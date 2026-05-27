@@ -32,6 +32,7 @@ public interface IApplicationDbContext
     DbSet<AiAgentPrompt> AiAgentPrompts { get; }
     DbSet<AiUsageLog> AiUsageLogs { get; }
     DbSet<AutomationRule> AutomationRules { get; }
+    DbSet<FormDefinition> FormDefinitions { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }
     DbSet<TenantSubscription> TenantSubscriptions { get; }

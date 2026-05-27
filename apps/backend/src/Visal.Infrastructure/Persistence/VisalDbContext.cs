@@ -62,6 +62,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AiAgentPrompt> AiAgentPrompts => Set<AiAgentPrompt>();
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
+    public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -437,6 +438,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.TemplateCategory).HasMaxLength(40);
             b.Property(x => x.ShiftName).HasMaxLength(60);
             b.HasIndex(x => new { x.TenantId, x.SortOrder });
+        });
+
+        modelBuilder.Entity<FormDefinition>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Version).HasMaxLength(20);
+            b.Property(x => x.Tipo).HasMaxLength(40);
+            b.Property(x => x.SchemaJson).HasColumnType("jsonb").IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
         });
     }
 

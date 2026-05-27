@@ -1,8 +1,442 @@
 @page "/formularios"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
+@inject IFormDefinitionService FormsSvc
+@inject IJSRuntime JS
 
 <PageTitle>Motor de Formularios - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Operacion Clinica"
-                   Title="Motor de Formularios"
-                   Description="Formularios clinicos dinamicos configurables." />
+<div class="fb-shell">
+
+    <!-- Toolbar -->
+    <div class="fb-toolbar">
+        <div class="fb-tb-left">
+            <span class="fb-eyebrow">Operacion Clinica</span>
+            <strong class="fb-tb-title">Motor de Formularios</strong>
+        </div>
+        <div class="fb-tb-right">
+            <select class="fb-input fb-input-sm" @onchange="OnPickForm">
+                <option value="">— Abrir formulario —</option>
+                @foreach (var f in _forms)
+                {
+                    <option value="@f.Id" selected="@(f.Id == _currentId)">@f.Nombre (@f.Codigo)</option>
+                }
+            </select>
+            <button class="fb-btn" @onclick="NewForm">Nuevo</button>
+            <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="fb-alert">@_error</div>
+    }
+    @if (_ok is not null)
+    {
+        <div class="fb-ok">@_ok</div>
+    }
+
+    <!-- Meta del formulario -->
+    <div class="fb-meta">
+        <div class="fb-meta-field">
+            <label>Nombre</label>
+            <input class="fb-input" @bind="_nombre" @bind:event="oninput" placeholder="Historia Clinica General" />
+        </div>
+        <div class="fb-meta-field" style="max-width:160px;">
+            <label>Codigo</label>
+            <input class="fb-input fb-mono" @bind="_codigo" @bind:event="oninput" placeholder="HC-GENERAL" />
+        </div>
+        <div class="fb-meta-field" style="max-width:160px;">
+            <label>Tipo</label>
+            <input class="fb-input" @bind="_tipo" @bind:event="oninput" placeholder="historia" />
+        </div>
+        <div class="fb-meta-field" style="max-width:110px;">
+            <label>Version</label>
+            <input class="fb-input" @bind="_version" @bind:event="oninput" placeholder="1.0" />
+        </div>
+        <label class="fb-check">
+            <input type="checkbox" @bind="_activo" /> Activo
+        </label>
+    </div>
+
+    <!-- Body: paleta | lienzo | propiedades -->
+    <div class="fb-body">
+
+        <!-- Paleta -->
+        <aside class="fb-palette">
+            <div class="fb-palette-group">Estructura</div>
+            <button class="fb-pal-btn" @onclick="AddSection">+ Seccion</button>
+
+            <div class="fb-palette-group">Campos</div>
+            @foreach (var ft in FieldTypes)
+            {
+                <button class="fb-pal-btn" @onclick="() => AddField(ft.Key)">@ft.Value</button>
+            }
+            <div class="fb-pal-hint">Se agrega a la seccion seleccionada (o a la raiz).</div>
+        </aside>
+
+        <!-- Lienzo -->
+        <section class="fb-canvas">
+            @if (_schema.Children.Count == 0)
+            {
+                <div class="fb-empty">Agrega una seccion o un campo desde la paleta.</div>
+            }
+            else
+            {
+                @foreach (var node in _schema.Children)
+                {
+                    if (node.IsSection)
+                    {
+                        <div class="fb-section @(IsSelected(node) ? "sel" : "")" @onclick="() => Select(node)" @onclick:stopPropagation="true">
+                            <div class="fb-section-head">
+                                <span class="fb-section-title">@(string.IsNullOrWhiteSpace(node.Label) ? "Seccion" : node.Label)</span>
+                                <span class="fb-node-actions">
+                                    <button class="fb-mini" title="Subir" @onclick="() => MoveUp(node, _schema.Children)" @onclick:stopPropagation="true">↑</button>
+                                    <button class="fb-mini" title="Bajar" @onclick="() => MoveDown(node, _schema.Children)" @onclick:stopPropagation="true">↓</button>
+                                    <button class="fb-mini fb-mini-danger" title="Eliminar" @onclick="() => Delete(node)" @onclick:stopPropagation="true">×</button>
+                                </span>
+                            </div>
+                            <div class="fb-section-body fb-grid">
+                                @if (node.Children is null || node.Children.Count == 0)
+                                {
+                                    <div class="fb-empty-sm">Seccion vacia. Selecciona y agrega campos.</div>
+                                }
+                                else
+                                {
+                                    @foreach (var fld in node.Children)
+                                    {
+                                        @RenderField(fld, node.Children)
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="fb-grid">@RenderField(node, _schema.Children)</div>
+                    }
+                }
+            }
+        </section>
+
+        <!-- Propiedades -->
+        <aside class="fb-props">
+            @if (_selected is null)
+            {
+                <div class="fb-props-empty">Selecciona un elemento del lienzo para editar sus propiedades.</div>
+            }
+            else if (_selected.IsSection)
+            {
+                <div class="fb-props-title">Seccion</div>
+                <div class="fb-prop"><label>Titulo</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" /></div>
+                <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar seccion</button>
+            }
+            else
+            {
+                <div class="fb-props-title">Campo</div>
+                <div class="fb-prop">
+                    <label>Tipo de campo</label>
+                    <select class="fb-input" @bind="_selected.FieldType">
+                        @foreach (var ft in FieldTypes)
+                        {
+                            <option value="@ft.Key">@ft.Value</option>
+                        }
+                    </select>
+                </div>
+                <div class="fb-prop"><label>Etiqueta</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" @bind:after="SyncName" /></div>
+                <div class="fb-prop"><label>Nombre / id</label><input class="fb-input fb-mono" @bind="_selected.Name" @bind:event="oninput" /></div>
+                <div class="fb-prop"><label>Placeholder</label><input class="fb-input" @bind="_selected.Placeholder" @bind:event="oninput" /></div>
+                <div class="fb-prop">
+                    <label>Ancho (columnas 1-12)</label>
+                    <input class="fb-input" type="number" min="1" max="12" @bind="_selected.WidthColumns" />
+                </div>
+                <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
+
+                @if (_selected.FieldType is "select" or "autocomplete")
+                {
+                    <div class="fb-prop">
+                        <label>Origen de la lista</label>
+                        <select class="fb-input" @bind="_selected.Catalog">
+                            @foreach (var c in Catalogs)
+                            {
+                                <option value="@c.Key">@c.Value</option>
+                            }
+                        </select>
+                    </div>
+                    @if (_selected.Catalog == "estatico")
+                    {
+                        <div class="fb-prop">
+                            <label>Opciones (una por linea)</label>
+                            <textarea class="fb-input" rows="4" value="@OptionsText" @oninput="OnOptionsInput"></textarea>
+                        </div>
+                    }
+                }
+                else if (_selected.FieldType == "calculated")
+                {
+                    <div class="fb-prop">
+                        <label>Formula</label>
+                        <input class="fb-input fb-mono" @bind="_selected.Formula" @bind:event="oninput" placeholder="edad(fecha_nacimiento)" />
+                        <div class="fb-hint">Funciones: edad(fecha), sumar(a,b), restar(a,b), hoy(). Referencia campos por su nombre.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="fb-prop"><label>Valor por defecto</label><input class="fb-input" @bind="_selected.DefaultValue" @bind:event="oninput" /></div>
+                }
+
+                <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar campo</button>
+            }
+        </aside>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private static readonly Dictionary<string, string> FieldTypes = new()
+    {
+        ["text"] = "Texto",
+        ["textarea"] = "Area de texto",
+        ["number"] = "Numero",
+        ["date"] = "Fecha",
+        ["email"] = "Email",
+        ["select"] = "Lista",
+        ["autocomplete"] = "Autocompletar",
+        ["calculated"] = "Calculado"
+    };
+
+    private static readonly Dictionary<string, string> Catalogs = new()
+    {
+        ["estatico"] = "Opciones fijas",
+        ["cie11"] = "CIE-11 (diagnosticos)",
+        ["cups"] = "CUPS (procedimientos)",
+        ["medicamentos"] = "Medicamentos",
+        ["profesionales"] = "Profesionales",
+        ["ips"] = "IPS / sedes",
+        ["generos"] = "Generos"
+    };
+
+    private List<FormDefinitionDto> _forms = new();
+    private FormSchema _schema = new();
+    private FormNode? _selected;
+    private Guid? _currentId;
+    private string _codigo = "";
+    private string _nombre = "";
+    private string? _tipo;
+    private string? _version;
+    private bool _activo = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    protected override async Task OnInitializedAsync() => await LoadListAsync();
+
+    private async Task LoadListAsync()
+    {
+        _forms = (await FormsSvc.ListAsync()).ToList();
+    }
+
+    private void NewForm()
+    {
+        _currentId = null;
+        _codigo = ""; _nombre = ""; _tipo = null; _version = null; _activo = true;
+        _schema = new FormSchema();
+        _selected = null;
+        _error = null; _ok = null;
+    }
+
+    private async Task OnPickForm(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(raw) || !Guid.TryParse(raw, out var id))
+        {
+            return;
+        }
+        var d = await FormsSvc.GetAsync(id);
+        if (d is null) { return; }
+        _currentId = d.Id;
+        _codigo = d.Codigo; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
+        _schema = FormSchema.FromJson(d.SchemaJson);
+        _selected = null;
+        _error = null; _ok = null;
+    }
+
+    private void AddSection()
+    {
+        var s = new FormNode { Type = "section", Label = "Nueva seccion", Children = new() };
+        _schema.Children.Add(s);
+        Select(s);
+    }
+
+    private void AddField(string fieldType)
+    {
+        var f = new FormNode
+        {
+            Type = "field",
+            FieldType = fieldType,
+            Label = "Nuevo campo",
+            Name = "",
+            WidthColumns = fieldType == "textarea" ? 12 : 6,
+            Catalog = fieldType is "select" or "autocomplete" ? "estatico" : null
+        };
+        GetTargetList().Add(f);
+        Select(f);
+    }
+
+    // Donde cae un campo nuevo: en la seccion seleccionada, o en la seccion del campo
+    // seleccionado, o en la raiz.
+    private List<FormNode> GetTargetList()
+    {
+        if (_selected is not null)
+        {
+            if (_selected.IsSection)
+            {
+                _selected.Children ??= new();
+                return _selected.Children;
+            }
+            var parent = _schema.Children.FirstOrDefault(n => n.IsSection && n.Children is not null && n.Children.Contains(_selected));
+            if (parent?.Children is not null) { return parent.Children; }
+        }
+        return _schema.Children;
+    }
+
+    private void Select(FormNode node) { _selected = node; _ok = null; }
+    private bool IsSelected(FormNode node) => ReferenceEquals(_selected, node);
+
+    private void Delete(FormNode node)
+    {
+        if (_schema.Children.Remove(node)) { _selected = null; return; }
+        foreach (var s in _schema.Children.Where(n => n.IsSection && n.Children is not null))
+        {
+            if (s.Children!.Remove(node)) { _selected = null; return; }
+        }
+    }
+
+    private void MoveUp(FormNode node, List<FormNode> list)
+    {
+        var i = list.IndexOf(node);
+        if (i > 0) { list.RemoveAt(i); list.Insert(i - 1, node); }
+    }
+
+    private void MoveDown(FormNode node, List<FormNode> list)
+    {
+        var i = list.IndexOf(node);
+        if (i >= 0 && i < list.Count - 1) { list.RemoveAt(i); list.Insert(i + 1, node); }
+    }
+
+    private void SyncName()
+    {
+        if (_selected is not null && string.IsNullOrWhiteSpace(_selected.Name))
+        {
+            _selected.Name = Slug(_selected.Label);
+        }
+    }
+
+    private static string Slug(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        var chars = s.Trim().ToLowerInvariant()
+            .Replace("á", "a").Replace("é", "e").Replace("í", "i").Replace("ó", "o").Replace("ú", "u").Replace("ñ", "n")
+            .Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray();
+        var slug = new string(chars);
+        while (slug.Contains("__")) slug = slug.Replace("__", "_");
+        return slug.Trim('_');
+    }
+
+    private string OptionsText => _selected?.Options is null ? "" : string.Join("\n", _selected.Options);
+
+    private void OnOptionsInput(ChangeEventArgs e)
+    {
+        if (_selected is null) return;
+        var text = e.Value?.ToString() ?? "";
+        _selected.Options = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null; _ok = null;
+        if (string.IsNullOrWhiteSpace(_codigo) || string.IsNullOrWhiteSpace(_nombre))
+        {
+            _error = "El nombre y el codigo son obligatorios.";
+            return;
+        }
+        _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            var req = new SaveFormDefinitionRequest(_currentId, _codigo, _nombre, _version, _tipo, _schema.ToJson(), _activo);
+            var saved = await FormsSvc.SaveAsync(req, actor);
+            if (saved is null)
+            {
+                _error = "No se pudo guardar (sin tenant activo o formulario no encontrado).";
+                return;
+            }
+            _currentId = saved.Id;
+            await LoadListAsync();
+            _ok = $"Formulario \"{saved.Nombre}\" guardado.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) return Guid.Empty;
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private static string WidthBasis(FormNode f)
+    {
+        var pct = Math.Clamp(f.WidthColumns, 1, 12) / 12.0 * 100.0;
+        return $"calc({pct.ToString(System.Globalization.CultureInfo.InvariantCulture)}% - 10px)";
+    }
+
+    private RenderFragment RenderField(FormNode f, List<FormNode> list) => @<div class="fb-field @(IsSelected(f) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(f)}")" @onclick="() => Select(f)" @onclick:stopPropagation="true">
+        <div class="fb-field-top">
+            <span class="fb-field-label">@(string.IsNullOrWhiteSpace(f.Label) ? "(sin etiqueta)" : f.Label)@(f.Required ? " *" : "")</span>
+            <span class="fb-node-actions">
+                <button class="fb-mini" title="Subir" @onclick="() => MoveUp(f, list)" @onclick:stopPropagation="true">↑</button>
+                <button class="fb-mini" title="Bajar" @onclick="() => MoveDown(f, list)" @onclick:stopPropagation="true">↓</button>
+                <button class="fb-mini fb-mini-danger" title="Eliminar" @onclick="() => Delete(f)" @onclick:stopPropagation="true">×</button>
+            </span>
+        </div>
+        <div class="fb-field-preview">
+            @if (f.FieldType == "textarea")
+            {
+                <textarea class="fb-prev" rows="2" placeholder="@f.Placeholder" disabled></textarea>
+            }
+            else if (f.FieldType is "select" or "autocomplete")
+            {
+                <select class="fb-prev" disabled>
+                    <option>@(f.Catalog == "estatico" ? "Opciones fijas" : Catalogs.GetValueOrDefault(f.Catalog ?? "", "lista"))</option>
+                </select>
+            }
+            else if (f.FieldType == "date")
+            {
+                <input class="fb-prev" type="date" disabled />
+            }
+            else if (f.FieldType == "number")
+            {
+                <input class="fb-prev" type="number" placeholder="@f.Placeholder" disabled />
+            }
+            else if (f.FieldType == "calculated")
+            {
+                <input class="fb-prev fb-mono" value="@($"= {f.Formula}")" disabled />
+            }
+            else
+            {
+                <input class="fb-prev" type="text" placeholder="@f.Placeholder" disabled />
+            }
+        </div>
+        <div class="fb-field-meta">@FieldTypeLabel(f.FieldType) · @(string.IsNullOrWhiteSpace(f.Name) ? "sin nombre" : f.Name)</div>
+    </div>;
+
+    private static string FieldTypeLabel(string? ft) => ft is not null && FieldTypes.TryGetValue(ft, out var v) ? v : "Campo";
+}

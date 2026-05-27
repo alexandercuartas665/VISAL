@@ -55,6 +55,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IAiUsageService, Tenancy.AiUsageService>();
         services.AddScoped<Tenancy.IAiInferenceService, Tenancy.AiInferenceService>();
         services.AddScoped<Tenancy.IAutomationService, Tenancy.AutomationService>();
+        services.AddScoped<Tenancy.IFormDefinitionService, Tenancy.FormDefinitionService>();
         return services;
     }
 }

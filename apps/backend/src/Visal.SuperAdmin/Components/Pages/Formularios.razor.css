@@ -70,6 +70,25 @@
 .fb-prop label { font-size: 11px; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .04em; }
 .fb-hint { font-size: 11px; color: var(--muted-foreground); line-height: 1.4; }
 
+/* Bloques de texto */
+.fb-textblock { flex-grow: 1; min-width: 160px; border: 1px solid transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; background: #fcfcfd; }
+.fb-textblock.sel { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(21,101,192,.12); }
+.fb-tb-content { color: var(--foreground); }
+.fb-ts-heading .fb-tb-content { font-size: 18px; font-weight: 800; color: var(--primary); }
+.fb-ts-subheading .fb-tb-content { font-size: 14px; font-weight: 700; }
+.fb-ts-paragraph .fb-tb-content { font-size: 12px; color: var(--muted-foreground); }
+
+/* Preview de tabla repetible */
+.fb-prev-table { width: 100%; border-collapse: collapse; margin: 6px 0 4px; font-size: 11px; }
+.fb-prev-table th { background: var(--primary-soft); color: var(--primary); text-align: left; padding: 4px 8px; border: 1px solid var(--border); font-weight: 700; }
+.fb-prev-table td { padding: 4px 8px; border: 1px solid var(--border); color: var(--muted-foreground); background: var(--surface-2, #f5f5f4); }
+
+/* Editor de columnas (panel propiedades) */
+.fb-props-subtitle { font-size: 12px; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .04em; margin: 6px 0 8px; }
+.fb-col-edit { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #fcfcfd; display: flex; flex-direction: column; gap: 6px; }
+.fb-col-row { display: flex; gap: 6px; align-items: center; }
+.fb-col-row .fb-input { flex: 1; }
+
 @media (max-width: 1100px) {
   .fb-body { flex-direction: column; }
   .fb-palette, .fb-props { width: 100%; }

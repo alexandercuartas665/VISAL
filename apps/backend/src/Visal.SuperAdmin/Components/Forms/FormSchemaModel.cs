@@ -44,7 +44,7 @@ public sealed class FormNode
     [JsonPropertyName("id")]
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
 
-    /// <summary>"section" | "field".</summary>
+    /// <summary>"section" | "field" | "text".</summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = "field";
 
@@ -55,10 +55,22 @@ public sealed class FormNode
     [JsonPropertyName("children")]
     public List<FormNode>? Children { get; set; }
 
+    // ── Bloque de texto (Type = "text") ──
+    /// <summary>heading | subheading | paragraph.</summary>
+    [JsonPropertyName("textStyle")]
+    public string? TextStyle { get; set; }
+
+    [JsonPropertyName("content")]
+    public string? Content { get; set; }
+
     // ── Campo ──
-    /// <summary>text | number | email | date | textarea | select | autocomplete | calculated.</summary>
+    /// <summary>text | number | email | date | textarea | select | autocomplete | calculated | table.</summary>
     [JsonPropertyName("fieldType")]
     public string? FieldType { get; set; }
+
+    // ── Tabla repetible (fieldType = "table") ──
+    [JsonPropertyName("columns")]
+    public List<FormColumn>? Columns { get; set; }
 
     [JsonPropertyName("name")]
     public string? Name { get; set; }
@@ -89,4 +101,26 @@ public sealed class FormNode
     public List<string>? Options { get; set; }
 
     public bool IsSection => Type == "section";
+    public bool IsText => Type == "text";
+    public bool IsTable => Type == "field" && FieldType == "table";
+}
+
+/// <summary>Columna de una tabla repetible.</summary>
+public sealed class FormColumn
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "Columna";
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    /// <summary>text | number | date | select | autocomplete.</summary>
+    [JsonPropertyName("fieldType")]
+    public string FieldType { get; set; } = "text";
+
+    [JsonPropertyName("catalog")]
+    public string? Catalog { get; set; }
 }

@@ -69,6 +69,9 @@
         <aside class="fb-palette">
             <div class="fb-palette-group">Estructura</div>
             <button class="fb-pal-btn" @onclick="AddSection">+ Seccion</button>
+            <button class="fb-pal-btn" @onclick='() => AddText("heading")'>Titulo</button>
+            <button class="fb-pal-btn" @onclick='() => AddText("subheading")'>Subtitulo</button>
+            <button class="fb-pal-btn" @onclick='() => AddText("paragraph")'>Parrafo</button>
 
             <div class="fb-palette-group">Campos</div>
             @foreach (var ft in FieldTypes)
@@ -108,7 +111,7 @@
                                 {
                                     @foreach (var fld in node.Children)
                                     {
-                                        @RenderField(fld, node.Children)
+                                        @RenderNode(fld, node.Children)
                                     }
                                 }
                             </div>
@@ -116,7 +119,7 @@
                     }
                     else
                     {
-                        <div class="fb-grid">@RenderField(node, _schema.Children)</div>
+                        <div class="fb-grid">@RenderNode(node, _schema.Children)</div>
                     }
                 }
             }
@@ -134,9 +137,23 @@
                 <div class="fb-prop"><label>Titulo</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" /></div>
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar seccion</button>
             }
+            else if (_selected.IsText)
+            {
+                <div class="fb-props-title">Texto</div>
+                <div class="fb-prop">
+                    <label>Estilo</label>
+                    <select class="fb-input" @bind="_selected.TextStyle">
+                        <option value="heading">Titulo</option>
+                        <option value="subheading">Subtitulo</option>
+                        <option value="paragraph">Parrafo</option>
+                    </select>
+                </div>
+                <div class="fb-prop"><label>Contenido</label><textarea class="fb-input" rows="3" @bind="_selected.Content" @bind:event="oninput"></textarea></div>
+                <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar texto</button>
+            }
             else
             {
-                <div class="fb-props-title">Campo</div>
+                <div class="fb-props-title">@(_selected.IsTable ? "Tabla" : "Campo")</div>
                 <div class="fb-prop">
                     <label>Tipo de campo</label>
                     <select class="fb-input" @bind="_selected.FieldType">
@@ -146,48 +163,88 @@
                         }
                     </select>
                 </div>
-                <div class="fb-prop"><label>Etiqueta</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" @bind:after="SyncName" /></div>
+                <div class="fb-prop"><label>@(_selected.IsTable ? "Titulo de la tabla" : "Etiqueta")</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" @bind:after="SyncName" /></div>
                 <div class="fb-prop"><label>Nombre / id</label><input class="fb-input fb-mono" @bind="_selected.Name" @bind:event="oninput" /></div>
-                <div class="fb-prop"><label>Placeholder</label><input class="fb-input" @bind="_selected.Placeholder" @bind:event="oninput" /></div>
                 <div class="fb-prop">
                     <label>Ancho (columnas 1-12)</label>
                     <input class="fb-input" type="number" min="1" max="12" @bind="_selected.WidthColumns" />
                 </div>
-                <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
 
-                @if (_selected.FieldType is "select" or "autocomplete")
+                @if (_selected.IsTable)
                 {
-                    <div class="fb-prop">
-                        <label>Origen de la lista</label>
-                        <select class="fb-input" @bind="_selected.Catalog">
-                            @foreach (var c in Catalogs)
-                            {
-                                <option value="@c.Key">@c.Value</option>
-                            }
-                        </select>
-                    </div>
-                    @if (_selected.Catalog == "estatico")
+                    <div class="fb-props-subtitle">Columnas de la tabla</div>
+                    @if (_selected.Columns is not null)
                     {
-                        <div class="fb-prop">
-                            <label>Opciones (una por linea)</label>
-                            <textarea class="fb-input" rows="4" value="@OptionsText" @oninput="OnOptionsInput"></textarea>
-                        </div>
+                        @foreach (var col in _selected.Columns)
+                        {
+                            <div class="fb-col-edit">
+                                <div class="fb-col-row">
+                                    <input class="fb-input" placeholder="Etiqueta" @bind="col.Label" @bind:event="oninput" />
+                                    <button class="fb-mini fb-mini-danger" title="Quitar columna" @onclick="() => RemoveColumn(col)">×</button>
+                                </div>
+                                <div class="fb-col-row">
+                                    <input class="fb-input fb-mono" placeholder="nombre" @bind="col.Name" @bind:event="oninput" />
+                                    <select class="fb-input" @bind="col.FieldType">
+                                        <option value="text">Texto</option>
+                                        <option value="number">Numero</option>
+                                        <option value="date">Fecha</option>
+                                        <option value="select">Lista</option>
+                                        <option value="autocomplete">Autocompletar</option>
+                                    </select>
+                                </div>
+                                @if (col.FieldType is "select" or "autocomplete")
+                                {
+                                    <select class="fb-input" @bind="col.Catalog">
+                                        @foreach (var c in Catalogs)
+                                        {
+                                            <option value="@c.Key">@c.Value</option>
+                                        }
+                                    </select>
+                                }
+                            </div>
+                        }
                     }
-                }
-                else if (_selected.FieldType == "calculated")
-                {
-                    <div class="fb-prop">
-                        <label>Formula</label>
-                        <input class="fb-input fb-mono" @bind="_selected.Formula" @bind:event="oninput" placeholder="edad(fecha_nacimiento)" />
-                        <div class="fb-hint">Funciones: edad(fecha), sumar(a,b), restar(a,b), hoy(). Referencia campos por su nombre.</div>
-                    </div>
+                    <button class="fb-btn" @onclick="AddColumn">+ Columna</button>
                 }
                 else
                 {
-                    <div class="fb-prop"><label>Valor por defecto</label><input class="fb-input" @bind="_selected.DefaultValue" @bind:event="oninput" /></div>
+                    <div class="fb-prop"><label>Placeholder</label><input class="fb-input" @bind="_selected.Placeholder" @bind:event="oninput" /></div>
+                    <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
+
+                    @if (_selected.FieldType is "select" or "autocomplete")
+                    {
+                        <div class="fb-prop">
+                            <label>Origen de la lista</label>
+                            <select class="fb-input" @bind="_selected.Catalog">
+                                @foreach (var c in Catalogs)
+                                {
+                                    <option value="@c.Key">@c.Value</option>
+                                }
+                            </select>
+                        </div>
+                        @if (_selected.Catalog == "estatico")
+                        {
+                            <div class="fb-prop">
+                                <label>Opciones (una por linea)</label>
+                                <textarea class="fb-input" rows="4" value="@OptionsText" @oninput="OnOptionsInput"></textarea>
+                            </div>
+                        }
+                    }
+                    else if (_selected.FieldType == "calculated")
+                    {
+                        <div class="fb-prop">
+                            <label>Formula</label>
+                            <input class="fb-input fb-mono" @bind="_selected.Formula" @bind:event="oninput" placeholder="edad(fecha_nacimiento)" />
+                            <div class="fb-hint">Funciones: edad(fecha), sumar(a,b), restar(a,b), hoy(). Referencia campos por su nombre.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="fb-prop"><label>Valor por defecto</label><input class="fb-input" @bind="_selected.DefaultValue" @bind:event="oninput" /></div>
+                    }
                 }
 
-                <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar campo</button>
+                <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">@(_selected.IsTable ? "Eliminar tabla" : "Eliminar campo")</button>
             }
         </aside>
     </div>
@@ -205,7 +262,8 @@
         ["email"] = "Email",
         ["select"] = "Lista",
         ["autocomplete"] = "Autocompletar",
-        ["calculated"] = "Calculado"
+        ["calculated"] = "Calculado",
+        ["table"] = "Tabla"
     };
 
     private static readonly Dictionary<string, string> Catalogs = new()
@@ -277,13 +335,52 @@
         {
             Type = "field",
             FieldType = fieldType,
-            Label = "Nuevo campo",
+            Label = fieldType == "table" ? "Nueva tabla" : "Nuevo campo",
             Name = "",
-            WidthColumns = fieldType == "textarea" ? 12 : 6,
-            Catalog = fieldType is "select" or "autocomplete" ? "estatico" : null
+            WidthColumns = fieldType is "textarea" or "table" ? 12 : 6,
+            Catalog = fieldType is "select" or "autocomplete" ? "estatico" : null,
+            Columns = fieldType == "table"
+                ? new List<FormColumn>
+                {
+                    new() { Label = "Codigo", Name = "codigo", FieldType = "text" },
+                    new() { Label = "Descripcion", Name = "descripcion", FieldType = "text" }
+                }
+                : null
         };
         GetTargetList().Add(f);
         Select(f);
+    }
+
+    private void AddText(string style)
+    {
+        var t = new FormNode
+        {
+            Type = "text",
+            TextStyle = style,
+            WidthColumns = 12,
+            Content = style switch
+            {
+                "heading" => "Titulo de seccion",
+                "subheading" => "Subtitulo",
+                _ => "Texto del parrafo."
+            }
+        };
+        GetTargetList().Add(t);
+        Select(t);
+    }
+
+    private void AddColumn()
+    {
+        if (_selected?.IsTable == true)
+        {
+            _selected.Columns ??= new();
+            _selected.Columns.Add(new FormColumn { Label = "Columna", FieldType = "text" });
+        }
+    }
+
+    private void RemoveColumn(FormColumn col)
+    {
+        _selected?.Columns?.Remove(col);
     }
 
     // Donde cae un campo nuevo: en la seccion seleccionada, o en la seccion del campo
@@ -397,6 +494,56 @@
         var pct = Math.Clamp(f.WidthColumns, 1, 12) / 12.0 * 100.0;
         return $"calc({pct.ToString(System.Globalization.CultureInfo.InvariantCulture)}% - 10px)";
     }
+
+    private RenderFragment RenderNode(FormNode n, List<FormNode> list) =>
+        n.IsText ? RenderText(n, list) : (n.IsTable ? RenderTable(n, list) : RenderField(n, list));
+
+    private RenderFragment RenderText(FormNode n, List<FormNode> list) => @<div class="fb-textblock fb-ts-@n.TextStyle @(IsSelected(n) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(n)}")" @onclick="() => Select(n)" @onclick:stopPropagation="true">
+        <div class="fb-field-top">
+            <span class="fb-tb-content">@(string.IsNullOrWhiteSpace(n.Content) ? "(texto)" : n.Content)</span>
+            <span class="fb-node-actions">
+                <button class="fb-mini" title="Subir" @onclick="() => MoveUp(n, list)" @onclick:stopPropagation="true">↑</button>
+                <button class="fb-mini" title="Bajar" @onclick="() => MoveDown(n, list)" @onclick:stopPropagation="true">↓</button>
+                <button class="fb-mini fb-mini-danger" title="Eliminar" @onclick="() => Delete(n)" @onclick:stopPropagation="true">×</button>
+            </span>
+        </div>
+    </div>;
+
+    private RenderFragment RenderTable(FormNode n, List<FormNode> list) => @<div class="fb-field @(IsSelected(n) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(n)}")" @onclick="() => Select(n)" @onclick:stopPropagation="true">
+        <div class="fb-field-top">
+            <span class="fb-field-label">@(string.IsNullOrWhiteSpace(n.Label) ? "Tabla" : n.Label)</span>
+            <span class="fb-node-actions">
+                <button class="fb-mini" title="Subir" @onclick="() => MoveUp(n, list)" @onclick:stopPropagation="true">↑</button>
+                <button class="fb-mini" title="Bajar" @onclick="() => MoveDown(n, list)" @onclick:stopPropagation="true">↓</button>
+                <button class="fb-mini fb-mini-danger" title="Eliminar" @onclick="() => Delete(n)" @onclick:stopPropagation="true">×</button>
+            </span>
+        </div>
+        <table class="fb-prev-table">
+            <thead>
+                <tr>
+                    @if (n.Columns is not null)
+                    {
+                        @foreach (var c in n.Columns)
+                        {
+                            <th>@(string.IsNullOrWhiteSpace(c.Label) ? "Columna" : c.Label)</th>
+                        }
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    @if (n.Columns is not null)
+                    {
+                        @foreach (var c in n.Columns)
+                        {
+                            <td>@FieldTypeLabel(c.FieldType)</td>
+                        }
+                    }
+                </tr>
+            </tbody>
+        </table>
+        <div class="fb-field-meta">Tabla repetible &middot; @(n.Columns?.Count ?? 0) columnas</div>
+    </div>;
 
     private RenderFragment RenderField(FormNode f, List<FormNode> list) => @<div class="fb-field @(IsSelected(f) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(f)}")" @onclick="() => Select(f)" @onclick:stopPropagation="true">
         <div class="fb-field-top">

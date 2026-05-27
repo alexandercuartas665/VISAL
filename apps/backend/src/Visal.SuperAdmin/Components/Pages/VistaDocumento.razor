@@ -1,0 +1,135 @@
+@page "/formulario-doc/{Id:guid}"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
+@inject IFormDefinitionService FormsSvc
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>@(_def?.Nombre ?? "Documento") - Visal</PageTitle>
+
+<style>
+    .doc-actions { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+    .doc-actions .dbtn { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; font-weight: 600; cursor: pointer; color: var(--foreground); text-decoration: none; }
+    .doc-actions .dbtn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+    .doc { max-width: 920px; margin: 0 auto; background: #fff; color: #000; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; line-height: 1.35; border: 1px solid #000; }
+    .doc-title { text-align: center; font-size: 15px; font-weight: 800; padding: 8px; border-bottom: 1px solid #000; text-transform: uppercase; }
+    .doc-grid { display: grid; grid-template-columns: repeat(12, 1fr); }
+    .doc-band { grid-column: span 12; background: #dde7f3; font-weight: 800; font-size: 11px; padding: 4px 8px; text-transform: uppercase; border-bottom: 1px solid #000; letter-spacing: .04em; }
+    .doc-sub { grid-column: span 12; font-weight: 700; font-size: 11px; padding: 4px 8px; background: #f3f6fb; border-bottom: 1px solid #000; }
+    .doc-para { grid-column: span 12; padding: 4px 8px; border-bottom: 1px solid #000; color: #222; }
+    .doc-cell { border-right: 1px solid #000; border-bottom: 1px solid #000; padding: 2px 6px 4px; min-height: 36px; }
+    .doc-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #333; }
+    .doc-req { color: #b00; }
+    .doc-value { min-height: 16px; border-bottom: 1px dotted #999; margin-top: 4px; }
+    .doc-tablewrap { grid-column: span 12; border-bottom: 1px solid #000; padding: 0; }
+    .doc-table { width: 100%; border-collapse: collapse; }
+    .doc-table th { border: 1px solid #000; background: #dde7f3; font-size: 10px; padding: 3px 6px; text-align: left; font-weight: 700; }
+    .doc-table td { border: 1px solid #000; height: 22px; padding: 2px 6px; }
+
+    @@media print {
+        .visal-sidebar, .visal-topbar, .doc-actions { display: none !important; }
+        .visal-main, .visal-shell { margin: 0 !important; padding: 0 !important; }
+        .doc { max-width: none; border: 1px solid #000; }
+        body { background: #fff !important; }
+        @@page { size: A4; margin: 12mm; }
+    }
+</style>
+
+@if (_loading)
+{
+    <p>Cargando...</p>
+}
+else if (_def is null)
+{
+    <p>Formulario no encontrado.</p>
+}
+else
+{
+    <div class="doc-actions">
+        <a class="dbtn" href="/formularios">&larr; Volver al disenador</a>
+        <button class="dbtn primary" @onclick="PrintAsync">Imprimir / Guardar PDF</button>
+        <span style="font-size:12px;color:var(--muted-foreground);">Codigo: @_def.Codigo &middot; Version: @(_def.Version ?? "-")</span>
+    </div>
+
+    <div class="doc">
+        <div class="doc-title">@_def.Nombre</div>
+        @foreach (var node in _schema.Children)
+        {
+            <div class="doc-grid">
+                @if (node.IsSection)
+                {
+                    @foreach (var ch in node.Children ?? new())
+                    {
+                        @RenderDocNode(ch)
+                    }
+                }
+                else
+                {
+                    @RenderDocNode(node)
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private FormDefinitionDetailDto? _def;
+    private FormSchema _schema = new();
+    private bool _loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _def = await FormsSvc.GetAsync(Id);
+        _schema = _def is null ? new FormSchema() : FormSchema.FromJson(_def.SchemaJson);
+        _loading = false;
+    }
+
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("print");
+
+    private static int Span(FormNode f) => Math.Clamp(f.WidthColumns <= 0 ? 12 : f.WidthColumns, 1, 12);
+
+    private RenderFragment RenderDocNode(FormNode n) =>
+        n.IsText ? RenderDocText(n) : (n.IsTable ? RenderDocTable(n) : RenderDocField(n));
+
+    private RenderFragment RenderDocText(FormNode n) => n.TextStyle switch
+    {
+        "heading" => @<div class="doc-band">@n.Content</div>,
+        "subheading" => @<div class="doc-sub">@n.Content</div>,
+        _ => @<div class="doc-para">@n.Content</div>
+    };
+
+    private RenderFragment RenderDocField(FormNode f) => @<div class="doc-cell" style="@($"grid-column: span {Span(f)};")">
+        <div class="doc-label">@f.Label@(f.Required ? new MarkupString(" <span class=\"doc-req\">*</span>") : (MarkupString)"")</div>
+        <div class="doc-value">&nbsp;</div>
+    </div>;
+
+    private RenderFragment RenderDocTable(FormNode n) => @<div class="doc-tablewrap">
+        <table class="doc-table">
+            <thead>
+                <tr>
+                    @foreach (var c in n.Columns ?? new())
+                    {
+                        <th>@(string.IsNullOrWhiteSpace(c.Label) ? "Columna" : c.Label)</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @for (var r = 0; r < 3; r++)
+                {
+                    <tr>
+                        @foreach (var c in n.Columns ?? new())
+                        {
+                            <td>&nbsp;</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>;
+}

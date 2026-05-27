@@ -25,6 +25,10 @@
                     <option value="@f.Id" selected="@(f.Id == _currentId)">@f.Nombre (@f.Codigo)</option>
                 }
             </select>
+            @if (_currentId is not null)
+            {
+                <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
+            }
             <button class="fb-btn" @onclick="NewForm">Nuevo</button>
             <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
         </div>

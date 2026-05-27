@@ -14,7 +14,7 @@
 @inject Visal.Application.Auth.IAuthService AuthSvc
 @inject Visal.Application.Tenancy.ITenantApiService TenantApiSvc
 
-<PageTitle>Mi cuenta - VISAL.travels</PageTitle>
+<PageTitle>Mi cuenta - Visal</PageTitle>
 
 <div class="module-head">
     <div>
@@ -126,7 +126,7 @@ else
         <div>
             <div style="font-weight:700;">Metodo de pago de tu suscripcion</div>
             <p class="text-muted" style="font-size:0.88rem;margin:4px 0 0;max-width:680px;">
-                VISAL.travels cobra tu plan a traves de su pasarela Wompi. No necesitas configurar llaves ni una pasarela propia.
+                Visal cobra tu plan a traves de su pasarela Wompi. No necesitas configurar llaves ni una pasarela propia.
                 Al pagar se abre el checkout seguro de Wompi (tarjeta / PSE); la confirmacion se aplica automaticamente.
             </p>
             <button class="btn btn-primary btn-sm" style="margin-top:10px;" @onclick="PayNow" disabled="@(_checkoutBusy || _sub is null)">

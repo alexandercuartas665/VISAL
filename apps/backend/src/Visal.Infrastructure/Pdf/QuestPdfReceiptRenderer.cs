@@ -38,7 +38,7 @@ public sealed class QuestPdfReceiptRenderer : IReceiptPdfRenderer
         {
             row.RelativeItem().Column(col =>
             {
-                col.Item().Text("VISAL.travels").FontSize(18).Bold().FontColor(Brand);
+                col.Item().Text("Visal").FontSize(18).Bold().FontColor(Brand);
                 col.Item().Text("Comprobante de pago").FontSize(11).FontColor(Muted);
             });
             row.ConstantItem(200).AlignRight().Column(col =>

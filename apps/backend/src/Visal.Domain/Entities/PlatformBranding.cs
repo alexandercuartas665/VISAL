@@ -8,10 +8,10 @@ namespace Visal.Domain.Entities;
 /// </summary>
 public class PlatformBranding : BaseEntity
 {
-    /// <summary>Nombre visible de la plataforma (ej. "VISAL.travels").</summary>
-    public string PlatformName { get; set; } = "VISAL.travels";
+    /// <summary>Nombre visible de la plataforma (ej. "Visal").</summary>
+    public string PlatformName { get; set; } = "Visal";
 
-    /// <summary>Bajada corta bajo el nombre (ej. "CRM Conversacional").</summary>
+    /// <summary>Bajada corta bajo el nombre (ej. "Salud Domiciliaria").</summary>
     public string? Tagline { get; set; }
 
     /// <summary>URL del logo principal del login (en /uploads/branding o /img/brand). Null = logo por defecto.</summary>

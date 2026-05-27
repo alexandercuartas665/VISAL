@@ -7,7 +7,7 @@
 @inject IEmailConfigService EmailSvc
 @inject IEmailSender EmailSender
 
-<PageTitle>Servidor de correo - VISAL.travels</PageTitle>
+<PageTitle>Servidor de correo - Visal</PageTitle>
 
 <div class="module-head">
     <div>
@@ -56,7 +56,7 @@ else
             </div>
             <div class="col-6 auth-field">
                 <label>Nombre del remitente</label>
-                <input class="form-control" @bind="_fromName" placeholder="VISAL.travels" />
+                <input class="form-control" @bind="_fromName" placeholder="Visal" />
             </div>
         </div>
 
@@ -142,8 +142,8 @@ else
         {
             _testOk = false; _testResult = "Escribe un correo valido."; _sending = false; return;
         }
-        var html = "<p>Este es un correo de prueba de VISAL.travels. Si lo recibiste, el SMTP funciona.</p>";
-        var r = await EmailSender.SendAsync(to, "Prueba de correo - VISAL.travels", html);
+        var html = "<p>Este es un correo de prueba de Visal. Si lo recibiste, el SMTP funciona.</p>";
+        var r = await EmailSender.SendAsync(to, "Prueba de correo - Visal", html);
         _testOk = r.Ok;
         _testResult = r.Ok ? "Enviado. Revisa la bandeja." : (r.Error ?? "No se pudo enviar.");
         _sending = false;

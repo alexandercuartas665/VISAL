@@ -14,11 +14,11 @@ public sealed record PlatformBrandingDto(
 {
     /// <summary>Valores por defecto cuando aun no se ha configurado la marca.</summary>
     public static PlatformBrandingDto Default => new(
-        "VISAL.travels",
-        "CRM Conversacional",
+        "Visal",
+        "Salud Domiciliaria",
         null,
-        "Rapido, facil y seguro",
-        "La plataforma para vender por WhatsApp, automatizar seguimientos y operar tu agencia de viajes con agentes de IA.");
+        "Atencion humana, agil y oportuna",
+        "Coordina la atencion domiciliaria: pacientes, historias clinicas, profesionales y agendas en una sola plataforma.");
 }
 
 public sealed record SaveBrandingRequest(
@@ -58,7 +58,7 @@ public sealed class PlatformBrandingService : IPlatformBrandingService
 
     public async Task SaveAsync(SaveBrandingRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var name = string.IsNullOrWhiteSpace(request.PlatformName) ? "VISAL.travels" : request.PlatformName.Trim();
+        var name = string.IsNullOrWhiteSpace(request.PlatformName) ? "Visal" : request.PlatformName.Trim();
 
         var row = await _db.PlatformBrandings.FirstOrDefaultAsync(cancellationToken);
         if (row is null)

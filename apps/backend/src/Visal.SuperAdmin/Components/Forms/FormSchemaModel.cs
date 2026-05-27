@@ -121,21 +121,36 @@ public sealed class FormHeader
     [JsonPropertyName("titulo")]
     public string? Titulo { get; set; }
 
-    [JsonPropertyName("mostrarNoHistoria")]
-    public bool MostrarNoHistoria { get; set; } = true;
+    /// <summary>URL del logo (en /uploads/forms). Si esta vacio se usa el icono por defecto.</summary>
+    [JsonPropertyName("logoUrl")]
+    public string? LogoUrl { get; set; }
 
-    [JsonPropertyName("mostrarConsecutivo")]
-    public bool MostrarConsecutivo { get; set; } = true;
-
-    [JsonPropertyName("mostrarCiudadFecha")]
-    public bool MostrarCiudadFecha { get; set; } = true;
+    /// <summary>Campos de cabecera personalizables (ej. No Historia, Consecutivo, Ciudad y Fecha).</summary>
+    [JsonPropertyName("campos")]
+    public List<FormHeaderField> Campos { get; set; } = new();
 
     public static FormHeader Default() => new()
     {
         Institucion = "IPS VISAL RT",
         Tagline = "Atencion Humana, Agil y Oportuna",
-        Titulo = ""
+        Titulo = "",
+        Campos = new()
+        {
+            new() { Label = "No Historia" },
+            new() { Label = "Consecutivo" },
+            new() { Label = "Ciudad y Fecha" }
+        }
     };
+}
+
+/// <summary>Campo de cabecera (solo etiqueta; el valor se diligencia al usar el formato).</summary>
+public sealed class FormHeaderField
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "Campo";
 }
 
 /// <summary>Columna de una tabla repetible.</summary>

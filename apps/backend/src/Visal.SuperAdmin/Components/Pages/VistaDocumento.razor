@@ -20,6 +20,7 @@
     .doc-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     .doc-hdr-brand { display: flex; align-items: center; gap: 8px; }
     .doc-hdr-brand svg { width: 30px; height: 30px; color: #1565c0; }
+    .doc-hdr-logo { max-height: 48px; max-width: 180px; object-fit: contain; }
     .doc-hdr-inst { font-size: 16px; font-weight: 800; color: #1565c0; letter-spacing: .02em; }
     .doc-hdr-tag { font-size: 10px; font-style: italic; color: #555; }
     .doc-hdr-nohist { font-size: 11px; white-space: nowrap; }
@@ -67,21 +68,26 @@ else
         <div class="doc-header">
             <div class="doc-hdr-top">
                 <div class="doc-hdr-brand">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    @if (!string.IsNullOrWhiteSpace(Hdr.LogoUrl))
+                    {
+                        <img class="doc-hdr-logo" src="@Hdr.LogoUrl" alt="logo" />
+                    }
+                    else
+                    {
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    }
                     <div>
                         <div class="doc-hdr-inst">@Hdr.Institucion</div>
                         <div class="doc-hdr-tag">@Hdr.Tagline</div>
                     </div>
                 </div>
-                @if (Hdr.MostrarNoHistoria)
-                {
-                    <div class="doc-hdr-nohist">No Historia: <b>__________</b></div>
-                }
             </div>
             <div class="doc-hdr-title">@(string.IsNullOrWhiteSpace(Hdr.Titulo) ? _def.Nombre : Hdr.Titulo)</div>
             <div class="doc-hdr-meta">
-                @if (Hdr.MostrarConsecutivo) { <span>Consecutivo: __________</span> }
-                @if (Hdr.MostrarCiudadFecha) { <span>Ciudad y Fecha: __________</span> }
+                @foreach (var c in Hdr.Campos)
+                {
+                    <span>@c.Label: __________</span>
+                }
             </div>
         </div>
         @foreach (var node in _schema.Children)

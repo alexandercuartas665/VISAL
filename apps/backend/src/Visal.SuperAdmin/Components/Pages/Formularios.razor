@@ -1,11 +1,13 @@
 @page "/formularios"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.IO
 @using System.Security.Claims
 @using Visal.Application.Tenancy
 @using Visal.SuperAdmin.Components.Forms
 @inject IFormDefinitionService FormsSvc
 @inject IJSRuntime JS
+@inject IWebHostEnvironment Env
 
 <PageTitle>Motor de Formularios - Visal</PageTitle>
 
@@ -89,7 +91,14 @@
         <section class="fb-canvas">
             <div class="fb-header @(_headerSel ? "sel" : "")" @onclick="SelectHeader">
                 <div class="fb-hdr-brand">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    @if (!string.IsNullOrWhiteSpace(_schema.Header?.LogoUrl))
+                    {
+                        <img class="fb-hdr-logo" src="@_schema.Header!.LogoUrl" alt="logo" />
+                    }
+                    else
+                    {
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    }
                     <div>
                         <div class="fb-hdr-inst">@(string.IsNullOrWhiteSpace(_schema.Header?.Institucion) ? "Institucion" : _schema.Header!.Institucion)</div>
                         <div class="fb-hdr-tag">@_schema.Header?.Tagline</div>
@@ -97,9 +106,10 @@
                 </div>
                 <div class="fb-hdr-title">@(string.IsNullOrWhiteSpace(_schema.Header?.Titulo) ? (string.IsNullOrWhiteSpace(_nombre) ? "Titulo del documento" : _nombre) : _schema.Header!.Titulo)</div>
                 <div class="fb-hdr-meta">
-                    @if (_schema.Header?.MostrarConsecutivo == true) { <span>Consecutivo: ____</span> }
-                    @if (_schema.Header?.MostrarCiudadFecha == true) { <span>Ciudad y Fecha: ____</span> }
-                    @if (_schema.Header?.MostrarNoHistoria == true) { <span>No Historia: ____</span> }
+                    @foreach (var c in _schema.Header?.Campos ?? new())
+                    {
+                        <span>@c.Label: ____</span>
+                    }
                 </div>
             </div>
 
@@ -153,10 +163,28 @@
                 <div class="fb-prop"><label>Institucion</label><input class="fb-input" @bind="_schema.Header!.Institucion" @bind:event="oninput" placeholder="IPS VISAL RT" /></div>
                 <div class="fb-prop"><label>Lema</label><input class="fb-input" @bind="_schema.Header!.Tagline" @bind:event="oninput" placeholder="Atencion Humana, Agil y Oportuna" /></div>
                 <div class="fb-prop"><label>Titulo del documento</label><input class="fb-input" @bind="_schema.Header!.Titulo" @bind:event="oninput" placeholder="(usa el nombre del formulario)" /></div>
+
+                <div class="fb-props-subtitle">Logo</div>
+                @if (!string.IsNullOrWhiteSpace(_schema.Header!.LogoUrl))
+                {
+                    <div class="fb-logo-prev"><img src="@_schema.Header!.LogoUrl" alt="logo" /></div>
+                    <button class="fb-btn" @onclick="ClearHeaderLogo">Quitar logo</button>
+                }
+                else
+                {
+                    <InputFile class="fb-input" accept="image/*" OnChange="OnHeaderLogoSelected" />
+                    <div class="fb-hint">Sube el logo de la IPS (PNG/JPG, max 4 MB). Si no, se usa el icono por defecto.</div>
+                }
+
                 <div class="fb-props-subtitle">Campos de cabecera</div>
-                <label class="fb-check"><input type="checkbox" @bind="_schema.Header!.MostrarNoHistoria" /> No Historia</label>
-                <label class="fb-check"><input type="checkbox" @bind="_schema.Header!.MostrarConsecutivo" /> Consecutivo</label>
-                <label class="fb-check"><input type="checkbox" @bind="_schema.Header!.MostrarCiudadFecha" /> Ciudad y Fecha</label>
+                @foreach (var c in _schema.Header!.Campos)
+                {
+                    <div class="fb-col-row">
+                        <input class="fb-input" placeholder="Etiqueta" @bind="c.Label" @bind:event="oninput" />
+                        <button class="fb-mini fb-mini-danger" title="Quitar" @onclick="() => RemoveHeaderField(c)">&times;</button>
+                    </div>
+                }
+                <button class="fb-btn" @onclick="AddHeaderField">+ Campo</button>
             }
             else if (_selected is null)
             {
@@ -348,6 +376,39 @@
         _headerSel = true;
         _selected = null;
         _ok = null;
+    }
+
+    private void AddHeaderField()
+    {
+        _schema.Header ??= FormHeader.Default();
+        _schema.Header.Campos.Add(new FormHeaderField { Label = "Nuevo campo" });
+    }
+
+    private void RemoveHeaderField(FormHeaderField c) => _schema.Header?.Campos.Remove(c);
+
+    private void ClearHeaderLogo()
+    {
+        if (_schema.Header is not null) { _schema.Header.LogoUrl = null; }
+    }
+
+    private async Task OnHeaderLogoSelected(InputFileChangeEventArgs e)
+    {
+        if (_schema.Header is null) { return; }
+        var file = e.File;
+        const long max = 4L * 1024 * 1024;
+        if (file.Size <= 0 || file.Size > max) { _error = "El logo debe pesar menos de 4 MB."; return; }
+        try
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(max).CopyToAsync(ms);
+            var ext = Path.GetExtension(file.Name);
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "forms");
+            Directory.CreateDirectory(dir);
+            var name = $"hdr-{Guid.NewGuid():N}{ext}";
+            await File.WriteAllBytesAsync(Path.Combine(dir, name), ms.ToArray());
+            _schema.Header.LogoUrl = $"/uploads/forms/{name}";
+        }
+        catch { _error = "No se pudo subir el logo."; }
     }
 
     private async Task OnPickForm(ChangeEventArgs e)

@@ -65,6 +65,8 @@ else
     </div>
 
     <div class="doc">
+        @if (_schema.Header is not null)
+        {
         <div class="doc-header">
             <div class="doc-hdr-top">
                 <div class="doc-hdr-brand">
@@ -90,6 +92,7 @@ else
                 }
             </div>
         </div>
+        }
         @foreach (var node in _schema.Children)
         {
             <div class="doc-grid">

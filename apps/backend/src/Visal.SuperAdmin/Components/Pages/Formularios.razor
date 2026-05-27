@@ -74,6 +74,10 @@
         <!-- Paleta -->
         <aside class="fb-palette">
             <div class="fb-palette-group">Estructura</div>
+            @if (_schema.Header is null)
+            {
+                <button class="fb-pal-btn" @onclick="AddHeader">+ Encabezado</button>
+            }
             <button class="fb-pal-btn" @onclick="AddSection">+ Seccion</button>
             <button class="fb-pal-btn" @onclick='() => AddText("heading")'>Titulo</button>
             <button class="fb-pal-btn" @onclick='() => AddText("subheading")'>Subtitulo</button>
@@ -89,6 +93,8 @@
 
         <!-- Lienzo -->
         <section class="fb-canvas">
+            @if (_schema.Header is not null)
+            {
             <div class="fb-header @(_headerSel ? "sel" : "")" @onclick="SelectHeader">
                 <div class="fb-hdr-brand">
                     @if (!string.IsNullOrWhiteSpace(_schema.Header?.LogoUrl))
@@ -112,6 +118,7 @@
                     }
                 </div>
             </div>
+            }
 
             @if (_schema.Children.Count == 0)
             {
@@ -185,6 +192,8 @@
                     </div>
                 }
                 <button class="fb-btn" @onclick="AddHeaderField">+ Campo</button>
+
+                <button class="fb-btn fb-btn-danger" @onclick="RemoveHeader">Eliminar encabezado</button>
             }
             else if (_selected is null)
             {
@@ -350,11 +359,7 @@
     private string? _error;
     private string? _ok;
 
-    protected override async Task OnInitializedAsync()
-    {
-        _schema.Header ??= FormHeader.Default();
-        await LoadListAsync();
-    }
+    protected override async Task OnInitializedAsync() => await LoadListAsync();
 
     private async Task LoadListAsync()
     {
@@ -365,17 +370,31 @@
     {
         _currentId = null;
         _codigo = ""; _nombre = ""; _tipo = null; _version = null; _activo = true;
-        _schema = new FormSchema { Header = FormHeader.Default() };
+        _schema = new FormSchema();
         _selected = null; _headerSel = false;
         _error = null; _ok = null;
     }
 
-    private void SelectHeader()
+    private void AddHeader()
     {
-        _schema.Header ??= FormHeader.Default();
+        _schema.Header = FormHeader.Default();
         _headerSel = true;
         _selected = null;
         _ok = null;
+    }
+
+    private void SelectHeader()
+    {
+        if (_schema.Header is null) { return; }
+        _headerSel = true;
+        _selected = null;
+        _ok = null;
+    }
+
+    private void RemoveHeader()
+    {
+        _schema.Header = null;
+        _headerSel = false;
     }
 
     private void AddHeaderField()
@@ -423,7 +442,6 @@
         _currentId = d.Id;
         _codigo = d.Codigo; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
         _schema = FormSchema.FromJson(d.SchemaJson);
-        _schema.Header ??= FormHeader.Default();
         _selected = null; _headerSel = false;
         _error = null; _ok = null;
     }

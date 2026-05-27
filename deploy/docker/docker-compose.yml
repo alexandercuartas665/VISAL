@@ -1,0 +1,107 @@
+name: visal
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: visal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - visal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - visal-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: visal-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    ports:
+      - "${REDIS_PORT:-6382}:6379"
+    volumes:
+      - visal-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - visal-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: visal-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "${RABBITMQ_PORT:-5674}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15674}:15672"
+    volumes:
+      - visal-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - visal-net
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: visal-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "${PGADMIN_PORT:-5052}:80"
+    volumes:
+      - visal-pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - visal-net
+
+  # evolution-api:
+  #   image: atendai/evolution-api:latest
+  #   container_name: visal-evolution-api
+  #   restart: unless-stopped
+  #   environment:
+  #     SERVER_URL: http://localhost:8081
+  #     AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+  #   ports:
+  #     - "${EVOLUTION_PORT:-8081}:8080"
+  #   volumes:
+  #     - visal-evolution-data:/evolution/instances
+  #   networks:
+  #     - visal-net
+
+volumes:
+  visal-postgres-data:
+  visal-redis-data:
+  visal-rabbitmq-data:
+  visal-pgadmin-data:
+
+networks:
+  visal-net:
+    name: visal-net
+    driver: bridge

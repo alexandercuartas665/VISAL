@@ -1,0 +1,76 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack/**
+.nitro
+*.local
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sw?
+
+# .NET build artefactos
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+[Tt]est[Rr]esult*/
+*.VisualState.xml
+coverage*.xml
+coverage*.json
+coverage*.info
+*.coverage
+*.coveragexml
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# CUBOT.travels - secretos y datos locales
+.claude/scheduled_tasks.lock
+.env
+.env.local
+appsettings.*.local.json
+appsettings.Local.json
+deploy/docker/.env
+deploy/docker/postgres-data/
+deploy/docker/rabbitmq-data/
+deploy/docker/redis-data/
+deploy/docker/pgadmin-data/
+
+# Archivos subidos en tiempo de ejecucion (logos, avatares, media de chat/agentes)
+apps/backend/src/Visal.SuperAdmin/wwwroot/uploads/
+
+# Binarios/herramientas locales (cloudflared para el tunel de desarrollo)
+tools/
+
+# Excepcion: Bootstrap vendorizado del backend (la regla generica `dist` de arriba,
+# pensada para el prototipo JS, lo estaba ignorando y rompia el CSS en produccion).
+!apps/backend/src/Visal.SuperAdmin/wwwroot/lib/
+!apps/backend/src/Visal.SuperAdmin/wwwroot/lib/**

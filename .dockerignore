@@ -1,0 +1,9 @@
+# Acelera el build de Docker y evita copiar artefactos al contexto.
+.git
+**/bin
+**/obj
+**/node_modules
+apps/web-prototype
+tools
+deploy/docker/.env
+**/*.user

@@ -87,6 +87,22 @@
 
         <!-- Lienzo -->
         <section class="fb-canvas">
+            <div class="fb-header @(_headerSel ? "sel" : "")" @onclick="SelectHeader">
+                <div class="fb-hdr-brand">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <div>
+                        <div class="fb-hdr-inst">@(string.IsNullOrWhiteSpace(_schema.Header?.Institucion) ? "Institucion" : _schema.Header!.Institucion)</div>
+                        <div class="fb-hdr-tag">@_schema.Header?.Tagline</div>
+                    </div>
+                </div>
+                <div class="fb-hdr-title">@(string.IsNullOrWhiteSpace(_schema.Header?.Titulo) ? (string.IsNullOrWhiteSpace(_nombre) ? "Titulo del documento" : _nombre) : _schema.Header!.Titulo)</div>
+                <div class="fb-hdr-meta">
+                    @if (_schema.Header?.MostrarConsecutivo == true) { <span>Consecutivo: ____</span> }
+                    @if (_schema.Header?.MostrarCiudadFecha == true) { <span>Ciudad y Fecha: ____</span> }
+                    @if (_schema.Header?.MostrarNoHistoria == true) { <span>No Historia: ____</span> }
+                </div>
+            </div>
+
             @if (_schema.Children.Count == 0)
             {
                 <div class="fb-empty">Agrega una seccion o un campo desde la paleta.</div>
@@ -131,9 +147,20 @@
 
         <!-- Propiedades -->
         <aside class="fb-props">
-            @if (_selected is null)
+            @if (_headerSel)
             {
-                <div class="fb-props-empty">Selecciona un elemento del lienzo para editar sus propiedades.</div>
+                <div class="fb-props-title">Encabezado del documento</div>
+                <div class="fb-prop"><label>Institucion</label><input class="fb-input" @bind="_schema.Header!.Institucion" @bind:event="oninput" placeholder="IPS VISAL RT" /></div>
+                <div class="fb-prop"><label>Lema</label><input class="fb-input" @bind="_schema.Header!.Tagline" @bind:event="oninput" placeholder="Atencion Humana, Agil y Oportuna" /></div>
+                <div class="fb-prop"><label>Titulo del documento</label><input class="fb-input" @bind="_schema.Header!.Titulo" @bind:event="oninput" placeholder="(usa el nombre del formulario)" /></div>
+                <div class="fb-props-subtitle">Campos de cabecera</div>
+                <label class="fb-check"><input type="checkbox" @bind="_schema.Header!.MostrarNoHistoria" /> No Historia</label>
+                <label class="fb-check"><input type="checkbox" @bind="_schema.Header!.MostrarConsecutivo" /> Consecutivo</label>
+                <label class="fb-check"><input type="checkbox" @bind="_schema.Header!.MostrarCiudadFecha" /> Ciudad y Fecha</label>
+            }
+            else if (_selected is null)
+            {
+                <div class="fb-props-empty">Selecciona el encabezado o un elemento del lienzo para editar sus propiedades.</div>
             }
             else if (_selected.IsSection)
             {
@@ -284,6 +311,7 @@
     private List<FormDefinitionDto> _forms = new();
     private FormSchema _schema = new();
     private FormNode? _selected;
+    private bool _headerSel;
     private Guid? _currentId;
     private string _codigo = "";
     private string _nombre = "";
@@ -294,7 +322,11 @@
     private string? _error;
     private string? _ok;
 
-    protected override async Task OnInitializedAsync() => await LoadListAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _schema.Header ??= FormHeader.Default();
+        await LoadListAsync();
+    }
 
     private async Task LoadListAsync()
     {
@@ -305,9 +337,17 @@
     {
         _currentId = null;
         _codigo = ""; _nombre = ""; _tipo = null; _version = null; _activo = true;
-        _schema = new FormSchema();
-        _selected = null;
+        _schema = new FormSchema { Header = FormHeader.Default() };
+        _selected = null; _headerSel = false;
         _error = null; _ok = null;
+    }
+
+    private void SelectHeader()
+    {
+        _schema.Header ??= FormHeader.Default();
+        _headerSel = true;
+        _selected = null;
+        _ok = null;
     }
 
     private async Task OnPickForm(ChangeEventArgs e)
@@ -322,7 +362,8 @@
         _currentId = d.Id;
         _codigo = d.Codigo; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
         _schema = FormSchema.FromJson(d.SchemaJson);
-        _selected = null;
+        _schema.Header ??= FormHeader.Default();
+        _selected = null; _headerSel = false;
         _error = null; _ok = null;
     }
 
@@ -404,7 +445,7 @@
         return _schema.Children;
     }
 
-    private void Select(FormNode node) { _selected = node; _ok = null; }
+    private void Select(FormNode node) { _selected = node; _headerSel = false; _ok = null; }
     private bool IsSelected(FormNode node) => ReferenceEquals(_selected, node);
 
     private void Delete(FormNode node)

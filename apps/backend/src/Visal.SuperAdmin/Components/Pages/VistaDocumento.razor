@@ -16,6 +16,15 @@
 
     .doc { max-width: 920px; margin: 0 auto; background: #fff; color: #000; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; line-height: 1.35; border: 1px solid #000; }
     .doc-title { text-align: center; font-size: 15px; font-weight: 800; padding: 8px; border-bottom: 1px solid #000; text-transform: uppercase; }
+    .doc-header { border-bottom: 1px solid #000; padding: 8px 10px; }
+    .doc-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .doc-hdr-brand { display: flex; align-items: center; gap: 8px; }
+    .doc-hdr-brand svg { width: 30px; height: 30px; color: #1565c0; }
+    .doc-hdr-inst { font-size: 16px; font-weight: 800; color: #1565c0; letter-spacing: .02em; }
+    .doc-hdr-tag { font-size: 10px; font-style: italic; color: #555; }
+    .doc-hdr-nohist { font-size: 11px; white-space: nowrap; }
+    .doc-hdr-title { text-align: center; font-size: 15px; font-weight: 800; text-transform: uppercase; margin: 6px 0; }
+    .doc-hdr-meta { display: flex; gap: 28px; font-size: 11px; }
     .doc-grid { display: grid; grid-template-columns: repeat(12, 1fr); }
     .doc-band { grid-column: span 12; background: #dde7f3; font-weight: 800; font-size: 11px; padding: 4px 8px; text-transform: uppercase; border-bottom: 1px solid #000; letter-spacing: .04em; }
     .doc-sub { grid-column: span 12; font-weight: 700; font-size: 11px; padding: 4px 8px; background: #f3f6fb; border-bottom: 1px solid #000; }
@@ -55,7 +64,26 @@ else
     </div>
 
     <div class="doc">
-        <div class="doc-title">@_def.Nombre</div>
+        <div class="doc-header">
+            <div class="doc-hdr-top">
+                <div class="doc-hdr-brand">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <div>
+                        <div class="doc-hdr-inst">@Hdr.Institucion</div>
+                        <div class="doc-hdr-tag">@Hdr.Tagline</div>
+                    </div>
+                </div>
+                @if (Hdr.MostrarNoHistoria)
+                {
+                    <div class="doc-hdr-nohist">No Historia: <b>__________</b></div>
+                }
+            </div>
+            <div class="doc-hdr-title">@(string.IsNullOrWhiteSpace(Hdr.Titulo) ? _def.Nombre : Hdr.Titulo)</div>
+            <div class="doc-hdr-meta">
+                @if (Hdr.MostrarConsecutivo) { <span>Consecutivo: __________</span> }
+                @if (Hdr.MostrarCiudadFecha) { <span>Ciudad y Fecha: __________</span> }
+            </div>
+        </div>
         @foreach (var node in _schema.Children)
         {
             <div class="doc-grid">
@@ -81,6 +109,8 @@ else
     private FormDefinitionDetailDto? _def;
     private FormSchema _schema = new();
     private bool _loading = true;
+
+    private FormHeader Hdr => _schema.Header ?? FormHeader.Default();
 
     protected override async Task OnParametersSetAsync()
     {

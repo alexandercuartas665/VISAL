@@ -9,6 +9,9 @@ namespace Visal.SuperAdmin.Components.Forms;
 /// </summary>
 public sealed class FormSchema
 {
+    [JsonPropertyName("header")]
+    public FormHeader? Header { get; set; }
+
     [JsonPropertyName("children")]
     public List<FormNode> Children { get; set; } = new();
 
@@ -103,6 +106,36 @@ public sealed class FormNode
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";
+}
+
+/// <summary>Encabezado institucional del formato (logo, institucion, titulo y campos de cabecera).</summary>
+public sealed class FormHeader
+{
+    [JsonPropertyName("institucion")]
+    public string? Institucion { get; set; }
+
+    [JsonPropertyName("tagline")]
+    public string? Tagline { get; set; }
+
+    /// <summary>Titulo del documento. Si esta vacio se usa el nombre del formulario.</summary>
+    [JsonPropertyName("titulo")]
+    public string? Titulo { get; set; }
+
+    [JsonPropertyName("mostrarNoHistoria")]
+    public bool MostrarNoHistoria { get; set; } = true;
+
+    [JsonPropertyName("mostrarConsecutivo")]
+    public bool MostrarConsecutivo { get; set; } = true;
+
+    [JsonPropertyName("mostrarCiudadFecha")]
+    public bool MostrarCiudadFecha { get; set; } = true;
+
+    public static FormHeader Default() => new()
+    {
+        Institucion = "IPS VISAL RT",
+        Tagline = "Atencion Humana, Agil y Oportuna",
+        Titulo = ""
+    };
 }
 
 /// <summary>Columna de una tabla repetible.</summary>

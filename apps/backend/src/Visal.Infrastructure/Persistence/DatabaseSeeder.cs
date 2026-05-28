@@ -216,10 +216,11 @@ public sealed class DatabaseSeeder
         foreach (var u in globales)
         {
             u.EsGlobal = true;
-            // Cedula demo para login por documento (igual a la captura de la solicitud).
-            if (string.IsNullOrWhiteSpace(u.Documento) && u.Email == TenantAdminEmail)
+            // La cedula 13069774 pertenece a JESUS ALBERTO TORO (owner real de Visal IPS RT)
+            // y se carga via EnsureVisalRealUsersAsync. Si demo-admin la tenia, liberarla.
+            if (u.Email == TenantAdminEmail && u.Documento == "13069774")
             {
-                u.Documento = "13069774";
+                u.Documento = null;
             }
         }
         await _db.SaveChangesAsync(cancellationToken);
@@ -276,5 +277,163 @@ public sealed class DatabaseSeeder
         }
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Sedes Visal IPS aseguradas en el tenant demo ({N}).", visalSedes.Length);
+    }
+
+    // Carga los usuarios reales del archivo maestro de Visal IPS RT con rol "Coordinador"
+    // (V/C/E sobre todos los modulos) y acceso a TODAS las sedes activas. Idempotente:
+    // identifica usuarios por cedula y los omite si ya existen. Clave inicial = cedula.
+    public async Task EnsureVisalRealUsersAsync(CancellationToken cancellationToken = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Kind == TenantKind.Demo, cancellationToken);
+        if (tenant is null) { return; }
+
+        // 1) Rol "Coordinador" con V/C/E (sin eliminar) en todos los modulos.
+        var coord = await _db.Roles.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.TenantId == tenant.Id && r.Nombre == "Coordinador", cancellationToken);
+        if (coord is null)
+        {
+            coord = new Rol
+            {
+                TenantId = tenant.Id,
+                Nombre = "Coordinador",
+                Descripcion = "Coordinador de operacion clinica. V/C/E en todos los modulos.",
+                Activo = true
+            };
+            _db.Roles.Add(coord);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        var existentes = await _db.RolPermisos.IgnoreQueryFilters()
+            .Where(p => p.RolId == coord.Id).ToListAsync(cancellationToken);
+        _db.RolPermisos.RemoveRange(existentes);
+        foreach (var modulo in ModuloCatalogo.Todos)
+        {
+            _db.RolPermisos.Add(new RolPermiso
+            {
+                TenantId = tenant.Id,
+                RolId = coord.Id,
+                Modulo = modulo.Key,
+                Ver = true, Crear = true, Editar = true, Eliminar = false
+            });
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+
+        // 2) Sedes activas del tenant (se asignaran TODAS a cada usuario).
+        var sedes = await _db.Sucursales.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenant.Id && s.Activo)
+            .ToListAsync(cancellationToken);
+
+        // 3) Lista maestra: (nombre, cedula, email, usuario).
+        (string nombre, string cedula, string? email, string usuario)[] usuarios =
+        {
+            ("ANA MATILDE TORO ANDRADE", "59177247", "visalrtsas@gmail.com", "ANA.TORO"),
+            ("ANDRES EDUARDO BRAVO VELASQUEZ", "1085257309", "acuartas@bitcode.com.co", "ANDRES.BRAVO"),
+            ("Angela Maria Lopez Benavides", "1086133424", "homecarevisalrtsas.pasto@gmail.com", "ANGELA.LOPEZ"),
+            ("CAROLINA ROMERO CHAPARRO", "1022969566", "visalequiposmedicos@gmail.com", "CAROLINA.CHAPARRO"),
+            ("CHRISTIAN LINARES GOMEZ", "1130636792", "usuario@visal.com.co", "CHRISTIAN.GOMEZ"),
+            ("CLON JESUS ALBERTO TORO", "C80001976", null, "CLON.JESUS.TORO"),
+            ("CLON VALERIA URIBE RESTREPO", "C1002924632", "CamiloTDH24@gmail.com", "CLON.VALERIA.RESTREPO"),
+            ("DANIELA LOPEZ", "1059915437", "autorizaciones.visalrt@gmail.com", "DANIELA.LOPEZ"),
+            ("DAYANA ROSERO", "1085335046", "homecarevisalrtsas.pasto@gmail.com", "DAYANA.ROSERO"),
+            ("FERNANDA ZAMBRANO", "1086137278", "correo@visal.com.co", "FERNANDA.ZAMBRANO"),
+            ("JESUS ALBERTO TORO", "13069774", "talentohumano@visalrtsas.com.co", "JESUS.TORO"),
+            ("LILIANA TORO", "1023003747", "visaltesoreria@gmail.com", "LILIANA.TORO"),
+            ("LUISA TORO", "1006009064", "homecare.visalrtsas@gmail.com", "LUISA.TORO"),
+            ("MAIRA ALEJANDRA USCATEGUI", "1085291717", "terapiasvisalpasto@gmail.com", "MAIRA.USCATEGUI"),
+            ("MARIO SEBASTIAN RUBIO TORO", "1031171951", "visalrtsas@gmail.com", "MARIO.RUBIO"),
+            ("MARTHA ORTIZ", "59835952", "coordinacionpad.visalrt@gmail.com", "MARTHA.ORTIZ"),
+            ("MERLIN MOSQUERA", "1105368044", "terapiasvisalrt2@gmail.com", "MERLIN.MOSQUERA"),
+            ("MONICA GUERRERO", "1086133758", "insumovisalpasto@gmail.com", "MONICA.GUERRERO"),
+            ("NATALY ARTEGA", "1085921101", "atencionalusuario.visalrt@gmail.com", "NATALY.ARTEGA"),
+            ("NATHALIA MAZO", "1005867637", "gestionpositivavisalcali@gmail.com", "NATHALIA.MAZO"),
+            ("NATHALIA ISABEL CAICEDO ROJAS", "1086133791", "correo@visal.com.co", "NATHALIA.CAICEDO"),
+            ("NORVI ORLANDI MUÑOZ CORDOBA", "1085662574", "homecarevisalrt.popayan@gmail.com", "NORVI.MUNOZ"),
+            ("PAOLA ANDREA BURGOS MENESES", "1125180774", "correo@visal.com.co", "PAOLA.BURGOS"),
+            ("VALERIA URIBE RESTREPO", "1109661916", "valeriauribecbo@gmail.com", "VALERIA.RESTREPO"),
+            ("VICKY MUÑOZ", "1088970257", "fact.visalrtsas@gmail.com", "VICKY.MUNOZ"),
+            ("Yenifer Astrid Burbano Erazo", "1085315888", "asignacion.visal.arl.pasto@gmail.com", "YENIFER.BURBANO"),
+            ("YESSICA GUERRERO", "1088976322", "enfvisrt@outlook.com", "YESSICA.GUERRERO")
+        };
+
+        // Set de emails ya en BD para evitar colisiones (constraint unique).
+        var emailsEnBd = (await _db.PlatformUsers.IgnoreQueryFilters()
+            .Select(p => p.Email).ToListAsync(cancellationToken))
+            .Select(e => e.ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        int agregados = 0;
+        foreach (var (nombre, cedula, emailRaw, usuario) in usuarios)
+        {
+            // Idempotencia: si ya existe por cedula, saltar.
+            var existePorDoc = await _db.PlatformUsers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(p => p.Documento == cedula, cancellationToken);
+            if (existePorDoc is not null) { continue; }
+
+            // Resolver email evitando colisiones.
+            var emailLower = (emailRaw ?? "").Trim().ToLowerInvariant();
+            string email;
+            if (string.IsNullOrEmpty(emailLower) || emailsEnBd.Contains(emailLower))
+            {
+                var slug = usuario.ToLowerInvariant().Trim('.').Replace(' ', '.');
+                email = $"{slug}@visal.local";
+                int n = 1;
+                var baseEmail = email;
+                while (emailsEnBd.Contains(email))
+                {
+                    email = baseEmail.Replace("@", $"{n}@");
+                    n++;
+                }
+            }
+            else
+            {
+                email = emailLower;
+            }
+            emailsEnBd.Add(email);
+
+            // PlatformUser (identidad). Clave inicial = cedula.
+            var pu = new PlatformUser
+            {
+                Email = email,
+                DisplayName = nombre,
+                Documento = cedula,
+                EmailVerified = true,
+                AuthProvider = "local",
+                PasswordHash = _hasher.Hash(cedula),
+                Status = PlatformUserStatus.Active,
+                EsGlobal = false
+            };
+            _db.PlatformUsers.Add(pu);
+            await _db.SaveChangesAsync(cancellationToken);
+
+            // TenantUser (membresia) con rol Coordinador.
+            var tu = new TenantUser
+            {
+                TenantId = tenant.Id,
+                PlatformUserId = pu.Id,
+                Email = email,
+                TenantRole = TenantRole.Advisor,
+                Status = PlatformUserStatus.Active,
+                RolId = coord.Id
+            };
+            _db.TenantUsers.Add(tu);
+            await _db.SaveChangesAsync(cancellationToken);
+
+            // Asignar TODAS las sedes activas del tenant.
+            foreach (var s in sedes)
+            {
+                _db.TenantUserSucursales.Add(new TenantUserSucursal
+                {
+                    TenantId = tenant.Id,
+                    TenantUserId = tu.Id,
+                    SucursalId = s.Id
+                });
+            }
+            await _db.SaveChangesAsync(cancellationToken);
+            agregados++;
+        }
+
+        _logger.LogInformation("Usuarios reales Visal cargados: {N} nuevos (de {T} en archivo maestro). Rol: Coordinador. Sedes: todas ({S}).",
+            agregados, usuarios.Length, sedes.Count);
     }
 }

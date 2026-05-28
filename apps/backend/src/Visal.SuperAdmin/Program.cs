@@ -95,6 +95,7 @@ else
     await seeder.EnsureDemoTemplateAssetsAsync();
     await seeder.EnsureAdministradorRolAsync();
     await seeder.EnsureSedesVisalAsync();
+    await seeder.EnsureVisalRealUsersAsync();
 }
 
 app.UseHttpsRedirection();

@@ -1,0 +1,80 @@
+@page "/cfg-tipos-profesional"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IProfesionalConfigService Svc
+
+<PageTitle>Tipos de Profesional - Visal</PageTitle>
+
+<div class="cat-head">
+    <div>
+        <div class="cat-eyebrow">Configuracion del Sistema</div>
+        <h1 class="cat-title">Tipos de Profesional</h1>
+        <p class="cat-sub">Catalogo de categorias de profesional (Medico, Terapeuta, Enfermeria...).</p>
+    </div>
+    <button class="btn btn-primary btn-sm" @onclick="Add">+ Agregar</button>
+</div>
+
+@if (_error is not null) { <div class="cat-alert">@_error</div> }
+
+<div class="cat-card">
+    <table class="table table-sm align-middle">
+        <thead><tr><th style="width:60%">Nombre</th><th>Activo</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var it in _items)
+            {
+                <tr>
+                    <td><input class="form-control form-control-sm" @bind="it.Nombre" /></td>
+                    <td><input type="checkbox" class="form-check-input" @bind="it.Activo" /></td>
+                    <td class="cat-actions">
+                        <button class="btn btn-primary btn-sm" @onclick="() => Save(it)">&#10003;</button>
+                        @if (it.Id is not null)
+                        {
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => Delete(it)">&times;</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (_items.Count == 0) { <div class="cat-empty">Sin registros. Agrega uno.</div> }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private List<Row> _items = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load() => _items = (await Svc.ListTiposAsync()).Select(Row.From).ToList();
+    private void Add() => _items.Add(new Row { Activo = true });
+
+    private async Task Save(Row r)
+    {
+        _error = null;
+        try { var s = await Svc.SaveTipoAsync(r.Id, r.Nombre, r.Activo, await Actor()); if (s is not null) { r.Id = s.Id; } }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private async Task Delete(Row r)
+    {
+        if (r.Id is Guid id) { await Svc.DeleteTipoAsync(id, await Actor()); }
+        await Load();
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private sealed class Row
+    {
+        public Guid? Id { get; set; }
+        public string Nombre { get; set; } = "";
+        public bool Activo { get; set; } = true;
+        public static Row From(CatalogItemDto d) => new() { Id = d.Id, Nombre = d.Nombre, Activo = d.Activo };
+    }
+}

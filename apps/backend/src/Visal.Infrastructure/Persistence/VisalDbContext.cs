@@ -66,6 +66,11 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
+    public DbSet<TipoProfesional> TiposProfesional => Set<TipoProfesional>();
+    public DbSet<SubCategoriaProfesional> SubCategoriasProfesional => Set<SubCategoriaProfesional>();
+    public DbSet<Profesional> Profesionales => Set<Profesional>();
+    public DbSet<ProfesionalSubCategoria> ProfesionalSubCategorias => Set<ProfesionalSubCategoria>();
+    public DbSet<ProfesionalAgencia> ProfesionalAgencias => Set<ProfesionalAgencia>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -473,6 +478,49 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.AseguradoraId });
             b.HasIndex(x => new { x.TenantId, x.CodigoContrato });
+        });
+
+        modelBuilder.Entity<TipoProfesional>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Nombre }).IsUnique();
+        });
+
+        modelBuilder.Entity<SubCategoriaProfesional>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Nombre }).IsUnique();
+        });
+
+        modelBuilder.Entity<Profesional>(b =>
+        {
+            b.Property(x => x.NumeroDocumento).HasMaxLength(30).IsRequired();
+            b.Property(x => x.TipoDocumento).HasMaxLength(10).IsRequired();
+            b.Property(x => x.PrimerNombre).HasMaxLength(80);
+            b.Property(x => x.SegundoNombre).HasMaxLength(80);
+            b.Property(x => x.PrimerApellido).HasMaxLength(80);
+            b.Property(x => x.SegundoApellido).HasMaxLength(80);
+            b.Property(x => x.NombreCompleto).HasMaxLength(250).IsRequired();
+            b.Property(x => x.RegistroMedico).HasMaxLength(60);
+            b.Property(x => x.Ciudad).HasMaxLength(120);
+            b.Property(x => x.Celular).HasMaxLength(40);
+            b.Property(x => x.FirmaUrl).HasMaxLength(500);
+            b.HasOne(x => x.TipoProfesional).WithMany().HasForeignKey(x => x.TipoProfesionalId).OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(x => new { x.TenantId, x.NumeroDocumento }).IsUnique();
+        });
+
+        modelBuilder.Entity<ProfesionalSubCategoria>(b =>
+        {
+            b.HasOne(x => x.Profesional).WithMany().HasForeignKey(x => x.ProfesionalId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.SubCategoria).WithMany().HasForeignKey(x => x.SubCategoriaId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.ProfesionalId });
+        });
+
+        modelBuilder.Entity<ProfesionalAgencia>(b =>
+        {
+            b.Property(x => x.Agencia).HasMaxLength(120).IsRequired();
+            b.HasOne(x => x.Profesional).WithMany().HasForeignKey(x => x.ProfesionalId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.ProfesionalId });
         });
 
         modelBuilder.Entity<ServicioContrato>(b =>

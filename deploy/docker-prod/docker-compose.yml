@@ -1,0 +1,96 @@
+# Stack de PRODUCCION de Visal IPS RT.
+# Arranca:
+#   - visal-app    : la consola Blazor (imagen tirada de GHCR)
+#   - postgres     : base persistente con volumen propio
+#   - caddy        : reverse proxy con HTTPS automatico (Let's Encrypt)
+#
+# Uso:
+#   1) Copiar .env.example a .env y editar VISAL_DOMAIN, POSTGRES_PASSWORD, etc.
+#   2) docker login ghcr.io (la primera vez, con un PAT con permiso read:packages)
+#   3) docker compose up -d
+#   4) Actualizar: docker compose pull && docker compose up -d
+#
+# Requisitos en el servidor:
+#   - Puertos 80 y 443 abiertos hacia internet
+#   - DNS A record de tu dominio apuntando al servidor
+#   - Docker 24+ con compose v2
+
+name: visal-prod
+
+services:
+  visal-app:
+    # Cambia "owner/repo" por tu repo de GitHub (lower-case). Ej: ghcr.io/alexandercuartas665/visal/superadmin:latest
+    image: ${VISAL_IMAGE:-ghcr.io/alexandercuartas665/visal/superadmin:latest}
+    container_name: visal-app
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_HTTP_PORTS: 8080
+      # Connection string apuntando al servicio postgres del compose (dentro de la red interna).
+      VISAL_DB_CONNECTION: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      # Aplica migrations al arrancar (idempotente). Solo se ejecutan las pendientes.
+      VISAL_RUN_MIGRATIONS: "true"
+      # Confianza al proxy (Caddy) para que Request.Scheme = https detras del TLS termination.
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - visal-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/login || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: visal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - visal-pgdata:/var/lib/postgresql/data
+    networks:
+      - visal-net
+    # En produccion NO publicamos el puerto al host; solo Caddy/visal-app lo ven via la red interna.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: visal-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      VISAL_DOMAIN: ${VISAL_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - visal-caddy-data:/data       # certificados Let's Encrypt
+      - visal-caddy-config:/config
+    depends_on:
+      visal-app:
+        condition: service_started
+    networks:
+      - visal-net
+
+volumes:
+  visal-pgdata:
+  visal-caddy-data:
+  visal-caddy-config:
+
+networks:
+  visal-net:
+    driver: bridge

@@ -1,0 +1,2 @@
+# Solo el .env.example va al repo; el .env real con claves se queda en el servidor.
+.env

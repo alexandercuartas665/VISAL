@@ -96,6 +96,11 @@ else
     await seeder.EnsureAdministradorRolAsync();
     await seeder.EnsureSedesVisalAsync();
     await seeder.EnsureVisalRealUsersAsync();
+
+    // Geografia (Pais/Departamento/Municipio) via api-colombia.com. Idempotente.
+    // Si la API esta caida, solo registra warning y sigue.
+    var geoSeeder = scope.ServiceProvider.GetRequiredService<Visal.Infrastructure.Geo.ApiColombiaSeeder>();
+    await geoSeeder.EnsureColombiaAsync();
 }
 
 app.UseHttpsRedirection();

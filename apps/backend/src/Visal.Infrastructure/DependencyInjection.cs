@@ -54,6 +54,8 @@ public static class DependencyInjection
         services.AddHttpClient<Visal.Application.Tenancy.IAiProviderClient, Ai.AiProviderClient>();
         services.AddHttpClient<Visal.Application.Auth.IGoogleOAuthClient, Auth.GoogleOAuthClient>();
         services.AddScoped<DatabaseSeeder>();
+        services.AddHttpClient("api-colombia");
+        services.AddScoped<Geo.ApiColombiaSeeder>();
 
         // Comprobantes PDF (QuestPDF). Licencia Community: gratis para empresas con ingresos < USD 1M/ano.
         QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;

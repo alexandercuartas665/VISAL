@@ -7,6 +7,7 @@
 @inject IAseguradoraService AseSvc
 @inject ISucursalService SucSvc
 @inject ICatalogoPacienteService CatSvc
+@inject IGeografiaService GeoSvc
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
 
@@ -183,16 +184,28 @@
                     <div class="ase-card-h" style="margin-top:14px;">Geografia y contacto</div>
                     <div class="ase-form">
                         <div class="ase-f"><label>Pais Residencia</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" value="@_paisResidencia" @onchange="OnPaisResidenciaChanged">
+                                <option value="">--</option>
+                                @foreach (var p in _paises) { <option value="@p.Id">@p.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Pais Origen</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_paisOrigen">
+                                <option value="">--</option>
+                                @foreach (var p in _paises) { <option value="@p.Id">@p.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Departamento</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" value="@_departamento" @onchange="OnDepartamentoChanged" disabled="@(_departamentos.Count == 0)">
+                                <option value="">--</option>
+                                @foreach (var d in _departamentos) { <option value="@d.Id">@d.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Municipio</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_municipio" disabled="@(_municipios.Count == 0)">
+                                <option value="">--</option>
+                                @foreach (var m in _municipios) { <option value="@m.Id">@m.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>
                         <div class="ase-f"><label>Barrio</label><input class="form-control form-control-sm" @bind="_barrio" /></div>
@@ -303,6 +316,12 @@
     private string? _tel, _email;
     private string _sedeId = "";
 
+    // Selects en cascada de geografia.
+    private List<PaisDto> _paises = new();
+    private List<DepartamentoDto> _departamentos = new();
+    private List<MunicipioDto> _municipios = new();
+    private string _paisResidencia = "", _paisOrigen = "", _departamento = "", _municipio = "";
+
     // Emergencia
     private string? _emerNombre, _emerParentesco, _emerTel;
     private bool _activo = true;
@@ -314,7 +333,30 @@
         _aseguradoras = (await AseSvc.ListAseguradorasAsync()).ToList();
         _sedes = (await SucSvc.ListAsync()).ToList();
         _catalogos = (await CatSvc.ListAsync(null)).ToList();
+        _paises = (await GeoSvc.ListPaisesAsync()).ToList();
         await LoadLista();
+    }
+
+    private async Task OnPaisResidenciaChanged(ChangeEventArgs e)
+    {
+        _paisResidencia = e.Value?.ToString() ?? "";
+        _departamento = ""; _municipio = ""; _municipios = new();
+        if (Guid.TryParse(_paisResidencia, out var pid))
+        {
+            _departamentos = (await GeoSvc.ListDepartamentosAsync(pid)).ToList();
+        }
+        else { _departamentos = new(); }
+    }
+
+    private async Task OnDepartamentoChanged(ChangeEventArgs e)
+    {
+        _departamento = e.Value?.ToString() ?? "";
+        _municipio = "";
+        if (Guid.TryParse(_departamento, out var did))
+        {
+            _municipios = (await GeoSvc.ListMunicipiosAsync(did)).ToList();
+        }
+        else { _municipios = new(); }
     }
 
     private async Task LoadLista() => _lista = (await Svc.ListAsync(string.IsNullOrWhiteSpace(_filtro) ? null : _filtro)).ToList();
@@ -336,6 +378,8 @@
         _tipoTutela = "";
         _dir = _barrio = _ciudad = null;
         _tel = _email = null; _sedeId = "";
+        _paisResidencia = _paisOrigen = _departamento = _municipio = "";
+        _departamentos = new(); _municipios = new();
         _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
         _showForm = true; _tab = "generales"; _error = _ok = null;
     }
@@ -366,6 +410,14 @@
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _tel = d.Telefono; _email = d.Email;
         _sedeId = d.SedeAtencionId?.ToString() ?? "";
+        _paisResidencia = d.PaisResidenciaId?.ToString() ?? "";
+        _paisOrigen = d.PaisOrigenId?.ToString() ?? "";
+        _departamento = d.DepartamentoId?.ToString() ?? "";
+        _municipio = d.MunicipioId?.ToString() ?? "";
+        if (Guid.TryParse(_paisResidencia, out var pid)) { _departamentos = (await GeoSvc.ListDepartamentosAsync(pid)).ToList(); }
+        else { _departamentos = new(); }
+        if (Guid.TryParse(_departamento, out var did)) { _municipios = (await GeoSvc.ListMunicipiosAsync(did)).ToList(); }
+        else { _municipios = new(); }
         _emerNombre = d.ContactoEmergencia; _emerParentesco = d.Parentesco; _emerTel = d.TelefonoEmergencia; _activo = d.Activo;
         _showForm = true; _tab = "generales"; _error = _ok = null;
     }
@@ -390,7 +442,7 @@
                 Try(_contrato1), Try(_contrato2), Try(_contrato3),
                 null, _dxPrincipal,
                 _tutela, Try(_tipoTutela), _medContratado,
-                null, null, null, null,
+                Try(_paisResidencia), Try(_paisOrigen), Try(_departamento), Try(_municipio),
                 _dir, _barrio, _ciudad,
                 _tel, _email,
                 sede,

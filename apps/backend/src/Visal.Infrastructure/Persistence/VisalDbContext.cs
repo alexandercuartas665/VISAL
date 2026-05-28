@@ -77,6 +77,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
+    public DbSet<Pais> Paises => Set<Pais>();
+    public DbSet<Departamento> Departamentos => Set<Departamento>();
+    public DbSet<Municipio> Municipios => Set<Municipio>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -636,6 +639,28 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Descripcion).HasMaxLength(500);
             // Unico por tenant + tipo + codigo: cada catalogo tiene su propio espacio de codigos.
             b.HasIndex(x => new { x.TenantId, x.Tipo, x.Codigo }).IsUnique();
+        });
+
+        modelBuilder.Entity<Pais>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(10).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.HasIndex(x => x.Codigo).IsUnique();
+        });
+
+        modelBuilder.Entity<Departamento>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.HasOne(x => x.Pais).WithMany().HasForeignKey(x => x.PaisId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.PaisId, x.Nombre }).IsUnique();
+            b.HasIndex(x => new { x.PaisId, x.ExternalId });
+        });
+
+        modelBuilder.Entity<Municipio>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(150).IsRequired();
+            b.HasOne(x => x.Departamento).WithMany().HasForeignKey(x => x.DepartamentoId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.DepartamentoId, x.Nombre }).IsUnique();
         });
     }
 

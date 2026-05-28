@@ -209,13 +209,72 @@ public sealed class DatabaseSeeder
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        // 4) Marcar admin@visal.travels y demo-admin@visal.travels como globales.
+        // 4) Marcar admin@visal.travels y demo-admin@visal.travels como globales y asignarles cedula demo.
         var globales = await _db.PlatformUsers.IgnoreQueryFilters()
             .Where(u => u.Email == SuperAdminEmail || u.Email == TenantAdminEmail)
             .ToListAsync(cancellationToken);
-        foreach (var u in globales) { u.EsGlobal = true; }
+        foreach (var u in globales)
+        {
+            u.EsGlobal = true;
+            // Cedula demo para login por documento (igual a la captura de la solicitud).
+            if (string.IsNullOrWhiteSpace(u.Documento) && u.Email == TenantAdminEmail)
+            {
+                u.Documento = "13069774";
+            }
+        }
         await _db.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Rol 'Administrador' garantizado con todos los permisos en {N} tenant(s).", tenants.Count);
+    }
+
+    // Asegura las sedes principales de Visal IPS RT (IBAGUE, NARIÑO, PASTO, POPAYAN, SANTIAGO DE CALI)
+    // en el tenant demo. Desactiva las sedes legacy S001 "Sede Cali" y S002 "Sede Bogota" si existen
+    // con esos nombres. Idempotente: solo agrega las que faltan, no toca otras sedes del cliente.
+    public async Task EnsureSedesVisalAsync(CancellationToken cancellationToken = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Kind == TenantKind.Demo, cancellationToken);
+        if (tenant is null) { return; }
+
+        // Desactivar sedes legacy del seed inicial.
+        var legacy = await _db.Sucursales.IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenant.Id && (
+                (s.Codigo == "S001" && s.Nombre == "Sede Cali") ||
+                (s.Codigo == "S002" && s.Nombre == "Sede Bogota")))
+            .ToListAsync(cancellationToken);
+        foreach (var s in legacy) { s.Activo = false; }
+
+        (string codigo, string nombre, string ciudad)[] visalSedes =
+        {
+            ("IBA", "IBAGUE", "IBAGUE"),
+            ("NAR", "NARIÑO", "PASTO"),
+            ("PAS", "PASTO", "PASTO"),
+            ("POP", "POPAYAN", "POPAYAN"),
+            ("SCL", "SANTIAGO DE CALI", "SANTIAGO DE CALI")
+        };
+        foreach (var (codigo, nombre, ciudad) in visalSedes)
+        {
+            var existente = await _db.Sucursales.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(s => s.TenantId == tenant.Id && s.Codigo == codigo, cancellationToken);
+            if (existente is null)
+            {
+                _db.Sucursales.Add(new Sucursal
+                {
+                    TenantId = tenant.Id,
+                    Codigo = codigo,
+                    Nombre = nombre,
+                    Ciudad = ciudad,
+                    Activo = true
+                });
+            }
+            else if (!existente.Activo)
+            {
+                existente.Activo = true;
+                existente.Nombre = nombre;
+                existente.Ciudad = ciudad;
+            }
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Sedes Visal IPS aseguradas en el tenant demo ({N}).", visalSedes.Length);
     }
 }

@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Visal.Application;
 using Visal.Application.Common;
 using Visal.Application.Common.Auth;
+using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Visal.Infrastructure;
 using Visal.Infrastructure.Persistence;
@@ -93,6 +94,7 @@ else
     await seeder.SeedAsync();
     await seeder.EnsureDemoTemplateAssetsAsync();
     await seeder.EnsureAdministradorRolAsync();
+    await seeder.EnsureSedesVisalAsync();
 }
 
 app.UseHttpsRedirection();
@@ -110,13 +112,24 @@ app.MapHub<Visal.SuperAdmin.RealTime.ChatHub>("/hubs/chat");
 
 app.MapPost("/auth/login", async (
     HttpContext http,
-    [FromForm] string email,
+    [FromForm] string usuario,
     [FromForm] string password,
+    [FromForm] string? sede,
     IApplicationDbContext db,
     IPasswordHasher hasher) =>
 {
-    var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
-    var user = await db.PlatformUsers.FirstOrDefaultAsync(u => u.Email == normalized);
+    // Aceptar email o documento (cedula). Si trae '@' lo tratamos como correo.
+    var raw = (usuario ?? string.Empty).Trim();
+    var lower = raw.ToLowerInvariant();
+    PlatformUser? user;
+    if (raw.Contains('@'))
+    {
+        user = await db.PlatformUsers.FirstOrDefaultAsync(u => u.Email == lower);
+    }
+    else
+    {
+        user = await db.PlatformUsers.FirstOrDefaultAsync(u => u.Documento == raw);
+    }
 
     if (user is null
         || user.Status != PlatformUserStatus.Active
@@ -133,62 +146,97 @@ app.MapPost("/auth/login", async (
         new(ClaimTypes.Email, user.Email)
     };
 
-    string redirect;
+    // Super Admin: ignora la sede seleccionada y va al panel SaaS.
     if (user.PlatformRole is PlatformRole role)
     {
-        // Operador de plataforma (Super Admin / roles internos).
         claims.Add(new Claim("platform_role", role.ToString()));
-        redirect = "/";
+        var idSuper = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idSuper));
+        return Results.Redirect("/");
+    }
+
+    // Memberships del usuario.
+    var memberships = await db.TenantUsers.IgnoreQueryFilters()
+        .Where(tu => tu.PlatformUserId == user.Id && tu.Status == PlatformUserStatus.Active)
+        .OrderBy(tu => tu.CreatedAt)
+        .ToListAsync();
+
+    var sedeStr = (sede ?? "").Trim();
+
+    // GLOBAL: solo permitido para usuarios marcados globales. Entra sin sede pero con tenant_id.
+    if (string.Equals(sedeStr, "GLOBAL", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!user.EsGlobal) { return Results.Redirect("/login?error=2"); }
+        Guid tenantId;
+        TenantRole rol = TenantRole.Owner;
+        if (memberships.Count > 0)
+        {
+            tenantId = memberships[0].TenantId;
+            rol = memberships[0].TenantRole;
+        }
+        else
+        {
+            // Sin membresia: tomar el primer tenant activo del SaaS.
+            var first = await db.Tenants.IgnoreQueryFilters()
+                .Where(t => t.Status == TenantStatus.Active || t.Status == TenantStatus.Trial)
+                .OrderBy(t => t.Name)
+                .FirstOrDefaultAsync();
+            if (first is null) { return Results.Redirect("/login?error=3"); }
+            tenantId = first.Id;
+        }
+        claims.Add(new Claim("tenant_id", tenantId.ToString()));
+        claims.Add(new Claim("tenant_role", rol.ToString()));
+        claims.Add(new Claim("global_access", "1"));
+        var idGlobal = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idGlobal));
+        return Results.Redirect("/mi-cuenta");
+    }
+
+    // Sede especifica: el usuario eligio en que sucursal trabajar.
+    if (Guid.TryParse(sedeStr, out var sucursalId))
+    {
+        var suc = await db.Sucursales.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Id == sucursalId && s.Activo);
+        if (suc is null) { return Results.Redirect("/login?error=4"); }
+
+        var membership = memberships.FirstOrDefault(m => m.TenantId == suc.TenantId);
+        // Verificar que la sede este dentro de las asignadas al usuario, salvo que sea global.
+        if (membership is null && !user.EsGlobal) { return Results.Redirect("/login?error=5"); }
+        if (membership is not null)
+        {
+            var asignadas = await db.TenantUserSucursales.IgnoreQueryFilters()
+                .Where(x => x.TenantUserId == membership.Id)
+                .Select(x => x.SucursalId)
+                .ToListAsync();
+            if (asignadas.Count > 0 && !asignadas.Contains(sucursalId) && !user.EsGlobal)
+            {
+                return Results.Redirect("/login?error=6");
+            }
+        }
+
+        claims.Add(new Claim("tenant_id", suc.TenantId.ToString()));
+        claims.Add(new Claim("tenant_role", (membership?.TenantRole ?? TenantRole.Owner).ToString()));
+        claims.Add(new Claim("sucursal_id", sucursalId.ToString()));
+        if (user.EsGlobal) { claims.Add(new Claim("global_access", "1")); }
+        var idSede = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idSede));
+        return Results.Redirect("/mi-cuenta");
+    }
+
+    // Sin sede valida: fallback al flujo anterior (compatibilidad).
+    if (memberships.Count == 1 && !user.EsGlobal)
+    {
+        var m = memberships[0];
+        claims.Add(new Claim("tenant_id", m.TenantId.ToString()));
+        claims.Add(new Claim("tenant_role", m.TenantRole.ToString()));
     }
     else
     {
-        // Usuario de agencia o usuario global. Calcular cuantas empresas puede ver:
-        //  - Si NO es global: solo memberships activos.
-        //  - Si es global: todos los tenants activos del SaaS.
-        var memberships = await db.TenantUsers
-            .IgnoreQueryFilters()
-            .Where(tu => tu.PlatformUserId == user.Id && tu.Status == PlatformUserStatus.Active)
-            .OrderBy(tu => tu.CreatedAt)
-            .ToListAsync();
-
-        int totalOpciones;
-        if (user.EsGlobal)
-        {
-            totalOpciones = await db.Tenants
-                .IgnoreQueryFilters()
-                .CountAsync(t => t.Status == TenantStatus.Active || t.Status == TenantStatus.Trial);
-        }
-        else
-        {
-            totalOpciones = memberships.Count;
-        }
-
-        if (totalOpciones == 0)
-        {
-            // Identidad valida pero sin rol de plataforma ni membresia activa: sin acceso.
-            return Results.Redirect("/login?error=1");
-        }
-
-        if (totalOpciones == 1 && !user.EsGlobal)
-        {
-            // Atajo: usuario no global con exactamente un tenant -> entrar directo.
-            var m = memberships[0];
-            claims.Add(new Claim("tenant_id", m.TenantId.ToString()));
-            claims.Add(new Claim("tenant_role", m.TenantRole.ToString()));
-            redirect = "/mi-cuenta";
-        }
-        else
-        {
-            // Hay varias empresas (o el usuario es global): firmar sin tenant_id y enviar al selector.
-            claims.Add(new Claim("needs_tenant", "1"));
-            if (user.EsGlobal) { claims.Add(new Claim("is_global", "1")); }
-            redirect = "/seleccionar-empresa";
-        }
+        claims.Add(new Claim("needs_tenant", "1"));
+        if (user.EsGlobal) { claims.Add(new Claim("is_global", "1")); }
     }
-
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
-    return Results.Redirect(redirect);
+    return Results.Redirect(memberships.Count == 1 && !user.EsGlobal ? "/mi-cuenta" : "/seleccionar-empresa");
 }).DisableAntiforgery();
 
 // Selector de empresa: el usuario eligio un tenant tras el login. Validamos que pueda entrar

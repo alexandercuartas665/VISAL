@@ -3,6 +3,7 @@
 @attribute [AllowAnonymous]
 @inject Visal.Application.Admin.IPlatformBrandingService BrandingSvc
 @inject Visal.Application.Admin.IGoogleAuthConfigService GoogleCfg
+@inject Visal.Application.Tenancy.ISedeCatalogoPublicoService SedesSvc
 
 <PageTitle>Ingresar - @_brand.PlatformName</PageTitle>
 
@@ -76,8 +77,8 @@
 
                 <form method="post" action="/auth/login" class="auth-form">
                     <div class="auth-field">
-                        <label for="login-email">Correo electronico</label>
-                        <input id="login-email" name="email" type="email" required placeholder="tu.correo@ejemplo.com" />
+                        <label for="login-usuario">Usuario / Documento</label>
+                        <input id="login-usuario" name="usuario" type="text" required placeholder="Cedula o correo" autocomplete="username" />
                     </div>
                     <div class="auth-field">
                         <div class="auth-label-row">
@@ -85,9 +86,20 @@
                             <a class="auth-forgot" href="/recuperar">Olvidaste tu contrasena?</a>
                         </div>
                         <div class="auth-input-icon">
-                            <input id="login-password" name="password" type="password" required placeholder="Tu contrasena" />
+                            <input id="login-password" name="password" type="password" required placeholder="Tu contrasena" autocomplete="current-password" />
                             <button type="button" class="auth-eye" onclick="visalAuth.toggle('login-password', this)">MOSTRAR</button>
                         </div>
+                    </div>
+                    <div class="auth-field">
+                        <label for="login-sede">Sede</label>
+                        <select id="login-sede" name="sede" required class="auth-select">
+                            <option value="" disabled selected>Selecciona SEDE</option>
+                            <option value="GLOBAL">GLOBAL</option>
+                            @foreach (var s in _sedes)
+                            {
+                                <option value="@s.Id">@s.Nombre</option>
+                            }
+                        </select>
                     </div>
                     <button class="auth-submit" type="submit">
                         <span>Ingresar</span>
@@ -209,6 +221,7 @@
 
     private Visal.Application.Admin.PlatformBrandingDto _brand = Visal.Application.Admin.PlatformBrandingDto.Default;
     private bool _googleEnabled;
+    private List<Visal.Application.Tenancy.SedePublicaDto> _sedes = new();
 
     private bool StartSignup => string.Equals(Mode, "signup", StringComparison.OrdinalIgnoreCase)
         || !string.IsNullOrWhiteSpace(RegError);
@@ -217,5 +230,6 @@
     {
         _brand = await BrandingSvc.GetAsync();
         _googleEnabled = (await GoogleCfg.GetAsync())?.IsEnabled == true;
+        _sedes = (await SedesSvc.ListAsync()).ToList();
     }
 }

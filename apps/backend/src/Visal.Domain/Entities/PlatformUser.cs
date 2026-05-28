@@ -24,4 +24,7 @@ public class PlatformUser : BaseEntity
 
     /// <summary>Usuario global: puede acceder a cualquier empresa/tenant y elegir cual al iniciar sesion.</summary>
     public bool EsGlobal { get; set; }
+
+    /// <summary>Numero de documento (cedula) del usuario. Permite login con cedula ademas del correo.</summary>
+    public string? Documento { get; set; }
 }

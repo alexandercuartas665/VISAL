@@ -170,8 +170,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.DisplayName).HasMaxLength(200);
             b.Property(x => x.GoogleSubject).HasMaxLength(255);
             b.Property(x => x.AuthProvider).HasMaxLength(50).IsRequired();
+            b.Property(x => x.Documento).HasMaxLength(40);
             b.HasIndex(x => x.Email).IsUnique();
             b.HasIndex(x => x.GoogleSubject).IsUnique().HasFilter("google_subject IS NOT NULL");
+            b.HasIndex(x => x.Documento).IsUnique().HasFilter("documento IS NOT NULL");
         });
 
         modelBuilder.Entity<SuperAdminAuditLog>(b =>

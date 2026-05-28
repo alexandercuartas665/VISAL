@@ -141,28 +141,93 @@ app.MapPost("/auth/login", async (
     }
     else
     {
-        // Usuario de agencia: resolver su membresia activa. Sin contexto de tenant aun,
-        // se ignora el filtro global para localizar la membresia por su PlatformUserId.
-        var membership = await db.TenantUsers
+        // Usuario de agencia o usuario global. Calcular cuantas empresas puede ver:
+        //  - Si NO es global: solo memberships activos.
+        //  - Si es global: todos los tenants activos del SaaS.
+        var memberships = await db.TenantUsers
             .IgnoreQueryFilters()
             .Where(tu => tu.PlatformUserId == user.Id && tu.Status == PlatformUserStatus.Active)
             .OrderBy(tu => tu.CreatedAt)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
 
-        if (membership is null)
+        int totalOpciones;
+        if (user.EsGlobal)
+        {
+            totalOpciones = await db.Tenants
+                .IgnoreQueryFilters()
+                .CountAsync(t => t.Status == TenantStatus.Active || t.Status == TenantStatus.Trial);
+        }
+        else
+        {
+            totalOpciones = memberships.Count;
+        }
+
+        if (totalOpciones == 0)
         {
             // Identidad valida pero sin rol de plataforma ni membresia activa: sin acceso.
             return Results.Redirect("/login?error=1");
         }
 
-        claims.Add(new Claim("tenant_id", membership.TenantId.ToString()));
-        claims.Add(new Claim("tenant_role", membership.TenantRole.ToString()));
-        redirect = "/mi-cuenta";
+        if (totalOpciones == 1 && !user.EsGlobal)
+        {
+            // Atajo: usuario no global con exactamente un tenant -> entrar directo.
+            var m = memberships[0];
+            claims.Add(new Claim("tenant_id", m.TenantId.ToString()));
+            claims.Add(new Claim("tenant_role", m.TenantRole.ToString()));
+            redirect = "/mi-cuenta";
+        }
+        else
+        {
+            // Hay varias empresas (o el usuario es global): firmar sin tenant_id y enviar al selector.
+            claims.Add(new Claim("needs_tenant", "1"));
+            if (user.EsGlobal) { claims.Add(new Claim("is_global", "1")); }
+            redirect = "/seleccionar-empresa";
+        }
     }
 
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
     return Results.Redirect(redirect);
+}).DisableAntiforgery();
+
+// Selector de empresa: el usuario eligio un tenant tras el login. Validamos que pueda entrar
+// (membership activo, o usuario global con tenant activo), enriquecemos el cookie con
+// tenant_id + tenant_role y devolvemos al panel.
+app.MapPost("/auth/select-empresa", async (
+    HttpContext http,
+    [FromForm] Guid tenantId,
+    Visal.Application.Tenancy.IEmpresaSelectorService selector) =>
+{
+    if (http.User?.Identity?.IsAuthenticated != true)
+    {
+        return Results.Redirect("/login");
+    }
+    if (!Guid.TryParse(http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId))
+    {
+        return Results.Redirect("/login");
+    }
+
+    var resultado = await selector.ResolverAsync(userId, tenantId);
+    if (resultado is null)
+    {
+        return Results.Redirect("/seleccionar-empresa?error=1");
+    }
+
+    // Reconstruir claims preservando identidad y agregando tenant_id + tenant_role.
+    var keep = new List<Claim>();
+    foreach (var c in http.User.Claims)
+    {
+        if (c.Type is "tenant_id" or "tenant_role" or "needs_tenant") { continue; }
+        keep.Add(c);
+    }
+    keep.Add(new Claim("tenant_id", resultado.TenantId.ToString()));
+    keep.Add(new Claim("tenant_role", resultado.TenantRole));
+    if (resultado.EsGlobalAccess) { keep.Add(new Claim("global_access", "1")); }
+
+    var identity = new ClaimsIdentity(keep, CookieAuthenticationDefaults.AuthenticationScheme);
+    await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+    return Results.Redirect("/mi-cuenta");
 }).DisableAntiforgery();
 
 // Auto-registro (autogestion): un visitante crea su propia agencia + usuario Owner y queda

@@ -1,0 +1,141 @@
+@page "/seleccionar-empresa"
+@layout EmptyLayout
+@attribute [Authorize]
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IEmpresaSelectorService Selector
+@inject Visal.Application.Admin.IPlatformBrandingService BrandingSvc
+
+<PageTitle>Selecciona tu empresa - @_brand.PlatformName</PageTitle>
+
+<div class="auth-shell">
+    <aside class="auth-aside">
+        <div class="auth-aside-deco auth-deco-tr"></div>
+        <div class="auth-aside-deco auth-deco-bl"></div>
+
+        <div class="auth-brand">
+            @if (!string.IsNullOrWhiteSpace(_brand.LoginLogoUrl))
+            {
+                <img class="auth-brand-logo-img" src="@_brand.LoginLogoUrl" alt="@_brand.PlatformName" />
+            }
+            else
+            {
+                <div class="auth-brand-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                </div>
+            }
+            <span class="auth-brand-name">@_brand.PlatformName</span>
+        </div>
+
+        <div class="auth-aside-body">
+            <h2>Elige tu empresa</h2>
+            <p>Trabajas en mas de una empresa. Selecciona sobre cual deseas operar en esta sesion. Podras cambiarla cerrando sesion.</p>
+            <div class="auth-dots"><span></span><span></span><span></span></div>
+        </div>
+    </aside>
+
+    <main class="auth-main">
+        <div class="auth-form-wrap">
+            <section class="auth-pane auth-pane-login" style="opacity:1;visibility:visible;position:relative;">
+                <div class="auth-head">
+                    <h1>Selecciona tu empresa</h1>
+                    <p>@_userLabel</p>
+                </div>
+
+                @if (Error == 1)
+                {
+                    <div class="auth-alert auth-alert-error">No tienes acceso a esa empresa.</div>
+                }
+
+                @if (_loading)
+                {
+                    <div class="ase-empty">Cargando empresas...</div>
+                }
+                else if (_opciones.Count == 0)
+                {
+                    <div class="auth-alert auth-alert-error">No hay empresas activas a las que puedas ingresar. Contacta al administrador.</div>
+                    <form method="post" action="/auth/logout" class="auth-form" style="margin-top:14px;">
+                        <button class="auth-submit" type="submit"><span>Cerrar sesion</span></button>
+                    </form>
+                }
+                else
+                {
+                    <form method="post" action="/auth/select-empresa" class="auth-form">
+                        <div class="emp-list">
+                            @foreach (var o in _opciones)
+                            {
+                                <label class="emp-row @(o.TenantId == _seleccion ? "sel" : "")">
+                                    <input type="radio" name="tenantId" value="@o.TenantId" checked="@(o.TenantId == _seleccion)" @onchange="() => _seleccion = o.TenantId" />
+                                    <div class="emp-info">
+                                        <div class="emp-name">@o.Nombre</div>
+                                        @if (!string.IsNullOrWhiteSpace(o.LegalName))
+                                        {
+                                            <div class="emp-legal">@o.LegalName</div>
+                                        }
+                                        <div class="emp-tag">
+                                            @if (o.EsMiembro) { <span class="emp-pill emp-pill-mem">Miembro</span> }
+                                            @if (o.EsGlobalAccess) { <span class="emp-pill emp-pill-glb">Acceso global</span> }
+                                        </div>
+                                    </div>
+                                </label>
+                            }
+                        </div>
+                        <button class="auth-submit" type="submit" disabled="@(_seleccion == Guid.Empty)">
+                            <span>Entrar</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                        </button>
+                    </form>
+                    <p class="auth-switch" style="margin-top:18px;">
+                        <form method="post" action="/auth/logout" style="display:inline;">
+                            <button type="submit" class="auth-link-btn">Cerrar sesion</button>
+                        </form>
+                    </p>
+                }
+            </section>
+        </div>
+        <footer class="auth-footer">&copy; @DateTime.UtcNow.Year @_brand.PlatformName. Todos los derechos reservados.</footer>
+    </main>
+</div>
+
+<style>
+    .emp-list { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+    .emp-row { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1.5px solid #e2e8f0; border-radius:10px; cursor:pointer; transition: all .15s; background:#fff; }
+    .emp-row:hover { border-color:#1565c0; }
+    .emp-row.sel { border-color:#1565c0; background:#eff6ff; box-shadow:0 0 0 3px rgba(21,101,192,.10); }
+    .emp-row input { margin:0; }
+    .emp-info { flex:1; }
+    .emp-name { font-weight:600; color:#0f172a; }
+    .emp-legal { font-size:12px; color:#64748b; }
+    .emp-tag { margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; }
+    .emp-pill { font-size:11px; padding:2px 8px; border-radius:999px; font-weight:600; }
+    .emp-pill-mem { background:#dcfce7; color:#166534; }
+    .emp-pill-glb { background:#dbeafe; color:#1e40af; }
+    .auth-link-btn { background:none; border:none; color:#1565c0; cursor:pointer; font-weight:600; padding:0; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [SupplyParameterFromQuery] public int? Error { get; set; }
+
+    private Visal.Application.Admin.PlatformBrandingDto _brand = Visal.Application.Admin.PlatformBrandingDto.Default;
+    private List<EmpresaOpcionDto> _opciones = new();
+    private Guid _seleccion = Guid.Empty;
+    private bool _loading = true;
+    private string _userLabel = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _brand = await BrandingSvc.GetAsync();
+        if (AuthState is null) { _loading = false; return; }
+        var st = await AuthState;
+        _userLabel = st.User.FindFirst(ClaimTypes.Email)?.Value
+            ?? st.User.Identity?.Name ?? "";
+
+        if (Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var uid))
+        {
+            _opciones = (await Selector.GetOpcionesAsync(uid)).ToList();
+            _seleccion = _opciones.Count > 0 ? _opciones[0].TenantId : Guid.Empty;
+        }
+        _loading = false;
+    }
+}

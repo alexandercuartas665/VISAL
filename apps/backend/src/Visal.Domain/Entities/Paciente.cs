@@ -67,8 +67,10 @@ public class Paciente : TenantEntity
     public Guid? Contrato3Id { get; set; }
 
     // ===== Diagnostico =====
-    /// <summary>FK a futura tabla cie10_diagnosticos.</summary>
+    /// <summary>FK a tabla local cie10_diagnosticos (deprecated: usar Cie10Codigo).</summary>
     public Guid? Cie10Id { get; set; }
+    /// <summary>Codigo CIE-11/CIE-10 (texto). Viene del WHO ICD-11 API. Ej: "5A11", "I10".</summary>
+    public string? Cie10Codigo { get; set; }
     public string? DiagnosticoPrincipal { get; set; }
 
     // ===== Tutela =====

@@ -21,7 +21,7 @@ public sealed record PacienteDetailDto(
     // Contratos
     Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
     // Diagnostico
-    Guid? Cie10Id, string? DiagnosticoPrincipal,
+    Guid? Cie10Id, string? Cie10Codigo, string? DiagnosticoPrincipal,
     // Tutela
     string? Tutela, Guid? TipoTutelaId, Guid? MedContratadoId,
     // Geografia
@@ -53,7 +53,7 @@ public sealed record SavePacienteRequest(
     // Contratos
     Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
     // Diagnostico
-    Guid? Cie10Id, string? DiagnosticoPrincipal,
+    Guid? Cie10Id, string? Cie10Codigo, string? DiagnosticoPrincipal,
     // Tutela
     string? Tutela, Guid? TipoTutelaId, Guid? MedContratadoId,
     // Geografia

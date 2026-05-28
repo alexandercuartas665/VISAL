@@ -47,6 +47,7 @@ public interface IApplicationDbContext
     DbSet<TenantUserSucursal> TenantUserSucursales { get; }
     DbSet<Paciente> Pacientes { get; }
     DbSet<CatalogoPaciente> CatalogosPaciente { get; }
+    DbSet<Cie11Config> Cie11Configs { get; }
     DbSet<Pais> Paises { get; }
     DbSet<Departamento> Departamentos { get; }
     DbSet<Municipio> Municipios { get; }

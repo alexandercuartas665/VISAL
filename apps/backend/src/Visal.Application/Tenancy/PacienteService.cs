@@ -47,7 +47,7 @@ public sealed class PacienteService : IPacienteService
                 p.EstratoSocial, p.Sexo, p.EstadoCivil, p.Zona,
                 p.Ocupacion, p.Regimen,
                 p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
-                p.Cie10Id, p.DiagnosticoPrincipal,
+                p.Cie10Id, p.Cie10Codigo, p.DiagnosticoPrincipal,
                 p.Tutela, p.TipoTutelaId, p.MedContratadoId,
                 p.PaisResidenciaId, p.PaisOrigenId, p.DepartamentoId, p.MunicipioId,
                 p.Direccion, p.Barrio, p.Ciudad,
@@ -124,6 +124,7 @@ public sealed class PacienteService : IPacienteService
 
         // Diagnostico
         p.Cie10Id = req.Cie10Id;
+        p.Cie10Codigo = req.Cie10Codigo?.Trim();
         p.DiagnosticoPrincipal = req.DiagnosticoPrincipal?.Trim();
 
         // Tutela

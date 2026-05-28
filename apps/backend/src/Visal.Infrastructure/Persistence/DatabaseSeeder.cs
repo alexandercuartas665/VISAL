@@ -505,4 +505,30 @@ public sealed class DatabaseSeeder
         if (agregados > 0) { await _db.SaveChangesAsync(cancellationToken); }
         _logger.LogInformation("Catalogos Paciente: {N} items por defecto (de {T} en lista maestra).", agregados, items.Length);
     }
+
+    // Configura el cliente WHO ICD-11 API en el tenant demo si no existe. Las credenciales
+    // las proporciono el cliente y son las del entorno PRODUCCION del sistema legacy Visal.
+    public async Task EnsureCie11ConfigAsync(CancellationToken cancellationToken = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Kind == TenantKind.Demo, cancellationToken);
+        if (tenant is null) { return; }
+
+        var existe = await _db.Cie11Configs.IgnoreQueryFilters()
+            .AnyAsync(c => c.TenantId == tenant.Id, cancellationToken);
+        if (existe) { return; }
+
+        _db.Cie11Configs.Add(new Cie11Config
+        {
+            TenantId = tenant.Id,
+            TokenUrl = "https://icdaccessmanagement.who.int/connect/token",
+            ClientId = "85afc027-5129-4c55-be33-9efba1dcc798_21ba80c1-bc3c-454b-8838-338beca0d571",
+            ClientSecret = "TrtrpZCc3KDIXbLDfugX9XZkIcPa6QZeOlaD0avCDrQ=",
+            SearchUrl = "https://id.who.int/icd/entity/search",
+            MmsUrlBase = "https://id.who.int/icd/release/11/2024-01/mms/",
+            Activo = true
+        });
+        await _db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("CIE-11 config sembrada en tenant demo (WHO ICD-11 API PRODUCCION).");
+    }
 }

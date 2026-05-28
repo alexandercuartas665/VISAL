@@ -1,8 +1,130 @@
 @page "/cie11"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject ICie11Service Svc
 
-<PageTitle>Diagnosticos CIE-11 - Visal</PageTitle>
+<PageTitle>Configuracion CIE-11 - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Operacion Clinica"
-                   Title="Diagnosticos CIE-11"
-                   Description="Codificacion diagnostica segun CIE-11." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">CIE-11 (WHO ICD-11)</h1>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card">
+    <div class="ase-card-h">Credenciales del cliente WHO ICD-11 API</div>
+    <p class="cie-help">
+        Solicita las credenciales en <a href="https://icd.who.int/icdapi" target="_blank">icd.who.int/icdapi</a>.
+        Una vez registrada tu aplicacion, copia los valores aqui. El cliente usa OAuth2
+        <code>client_credentials</code> con scope <code>icdapi_access</code>.
+    </p>
+    <div class="ase-form">
+        <div class="ase-f ase-f-wide">
+            <label>TOKEN_URL <span class="cie-hint">— endpoint OAuth2</span></label>
+            <input class="form-control form-control-sm mono" @bind="_tokenUrl" placeholder="https://icdaccessmanagement.who.int/connect/token" />
+        </div>
+        <div class="ase-f ase-f-wide">
+            <label>CLIENT_ID</label>
+            <input class="form-control form-control-sm mono" @bind="_clientId" placeholder="xxxxxx_xxxxxx" />
+        </div>
+        <div class="ase-f ase-f-wide">
+            <label>CLIENT_SECRET</label>
+            <input type="password" class="form-control form-control-sm mono" @bind="_clientSecret" placeholder="••••••••" />
+        </div>
+        <div class="ase-f ase-f-wide">
+            <label>SEARCH_URL <span class="cie-hint">— GET ?q=...&useFlexisearch=true</span></label>
+            <input class="form-control form-control-sm mono" @bind="_searchUrl" placeholder="https://id.who.int/icd/entity/search" />
+        </div>
+        <div class="ase-f ase-f-wide">
+            <label>MMS_URL_BASE <span class="cie-hint">— base para detalle por entityId</span></label>
+            <input class="form-control form-control-sm mono" @bind="_mmsUrlBase" placeholder="https://id.who.int/icd/release/11/2024-01/mms/" />
+        </div>
+        <label class="ase-chk ase-f-wide"><input type="checkbox" @bind="_activo" /> <span>Activo (habilita la busqueda en el modulo de pacientes)</span></label>
+    </div>
+    <div class="ase-actions">
+        <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar configuracion")</button>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="TestSearch" disabled="@_busyTest">@(_busyTest ? "Probando..." : "Probar busqueda")</button>
+    </div>
+
+    @if (_test is not null)
+    {
+        <div class="cie-test">
+            <strong>Prueba con "diabetes":</strong>
+            @if (_test.Count == 0) { <em>Sin resultados.</em> }
+            else
+            {
+                <ul>
+                    @foreach (var r in _test) { <li><code>@r.EntityId</code> — @r.Title</li> }
+                </ul>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .cie-help { font-size: 13px; color: #475569; margin-bottom: 14px; }
+    .cie-help code { background:#f1f5f9; padding:1px 6px; border-radius:4px; }
+    .cie-hint { font-size: 11px; color: #94a3b8; font-weight: 400; }
+    .cie-test { margin-top: 14px; padding: 12px; background: #f8fafc; border-left: 3px solid #1565c0; border-radius: 6px; font-size: 13px; }
+    .cie-test ul { margin: 8px 0 0 0; padding-left: 20px; }
+    .cie-test code { background:#fff; padding:1px 6px; border-radius:4px; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string? _tokenUrl, _clientId, _clientSecret, _searchUrl, _mmsUrlBase;
+    private bool _activo = true;
+    private bool _busy, _busyTest;
+    private string? _error, _ok;
+    private List<Cie11SearchItem>? _test;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var c = await Svc.GetConfigAsync();
+        if (c is not null)
+        {
+            _tokenUrl = c.TokenUrl; _clientId = c.ClientId; _clientSecret = c.ClientSecret;
+            _searchUrl = c.SearchUrl; _mmsUrlBase = c.MmsUrlBase; _activo = c.Activo;
+        }
+    }
+
+    private async Task Save()
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            var saved = await Svc.SaveConfigAsync(new Cie11ConfigDto(_tokenUrl, _clientId, _clientSecret, _searchUrl, _mmsUrlBase, _activo), await Actor());
+            if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
+            _ok = "Configuracion CIE-11 guardada.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task TestSearch()
+    {
+        _error = _ok = null; _test = null; _busyTest = true;
+        try
+        {
+            _test = (await Svc.SearchAsync("diabetes")).Take(5).ToList();
+            _ok = $"Conexion OK. Devolvio {_test.Count} resultados.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        finally { _busyTest = false; }
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+}

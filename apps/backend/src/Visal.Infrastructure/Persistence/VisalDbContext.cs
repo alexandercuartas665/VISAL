@@ -77,6 +77,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
+    public DbSet<Cie11Config> Cie11Configs => Set<Cie11Config>();
     public DbSet<Pais> Paises => Set<Pais>();
     public DbSet<Departamento> Departamentos => Set<Departamento>();
     public DbSet<Municipio> Municipios => Set<Municipio>();
@@ -600,6 +601,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Tutela).HasMaxLength(40);
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
+            b.Property(x => x.Cie10Codigo).HasMaxLength(30);
             // Geografia
             b.Property(x => x.Direccion).HasMaxLength(300);
             b.Property(x => x.Barrio).HasMaxLength(120);
@@ -638,6 +640,17 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Descripcion).HasMaxLength(500);
             // Unico por tenant + tipo + codigo: cada catalogo tiene su propio espacio de codigos.
             b.HasIndex(x => new { x.TenantId, x.Tipo, x.Codigo }).IsUnique();
+        });
+
+        modelBuilder.Entity<Cie11Config>(b =>
+        {
+            b.Property(x => x.TokenUrl).HasMaxLength(300);
+            b.Property(x => x.ClientId).HasMaxLength(200);
+            b.Property(x => x.ClientSecret).HasMaxLength(400);
+            b.Property(x => x.SearchUrl).HasMaxLength(300);
+            b.Property(x => x.MmsUrlBase).HasMaxLength(300);
+            // Una sola fila de config por tenant.
+            b.HasIndex(x => x.TenantId).IsUnique();
         });
 
         modelBuilder.Entity<Pais>(b =>

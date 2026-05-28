@@ -8,6 +8,7 @@
 @inject ISucursalService SucSvc
 @inject ICatalogoPacienteService CatSvc
 @inject IGeografiaService GeoSvc
+@inject ICie11Service Cie11Svc
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
 
@@ -164,8 +165,12 @@
 
                     <div class="ase-card-h" style="margin-top:14px;">Diagnostico</div>
                     <div class="ase-form">
-                        <div class="ase-f"><label>CIE10</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        <div class="ase-f">
+                            <label>CIE10 / CIE-11</label>
+                            <div class="cie-input-row">
+                                <input class="form-control form-control-sm mono" @bind="_cie10Codigo" placeholder="Codigo" />
+                                <button class="btn btn-danger btn-sm" title="Buscar diagnostico" @onclick="OpenCieModal">Buscar</button>
+                            </div>
                         </div>
                         <div class="ase-f ase-f-wide"><label>Diagnostico Principal</label><input class="form-control form-control-sm" @bind="_dxPrincipal" /></div>
                         <div class="ase-f"><label>Tutela</label>
@@ -272,11 +277,64 @@
     </div>
 </div>
 
+@* ===== Modal de busqueda CIE-11 (WHO ICD-11 API) ===== *@
+@if (_cieModal)
+{
+    <div class="cie-backdrop" @onclick="CloseCieModal"></div>
+    <div class="cie-modal">
+        <div class="cie-modal-h">
+            <h3>Buscar Diagnostico o Codigo</h3>
+            <button class="cie-modal-close" @onclick="CloseCieModal">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="cie-search-row">
+                <input class="form-control form-control-sm" placeholder="Ej.: diabetes, covid, 5A11..."
+                       @bind="_cieQuery" @bind:event="oninput"
+                       @onkeyup="OnCieKeyUp" />
+                <button class="btn btn-danger btn-sm" @onclick="SearchCie" disabled="@_cieBusy">@(_cieBusy ? "..." : "Buscar")</button>
+            </div>
+            @if (_cieError is not null) { <div class="ase-alert" style="margin-top:10px;">@_cieError</div> }
+            <div class="cie-result-h">Resultados de la Busqueda</div>
+            <div class="cie-result-list">
+                @if (_cieBusy) { <div class="cie-empty">Buscando en WHO ICD-11...</div> }
+                else if (_cieResults.Count == 0) { <div class="cie-empty">Escribe un termino y pulsa Buscar.</div> }
+                else
+                {
+                    @foreach (var r in _cieResults)
+                    {
+                        <button class="cie-result-item" @onclick="() => SelectCieAsync(r)">
+                            <span class="cie-title">@r.Title</span>
+                            <span class="cie-id">@TrimId(r.EntityId)</span>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
     .pac-tab { background: none; border: none; padding: 10px 18px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; transition: all .15s; }
     .pac-tab:hover { color: #1565c0; }
     .pac-tab.active { color: #1565c0; border-bottom-color: #1565c0; }
+    .cie-input-row { display:flex; gap:6px; }
+    .cie-input-row input { flex:1; }
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 80vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .cie-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
+    .cie-modal-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#64748b; }
+    .cie-modal-body { padding:18px; overflow:auto; }
+    .cie-search-row { display:flex; gap:6px; }
+    .cie-search-row input { flex:1; }
+    .cie-result-h { font-size:12.5px; font-weight:700; color:#334155; margin: 14px 0 6px 0; }
+    .cie-result-list { border:1px solid #e2e8f0; border-radius:8px; min-height:200px; max-height:380px; overflow:auto; background:#fafafa; }
+    .cie-empty { padding:60px 20px; text-align:center; color:#94a3b8; font-size:13px; }
+    .cie-result-item { display:flex; align-items:center; gap:12px; width:100%; padding:10px 14px; background:#fff; border:none; border-bottom:1px solid #f1f5f9; cursor:pointer; text-align:left; transition: background .15s; }
+    .cie-result-item:hover { background:#eff6ff; }
+    .cie-title { flex:1; font-size:13px; color:#0f172a; }
+    .cie-id { font-family: monospace; font-size:10px; color:#94a3b8; }
 </style>
 
 @code {
@@ -319,6 +377,57 @@
     private string? _dxPrincipal, _tutela;
     private string _tipoTutela = "";
     private string _medContratado = "";
+    private string? _cie10Codigo;
+
+    // Modal CIE-11
+    private bool _cieModal;
+    private string _cieQuery = "";
+    private List<Cie11SearchItem> _cieResults = new();
+    private bool _cieBusy;
+    private string? _cieError;
+
+    private void OpenCieModal()
+    {
+        _cieModal = true; _cieQuery = ""; _cieResults = new(); _cieError = null;
+    }
+    private void CloseCieModal() => _cieModal = false;
+    private async Task OnCieKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await SearchCie(); }
+    }
+    private async Task SearchCie()
+    {
+        if (string.IsNullOrWhiteSpace(_cieQuery)) { return; }
+        _cieError = null; _cieBusy = true; _cieResults = new();
+        try { _cieResults = (await Cie11Svc.SearchAsync(_cieQuery.Trim())).ToList(); }
+        catch (InvalidOperationException ex) { _cieError = ex.Message; }
+        catch (Exception ex) { _cieError = "Error tecnico: " + ex.Message; }
+        finally { _cieBusy = false; }
+    }
+    private async Task SelectCieAsync(Cie11SearchItem item)
+    {
+        _cieError = null;
+        try
+        {
+            var d = await Cie11Svc.GetDetailAsync(item.EntityId);
+            if (d is null || string.IsNullOrEmpty(d.Code))
+            {
+                _cieError = "No se pudo obtener el codigo del diagnostico seleccionado.";
+                return;
+            }
+            _cie10Codigo = d.Code;
+            _dxPrincipal = d.Title;
+            _cieModal = false;
+        }
+        catch (InvalidOperationException ex) { _cieError = ex.Message; }
+        catch (Exception ex) { _cieError = "Error tecnico: " + ex.Message; }
+    }
+    private static string TrimId(string id)
+    {
+        if (string.IsNullOrEmpty(id)) { return ""; }
+        var slash = id.LastIndexOf('/');
+        return slash > 0 ? id[(slash + 1)..] : id;
+    }
 
     // Geografia
     private string? _dir, _barrio, _ciudad;
@@ -398,6 +507,7 @@
         _dxPrincipal = _tutela = null;
         _tipoTutela = "";
         _medContratado = "";
+        _cie10Codigo = null;
         _dir = _barrio = _ciudad = null;
         _tel = _email = null; _sedeId = "";
         _paisResidencia = _paisOrigen = _departamento = _municipio = "";
@@ -434,6 +544,7 @@
         _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela;
         _tipoTutela = d.TipoTutelaId?.ToString() ?? "";
         _medContratado = d.MedContratadoId?.ToString() ?? "";
+        _cie10Codigo = d.Cie10Codigo;
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _tel = d.Telefono; _email = d.Email;
         _sedeId = d.SedeAtencionId?.ToString() ?? "";
@@ -467,7 +578,7 @@
                 Try(_clasifPaciente), Try(_clasifGrupo),
                 _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen,
                 Try(_contrato1), Try(_contrato2), Try(_contrato3),
-                null, _dxPrincipal,
+                null, _cie10Codigo, _dxPrincipal,
                 _tutela, Try(_tipoTutela), Try(_medContratado),
                 Try(_paisResidencia), Try(_paisOrigen), Try(_departamento), Try(_municipio),
                 _dir, _barrio, _ciudad,

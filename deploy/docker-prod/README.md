@@ -33,7 +33,57 @@ Si la dejas privada, en el servidor necesitas `docker login ghcr.io` con un PAT 
 
 ---
 
-## 2. Setup en el servidor (una sola vez)
+## 2. Setup desde TU MAQUINA con Docker context SSH (recomendado)
+
+En vez de SSH-ear al servidor y editar archivos alla, conectas tu Docker CLI local al daemon del server por SSH. Todo `docker compose ...` que ejecutes desde tu maquina corre alla. Los archivos (`docker-compose.yml`, `.env`) viven en TU maquina.
+
+### Pre-requisitos
+- Acceso SSH al server con clave (entrar sin pedir password): `ssh user@server` debe funcionar.
+- Tu usuario en el server debe estar en el grupo `docker`: `sudo usermod -aG docker $USER` (y relogin).
+- Docker 24+ en tu maquina.
+
+### Setup (una sola vez)
+
+```pwsh
+cd C:\DesarrolloIA\Visal\deploy\docker-prod
+
+# 1) Copia el .env de ejemplo y edita VISAL_PORT, POSTGRES_*, etc.
+Copy-Item .env.example .env
+notepad .env
+
+# 2) Crea el context apuntando a tu server
+.\deploy-remote.ps1 setup-context -RemoteSsh acuartas@visal.tudominio.com
+
+# (Opcional) Persistir el SSH del server en tu sesion para no escribirlo cada vez:
+[Environment]::SetEnvironmentVariable("VISAL_REMOTE_SSH", "acuartas@visal.tudominio.com", "User")
+```
+
+### Deploy / operaciones
+
+```pwsh
+.\deploy-remote.ps1 deploy     # pull la imagen + up -d en el SERVER + tail logs
+.\deploy-remote.ps1 logs       # tail logs del SERVER
+.\deploy-remote.ps1 status     # docker compose ps en el SERVER
+.\deploy-remote.ps1 restart    # restart visal-app en el SERVER
+.\deploy-remote.ps1 backup     # pg_dump del SERVER bajando el .sql.gz a backups/ aqui
+.\deploy-remote.ps1 shell      # bash dentro de visal-app
+.\deploy-remote.ps1 psql       # psql dentro de postgres
+.\deploy-remote.ps1 down       # bajar el stack (datos quedan en volumen)
+```
+
+> Bajo el capo el script ejecuta `docker --context visal-prod compose --env-file .env ...`. Si prefieres a mano, puedes usar esos comandos directos sin el script.
+
+### Si ya no quieres el control remoto desde local
+
+```pwsh
+.\deploy-remote.ps1 remove-context
+```
+
+Esto NO toca el servidor — solo quita el atajo en tu Docker local. El stack sigue corriendo alla.
+
+---
+
+## 3. Setup directo en el servidor (alternativa)
 
 ### Requisitos
 - Docker 24+ con `docker compose v2`
@@ -70,7 +120,7 @@ docker compose logs -f visal-app
 
 ---
 
-## 3. Apuntar tu reverse proxy global hacia visal-app
+## 4. Apuntar tu reverse proxy global hacia visal-app
 
 Solo tienes que decirle a TU proxy global "para `visal.midominio.com`, reverse_proxy a `http://localhost:5380`".
 
@@ -133,7 +183,7 @@ server {
 
 ---
 
-## 4. Updates rutinarios
+## 5. Updates rutinarios (en el server)
 
 ```bash
 cd /opt/visal
@@ -154,7 +204,7 @@ Luego `docker compose up -d`.
 
 ---
 
-## 5. Backups de Postgres
+## 6. Backups de Postgres
 
 ### Dump manual
 ```bash
@@ -176,7 +226,7 @@ gunzip < backups/visal-2026-05-28-0300.sql.gz | docker exec -i visal-postgres-pr
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 ### "no such image" al hacer `docker compose pull`
 - La imagen aun no se publico (revisa GitHub Actions).
@@ -199,7 +249,7 @@ gunzip < backups/visal-2026-05-28-0300.sql.gz | docker exec -i visal-postgres-pr
 
 ---
 
-## 7. Apagado limpio para mudanza
+## 8. Apagado limpio para mudanza
 
 ```bash
 cd /opt/visal

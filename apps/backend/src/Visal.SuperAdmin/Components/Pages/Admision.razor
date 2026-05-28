@@ -73,7 +73,7 @@
                     <div class="ase-card-h" style="margin-top:14px;">Datos administrativos PAD</div>
                     <div class="ase-form">
                         <div class="ase-f"><label>IPS Que Comenta</label>
-                            <select class="form-select form-select-sm" @bind="_ipsComenta">
+                            <select class="form-select form-select-sm" value="@_ipsComenta" @onchange="OnIpsComentaChanged">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
@@ -81,7 +81,7 @@
                         <div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>
                         <div class="ase-f"><label>Fecha Comentan</label><input type="date" class="form-control form-control-sm" @bind="_fComenta" /></div>
                         <div class="ase-f"><label>Entidad Aseguradora</label>
-                            <select class="form-select form-select-sm" value="@_aseId" @onchange="OnAseguradoraChanged">
+                            <select class="form-select form-select-sm" @bind="_aseId">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
@@ -129,19 +129,19 @@
                         </div>
                         <div class="ase-f"><label>Contrato 1</label>
                             <select class="form-select form-select-sm" @bind="_contrato1" disabled="@(_contratosAse.Count == 0)">
-                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona aseguradora" : "Seleccione Elemento")</option>
+                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona IPS que comenta" : "Seleccione Elemento")</option>
                                 @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Contrato 2</label>
                             <select class="form-select form-select-sm" @bind="_contrato2" disabled="@(_contratosAse.Count == 0)">
-                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona aseguradora" : "Seleccione Elemento")</option>
+                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona IPS que comenta" : "Seleccione Elemento")</option>
                                 @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Contrato 3</label>
                             <select class="form-select form-select-sm" @bind="_contrato3" disabled="@(_contratosAse.Count == 0)">
-                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona aseguradora" : "Seleccione Elemento")</option>
+                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona IPS que comenta" : "Seleccione Elemento")</option>
                                 @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
                             </select>
                         </div>
@@ -342,13 +342,13 @@
         await LoadLista();
     }
 
-    private async Task OnAseguradoraChanged(ChangeEventArgs e)
+    private async Task OnIpsComentaChanged(ChangeEventArgs e)
     {
-        _aseId = e.Value?.ToString() ?? "";
+        _ipsComenta = e.Value?.ToString() ?? "";
         _contrato1 = _contrato2 = _contrato3 = "";
-        if (Guid.TryParse(_aseId, out var aid))
+        if (Guid.TryParse(_ipsComenta, out var iid))
         {
-            _contratosAse = (await AseSvc.ListContratosAsync(aid)).ToList();
+            _contratosAse = (await AseSvc.ListContratosAsync(iid)).ToList();
         }
         else { _contratosAse = new(); }
     }
@@ -413,8 +413,8 @@
         _fIngreso = d.FechaIngresoPad; _fEgreso = d.FechaEgresoPad;
         _aseId = d.AseguradoraId?.ToString() ?? "";
         _ipsComenta = d.IpsComentaId?.ToString() ?? "";
-        // Cargar contratos de la aseguradora del paciente para los selects.
-        if (d.AseguradoraId is Guid aid) { _contratosAse = (await AseSvc.ListContratosAsync(aid)).ToList(); }
+        // Cargar contratos de la IPS que comenta del paciente para los selects.
+        if (d.IpsComentaId is Guid iid) { _contratosAse = (await AseSvc.ListContratosAsync(iid)).ToList(); }
         else { _contratosAse = new(); }
         _diasEst = d.DiasEstancia; _opIngreso = d.OpIngresoDias;
         _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _estado = d.Estado;

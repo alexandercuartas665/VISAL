@@ -1,8 +1,179 @@
 @page "/admision"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IPacienteService Svc
+@inject IAseguradoraService AseSvc
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Operacion Clinica"
-                   Title="Admision de Pacientes"
-                   Description="Alta y datos demograficos y clinicos del paciente." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Admision de Pacientes</h1>
+    </div>
+    <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo paciente</button>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-grid">
+    <div class="ase-card ase-list">
+        <div class="ase-card-h">Pacientes (@_lista.Count)</div>
+        <input class="form-control form-control-sm mb-2" placeholder="Buscar por nombre o documento..." value="@_filtro" @oninput="OnFiltro" />
+        @foreach (var p in _lista)
+        {
+            <button class="ase-li @(p.Id == _id ? "sel" : "")" @onclick="() => Select(p.Id)">
+                <div class="ase-li-name">@p.NombreCompleto</div>
+                <div class="ase-li-sub">@p.NumeroDocumento &middot; @(p.Ciudad ?? "-") &middot; @(p.Aseguradora ?? "Sin aseguradora")</div>
+            </button>
+        }
+        @if (_lista.Count == 0) { <div class="ase-empty">Sin pacientes.</div> }
+    </div>
+
+    <div class="ase-detail">
+        @if (!_showForm)
+        {
+            <div class="ase-card"><div class="ase-empty">Selecciona o registra un paciente.</div></div>
+        }
+        else
+        {
+            <div class="ase-card">
+                <div class="ase-card-h">Datos personales</div>
+                <div class="ase-form">
+                    <div class="ase-f"><label>Numero Documento *</label><input class="form-control form-control-sm" @bind="_doc" /></div>
+                    <div class="ase-f"><label>Tipo documento</label>
+                        <select class="form-select form-select-sm" @bind="_tipoDoc"><option>CC</option><option>CE</option><option>TI</option><option>RC</option><option>PA</option><option>MS</option></select>
+                    </div>
+                    <div class="ase-f ase-f-wide"><label>Nombre Completo</label><input class="form-control form-control-sm" @bind="_nombre" placeholder="(se arma con los nombres si lo dejas vacio)" /></div>
+                    <div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="_pNombre" /></div>
+                    <div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="_sNombre" /></div>
+                    <div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="_pApellido" /></div>
+                    <div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="_sApellido" /></div>
+                    <div class="ase-f"><label>Fecha nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" /></div>
+                    <div class="ase-f"><label>Sexo</label>
+                        <select class="form-select form-select-sm" @bind="_sexo"><option value="">--</option><option>MASCULINO</option><option>FEMENINO</option></select>
+                    </div>
+                    <div class="ase-f"><label>Estado civil</label>
+                        <select class="form-select form-select-sm" @bind="_estadoCivil"><option value="">--</option><option>SOLTERO</option><option>CASADO</option><option>UNION LIBRE</option><option>VIUDO</option><option>DIVORCIADO</option></select>
+                    </div>
+                    <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_tel" /></div>
+                    <div class="ase-f"><label>Email</label><input class="form-control form-control-sm" @bind="_email" /></div>
+                    <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>
+                    <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
+                    <div class="ase-f"><label>Zona</label>
+                        <select class="form-select form-select-sm" @bind="_zona"><option value="">--</option><option>URBANA</option><option>RURAL</option></select>
+                    </div>
+                    <div class="ase-f"><label>Ocupacion</label><input class="form-control form-control-sm" @bind="_ocupacion" /></div>
+                    <div class="ase-f"><label>Regimen</label>
+                        <select class="form-select form-select-sm" @bind="_regimen"><option value="">--</option><option>CONTRIBUTIVO</option><option>SUBSIDIADO</option><option>PARTICULAR</option><option>ESPECIAL</option></select>
+                    </div>
+                    <div class="ase-f ase-f-wide"><label>Aseguradora</label>
+                        <select class="form-select form-select-sm" @bind="_aseId">
+                            <option value="">-- Sin aseguradora --</option>
+                            @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                        </select>
+                    </div>
+                </div>
+
+                <div class="ase-card-h" style="margin-top:14px;">Contacto de emergencia</div>
+                <div class="ase-form">
+                    <div class="ase-f ase-f-wide"><label>Informar a</label><input class="form-control form-control-sm" @bind="_emerNombre" /></div>
+                    <div class="ase-f"><label>Parentesco</label><input class="form-control form-control-sm" @bind="_emerParentesco" /></div>
+                    <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_emerTel" /></div>
+                    <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
+                </div>
+
+                <div class="ase-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">Guardar paciente</button>
+                    @if (_id is not null)
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick="Delete">Eliminar</button>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<PacienteDto> _lista = new();
+    private List<AseguradoraDto> _aseguradoras = new();
+    private string _filtro = "";
+
+    private bool _showForm;
+    private Guid? _id;
+    private string _doc = "", _tipoDoc = "CC";
+    private string? _nombre, _pNombre, _sNombre, _pApellido, _sApellido;
+    private DateOnly? _fnac;
+    private string? _sexo, _estadoCivil, _tel, _email, _dir, _ciudad, _zona, _ocupacion, _regimen;
+    private string _aseId = "";
+    private string? _emerNombre, _emerParentesco, _emerTel;
+    private bool _activo = true;
+    private bool _busy; private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _aseguradoras = (await AseSvc.ListAseguradorasAsync()).ToList();
+        await LoadLista();
+    }
+
+    private async Task LoadLista() => _lista = (await Svc.ListAsync(string.IsNullOrWhiteSpace(_filtro) ? null : _filtro)).ToList();
+    private async Task OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; await LoadLista(); }
+
+    private void New()
+    {
+        _id = null; _doc = ""; _tipoDoc = "CC"; _nombre = _pNombre = _sNombre = _pApellido = _sApellido = null;
+        _fnac = null; _sexo = _estadoCivil = _tel = _email = _dir = _ciudad = _zona = _ocupacion = _regimen = null;
+        _aseId = ""; _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
+        _showForm = true; _error = _ok = null;
+    }
+
+    private async Task Select(Guid id)
+    {
+        var d = await Svc.GetAsync(id);
+        if (d is null) { return; }
+        _id = d.Id; _doc = d.NumeroDocumento; _tipoDoc = d.TipoDocumento; _nombre = d.NombreCompleto;
+        _pNombre = d.PrimerNombre; _sNombre = d.SegundoNombre; _pApellido = d.PrimerApellido; _sApellido = d.SegundoApellido;
+        _fnac = d.FechaNacimiento; _sexo = d.Sexo; _estadoCivil = d.EstadoCivil; _tel = d.Telefono; _email = d.Email;
+        _dir = d.Direccion; _ciudad = d.Ciudad; _zona = d.Zona; _ocupacion = d.Ocupacion; _regimen = d.Regimen;
+        _aseId = d.AseguradoraId?.ToString() ?? "";
+        _emerNombre = d.ContactoEmergencia; _emerParentesco = d.Parentesco; _emerTel = d.TelefonoEmergencia; _activo = d.Activo;
+        _showForm = true; _error = _ok = null;
+    }
+
+    private async Task Save()
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            Guid? ase = Guid.TryParse(_aseId, out var ag) ? ag : null;
+            var req = new SavePacienteRequest(_id, _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido, _nombre,
+                _fnac, _sexo, _estadoCivil, _tel, _email, _dir, _ciudad, _zona, _ocupacion, _regimen, ase,
+                _emerNombre, _emerParentesco, _emerTel, _activo);
+            var saved = await Svc.SaveAsync(req, await Actor());
+            if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
+            await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        if (_id is not Guid id) { return; }
+        await Svc.DeleteAsync(id, await Actor());
+        _showForm = false; _id = null; await LoadLista(); _ok = "Paciente eliminado.";
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+}

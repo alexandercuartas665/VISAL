@@ -46,6 +46,43 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .cat-empty { color: var(--muted-foreground); font-size: 13px; padding: 12px 2px; text-align: center; }
 .cat-alert { padding: 10px 14px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; margin-bottom: 12px; max-width: 760px; }
 
+/* Modulos de configuracion (aseguradoras, roles, usuarios, pacientes...) */
+.ase-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }
+.ase-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .16em; color: var(--primary); }
+.ase-title { font-size: 22px; margin: 2px 0 0; }
+.ase-alert { padding: 10px 14px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; margin-bottom: 12px; }
+.ase-ok { padding: 10px 14px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; font-size: 13px; margin-bottom: 12px; }
+.ase-grid { display: flex; gap: 14px; align-items: flex-start; }
+.ase-list { width: 300px; flex-shrink: 0; }
+.ase-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.ase-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.ase-card-h { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ase-empty { color: var(--muted-foreground); font-size: 13px; padding: 12px 2px; text-align: center; }
+.ase-li { display: block; width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
+.ase-li:hover { border-color: var(--primary); }
+.ase-li.sel { border-color: var(--primary); background: var(--primary-soft); }
+.ase-li-name { font-weight: 600; font-size: 13px; color: var(--foreground); }
+.ase-li-sub { font-size: 11px; color: var(--muted-foreground); }
+.ase-form { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.ase-f { display: flex; flex-direction: column; gap: 3px; }
+.ase-f label { font-size: 11px; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .03em; }
+.ase-f-wide { grid-column: span 2; }
+.ase-f-full { grid-column: span 4; }
+.ase-actions { display: flex; gap: 8px; margin-top: 12px; }
+.ase-chk { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.ase-row-actions { display: flex; gap: 4px; white-space: nowrap; }
+.ms-auto { margin-left: auto; }
+.rol-grupo { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--primary); margin: 12px 0 4px; }
+.rol-table th { font-size: 11px; text-transform: uppercase; color: var(--muted-foreground); text-align: center; }
+.rol-table td { text-align: center; }
+.rol-table td:first-child { text-align: left; }
+@media (max-width: 1100px) {
+  .ase-grid { flex-direction: column; }
+  .ase-list { width: 100%; }
+  .ase-form { grid-template-columns: repeat(2, 1fr); }
+  .ase-f-wide, .ase-f-full { grid-column: span 2; }
+}
+
 /* ===== Layout shell ===== */
 .visal-shell { display: flex; min-height: 100vh; }
 

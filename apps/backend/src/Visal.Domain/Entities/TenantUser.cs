@@ -22,4 +22,12 @@ public class TenantUser : TenantEntity
     /// <summary>Token de invitacion para que el asesor complete su registro (clave + foto). Null si ya activo.</summary>
     public string? InvitationToken { get; set; }
     public DateTimeOffset? InvitationExpiresAt { get; set; }
+
+    /// <summary>Rol de permisos del usuario en esta entidad (modulo Roles y Permisos). Opcional.</summary>
+    public Guid? RolId { get; set; }
+    public Rol? Rol { get; set; }
+
+    /// <summary>Sucursal/sede asignada al usuario (opcional).</summary>
+    public Guid? SucursalId { get; set; }
+    public Sucursal? Sucursal { get; set; }
 }

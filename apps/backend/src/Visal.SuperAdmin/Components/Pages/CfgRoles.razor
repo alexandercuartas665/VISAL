@@ -1,8 +1,165 @@
 @page "/cfg-roles"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IRolService Svc
 
 <PageTitle>Roles y Permisos - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Configuracion de la Entidad"
-                   Title="Roles y Permisos"
-                   Description="Definicion de roles y permisos de la entidad." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion de la Entidad</div>
+        <h1 class="ase-title">Roles y Permisos</h1>
+    </div>
+    <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo rol</button>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-grid">
+    <div class="ase-card ase-list">
+        <div class="ase-card-h">Roles (@_roles.Count)</div>
+        @foreach (var r in _roles)
+        {
+            <button class="ase-li @(r.Id == _id ? "sel" : "")" @onclick="() => Select(r.Id)">
+                <div class="ase-li-name">@r.Nombre</div>
+                <div class="ase-li-sub">@(r.Activo ? "Activo" : "Inactivo")@(string.IsNullOrWhiteSpace(r.Descripcion) ? "" : " · " + r.Descripcion)</div>
+            </button>
+        }
+        @if (_roles.Count == 0) { <div class="ase-empty">Sin roles. Crea uno.</div> }
+    </div>
+
+    <div class="ase-detail">
+        @if (!_showForm)
+        {
+            <div class="ase-card"><div class="ase-empty">Selecciona o crea un rol.</div></div>
+        }
+        else
+        {
+            <div class="ase-card">
+                <div class="ase-card-h">Datos del rol</div>
+                <div class="ase-form">
+                    <div class="ase-f ase-f-wide"><label>Nombre *</label><input class="form-control form-control-sm" @bind="_nombre" /></div>
+                    <div class="ase-f ase-f-wide"><label>Descripcion</label><input class="form-control form-control-sm" @bind="_desc" /></div>
+                    <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
+                </div>
+                <div class="ase-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="SaveRol" disabled="@_busy">Guardar rol</button>
+                    @if (_id is not null)
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick="DeleteRol">Eliminar</button>
+                    }
+                </div>
+            </div>
+
+            @if (_id is not null)
+            {
+                <div class="ase-card">
+                    <div class="ase-card-h">Permisos por modulo
+                        <button class="btn btn-primary btn-sm ms-auto" @onclick="SavePermisos">Guardar permisos</button>
+                    </div>
+                    @foreach (var grupo in ModuloCatalogo.Todos.Select(m => m.Grupo).Distinct())
+                    {
+                        <div class="rol-grupo">@grupo</div>
+                        <table class="table table-sm align-middle rol-table">
+                            <thead><tr><th style="width:46%">Modulo</th><th>Ver</th><th>Crear</th><th>Editar</th><th>Eliminar</th></tr></thead>
+                            <tbody>
+                                @foreach (var m in ModuloCatalogo.Todos.Where(x => x.Grupo == grupo))
+                                {
+                                    var p = _perm[m.Key];
+                                    <tr>
+                                        <td>@m.Label</td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="p.Ver" /></td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="p.Crear" /></td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="p.Editar" /></td>
+                                        <td><input type="checkbox" class="form-check-input" @bind="p.Eliminar" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private List<RolDto> _roles = new();
+    private bool _showForm;
+    private Guid? _id;
+    private string _nombre = ""; private string? _desc; private bool _activo = true;
+    private Dictionary<string, PermRow> _perm = new();
+    private bool _busy; private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load() => _roles = (await Svc.ListAsync()).ToList();
+
+    private void ResetPerm(IReadOnlyList<PermisoDto>? from)
+    {
+        _perm = ModuloCatalogo.Todos.ToDictionary(m => m.Key, m => new PermRow());
+        if (from is not null)
+        {
+            foreach (var p in from)
+            {
+                if (_perm.TryGetValue(p.Modulo, out var row)) { row.Ver = p.Ver; row.Crear = p.Crear; row.Editar = p.Editar; row.Eliminar = p.Eliminar; }
+            }
+        }
+    }
+
+    private void New()
+    {
+        _id = null; _nombre = ""; _desc = null; _activo = true; ResetPerm(null);
+        _showForm = true; _error = _ok = null;
+    }
+
+    private async Task Select(Guid id)
+    {
+        var d = await Svc.GetAsync(id);
+        if (d is null) { return; }
+        _id = d.Id; _nombre = d.Nombre; _desc = d.Descripcion; _activo = d.Activo;
+        ResetPerm(d.Permisos);
+        _showForm = true; _error = _ok = null;
+    }
+
+    private async Task SaveRol()
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            var s = await Svc.SaveAsync(_id, _nombre, _desc, _activo, await Actor());
+            if (s is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
+            _id = s.Id; await Load(); _ok = $"Rol \"{s.Nombre}\" guardado.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteRol()
+    {
+        if (_id is not Guid id) { return; }
+        await Svc.DeleteAsync(id, await Actor());
+        _showForm = false; _id = null; await Load(); _ok = "Rol eliminado.";
+    }
+
+    private async Task SavePermisos()
+    {
+        if (_id is not Guid id) { return; }
+        _error = _ok = null;
+        var lista = _perm.Select(kv => new PermisoDto(kv.Key, kv.Value.Ver, kv.Value.Crear, kv.Value.Editar, kv.Value.Eliminar)).ToList();
+        await Svc.SavePermisosAsync(id, lista, await Actor());
+        _ok = "Permisos guardados.";
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private sealed class PermRow { public bool Ver; public bool Crear; public bool Editar; public bool Eliminar; }
+}

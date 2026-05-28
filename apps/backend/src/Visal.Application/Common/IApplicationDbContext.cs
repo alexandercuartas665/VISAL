@@ -41,6 +41,10 @@ public interface IApplicationDbContext
     DbSet<Profesional> Profesionales { get; }
     DbSet<ProfesionalSubCategoria> ProfesionalSubCategorias { get; }
     DbSet<ProfesionalAgencia> ProfesionalAgencias { get; }
+    DbSet<Rol> Roles { get; }
+    DbSet<RolPermiso> RolPermisos { get; }
+    DbSet<Sucursal> Sucursales { get; }
+    DbSet<Paciente> Pacientes { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }
     DbSet<TenantSubscription> TenantSubscriptions { get; }

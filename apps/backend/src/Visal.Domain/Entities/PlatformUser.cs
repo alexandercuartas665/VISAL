@@ -21,4 +21,7 @@ public class PlatformUser : BaseEntity
     public PlatformUserStatus Status { get; set; } = PlatformUserStatus.Invited;
     public PlatformRole? PlatformRole { get; set; }
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    /// <summary>Usuario global: puede acceder a cualquier empresa/tenant y elegir cual al iniciar sesion.</summary>
+    public bool EsGlobal { get; set; }
 }

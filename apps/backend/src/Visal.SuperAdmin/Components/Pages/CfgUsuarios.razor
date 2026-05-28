@@ -1,8 +1,156 @@
 @page "/cfg-usuarios"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IUsuarioAdminService Svc
+@inject IRolService RolesSvc
+@inject ISucursalService SucSvc
 
 <PageTitle>Administracion de Usuarios - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Configuracion de la Entidad"
-                   Title="Administracion de Usuarios"
-                   Description="Gestion de usuarios de la entidad." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion de la Entidad</div>
+        <h1 class="ase-title">Administracion de Usuarios</h1>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card" style="margin-bottom:14px;">
+    <div class="ase-card-h">Crear usuario</div>
+    <div class="ase-form">
+        <div class="ase-f ase-f-wide"><label>Correo *</label><input class="form-control form-control-sm" @bind="_nEmail" placeholder="usuario@ips.com" /></div>
+        <div class="ase-f ase-f-wide"><label>Nombre</label><input class="form-control form-control-sm" @bind="_nNombre" /></div>
+        <div class="ase-f"><label>Clave *</label><input type="password" class="form-control form-control-sm" @bind="_nPass" /></div>
+        <div class="ase-f"><label>Rol</label>
+            <select class="form-select form-select-sm" @bind="_nRol">
+                <option value="">--</option>
+                @foreach (var r in _roles) { <option value="@r.Id">@r.Nombre</option> }
+            </select>
+        </div>
+        <div class="ase-f"><label>Sucursal</label>
+            <select class="form-select form-select-sm" @bind="_nSuc">
+                <option value="">--</option>
+                @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
+            </select>
+        </div>
+        <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_nGlobal" /> <span>Usuario global</span></label>
+    </div>
+    <div class="ase-actions">
+        <button class="btn btn-primary btn-sm" @onclick="Crear" disabled="@_busy">Crear usuario</button>
+    </div>
+</div>
+
+<div class="ase-card">
+    <div class="ase-card-h">Usuarios (@_users.Count)</div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>Correo</th><th>Nombre</th><th>Estado</th><th>Rol</th><th>Sucursal</th><th>Global</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var u in _users)
+                {
+                    <tr>
+                        <td class="mono">@u.Email</td>
+                        <td>@u.DisplayName</td>
+                        <td>@u.Estado</td>
+                        <td>
+                            <select class="form-select form-select-sm" @bind="u.RolSel">
+                                <option value="">--</option>
+                                @foreach (var r in _roles) { <option value="@r.Id">@r.Nombre</option> }
+                            </select>
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm" @bind="u.SucSel">
+                                <option value="">--</option>
+                                @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
+                            </select>
+                        </td>
+                        <td class="text-center"><input type="checkbox" class="form-check-input" @bind="u.Global" /></td>
+                        <td class="ase-row-actions">
+                            <button class="btn btn-primary btn-sm" title="Guardar asignacion" @onclick="() => Asignar(u)">&#10003;</button>
+                            <button class="btn btn-outline-danger btn-sm" title="Quitar de la entidad" @onclick="() => Eliminar(u)">&times;</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_users.Count == 0) { <div class="ase-empty">Sin usuarios.</div> }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<Row> _users = new();
+    private List<RolDto> _roles = new();
+    private List<SucursalDto> _sucursales = new();
+
+    private string _nEmail = "", _nPass = ""; private string? _nNombre; private string _nRol = "", _nSuc = ""; private bool _nGlobal;
+    private bool _busy; private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _roles = (await RolesSvc.ListAsync()).ToList();
+        _sucursales = (await SucSvc.ListAsync()).ToList();
+        await Load();
+    }
+
+    private async Task Load() => _users = (await Svc.ListAsync()).Select(Row.From).ToList();
+
+    private async Task Crear()
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            Guid? rol = Guid.TryParse(_nRol, out var rg) ? rg : null;
+            Guid? suc = Guid.TryParse(_nSuc, out var sg) ? sg : null;
+            var u = await Svc.CrearAsync(new CrearUsuarioRequest(_nEmail, _nNombre, _nPass, rol, suc, _nGlobal), await Actor());
+            if (u is null) { _error = "No se pudo crear (sin tenant activo)."; return; }
+            _nEmail = ""; _nNombre = null; _nPass = ""; _nRol = ""; _nSuc = ""; _nGlobal = false;
+            await Load(); _ok = $"Usuario \"{u.Email}\" creado.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task Asignar(Row u)
+    {
+        _error = _ok = null;
+        Guid? rol = Guid.TryParse(u.RolSel, out var rg) ? rg : null;
+        Guid? suc = Guid.TryParse(u.SucSel, out var sg) ? sg : null;
+        await Svc.AsignarAsync(u.Id, rol, suc, u.Global, await Actor());
+        _ok = $"Asignacion de \"{u.Email}\" guardada.";
+    }
+
+    private async Task Eliminar(Row u)
+    {
+        await Svc.EliminarAsync(u.Id, await Actor());
+        await Load();
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private sealed class Row
+    {
+        public Guid Id { get; set; }
+        public string Email { get; set; } = "";
+        public string? DisplayName { get; set; }
+        public string Estado { get; set; } = "";
+        public string RolSel { get; set; } = "";
+        public string SucSel { get; set; } = "";
+        public bool Global { get; set; }
+        public static Row From(UsuarioDto d) => new()
+        {
+            Id = d.Id, Email = d.Email, DisplayName = d.DisplayName, Estado = d.Estado,
+            RolSel = d.RolId?.ToString() ?? "", SucSel = d.SucursalId?.ToString() ?? "", Global = d.EsGlobal
+        };
+    }
+}

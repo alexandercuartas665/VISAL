@@ -21,4 +21,11 @@ public sealed class CookieUserContext(IHttpContextAccessor accessor) : ITenantCo
         Guid.TryParse(accessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)
             ? id
             : null;
+
+    /// <summary>Sede sobre la que el usuario eligio operar en esta sesion. Null si el tenant
+    /// solo tiene una sede o el usuario aun no la eligio.</summary>
+    public Guid? SucursalId =>
+        Guid.TryParse(accessor.HttpContext?.User.FindFirst("sucursal_id")?.Value, out var id)
+            ? id
+            : null;
 }

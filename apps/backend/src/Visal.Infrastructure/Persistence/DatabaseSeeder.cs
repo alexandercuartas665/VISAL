@@ -1,4 +1,5 @@
 using Visal.Application.Common.Auth;
+using Visal.Application.Tenancy;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -151,5 +152,70 @@ public sealed class DatabaseSeeder
         }
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Recursos demo de la galeria de plantillas registrados ({Count}).", assets.Length);
+    }
+
+    // Garantiza que cada tenant tenga un rol "Administrador" con TODOS los permisos de TODOS
+    // los modulos del catalogo, y lo asigna a los TenantUsers que sean Owner (o no tengan rol).
+    // Tambien marca como global a los usuarios admin@visal.travels y demo-admin@visal.travels.
+    // Idempotente: se ejecuta en cada arranque de desarrollo sin duplicar datos.
+    public async Task EnsureAdministradorRolAsync(CancellationToken cancellationToken = default)
+    {
+        var tenants = await _db.Tenants.IgnoreQueryFilters().ToListAsync(cancellationToken);
+        foreach (var tenant in tenants)
+        {
+            // 1) Asegurar rol "Administrador" para el tenant.
+            var rol = await _db.Roles.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(r => r.TenantId == tenant.Id && r.Nombre == "Administrador", cancellationToken);
+            if (rol is null)
+            {
+                rol = new Rol
+                {
+                    TenantId = tenant.Id,
+                    Nombre = "Administrador",
+                    Descripcion = "Acceso total a todos los modulos del sistema.",
+                    Activo = true
+                };
+                _db.Roles.Add(rol);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
+            // 2) Sincronizar permisos: borrar y reinsertar con todo en true.
+            var existentes = await _db.RolPermisos.IgnoreQueryFilters()
+                .Where(p => p.RolId == rol.Id).ToListAsync(cancellationToken);
+            _db.RolPermisos.RemoveRange(existentes);
+            foreach (var modulo in ModuloCatalogo.Todos)
+            {
+                _db.RolPermisos.Add(new RolPermiso
+                {
+                    TenantId = tenant.Id,
+                    RolId = rol.Id,
+                    Modulo = modulo.Key,
+                    Ver = true, Crear = true, Editar = true, Eliminar = true
+                });
+            }
+            await _db.SaveChangesAsync(cancellationToken);
+
+            // 3) Asignar el rol a los TenantUsers Owner o sin rol del tenant.
+            var users = await _db.TenantUsers.IgnoreQueryFilters()
+                .Where(tu => tu.TenantId == tenant.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var u in users)
+            {
+                if (u.RolId is null || u.TenantRole == TenantRole.Owner)
+                {
+                    u.RolId = rol.Id;
+                }
+            }
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        // 4) Marcar admin@visal.travels y demo-admin@visal.travels como globales.
+        var globales = await _db.PlatformUsers.IgnoreQueryFilters()
+            .Where(u => u.Email == SuperAdminEmail || u.Email == TenantAdminEmail)
+            .ToListAsync(cancellationToken);
+        foreach (var u in globales) { u.EsGlobal = true; }
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Rol 'Administrador' garantizado con todos los permisos en {N} tenant(s).", tenants.Count);
     }
 }

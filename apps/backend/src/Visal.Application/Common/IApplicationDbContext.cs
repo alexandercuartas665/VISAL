@@ -44,6 +44,7 @@ public interface IApplicationDbContext
     DbSet<Rol> Roles { get; }
     DbSet<RolPermiso> RolPermisos { get; }
     DbSet<Sucursal> Sucursales { get; }
+    DbSet<TenantUserSucursal> TenantUserSucursales { get; }
     DbSet<Paciente> Pacientes { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }

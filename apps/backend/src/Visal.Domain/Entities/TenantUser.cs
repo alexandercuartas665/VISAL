@@ -27,7 +27,11 @@ public class TenantUser : TenantEntity
     public Guid? RolId { get; set; }
     public Rol? Rol { get; set; }
 
-    /// <summary>Sucursal/sede asignada al usuario (opcional).</summary>
+    /// <summary>Sucursal/sede principal asignada al usuario (opcional). La lista completa
+    /// de sedes a las que el usuario tiene acceso vive en TenantUserSucursal.</summary>
     public Guid? SucursalId { get; set; }
     public Sucursal? Sucursal { get; set; }
+
+    /// <summary>Sedes (sucursales) adicionales que maneja el usuario. Soporte multi-sede.</summary>
+    public List<TenantUserSucursal> Sucursales { get; set; } = new();
 }

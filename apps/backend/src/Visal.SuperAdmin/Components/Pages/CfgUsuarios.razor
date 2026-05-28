@@ -6,6 +6,7 @@
 @inject IUsuarioAdminService Svc
 @inject IRolService RolesSvc
 @inject ISucursalService SucSvc
+@inject IJSRuntime JS
 
 <PageTitle>Administracion de Usuarios - Visal</PageTitle>
 
@@ -14,41 +15,27 @@
         <div class="ase-eyebrow">Configuracion de la Entidad</div>
         <h1 class="ase-title">Administracion de Usuarios</h1>
     </div>
+    <button class="btn btn-primary btn-sm" @onclick="OpenCreateModal">+ Nuevo usuario</button>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
-<div class="ase-card" style="margin-bottom:14px;">
-    <div class="ase-card-h">Crear usuario</div>
-    <div class="ase-form">
-        <div class="ase-f ase-f-wide"><label>Correo *</label><input class="form-control form-control-sm" @bind="_nEmail" placeholder="usuario@ips.com" /></div>
-        <div class="ase-f ase-f-wide"><label>Nombre</label><input class="form-control form-control-sm" @bind="_nNombre" /></div>
-        <div class="ase-f"><label>Clave *</label><input type="password" class="form-control form-control-sm" @bind="_nPass" /></div>
-        <div class="ase-f"><label>Rol</label>
-            <select class="form-select form-select-sm" @bind="_nRol">
-                <option value="">--</option>
-                @foreach (var r in _roles) { <option value="@r.Id">@r.Nombre</option> }
-            </select>
-        </div>
-        <div class="ase-f"><label>Sucursal</label>
-            <select class="form-select form-select-sm" @bind="_nSuc">
-                <option value="">--</option>
-                @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
-            </select>
-        </div>
-        <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_nGlobal" /> <span>Usuario global</span></label>
-    </div>
-    <div class="ase-actions">
-        <button class="btn btn-primary btn-sm" @onclick="Crear" disabled="@_busy">Crear usuario</button>
-    </div>
-</div>
-
 <div class="ase-card">
     <div class="ase-card-h">Usuarios (@_users.Count)</div>
     <div class="table-responsive">
         <table class="table table-sm align-middle">
-            <thead><tr><th>Correo</th><th>Nombre</th><th>Estado</th><th>Rol</th><th>Sucursal</th><th>Global</th><th></th></tr></thead>
+            <thead>
+                <tr>
+                    <th>Correo</th>
+                    <th>Nombre</th>
+                    <th>Estado</th>
+                    <th>Rol</th>
+                    <th>Sedes</th>
+                    <th class="text-center">Global</th>
+                    <th></th>
+                </tr>
+            </thead>
             <tbody>
                 @foreach (var u in _users)
                 {
@@ -63,14 +50,24 @@
                             </select>
                         </td>
                         <td>
-                            <select class="form-select form-select-sm" @bind="u.SucSel">
-                                <option value="">--</option>
-                                @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
-                            </select>
+                            <div class="usu-sedes" title="@string.Join(", ", u.SedesNombres)">
+                                @if (u.SedesIds.Count == 0)
+                                {
+                                    <span class="usu-sede-empty">Sin sedes</span>
+                                }
+                                else
+                                {
+                                    @foreach (var n in u.SedesNombres) { <span class="usu-sede-pill">@n</span> }
+                                }
+                                <button class="btn btn-link btn-sm usu-sede-edit" @onclick="() => OpenSedesModal(u)">editar</button>
+                            </div>
                         </td>
-                        <td class="text-center"><input type="checkbox" class="form-check-input" @bind="u.Global" /></td>
+                        <td class="text-center">
+                            <input type="checkbox" class="form-check-input" @bind="u.Global" />
+                        </td>
                         <td class="ase-row-actions">
                             <button class="btn btn-primary btn-sm" title="Guardar asignacion" @onclick="() => Asignar(u)">&#10003;</button>
+                            <button class="btn btn-outline-warning btn-sm" title="Reiniciar clave" @onclick="() => ResetPassword(u)">&#128274;</button>
                             <button class="btn btn-outline-danger btn-sm" title="Quitar de la entidad" @onclick="() => Eliminar(u)">&times;</button>
                         </td>
                     </tr>
@@ -81,6 +78,107 @@
     </div>
 </div>
 
+@* ===== Modal Crear usuario ===== *@
+@if (_showCreateModal)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseCreateModal"></div>
+    <div class="usu-modal">
+        <div class="usu-modal-h">
+            <h3>Nuevo usuario</h3>
+            <button class="usu-modal-close" @onclick="CloseCreateModal">&times;</button>
+        </div>
+        <div class="usu-modal-body">
+            @if (_modalError is not null) { <div class="ase-alert">@_modalError</div> }
+            <div class="ase-form">
+                <div class="ase-f ase-f-wide"><label>Correo *</label><input class="form-control form-control-sm" @bind="_nEmail" placeholder="usuario@ips.com" /></div>
+                <div class="ase-f ase-f-wide"><label>Nombre</label><input class="form-control form-control-sm" @bind="_nNombre" /></div>
+                <div class="ase-f"><label>Clave *</label><input type="password" class="form-control form-control-sm" @bind="_nPass" placeholder="Min. 6 caracteres" /></div>
+                <div class="ase-f"><label>Rol</label>
+                    <select class="form-select form-select-sm" @bind="_nRol">
+                        <option value="">--</option>
+                        @foreach (var r in _roles) { <option value="@r.Id">@r.Nombre</option> }
+                    </select>
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <label>Sedes que maneja</label>
+                    <div class="usu-sedes-grid">
+                        @if (_sucursales.Count == 0)
+                        {
+                            <span class="usu-sede-empty">No hay sedes configuradas. Crea sedes en "Configuracion de Empresa".</span>
+                        }
+                        else
+                        {
+                            @foreach (var s in _sucursales)
+                            {
+                                <label class="usu-sede-chk">
+                                    <input type="checkbox" checked="@_nSedes.Contains(s.Id)" @onchange="e => ToggleNSede(s.Id, e)" />
+                                    <span>@s.Nombre</span>
+                                </label>
+                            }
+                        }
+                    </div>
+                </div>
+                <label class="ase-chk ase-f-wide"><input type="checkbox" @bind="_nGlobal" /> <span>Usuario global (puede acceder a cualquier empresa del SaaS)</span></label>
+            </div>
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseCreateModal">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Crear" disabled="@_busy">@(_busy ? "Creando..." : "Crear usuario")</button>
+        </div>
+    </div>
+}
+
+@* ===== Modal editar sedes de un usuario ===== *@
+@if (_sedesModalUser is not null)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseSedesModal"></div>
+    <div class="usu-modal">
+        <div class="usu-modal-h">
+            <h3>Sedes asignadas a @_sedesModalUser.Email</h3>
+            <button class="usu-modal-close" @onclick="CloseSedesModal">&times;</button>
+        </div>
+        <div class="usu-modal-body">
+            <div class="usu-sedes-grid">
+                @if (_sucursales.Count == 0)
+                {
+                    <span class="usu-sede-empty">No hay sedes configuradas.</span>
+                }
+                else
+                {
+                    @foreach (var s in _sucursales)
+                    {
+                        <label class="usu-sede-chk">
+                            <input type="checkbox" checked="@_sedesModalUser.SedesIds.Contains(s.Id)" @onchange="e => ToggleRowSede(_sedesModalUser, s.Id, e)" />
+                            <span>@s.Nombre</span>
+                        </label>
+                    }
+                }
+            </div>
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseSedesModal">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarSedesModal">Aplicar</button>
+        </div>
+    </div>
+}
+
+<style>
+    .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
+    .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .usu-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .usu-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .usu-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .usu-modal-body { padding: 18px; overflow: auto; }
+    .usu-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
+    .usu-sedes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; padding: 6px 0; }
+    .usu-sede-chk { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+    .usu-sede-chk:hover { background: #f1f5f9; }
+    .usu-sedes { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .usu-sede-pill { background: #dbeafe; color: #1e40af; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+    .usu-sede-empty { font-size: 12px; color: #94a3b8; font-style: italic; }
+    .usu-sede-edit { font-size: 12px; padding: 0 4px; }
+</style>
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -88,8 +186,13 @@
     private List<RolDto> _roles = new();
     private List<SucursalDto> _sucursales = new();
 
-    private string _nEmail = "", _nPass = ""; private string? _nNombre; private string _nRol = "", _nSuc = ""; private bool _nGlobal;
-    private bool _busy; private string? _error, _ok;
+    private bool _showCreateModal;
+    private string _nEmail = "", _nPass = ""; private string? _nNombre; private string _nRol = ""; private bool _nGlobal;
+    private HashSet<Guid> _nSedes = new();
+    private string? _modalError;
+    private bool _busy;
+    private string? _error, _ok;
+    private Row? _sedesModalUser;
 
     protected override async Task OnInitializedAsync()
     {
@@ -100,19 +203,51 @@
 
     private async Task Load() => _users = (await Svc.ListAsync()).Select(Row.From).ToList();
 
+    private void OpenCreateModal()
+    {
+        _nEmail = ""; _nPass = ""; _nNombre = null; _nRol = ""; _nGlobal = false; _nSedes = new();
+        _modalError = null; _showCreateModal = true;
+    }
+
+    private void CloseCreateModal() => _showCreateModal = false;
+
+    private void ToggleNSede(Guid id, ChangeEventArgs e)
+    {
+        var on = e.Value is bool b && b;
+        if (on) { _nSedes.Add(id); } else { _nSedes.Remove(id); }
+    }
+
+    private void ToggleRowSede(Row u, Guid id, ChangeEventArgs e)
+    {
+        var on = e.Value is bool b && b;
+        if (on) { if (!u.SedesIds.Contains(id)) { u.SedesIds.Add(id); } }
+        else { u.SedesIds.Remove(id); }
+        u.SedesNombres = u.SedesIds.Select(sid => _sucursales.FirstOrDefault(s => s.Id == sid)?.Nombre ?? "").Where(n => n.Length > 0).OrderBy(n => n).ToList();
+    }
+
+    private void OpenSedesModal(Row u) => _sedesModalUser = u;
+    private void CloseSedesModal() => _sedesModalUser = null;
+
+    private async Task GuardarSedesModal()
+    {
+        if (_sedesModalUser is null) { return; }
+        await Asignar(_sedesModalUser);
+        _sedesModalUser = null;
+    }
+
     private async Task Crear()
     {
-        _error = _ok = null; _busy = true;
+        _modalError = null; _busy = true;
         try
         {
             Guid? rol = Guid.TryParse(_nRol, out var rg) ? rg : null;
-            Guid? suc = Guid.TryParse(_nSuc, out var sg) ? sg : null;
-            var u = await Svc.CrearAsync(new CrearUsuarioRequest(_nEmail, _nNombre, _nPass, rol, suc, _nGlobal), await Actor());
-            if (u is null) { _error = "No se pudo crear (sin tenant activo)."; return; }
-            _nEmail = ""; _nNombre = null; _nPass = ""; _nRol = ""; _nSuc = ""; _nGlobal = false;
+            var sedes = _nSedes.ToList();
+            var u = await Svc.CrearAsync(new CrearUsuarioRequest(_nEmail, _nNombre, _nPass, rol, sedes, _nGlobal), await Actor());
+            if (u is null) { _modalError = "No se pudo crear (sin tenant activo)."; return; }
             await Load(); _ok = $"Usuario \"{u.Email}\" creado.";
+            _showCreateModal = false;
         }
-        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (InvalidOperationException ex) { _modalError = ex.Message; }
         finally { _busy = false; }
     }
 
@@ -120,13 +255,29 @@
     {
         _error = _ok = null;
         Guid? rol = Guid.TryParse(u.RolSel, out var rg) ? rg : null;
-        Guid? suc = Guid.TryParse(u.SucSel, out var sg) ? sg : null;
-        await Svc.AsignarAsync(u.Id, rol, suc, u.Global, await Actor());
+        await Svc.AsignarAsync(u.Id, rol, u.SedesIds.ToList(), u.Global, await Actor());
         _ok = $"Asignacion de \"{u.Email}\" guardada.";
+        await Load();
+    }
+
+    private async Task ResetPassword(Row u)
+    {
+        var nueva = await JS.InvokeAsync<string?>("prompt", $"Nueva clave para {u.Email} (minimo 6 caracteres):", "");
+        if (string.IsNullOrWhiteSpace(nueva)) { return; }
+        try
+        {
+            if (await Svc.ResetPasswordAsync(u.Id, nueva, await Actor()))
+            {
+                _ok = $"Clave de \"{u.Email}\" reiniciada.";
+            }
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
     }
 
     private async Task Eliminar(Row u)
     {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar a \"{u.Email}\" de esta entidad?");
+        if (!ok) { return; }
         await Svc.EliminarAsync(u.Id, await Actor());
         await Load();
     }
@@ -145,12 +296,16 @@
         public string? DisplayName { get; set; }
         public string Estado { get; set; } = "";
         public string RolSel { get; set; } = "";
-        public string SucSel { get; set; } = "";
+        public List<Guid> SedesIds { get; set; } = new();
+        public List<string> SedesNombres { get; set; } = new();
         public bool Global { get; set; }
         public static Row From(UsuarioDto d) => new()
         {
             Id = d.Id, Email = d.Email, DisplayName = d.DisplayName, Estado = d.Estado,
-            RolSel = d.RolId?.ToString() ?? "", SucSel = d.SucursalId?.ToString() ?? "", Global = d.EsGlobal
+            RolSel = d.RolId?.ToString() ?? "",
+            SedesIds = d.SucursalIds.ToList(),
+            SedesNombres = d.SucursalNombres.ToList(),
+            Global = d.EsGlobal
         };
     }
 }

@@ -74,6 +74,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Rol> Roles => Set<Rol>();
     public DbSet<RolPermiso> RolPermisos => Set<RolPermiso>();
     public DbSet<Sucursal> Sucursales => Set<Sucursal>();
+    public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -597,6 +598,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.HasOne(x => x.Rol).WithMany().HasForeignKey(x => x.RolId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId).OnDelete(DeleteBehavior.SetNull);
+            b.HasMany(x => x.Sucursales).WithOne(x => x.TenantUser!).HasForeignKey(x => x.TenantUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TenantUserSucursal>(b =>
+        {
+            b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantUserId, x.SucursalId }).IsUnique();
         });
     }
 

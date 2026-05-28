@@ -44,10 +44,13 @@ else
             }
             @foreach (var t in _list)
             {
-                <button class="pl-tpl-item @(_editingId == t.Id ? "active" : "")" @onclick="() => Select(t.Id)">
-                    <div class="nm">@t.Name @if (t.IsDefault) { <span class="pl-tpl-default">predeterminada</span> }</div>
-                    <div class="mt">Actualizada @t.UpdatedAt.LocalDateTime.ToString("dd MMM yyyy HH:mm")</div>
-                </button>
+                <div class="pl-tpl-item-row @(_editingId == t.Id ? "active" : "")">
+                    <button class="pl-tpl-item" @onclick="() => Select(t.Id)">
+                        <div class="nm">@t.Name @if (t.IsDefault) { <span class="pl-tpl-default">predeterminada</span> }</div>
+                        <div class="mt">Actualizada @t.UpdatedAt.LocalDateTime.ToString("dd MMM yyyy HH:mm")</div>
+                    </button>
+                    <button class="pl-tpl-del" title="Eliminar plantilla" @onclick="() => DeleteByIdAsync(t.Id, t.Name)">&times;</button>
+                </div>
             }
         </aside>
 
@@ -285,6 +288,22 @@ else
             {
                 await ReloadAsync();
                 if (_list.Count > 0) { Select(_list[0].Id); } else { NewTemplate(); }
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteByIdAsync(Guid id, string nombre)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar la plantilla \"{nombre}\"? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true;
+        try
+        {
+            if (await TemplatesSvc.DeleteAsync(id, Guid.Empty))
+            {
+                await ReloadAsync();
+                if (_editingId == id) { _editingId = null; NewTemplate(); }
             }
         }
         finally { _busy = false; }

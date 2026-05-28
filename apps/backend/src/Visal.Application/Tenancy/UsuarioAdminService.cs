@@ -21,12 +21,13 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
 
     public async Task<IReadOnlyList<UsuarioDto>> ListAsync(CancellationToken ct = default)
     {
-        // TenantUsers del tenant activo (filtro global). Se cruzan rol, sucursal y datos de PlatformUser.
         var users = await _db.TenantUsers.AsNoTracking().ToListAsync(ct);
         var roles = await _db.Roles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Nombre, ct);
         var sucs = await _db.Sucursales.AsNoTracking().ToDictionaryAsync(s => s.Id, s => s.Nombre, ct);
+        var assigns = await _db.TenantUserSucursales.AsNoTracking().ToListAsync(ct);
+        var byUser = assigns.GroupBy(a => a.TenantUserId).ToDictionary(g => g.Key, g => g.Select(x => x.SucursalId).ToList());
         var puIds = users.Select(u => u.PlatformUserId).ToList();
-        var pus = await _db.PlatformUsers.AsNoTracking().Where(p => puIds.Contains(p.Id))
+        var pus = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters().Where(p => puIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
         return users
@@ -34,9 +35,11 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             .Select(u =>
             {
                 pus.TryGetValue(u.PlatformUserId, out var pu);
+                var sids = byUser.TryGetValue(u.Id, out var lst) ? lst : new List<Guid>();
+                var snames = sids.Where(id => sucs.ContainsKey(id)).Select(id => sucs[id]).OrderBy(n => n).ToList();
                 return new UsuarioDto(u.Id, u.PlatformUserId, u.Email, pu?.DisplayName,
                     u.RolId, u.RolId is Guid rid && roles.TryGetValue(rid, out var rn) ? rn : null,
-                    u.SucursalId, u.SucursalId is Guid sid && sucs.TryGetValue(sid, out var sn) ? sn : null,
+                    sids, snames,
                     u.Status.ToString(), pu?.EsGlobal ?? false);
             })
             .ToList();
@@ -49,7 +52,6 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         if (email.Length == 0) { throw new InvalidOperationException("El correo es obligatorio."); }
         if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6) { throw new InvalidOperationException("La clave debe tener al menos 6 caracteres."); }
 
-        // PlatformUser global (identidad): reutilizar si existe, si no crear.
         var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Email == email, ct);
         if (pu is null)
         {
@@ -85,22 +87,43 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             TenantRole = TenantRole.Advisor,
             Status = PlatformUserStatus.Active,
             RolId = req.RolId,
-            SucursalId = req.SucursalId
+            SucursalId = req.SucursalIds?.Count > 0 ? req.SucursalIds[0] : null
         };
         _db.TenantUsers.Add(tu);
+        await _db.SaveChangesAsync(ct);
+
+        foreach (var sid in (req.SucursalIds ?? Array.Empty<Guid>()).Distinct())
+        {
+            _db.TenantUserSucursales.Add(new TenantUserSucursal
+            {
+                TenantId = tid, TenantUserId = tu.Id, SucursalId = sid
+            });
+        }
         await _db.SaveChangesAsync(ct);
 
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tu.Id);
     }
 
-    public async Task<UsuarioDto?> AsignarAsync(Guid tenantUserId, Guid? rolId, Guid? sucursalId, bool esGlobal, Guid actor, CancellationToken ct = default)
+    public async Task<UsuarioDto?> AsignarAsync(Guid tenantUserId, Guid? rolId, IReadOnlyList<Guid> sucursalIds, bool esGlobal, Guid actor, CancellationToken ct = default)
     {
         var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return null; }
         tu.RolId = rolId;
-        tu.SucursalId = sucursalId;
+        var distinct = (sucursalIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        tu.SucursalId = distinct.Count > 0 ? distinct[0] : null;
         var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
         if (pu is not null) { pu.EsGlobal = esGlobal; }
+
+        // Sincronizar asignaciones de sedes (borrar todas y reinsertar las elegidas).
+        var existentes = await _db.TenantUserSucursales.Where(s => s.TenantUserId == tenantUserId).ToListAsync(ct);
+        _db.TenantUserSucursales.RemoveRange(existentes);
+        foreach (var sid in distinct)
+        {
+            _db.TenantUserSucursales.Add(new TenantUserSucursal
+            {
+                TenantId = tu.TenantId, TenantUserId = tenantUserId, SucursalId = sid
+            });
+        }
         await _db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tenantUserId);
     }
@@ -110,6 +133,21 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return false; }
         _db.TenantUsers.Remove(tu);
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> ResetPasswordAsync(Guid tenantUserId, string nuevaClave, Guid actor, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(nuevaClave) || nuevaClave.Length < 6)
+        {
+            throw new InvalidOperationException("La nueva clave debe tener al menos 6 caracteres.");
+        }
+        var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        if (tu is null) { return false; }
+        var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
+        if (pu is null) { return false; }
+        pu.PasswordHash = _hasher.Hash(nuevaClave);
         await _db.SaveChangesAsync(ct);
         return true;
     }

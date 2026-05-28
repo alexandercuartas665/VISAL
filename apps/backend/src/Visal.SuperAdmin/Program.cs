@@ -92,6 +92,7 @@ else
     var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
     await seeder.SeedAsync();
     await seeder.EnsureDemoTemplateAssetsAsync();
+    await seeder.EnsureAdministradorRolAsync();
 }
 
 app.UseHttpsRedirection();
@@ -196,7 +197,8 @@ app.MapPost("/auth/login", async (
 app.MapPost("/auth/select-empresa", async (
     HttpContext http,
     [FromForm] Guid tenantId,
-    Visal.Application.Tenancy.IEmpresaSelectorService selector) =>
+    Visal.Application.Tenancy.IEmpresaSelectorService selector,
+    Visal.Application.Tenancy.ISedeSelectorService sedes) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true)
     {
@@ -217,12 +219,63 @@ app.MapPost("/auth/select-empresa", async (
     var keep = new List<Claim>();
     foreach (var c in http.User.Claims)
     {
-        if (c.Type is "tenant_id" or "tenant_role" or "needs_tenant") { continue; }
+        if (c.Type is "tenant_id" or "tenant_role" or "needs_tenant" or "sucursal_id") { continue; }
         keep.Add(c);
     }
     keep.Add(new Claim("tenant_id", resultado.TenantId.ToString()));
     keep.Add(new Claim("tenant_role", resultado.TenantRole));
     if (resultado.EsGlobalAccess) { keep.Add(new Claim("global_access", "1")); }
+
+    // Si el usuario tiene exactamente una sede a su alcance, entrar directo con sucursal_id.
+    // Si tiene varias o ninguna, dejarlo en el selector de sede (o seguir sin sede si no hay).
+    var disponibles = await sedes.GetSedesAsync(userId, resultado.TenantId);
+    string destino = "/mi-cuenta";
+    if (disponibles.Count == 1)
+    {
+        keep.Add(new Claim("sucursal_id", disponibles[0].Id.ToString()));
+    }
+    else if (disponibles.Count > 1)
+    {
+        keep.Add(new Claim("needs_sucursal", "1"));
+        destino = "/seleccionar-sede";
+    }
+
+    var identity = new ClaimsIdentity(keep, CookieAuthenticationDefaults.AuthenticationScheme);
+    await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+    return Results.Redirect(destino);
+}).DisableAntiforgery();
+
+// Selector de sede: el usuario eligio en que sucursal va a trabajar dentro del tenant activo.
+app.MapPost("/auth/select-sede", async (
+    HttpContext http,
+    [FromForm] Guid sucursalId,
+    Visal.Application.Tenancy.ISedeSelectorService sedes) =>
+{
+    if (http.User?.Identity?.IsAuthenticated != true)
+    {
+        return Results.Redirect("/login");
+    }
+    if (!Guid.TryParse(http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId))
+    {
+        return Results.Redirect("/login");
+    }
+    if (!Guid.TryParse(http.User.FindFirst("tenant_id")?.Value, out var tenantId))
+    {
+        return Results.Redirect("/seleccionar-empresa");
+    }
+    if (!await sedes.PuedeAccederAsync(userId, tenantId, sucursalId))
+    {
+        return Results.Redirect("/seleccionar-sede?error=1");
+    }
+
+    var keep = new List<Claim>();
+    foreach (var c in http.User.Claims)
+    {
+        if (c.Type is "sucursal_id" or "needs_sucursal") { continue; }
+        keep.Add(c);
+    }
+    keep.Add(new Claim("sucursal_id", sucursalId.ToString()));
 
     var identity = new ClaimsIdentity(keep, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);

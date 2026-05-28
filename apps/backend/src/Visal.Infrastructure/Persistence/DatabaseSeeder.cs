@@ -436,4 +436,65 @@ public sealed class DatabaseSeeder
         _logger.LogInformation("Usuarios reales Visal cargados: {N} nuevos (de {T} en archivo maestro). Rol: Coordinador. Sedes: todas ({S}).",
             agregados, usuarios.Length, sedes.Count);
     }
+
+    // Siembra valores por defecto de los catalogos del modulo Configuracion Pacientes
+    // segun el sistema original de Visal IPS RT. Idempotente: solo agrega los que no
+    // existan (verificacion por tenant + tipo + codigo).
+    public async Task EnsureCatalogosPacienteDefaultAsync(CancellationToken cancellationToken = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Kind == TenantKind.Demo, cancellationToken);
+        if (tenant is null) { return; }
+
+        // Datos extraidos de las capturas del sistema legacy Visal.
+        (Visal.Domain.Enums.CatalogoPacienteTipo tipo, string codigo, string nombre)[] items =
+        {
+            // ===== TIPO USUARIO =====
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "COT", "Cotizante"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "BEN", "Beneficiario"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "SUB", "Subsidiado"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "VIN", "Vinculado"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "PAR", "Particular"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "PRE", "Prepagada"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "RES", "Regimen Especial"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "MIG", "Poblacion Migrante"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "NAF", "No afiliado"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, "EXC", "Excepcion"),
+
+            // ===== CLASIFICACION PACIENTE =====
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionPaciente, "AGU", "AGUDO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionPaciente, "CRO", "CRONICO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionPaciente, "CRV", "CRONICO CON VENTILADOR"),
+
+            // ===== CLASIFICACION GRUPO DE PATOLOGIA =====
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "RES", "RESPIRATORIO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "CAR", "CARDIOVASCULAR"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "HEP", "HEPATICA"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "REN", "RENAL Y METABOLICA"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "NEU", "NEUROLOGICA"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "OST", "OSTEOARTICULAR"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "INF", "INFECCIOSAS"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "ONC", "ONCOLOGICA"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "MEN", "MENTAL")
+        };
+
+        int agregados = 0;
+        foreach (var (tipo, codigo, nombre) in items)
+        {
+            var existe = await _db.CatalogosPaciente.IgnoreQueryFilters()
+                .AnyAsync(c => c.TenantId == tenant.Id && c.Tipo == tipo && c.Codigo == codigo, cancellationToken);
+            if (existe) { continue; }
+            _db.CatalogosPaciente.Add(new CatalogoPaciente
+            {
+                TenantId = tenant.Id,
+                Tipo = tipo,
+                Codigo = codigo,
+                Nombre = nombre,
+                Activo = true
+            });
+            agregados++;
+        }
+        if (agregados > 0) { await _db.SaveChangesAsync(cancellationToken); }
+        _logger.LogInformation("Catalogos Paciente: {N} items por defecto (de {T} en lista maestra).", agregados, items.Length);
+    }
 }

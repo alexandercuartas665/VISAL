@@ -77,6 +77,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
+    public DbSet<AsignacionLote> AsignacionLotes => Set<AsignacionLote>();
+    public DbSet<Asignacion> Asignaciones => Set<Asignacion>();
     public DbSet<Cie11Config> Cie11Configs => Set<Cie11Config>();
     public DbSet<Pais> Paises => Set<Pais>();
     public DbSet<Departamento> Departamentos => Set<Departamento>();
@@ -640,6 +642,33 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Descripcion).HasMaxLength(500);
             // Unico por tenant + tipo + codigo: cada catalogo tiene su propio espacio de codigos.
             b.HasIndex(x => new { x.TenantId, x.Tipo, x.Codigo }).IsUnique();
+        });
+
+        modelBuilder.Entity<AsignacionLote>(b =>
+        {
+            b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
+            b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(x => x.Items).WithOne(x => x.Lote!).HasForeignKey(x => x.LoteId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.PacienteId });
+        });
+
+        modelBuilder.Entity<Asignacion>(b =>
+        {
+            b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
+            b.Property(x => x.ServicioId).HasMaxLength(60).IsRequired();
+            b.Property(x => x.NombreServicio).HasMaxLength(200).IsRequired();
+            b.Property(x => x.TipoServicio).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Modulo).HasMaxLength(40);
+            b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
+            b.Property(x => x.CodigoAutorizacion).HasMaxLength(60);
+            b.Property(x => x.FormatoHistoria).HasMaxLength(60);
+            b.Property(x => x.Estado).HasMaxLength(30).IsRequired();
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
+            b.HasCheckConstraint("ck_asignaciones_cantidad", "cantidad > 0");
+            b.HasIndex(x => new { x.TenantId, x.PacienteId });
+            b.HasIndex(x => new { x.TenantId, x.Estado, x.MesVigencia, x.AnioServicio });
+            b.HasIndex(x => x.LoteId);
         });
 
         modelBuilder.Entity<Cie11Config>(b =>

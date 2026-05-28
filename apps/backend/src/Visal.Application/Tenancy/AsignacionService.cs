@@ -60,6 +60,71 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return result;
     }
 
+    public async Task<IReadOnlyList<ContratoMiniDto>> ListContratosDisponiblesAsync(CancellationToken ct = default)
+    {
+        return await db.ContratosAseguradora.AsNoTracking()
+            .Where(c => c.Estado == "ACTIVO")
+            .Join(db.Aseguradoras.AsNoTracking(), c => c.AseguradoraId, a => a.Id,
+                (c, a) => new { c.Id, c.AseguradoraId, AseguradoraNombre = a.Nombre, c.CodigoContrato, c.Estado })
+            .OrderBy(x => x.AseguradoraNombre).ThenBy(x => x.CodigoContrato)
+            .Select(x => new ContratoMiniDto(x.Id, x.AseguradoraId, x.AseguradoraNombre, x.CodigoContrato, x.Estado))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<PacienteFiltroResultadoDto>> BuscarPacientesAvanzadoAsync(BusquedaPacienteFiltro filtro, CancellationToken ct = default)
+    {
+        var q = db.Pacientes.AsNoTracking().AsQueryable();
+
+        // Filtro por contratos: trae todas las aseguradoras de esos contratos y filtra pacientes por aseguradora.
+        if (filtro.ContratoIds is { Count: > 0 } contIds)
+        {
+            var aseIds = await db.ContratosAseguradora.AsNoTracking()
+                .Where(c => contIds.Contains(c.Id))
+                .Select(c => c.AseguradoraId).Distinct().ToListAsync(ct);
+            if (aseIds.Count == 0) { return Array.Empty<PacienteFiltroResultadoDto>(); }
+            q = q.Where(p => p.AseguradoraId != null && aseIds.Contains(p.AseguradoraId.Value));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filtro.Documento))
+        {
+            var d = filtro.Documento.Trim();
+            q = q.Where(p => p.NumeroDocumento.Contains(d));
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Telefono))
+        {
+            var t = filtro.Telefono.Trim();
+            q = q.Where(p => p.Telefono != null && p.Telefono.Contains(t));
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Correo))
+        {
+            var c = filtro.Correo.Trim().ToLower();
+            q = q.Where(p => p.Email != null && p.Email.ToLower().Contains(c));
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Nombre))
+        {
+            // Split por espacios: cada token AND LIKE sobre el nombre completo (mismo patron del legacy).
+            var tokens = filtro.Nombre.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var raw in tokens)
+            {
+                var t = raw.ToLower();
+                q = q.Where(p => p.NombreCompleto.ToLower().Contains(t));
+            }
+        }
+
+        var lista = await q.OrderBy(p => p.NombreCompleto).Take(100).ToListAsync(ct);
+
+        // Resolver nombre aseguradora (contrato visible) en una segunda query.
+        var aseIdsR = lista.Where(p => p.AseguradoraId is Guid).Select(p => p.AseguradoraId!.Value).Distinct().ToList();
+        var aseguradoras = aseIdsR.Count > 0
+            ? await db.Aseguradoras.AsNoTracking().Where(a => aseIdsR.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.Nombre, ct)
+            : new Dictionary<Guid, string>();
+
+        return lista.Select(p => new PacienteFiltroResultadoDto(
+            p.Id, p.NumeroDocumento, p.NombreCompleto,
+            p.AseguradoraId is Guid aid && aseguradoras.TryGetValue(aid, out var an) ? an : null,
+            p.Telefono, p.Email)).ToList();
+    }
+
     public async Task<IReadOnlyList<string>> TiposServicioPorContratoAsync(Guid contratoId, CancellationToken ct = default)
     {
         return await db.ServiciosContrato.AsNoTracking()

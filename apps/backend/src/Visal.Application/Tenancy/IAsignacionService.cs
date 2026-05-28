@@ -10,6 +10,19 @@ public sealed record PacienteAsignacionDto(
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado);
 
+/// <summary>Filtro tipado para la busqueda avanzada de pacientes (modal BUSCAR PACIENTES).</summary>
+public sealed record BusquedaPacienteFiltro(
+    IReadOnlyList<Guid>? ContratoIds = null,
+    string? Documento = null,
+    string? Nombre = null,
+    string? Telefono = null,
+    string? Correo = null);
+
+/// <summary>Fila del grid de resultados del modal (incluye contrato de la aseguradora del paciente).</summary>
+public sealed record PacienteFiltroResultadoDto(
+    Guid Id, string Documento, string NombreCompleto, string? Contrato,
+    string? Telefono, string? Correo);
+
 /// <summary>Item del catalogo de servicios filtrado por contrato + tipo de servicio.</summary>
 public sealed record ServicioCatalogoDto(
     Guid Id, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, decimal? Tarifa);
@@ -39,8 +52,14 @@ public interface IAsignacionService
     /// <summary>Datos del paciente + sus contratos (de su aseguradora). Devuelve null si no existe.</summary>
     Task<PacienteAsignacionDto?> GetPacienteAsync(Guid pacienteId, CancellationToken ct = default);
 
-    /// <summary>Busca pacientes por documento/nombre/telefono para el modal de busqueda avanzada.</summary>
+    /// <summary>Busca pacientes por documento/nombre/telefono para el modal de busqueda avanzada (simple).</summary>
     Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default);
+
+    /// <summary>Busqueda avanzada con filtro tipado (multi-contrato + 4 campos). Alimenta el grid del modal.</summary>
+    Task<IReadOnlyList<PacienteFiltroResultadoDto>> BuscarPacientesAvanzadoAsync(BusquedaPacienteFiltro filtro, CancellationToken ct = default);
+
+    /// <summary>Lista todos los contratos activos del tenant para el CheckBoxList del modal.</summary>
+    Task<IReadOnlyList<ContratoMiniDto>> ListContratosDisponiblesAsync(CancellationToken ct = default);
 
     /// <summary>Tipos de servicio disponibles para un contrato: DISTINCT de servicios_contrato.Modulo.</summary>
     Task<IReadOnlyList<string>> TiposServicioPorContratoAsync(Guid contratoId, CancellationToken ct = default);

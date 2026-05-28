@@ -33,7 +33,7 @@
                     <div class="asg-input-row">
                         <input class="form-control form-control-sm mono" placeholder="Busqueda de paciente por identificacion"
                                value="@_docBusqueda" @oninput="e => _docBusqueda = e.Value?.ToString() ?? string.Empty" @onkeyup="OnDocKey" />
-                        <button class="btn btn-outline-secondary btn-sm" title="Busqueda avanzada" @onclick="OpenBuscadorModal">&#9776;</button>
+                        <button class="btn btn-outline-secondary btn-sm" title="Busqueda avanzada" @onclick="OpenBuscadorModal">&#128270;</button>
                         <button class="btn btn-primary btn-sm" title="Buscar" @onclick="BuscarPorDocumento">&#128269;</button>
                     </div>
                 </div>
@@ -179,29 +179,92 @@
     </div>
 </div>
 
-@* ============ Modal de busqueda avanzada ============ *@
+@* ============ Modal BUSCAR PACIENTES (filtros + grid) ============ *@
 @if (_modal)
 {
     <div class="cie-backdrop" @onclick="CloseBuscadorModal"></div>
-    <div class="cie-modal">
+    <div class="cie-modal cie-modal-lg">
         <div class="cie-modal-h">
-            <h3>Busqueda avanzada de paciente</h3>
+            <h3>BUSCAR PACIENTES</h3>
             <button class="cie-modal-close" @onclick="CloseBuscadorModal">&times;</button>
         </div>
         <div class="cie-modal-body">
-            <div class="cie-search-row">
-                <input class="form-control form-control-sm" placeholder="Documento, nombre o telefono..." value="@_modalTexto" @oninput="e => _modalTexto = e.Value?.ToString() ?? string.Empty" @onkeyup="OnModalKey" />
-                <button class="btn btn-primary btn-sm" @onclick="BuscarEnModal" disabled="@_modalBusy">@(_modalBusy ? "..." : "Aplicar filtro")</button>
+
+            <div class="bp-section">
+                <div class="bp-section-h"><span class="bp-filtro-ico">&#9776;</span> Filtros</div>
+                <div class="bp-filtros">
+                    <div class="bp-filtros-title">Filtrar Datos</div>
+                    <div class="bp-filtros-grid">
+                        <div class="bp-f bp-f-contrato">
+                            <label>Contrato:</label>
+                            <div class="bp-contratos-list">
+                                @if (_modalContratos.Count == 0) { <div class="bp-muted">Sin contratos activos.</div> }
+                                @foreach (var c in _modalContratos)
+                                {
+                                    <label class="bp-contrato-row">
+                                        <input type="checkbox" checked="@_modalContratoSel.Contains(c.ContratoId)" @onchange="e => ToggleContratoModal(c.ContratoId, e)" />
+                                        <span>@c.CodigoContrato - @c.AseguradoraNombre</span>
+                                    </label>
+                                }
+                            </div>
+                        </div>
+                        <div class="bp-f">
+                            <label>No Documento:</label>
+                            <input class="form-control form-control-sm" @bind="_modalDoc" @onkeyup="OnModalKey" />
+                        </div>
+                        <div class="bp-f">
+                            <label>Nombre:</label>
+                            <input class="form-control form-control-sm" @bind="_modalNombre" @onkeyup="OnModalKey" />
+                        </div>
+                        <div class="bp-f">
+                            <label>Telefono:</label>
+                            <input class="form-control form-control-sm" @bind="_modalTel" @onkeyup="OnModalKey" />
+                        </div>
+                        <div class="bp-f">
+                            <label>Correo:</label>
+                            <input class="form-control form-control-sm" @bind="_modalCorreo" @onkeyup="OnModalKey" />
+                        </div>
+                    </div>
+                    <div class="bp-actions">
+                        <button class="btn btn-primary btn-sm" @onclick="BuscarEnModal" disabled="@_modalBusy">@(_modalBusy ? "..." : "Aplicar filtro")</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosModal">Limpiar Filtro</button>
+                    </div>
+                </div>
             </div>
-            <div class="cie-result-list" style="margin-top:12px;">
-                @if (_modalResults.Count == 0) { <div class="cie-empty">Sin resultados.</div> }
-                @foreach (var r in _modalResults)
-                {
-                    <button class="cie-result-item" @onclick="() => PickPaciente(r)">
-                        <span class="cie-title">@r.NombreCompleto</span>
-                        <span class="cie-id">@r.TipoDocumento @r.NumeroDocumento</span>
-                    </button>
-                }
+
+            <div class="bp-results">
+                <table class="table table-sm bp-grid">
+                    <thead>
+                        <tr>
+                            <th style="width:50px"></th>
+                            <th>Documento</th>
+                            <th>Nombre Paciente</th>
+                            <th>Contrato</th>
+                            <th>Telefono</th>
+                            <th>Correo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_modalGrid.Count == 0)
+                        {
+                            <tr><td colspan="6" class="bp-empty">@(_modalBusy ? "Buscando..." : "Aplica un filtro para ver pacientes.")</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var r in _modalGrid)
+                            {
+                                <tr>
+                                    <td><button class="btn btn-primary btn-sm" title="Seleccionar" @onclick="() => PickPacienteFromGrid(r)">&#10003;</button></td>
+                                    <td class="mono">@r.Documento</td>
+                                    <td>@r.NombreCompleto</td>
+                                    <td>@(r.Contrato ?? "-")</td>
+                                    <td>@(r.Telefono ?? "-")</td>
+                                    <td>@(r.Correo ?? "-")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -243,6 +306,26 @@
     .asg-st-cerrado { background: #e0e7ff; color: #3730a3; }
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
     .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 80vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .cie-modal-lg { width: 1100px; max-height: 88vh; }
+    .bp-section { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 14px; }
+    .bp-section-h { background: #f8fafc; padding: 10px 14px; font-size: 13px; font-weight: 600; color: #334155; border-bottom: 1px solid #e2e8f0; border-radius: 8px 8px 0 0; }
+    .bp-filtro-ico { color: #64748b; margin-right: 6px; }
+    .bp-filtros { padding: 16px; }
+    .bp-filtros-title { font-size: 18px; color: #1565c0; margin-bottom: 14px; font-weight: 500; }
+    .bp-filtros-grid { display: grid; grid-template-columns: 220px 1fr 1fr; gap: 14px 18px; align-items: start; }
+    .bp-f { display: flex; flex-direction: column; gap: 4px; }
+    .bp-f label { font-size: 12px; color: #334155; font-weight: 500; }
+    .bp-f-contrato { grid-row: span 3; }
+    .bp-contratos-list { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; max-height: 220px; overflow: auto; background: #fff; }
+    .bp-contrato-row { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; font-size: 12px; color: #1565c0; cursor: pointer; }
+    .bp-contrato-row input { margin-top: 2px; }
+    .bp-muted { color: #94a3b8; font-style: italic; font-size: 12px; padding: 8px; }
+    .bp-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .bp-results { border: 1px solid #e2e8f0; border-radius: 8px; max-height: 320px; overflow: auto; }
+    .bp-grid { margin: 0; }
+    .bp-grid th { background: #f8fafc; font-size: 12px; color: #334155; position: sticky; top: 0; }
+    .bp-grid td { font-size: 12.5px; vertical-align: middle; }
+    .bp-empty { text-align: center; padding: 30px; color: #94a3b8; font-style: italic; }
     .cie-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #e2e8f0; }
     .cie-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
     .cie-modal-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#64748b; }
@@ -293,10 +376,15 @@
     private bool _busy;
     private string? _error, _ok;
 
-    // Modal.
+    // Modal BUSCAR PACIENTES.
     private bool _modal;
-    private string _modalTexto = "";
-    private List<PacienteAsignacionDto> _modalResults = new();
+    private List<ContratoMiniDto> _modalContratos = new();
+    private HashSet<Guid> _modalContratoSel = new();
+    private string _modalDoc = "";
+    private string _modalNombre = "";
+    private string _modalTel = "";
+    private string _modalCorreo = "";
+    private List<PacienteFiltroResultadoDto> _modalGrid = new();
     private bool _modalBusy;
 
     private async Task BuscarPorDocumento()
@@ -419,14 +507,46 @@
         _error = _ok = null;
     }
 
-    private void OpenBuscadorModal() { _modal = true; _modalTexto = _docBusqueda; _modalResults = new(); }
+    private async Task OpenBuscadorModal()
+    {
+        _modal = true;
+        _modalDoc = _docBusqueda; _modalNombre = ""; _modalTel = ""; _modalCorreo = "";
+        _modalContratoSel = new();
+        _modalGrid = new();
+        _modalContratos = (await Svc.ListContratosDisponiblesAsync()).ToList();
+    }
     private void CloseBuscadorModal() => _modal = false;
     private async Task OnModalKey(KeyboardEventArgs e) { if (e.Key == "Enter") { await BuscarEnModal(); } }
+    private void ToggleContratoModal(Guid contratoId, ChangeEventArgs e)
+    {
+        var on = e.Value is bool b && b;
+        if (on) { _modalContratoSel.Add(contratoId); } else { _modalContratoSel.Remove(contratoId); }
+    }
+    private void LimpiarFiltrosModal()
+    {
+        _modalDoc = _modalNombre = _modalTel = _modalCorreo = "";
+        _modalContratoSel = new();
+        _modalGrid = new();
+    }
     private async Task BuscarEnModal()
     {
         _modalBusy = true;
-        try { _modalResults = (await Svc.BuscarPacientesAsync(_modalTexto, null)).ToList(); }
+        try
+        {
+            var f = new BusquedaPacienteFiltro(
+                _modalContratoSel.Count > 0 ? _modalContratoSel.ToList() : null,
+                string.IsNullOrWhiteSpace(_modalDoc) ? null : _modalDoc.Trim(),
+                string.IsNullOrWhiteSpace(_modalNombre) ? null : _modalNombre.Trim(),
+                string.IsNullOrWhiteSpace(_modalTel) ? null : _modalTel.Trim(),
+                string.IsNullOrWhiteSpace(_modalCorreo) ? null : _modalCorreo.Trim());
+            _modalGrid = (await Svc.BuscarPacientesAvanzadoAsync(f)).ToList();
+        }
         finally { _modalBusy = false; }
+    }
+    private async Task PickPacienteFromGrid(PacienteFiltroResultadoDto r)
+    {
+        var p = await Svc.GetPacienteAsync(r.Id);
+        if (p is not null) { await PickPaciente(p); }
     }
 
     private async Task<Guid> Actor()

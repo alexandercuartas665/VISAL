@@ -73,13 +73,16 @@
                     <div class="ase-card-h" style="margin-top:14px;">Datos administrativos PAD</div>
                     <div class="ase-form">
                         <div class="ase-f"><label>IPS Que Comenta</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_ipsComenta">
+                                <option value="">Seleccione Elemento</option>
+                                @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>
                         <div class="ase-f"><label>Fecha Comentan</label><input type="date" class="form-control form-control-sm" @bind="_fComenta" /></div>
                         <div class="ase-f"><label>Entidad Aseguradora</label>
-                            <select class="form-select form-select-sm" @bind="_aseId">
-                                <option value="">--</option>
+                            <select class="form-select form-select-sm" value="@_aseId" @onchange="OnAseguradoraChanged">
+                                <option value="">Seleccione Elemento</option>
                                 @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
                         </div>
@@ -125,21 +128,21 @@
                             </select>
                         </div>
                         <div class="ase-f"><label>Contrato 1</label>
-                            <select class="form-select form-select-sm" @bind="_contrato1">
-                                <option value="">--</option>
-                                @foreach (var c in CatItems(CatalogoPacienteTipo.Contrato)) { <option value="@c.Id">@c.Nombre</option> }
+                            <select class="form-select form-select-sm" @bind="_contrato1" disabled="@(_contratosAse.Count == 0)">
+                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona aseguradora" : "Seleccione Elemento")</option>
+                                @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Contrato 2</label>
-                            <select class="form-select form-select-sm" @bind="_contrato2">
-                                <option value="">--</option>
-                                @foreach (var c in CatItems(CatalogoPacienteTipo.Contrato)) { <option value="@c.Id">@c.Nombre</option> }
+                            <select class="form-select form-select-sm" @bind="_contrato2" disabled="@(_contratosAse.Count == 0)">
+                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona aseguradora" : "Seleccione Elemento")</option>
+                                @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Contrato 3</label>
-                            <select class="form-select form-select-sm" @bind="_contrato3">
-                                <option value="">--</option>
-                                @foreach (var c in CatItems(CatalogoPacienteTipo.Contrato)) { <option value="@c.Id">@c.Nombre</option> }
+                            <select class="form-select form-select-sm" @bind="_contrato3" disabled="@(_contratosAse.Count == 0)">
+                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona aseguradora" : "Seleccione Elemento")</option>
+                                @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Estrato Social</label>
@@ -299,6 +302,8 @@
     private string? _codAcept;
     private DateOnly? _fComenta, _fIngreso, _fEgreso;
     private string _aseId = "";
+    private string _ipsComenta = "";
+    private List<ContratoDto> _contratosAse = new();
     private int? _diasEst, _opIngreso;
 
     // Clasificacion
@@ -337,6 +342,17 @@
         await LoadLista();
     }
 
+    private async Task OnAseguradoraChanged(ChangeEventArgs e)
+    {
+        _aseId = e.Value?.ToString() ?? "";
+        _contrato1 = _contrato2 = _contrato3 = "";
+        if (Guid.TryParse(_aseId, out var aid))
+        {
+            _contratosAse = (await AseSvc.ListContratosAsync(aid)).ToList();
+        }
+        else { _contratosAse = new(); }
+    }
+
     private async Task OnPaisResidenciaChanged(ChangeEventArgs e)
     {
         _paisResidencia = e.Value?.ToString() ?? "";
@@ -369,6 +385,7 @@
         _pNombre = _sNombre = _pApellido = _sApellido = null;
         _fnac = null; _edad = null;
         _codAcept = null; _fComenta = _fIngreso = _fEgreso = null; _aseId = "";
+        _ipsComenta = ""; _contratosAse = new();
         _diasEst = _opIngreso = null;
         _incapacidad = _grupoRh = _estado = null;
         _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
@@ -395,6 +412,10 @@
         _codAcept = d.CodigoAceptacion; _fComenta = d.FechaComentan;
         _fIngreso = d.FechaIngresoPad; _fEgreso = d.FechaEgresoPad;
         _aseId = d.AseguradoraId?.ToString() ?? "";
+        _ipsComenta = d.IpsComentaId?.ToString() ?? "";
+        // Cargar contratos de la aseguradora del paciente para los selects.
+        if (d.AseguradoraId is Guid aid) { _contratosAse = (await AseSvc.ListContratosAsync(aid)).ToList(); }
+        else { _contratosAse = new(); }
         _diasEst = d.DiasEstancia; _opIngreso = d.OpIngresoDias;
         _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _estado = d.Estado;
         _tipoUsuario = d.TipoUsuarioId?.ToString() ?? "";
@@ -434,7 +455,7 @@
                 _id,
                 _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido, null,
                 _fnac, _edad,
-                null, _codAcept, _fComenta,
+                Try(_ipsComenta), _codAcept, _fComenta,
                 ase, _fIngreso, _fEgreso, _diasEst, _opIngreso,
                 _incapacidad, _grupoRh, Try(_tipoUsuario), _estado,
                 Try(_clasifPaciente), Try(_clasifGrupo),

@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy
 @inject IPacienteService Svc
 @inject IAseguradoraService AseSvc
+@inject ISucursalService SucSvc
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
 
@@ -28,6 +29,7 @@
             <button class="ase-li @(p.Id == _id ? "sel" : "")" @onclick="() => Select(p.Id)">
                 <div class="ase-li-name">@p.NombreCompleto</div>
                 <div class="ase-li-sub">@p.NumeroDocumento &middot; @(p.Ciudad ?? "-") &middot; @(p.Aseguradora ?? "Sin aseguradora")</div>
+                <div class="ase-li-sub">@(p.Sede ?? "Sin sede") &middot; @(p.Estado ?? "Sin estado")</div>
             </button>
         }
         @if (_lista.Count == 0) { <div class="ase-empty">Sin pacientes.</div> }
@@ -41,53 +43,182 @@
         else
         {
             <div class="ase-card">
-                <div class="ase-card-h">Datos personales</div>
-                <div class="ase-form">
-                    <div class="ase-f"><label>Numero Documento *</label><input class="form-control form-control-sm" @bind="_doc" /></div>
-                    <div class="ase-f"><label>Tipo documento</label>
-                        <select class="form-select form-select-sm" @bind="_tipoDoc"><option>CC</option><option>CE</option><option>TI</option><option>RC</option><option>PA</option><option>MS</option></select>
-                    </div>
-                    <div class="ase-f ase-f-wide"><label>Nombre Completo</label><input class="form-control form-control-sm" @bind="_nombre" placeholder="(se arma con los nombres si lo dejas vacio)" /></div>
-                    <div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="_pNombre" /></div>
-                    <div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="_sNombre" /></div>
-                    <div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="_pApellido" /></div>
-                    <div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="_sApellido" /></div>
-                    <div class="ase-f"><label>Fecha nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" /></div>
-                    <div class="ase-f"><label>Sexo</label>
-                        <select class="form-select form-select-sm" @bind="_sexo"><option value="">--</option><option>MASCULINO</option><option>FEMENINO</option></select>
-                    </div>
-                    <div class="ase-f"><label>Estado civil</label>
-                        <select class="form-select form-select-sm" @bind="_estadoCivil"><option value="">--</option><option>SOLTERO</option><option>CASADO</option><option>UNION LIBRE</option><option>VIUDO</option><option>DIVORCIADO</option></select>
-                    </div>
-                    <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_tel" /></div>
-                    <div class="ase-f"><label>Email</label><input class="form-control form-control-sm" @bind="_email" /></div>
-                    <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>
-                    <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
-                    <div class="ase-f"><label>Zona</label>
-                        <select class="form-select form-select-sm" @bind="_zona"><option value="">--</option><option>URBANA</option><option>RURAL</option></select>
-                    </div>
-                    <div class="ase-f"><label>Ocupacion</label><input class="form-control form-control-sm" @bind="_ocupacion" /></div>
-                    <div class="ase-f"><label>Regimen</label>
-                        <select class="form-select form-select-sm" @bind="_regimen"><option value="">--</option><option>CONTRIBUTIVO</option><option>SUBSIDIADO</option><option>PARTICULAR</option><option>ESPECIAL</option></select>
-                    </div>
-                    <div class="ase-f ase-f-wide"><label>Aseguradora</label>
-                        <select class="form-select form-select-sm" @bind="_aseId">
-                            <option value="">-- Sin aseguradora --</option>
-                            @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
-                        </select>
-                    </div>
+                <div class="pac-tabs">
+                    <button class="pac-tab @(_tab == "generales" ? "active" : "")" @onclick="@(() => _tab = "generales")">Datos Generales</button>
+                    <button class="pac-tab @(_tab == "adicionales" ? "active" : "")" @onclick="@(() => _tab = "adicionales")">Datos Adicionales</button>
+                    <button class="pac-tab @(_tab == "detalle" ? "active" : "")" @onclick="@(() => _tab = "detalle")">Detalle</button>
                 </div>
 
-                <div class="ase-card-h" style="margin-top:14px;">Contacto de emergencia</div>
-                <div class="ase-form">
-                    <div class="ase-f ase-f-wide"><label>Informar a</label><input class="form-control form-control-sm" @bind="_emerNombre" /></div>
-                    <div class="ase-f"><label>Parentesco</label><input class="form-control form-control-sm" @bind="_emerParentesco" /></div>
-                    <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_emerTel" /></div>
-                    <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
-                </div>
+                @* ===== TAB DATOS GENERALES ===== *@
+                @if (_tab == "generales")
+                {
+                    <div class="ase-card-h">Identificacion</div>
+                    <div class="ase-form">
+                        <div class="ase-f"><label>Numero Documento *</label><input class="form-control form-control-sm" @bind="_doc" /></div>
+                        <div class="ase-f"><label>Tipo Documento</label>
+                            <select class="form-select form-select-sm" @bind="_tipoDoc">
+                                <option>CC</option><option>CE</option><option>TI</option><option>RC</option><option>PA</option><option>MS</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="_pNombre" /></div>
+                        <div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="_sNombre" /></div>
+                        <div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="_pApellido" /></div>
+                        <div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="_sApellido" /></div>
+                        <div class="ase-f"><label>Fecha Nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" /></div>
+                        <div class="ase-f"><label>Edad</label><input type="number" class="form-control form-control-sm" @bind="_edad" /></div>
+                    </div>
 
-                <div class="ase-actions">
-                    <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">Guardar paciente</button>
+                    <div class="ase-card-h" style="margin-top:14px;">Datos administrativos PAD</div>
+                    <div class="ase-form">
+                        <div class="ase-f"><label>IPS Que Comenta</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>
+                        <div class="ase-f"><label>Fecha Comentan</label><input type="date" class="form-control form-control-sm" @bind="_fComenta" /></div>
+                        <div class="ase-f"><label>Entidad Aseguradora</label>
+                            <select class="form-select form-select-sm" @bind="_aseId">
+                                <option value="">--</option>
+                                @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>FECHA INGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fIngreso" /></div>
+                        <div class="ase-f"><label>FECHA EGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fEgreso" /></div>
+                        <div class="ase-f"><label>Dias Estancia</label><input type="number" class="form-control form-control-sm" @bind="_diasEst" /></div>
+                        <div class="ase-f"><label>Op. de Ingreso (dias)</label><input type="number" class="form-control form-control-sm" @bind="_opIngreso" /></div>
+                    </div>
+
+                    <div class="ase-card-h" style="margin-top:14px;">Clasificacion</div>
+                    <div class="ase-form">
+                        <div class="ase-f"><label>Incapacidad</label>
+                            <select class="form-select form-select-sm" @bind="_incapacidad">
+                                <option value="">--</option><option>SI</option><option>NO</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Grupo RH</label>
+                            <select class="form-select form-select-sm" @bind="_grupoRh">
+                                <option value="">--</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Tipo Usuario</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Estado</label>
+                            <select class="form-select form-select-sm" @bind="_estado">
+                                <option value="">--</option><option>ACTIVO</option><option>EGRESADO</option><option>FALLECIDO</option><option>SUSPENDIDO</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Clasificacion Paciente</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Clasificacion Grupo de Patologia</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Contrato 1</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Contrato 2</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Contrato 3</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Estrato Social</label>
+                            <select class="form-select form-select-sm" @bind="_estrato">
+                                <option value="">--</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Sexo</label>
+                            <select class="form-select form-select-sm" @bind="_sexo">
+                                <option value="">--</option><option>MASCULINO</option><option>FEMENINO</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Zona</label>
+                            <select class="form-select form-select-sm" @bind="_zona">
+                                <option value="">--</option><option>URBANA</option><option>RURAL</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="ase-card-h" style="margin-top:14px;">Diagnostico</div>
+                    <div class="ase-form">
+                        <div class="ase-f"><label>CIE10</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f ase-f-wide"><label>Diagnostico Principal</label><input class="form-control form-control-sm" @bind="_dxPrincipal" /></div>
+                        <div class="ase-f"><label>Tutela</label>
+                            <select class="form-select form-select-sm" @bind="_tutela">
+                                <option value="">--</option><option>SI</option><option>NO</option>
+                            </select>
+                        </div>
+                        <div class="ase-f"><label>Tipo Tutela</label><input class="form-control form-control-sm" @bind="_tipoTutela" /></div>
+                        <div class="ase-f"><label>Med Contratado</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                    </div>
+
+                    <div class="ase-card-h" style="margin-top:14px;">Geografia y contacto</div>
+                    <div class="ase-form">
+                        <div class="ase-f"><label>Pais Residencia</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Pais Origen</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Departamento</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f"><label>Municipio</label>
+                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                        </div>
+                        <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>
+                        <div class="ase-f"><label>Barrio</label><input class="form-control form-control-sm" @bind="_barrio" /></div>
+                        <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
+                        <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_tel" /></div>
+                        <div class="ase-f"><label>Correo Electronico</label><input class="form-control form-control-sm" @bind="_email" /></div>
+                        <div class="ase-f"><label>Sede Atencion</label>
+                            <select class="form-select form-select-sm" @bind="_sedeId">
+                                <option value="">--</option>
+                                @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
+                            </select>
+                        </div>
+                    </div>
+                }
+
+                @* ===== TAB DATOS ADICIONALES ===== *@
+                @if (_tab == "adicionales")
+                {
+                    <div class="ase-card-h">Estado civil, ocupacion, regimen</div>
+                    <div class="ase-form">
+                        <div class="ase-f"><label>Estado civil</label>
+                            <select class="form-select form-select-sm" @bind="_estadoCivil"><option value="">--</option><option>SOLTERO</option><option>CASADO</option><option>UNION LIBRE</option><option>VIUDO</option><option>DIVORCIADO</option></select>
+                        </div>
+                        <div class="ase-f"><label>Ocupacion</label><input class="form-control form-control-sm" @bind="_ocupacion" /></div>
+                        <div class="ase-f"><label>Regimen</label>
+                            <select class="form-select form-select-sm" @bind="_regimen"><option value="">--</option><option>CONTRIBUTIVO</option><option>SUBSIDIADO</option><option>PARTICULAR</option><option>ESPECIAL</option></select>
+                        </div>
+                    </div>
+
+                    <div class="ase-card-h" style="margin-top:14px;">Contacto de emergencia</div>
+                    <div class="ase-form">
+                        <div class="ase-f ase-f-wide"><label>Informar a</label><input class="form-control form-control-sm" @bind="_emerNombre" /></div>
+                        <div class="ase-f"><label>Parentesco</label><input class="form-control form-control-sm" @bind="_emerParentesco" /></div>
+                        <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_emerTel" /></div>
+                        <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
+                    </div>
+                }
+
+                @* ===== TAB DETALLE ===== *@
+                @if (_tab == "detalle")
+                {
+                    <div class="ase-card-h">Detalle clinico (proximo modulo)</div>
+                    <div class="ase-empty">
+                        Aqui ira la HC del paciente, historial de ingresos, ordenes clinicas, notas medicas y formularios diligenciados.
+                        Por ahora se reservan los cimientos del paciente.
+                    </div>
+                }
+
+                <div class="ase-actions" style="margin-top:18px;">
+                    <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar paciente")</button>
                     @if (_id is not null)
                     {
                         <button class="btn btn-outline-danger btn-sm" @onclick="Delete">Eliminar</button>
@@ -98,27 +229,60 @@
     </div>
 </div>
 
+<style>
+    .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
+    .pac-tab { background: none; border: none; padding: 10px 18px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; transition: all .15s; }
+    .pac-tab:hover { color: #1565c0; }
+    .pac-tab.active { color: #1565c0; border-bottom-color: #1565c0; }
+</style>
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<PacienteDto> _lista = new();
     private List<AseguradoraDto> _aseguradoras = new();
+    private List<SucursalDto> _sedes = new();
     private string _filtro = "";
 
     private bool _showForm;
+    private string _tab = "generales";
     private Guid? _id;
+
+    // Identificacion
     private string _doc = "", _tipoDoc = "CC";
-    private string? _nombre, _pNombre, _sNombre, _pApellido, _sApellido;
+    private string? _pNombre, _sNombre, _pApellido, _sApellido;
     private DateOnly? _fnac;
-    private string? _sexo, _estadoCivil, _tel, _email, _dir, _ciudad, _zona, _ocupacion, _regimen;
+    private int? _edad;
+
+    // Admin PAD
+    private string? _codAcept;
+    private DateOnly? _fComenta, _fIngreso, _fEgreso;
     private string _aseId = "";
+    private int? _diasEst, _opIngreso;
+
+    // Clasificacion
+    private string? _incapacidad, _grupoRh, _tipoUsuario, _estado;
+    private string? _clasifPaciente, _clasifGrupo;
+    private string? _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen;
+
+    // Diagnostico
+    private string? _dxPrincipal, _tutela, _tipoTutela, _medContratado;
+
+    // Geografia
+    private string? _dir, _barrio, _ciudad;
+    private string? _tel, _email;
+    private string _sedeId = "";
+
+    // Emergencia
     private string? _emerNombre, _emerParentesco, _emerTel;
     private bool _activo = true;
+
     private bool _busy; private string? _error, _ok;
 
     protected override async Task OnInitializedAsync()
     {
         _aseguradoras = (await AseSvc.ListAseguradorasAsync()).ToList();
+        _sedes = (await SucSvc.ListAsync()).ToList();
         await LoadLista();
     }
 
@@ -127,23 +291,44 @@
 
     private void New()
     {
-        _id = null; _doc = ""; _tipoDoc = "CC"; _nombre = _pNombre = _sNombre = _pApellido = _sApellido = null;
-        _fnac = null; _sexo = _estadoCivil = _tel = _email = _dir = _ciudad = _zona = _ocupacion = _regimen = null;
-        _aseId = ""; _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
-        _showForm = true; _error = _ok = null;
+        _id = null;
+        _doc = ""; _tipoDoc = "CC";
+        _pNombre = _sNombre = _pApellido = _sApellido = null;
+        _fnac = null; _edad = null;
+        _codAcept = null; _fComenta = _fIngreso = _fEgreso = null; _aseId = "";
+        _diasEst = _opIngreso = null;
+        _incapacidad = _grupoRh = _tipoUsuario = _estado = null;
+        _clasifPaciente = _clasifGrupo = null;
+        _estrato = _sexo = _estadoCivil = _zona = _ocupacion = _regimen = null;
+        _dxPrincipal = _tutela = _tipoTutela = _medContratado = null;
+        _dir = _barrio = _ciudad = null;
+        _tel = _email = null; _sedeId = "";
+        _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
+        _showForm = true; _tab = "generales"; _error = _ok = null;
     }
 
     private async Task Select(Guid id)
     {
         var d = await Svc.GetAsync(id);
         if (d is null) { return; }
-        _id = d.Id; _doc = d.NumeroDocumento; _tipoDoc = d.TipoDocumento; _nombre = d.NombreCompleto;
+        _id = d.Id;
+        _doc = d.NumeroDocumento; _tipoDoc = d.TipoDocumento;
         _pNombre = d.PrimerNombre; _sNombre = d.SegundoNombre; _pApellido = d.PrimerApellido; _sApellido = d.SegundoApellido;
-        _fnac = d.FechaNacimiento; _sexo = d.Sexo; _estadoCivil = d.EstadoCivil; _tel = d.Telefono; _email = d.Email;
-        _dir = d.Direccion; _ciudad = d.Ciudad; _zona = d.Zona; _ocupacion = d.Ocupacion; _regimen = d.Regimen;
+        _fnac = d.FechaNacimiento; _edad = d.Edad;
+        _codAcept = d.CodigoAceptacion; _fComenta = d.FechaComentan;
+        _fIngreso = d.FechaIngresoPad; _fEgreso = d.FechaEgresoPad;
         _aseId = d.AseguradoraId?.ToString() ?? "";
+        _diasEst = d.DiasEstancia; _opIngreso = d.OpIngresoDias;
+        _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _tipoUsuario = d.TipoUsuario; _estado = d.Estado;
+        _clasifPaciente = d.ClasificacionPaciente; _clasifGrupo = d.ClasificacionGrupoPatologia;
+        _estrato = d.EstratoSocial; _sexo = d.Sexo; _estadoCivil = d.EstadoCivil; _zona = d.Zona;
+        _ocupacion = d.Ocupacion; _regimen = d.Regimen;
+        _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela; _tipoTutela = d.TipoTutela; _medContratado = d.MedContratado;
+        _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
+        _tel = d.Telefono; _email = d.Email;
+        _sedeId = d.SedeAtencionId?.ToString() ?? "";
         _emerNombre = d.ContactoEmergencia; _emerParentesco = d.Parentesco; _emerTel = d.TelefonoEmergencia; _activo = d.Activo;
-        _showForm = true; _error = _ok = null;
+        _showForm = true; _tab = "generales"; _error = _ok = null;
     }
 
     private async Task Save()
@@ -152,9 +337,25 @@
         try
         {
             Guid? ase = Guid.TryParse(_aseId, out var ag) ? ag : null;
-            var req = new SavePacienteRequest(_id, _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido, _nombre,
-                _fnac, _sexo, _estadoCivil, _tel, _email, _dir, _ciudad, _zona, _ocupacion, _regimen, ase,
-                _emerNombre, _emerParentesco, _emerTel, _activo);
+            Guid? sede = Guid.TryParse(_sedeId, out var sg) ? sg : null;
+            var req = new SavePacienteRequest(
+                _id,
+                _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido, null,
+                _fnac, _edad,
+                null, _codAcept, _fComenta,
+                ase, _fIngreso, _fEgreso, _diasEst, _opIngreso,
+                _incapacidad, _grupoRh, _tipoUsuario, _estado,
+                _clasifPaciente, _clasifGrupo,
+                _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen,
+                null, null, null,
+                null, _dxPrincipal,
+                _tutela, _tipoTutela, _medContratado,
+                null, null, null, null,
+                _dir, _barrio, _ciudad,
+                _tel, _email,
+                sede,
+                _emerNombre, _emerParentesco, _emerTel,
+                _activo);
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";

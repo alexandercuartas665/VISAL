@@ -1,20 +1,71 @@
 namespace Visal.Application.Tenancy;
 
-public sealed record PacienteDto(Guid Id, string NumeroDocumento, string NombreCompleto, string? Ciudad, string? Telefono, string? Aseguradora);
+public sealed record PacienteDto(
+    Guid Id, string NumeroDocumento, string NombreCompleto, string? Ciudad, string? Telefono,
+    string? Aseguradora, string? Sede, string? Estado, DateOnly? FechaIngresoPad);
 
 public sealed record PacienteDetailDto(
-    Guid Id, string NumeroDocumento, string TipoDocumento, string? PrimerNombre, string? SegundoNombre,
-    string? PrimerApellido, string? SegundoApellido, string NombreCompleto, DateOnly? FechaNacimiento,
-    string? Sexo, string? EstadoCivil, string? Telefono, string? Email, string? Direccion, string? Ciudad,
-    string? Zona, string? Ocupacion, string? Regimen, Guid? AseguradoraId,
-    string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia, bool Activo);
+    // Identificacion
+    Guid Id, string NumeroDocumento, string TipoDocumento,
+    string? PrimerNombre, string? SegundoNombre, string? PrimerApellido, string? SegundoApellido,
+    string NombreCompleto, DateOnly? FechaNacimiento, int? Edad,
+    // Admin PAD
+    Guid? IpsComentaId, string? CodigoAceptacion, DateOnly? FechaComentan,
+    Guid? AseguradoraId, DateOnly? FechaIngresoPad, DateOnly? FechaEgresoPad,
+    int? DiasEstancia, int? OpIngresoDias,
+    // Clasificaciones
+    string? Incapacidad, string? GrupoRh, string? TipoUsuario, string? Estado,
+    string? ClasificacionPaciente, string? ClasificacionGrupoPatologia,
+    string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
+    string? Ocupacion, string? Regimen,
+    // Contratos
+    Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
+    // Diagnostico
+    Guid? Cie10Id, string? DiagnosticoPrincipal,
+    // Tutela
+    string? Tutela, string? TipoTutela, string? MedContratado,
+    // Geografia
+    Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
+    string? Direccion, string? Barrio, string? Ciudad,
+    // Contacto
+    string? Telefono, string? Email,
+    // Sede
+    Guid? SedeAtencionId,
+    // Emergencia
+    string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia,
+    bool Activo);
 
 public sealed record SavePacienteRequest(
-    Guid? Id, string NumeroDocumento, string TipoDocumento, string? PrimerNombre, string? SegundoNombre,
-    string? PrimerApellido, string? SegundoApellido, string? NombreCompleto, DateOnly? FechaNacimiento,
-    string? Sexo, string? EstadoCivil, string? Telefono, string? Email, string? Direccion, string? Ciudad,
-    string? Zona, string? Ocupacion, string? Regimen, Guid? AseguradoraId,
-    string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia, bool Activo);
+    Guid? Id,
+    // Identificacion
+    string NumeroDocumento, string TipoDocumento,
+    string? PrimerNombre, string? SegundoNombre, string? PrimerApellido, string? SegundoApellido,
+    string? NombreCompleto, DateOnly? FechaNacimiento, int? Edad,
+    // Admin PAD
+    Guid? IpsComentaId, string? CodigoAceptacion, DateOnly? FechaComentan,
+    Guid? AseguradoraId, DateOnly? FechaIngresoPad, DateOnly? FechaEgresoPad,
+    int? DiasEstancia, int? OpIngresoDias,
+    // Clasificaciones
+    string? Incapacidad, string? GrupoRh, string? TipoUsuario, string? Estado,
+    string? ClasificacionPaciente, string? ClasificacionGrupoPatologia,
+    string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
+    string? Ocupacion, string? Regimen,
+    // Contratos
+    Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
+    // Diagnostico
+    Guid? Cie10Id, string? DiagnosticoPrincipal,
+    // Tutela
+    string? Tutela, string? TipoTutela, string? MedContratado,
+    // Geografia
+    Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
+    string? Direccion, string? Barrio, string? Ciudad,
+    // Contacto
+    string? Telefono, string? Email,
+    // Sede
+    Guid? SedeAtencionId,
+    // Emergencia
+    string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia,
+    bool Activo);
 
 public interface IPacienteService
 {

@@ -573,6 +573,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<Paciente>(b =>
         {
+            // Identificacion
             b.Property(x => x.NumeroDocumento).HasMaxLength(30).IsRequired();
             b.Property(x => x.TipoDocumento).HasMaxLength(10).IsRequired();
             b.Property(x => x.PrimerNombre).HasMaxLength(80);
@@ -580,19 +581,40 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.PrimerApellido).HasMaxLength(80);
             b.Property(x => x.SegundoApellido).HasMaxLength(80);
             b.Property(x => x.NombreCompleto).HasMaxLength(250).IsRequired();
+            // Admin PAD
+            b.Property(x => x.CodigoAceptacion).HasMaxLength(40);
+            // Clasificaciones (texto libre por ahora)
+            b.Property(x => x.Incapacidad).HasMaxLength(60);
+            b.Property(x => x.GrupoRh).HasMaxLength(10);
+            b.Property(x => x.TipoUsuario).HasMaxLength(60);
+            b.Property(x => x.Estado).HasMaxLength(40);
+            b.Property(x => x.ClasificacionPaciente).HasMaxLength(80);
+            b.Property(x => x.ClasificacionGrupoPatologia).HasMaxLength(120);
+            b.Property(x => x.EstratoSocial).HasMaxLength(20);
             b.Property(x => x.Sexo).HasMaxLength(20);
             b.Property(x => x.EstadoCivil).HasMaxLength(40);
-            b.Property(x => x.Telefono).HasMaxLength(40);
-            b.Property(x => x.Email).HasMaxLength(160);
-            b.Property(x => x.Direccion).HasMaxLength(300);
-            b.Property(x => x.Ciudad).HasMaxLength(120);
             b.Property(x => x.Zona).HasMaxLength(40);
             b.Property(x => x.Ocupacion).HasMaxLength(120);
             b.Property(x => x.Regimen).HasMaxLength(40);
+            b.Property(x => x.Tutela).HasMaxLength(40);
+            b.Property(x => x.TipoTutela).HasMaxLength(80);
+            b.Property(x => x.MedContratado).HasMaxLength(80);
+            // Diagnostico
+            b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
+            // Geografia
+            b.Property(x => x.Direccion).HasMaxLength(300);
+            b.Property(x => x.Barrio).HasMaxLength(120);
+            b.Property(x => x.Ciudad).HasMaxLength(120);
+            // Contacto
+            b.Property(x => x.Telefono).HasMaxLength(40);
+            b.Property(x => x.Email).HasMaxLength(160);
+            // Emergencia
             b.Property(x => x.ContactoEmergencia).HasMaxLength(200);
             b.Property(x => x.Parentesco).HasMaxLength(80);
             b.Property(x => x.TelefonoEmergencia).HasMaxLength(40);
+            // FKs concretas (las catalogo se haran luego)
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.SedeAtencion).WithMany().HasForeignKey(x => x.SedeAtencionId).OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.NumeroDocumento }).IsUnique();
         });
 

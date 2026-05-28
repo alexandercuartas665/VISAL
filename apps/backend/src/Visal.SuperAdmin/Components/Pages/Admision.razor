@@ -180,7 +180,10 @@
                             </select>
                         </div>
                         <div class="ase-f"><label>Med Contratado</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_medContratado">
+                                <option value="">Seleccione Elemento</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.MedContratado)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                     </div>
 
@@ -313,8 +316,9 @@
     private string? _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen;
 
     // Diagnostico
-    private string? _dxPrincipal, _tutela, _medContratado;
+    private string? _dxPrincipal, _tutela;
     private string _tipoTutela = "";
+    private string _medContratado = "";
 
     // Geografia
     private string? _dir, _barrio, _ciudad;
@@ -391,8 +395,9 @@
         _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
         _contrato1 = _contrato2 = _contrato3 = "";
         _estrato = _sexo = _estadoCivil = _zona = _ocupacion = _regimen = null;
-        _dxPrincipal = _tutela = _medContratado = null;
+        _dxPrincipal = _tutela = null;
         _tipoTutela = "";
+        _medContratado = "";
         _dir = _barrio = _ciudad = null;
         _tel = _email = null; _sedeId = "";
         _paisResidencia = _paisOrigen = _departamento = _municipio = "";
@@ -426,8 +431,9 @@
         _contrato3 = d.Contrato3Id?.ToString() ?? "";
         _estrato = d.EstratoSocial; _sexo = d.Sexo; _estadoCivil = d.EstadoCivil; _zona = d.Zona;
         _ocupacion = d.Ocupacion; _regimen = d.Regimen;
-        _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela; _medContratado = d.MedContratado;
+        _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela;
         _tipoTutela = d.TipoTutelaId?.ToString() ?? "";
+        _medContratado = d.MedContratadoId?.ToString() ?? "";
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _tel = d.Telefono; _email = d.Email;
         _sedeId = d.SedeAtencionId?.ToString() ?? "";
@@ -462,7 +468,7 @@
                 _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen,
                 Try(_contrato1), Try(_contrato2), Try(_contrato3),
                 null, _dxPrincipal,
-                _tutela, Try(_tipoTutela), _medContratado,
+                _tutela, Try(_tipoTutela), Try(_medContratado),
                 Try(_paisResidencia), Try(_paisOrigen), Try(_departamento), Try(_municipio),
                 _dir, _barrio, _ciudad,
                 _tel, _email,

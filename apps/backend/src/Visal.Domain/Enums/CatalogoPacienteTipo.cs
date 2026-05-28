@@ -15,5 +15,7 @@ public enum CatalogoPacienteTipo
     /// <summary>Tipo de tutela (juzgado, derecho de peticion, accion, etc).</summary>
     TipoTutela,
     /// <summary>Contrato comercial entre IPS y aseguradora.</summary>
-    Contrato
+    Contrato,
+    /// <summary>Mediamento contratado (SI/NO o detalle del contrato del medicamento).</summary>
+    MedContratado
 }

@@ -23,7 +23,7 @@ public sealed record PacienteDetailDto(
     // Diagnostico
     Guid? Cie10Id, string? DiagnosticoPrincipal,
     // Tutela
-    string? Tutela, Guid? TipoTutelaId, string? MedContratado,
+    string? Tutela, Guid? TipoTutelaId, Guid? MedContratadoId,
     // Geografia
     Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
     string? Direccion, string? Barrio, string? Ciudad,
@@ -55,7 +55,7 @@ public sealed record SavePacienteRequest(
     // Diagnostico
     Guid? Cie10Id, string? DiagnosticoPrincipal,
     // Tutela
-    string? Tutela, Guid? TipoTutelaId, string? MedContratado,
+    string? Tutela, Guid? TipoTutelaId, Guid? MedContratadoId,
     // Geografia
     Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
     string? Direccion, string? Barrio, string? Ciudad,

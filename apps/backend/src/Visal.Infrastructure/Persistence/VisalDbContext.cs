@@ -598,7 +598,6 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Ocupacion).HasMaxLength(120);
             b.Property(x => x.Regimen).HasMaxLength(40);
             b.Property(x => x.Tutela).HasMaxLength(40);
-            b.Property(x => x.MedContratado).HasMaxLength(80);
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
             // Geografia

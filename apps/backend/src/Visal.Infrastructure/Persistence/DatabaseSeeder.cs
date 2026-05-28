@@ -475,7 +475,15 @@ public sealed class DatabaseSeeder
             (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "OST", "OSTEOARTICULAR"),
             (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "INF", "INFECCIOSAS"),
             (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "ONC", "ONCOLOGICA"),
-            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "MEN", "MENTAL")
+            (Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, "MEN", "MENTAL"),
+
+            // ===== TIPO TUTELA =====
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoTutela, "INT", "INTEGRAL"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoTutela, "PAR", "PARCIAL"),
+
+            // ===== MED CONTRATADO =====
+            (Visal.Domain.Enums.CatalogoPacienteTipo.MedContratado, "SI", "SI"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.MedContratado, "NO", "NO")
         };
 
         int agregados = 0;

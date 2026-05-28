@@ -75,7 +75,8 @@ public class Paciente : TenantEntity
     public string? Tutela { get; set; }
     /// <summary>FK a catalogos_paciente (tipo=TipoTutela).</summary>
     public Guid? TipoTutelaId { get; set; }
-    public string? MedContratado { get; set; }
+    /// <summary>FK a catalogos_paciente (tipo=MedContratado).</summary>
+    public Guid? MedContratadoId { get; set; }
 
     // ===== Geografia (FKs a futuras tablas catalogo) =====
     public Guid? PaisResidenciaId { get; set; }

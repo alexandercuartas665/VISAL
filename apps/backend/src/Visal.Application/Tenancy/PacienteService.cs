@@ -48,7 +48,7 @@ public sealed class PacienteService : IPacienteService
                 p.Ocupacion, p.Regimen,
                 p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
                 p.Cie10Id, p.DiagnosticoPrincipal,
-                p.Tutela, p.TipoTutelaId, p.MedContratado,
+                p.Tutela, p.TipoTutelaId, p.MedContratadoId,
                 p.PaisResidenciaId, p.PaisOrigenId, p.DepartamentoId, p.MunicipioId,
                 p.Direccion, p.Barrio, p.Ciudad,
                 p.Telefono, p.Email,
@@ -129,7 +129,7 @@ public sealed class PacienteService : IPacienteService
         // Tutela
         p.Tutela = req.Tutela?.Trim();
         p.TipoTutelaId = req.TipoTutelaId;
-        p.MedContratado = req.MedContratado?.Trim();
+        p.MedContratadoId = req.MedContratadoId;
 
         // Geografia
         p.PaisResidenciaId = req.PaisResidenciaId;

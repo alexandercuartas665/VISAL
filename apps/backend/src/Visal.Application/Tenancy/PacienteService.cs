@@ -42,13 +42,13 @@ public sealed class PacienteService : IPacienteService
                 p.IpsComentaId, p.CodigoAceptacion, p.FechaComentan,
                 p.AseguradoraId, p.FechaIngresoPad, p.FechaEgresoPad,
                 p.DiasEstancia, p.OpIngresoDias,
-                p.Incapacidad, p.GrupoRh, p.TipoUsuario, p.Estado,
-                p.ClasificacionPaciente, p.ClasificacionGrupoPatologia,
+                p.Incapacidad, p.GrupoRh, p.TipoUsuarioId, p.Estado,
+                p.ClasificacionPacienteId, p.ClasificacionGrupoPatologiaId,
                 p.EstratoSocial, p.Sexo, p.EstadoCivil, p.Zona,
                 p.Ocupacion, p.Regimen,
                 p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
                 p.Cie10Id, p.DiagnosticoPrincipal,
-                p.Tutela, p.TipoTutela, p.MedContratado,
+                p.Tutela, p.TipoTutelaId, p.MedContratado,
                 p.PaisResidenciaId, p.PaisOrigenId, p.DepartamentoId, p.MunicipioId,
                 p.Direccion, p.Barrio, p.Ciudad,
                 p.Telefono, p.Email,
@@ -106,10 +106,10 @@ public sealed class PacienteService : IPacienteService
         // Clasificaciones
         p.Incapacidad = req.Incapacidad?.Trim();
         p.GrupoRh = req.GrupoRh?.Trim();
-        p.TipoUsuario = req.TipoUsuario?.Trim();
+        p.TipoUsuarioId = req.TipoUsuarioId;
         p.Estado = req.Estado?.Trim();
-        p.ClasificacionPaciente = req.ClasificacionPaciente?.Trim();
-        p.ClasificacionGrupoPatologia = req.ClasificacionGrupoPatologia?.Trim();
+        p.ClasificacionPacienteId = req.ClasificacionPacienteId;
+        p.ClasificacionGrupoPatologiaId = req.ClasificacionGrupoPatologiaId;
         p.EstratoSocial = req.EstratoSocial?.Trim();
         p.Sexo = req.Sexo?.Trim();
         p.EstadoCivil = req.EstadoCivil?.Trim();
@@ -128,7 +128,7 @@ public sealed class PacienteService : IPacienteService
 
         // Tutela
         p.Tutela = req.Tutela?.Trim();
-        p.TipoTutela = req.TipoTutela?.Trim();
+        p.TipoTutelaId = req.TipoTutelaId;
         p.MedContratado = req.MedContratado?.Trim();
 
         // Geografia

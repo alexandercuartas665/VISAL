@@ -76,6 +76,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Sucursal> Sucursales => Set<Sucursal>();
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
+    public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -586,10 +587,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Clasificaciones (texto libre por ahora)
             b.Property(x => x.Incapacidad).HasMaxLength(60);
             b.Property(x => x.GrupoRh).HasMaxLength(10);
-            b.Property(x => x.TipoUsuario).HasMaxLength(60);
             b.Property(x => x.Estado).HasMaxLength(40);
-            b.Property(x => x.ClasificacionPaciente).HasMaxLength(80);
-            b.Property(x => x.ClasificacionGrupoPatologia).HasMaxLength(120);
             b.Property(x => x.EstratoSocial).HasMaxLength(20);
             b.Property(x => x.Sexo).HasMaxLength(20);
             b.Property(x => x.EstadoCivil).HasMaxLength(40);
@@ -597,7 +595,6 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Ocupacion).HasMaxLength(120);
             b.Property(x => x.Regimen).HasMaxLength(40);
             b.Property(x => x.Tutela).HasMaxLength(40);
-            b.Property(x => x.TipoTutela).HasMaxLength(80);
             b.Property(x => x.MedContratado).HasMaxLength(80);
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
@@ -629,6 +626,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantUserId, x.SucursalId }).IsUnique();
+        });
+
+        modelBuilder.Entity<CatalogoPaciente>(b =>
+        {
+            b.Property(x => x.Tipo).HasMaxLength(60).IsRequired();
+            b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Descripcion).HasMaxLength(500);
+            // Unico por tenant + tipo + codigo: cada catalogo tiene su propio espacio de codigos.
+            b.HasIndex(x => new { x.TenantId, x.Tipo, x.Codigo }).IsUnique();
         });
     }
 

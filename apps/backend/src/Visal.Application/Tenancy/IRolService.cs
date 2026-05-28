@@ -24,6 +24,7 @@ public static class ModuloCatalogo
         new("cfg-aseguradoras", "Entidades Aseguradoras", "Configuracion del Sistema"),
         new("cfg-profesionales", "Profesionales (catalogo)", "Configuracion del Sistema"),
         new("cfg-servicios", "Servicios", "Configuracion del Sistema"),
+        new("cfg-pacientes", "Configuracion Pacientes", "Configuracion del Sistema"),
         new("cfg-turnos", "Configuracion de Turnos", "Configuracion del Sistema"),
         new("cfg-empresa", "Configuracion de Empresa", "Configuracion de la Entidad"),
         new("cfg-interoperabilidad", "Interoperabilidad", "Configuracion de la Entidad"),

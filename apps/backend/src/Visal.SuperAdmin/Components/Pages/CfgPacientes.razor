@@ -1,0 +1,145 @@
+@page "/cfg-pacientes"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject ICatalogoPacienteService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Configuracion Pacientes - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Configuracion Pacientes</h1>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card">
+    <div class="pac-tabs">
+        @foreach (var t in _tabs)
+        {
+            <button class="pac-tab @(_tab == t.tipo ? "active" : "")" @onclick="() => Switch(t.tipo)">@t.label</button>
+        }
+    </div>
+
+    <div class="ase-card-h">@LabelActivo (@_items.Count(i => i.Tipo == _tab))
+        <button class="btn btn-outline-primary btn-sm ms-2" @onclick="Add">+ Agregar</button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width:140px">Codigo</th>
+                    <th>Nombre</th>
+                    <th>Descripcion</th>
+                    <th style="width:80px;text-align:center">Activo</th>
+                    <th style="width:120px"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows.Where(r => r.Tipo == _tab))
+                {
+                    <tr>
+                        <td><input class="form-control form-control-sm mono" @bind="r.Codigo" /></td>
+                        <td><input class="form-control form-control-sm" @bind="r.Nombre" /></td>
+                        <td><input class="form-control form-control-sm" @bind="r.Descripcion" /></td>
+                        <td class="text-center"><input type="checkbox" class="form-check-input" @bind="r.Activo" /></td>
+                        <td class="ase-row-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="() => Save(r)">&#10003;</button>
+                            @if (r.Id is not null)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => Delete(r)">&times;</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (!_rows.Any(r => r.Tipo == _tab)) { <div class="ase-empty">Sin items. Agrega el primero con "+ Agregar".</div> }
+    </div>
+</div>
+
+<style>
+    .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
+    .pac-tab { background: none; border: none; padding: 10px 18px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; transition: all .15s; }
+    .pac-tab:hover { color: #1565c0; }
+    .pac-tab.active { color: #1565c0; border-bottom-color: #1565c0; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private readonly (CatalogoPacienteTipo tipo, string label)[] _tabs =
+    {
+        (CatalogoPacienteTipo.TipoUsuario, "Tipo Usuario"),
+        (CatalogoPacienteTipo.ClasificacionPaciente, "Clasificacion Paciente"),
+        (CatalogoPacienteTipo.ClasificacionGrupoPatologia, "Clasif. Grupo Patologia"),
+        (CatalogoPacienteTipo.TipoTutela, "Tipo Tutela"),
+        (CatalogoPacienteTipo.Contrato, "Contratos")
+    };
+
+    private CatalogoPacienteTipo _tab = CatalogoPacienteTipo.TipoUsuario;
+    private List<Row> _rows = new();
+    private List<CatalogoPacienteDto> _items = new();
+    private string? _error, _ok;
+
+    private string LabelActivo => _tabs.First(t => t.tipo == _tab).label;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _items = (await Svc.ListAsync(null)).ToList();
+        _rows = _items.Select(Row.From).ToList();
+    }
+
+    private void Switch(CatalogoPacienteTipo t) { _tab = t; _error = _ok = null; }
+
+    private void Add() => _rows.Add(new Row { Tipo = _tab, Activo = true });
+
+    private async Task Save(Row r)
+    {
+        _error = _ok = null;
+        try
+        {
+            var saved = await Svc.SaveAsync(new SaveCatalogoPacienteRequest(r.Id, r.Tipo, r.Codigo, r.Nombre, r.Descripcion, r.Activo), await Actor());
+            if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
+            r.Id = saved.Id; _ok = $"\"{saved.Nombre}\" guardado.";
+            await Load();
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private async Task Delete(Row r)
+    {
+        if (r.Id is not Guid id) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar \"{r.Nombre}\"?");
+        if (!ok) { return; }
+        await Svc.DeleteAsync(id, await Actor());
+        _ok = "Item eliminado.";
+        await Load();
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private sealed class Row
+    {
+        public Guid? Id { get; set; }
+        public CatalogoPacienteTipo Tipo { get; set; }
+        public string Codigo { get; set; } = "";
+        public string Nombre { get; set; } = "";
+        public string? Descripcion { get; set; }
+        public bool Activo { get; set; } = true;
+        public static Row From(CatalogoPacienteDto d) => new() { Id = d.Id, Tipo = d.Tipo, Codigo = d.Codigo, Nombre = d.Nombre, Descripcion = d.Descripcion, Activo = d.Activo };
+    }
+}

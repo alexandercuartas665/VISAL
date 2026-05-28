@@ -6,6 +6,7 @@
 @inject IPacienteService Svc
 @inject IAseguradoraService AseSvc
 @inject ISucursalService SucSvc
+@inject ICatalogoPacienteService CatSvc
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
 
@@ -100,7 +101,10 @@
                             </select>
                         </div>
                         <div class="ase-f"><label>Tipo Usuario</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_tipoUsuario">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.TipoUsuario)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Estado</label>
                             <select class="form-select form-select-sm" @bind="_estado">
@@ -108,19 +112,34 @@
                             </select>
                         </div>
                         <div class="ase-f"><label>Clasificacion Paciente</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_clasifPaciente">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.ClasificacionPaciente)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Clasificacion Grupo de Patologia</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_clasifGrupo">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.ClasificacionGrupoPatologia)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Contrato 1</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_contrato1">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.Contrato)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Contrato 2</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_contrato2">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.Contrato)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Contrato 3</label>
-                            <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
+                            <select class="form-select form-select-sm" @bind="_contrato3">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.Contrato)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
                         </div>
                         <div class="ase-f"><label>Estrato Social</label>
                             <select class="form-select form-select-sm" @bind="_estrato">
@@ -150,7 +169,12 @@
                                 <option value="">--</option><option>SI</option><option>NO</option>
                             </select>
                         </div>
-                        <div class="ase-f"><label>Tipo Tutela</label><input class="form-control form-control-sm" @bind="_tipoTutela" /></div>
+                        <div class="ase-f"><label>Tipo Tutela</label>
+                            <select class="form-select form-select-sm" @bind="_tipoTutela">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.TipoTutela)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
+                        </div>
                         <div class="ase-f"><label>Med Contratado</label>
                             <select class="form-select form-select-sm" disabled title="Catalogo en proximo modulo"><option>-- Por configurar --</option></select>
                         </div>
@@ -242,7 +266,11 @@
     private List<PacienteDto> _lista = new();
     private List<AseguradoraDto> _aseguradoras = new();
     private List<SucursalDto> _sedes = new();
+    private List<CatalogoPacienteDto> _catalogos = new();
     private string _filtro = "";
+
+    private IEnumerable<CatalogoPacienteDto> CatItems(Visal.Domain.Enums.CatalogoPacienteTipo tipo)
+        => _catalogos.Where(c => c.Tipo == tipo && c.Activo);
 
     private bool _showForm;
     private string _tab = "generales";
@@ -261,12 +289,14 @@
     private int? _diasEst, _opIngreso;
 
     // Clasificacion
-    private string? _incapacidad, _grupoRh, _tipoUsuario, _estado;
-    private string? _clasifPaciente, _clasifGrupo;
+    private string? _incapacidad, _grupoRh, _estado;
+    private string _tipoUsuario = "", _clasifPaciente = "", _clasifGrupo = "";
+    private string _contrato1 = "", _contrato2 = "", _contrato3 = "";
     private string? _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen;
 
     // Diagnostico
-    private string? _dxPrincipal, _tutela, _tipoTutela, _medContratado;
+    private string? _dxPrincipal, _tutela, _medContratado;
+    private string _tipoTutela = "";
 
     // Geografia
     private string? _dir, _barrio, _ciudad;
@@ -283,6 +313,7 @@
     {
         _aseguradoras = (await AseSvc.ListAseguradorasAsync()).ToList();
         _sedes = (await SucSvc.ListAsync()).ToList();
+        _catalogos = (await CatSvc.ListAsync(null)).ToList();
         await LoadLista();
     }
 
@@ -297,10 +328,12 @@
         _fnac = null; _edad = null;
         _codAcept = null; _fComenta = _fIngreso = _fEgreso = null; _aseId = "";
         _diasEst = _opIngreso = null;
-        _incapacidad = _grupoRh = _tipoUsuario = _estado = null;
-        _clasifPaciente = _clasifGrupo = null;
+        _incapacidad = _grupoRh = _estado = null;
+        _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
+        _contrato1 = _contrato2 = _contrato3 = "";
         _estrato = _sexo = _estadoCivil = _zona = _ocupacion = _regimen = null;
-        _dxPrincipal = _tutela = _tipoTutela = _medContratado = null;
+        _dxPrincipal = _tutela = _medContratado = null;
+        _tipoTutela = "";
         _dir = _barrio = _ciudad = null;
         _tel = _email = null; _sedeId = "";
         _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
@@ -319,11 +352,17 @@
         _fIngreso = d.FechaIngresoPad; _fEgreso = d.FechaEgresoPad;
         _aseId = d.AseguradoraId?.ToString() ?? "";
         _diasEst = d.DiasEstancia; _opIngreso = d.OpIngresoDias;
-        _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _tipoUsuario = d.TipoUsuario; _estado = d.Estado;
-        _clasifPaciente = d.ClasificacionPaciente; _clasifGrupo = d.ClasificacionGrupoPatologia;
+        _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _estado = d.Estado;
+        _tipoUsuario = d.TipoUsuarioId?.ToString() ?? "";
+        _clasifPaciente = d.ClasificacionPacienteId?.ToString() ?? "";
+        _clasifGrupo = d.ClasificacionGrupoPatologiaId?.ToString() ?? "";
+        _contrato1 = d.Contrato1Id?.ToString() ?? "";
+        _contrato2 = d.Contrato2Id?.ToString() ?? "";
+        _contrato3 = d.Contrato3Id?.ToString() ?? "";
         _estrato = d.EstratoSocial; _sexo = d.Sexo; _estadoCivil = d.EstadoCivil; _zona = d.Zona;
         _ocupacion = d.Ocupacion; _regimen = d.Regimen;
-        _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela; _tipoTutela = d.TipoTutela; _medContratado = d.MedContratado;
+        _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela; _medContratado = d.MedContratado;
+        _tipoTutela = d.TipoTutelaId?.ToString() ?? "";
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _tel = d.Telefono; _email = d.Email;
         _sedeId = d.SedeAtencionId?.ToString() ?? "";
@@ -338,18 +377,19 @@
         {
             Guid? ase = Guid.TryParse(_aseId, out var ag) ? ag : null;
             Guid? sede = Guid.TryParse(_sedeId, out var sg) ? sg : null;
+            Guid? Try(string s) => Guid.TryParse(s, out var g) ? g : null;
             var req = new SavePacienteRequest(
                 _id,
                 _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido, null,
                 _fnac, _edad,
                 null, _codAcept, _fComenta,
                 ase, _fIngreso, _fEgreso, _diasEst, _opIngreso,
-                _incapacidad, _grupoRh, _tipoUsuario, _estado,
-                _clasifPaciente, _clasifGrupo,
+                _incapacidad, _grupoRh, Try(_tipoUsuario), _estado,
+                Try(_clasifPaciente), Try(_clasifGrupo),
                 _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen,
-                null, null, null,
+                Try(_contrato1), Try(_contrato2), Try(_contrato3),
                 null, _dxPrincipal,
-                _tutela, _tipoTutela, _medContratado,
+                _tutela, Try(_tipoTutela), _medContratado,
                 null, null, null, null,
                 _dir, _barrio, _ciudad,
                 _tel, _email,

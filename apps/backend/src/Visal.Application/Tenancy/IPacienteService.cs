@@ -13,9 +13,9 @@ public sealed record PacienteDetailDto(
     Guid? IpsComentaId, string? CodigoAceptacion, DateOnly? FechaComentan,
     Guid? AseguradoraId, DateOnly? FechaIngresoPad, DateOnly? FechaEgresoPad,
     int? DiasEstancia, int? OpIngresoDias,
-    // Clasificaciones
-    string? Incapacidad, string? GrupoRh, string? TipoUsuario, string? Estado,
-    string? ClasificacionPaciente, string? ClasificacionGrupoPatologia,
+    // Clasificaciones (FKs a catalogos_paciente)
+    string? Incapacidad, string? GrupoRh, Guid? TipoUsuarioId, string? Estado,
+    Guid? ClasificacionPacienteId, Guid? ClasificacionGrupoPatologiaId,
     string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
     string? Ocupacion, string? Regimen,
     // Contratos
@@ -23,7 +23,7 @@ public sealed record PacienteDetailDto(
     // Diagnostico
     Guid? Cie10Id, string? DiagnosticoPrincipal,
     // Tutela
-    string? Tutela, string? TipoTutela, string? MedContratado,
+    string? Tutela, Guid? TipoTutelaId, string? MedContratado,
     // Geografia
     Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
     string? Direccion, string? Barrio, string? Ciudad,
@@ -45,9 +45,9 @@ public sealed record SavePacienteRequest(
     Guid? IpsComentaId, string? CodigoAceptacion, DateOnly? FechaComentan,
     Guid? AseguradoraId, DateOnly? FechaIngresoPad, DateOnly? FechaEgresoPad,
     int? DiasEstancia, int? OpIngresoDias,
-    // Clasificaciones
-    string? Incapacidad, string? GrupoRh, string? TipoUsuario, string? Estado,
-    string? ClasificacionPaciente, string? ClasificacionGrupoPatologia,
+    // Clasificaciones (FKs)
+    string? Incapacidad, string? GrupoRh, Guid? TipoUsuarioId, string? Estado,
+    Guid? ClasificacionPacienteId, Guid? ClasificacionGrupoPatologiaId,
     string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
     string? Ocupacion, string? Regimen,
     // Contratos
@@ -55,7 +55,7 @@ public sealed record SavePacienteRequest(
     // Diagnostico
     Guid? Cie10Id, string? DiagnosticoPrincipal,
     // Tutela
-    string? Tutela, string? TipoTutela, string? MedContratado,
+    string? Tutela, Guid? TipoTutelaId, string? MedContratado,
     // Geografia
     Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
     string? Direccion, string? Barrio, string? Ciudad,

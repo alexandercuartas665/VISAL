@@ -44,13 +44,16 @@ public class Paciente : TenantEntity
     /// <summary>Opcion de ingreso (dias autorizados por la aseguradora).</summary>
     public int? OpIngresoDias { get; set; }
 
-    // ===== Clasificaciones (texto por ahora; cataloguizar luego) =====
+    // ===== Clasificaciones (texto libre + FK al modulo Configuracion Pacientes) =====
     public string? Incapacidad { get; set; }
     public string? GrupoRh { get; set; }
-    public string? TipoUsuario { get; set; }
+    /// <summary>FK a catalogos_paciente (tipo=TipoUsuario). Lista configurable por tenant.</summary>
+    public Guid? TipoUsuarioId { get; set; }
     public string? Estado { get; set; }
-    public string? ClasificacionPaciente { get; set; }
-    public string? ClasificacionGrupoPatologia { get; set; }
+    /// <summary>FK a catalogos_paciente (tipo=ClasificacionPaciente).</summary>
+    public Guid? ClasificacionPacienteId { get; set; }
+    /// <summary>FK a catalogos_paciente (tipo=ClasificacionGrupoPatologia).</summary>
+    public Guid? ClasificacionGrupoPatologiaId { get; set; }
     public string? EstratoSocial { get; set; }
     public string? Sexo { get; set; }
     public string? EstadoCivil { get; set; }
@@ -58,7 +61,7 @@ public class Paciente : TenantEntity
     public string? Ocupacion { get; set; }
     public string? Regimen { get; set; }
 
-    // ===== Contratos (FK a futura tabla contratos) =====
+    // ===== Contratos (FK a catalogos_paciente tipo=Contrato) =====
     public Guid? Contrato1Id { get; set; }
     public Guid? Contrato2Id { get; set; }
     public Guid? Contrato3Id { get; set; }
@@ -70,7 +73,8 @@ public class Paciente : TenantEntity
 
     // ===== Tutela =====
     public string? Tutela { get; set; }
-    public string? TipoTutela { get; set; }
+    /// <summary>FK a catalogos_paciente (tipo=TipoTutela).</summary>
+    public Guid? TipoTutelaId { get; set; }
     public string? MedContratado { get; set; }
 
     // ===== Geografia (FKs a futuras tablas catalogo) =====

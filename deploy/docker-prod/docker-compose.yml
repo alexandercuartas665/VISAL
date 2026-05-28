@@ -1,25 +1,29 @@
 # Stack de PRODUCCION de Visal IPS RT.
-# Arranca:
-#   - visal-app    : la consola Blazor (imagen tirada de GHCR)
-#   - postgres     : base persistente con volumen propio
-#   - caddy        : reverse proxy con HTTPS automatico (Let's Encrypt)
+#
+# Diseño: el servidor YA tiene un reverse proxy global (nginx-proxy-manager,
+# traefik, otro Caddy, etc.) en los puertos 80/443 que se encarga del SSL.
+# Este compose expone visal-app en un puerto uncommon del host; tu reverse
+# proxy global hace TLS termination y forwardea hacia ese puerto.
+#
+# Servicios:
+#   - visal-app   : la consola Blazor (imagen de GHCR). Expuesta SOLO en
+#                   ${VISAL_PORT}; tu proxy global la alcanza.
+#   - postgres    : base persistente. NO expuesta al host (solo red interna).
 #
 # Uso:
-#   1) Copiar .env.example a .env y editar VISAL_DOMAIN, POSTGRES_PASSWORD, etc.
-#   2) docker login ghcr.io (la primera vez, con un PAT con permiso read:packages)
+#   1) Copiar .env.example a .env y editar VISAL_PORT, VISAL_IMAGE, POSTGRES_*.
+#   2) docker login ghcr.io (si la imagen sigue privada, con un PAT read:packages)
 #   3) docker compose up -d
-#   4) Actualizar: docker compose pull && docker compose up -d
-#
-# Requisitos en el servidor:
-#   - Puertos 80 y 443 abiertos hacia internet
-#   - DNS A record de tu dominio apuntando al servidor
-#   - Docker 24+ con compose v2
+#   4) En tu reverse proxy global, agregar reverse_proxy hacia
+#      http://localhost:${VISAL_PORT}  (Blazor SignalR requiere WebSockets;
+#      casi todos los proxies modernos los pasan por defecto).
+#   5) Actualizar: docker compose pull && docker compose up -d
 
 name: visal-prod
 
 services:
   visal-app:
-    # Cambia "owner/repo" por tu repo de GitHub (lower-case). Ej: ghcr.io/alexandercuartas665/visal/superadmin:latest
+    # Cambia owner/repo si es tu fork. Default: la imagen publicada por el workflow.
     image: ${VISAL_IMAGE:-ghcr.io/alexandercuartas665/visal/superadmin:latest}
     container_name: visal-app
     restart: unless-stopped
@@ -27,12 +31,16 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:8080
       ASPNETCORE_HTTP_PORTS: 8080
-      # Connection string apuntando al servicio postgres del compose (dentro de la red interna).
+      # Connection string apuntando al servicio postgres del compose (red interna).
       VISAL_DB_CONNECTION: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-      # Aplica migrations al arrancar (idempotente). Solo se ejecutan las pendientes.
+      # Aplica migrations EF al arrancar (idempotente).
       VISAL_RUN_MIGRATIONS: "true"
-      # Confianza al proxy (Caddy) para que Request.Scheme = https detras del TLS termination.
+      # Confianza al proxy global (TLS terminado afuera).
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+    ports:
+      # Publica al host en un puerto uncommon. Por default 5380 (ASCII de "S-D" : SuperAdmin).
+      # Tu reverse proxy global apunta a http://localhost:${VISAL_PORT}.
+      - "127.0.0.1:${VISAL_PORT:-5380}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,7 +55,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: visal-postgres
+    container_name: visal-postgres-prod
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -58,7 +66,7 @@ services:
       - visal-pgdata:/var/lib/postgresql/data
     networks:
       - visal-net
-    # En produccion NO publicamos el puerto al host; solo Caddy/visal-app lo ven via la red interna.
+    # En produccion NO publicamos al host. La BD solo se accede desde la red interna.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -66,30 +74,8 @@ services:
       retries: 10
       start_period: 20s
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: visal-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      VISAL_DOMAIN: ${VISAL_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - visal-caddy-data:/data       # certificados Let's Encrypt
-      - visal-caddy-config:/config
-    depends_on:
-      visal-app:
-        condition: service_started
-    networks:
-      - visal-net
-
 volumes:
   visal-pgdata:
-  visal-caddy-data:
-  visal-caddy-config:
 
 networks:
   visal-net:

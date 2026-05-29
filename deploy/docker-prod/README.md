@@ -33,7 +33,39 @@ Si la dejas privada, en el servidor necesitas `docker login ghcr.io` con un PAT 
 
 ---
 
-## 2. Setup desde TU MAQUINA con Docker context SSH (recomendado)
+## 2. Primer deploy: bootstrap-server.ps1 (un solo comando)
+
+Si es la primera vez que despliegas en un servidor Windows con Docker, usa el bootstrap. Crea la carpeta, sube los archivos, genera la clave Postgres y deja el stack arriba.
+
+```pwsh
+cd C:\DesarrolloIA\Visal\deploy\docker-prod
+
+# Imagen publica:
+.\bootstrap-server.ps1 -RemoteSsh bit-admin@10.0.1.6 `
+                       -Password 'tu_password_windows' `
+                       -DeployDir 'E:\DOCKER\visal'
+
+# Imagen privada en GHCR (agrega PAT con read:packages):
+.\bootstrap-server.ps1 -RemoteSsh bit-admin@10.0.1.6 `
+                       -Password 'tu_password_windows' `
+                       -DeployDir 'E:\DOCKER\visal' `
+                       -GhcrUser alexandercuartas665 `
+                       -GhcrToken 'ghp_xxxxx'
+```
+
+Por defecto el script:
+- Encuentra el primer puerto libre desde 5380 (pasa `-PreferredPort` para cambiar)
+- Crea `E:\DOCKER\visal\` en el server (pasa `-DeployDir` para cambiar)
+- Genera password Postgres aleatoria de 32 chars y la deja en `.env` del server
+- Bindea el puerto a `127.0.0.1` del server (no expuesto a internet sin proxy)
+
+> **Requisito local:** PuTTY instalado (`winget install --id PuTTY.PuTTY`).
+
+Despues del primer deploy, cambia a `deploy-remote.ps1` para mantenimiento (usa SSH keys, no password).
+
+---
+
+## 3. Mantenimiento desde TU MAQUINA con Docker context SSH
 
 En vez de SSH-ear al servidor y editar archivos alla, conectas tu Docker CLI local al daemon del server por SSH. Todo `docker compose ...` que ejecutes desde tu maquina corre alla. Los archivos (`docker-compose.yml`, `.env`) viven en TU maquina.
 
@@ -83,7 +115,7 @@ Esto NO toca el servidor — solo quita el atajo en tu Docker local. El stack si
 
 ---
 
-## 3. Setup directo en el servidor (alternativa)
+## 4. Setup directo en el servidor (alternativa manual)
 
 ### Requisitos
 - Docker 24+ con `docker compose v2`
@@ -120,7 +152,7 @@ docker compose logs -f visal-app
 
 ---
 
-## 4. Apuntar tu reverse proxy global hacia visal-app
+## 5. Apuntar tu reverse proxy global hacia visal-app
 
 Solo tienes que decirle a TU proxy global "para `visal.midominio.com`, reverse_proxy a `http://localhost:5380`".
 
@@ -183,7 +215,7 @@ server {
 
 ---
 
-## 5. Updates rutinarios (en el server)
+## 6. Updates rutinarios (en el server)
 
 ```bash
 cd /opt/visal
@@ -204,7 +236,7 @@ Luego `docker compose up -d`.
 
 ---
 
-## 6. Backups de Postgres
+## 7. Backups de Postgres
 
 ### Dump manual
 ```bash
@@ -226,7 +258,7 @@ gunzip < backups/visal-2026-05-28-0300.sql.gz | docker exec -i visal-postgres-pr
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### "no such image" al hacer `docker compose pull`
 - La imagen aun no se publico (revisa GitHub Actions).
@@ -249,7 +281,7 @@ gunzip < backups/visal-2026-05-28-0300.sql.gz | docker exec -i visal-postgres-pr
 
 ---
 
-## 8. Apagado limpio para mudanza
+## 9. Apagado limpio para mudanza
 
 ```bash
 cd /opt/visal

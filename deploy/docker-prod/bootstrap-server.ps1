@@ -31,7 +31,7 @@ param(
     [Parameter(Mandatory)][string]$RemoteSsh,
     [Parameter(Mandatory)][string]$Password,
     [int]$PreferredPort = 5380,
-    [string]$DeployDir = "C:\visal-prod",
+    [string]$DeployDir = "E:\DOCKER\visal",
     [string]$VisalImage = "ghcr.io/alexandercuartas665/visal/superadmin:latest",
     [string]$GhcrUser = "",
     [string]$GhcrToken = ""
@@ -145,9 +145,16 @@ Ok ("Generada (no se imprime). Hash inicial: " + ([System.BitConverter]::ToStrin
 
 # 5) ---------- Carpeta de deploy ----------
 Step "5) Preparando carpeta '$DeployDir' en el server"
-# Forward slashes funcionan en cmd/powershell de Windows.
+# Forward slashes funcionan en cmd y para pscp.
 $dirNoSlash = $DeployDir -replace '\\','/'
-Invoke-Remote ("if not exist `"$DeployDir`" mkdir `"$DeployDir`"") -Quiet | Out-Null
+# Usar `mkdir` con flag PowerShell -Force crea TODA la cadena de carpetas (E:\DOCKER\visal aunque E:\DOCKER no exista).
+$mkdirCmd = "powershell -NoProfile -Command `"New-Item -ItemType Directory -Path '$DeployDir' -Force | Out-Null; Test-Path '$DeployDir'`""
+$r = Invoke-Remote $mkdirCmd -Quiet
+$exists = ($r.Output -split "`r?`n" | Where-Object { $_ -match "True|False" } | Select-Object -Last 1)
+if ($exists -ne "True") {
+    Err "No pude crear la carpeta $DeployDir. Revisa si la unidad E:\ existe en el server."
+    exit 1
+}
 Ok "Carpeta lista."
 
 # 6) ---------- Generar .env + docker-compose.yml ----------

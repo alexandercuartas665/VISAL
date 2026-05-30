@@ -34,10 +34,22 @@ param(
     [string]$DeployDir = "E:\DOCKER\visal",
     [string]$VisalImage = "ghcr.io/alexandercuartas665/visal/superadmin:latest",
     [string]$GhcrUser = "",
-    [string]$GhcrToken = ""
+    [string]$GhcrToken = "",
+    # Fingerprint SSH del server. Si lo pasas, se evita el autodetect (que se cuelga en ISE).
+    # Default: el del server bit-admin@10.0.1.6 que ya validamos.
+    [string]$HostKey = "SHA256:B5/N07REfJuWqk82owJKgYIDuXVFnSaXOa1yqOQ84UA"
 )
 
 $ErrorActionPreference = "Stop"
+
+# Aviso: ISE no maneja bien stdin de comandos nativos como plink/pscp.
+if ($Host.Name -match "ISE") {
+    Write-Host "ATENCION: estas en Windows PowerShell ISE." -ForegroundColor Red
+    Write-Host "  ISE cuelga con plink/pscp por su manejo roto de stdin." -ForegroundColor Yellow
+    Write-Host "  Cierra ISE y abre una PowerShell normal (Win+X -> PowerShell)." -ForegroundColor Yellow
+    Write-Host "  Pega de nuevo el mismo comando ahi." -ForegroundColor Yellow
+    exit 1
+}
 
 # --- localizar plink y pscp ---
 $putty = "C:\Program Files\PuTTY"
@@ -55,17 +67,17 @@ function Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "    $msg" -ForegroundColor Yellow }
 function Err($msg)  { Write-Host "    $msg" -ForegroundColor Red }
 
+# Fingerprint del server, ya validado previamente (pasado como parametro $HostKey).
+Write-Host "    Fingerprint en uso: $HostKey" -ForegroundColor DarkGray
+
 function Invoke-Remote {
     param([Parameter(Mandatory)][string]$Cmd, [switch]$Quiet)
-    # Ejecuta un comando en el server via plink. Si es la primera vez,
-    # auto-acepta el host key (-batch lo rechaza, asi que sin -batch).
-    # Para auto-aceptar: prefijo el cmd con echo y (stdin) -> "y\n"
+    # Ejecuta un comando en el server via plink usando -hostkey + -batch para
+    # no depender de stdin (mas robusto que pipe "y`n").
     $tmpOut = New-TemporaryFile
     $tmpErr = New-TemporaryFile
     try {
-        # plink lee la primera linea de stdin como respuesta al host key prompt.
-        $stdin = "y`n"
-        $stdin | & plink -ssh -pw $Password $RemoteSsh $Cmd 2>$tmpErr.FullName |
+        & plink -batch -hostkey $HostKey -ssh -pw $Password $RemoteSsh $Cmd 2>$tmpErr.FullName |
             Tee-Object -FilePath $tmpOut.FullName | Out-Null
         $exit = $LASTEXITCODE
         $out = (Get-Content $tmpOut.FullName -Raw -ErrorAction SilentlyContinue)
@@ -83,8 +95,7 @@ function Invoke-Remote {
 
 function Copy-Remote {
     param([Parameter(Mandatory)][string]$Local, [Parameter(Mandatory)][string]$Remote)
-    $stdin = "y`n"
-    $stdin | & pscp -pw $Password $Local "${RemoteSsh}:${Remote}" 2>&1 | Out-Host
+    & pscp -batch -hostkey $HostKey -pw $Password $Local "${RemoteSsh}:${Remote}" 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "pscp fallo subiendo $Local a $Remote" }
 }
 
@@ -141,7 +152,11 @@ function New-Password([int]$len) {
     -join (1..$len | ForEach-Object { $chars | Get-Random })
 }
 $pgPass = New-Password 32
-Ok ("Generada (no se imprime). Hash inicial: " + ([System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($pgPass)))[0..15] -join "").Replace("-","")
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$hashBytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($pgPass))
+$hashHex = ([System.BitConverter]::ToString($hashBytes) -replace '-','').Substring(0,16)
+$sha.Dispose()
+Ok "Generada. Hash inicial (para referencia, no es la clave): $hashHex"
 
 # 5) ---------- Carpeta de deploy ----------
 Step "5) Preparando carpeta '$DeployDir' en el server"

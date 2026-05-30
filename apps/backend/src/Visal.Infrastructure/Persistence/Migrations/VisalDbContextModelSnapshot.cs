@@ -660,6 +660,121 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("asignacion_lotes", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.AsignacionTurno", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AsignacionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asignacion_id");
+
+                    b.Property<int>("Cantidad")
+                        .HasColumnType("integer")
+                        .HasColumnName("cantidad");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateOnly?>("FechaInicio")
+                        .HasColumnType("date")
+                        .HasColumnName("fecha_inicio");
+
+                    b.Property<decimal?>("HorasPorTurno")
+                        .HasColumnType("numeric")
+                        .HasColumnName("horas_por_turno");
+
+                    b.Property<short?>("MesAsignar")
+                        .HasColumnType("smallint")
+                        .HasColumnName("mes_asignar");
+
+                    b.Property<Guid>("ProfesionalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("profesional_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_asignacion_turnos");
+
+                    b.HasIndex("AsignacionId")
+                        .HasDatabaseName("ix_asignacion_turnos_asignacion_id");
+
+                    b.HasIndex("ProfesionalId")
+                        .HasDatabaseName("ix_asignacion_turnos_profesional_id");
+
+                    b.ToTable("asignacion_turnos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.AsignacionTurnoSesion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AsignacionTurnoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asignacion_turno_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateOnly>("FechaAtencion")
+                        .HasColumnType("date")
+                        .HasColumnName("fecha_atencion");
+
+                    b.Property<string>("NotaTexto")
+                        .HasColumnType("text")
+                        .HasColumnName("nota_texto");
+
+                    b.Property<int>("SessionNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("session_no");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_asignacion_turno_sesiones");
+
+                    b.HasIndex("AsignacionTurnoId")
+                        .HasDatabaseName("ix_asignacion_turno_sesiones_asignacion_turno_id");
+
+                    b.ToTable("asignacion_turno_sesiones", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.AutomationRule", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1322,6 +1437,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("nombre");
 
+                    b.Property<string>("PrefillRoutesJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("prefill_routes_json");
+
                     b.Property<string>("SchemaJson")
                         .IsRequired()
                         .HasColumnType("jsonb")
@@ -1399,6 +1518,90 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasName("pk_google_auth_configs");
 
                     b.ToTable("google_auth_configs", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.HistoriaClinica", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("EspecialistaNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("especialista_nombre");
+
+                    b.Property<int>("Estado")
+                        .HasColumnType("integer")
+                        .HasColumnName("estado");
+
+                    b.Property<DateTimeOffset>("FechaApertura")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_apertura");
+
+                    b.Property<DateTimeOffset?>("FechaCierre")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_cierre");
+
+                    b.Property<Guid>("FormDefinitionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("form_definition_id");
+
+                    b.Property<string>("MotivoInactivacion")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("motivo_inactivacion");
+
+                    b.Property<Guid>("PacienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("paciente_id");
+
+                    b.Property<Guid?>("ProfesionalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("profesional_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<string>("ValoresJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("valores_json");
+
+                    b.HasKey("Id")
+                        .HasName("pk_historias_clinicas");
+
+                    b.HasIndex("FormDefinitionId")
+                        .HasDatabaseName("ix_historias_clinicas_form_definition_id");
+
+                    b.HasIndex("PacienteId")
+                        .HasDatabaseName("ix_historias_clinicas_paciente_id");
+
+                    b.HasIndex("ProfesionalId")
+                        .HasDatabaseName("ix_historias_clinicas_profesional_id");
+
+                    b.HasIndex("TenantId", "PacienteId", "FechaApertura")
+                        .HasDatabaseName("ix_historias_clinicas_tenant_id_paciente_id_fecha_apertura");
+
+                    b.ToTable("historias_clinicas", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.Lead", b =>
@@ -2526,6 +2729,16 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("avatar_url");
 
+                    b.Property<string>("Celular")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("celular");
+
+                    b.Property<string>("Ciudad")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("ciudad");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -2533,6 +2746,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
+
+                    b.Property<string>("Direccion")
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)")
+                        .HasColumnName("direccion");
 
                     b.Property<string>("DisplayName")
                         .HasMaxLength(200)
@@ -2558,6 +2776,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("es_global");
 
+                    b.Property<string>("Fijo")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("fijo");
+
                     b.Property<string>("GoogleSubject")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
@@ -2576,6 +2799,26 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("platform_role");
 
+                    b.Property<string>("PrimerApellido")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("primer_apellido");
+
+                    b.Property<string>("PrimerNombre")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("primer_nombre");
+
+                    b.Property<string>("SegundoApellido")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("segundo_apellido");
+
+                    b.Property<string>("SegundoNombre")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("segundo_nombre");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -2589,6 +2832,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("updated_by");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("username");
 
                     b.HasKey("Id")
                         .HasName("pk_platform_users");
@@ -2606,6 +2854,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_platform_users_google_subject")
                         .HasFilter("google_subject IS NOT NULL");
+
+                    b.HasIndex("Username")
+                        .IsUnique()
+                        .HasDatabaseName("ix_platform_users_username")
+                        .HasFilter("username IS NOT NULL");
 
                     b.ToTable("platform_users", (string)null);
                 });
@@ -3871,6 +4124,22 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<bool>("CoordinaConsultas")
+                        .HasColumnType("boolean")
+                        .HasColumnName("coordina_consultas");
+
+                    b.Property<bool>("CoordinaEnfermeria")
+                        .HasColumnType("boolean")
+                        .HasColumnName("coordina_enfermeria");
+
+                    b.Property<bool>("CoordinaEquipos")
+                        .HasColumnType("boolean")
+                        .HasColumnName("coordina_equipos");
+
+                    b.Property<bool>("CoordinaTerapias")
+                        .HasColumnType("boolean")
+                        .HasColumnName("coordina_terapias");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -3903,6 +4172,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PlatformUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("platform_user_id");
+
+                    b.Property<Guid?>("ProfesionalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("profesional_id");
 
                     b.Property<Guid?>("RolId")
                         .HasColumnType("uuid")
@@ -3944,6 +4217,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("PlatformUserId")
                         .HasDatabaseName("ix_tenant_users_platform_user_id");
+
+                    b.HasIndex("ProfesionalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_users_profesional_id")
+                        .HasFilter("profesional_id IS NOT NULL");
 
                     b.HasIndex("RolId")
                         .HasDatabaseName("ix_tenant_users_rol_id");
@@ -4341,6 +4619,39 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Navigation("Paciente");
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.AsignacionTurno", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.Asignacion", "Asignacion")
+                        .WithMany()
+                        .HasForeignKey("AsignacionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_asignacion_turnos_asignaciones_asignacion_id");
+
+                    b.HasOne("Visal.Domain.Entities.Profesional", "Profesional")
+                        .WithMany()
+                        .HasForeignKey("ProfesionalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_asignacion_turnos_profesionales_profesional_id");
+
+                    b.Navigation("Asignacion");
+
+                    b.Navigation("Profesional");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.AsignacionTurnoSesion", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.AsignacionTurno", "AsignacionTurno")
+                        .WithMany()
+                        .HasForeignKey("AsignacionTurnoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_asignacion_turno_sesiones_asignacion_turnos_asignacion_turn");
+
+                    b.Navigation("AsignacionTurno");
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.ContratoAseguradora", b =>
                 {
                     b.HasOne("Visal.Domain.Entities.Aseguradora", "Aseguradora")
@@ -4375,6 +4686,35 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_follow_up_tasks_leads_lead_id");
 
                     b.Navigation("Lead");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.HistoriaClinica", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.FormDefinition", "FormDefinition")
+                        .WithMany()
+                        .HasForeignKey("FormDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_historias_clinicas_form_definitions_form_definition_id");
+
+                    b.HasOne("Visal.Domain.Entities.Paciente", "Paciente")
+                        .WithMany()
+                        .HasForeignKey("PacienteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_historias_clinicas_pacientes_paciente_id");
+
+                    b.HasOne("Visal.Domain.Entities.Profesional", "Profesional")
+                        .WithMany()
+                        .HasForeignKey("ProfesionalId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_historias_clinicas_profesionales_profesional_id");
+
+                    b.Navigation("FormDefinition");
+
+                    b.Navigation("Paciente");
+
+                    b.Navigation("Profesional");
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.Lead", b =>
@@ -4602,6 +4942,12 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_tenant_users_platform_users_platform_user_id");
 
+                    b.HasOne("Visal.Domain.Entities.Profesional", "Profesional")
+                        .WithMany()
+                        .HasForeignKey("ProfesionalId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_tenant_users_profesionales_profesional_id");
+
                     b.HasOne("Visal.Domain.Entities.Rol", "Rol")
                         .WithMany()
                         .HasForeignKey("RolId")
@@ -4615,6 +4961,8 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_tenant_users_sucursales_sucursal_id");
 
                     b.Navigation("PlatformUser");
+
+                    b.Navigation("Profesional");
 
                     b.Navigation("Rol");
 

@@ -49,6 +49,9 @@ public interface IApplicationDbContext
     DbSet<CatalogoPaciente> CatalogosPaciente { get; }
     DbSet<AsignacionLote> AsignacionLotes { get; }
     DbSet<Asignacion> Asignaciones { get; }
+    DbSet<AsignacionTurno> AsignacionTurnos { get; }
+    DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones { get; }
+    DbSet<HistoriaClinica> HistoriasClinicas { get; }
     DbSet<Cie11Config> Cie11Configs { get; }
     DbSet<Pais> Paises { get; }
     DbSet<Departamento> Departamentos { get; }

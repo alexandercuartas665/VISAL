@@ -46,12 +46,10 @@ services:
         condition: service_healthy
     networks:
       - visal-net
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/login || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
+    # Sin healthcheck explicito: la imagen aspnet:9.0 (Debian slim) no trae
+    # ni wget, ni curl, ni bash con /dev/tcp en sh. Mientras no agreguemos
+    # curl al Dockerfile, el reverse proxy global hace su propio probe HTTP
+    # contra /login. La app sigue gobernada por `restart: unless-stopped`.
 
   postgres:
     image: postgres:16-alpine

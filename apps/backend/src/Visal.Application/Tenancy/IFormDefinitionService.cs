@@ -10,7 +10,7 @@ public sealed record FormDefinitionDto(
     bool Activo,
     DateTimeOffset? UpdatedAt);
 
-/// <summary>Detalle completo (incluye el esquema JSON del disenador).</summary>
+/// <summary>Detalle completo (incluye el esquema JSON del disenador y las rutas de prefill).</summary>
 public sealed record FormDefinitionDetailDto(
     Guid Id,
     string Codigo,
@@ -18,7 +18,8 @@ public sealed record FormDefinitionDetailDto(
     string? Version,
     string? Tipo,
     bool Activo,
-    string SchemaJson);
+    string SchemaJson,
+    string? PrefillRoutesJson);
 
 /// <summary>Alta o actualizacion. Si <see cref="Id"/> es null se crea; si no, se actualiza.</summary>
 public sealed record SaveFormDefinitionRequest(
@@ -28,7 +29,8 @@ public sealed record SaveFormDefinitionRequest(
     string? Version,
     string? Tipo,
     string SchemaJson,
-    bool Activo);
+    bool Activo,
+    string? PrefillRoutesJson = null);
 
 /// <summary>Gestion de definiciones de formularios (Motor de Formularios, 2.M10), tenant-scoped.</summary>
 public interface IFormDefinitionService
@@ -37,4 +39,7 @@ public interface IFormDefinitionService
     Task<FormDefinitionDetailDto?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<FormDefinitionDetailDto?> SaveAsync(SaveFormDefinitionRequest request, Guid actorUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Actualiza solo las rutas de prefill del formulario, sin tocar schema ni metadatos.</summary>
+    Task<bool> UpdatePrefillRoutesAsync(Guid id, string? prefillRoutesJson, Guid actorUserId, CancellationToken cancellationToken = default);
 }

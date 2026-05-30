@@ -63,6 +63,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
+    public DbSet<HistoriaClinica> HistoriasClinicas => Set<HistoriaClinica>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
@@ -79,6 +80,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
     public DbSet<AsignacionLote> AsignacionLotes => Set<AsignacionLote>();
     public DbSet<Asignacion> Asignaciones => Set<Asignacion>();
+    public DbSet<AsignacionTurno> AsignacionTurnos => Set<AsignacionTurno>();
+    public DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones => Set<AsignacionTurnoSesion>();
     public DbSet<Cie11Config> Cie11Configs => Set<Cie11Config>();
     public DbSet<Pais> Paises => Set<Pais>();
     public DbSet<Departamento> Departamentos => Set<Departamento>();
@@ -178,9 +181,21 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.GoogleSubject).HasMaxLength(255);
             b.Property(x => x.AuthProvider).HasMaxLength(50).IsRequired();
             b.Property(x => x.Documento).HasMaxLength(40);
+            // Campos personales (modulo Administracion de Usuarios)
+            b.Property(x => x.Username).HasMaxLength(80);
+            b.Property(x => x.PrimerNombre).HasMaxLength(80);
+            b.Property(x => x.SegundoNombre).HasMaxLength(80);
+            b.Property(x => x.PrimerApellido).HasMaxLength(80);
+            b.Property(x => x.SegundoApellido).HasMaxLength(80);
+            b.Property(x => x.Celular).HasMaxLength(40);
+            b.Property(x => x.Fijo).HasMaxLength(40);
+            b.Property(x => x.Ciudad).HasMaxLength(120);
+            b.Property(x => x.Direccion).HasMaxLength(250);
             b.HasIndex(x => x.Email).IsUnique();
             b.HasIndex(x => x.GoogleSubject).IsUnique().HasFilter("google_subject IS NOT NULL");
             b.HasIndex(x => x.Documento).IsUnique().HasFilter("documento IS NOT NULL");
+            // Username unico (excluye nulls para no chocar entre usuarios sin username).
+            b.HasIndex(x => x.Username).IsUnique().HasFilter("username IS NOT NULL");
         });
 
         modelBuilder.Entity<SuperAdminAuditLog>(b =>
@@ -469,7 +484,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Version).HasMaxLength(20);
             b.Property(x => x.Tipo).HasMaxLength(40);
             b.Property(x => x.SchemaJson).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.PrefillRoutesJson).HasColumnType("jsonb");
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+        });
+
+        modelBuilder.Entity<HistoriaClinica>(b =>
+        {
+            b.Property(x => x.ValoresJson).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
+            b.Property(x => x.MotivoInactivacion).HasMaxLength(500);
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.FormDefinition).WithMany().HasForeignKey(x => x.FormDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Profesional).WithMany().HasForeignKey(x => x.ProfesionalId).OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(x => new { x.TenantId, x.PacienteId, x.FechaApertura });
         });
 
         modelBuilder.Entity<Aseguradora>(b =>
@@ -626,6 +653,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Rol).WithMany().HasForeignKey(x => x.RolId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId).OnDelete(DeleteBehavior.SetNull);
             b.HasMany(x => x.Sucursales).WithOne(x => x.TenantUser!).HasForeignKey(x => x.TenantUserId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Profesional).WithMany().HasForeignKey(x => x.ProfesionalId).OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(x => x.ProfesionalId).IsUnique().HasFilter("profesional_id IS NOT NULL");
         });
 
         modelBuilder.Entity<TenantUserSucursal>(b =>

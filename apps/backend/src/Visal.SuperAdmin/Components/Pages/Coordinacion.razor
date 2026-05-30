@@ -1,8 +1,537 @@
 @page "/coordinacion"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IAsignacionService Svc
+@inject IUsuarioAdminService UsuSvc
 
 <PageTitle>Coordinacion - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Operacion Clinica"
-                   Title="Coordinacion"
-                   Description="Asignacion de especialista y turnos a cada servicio." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Coordinacion de Servicios</h1>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@* ============ TABS ============ *@
+<div class="cd-tabs">
+    @foreach (var t in _tabs)
+    {
+        <button class="cd-tab @(t == _tabSel ? "sel" : "") @(t == "Solicitudes" ? "" : "muted")"
+                @onclick="() => _tabSel = t" disabled="@(t != "Solicitudes")"
+                title="@(t != "Solicitudes" ? "Pendiente de implementacion" : "")">
+            @t
+        </button>
+    }
+</div>
+
+@if (_tabSel == "Solicitudes")
+{
+    @if (_modulos.Count == 0)
+    {
+        <div class="ase-card">
+            <div class="ase-empty cd-no-perm">
+                Tu usuario no tiene permisos para coordinar ningun modulo.
+                Solicita al administrador activar permisos (COORDINADOR_TERAPIAS, COORDINADOR_ENFERMERIA, ...)
+                desde <code>Administracion de Usuarios</code>.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cd-grid">
+
+            @* ============ COLUMNA IZQUIERDA: filtros + grid ============ *@
+            <div class="cd-col">
+                <div class="ase-card">
+                    <div class="ase-card-h">Filtros</div>
+                    <div class="ase-form cd-form">
+                        <div class="ase-f ase-f-wide">
+                            <label>Selecione tipo asignacion</label>
+                            <select class="form-select form-select-sm" value="@_tipoSel" @onchange="OnTipoChanged">
+                                <option value="">Selecciona TIPO</option>
+                                @foreach (var m in _modulos) { <option value="@m">@m</option> }
+                            </select>
+                        </div>
+                        <div class="ase-f">
+                            <label>Perido</label>
+                            <select class="form-select form-select-sm" @bind="_anio">
+                                @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
+                            </select>
+                        </div>
+                        <div class="ase-f">
+                            <label>Mes Vigente</label>
+                            <div class="cd-input-row">
+                                <select class="form-select form-select-sm" @bind="_mes">
+                                    @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                                </select>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="MesActual">Mes Actual</button>
+                            </div>
+                        </div>
+                        <div class="ase-f">
+                            <label>Estado</label>
+                            <select class="form-select form-select-sm" @bind="_estado">
+                                <option value="@AsignacionEstadoFiltro.Pendientes">PENDIENTES</option>
+                                <option value="@AsignacionEstadoFiltro.Asignados">ASIGNADOS</option>
+                                <option value="@AsignacionEstadoFiltro.Todos">TODOS</option>
+                            </select>
+                        </div>
+                        <div class="ase-f">
+                            <label>No Orden</label>
+                            <input class="form-control form-control-sm mono" @bind="_noOrden" placeholder="" />
+                        </div>
+                        <div class="ase-f">
+                            <label>Numero Documento</label>
+                            <div class="cd-input-row">
+                                <input class="form-control form-control-sm mono" @bind="_doc" placeholder="BUSQUEDA DE PACIENTE" />
+                                <button class="btn btn-outline-secondary btn-sm" title="Filtrar">&#9776;</button>
+                            </div>
+                        </div>
+                        <div class="ase-f ase-f-wide cd-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="Cargar" disabled="@(_busy || string.IsNullOrEmpty(_tipoSel))">
+                                @(_busy ? "Cargando..." : "Cargar servicios")
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltros">Limpiar</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ase-card cd-col-full">
+                    <div class="ase-card-h">SERVICIOS NO ASIGNADOS (@_pendientes.Count)</div>
+                    <div class="cd-grid-wrap">
+                        @if (_pendientes.Count == 0)
+                        {
+                            <div class="ase-empty">
+                                @(string.IsNullOrEmpty(_tipoSel) ? "Selecciona un tipo y presiona Cargar servicios." : "Sin servicios pendientes para esta combinacion.")
+                            </div>
+                        }
+                        else
+                        {
+                            <table class="table table-sm cd-tbl">
+                                <thead>
+                                    <tr>
+                                        <th style="width:30px"></th>
+                                        <th style="width:90px">Asignar</th>
+                                        <th>Orden</th>
+                                        <th>Paciente</th>
+                                        <th>Servicio</th>
+                                        <th>Cantidad</th>
+                                        <th>Observaciones</th>
+                                        <th>Tipo</th>
+                                        <th>Contrato</th>
+                                        <th>Servicio</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _pendientes)
+                                    {
+                                        <tr class="@(_solicitudSel?.Id == p.Id ? "cd-row-sel" : "")">
+                                            <td><input type="checkbox" /></td>
+                                            <td><button class="btn btn-outline-primary btn-sm" title="Cargar a la derecha" @onclick="() => CargarSolicitud(p)">&#9998;</button></td>
+                                            <td class="mono">@p.Orden</td>
+                                            <td>@p.PacienteNombre</td>
+                                            <td>@p.NombreServicio</td>
+                                            <td class="text-center">@p.Cantidad</td>
+                                            <td class="cd-obs">@p.Observaciones</td>
+                                            <td>@p.TipoServicio</td>
+                                            <td class="mono">@p.ContratoCodigo</td>
+                                            <td class="mono">@p.CodigoServicio</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @* ============ COLUMNA DERECHA: panel de coordinacion ============ *@
+            <div class="cd-col">
+                <div class="ase-card cd-col-full">
+                    <div class="cd-right-h">
+                        <span>Datos de la solicitud</span>
+                        <span>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarPanel">Limpiar</button>
+                            <button class="btn btn-outline-warning btn-sm" disabled title="Pendiente">Terminar</button>
+                        </span>
+                    </div>
+
+                    @if (_solicitudSel is AsignacionPendienteDto s)
+                    {
+                        <div class="ase-form cd-rform">
+                            <div class="ase-f"><label>No Orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.CodigoAutorizacion" /></div>
+                            <div class="ase-f"><label>Fecha Orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.CreadoEn.LocalDateTime.ToString("dd/MM/yyyy")" /></div>
+                            <div class="ase-f"><label>Tipo</label><input class="form-control form-control-sm asg-ro" readonly value="@s.TipoServicio" /></div>
+                            <div class="ase-f"><label>Estado</label><input class="form-control form-control-sm asg-ro" readonly value="@s.EstadoTexto" /></div>
+                            <div class="ase-f"><label>Tip Doc</label><input class="form-control form-control-sm asg-ro mono" readonly value="@s.PacienteTipoDoc" /></div>
+                            <div class="ase-f ase-f-wide"><label>Documento</label><input class="form-control form-control-sm asg-ro mono" readonly value="@s.PacienteDocumento" /></div>
+                            <div class="ase-f ase-f-wide-3"><label>Nombre</label><input class="form-control form-control-sm asg-ro" readonly value="@s.PacienteNombre" /></div>
+                            <div class="ase-f ase-f-wide"><label>Descripcion orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.Observaciones" /></div>
+                            <div class="ase-f"><label>Especialidad</label><input class="form-control form-control-sm asg-ro" readonly /></div>
+
+                            <div class="ase-f ase-f-wide-3 cd-blue"><label>Servicio</label><input class="form-control form-control-sm" readonly value="@s.NombreServicio" /></div>
+                            <div class="ase-f ase-f-wide-3 cd-blue"><label>Codigo Servicio</label><input class="form-control form-control-sm mono" readonly value="@s.CodigoServicio" /></div>
+
+                            <div class="ase-f cd-blue"><label>ID Prof. Asig</label><input class="form-control form-control-sm" @bind="_idProfAsig" placeholder="" /></div>
+                            <div class="ase-f cd-blue"><label>Profesional Pred</label><input class="form-control form-control-sm" @bind="_profesionalPred" placeholder="" /></div>
+
+                            <div class="ase-f ase-f-wide-3 cd-blue"><label>Observaciones</label><textarea class="form-control form-control-sm" rows="2" @bind="_observaciones"></textarea></div>
+
+                            <div class="ase-f"><label>Fecha de inicio</label><input type="date" class="form-control form-control-sm" @bind="_fechaInicio" /></div>
+                            <div class="ase-f"><label>Mes Asignar</label>
+                                <select class="form-select form-select-sm" @bind="_mesAsignar">
+                                    <option value="0">--</option>
+                                    @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                                </select>
+                            </div>
+                            <div class="ase-f"><label>Tarifa</label><input class="form-control form-control-sm asg-ro" readonly /></div>
+
+                            <div class="ase-f"><label>Cantidad servicio</label><input type="number" class="form-control form-control-sm asg-ro" readonly value="@s.Cantidad" /></div>
+                            <div class="ase-f"><label>Turnos x Asignar</label>
+                                <input class="form-control form-control-sm @((_turnosFaltan == 0) ? "cd-ok" : "")"
+                                       readonly value="@_turnosFaltan" />
+                            </div>
+                            <div class="ase-f"><label>Horas x Turnos</label><input type="number" min="0" step="0.5" class="form-control form-control-sm" @bind="_horasPorTurno" /></div>
+
+                            <div class="ase-f ase-f-wide-2">
+                                <label>Seleccione Medico Especialista / Turnos</label>
+                                <div class="cd-input-row">
+                                    <select class="form-select form-select-sm" @bind="_especialistaSel">
+                                        <option value="">Seleccione Especialista</option>
+                                        @foreach (var e in _especialistas)
+                                        {
+                                            <option value="@e.Id">@e.NombreCompleto @(e.TipoProfesional is not null ? $"({e.TipoProfesional})" : "")</option>
+                                        }
+                                    </select>
+                                    <input type="number" min="1" max="@_turnosFaltan" class="form-control form-control-sm cd-turnos"
+                                           placeholder="TURNOS A AGREG" @bind="_turnosAAgregarN" />
+                                    <button class="btn btn-outline-primary btn-sm" @onclick="AgregarTurno" disabled="@(_turnosFaltan == 0)">Agregar</button>
+                                </div>
+                                @if (_especialistas.Count == 0 && _solicitudSel is not null)
+                                {
+                                    <small class="cd-help">No hay profesionales del tipo "@_solicitudSel.TipoServicio" en el catalogo. Verifica los tipos de profesional en Configuracion del Sistema.</small>
+                                }
+                                else
+                                {
+                                    <small class="cd-help">@_especialistas.Count profesional(es) disponibles. Suma de turnos coordinados: @_turnosUsados / @s.Cantidad</small>
+                                }
+                            </div>
+                        </div>
+
+                        @* Carrito de turnos en memoria - lista lo que esta listo para guardar. *@
+                        @if (_carritoTurnos.Count > 0)
+                        {
+                            <div class="cd-turnos-list">
+                                <div class="cd-turnos-h">Turnos a guardar (@_carritoTurnos.Count)</div>
+                                @foreach (var ct in _carritoTurnos)
+                                {
+                                    <div class="cd-turno-row">
+                                        <div class="cd-turno-prof">@ct.ProfesionalNombre</div>
+                                        <div class="cd-turno-meta">
+                                            <span class="asg-pill">@ct.Cantidad turno(s)</span>
+                                            @if (ct.HorasPorTurno is decimal hpt) { <span>@hpt h/turno</span> }
+                                            @if (ct.FechaInicio is DateOnly fi) { <span>desde @fi.ToString("dd MMM")</span> }
+                                        </div>
+                                        <button class="btn btn-link btn-sm cd-turno-rm" title="Quitar" @onclick="() => QuitarTurno(ct)">&times;</button>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        <div class="cd-asignar">
+                            <button class="btn btn-primary" @onclick="AsignarServicio"
+                                    disabled="@(_busy || _carritoTurnos.Count == 0)">
+                                @(_busy ? "Guardando..." : "Asignar el servicio")
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="ase-empty cd-empty-right">
+                            Selecciona una fila del grid de la izquierda para coordinar el servicio.
+                        </div>
+                    }
+                </div>
+            </div>
+
+        </div>
+    }
+}
+else
+{
+    <div class="ase-card">
+        <div class="ase-empty">Tab '@_tabSel' pendiente de implementacion.</div>
+    </div>
+}
+
+<style>
+    .cd-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 14px; }
+    .cd-tab { padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .cd-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
+    .cd-tab.muted { color: #94a3b8; cursor: not-allowed; }
+    .cd-no-perm { padding: 30px; color: #64748b; }
+    .cd-no-perm code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
+
+    .cd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
+    .cd-col { display: flex; flex-direction: column; gap: 14px; min-height: 720px; min-width: 0; }
+    .cd-col > .ase-card:last-child { flex: 1; display: flex; flex-direction: column; }
+    .cd-col-full { flex: 1; display: flex; flex-direction: column; }
+
+    .cd-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .cd-form .ase-f-wide { grid-column: span 2; }
+    .cd-form .cd-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .cd-input-row { display: flex; gap: 6px; }
+    .cd-input-row > select, .cd-input-row > input { flex: 1; }
+
+    .cd-grid-wrap { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; overflow: auto; flex: 1; }
+    .cd-tbl { margin: 0; font-size: 12px; min-width: 100%; }
+    .cd-tbl thead th { position: sticky; top: 0; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 700; border-bottom: 1px solid #cbd5e1; white-space: nowrap; padding: 8px 10px; }
+    .cd-tbl td { vertical-align: middle; font-size: 11.5px; padding: 8px 10px; }
+    .cd-tbl tbody tr { border-bottom: 1px solid #f1f5f9; }
+    .cd-row-sel { background: #eff6ff; }
+    .cd-obs { font-style: italic; color: #64748b; max-width: 180px; }
+
+    .cd-right-h { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid #e2e8f0; font-size: 13px; font-weight: 600; color: #334155; }
+    .cd-rform { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; padding: 14px; }
+    .cd-rform .ase-f-wide { grid-column: span 2; }
+    .cd-rform .ase-f-wide-2 { grid-column: span 2; }
+    .cd-rform .ase-f-wide-3 { grid-column: span 4; }
+    .cd-rform label { font-size: 11px; color: #475569; font-weight: 600; }
+    .asg-ro { background: #f8fafc; color: #475569; }
+    .cd-blue label { color: #0f172a; }
+    .cd-blue input, .cd-blue textarea, .cd-blue select { background: #dbeafe !important; }
+    .cd-blue input:read-only { background: #bfdbfe !important; }
+    .cd-help { color: #94a3b8; font-size: 11px; font-style: italic; }
+    .cd-asignar { padding: 14px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; }
+    .cd-empty-right { padding: 60px 30px; text-align: center; color: #94a3b8; }
+
+    /* Carrito de turnos en memoria */
+    .cd-turnos { max-width: 80px; }
+    .cd-ok { background: #dcfce7 !important; color: #166534 !important; font-weight: 600; }
+    .cd-turnos-list { padding: 14px; border-top: 1px solid #e2e8f0; }
+    .cd-turnos-h { font-size: 12px; font-weight: 700; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .cd-turno-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; margin-bottom: 6px; }
+    .cd-turno-prof { flex: 1; font-size: 13px; font-weight: 600; color: #0f172a; }
+    .cd-turno-meta { display: flex; gap: 8px; font-size: 11px; color: #475569; align-items: center; }
+    .asg-pill { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px; }
+    .cd-turno-rm { color: #b91c1c; font-size: 18px; line-height: 1; padding: 0 4px; text-decoration: none; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private readonly string[] _tabs = new[] { "Solicitudes", "Modificacion", "Consultas Historicas", "Documentos Externos", "RIPS", "Historias" };
+    private string _tabSel = "Solicitudes";
+
+    // Permisos del usuario logueado (que modulos puede coordinar).
+    private List<string> _modulos = new();
+
+    // Filtros.
+    private string _tipoSel = "";
+    private AsignacionEstadoFiltro _estado = AsignacionEstadoFiltro.Pendientes;
+    private int _anio = DateTime.Now.Year;
+    private int _mes = DateTime.Now.Month;
+    private string _noOrden = "";
+    private string _doc = "";
+
+    private List<AsignacionPendienteDto> _pendientes = new();
+    private AsignacionPendienteDto? _solicitudSel;
+
+    // Panel derecho (coordinacion - editable).
+    private string _idProfAsig = "";
+    private string _profesionalPred = "";
+    private string _observaciones = "";
+    private DateOnly? _fechaInicio;
+    private int _mesAsignar;
+    private decimal? _horasPorTurno;
+    // Lista de profesionales filtrada por el modulo del servicio elegido.
+    private List<EspecialistaDto> _especialistas = new();
+    private string _especialistaSel = "";
+    private int _turnosAAgregarN = 1;
+
+    // Carrito de turnos en memoria (lo que se va a guardar al pulsar "Asignar el servicio").
+    private List<CartTurno> _carritoTurnos = new();
+    // Turnos ya persistidos (los que ya estan en BD para esa asignacion).
+    private List<TurnoCoordinadoDto> _turnosGuardados = new();
+
+    private int _turnosUsados => _turnosGuardados.Sum(t => t.Cantidad) + _carritoTurnos.Sum(t => t.Cantidad);
+    private int _turnosFaltan => _solicitudSel is null ? 0 : Math.Max(0, _solicitudSel.Cantidad - _turnosUsados);
+
+    private bool _busy;
+    private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (AuthState is null) { _error = "Sesion no detectada."; return; }
+            var st = await AuthState;
+            if (!Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var puId))
+            {
+                _error = "No se pudo identificar al usuario.";
+                return;
+            }
+            _modulos = (await UsuSvc.GetModulosCoordinacionAsync(puId)).ToList();
+        }
+        catch (Exception ex) { _error = "Error inicial: " + ex.Message; }
+    }
+
+    private void OnTipoChanged(ChangeEventArgs e)
+    {
+        _tipoSel = e.Value?.ToString() ?? "";
+        _pendientes = new();
+        _solicitudSel = null;
+    }
+
+    private void MesActual()
+    {
+        _mes = DateTime.Now.Month;
+        _anio = DateTime.Now.Year;
+    }
+
+    private async Task Cargar()
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            var modulos = string.IsNullOrEmpty(_tipoSel) ? _modulos : new List<string> { _tipoSel };
+            _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, _mes,
+                string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
+                string.IsNullOrWhiteSpace(_doc) ? null : _doc)).ToList();
+            _solicitudSel = null;
+            _especialistas = new();
+            if (_pendientes.Count == 0) { _ok = "Sin servicios para esta combinacion."; }
+        }
+        catch (Exception ex) { _error = "Error consultando: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void LimpiarFiltros()
+    {
+        _tipoSel = ""; _noOrden = ""; _doc = "";
+        _estado = AsignacionEstadoFiltro.Pendientes;
+        _anio = DateTime.Now.Year; _mes = DateTime.Now.Month;
+        _pendientes = new(); _solicitudSel = null; _especialistas = new();
+    }
+
+    private async Task CargarSolicitud(AsignacionPendienteDto p)
+    {
+        _error = _ok = null;
+        _solicitudSel = p;
+        _observaciones = p.Observaciones ?? "";
+        _fechaInicio = p.FechaInicio;
+        _mesAsignar = 0;
+        _horasPorTurno = null;
+        _idProfAsig = "";
+        _profesionalPred = "";
+        _especialistaSel = "";
+        _carritoTurnos = new();
+        _turnosAAgregarN = 1;
+        // Cargar profesionales del tipo correspondiente al modulo del servicio + turnos ya guardados.
+        try
+        {
+            _especialistas = (await Svc.ListarEspecialistasPorModuloAsync(p.TipoServicio)).ToList();
+            _turnosGuardados = (await Svc.ListarTurnosAsync(p.Id)).ToList();
+            // Si ya hay turnos faltantes, sugerir turnosAAgregar = lo que falta.
+            if (_turnosFaltan > 0) { _turnosAAgregarN = _turnosFaltan; }
+        }
+        catch (Exception ex)
+        {
+            _error = "Error cargando coordinacion: " + ex.Message;
+            _especialistas = new();
+            _turnosGuardados = new();
+        }
+    }
+
+    private void AgregarTurno()
+    {
+        _error = null;
+        if (_solicitudSel is null) { return; }
+        if (!Guid.TryParse(_especialistaSel, out var profId) || profId == Guid.Empty)
+        {
+            _error = "Selecciona un especialista antes de agregar el turno."; return;
+        }
+        if (_turnosAAgregarN <= 0)
+        {
+            _error = "La cantidad de turnos a agregar debe ser mayor a cero."; return;
+        }
+        if (_turnosAAgregarN > _turnosFaltan)
+        {
+            _error = $"Solo faltan {_turnosFaltan} turnos por asignar."; return;
+        }
+        var prof = _especialistas.FirstOrDefault(e => e.Id == profId);
+        if (prof is null)
+        {
+            _error = "Especialista no encontrado en el catalogo."; return;
+        }
+        _carritoTurnos.Add(new CartTurno
+        {
+            ProfesionalId = profId,
+            ProfesionalNombre = prof.NombreCompleto,
+            Cantidad = _turnosAAgregarN,
+            HorasPorTurno = _horasPorTurno,
+            FechaInicio = _fechaInicio,
+            MesAsignar = _mesAsignar > 0 ? (short)_mesAsignar : (short?)null
+        });
+        // Reset para el siguiente turno; sugerir lo que aun falta.
+        _especialistaSel = "";
+        _turnosAAgregarN = _turnosFaltan > 0 ? _turnosFaltan : 0;
+    }
+
+    private void QuitarTurno(CartTurno t) => _carritoTurnos.Remove(t);
+
+    private async Task AsignarServicio()
+    {
+        _error = _ok = null;
+        if (_solicitudSel is null || _carritoTurnos.Count == 0) { return; }
+        _busy = true;
+        try
+        {
+            var req = new AsignarServicioRequest(
+                _solicitudSel.Id,
+                _carritoTurnos.Select(c => new TurnoCoordinadoRequest(
+                    c.ProfesionalId, c.Cantidad, c.HorasPorTurno, c.FechaInicio, c.MesAsignar)).ToList());
+            var n = await Svc.AsignarServicioAsync(req, Guid.Empty);
+            _ok = $"Servicio coordinado: {n} turno(s) guardados.";
+            // Refrescar grilla y limpiar panel.
+            _carritoTurnos = new();
+            await Cargar();
+            _solicitudSel = null;
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void LimpiarPanel()
+    {
+        _solicitudSel = null;
+        _observaciones = ""; _fechaInicio = null; _mesAsignar = 0;
+        _horasPorTurno = null;
+        _idProfAsig = ""; _profesionalPred = "";
+        _especialistas = new(); _especialistaSel = ""; _turnosAAgregarN = 1;
+        _carritoTurnos = new(); _turnosGuardados = new();
+    }
+
+    private sealed class CartTurno
+    {
+        public Guid ProfesionalId { get; set; }
+        public string ProfesionalNombre { get; set; } = "";
+        public int Cantidad { get; set; }
+        public decimal? HorasPorTurno { get; set; }
+        public DateOnly? FechaInicio { get; set; }
+        public short? MesAsignar { get; set; }
+    }
+
+    private static string MesNombre(int m) => m switch
+    {
+        1 => "Enero", 2 => "Febrero", 3 => "Marzo", 4 => "Abril", 5 => "Mayo", 6 => "Junio",
+        7 => "Julio", 8 => "Agosto", 9 => "Septiembre", 10 => "Octubre", 11 => "Noviembre", 12 => "Diciembre",
+        _ => "--"
+    };
+}

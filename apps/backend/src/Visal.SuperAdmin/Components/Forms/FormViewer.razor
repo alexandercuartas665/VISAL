@@ -1,0 +1,263 @@
+@using Visal.SuperAdmin.Components.Forms
+
+@* ============================================================
+   FormViewer: renderiza un FormSchema como una vista
+   EDITABLE (no editor). Cabecera institucional + secciones +
+   campos. Los valores diligenciados viven en el dict Valores.
+   ============================================================ *@
+
+@if (Schema is null)
+{
+    <div class="fv-empty">Sin formato cargado.</div>
+}
+else
+{
+    <div class="fv-doc">
+
+        @* ----- Cabecera ----- *@
+        @if (Schema.Header is not null || !string.IsNullOrEmpty(Titulo))
+        {
+            var hd = Schema.Header ?? new FormHeader();
+            <div class="fv-head">
+                <div class="fv-head-logo">
+                    @if (!string.IsNullOrWhiteSpace(hd.LogoUrl))
+                    {
+                        <img src="@hd.LogoUrl" alt="logo" />
+                    }
+                    else
+                    {
+                        <div class="fv-logo-fallback">@(!string.IsNullOrWhiteSpace(hd.Institucion) ? hd.Institucion : "IPS")</div>
+                    }
+                    <div class="fv-head-tag">@hd.Tagline</div>
+                </div>
+                <div class="fv-head-title">
+                    <h3>@(string.IsNullOrWhiteSpace(hd.Titulo) ? Titulo : hd.Titulo)</h3>
+                    <div class="fv-head-nit">@Subtitulo</div>
+                </div>
+                <div class="fv-head-meta">
+                    @foreach (var cabF in hd.Campos)
+                    {
+                        var hdrKey = "hdr:" + cabF.Id;
+                        <div class="fv-head-meta-row">
+                            <label>@cabF.Label:</label>
+                            <input class="form-control form-control-sm" value="@GetValue(hdrKey)"
+                                   @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @* ----- Cuerpo: secciones + campos ----- *@
+        @foreach (var node in Schema.Children)
+        {
+            if (node.IsSection)
+            {
+                <div class="fv-section">
+                    <div class="fv-section-h">@node.Label</div>
+                    <div class="fv-grid">
+                        @if (node.Children is not null)
+                        {
+                            @foreach (var f in node.Children)
+                            {
+                                @RenderField(f)
+                            }
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="fv-grid fv-grid-root">
+                    @RenderField(node)
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public FormSchema? Schema { get; set; }
+    [Parameter] public Dictionary<string, string?> Valores { get; set; } = new();
+    [Parameter] public string? Titulo { get; set; }
+    [Parameter] public string? Subtitulo { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback<KeyValuePair<string, string?>> OnValueChanged { get; set; }
+
+    private string? GetValue(string key) => Valores.TryGetValue(key, out var v) ? v : null;
+
+    private async Task SetValue(string key, string? value)
+    {
+        Valores[key] = value;
+        if (OnValueChanged.HasDelegate) { await OnValueChanged.InvokeAsync(new(key, value)); }
+    }
+
+    private RenderFragment RenderField(FormNode node) => __builder =>
+    {
+        var span = Math.Clamp(node.WidthColumns <= 0 ? 12 : node.WidthColumns, 1, 12);
+        <div class="@($"fv-col fv-col-{span}")">
+            @if (node.IsText)
+            {
+                if (node.TextStyle == "heading")
+                {
+                    <h4 class="fv-h">@node.Content</h4>
+                }
+                else if (node.TextStyle == "subheading")
+                {
+                    <h5 class="fv-sh">@node.Content</h5>
+                }
+                else
+                {
+                    <p class="fv-p">@node.Content</p>
+                }
+            }
+            else if (node.IsTable)
+            {
+                <label class="fv-lbl">@node.Label @(node.Required ? "*" : "")</label>
+                <div class="fv-tbl-wrap">
+                    <table class="table table-sm fv-tbl">
+                        <thead>
+                            <tr>
+                                @if (node.Columns is not null)
+                                {
+                                    @foreach (var c in node.Columns)
+                                    {
+                                        <th>@c.Label</th>
+                                    }
+                                    <th style="width:32px"></th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{ var key = $"tbl:{node.Id}"; var rows = GetRowCount(key); }
+                            @for (int i = 0; i < rows; i++)
+                            {
+                                var idx = i;
+                                <tr>
+                                    @if (node.Columns is not null)
+                                    {
+                                        @foreach (var c in node.Columns)
+                                        {
+                                            var cellKey = $"{key}:{idx}:{c.Id}";
+                                            <td>
+                                                @RenderTableCell(c, cellKey)
+                                            </td>
+                                        }
+                                        <td>
+                                            <button class="btn btn-link btn-sm fv-tbl-rm" @onclick="() => RemoveRow(key, idx)" disabled="@ReadOnly">&times;</button>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <button class="btn btn-outline-secondary btn-sm fv-tbl-add" @onclick="() => AddRow(key)" disabled="@ReadOnly">+ Agregar fila</button>
+                </div>
+            }
+            else
+            {
+                <label class="fv-lbl">@node.Label @(node.Required ? "*" : "")</label>
+                @RenderInput(node)
+            }
+        </div>
+    };
+
+    private RenderFragment RenderInput(FormNode node) => __builder =>
+    {
+        var key = node.Name ?? $"fld:{node.Id}";
+        var val = GetValue(key) ?? node.DefaultValue ?? "";
+        switch (node.FieldType)
+        {
+            case "textarea":
+                <textarea class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
+                          disabled="@ReadOnly" value="@val"
+                          @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
+                break;
+            case "number":
+                <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"
+                       disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            case "date":
+                <input type="date" class="form-control form-control-sm"
+                       disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            case "email":
+                <input type="email" class="form-control form-control-sm" placeholder="@node.Placeholder"
+                       disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            case "select":
+                <select class="form-select form-select-sm" disabled="@ReadOnly" value="@val"
+                        @onchange="e => SetValue(key, e.Value?.ToString())">
+                    <option value="">Seleccione...</option>
+                    @if (node.Options is not null)
+                    {
+                        @foreach (var o in node.Options)
+                        {
+                            <option value="@o">@o</option>
+                        }
+                    }
+                </select>
+                break;
+            case "autocomplete":
+                <input class="form-control form-control-sm" placeholder="@(node.Placeholder ?? $"Buscar en {node.Catalog}...")"
+                       disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            case "calculated":
+                <input class="form-control form-control-sm fv-calc" readonly value="@val" placeholder="@node.Formula" />
+                break;
+            default:
+                <input type="text" class="form-control form-control-sm" placeholder="@node.Placeholder"
+                       disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+        }
+    };
+
+    private RenderFragment RenderTableCell(FormColumn c, string key) => __builder =>
+    {
+        var val = GetValue(key) ?? "";
+        switch (c.FieldType)
+        {
+            case "number":
+                <input type="number" class="form-control form-control-sm" disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            case "date":
+                <input type="date" class="form-control form-control-sm" disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            case "select":
+                <input class="form-control form-control-sm" placeholder="@c.Catalog"
+                       disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+            default:
+                <input type="text" class="form-control form-control-sm" disabled="@ReadOnly" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                break;
+        }
+    };
+
+    private int GetRowCount(string key)
+    {
+        var raw = GetValue($"{key}:_rows");
+        if (int.TryParse(raw, out var n) && n >= 0) { return n; }
+        return 1; // siempre arranca con 1 fila editable
+    }
+
+    private async Task AddRow(string key)
+    {
+        var n = GetRowCount(key) + 1;
+        await SetValue($"{key}:_rows", n.ToString());
+    }
+
+    private async Task RemoveRow(string key, int idx)
+    {
+        var n = Math.Max(0, GetRowCount(key) - 1);
+        await SetValue($"{key}:_rows", n.ToString());
+    }
+}

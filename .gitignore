@@ -64,6 +64,12 @@ deploy/docker/rabbitmq-data/
 deploy/docker/redis-data/
 deploy/docker/pgadmin-data/
 
+# Deploy de produccion - .env real y dumps de BD nunca al repo (datos sensibles)
+deploy/docker-prod/.env
+deploy/docker-prod/dumps/*.dump
+deploy/docker-prod/dumps/*.sql.gz
+deploy/docker-prod/backups/
+
 # Archivos subidos en tiempo de ejecucion (logos, avatares, media de chat/agentes)
 apps/backend/src/Visal.SuperAdmin/wwwroot/uploads/
 

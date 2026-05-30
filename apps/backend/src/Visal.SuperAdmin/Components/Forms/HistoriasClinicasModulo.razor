@@ -1,0 +1,583 @@
+@using System.Security.Claims
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
+@inject IFormDefinitionService FormsSvc
+@inject IAsignacionService AsigSvc
+@inject IHistoriaClinicaService HcSvc
+@inject IJSRuntime JS
+
+@*
+   Modulo reutilizable de Historias Clinicas.
+   Se invoca como submodulo desde /atencion recibiendo el paciente como contexto.
+   No tiene @page: no es ruta independiente.
+*@
+
+<div class="hc-grid">
+
+    @* =========== SIDEBAR IZQUIERDO: filtros + lista historias =========== *@
+    <div class="hc-col">
+        <div class="ase-card">
+            <div class="ase-card-h">Paciente</div>
+            <div class="hc-form-padding">
+                @if (PacienteContexto is PacienteAsignacionDto pc)
+                {
+                    @* Paciente recibido por parametro: NO permite cambiar. *@
+                    <div class="hc-paciente-card">
+                        <div class="hc-paciente-nm">@pc.NombreCompleto</div>
+                        <div class="hc-paciente-doc">@pc.TipoDocumento @pc.NumeroDocumento</div>
+                        <small class="text-muted">Paciente fijado por el modulo de Atencion.</small>
+                    </div>
+                }
+                else if (_paciente is PacienteAsignacionDto p)
+                {
+                    <div class="hc-paciente-card">
+                        <div class="hc-paciente-nm">@p.NombreCompleto</div>
+                        <div class="hc-paciente-doc">@p.TipoDocumento @p.NumeroDocumento</div>
+                        <button class="btn btn-link btn-sm" @onclick="OpenPacienteModal">Cambiar paciente</button>
+                    </div>
+                }
+                else
+                {
+                    <button class="btn btn-outline-primary btn-sm" @onclick="OpenPacienteModal">&#128270; Seleccionar paciente</button>
+                }
+            </div>
+        </div>
+
+        <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-form hc-form">
+                <div class="ase-f"><label>Fecha inicial</label><input type="date" class="form-control form-control-sm" @bind="_filFechaIni" /></div>
+                <div class="ase-f"><label>Fecha final</label><input type="date" class="form-control form-control-sm" @bind="_filFechaFin" /></div>
+                <div class="ase-f ase-f-wide">
+                    <label>Formato de historia</label>
+                    <select class="form-select form-select-sm" @bind="_filFormato">
+                        <option value="">Selecciona formato...</option>
+                        @foreach (var f in _formatos)
+                        {
+                            <option value="@f.Id">[@f.Codigo] @f.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <button class="btn btn-outline-primary btn-sm" @onclick="MostrarHistorias">Mostrar historias</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="ase-card hc-list-card">
+            <div class="ase-card-h">Historias del paciente (@_historias.Count)</div>
+            <div class="hc-list">
+                @if (_historias.Count == 0)
+                {
+                    <div class="ase-empty">Aplica un filtro y presiona "Mostrar historias".</div>
+                }
+                @foreach (var h in _historias)
+                {
+                    <div class="hc-item @(h.Id == _historiaSel?.Id ? "sel" : "")">
+                        <div class="hc-item-h">
+                            <div>
+                                <div class="hc-item-prof">Especialista: <strong>@h.Especialista</strong></div>
+                                <div class="hc-item-fecha">Fecha inicial: @h.Fecha.ToString("dd/MM/yyyy")</div>
+                            </div>
+                            <div class="dropdown">
+                                <button class="btn btn-link btn-sm hc-item-menu" @onclick="() => ToggleMenu(h.Id)">&#8942;</button>
+                                @if (_menuAbierto == h.Id)
+                                {
+                                    <div class="hc-menu">
+                                        <div class="hc-menu-h">Acciones</div>
+                                        <button class="hc-menu-item" @onclick="() => Seleccionar(h)">Ver esta historia</button>
+                                        <button class="hc-menu-item" disabled>Impresion</button>
+                                        <button class="hc-menu-item" disabled>Procesar Interoperabilidad</button>
+                                        <button class="hc-menu-item" disabled>Abrir Documento</button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(h.Observaciones))
+                        {
+                            <div class="hc-item-obs">Obs: @h.Observaciones</div>
+                        }
+                        <div class="hc-item-pill @($"hc-est-{h.Estado.ToLower()}")">@h.Estado</div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @* =========== PANEL DERECHO: detalle + tabs =========== *@
+    <div class="hc-col hc-col-main">
+        <div class="ase-card">
+            <div class="hc-actions">
+                <button class="btn btn-primary btn-sm" @onclick="IniciarHistoria" disabled="@(string.IsNullOrEmpty(_filFormato))">&#128221; Iniciar historia medica</button>
+                <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Generar documento imprimible (pendiente de cableado)">&#128424; Imprimir</button>
+                <button class="btn btn-danger btn-sm" disabled="@(_schemaActual is null)" @onclick="Descartar">&#128465; Descartar</button>
+                <button class="btn btn-outline-secondary btn-sm" disabled="@(_schemaActual is null)" @onclick="Cerrar">&#10006; Cerrar</button>
+            </div>
+            @if (_imprimirMsg is not null) { <div class="hc-info-msg">@_imprimirMsg</div> }
+
+            <div class="hc-buscar">
+                <label class="hc-buscar-lbl">BUSCAR DATOS DE HISTORIA:</label>
+                <div class="hc-buscar-row">
+                    <input class="form-control form-control-sm" placeholder="BUSCA INFORMACION DE LA HISTORIA" @bind="_busqueda" />
+                    <button class="btn btn-outline-secondary btn-sm" title="Filtrar por campo">&#9776;</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="ase-card hc-col-full">
+            <div class="hc-tabs">
+                @foreach (var t in _tabs)
+                {
+                    <button class="hc-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">@t</button>
+                }
+            </div>
+            <div class="hc-tab-body">
+                @if (_historiaSel is null)
+                {
+                    <div class="ase-empty hc-empty-detail">
+                        Selecciona una historia de la lista o presiona "Iniciar historia medica" para crear una nueva.
+                    </div>
+                }
+                else
+                {
+                    @if (_tabSel == "Historial")
+                    {
+                        @if (_schemaActual is null)
+                        {
+                            <div class="hc-placeholder">
+                                <div class="hc-placeholder-t">Selecciona un formato y presiona "Iniciar historia medica"</div>
+                                <div class="hc-placeholder-d">
+                                    El motor de formularios cargara la plantilla seleccionada para que la diligencies aqui mismo.
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <FormViewer Schema="@_schemaActual" Valores="@_valores"
+                                        Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato" />
+                        }
+                    }
+                    else if (_tabSel == "Ordenes medicamento") { <OrdenMedicamentos /> }
+                    else if (_tabSel == "Ordenes a Servicios") { <OrdenServicios /> }
+                    else if (_tabSel == "Remisiones") { <OrdenRemisiones /> }
+                    else if (_tabSel == "Ordenes incapacidad") { <OrdenIncapacidades /> }
+                    else if (_tabSel == "Ordenes certificaciones") { <OrdenCertificaciones /> }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ===== Modal BUSCAR PACIENTE (solo si NO viene paciente por parametro) ===== *@
+@if (_showPacModal)
+{
+    <div class="cie-backdrop" @onclick="ClosePacienteModal"></div>
+    <div class="cie-modal cie-modal-lg">
+        <div class="cie-modal-h">
+            <h3>BUSCAR PACIENTE</h3>
+            <button class="cie-modal-close" @onclick="ClosePacienteModal">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="ase-form" style="grid-template-columns: 1fr 1fr 200px; display:grid; gap:10px; margin-bottom:14px;">
+                <div class="ase-f"><label>No Documento</label><input class="form-control form-control-sm mono" @bind="_modalDoc" /></div>
+                <div class="ase-f"><label>Nombre</label><input class="form-control form-control-sm" @bind="_modalNombre" /></div>
+                <div style="display:flex; align-items:end;"><button class="btn btn-primary btn-sm" @onclick="BuscarPaciente" disabled="@_modalBusy">@(_modalBusy ? "Buscando..." : "Aplicar filtro")</button></div>
+            </div>
+            <div class="bp-results" style="border:1px solid #e2e8f0; border-radius:8px; max-height:340px; overflow:auto;">
+                <table class="table table-sm" style="margin:0; font-size:12px;">
+                    <thead style="background:#f8fafc;">
+                        <tr><th style="width:50px"></th><th>Documento</th><th>Nombre</th><th>Contrato</th><th>Telefono</th></tr>
+                    </thead>
+                    <tbody>
+                        @if (_modalGrid.Count == 0)
+                        {
+                            <tr><td colspan="5" class="text-center text-muted" style="padding:20px;">@(_modalBusy ? "Buscando..." : "Aplica un filtro para ver pacientes.")</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var r in _modalGrid)
+                            {
+                                <tr>
+                                    <td><button class="btn btn-primary btn-sm" @onclick="() => PickPaciente(r)">&#10003;</button></td>
+                                    <td class="mono">@r.Documento</td>
+                                    <td>@r.NombreCompleto</td>
+                                    <td>@(r.Contrato ?? "-")</td>
+                                    <td>@(r.Telefono ?? "-")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .hc-grid { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: stretch; }
+    .hc-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 600px; }
+    .hc-col-main { min-width: 0; }
+    .hc-col > .ase-card:last-child { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .hc-col-full { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+    .hc-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .hc-form .ase-f-wide { grid-column: span 2; }
+    .hc-form label { font-size: 11px; color: #475569; font-weight: 600; text-transform: uppercase; }
+
+    .hc-list-card { min-height: 0; }
+    .hc-list { overflow: auto; flex: 1; padding: 4px; max-height: 440px; }
+    .hc-item { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 8px; background: #fff; cursor: pointer; position: relative; }
+    .hc-item.sel { border-color: #1565c0; background: #eff6ff; }
+    .hc-item-h { display: flex; justify-content: space-between; align-items: flex-start; }
+    .hc-item-prof { font-size: 12.5px; color: #0f172a; }
+    .hc-item-fecha { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .hc-item-obs { font-size: 11px; color: #475569; font-style: italic; margin-top: 6px; }
+    .hc-item-pill { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-top: 6px; text-transform: uppercase; }
+    .hc-est-abierta { background: #dbeafe; color: #1e40af; }
+    .hc-est-cerrada { background: #dcfce7; color: #166534; }
+    .hc-est-inactiva { background: #fee2e2; color: #991b1b; }
+    .hc-item-menu { font-size: 20px; color: #64748b; padding: 0 6px; }
+
+    .dropdown { position: relative; }
+    .hc-menu { position: absolute; right: 0; top: 24px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 12px rgba(15,23,42,.1); min-width: 200px; z-index: 100; padding: 6px 0; }
+    .hc-menu-h { font-size: 11px; font-weight: 700; color: #94a3b8; padding: 6px 12px; text-transform: uppercase; }
+    .hc-menu-item { display: block; width: 100%; padding: 8px 12px; background: none; border: none; text-align: left; font-size: 12.5px; color: #0f172a; cursor: pointer; }
+    .hc-menu-item:hover { background: #f1f5f9; }
+    .hc-menu-item:disabled { color: #cbd5e1; cursor: not-allowed; }
+
+    .hc-actions { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end; flex-wrap: wrap; }
+    .hc-info-msg { padding: 8px 14px; background: #ecfdf5; border-left: 3px solid #16a34a; font-size: 12px; color: #166534; }
+    .hc-buscar { padding: 12px 14px; }
+    .hc-buscar-lbl { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .hc-buscar-row { display: flex; gap: 6px; margin-top: 4px; max-width: 520px; }
+    .hc-buscar-row > input { flex: 1; }
+
+    .hc-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; padding: 0 8px; overflow-x: auto; }
+    .hc-tab { padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .hc-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
+    .hc-tab-body { padding: 18px; flex: 1; overflow: auto; }
+    .hc-empty-detail { padding: 60px 30px; }
+    .hc-placeholder { padding: 30px; text-align: center; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; }
+    .hc-placeholder-t { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .hc-placeholder-d { font-size: 12.5px; color: #64748b; }
+
+    .hc-form-padding { padding: 14px; }
+    .hc-paciente-card { padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; }
+    .hc-paciente-nm { font-weight: 700; color: #0f172a; font-size: 13px; }
+    .hc-paciente-doc { font-family: monospace; font-size: 11.5px; color: #1e40af; margin-top: 2px; }
+    .hc-paciente-card button { padding: 0 4px; font-size: 11px; margin-top: 4px; }
+
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 80vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .cie-modal-lg { width: 900px; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    /// <summary>Paciente para el que se abre el modulo. Si esta seteado, NO se permite cambiar.</summary>
+    [Parameter] public PacienteAsignacionDto? PacienteContexto { get; set; }
+
+    private DateOnly? _filFechaIni;
+    private DateOnly? _filFechaFin;
+    private string _filFormato = "";
+    private string _busqueda = "";
+
+    private readonly string[] _tabs = new[] {
+        "Historial", "Ordenes medicamento", "Ordenes a Servicios",
+        "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
+    };
+    private string _tabSel = "Historial";
+
+    private List<HistoriaRow> _historias = new();
+    private HistoriaRow? _historiaSel;
+    private Guid? _menuAbierto;
+
+    private List<FormDefinitionDto> _formatos = new();
+    private FormSchema? _schemaActual;
+    private PrefillRouteSet _prefillRoutesActual = new();
+    private Dictionary<string, string?> _valores = new();
+    private string? _formatoActualNombre;
+    private string? _subtituloFormato;
+    private string? _imprimirMsg;
+
+    private PacienteAsignacionDto? _paciente;
+
+    private bool _showPacModal;
+    private string _modalDoc = "";
+    private string _modalNombre = "";
+    private List<PacienteFiltroResultadoDto> _modalGrid = new();
+    private bool _modalBusy;
+
+    // Paciente efectivo: prioriza el parametro, despues el seleccionado en el modal interno.
+    private PacienteAsignacionDto? PacienteActivo => PacienteContexto ?? _paciente;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _formatos = (await FormsSvc.ListAsync()).Where(f => f.Activo).ToList();
+    }
+
+    private void OpenPacienteModal()
+    {
+        if (PacienteContexto is not null) { return; }
+        _showPacModal = true;
+        _modalDoc = ""; _modalNombre = "";
+        _modalGrid = new();
+    }
+
+    private void ClosePacienteModal() => _showPacModal = false;
+
+    private async Task BuscarPaciente()
+    {
+        _modalBusy = true;
+        try
+        {
+            var f = new BusquedaPacienteFiltro(
+                null,
+                string.IsNullOrWhiteSpace(_modalDoc) ? null : _modalDoc.Trim(),
+                string.IsNullOrWhiteSpace(_modalNombre) ? null : _modalNombre.Trim(),
+                null, null);
+            _modalGrid = (await AsigSvc.BuscarPacientesAvanzadoAsync(f)).ToList();
+        }
+        finally { _modalBusy = false; }
+    }
+
+    private async Task PickPaciente(PacienteFiltroResultadoDto r)
+    {
+        var full = await AsigSvc.GetPacienteAsync(r.Id);
+        if (full is null) { return; }
+        _paciente = full;
+        _showPacModal = false;
+    }
+
+    private async Task MostrarHistorias()
+    {
+        if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+        Guid? formId = Guid.TryParse(_filFormato, out var fid) ? fid : null;
+        var rows = await HcSvc.ListarPorPacienteAsync(p.Id, _filFechaIni, _filFechaFin, formId);
+        _historias = rows.Select(r => new HistoriaRow
+        {
+            Id = r.Id,
+            Especialista = r.EspecialistaNombre ?? "(sin nombre)",
+            Fecha = DateOnly.FromDateTime(r.FechaApertura.LocalDateTime),
+            Estado = r.Estado,
+            Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : "")
+        }).ToList();
+    }
+
+    private async Task Seleccionar(HistoriaRow h)
+    {
+        _menuAbierto = null;
+        _historiaSel = h;
+        // Cargar la historia completa desde BD para mostrar sus valores en el FormViewer.
+        var detail = await HcSvc.GetAsync(h.Id);
+        if (detail is null) { return; }
+        _schemaActual = FormSchema.FromJson(detail.SchemaJson);
+        _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
+        _valores = DeserializeValores(detail.ValoresJson);
+        _formatoActualNombre = detail.FormatoNombre;
+        _subtituloFormato = !string.IsNullOrWhiteSpace(detail.FormatoVersion)
+            ? $"Codigo: {detail.FormatoCodigo}  -  Version: {detail.FormatoVersion}"
+            : $"Codigo: {detail.FormatoCodigo}";
+        _tabSel = "Historial";
+        _imprimirMsg = null;
+    }
+    private void ToggleMenu(Guid id) => _menuAbierto = _menuAbierto == id ? null : id;
+
+    private static Dictionary<string, string?> DeserializeValores(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return new(); }
+        try
+        {
+            var dict = JsonSerializer.Deserialize<Dictionary<string, string?>>(json);
+            return dict ?? new();
+        }
+        catch { return new(); }
+    }
+
+    private static string SerializeValores(Dictionary<string, string?> v)
+        => JsonSerializer.Serialize(v);
+
+    private async Task IniciarHistoria()
+    {
+        if (!Guid.TryParse(_filFormato, out var fid)) { return; }
+        if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+
+        var detail = await FormsSvc.GetAsync(fid);
+        if (detail is null) { return; }
+        _schemaActual = FormSchema.FromJson(detail.SchemaJson);
+        _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
+        _valores = new();
+        PrefillFromPaciente();
+        _formatoActualNombre = detail.Nombre;
+        _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version) ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}" : $"Codigo: {detail.Codigo}";
+        _tabSel = "Historial";
+
+        // Persistir la historia recien creada con los valores de prefill.
+        var especialista = await GetEspecialistaNombreAsync();
+        var creada = await HcSvc.CrearAsync(
+            new CrearHistoriaRequest(p.Id, fid, SerializeValores(_valores), especialista),
+            Guid.Empty);
+
+        var nueva = new HistoriaRow
+        {
+            Id = creada.Id,
+            Especialista = creada.EspecialistaNombre ?? "(usuario actual)",
+            Fecha = DateOnly.FromDateTime(creada.FechaApertura.LocalDateTime),
+            Estado = creada.Estado,
+            Observaciones = $"Iniciada con formato {detail.Codigo} para {p.NombreCompleto}"
+        };
+        _historias.Insert(0, nueva);
+        _historiaSel = nueva;
+        _imprimirMsg = null;
+    }
+
+    private async Task<string?> GetEspecialistaNombreAsync()
+    {
+        if (AuthState is null) { return null; }
+        try
+        {
+            var st = await AuthState;
+            return st.User.Identity?.Name
+                ?? st.User.FindFirst(ClaimTypes.Name)?.Value
+                ?? st.User.FindFirst("name")?.Value
+                ?? st.User.FindFirst(ClaimTypes.Email)?.Value;
+        }
+        catch { return null; }
+    }
+
+    private void PrefillFromPaciente()
+    {
+        if (PacienteActivo is not PacienteAsignacionDto p || _schemaActual is null) { return; }
+
+        // 1) Valores del paciente disponibles para usarse como origen.
+        // Las claves coinciden con PrefillSourceCatalog.Campos["paciente"].
+        var pacienteValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["numeroDocumento"] = p.NumeroDocumento,
+            ["tipoDocumento"] = p.TipoDocumento,
+            ["nombreCompleto"] = p.NombreCompleto,
+            ["primerNombre"] = p.PrimerNombre,
+            ["segundoNombre"] = p.SegundoNombre,
+            ["primerApellido"] = p.PrimerApellido,
+            ["segundoApellido"] = p.SegundoApellido,
+            ["fechaNacimiento"] = p.FechaNacimiento?.ToString("yyyy-MM-dd"),
+            ["sexo"] = p.Sexo,
+            ["estadoCivil"] = p.EstadoCivil,
+            ["telefono"] = p.Telefono,
+            ["email"] = p.Email,
+            ["direccion"] = p.Direccion,
+            ["ciudad"] = p.Ciudad,
+            ["zona"] = p.Zona,
+            ["ocupacion"] = p.Ocupacion,
+            ["regimen"] = p.Regimen,
+            ["contactoEmergencia"] = p.ContactoEmergencia,
+            ["parentesco"] = p.Parentesco,
+            ["telefonoEmergencia"] = p.TelefonoEmergencia,
+            ["sede"] = p.Sede
+        };
+
+        // 2) Buscar la ruta "paciente" en las rutas configuradas del formulario.
+        var rutaPaciente = _prefillRoutesActual.Routes
+            .FirstOrDefault(r => string.Equals(r.SourceModule, "paciente", StringComparison.OrdinalIgnoreCase));
+
+        if (rutaPaciente is not null && rutaPaciente.Mappings.Count > 0)
+        {
+            // Modo configurado: aplicar mapeos.
+            foreach (var m in rutaPaciente.Mappings)
+            {
+                if (string.IsNullOrWhiteSpace(m.Source) || string.IsNullOrWhiteSpace(m.Target)) { continue; }
+                if (pacienteValues.TryGetValue(m.Source, out var v) && v is not null)
+                {
+                    _valores[m.Target] = v;
+                }
+            }
+            return;
+        }
+
+        // 3) Fallback: matching por convencion de nombre (heuristica usada antes de tener rutas).
+        var heuristic = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["documento"] = p.NumeroDocumento,
+            ["identificacion"] = p.NumeroDocumento,
+            ["nombre"] = p.NombreCompleto,
+            ["nombres_apellidos"] = p.NombreCompleto,
+            ["sede"] = p.Sede,
+            ["ciudad"] = p.Ciudad
+        };
+        void Recurse(IEnumerable<FormNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.IsSection && n.Children is not null) { Recurse(n.Children); continue; }
+                if (n.IsText || n.IsTable) { continue; }
+                var name = (n.Name ?? n.Label ?? "").ToLowerInvariant().Replace(" ", "_");
+                if (string.IsNullOrEmpty(name)) { continue; }
+                foreach (var kv in heuristic)
+                {
+                    if (name.Contains(kv.Key.ToLowerInvariant()))
+                    {
+                        var key = n.Name ?? $"fld:{n.Id}";
+                        _valores[key] = kv.Value;
+                        break;
+                    }
+                }
+            }
+        }
+        Recurse(_schemaActual.Children);
+    }
+
+    private async Task Descartar()
+    {
+        if (_historiaSel is HistoriaRow h)
+        {
+            // Pedimos motivo via prompt nativo; null o vacio = el usuario cancelo.
+            var motivo = await JS.InvokeAsync<string?>(
+                "prompt",
+                "Motivo de inactivacion de la historia clinica:",
+                "");
+            if (string.IsNullOrWhiteSpace(motivo)) { return; }
+
+            await HcSvc.DescartarAsync(h.Id, motivo.Trim(), Guid.Empty);
+            h.Estado = "Inactiva";
+            h.MotivoInactivacion = motivo.Trim();
+        }
+        _schemaActual = null; _valores = new(); _historiaSel = null;
+        _imprimirMsg = null;
+    }
+
+    private async Task Cerrar()
+    {
+        if (_historiaSel is HistoriaRow h)
+        {
+            await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), Guid.Empty);
+            h.Estado = "Cerrada";
+        }
+        _schemaActual = null; _valores = new();
+        _imprimirMsg = null;
+    }
+
+    /// <summary>
+    /// Placeholder de impresion. Cuando se cablee, generara el PDF o abrira la
+    /// vista documento con los valores diligenciados (FormViewer en modo print).
+    /// </summary>
+    private void Imprimir()
+    {
+        _imprimirMsg = $"Listo para imprimir: {_formatoActualNombre} con {_valores.Count} dato(s) diligenciado(s). Cableado de impresion pendiente.";
+    }
+
+    private sealed class HistoriaRow
+    {
+        public Guid Id { get; set; }
+        public string Especialista { get; set; } = "";
+        public DateOnly Fecha { get; set; }
+        public string Estado { get; set; } = "Abierta";
+        public string? Observaciones { get; set; }
+        public string? MotivoInactivacion { get; set; }
+    }
+}

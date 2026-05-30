@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @using Visal.Application.Tenancy
 @inject IProfesionalConfigService Svc
+@inject IUsuarioAdminService UsuSvc
 @inject IWebHostEnvironment Env
 
 <PageTitle>Profesionales - Visal</PageTitle>
@@ -87,6 +88,7 @@
                     <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">Guardar profesional</button>
                     @if (_id is not null)
                     {
+                        <button class="btn btn-outline-success btn-sm" @onclick="OpenCrearUsuario" title="Crear usuario de login para este profesional">&#128100; Crear usuario</button>
                         <button class="btn btn-outline-danger btn-sm" @onclick="Delete">Eliminar</button>
                     }
                 </div>
@@ -121,11 +123,64 @@
                 }
 
                 <div class="ase-card-h" style="margin-top:16px;">Usuario de acceso</div>
-                <div class="ase-deuda">Creacion de usuario para el profesional: <strong>pendiente (deuda tecnica)</strong>. Se habilitara junto al modulo de Usuarios.</div>
+                <div class="usu-info">
+                    Si este profesional necesita acceder al modulo de atencion para ver sus turnos asignados,
+                    presiona "Crear usuario" arriba. El usuario heredara los datos personales del profesional.
+                </div>
             </div>
         }
     </div>
 </div>
+
+@* ===== Modal Crear usuario para profesional ===== *@
+@if (_showCrearUsuModal)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseCrearUsuario"></div>
+    <div class="usu-modal">
+        <div class="usu-modal-h">
+            <h3>Crear usuario para @_nombreCompleto</h3>
+            <button class="usu-modal-close" @onclick="CloseCrearUsuario">&times;</button>
+        </div>
+        <div class="usu-modal-body">
+            @if (_modalError is not null) { <div class="ase-alert">@_modalError</div> }
+            <div class="ase-form">
+                <div class="ase-f ase-f-wide">
+                    <label>Correo *</label>
+                    <input class="form-control form-control-sm" @bind="_nuevoEmail" placeholder="profesional@ips.com" />
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <label>Clave temporal *</label>
+                    <input type="password" class="form-control form-control-sm" @bind="_nuevoPwd" placeholder="Minimo 6 caracteres" />
+                    <small class="text-muted">El profesional la cambiara en su primer ingreso.</small>
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <small class="usu-info">
+                        Se creara un usuario heredando documento, nombre, apellidos, celular y ciudad
+                        de <strong>@_nombreCompleto</strong>. Quedara vinculado a este profesional para
+                        ver sus turnos en el modulo de Atencion.
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseCrearUsuario">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="CrearUsuario" disabled="@_busyCrearUsu">
+                @(_busyCrearUsu ? "Creando..." : "Crear usuario")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
+    .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 520px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .usu-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .usu-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .usu-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .usu-modal-body { padding: 18px; overflow: auto; }
+    .usu-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
+    .usu-info { font-size: 12px; color: #475569; padding: 8px 10px; background: #f1f5f9; border-radius: 8px; }
+</style>
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
@@ -146,6 +201,37 @@
 
     private bool _busy;
     private string? _error, _ok;
+
+    // Modal crear usuario para profesional.
+    private bool _showCrearUsuModal;
+    private string _nuevoEmail = "", _nuevoPwd = "";
+    private string? _modalError;
+    private bool _busyCrearUsu;
+
+    private void OpenCrearUsuario()
+    {
+        if (_id is null) { _error = "Guarda el profesional antes de crear su usuario."; return; }
+        _nuevoEmail = ""; _nuevoPwd = ""; _modalError = null;
+        _showCrearUsuModal = true;
+    }
+
+    private void CloseCrearUsuario() => _showCrearUsuModal = false;
+
+    private async Task CrearUsuario()
+    {
+        if (_id is not Guid pid) { return; }
+        _modalError = null; _busyCrearUsu = true;
+        try
+        {
+            var u = await UsuSvc.CrearUsuarioDesdeProfesionalAsync(pid, _nuevoEmail, _nuevoPwd, await Actor());
+            if (u is null) { _modalError = "No se pudo crear (sin tenant activo)."; return; }
+            _ok = $"Usuario '{u.Email}' creado para {_nombreCompleto}.";
+            _showCrearUsuModal = false;
+        }
+        catch (InvalidOperationException ex) { _modalError = ex.Message; }
+        catch (Exception ex) { _modalError = "Error: " + ex.Message; }
+        finally { _busyCrearUsu = false; }
+    }
 
     protected override async Task OnInitializedAsync()
     {

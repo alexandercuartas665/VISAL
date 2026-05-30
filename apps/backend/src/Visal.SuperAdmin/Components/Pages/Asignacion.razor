@@ -28,15 +28,16 @@
             <div class="ase-card-h">1. Agregar Servicios</div>
 
             <div class="ase-form">
-                <div class="ase-f ase-f-wide">
+                <div class="ase-f">
                     <label>Numero Documento</label>
                     <div class="asg-input-row">
-                        <input class="form-control form-control-sm mono" placeholder="Busqueda de paciente por identificacion"
+                        <input class="form-control form-control-sm mono" placeholder="Busqueda por identificacion"
                                value="@_docBusqueda" @oninput="e => _docBusqueda = e.Value?.ToString() ?? string.Empty" @onkeyup="OnDocKey" />
                         <button class="btn btn-outline-secondary btn-sm" title="Busqueda avanzada" @onclick="OpenBuscadorModal">&#128270;</button>
                         <button class="btn btn-primary btn-sm" title="Buscar" @onclick="BuscarPorDocumento">&#128269;</button>
                     </div>
                 </div>
+                <div class="ase-f"><label>Numero Historia</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_paciente?.NumeroDocumento" /></div>
                 <div class="ase-f"><label>Tipo doc</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_paciente?.TipoDocumento" /></div>
                 <div class="ase-f ase-f-wide"><label>Nombre paciente</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.NombreCompleto" /></div>
                 <div class="ase-f"><label>Sede</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.Sede" /></div>
@@ -45,11 +46,26 @@
                     <label>Contratos</label>
                     <select class="form-select form-select-sm" value="@_contratoIdSel" @onchange="OnContratoChanged" disabled="@(_paciente == null)">
                         <option value="">Selecciona un contrato</option>
-                        @if (_paciente != null)
-                        {
-                            @foreach (var c in _paciente.Contratos) { <option value="@c.ContratoId">@c.CodigoContrato - @c.AseguradoraNombre</option> }
-                        }
+                        @foreach (var c in _todosContratos) { <option value="@c.ContratoId">@c.CodigoContrato - @c.AseguradoraNombre</option> }
                     </select>
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <div class="asg-modulos">
+                        @if (_modulos.Count == 0)
+                        {
+                            <span class="asg-muted">Selecciona un contrato para ver los modulos disponibles.</span>
+                        }
+                        else
+                        {
+                            @foreach (var m in _modulos)
+                            {
+                                <label class="asg-mod-radio">
+                                    <input type="radio" name="modSvc" checked="@(m == _moduloSel)" @onchange="() => OnModuloChanged(m)" />
+                                    <span>@m</span>
+                                </label>
+                            }
+                        }
+                    </div>
                 </div>
             </div>
         </div>
@@ -58,35 +74,56 @@
             <div class="ase-card-h">2. Seleccione el Servicio</div>
             <div class="ase-form">
                 <div class="ase-f ase-f-wide">
-                    <label>Tipo de Servicio</label>
-                    <div class="asg-tipos">
-                        @if (_tipos.Count == 0) { <span class="asg-muted">Selecciona un contrato primero.</span> }
-                        @foreach (var t in _tipos)
-                        {
-                            <label class="asg-radio">
-                                <input type="radio" name="tipoSvc" checked="@(t == _tipoSel)" @onchange="() => OnTipoChanged(t)" />
-                                <span>@t</span>
-                            </label>
-                        }
+                    <label>Busqueda por servicio</label>
+                    <div class="asg-input-row">
+                        <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..."
+                               value="@_filtroSvc" @oninput="e => _filtroSvc = e.Value?.ToString() ?? string.Empty" />
+                        <button class="btn btn-outline-secondary btn-sm" title="Filtrar">&#9776;</button>
                     </div>
                 </div>
-                <div class="ase-f ase-f-wide">
-                    <label>Filtro servicio</label>
-                    <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..." value="@_filtroSvc" @oninput="e => _filtroSvc = e.Value?.ToString() ?? string.Empty" />
-                </div>
             </div>
-            <div class="asg-servicios">
-                @if (_servicios.Count == 0) { <div class="ase-empty">Sin servicios para esta combinacion.</div> }
-                @foreach (var s in _serviciosFiltrados)
+            <div class="asg-grid-wrap">
+                @if (_serviciosVisibles.Count == 0)
                 {
-                    <button class="asg-svc @(_servicioSel?.Id == s.Id ? "sel" : "")" @onclick="() => _servicioSel = s">
-                        <div class="asg-svc-nm">@s.Descripcion</div>
-                        <div class="asg-svc-sub">
-                            @if (s.Codigo is not null) { <code>@s.Codigo</code> }
-                            <span>@(s.Especialidad ?? "")</span>
-                            @if (s.Tarifa is decimal t) { <span class="asg-tar">@t.ToString("N0")</span> }
-                        </div>
-                    </button>
+                    <div class="ase-empty">
+                        @(_contratoIdSel == "" ? "Selecciona un contrato primero." :
+                          _moduloSel == "" ? "Selecciona un modulo arriba (EQUIPOS, INSUMOS, ...)." :
+                          "Sin servicios para esta combinacion.")
+                    </div>
+                }
+                else
+                {
+                    <table class="table table-sm asg-tbl">
+                        <thead>
+                            <tr>
+                                <th style="width:90px">Accion</th>
+                                <th>CodServicio</th>
+                                <th>CodInterno</th>
+                                <th>Historia</th>
+                                <th>Descripcion</th>
+                                <th>Clasificacion</th>
+                                <th>Modulo</th>
+                                <th>Modalidad</th>
+                                <th class="text-end">Tarifa</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _serviciosVisibles)
+                            {
+                                <tr class="@(_servicioSel?.Id == s.Id ? "asg-row-sel" : "")">
+                                    <td><button class="btn btn-primary btn-sm" @onclick="() => PreseleccionarServicio(s)">Seleccionar</button></td>
+                                    <td class="mono">@s.Codigo</td>
+                                    <td class="mono">@s.CodigoInterno</td>
+                                    <td class="mono">@s.Historia</td>
+                                    <td>@s.Descripcion</td>
+                                    <td>@s.Clasificacion</td>
+                                    <td>@s.Modulo</td>
+                                    <td>@s.Modalidad</td>
+                                    <td class="text-end">@(s.Tarifa is decimal t ? $"$ {t:N0}" : "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
                 }
             </div>
         </div>
@@ -130,10 +167,19 @@
                         <input type="checkbox" @bind="c.Seleccionado" />
                         <div class="asg-cart-info">
                             <div class="asg-cart-nm">@c.NombreServicio</div>
+                            <div class="asg-cart-meta">Codigo: <code>@(c.Servicio.Codigo ?? "-")</code></div>
+                            <div class="asg-cart-meta">Cantidad: <strong>@c.Cantidad</strong></div>
+                            @if (!string.IsNullOrWhiteSpace(c.Observaciones))
+                            {
+                                <div class="asg-cart-meta asg-cart-obs">Obs: @c.Observaciones</div>
+                            }
                             <div class="asg-cart-sub">
                                 <span class="asg-pill">@c.TipoServicio</span>
-                                <span>Cant: @c.Cantidad</span>
                                 <span>@c.FechaInicio.ToString("dd MMM")@(c.FechaFinal is DateOnly f ? " - " + f.ToString("dd MMM") : "")</span>
+                                @if (!string.IsNullOrWhiteSpace(c.Autorizacion))
+                                {
+                                    <span>Aut: <code>@c.Autorizacion</code></span>
+                                }
                             </div>
                         </div>
                     </div>
@@ -272,7 +318,8 @@
 
 <style>
     .asg-grid { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 14px; align-items: stretch; }
-    .asg-col { display: flex; flex-direction: column; gap: 14px; min-height: 760px; }
+    /* min-width:0 impide que las tablas internas (asg-grid-wrap) empujen el ancho del track. */
+    .asg-col { display: flex; flex-direction: column; gap: 14px; min-height: 760px; min-width: 0; }
     /* La ultima card de cada columna crece para igualar la altura entre las 3. */
     .asg-col > .ase-card:last-child { flex: 1; display: flex; flex-direction: column; }
     .asg-col-full { flex: 1; display: flex; flex-direction: column; }
@@ -284,20 +331,26 @@
     .asg-radio:has(input:checked) { background: #eff6ff; border-color: #1565c0; color: #1565c0; }
     .asg-radio input { margin: 0; }
     .asg-muted { color: #94a3b8; font-style: italic; font-size: 13px; }
-    .asg-servicios { max-height: 280px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 4px; }
-    .asg-svc { display: block; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 6px; background: #fff; cursor: pointer; text-align: left; margin-bottom: 3px; }
-    .asg-svc:hover { background: #f8fafc; }
-    .asg-svc.sel { background: #eff6ff; border-color: #1565c0; }
-    .asg-svc-nm { font-size: 13px; font-weight: 600; color: #0f172a; }
-    .asg-svc-sub { display: flex; gap: 8px; font-size: 11px; color: #64748b; margin-top: 2px; }
-    .asg-svc-sub code { background:#f1f5f9; padding:1px 4px; border-radius:3px; }
+    .asg-modulos { display: flex; flex-wrap: wrap; gap: 16px; padding: 4px 0; }
+    .asg-mod-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #1565c0; cursor: pointer; }
+    .asg-mod-radio input { accent-color: #1565c0; }
+    .asg-grid-wrap { border: 1px solid #e2e8f0; border-radius: 8px; max-height: 360px; overflow: auto; background: #fff; }
+    .asg-tbl { margin: 0; font-size: 12px; min-width: 100%; }
+    .asg-tbl thead th { position: sticky; top: 0; background: #f8fafc; color: #334155; font-size: 11px; font-weight: 600; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    .asg-tbl td { vertical-align: middle; font-size: 11.5px; }
+    .asg-row-sel { background: #eff6ff; }
+    .asg-row-sel td { border-left: 2px solid #1565c0; }
+    .asg-tbl td:first-child, .asg-tbl th:first-child { border-left: none; padding-left: 8px; }
     .asg-tar { color: #1565c0; font-weight: 600; }
     .asg-historico, .asg-carrito { max-height: 480px; overflow: auto; }
     .asg-hist, .asg-cart-row { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; background: #fff; }
     .asg-cart-row { display: flex; gap: 10px; align-items: flex-start; }
     .asg-cart-info { flex: 1; }
     .asg-hist-nm, .asg-cart-nm { font-size: 13px; font-weight: 600; color: #0f172a; }
-    .asg-hist-sub, .asg-cart-sub { display: flex; gap: 10px; font-size: 11px; color: #64748b; margin-top: 3px; align-items: center; }
+    .asg-cart-meta { font-size: 11.5px; color: #475569; margin-top: 3px; }
+    .asg-cart-meta code { background:#f1f5f9; padding:1px 4px; border-radius:3px; font-size: 11px; }
+    .asg-cart-obs { font-style: italic; color: #64748b; }
+    .asg-hist-sub, .asg-cart-sub { display: flex; gap: 10px; font-size: 11px; color: #64748b; margin-top: 6px; align-items: center; flex-wrap: wrap; }
     .asg-hist-sub2 { font-size: 11px; color: #94a3b8; margin-top: 2px; }
     .asg-pill { background: #dbeafe; color: #1e40af; padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; }
     .asg-state { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
@@ -347,16 +400,32 @@
     private string _docBusqueda = "";
     private PacienteAsignacionDto? _paciente;
     private string _contratoIdSel = "";
-    private ContratoMiniDto? _contratoSel => _paciente?.Contratos.FirstOrDefault(c => c.ContratoId.ToString() == _contratoIdSel);
+    // Todos los contratos activos del sistema (no solo los del paciente).
+    private List<ContratoMiniDto> _todosContratos = new();
+    private ContratoMiniDto? _contratoSel => _todosContratos.FirstOrDefault(c => c.ContratoId.ToString() == _contratoIdSel);
 
-    // Catalogo servicios.
-    private List<string> _tipos = new();
-    private string _tipoSel = "";
+    // Catalogo servicios del contrato actual (todos los modulos, se filtran por modulo y filtro libre).
     private List<ServicioCatalogoDto> _servicios = new();
+    // Modulos disponibles para el contrato actual (EQUIPOS, INSUMOS, TERAPIAS, ...). Derivados de _servicios.
+    private List<string> _modulos = new();
+    private string _moduloSel = "";
     private string _filtroSvc = "";
-    private IEnumerable<ServicioCatalogoDto> _serviciosFiltrados =>
-        string.IsNullOrWhiteSpace(_filtroSvc) ? _servicios :
-        _servicios.Where(s => (s.Descripcion ?? "").ToLower().Contains(_filtroSvc.ToLower()) || (s.Codigo ?? "").ToLower().Contains(_filtroSvc.ToLower()));
+    // Lista visible en el grid: filtrada por modulo elegido y luego por texto libre (descripcion o codigo).
+    private List<ServicioCatalogoDto> _serviciosVisibles
+    {
+        get
+        {
+            if (_servicios.Count == 0 || string.IsNullOrEmpty(_moduloSel)) { return new(); }
+            var f = _filtroSvc?.Trim().ToLower() ?? "";
+            return _servicios
+                .Where(s => s.Modulo == _moduloSel)
+                .Where(s => f.Length == 0
+                    || (s.Descripcion ?? "").ToLower().Contains(f)
+                    || (s.Codigo ?? "").ToLower().Contains(f)
+                    || (s.CodigoInterno ?? "").ToLower().Contains(f))
+                .ToList();
+        }
+    }
     private ServicioCatalogoDto? _servicioSel;
 
     // Historico.
@@ -387,6 +456,12 @@
     private List<PacienteFiltroResultadoDto> _modalGrid = new();
     private bool _modalBusy;
 
+    protected override async Task OnInitializedAsync()
+    {
+        // Carga la lista global de contratos activos (la dropdown CONTRATOS muestra TODOS, no solo los del paciente).
+        _todosContratos = (await Svc.ListContratosDisponiblesAsync()).ToList();
+    }
+
     private async Task BuscarPorDocumento()
     {
         _error = _ok = null;
@@ -406,7 +481,7 @@
         _paciente = p;
         _docBusqueda = p.NumeroDocumento;
         _contratoIdSel = "";
-        _tipos = new(); _tipoSel = ""; _servicios = new(); _servicioSel = null;
+        _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;
         _ultimas = (await Svc.UltimasAsignacionesAsync(p.Id, 10)).ToList();
         _modal = false;
     }
@@ -414,46 +489,72 @@
     private async Task OnContratoChanged(ChangeEventArgs e)
     {
         _contratoIdSel = e.Value?.ToString() ?? "";
-        _tipos = new(); _tipoSel = ""; _servicios = new(); _servicioSel = null;
+        _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;
         if (Guid.TryParse(_contratoIdSel, out var cid))
         {
-            _tipos = (await Svc.TiposServicioPorContratoAsync(cid)).ToList();
+            // Trae TODOS los servicios del contrato; el filtrado por modulo se hace luego con los radios.
+            _servicios = (await Svc.ServiciosPorContratoAsync(cid, null)).ToList();
+            _modulos = _servicios
+                .Where(s => !string.IsNullOrWhiteSpace(s.Modulo))
+                .Select(s => s.Modulo!)
+                .Distinct()
+                .OrderBy(m => m)
+                .ToList();
         }
     }
 
-    private async Task OnTipoChanged(string t)
+    private void OnModuloChanged(string m)
     {
-        _tipoSel = t; _servicioSel = null;
-        if (_contratoSel is ContratoMiniDto c)
-        {
-            _servicios = (await Svc.ServiciosPorContratoAsync(c.ContratoId, t)).ToList();
-        }
+        _moduloSel = m;
+        _servicioSel = null;
+        _ok = null; _error = null;
     }
 
+    // Equivalente al gvServicios.RowCommand "Select" del legacy: marca el servicio elegido y muestra mensaje.
+    private void PreseleccionarServicio(ServicioCatalogoDto s)
+    {
+        _servicioSel = s;
+        _error = null;
+        _ok = $"Servicio '{s.Descripcion}' preseleccionado. Ingrese cantidad y presione Agregar.";
+    }
+
+    // Equivalente a Linkbutton2_Click → PrepararServicio() del legacy. Valida todos los campos antes de agregar al carrito.
     private void Agregar()
     {
-        _error = null;
-        if (_servicioSel is null) { _error = "Selecciona un servicio del catalogo."; return; }
-        if (_fechaInicio is not DateOnly fi) { _error = "Fecha de inicio obligatoria."; return; }
-        if (_mesVig < 1 || _mesVig > 12) { _error = "Mes de vigencia invalido."; return; }
-        if (_cantidad < 1) { _error = "Cantidad debe ser >= 1."; return; }
+        _error = null; _ok = null;
+        // Mismo orden de validaciones que ctrAsignaciones.PrepararServicio() (empty_field por campo).
+        if (_paciente is null) { _error = "Debe indicar una identificacion de paciente."; return; }
+        if (string.IsNullOrWhiteSpace(_paciente.NombreCompleto)) { _error = "Debe indicar un nombre de paciente."; return; }
+        if (_cantidad < 1) { _error = "Debe indicar cantidad de servicios."; return; }
+        if (string.IsNullOrWhiteSpace(_contratoIdSel)) { _error = "Debe seleccionar un contrato."; return; }
+        if (string.IsNullOrWhiteSpace(_moduloSel)) { _error = "Debe seleccionar un tipo de servicio (modulo)."; return; }
+        if (string.IsNullOrWhiteSpace(_autorizacion)) { _error = "Debe indicar un Numero de Orden / Autorizacion."; return; }
+        if (_fechaInicio is not DateOnly fi) { _error = "Debe indicar una Fecha de Inicio."; return; }
+        if (_fechaFinal is not DateOnly ff) { _error = "Debe indicar una Fecha Final."; return; }
+        if (_mesVig < 1 || _mesVig > 12) { _error = "Debe indicar un Mes de Vigencia."; return; }
+        if (_mesFin < 1 || _mesFin > 12) { _error = "Debe indicar un Mes Final."; return; }
+        if (!short.TryParse(_anio, out var anio) || anio < 2000 || anio > 2100) { _error = "Debe seleccionar un anio del servicio."; return; }
+        if (_servicioSel is null) { _error = "Debe seleccionar un servicio de la grilla."; return; }
+        if (string.IsNullOrWhiteSpace(_paciente.Sede)) { _error = "El paciente no tiene una sede asignada, consulta el paciente."; return; }
 
         _carrito.Add(new CartItem
         {
             Servicio = _servicioSel,
-            TipoServicio = _tipoSel,
+            TipoServicio = _servicioSel.Modulo ?? "(sin modulo)",
             Modulo = _servicioSel.Modulo,
             Cantidad = _cantidad,
             Autorizacion = _autorizacion?.Trim(),
             FechaInicio = fi,
-            FechaFinal = _fechaFinal,
-            Anio = short.TryParse(_anio, out var y) ? y : (short?)null,
+            FechaFinal = ff,
+            Anio = anio,
             MesVigencia = (short)_mesVig,
-            MesFinal = _mesFin >= 1 && _mesFin <= 12 ? (short?)_mesFin : null,
+            MesFinal = (short)_mesFin,
             Observaciones = _obs?.Trim()
         });
+        // Limpieza posterior al estilo legacy: deja listo para preseleccionar/agregar otro.
         _servicioSel = null;
-        _autorizacion = null; _obs = null; _fechaFinal = null;
+        _cantidad = 1;
+        _ok = "Servicio agregado al lote.";
     }
 
     private void EliminarSeleccionados()
@@ -500,7 +601,7 @@
     private void Reset()
     {
         _docBusqueda = ""; _paciente = null; _contratoIdSel = "";
-        _tipos = new(); _tipoSel = ""; _servicios = new(); _servicioSel = null;
+        _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;
         _ultimas = new(); _carrito = new();
         _autorizacion = null; _obs = null; _fechaFinal = null;
         _cantidad = 1; _filtroSvc = "";

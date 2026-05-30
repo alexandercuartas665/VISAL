@@ -1,0 +1,391 @@
+@*
+   Modulo reutilizable de Notas Medicas.
+   Se invoca como submodulo desde /atencion recibiendo paciente + sesion como contexto.
+   No tiene @page: no es ruta independiente.
+*@
+
+<div class="nm-header">
+    <div>
+        <h1 class="nm-title">&#9994; Notas Medicas</h1>
+        <div class="nm-subtitle">Modulo Profesional de Terapias</div>
+    </div>
+    <button class="btn btn-primary nm-btn-gradient">&#128190; Guardado Definitivo</button>
+</div>
+
+<div class="nm-tabs">
+    @foreach (var t in _tabs)
+    {
+        <button class="nm-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">@t</button>
+    }
+</div>
+
+@if (_tabSel == "Diligenciamiento")
+{
+    <div class="ase-card nm-panel">
+        <div class="nm-row">
+            <div class="ase-f">
+                <label>Seleccionar Fecha Nota</label>
+                <input type="date" class="form-control form-control-sm" @bind="_fechaNota" />
+            </div>
+            <div class="ase-f nm-col-2">
+                <label>Nombre Paciente</label>
+                <input class="form-control form-control-sm asg-ro" readonly value="@_nombrePaciente" />
+            </div>
+            <div class="ase-f">
+                <label>Documento Paciente</label>
+                <input class="form-control form-control-sm asg-ro mono" readonly value="@_docPaciente" />
+            </div>
+        </div>
+        <div class="nm-row">
+            <div class="ase-f">
+                <label>Codigo Unico Nota</label>
+                <input class="form-control form-control-sm asg-ro mono" readonly value="@_codNota" />
+            </div>
+            <div class="ase-f">
+                <label>Hora Nota</label>
+                <select class="form-select form-select-sm" @bind="_horaNota">
+                    <option value="">Selecciona...</option>
+                    @for (int h = 6; h <= 20; h++)
+                    {
+                        <option value="@($"{h:00}:00")">@($"{h:00}:00")</option>
+                        <option value="@($"{h:00}:30")">@($"{h:00}:30")</option>
+                    }
+                </select>
+            </div>
+            <div class="ase-f">
+                <label>Fecha Agregada Nota</label>
+                <input class="form-control form-control-sm asg-ro" readonly value="@_fechaAgregada" />
+            </div>
+            <div class="ase-f">
+                <label>Sesion No</label>
+                <input class="form-control form-control-sm mono" @bind="_sesionNo" />
+            </div>
+        </div>
+        <div class="ase-f ase-f-wide nm-row-full">
+            <label>Contenido de la Nota</label>
+            <textarea class="form-control form-control-sm" rows="12" @bind="_contenido"
+                      placeholder="Describe la atencion, hallazgos, plan, recomendaciones..."></textarea>
+        </div>
+        <div class="nm-acciones-center">
+            <button class="btn btn-outline-secondary">Guardado Parcial</button>
+            <button class="btn btn-primary nm-btn-gradient">Guardado Definitivo</button>
+            <button class="btn btn-outline-danger">Cancelar</button>
+        </div>
+    </div>
+}
+
+@if (_tabSel == "Notas Completadas")
+{
+    <div class="ase-card nm-panel">
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Paciente:</label>
+            <select class="form-select form-select-sm nm-w-280" @bind="_filPaciente">
+                <option value="">Todos</option>
+                <option value="1144099887">MARIA GOMEZ</option>
+                <option value="1010101010">JUAN CARLOS PEREZ MOLINA</option>
+                <option value="2020202020">LUIS FERNANDO GONZALEZ TORRES</option>
+            </select>
+            <button class="btn btn-outline-secondary btn-sm">Ver Todos</button>
+        </div>
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Desde:</label>
+            <input type="date" class="form-control form-control-sm nm-w-150" @bind="_filDesde" />
+            <label class="nm-lbl-inline">Hasta:</label>
+            <input type="date" class="form-control form-control-sm nm-w-150" @bind="_filHasta" />
+            <span class="nm-sep">|</span>
+            <label class="nm-lbl-inline">Descargar Notas:</label>
+            <button class="btn btn-outline-secondary btn-sm">Generar Reporte</button>
+        </div>
+        <div class="nm-row-inline">
+            <button class="btn btn-outline-primary btn-sm">Ver Nota</button>
+            <button class="btn btn-outline-secondary btn-sm">Generar Informes Fin</button>
+            <button class="btn btn-outline-success btn-sm">Crear Cuenta de Cobro</button>
+        </div>
+
+        <div class="nm-grid-wrap">
+            <table class="table table-sm nm-tbl">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" /></th>
+                        <th>CodInt</th>
+                        <th>CodAsign</th>
+                        <th>Orden</th>
+                        <th>Tipo Terapia</th>
+                        <th>Sesion</th>
+                        <th>Completado</th>
+                        <th>Paciente ID</th>
+                        <th>Paciente</th>
+                        <th>Profesional</th>
+                        <th>Fecha Nota</th>
+                        <th>Contenido</th>
+                        <th>Mes Asignado</th>
+                        <th>Detalle Servicio</th>
+                        <th>Cod Servicio</th>
+                        <th>Contrato</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_notasCompletas.Count == 0)
+                    {
+                        <tr><td colspan="16" class="ase-empty">No hay notas completadas. Cuando registres atenciones en /atencion, apareceran aqui.</td></tr>
+                    }
+                    @foreach (var n in _notasCompletas)
+                    {
+                        <tr>
+                            <td><input type="checkbox" /></td>
+                            <td class="mono">@n.CodInt</td>
+                            <td class="mono">@n.CodAsign</td>
+                            <td>@n.Orden</td>
+                            <td>@n.TipoTerapia</td>
+                            <td class="text-center">@n.SesionNo</td>
+                            <td><span class="nm-pill-ok">COMPLETO</span></td>
+                            <td class="mono">@n.NoDocPaciente</td>
+                            <td>@n.NomPaciente</td>
+                            <td>@n.Profesional</td>
+                            <td>@n.Fecha.ToString("dd/MM/yyyy")</td>
+                            <td class="nm-truncate">@n.Nota</td>
+                            <td>@n.MesAsignado</td>
+                            <td>@n.DetalleServicio</td>
+                            <td class="mono">@n.CodServicio</td>
+                            <td class="mono">@n.Contrato</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@if (_tabSel == "Firma")
+{
+    <div class="ase-card nm-panel nm-firma">
+        <h6 class="nm-firma-h">Ingrese Firma Paciente:</h6>
+        <div class="nm-firma-acciones-top">
+            <button class="btn btn-outline-secondary btn-sm" disabled>Limpiar</button>
+        </div>
+        <div class="nm-firma-canvas">
+            <div class="nm-firma-placeholder">Area de firma 450 x 175 (pendiente de cableado JS).</div>
+        </div>
+        <div class="nm-firma-acciones">
+            <button class="btn btn-primary nm-btn-gradient">&#128190; Guardar</button>
+            <button class="btn btn-outline-danger">Cancelar</button>
+        </div>
+    </div>
+}
+
+@if (_tabSel == "Seguimiento")
+{
+    <div class="ase-card nm-panel">
+        <div class="nm-placeholder">
+            <div class="nm-placeholder-t">Seguimiento de notas</div>
+            <div class="nm-placeholder-d">Pendiente de implementacion. Mostrara el historial de seguimiento de la atencion del paciente.</div>
+        </div>
+    </div>
+}
+
+@if (_tabSel == "Documentos Externos")
+{
+    <div class="ase-card nm-panel">
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Paciente:</label>
+            <select class="form-select form-select-sm nm-w-280" @bind="_extPaciente">
+                <option value="">Selecciona paciente...</option>
+                <option value="1144099887">MARIA GOMEZ</option>
+                <option value="1010101010">JUAN CARLOS PEREZ MOLINA</option>
+            </select>
+        </div>
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Nombre del Archivo:</label>
+            <select class="form-select form-select-sm nm-w-280" @bind="_extTipoArchivo">
+                <option value="">Seleccione tipo de archivo...</option>
+                <option value="firmas">Lista de firmas</option>
+                <option value="escala">Escala</option>
+                <option value="formato">Formato</option>
+            </select>
+        </div>
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Tipo de Terapia:</label>
+            <select class="form-select form-select-sm nm-w-280" @bind="_extTipoTerapia">
+                <option value="">Selecciona tipo de terapia...</option>
+                <option>FISIOTERAPEUTA</option>
+                <option>FONOAUDIOLOGIA</option>
+                <option>TERAPIAOCUPACIONAL</option>
+                <option>TERAPIARESPIRATORIA</option>
+                <option>NEBULIZACION</option>
+                <option>TRAQUEOSTOMIA</option>
+            </select>
+            <label class="nm-lbl-inline">Mes:</label>
+            <select class="form-select form-select-sm nm-w-150" @bind="_extMes">
+                <option value="">Selecciona mes...</option>
+                @foreach (var m in new[] { "ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE" })
+                {
+                    <option>@m</option>
+                }
+            </select>
+        </div>
+
+        <div class="nm-doc-grid">
+            <div class="nm-doc-card">
+                <div class="nm-doc-h">Anotaciones</div>
+                <textarea class="form-control form-control-sm" rows="3" placeholder="Anotaciones de la imagen..." @bind="_extAnotaciones"></textarea>
+                <hr />
+                <button class="btn btn-outline-primary btn-sm" disabled>&#128206; Subir archivo</button>
+                <small class="text-muted">Pendiente: integracion con storage.</small>
+            </div>
+            <div class="nm-doc-card">
+                <div class="nm-doc-h">Carpetas</div>
+                <div class="nm-folder-tree">
+                    <div>&#128193; HC</div>
+                    <div class="indent">&#128459; mayo 2026</div>
+                    <div class="indent">&#128459; abril 2026</div>
+                    <div>&#128193; Imagenes</div>
+                    <div class="indent">&#128459; mayo 2026</div>
+                </div>
+            </div>
+            <div class="nm-doc-card nm-doc-viewer">
+                <div class="nm-doc-h">Visor de documentos</div>
+                <div class="nm-doc-empty">Selecciona un documento para previsualizarlo.</div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_tabSel == "Ver Historias")
+{
+    <div class="ase-card nm-panel">
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Paciente:</label>
+            <select class="form-select form-select-sm nm-w-280" @bind="_histPaciente">
+                <option value="">Todos</option>
+                <option>MARIA GOMEZ</option>
+                <option>JUAN CARLOS PEREZ MOLINA</option>
+            </select>
+            <button class="btn btn-outline-secondary btn-sm">Ver Todos</button>
+            <span class="ms-auto"></span>
+            <button class="btn btn-outline-primary btn-sm">Ver Historia</button>
+        </div>
+        <label class="nm-lbl-inline">Historias:</label>
+        <div class="nm-historias-area">
+            <div class="ase-empty">Selecciona un paciente y presiona "Ver Historia".</div>
+        </div>
+    </div>
+}
+
+<style>
+    .nm-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: rgba(255,255,255,.7); border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 16px; }
+    .nm-title { margin: 0; font-size: 22px; font-weight: 700; color: #2c3e50; }
+    .nm-subtitle { font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+    .nm-btn-gradient { background: linear-gradient(135deg, #4a90e2, #00d2ff); border: none; color: #fff; padding: 8px 18px; border-radius: 8px; font-weight: 600; }
+    .nm-btn-gradient:hover { transform: translateY(-1px); color: #fff; }
+
+    .nm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .nm-tab { padding: 10px 18px; background: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3); border-radius: 12px; color: #7f8c8d; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .3s; }
+    .nm-tab:hover { background: rgba(255,255,255,.9); transform: translateY(-1px); }
+    .nm-tab.sel { background: linear-gradient(135deg, #4a90e2, #00d2ff); color: #fff; border-color: transparent; }
+
+    .nm-panel { padding: 22px; }
+    .nm-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 18px; }
+    .nm-col-2 { grid-column: span 2; }
+    .nm-row label { font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .nm-row-full { margin-bottom: 18px; }
+    .nm-row-full > label { display: block; font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; margin-bottom: 6px; }
+    .nm-acciones-center { display: flex; justify-content: center; gap: 12px; margin-top: 18px; }
+
+    .nm-row-inline { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .nm-lbl-inline { font-size: 11px; color: #7f8c8d; font-weight: 600; text-transform: uppercase; margin: 0; }
+    .nm-sep { color: #cbd5e1; }
+    .nm-w-150 { max-width: 150px; }
+    .nm-w-280 { min-width: 220px; max-width: 320px; }
+
+    .nm-grid-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 480px; }
+    .nm-tbl { margin: 0; font-size: 12px; min-width: 100%; }
+    .nm-tbl thead th { position: sticky; top: 0; background: #eff6ff; color: #1e40af; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #bfdbfe; white-space: nowrap; }
+    .nm-tbl td { padding: 8px 10px; font-size: 11.5px; }
+    .nm-pill-ok { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 11px; }
+    .nm-truncate { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .nm-firma { text-align: center; }
+    .nm-firma-h { text-align: left; font-weight: 700; color: #0f172a; margin-bottom: 12px; }
+    .nm-firma-acciones-top { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+    .nm-firma-canvas { border: 2px solid #cbd5e1; border-radius: 8px; background: #fff; padding: 60px 0; max-width: 480px; margin: 0 auto; }
+    .nm-firma-placeholder { color: #94a3b8; font-style: italic; }
+    .nm-firma-acciones { display: flex; justify-content: space-between; margin-top: 20px; max-width: 480px; margin-left: auto; margin-right: auto; }
+
+    .nm-placeholder { padding: 50px 30px; text-align: center; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; }
+    .nm-placeholder-t { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .nm-placeholder-d { font-size: 13px; color: #64748b; }
+
+    .nm-doc-grid { display: grid; grid-template-columns: 220px 200px 1fr; gap: 14px; margin-top: 16px; }
+    .nm-doc-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
+    .nm-doc-h { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+    .nm-folder-tree { font-size: 12.5px; color: #0f172a; }
+    .nm-folder-tree > div { padding: 4px 0; }
+    .nm-folder-tree .indent { padding-left: 18px; color: #475569; }
+    .nm-doc-viewer { min-height: 240px; }
+    .nm-doc-empty { color: #94a3b8; font-style: italic; padding: 30px 0; text-align: center; }
+
+    .nm-historias-area { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #f8f9fa; min-height: 220px; margin-top: 8px; }
+    .asg-ro { background: #f1f5f9; }
+</style>
+
+@code {
+    /// <summary>Nombre del paciente que llega desde /atencion. Si esta seteado, se prefilla y readonly.</summary>
+    [Parameter] public string? NombrePacienteCtx { get; set; }
+    [Parameter] public string? DocumentoPacienteCtx { get; set; }
+    [Parameter] public int? SessionNoCtx { get; set; }
+    [Parameter] public Guid? AsignacionTurnoIdCtx { get; set; }
+
+    private readonly string[] _tabs = new[] {
+        "Notas Completadas", "Diligenciamiento", "Firma", "Seguimiento", "Documentos Externos", "Ver Historias"
+    };
+    private string _tabSel = "Diligenciamiento";
+
+    private DateOnly? _fechaNota = DateOnly.FromDateTime(DateTime.Today);
+    private string _nombrePaciente = "";
+    private string _docPaciente = "";
+    private string _codNota = "";
+    private string _horaNota = "";
+    private string _fechaAgregada = "";
+    private string _sesionNo = "";
+    private string _contenido = "";
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(NombrePacienteCtx)) { _nombrePaciente = NombrePacienteCtx; }
+        if (!string.IsNullOrEmpty(DocumentoPacienteCtx)) { _docPaciente = DocumentoPacienteCtx; }
+        if (SessionNoCtx is int sn) { _sesionNo = sn.ToString(); }
+        if (AsignacionTurnoIdCtx is Guid g) { _codNota = g.ToString()[..8]; }
+        if (string.IsNullOrEmpty(_fechaAgregada)) { _fechaAgregada = DateTime.Today.ToString("yyyy-MM-dd"); }
+    }
+
+    private string _filPaciente = "";
+    private DateOnly? _filDesde;
+    private DateOnly? _filHasta;
+    private List<NotaRow> _notasCompletas = new();
+
+    private string _extPaciente = "";
+    private string _extTipoArchivo = "";
+    private string _extTipoTerapia = "";
+    private string _extMes = "";
+    private string _extAnotaciones = "";
+
+    private string _histPaciente = "";
+
+    private sealed class NotaRow
+    {
+        public string CodInt { get; set; } = "";
+        public string CodAsign { get; set; } = "";
+        public int Orden { get; set; }
+        public string TipoTerapia { get; set; } = "";
+        public int SesionNo { get; set; }
+        public string NoDocPaciente { get; set; } = "";
+        public string NomPaciente { get; set; } = "";
+        public string Profesional { get; set; } = "";
+        public DateOnly Fecha { get; set; }
+        public string Nota { get; set; } = "";
+        public string MesAsignado { get; set; } = "";
+        public string DetalleServicio { get; set; } = "";
+        public string CodServicio { get; set; } = "";
+        public string Contrato { get; set; } = "";
+    }
+}

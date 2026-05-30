@@ -31,7 +31,14 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
 
         return new PacienteAsignacionDto(p.Id, p.NumeroDocumento, p.TipoDocumento, p.NombreCompleto,
-            sedeNombre, p.Ciudad, contratos);
+            sedeNombre, p.Ciudad, contratos,
+            p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
+            p.FechaNacimiento,
+            p.Sexo, p.EstadoCivil,
+            p.Telefono, p.Email,
+            p.Direccion, p.Zona,
+            p.Ocupacion, p.Regimen,
+            p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia);
     }
 
     public async Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default)
@@ -140,7 +147,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var q = db.ServiciosContrato.AsNoTracking().Where(s => s.ContratoId == contratoId);
         if (!string.IsNullOrWhiteSpace(tipo)) { q = q.Where(s => s.Modulo == tipo); }
         return await q.OrderBy(s => s.Descripcion)
-            .Select(s => new ServicioCatalogoDto(s.Id, s.CodigoServicio, s.Descripcion ?? s.CodigoServicio ?? "(sin descripcion)", s.Modulo, s.Especialidad, s.Tarifa))
+            .Select(s => new ServicioCatalogoDto(
+                s.Id, s.CodigoServicio,
+                s.Descripcion ?? s.CodigoServicio ?? "(sin descripcion)",
+                s.Modulo, s.Especialidad, s.Tarifa,
+                s.CodigoInterno, s.Historia, s.Clasificacion, s.Modalidad))
             .ToListAsync(ct);
     }
 
@@ -214,5 +225,202 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         db.Asignaciones.Remove(a);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<IReadOnlyList<AsignacionPendienteDto>> ListarPendientesAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        AsignacionEstadoFiltro estado = AsignacionEstadoFiltro.Pendientes,
+        int? anio = null, int? mesVigencia = null,
+        string? noOrden = null, string? documentoPaciente = null,
+        CancellationToken ct = default)
+    {
+        // Sin modulos permitidos -> grid vacio (el usuario no es coordinador de ningun modulo).
+        if (modulosPermitidos is null || modulosPermitidos.Count == 0)
+        {
+            return Array.Empty<AsignacionPendienteDto>();
+        }
+
+        var permisos = modulosPermitidos.Select(m => m.ToUpperInvariant()).ToList();
+
+        // Asignaciones cuyo Modulo (o TipoServicio como fallback) esta entre los permitidos.
+        var q = db.Asignaciones.AsNoTracking()
+            .Where(a => (a.Modulo != null && permisos.Contains(a.Modulo.ToUpper()))
+                     || permisos.Contains(a.TipoServicio.ToUpper()));
+
+        // Filtro por estado equivalente al cmbEstado del legacy (ctrlCoordinador.ascx.vb).
+        switch (estado)
+        {
+            case AsignacionEstadoFiltro.Pendientes:
+                q = q.Where(a => a.Estado == AsignacionEstado.Pendiente);
+                break;
+            case AsignacionEstadoFiltro.Asignados:
+                q = q.Where(a => a.Estado != AsignacionEstado.Pendiente);
+                break;
+            case AsignacionEstadoFiltro.Todos:
+                // sin filtro adicional
+                break;
+        }
+
+        if (anio is int ay) { q = q.Where(a => a.AnioServicio == (short)ay); }
+        if (mesVigencia is int mv && mv >= 1 && mv <= 12) { q = q.Where(a => a.MesVigencia == (short)mv); }
+        if (!string.IsNullOrWhiteSpace(noOrden))
+        {
+            var n = noOrden.Trim();
+            q = q.Where(a => a.CodigoAutorizacion != null && a.CodigoAutorizacion.Contains(n));
+        }
+        if (!string.IsNullOrWhiteSpace(documentoPaciente))
+        {
+            var d = documentoPaciente.Trim();
+            q = q.Where(a => a.Paciente != null && a.Paciente.NumeroDocumento.Contains(d));
+        }
+
+        var asigs = await q
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(200)
+            .ToListAsync(ct);
+
+        // Resolver paciente (nombre + documento + tipoDoc) en una segunda query.
+        var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
+        var pacs = await db.Pacientes.AsNoTracking()
+            .Where(p => pacIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto, p.TipoDocumento })
+            .ToDictionaryAsync(p => p.Id, p => p, ct);
+
+        // El "Orden" visible en la grilla es un numero corrido por created_at (mas reciente primero -> 1, 2, ...).
+        var orderedById = asigs
+            .Select((a, idx) => new { a.Id, Orden = idx + 1 })
+            .ToDictionary(x => x.Id, x => x.Orden);
+
+        return asigs.Select(a =>
+        {
+            pacs.TryGetValue(a.PacienteId, out var p);
+            return new AsignacionPendienteDto(
+                a.Id,
+                orderedById[a.Id],
+                p?.NombreCompleto ?? "(sin paciente)",
+                p?.NumeroDocumento ?? "",
+                p?.TipoDocumento ?? "",
+                a.NombreServicio,
+                a.Cantidad,
+                a.Observaciones,
+                a.TipoServicio,
+                a.ContratoCodigo,
+                a.ServicioId,
+                a.FechaInicio,
+                a.FechaFinal,
+                a.CodigoAutorizacion,
+                a.CreatedAt,
+                a.Estado.ToString());
+        }).ToList();
+    }
+
+    public async Task<IReadOnlyList<EspecialistaDto>> ListarEspecialistasPorModuloAsync(string modulo, CancellationToken ct = default)
+    {
+        // Filtro por tipo de profesional cuyo Nombre haga match (case-insensitive) con el modulo.
+        var moduloUpper = (modulo ?? "").Trim().ToUpperInvariant();
+        if (moduloUpper.Length == 0) { return Array.Empty<EspecialistaDto>(); }
+
+        // 1) tipos que matchean por nombre
+        var tipoIdsMatch = await db.TiposProfesional.AsNoTracking()
+            .Where(t => t.Activo)
+            .Where(t => t.Nombre.ToUpper() == moduloUpper)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+
+        var qProf = db.Profesionales.AsNoTracking().AsQueryable();
+
+        // Si hay tipo coincidente, filtrar; si no, devolver TODOS los profesionales del tenant.
+        if (tipoIdsMatch.Count > 0)
+        {
+            qProf = qProf.Where(p => p.TipoProfesionalId != null && tipoIdsMatch.Contains(p.TipoProfesionalId.Value));
+        }
+
+        var lista = await qProf.OrderBy(p => p.NombreCompleto).Take(500).ToListAsync(ct);
+
+        // Resolver nombre del tipo para la columna del dropdown.
+        var tipoIds = lista.Where(p => p.TipoProfesionalId != null).Select(p => p.TipoProfesionalId!.Value).Distinct().ToList();
+        var tiposDict = tipoIds.Count > 0
+            ? await db.TiposProfesional.AsNoTracking().Where(t => tipoIds.Contains(t.Id))
+                .ToDictionaryAsync(t => t.Id, t => t.Nombre, ct)
+            : new Dictionary<Guid, string>();
+
+        return lista.Select(p => new EspecialistaDto(
+            p.Id,
+            p.NumeroDocumento,
+            p.NombreCompleto,
+            p.TipoProfesionalId is Guid tid && tiposDict.TryGetValue(tid, out var tn) ? tn : null)).ToList();
+    }
+
+    public async Task<IReadOnlyList<TurnoCoordinadoDto>> ListarTurnosAsync(Guid asignacionId, CancellationToken ct = default)
+    {
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.AsignacionId == asignacionId)
+            .OrderBy(t => t.CreatedAt)
+            .ToListAsync(ct);
+        if (turnos.Count == 0) { return Array.Empty<TurnoCoordinadoDto>(); }
+
+        var profIds = turnos.Select(t => t.ProfesionalId).Distinct().ToList();
+        var profDict = await db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+
+        return turnos.Select(t => new TurnoCoordinadoDto(
+            t.Id, t.ProfesionalId,
+            profDict.TryGetValue(t.ProfesionalId, out var n) ? n : "(desconocido)",
+            t.Cantidad, t.HorasPorTurno, t.FechaInicio, t.MesAsignar)).ToList();
+    }
+
+    public async Task<int> AsignarServicioAsync(AsignarServicioRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        if (req.Turnos is null || req.Turnos.Count == 0) { throw new InvalidOperationException("Debe agregar al menos un turno antes de asignar."); }
+
+        var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == req.AsignacionId, ct)
+            ?? throw new InvalidOperationException("Asignacion no encontrada.");
+
+        // Validaciones por turno + suma total.
+        var sumaNueva = 0;
+        foreach (var t in req.Turnos)
+        {
+            if (t.Cantidad <= 0) { throw new InvalidOperationException("Cada turno debe tener cantidad > 0."); }
+            if (t.ProfesionalId == Guid.Empty) { throw new InvalidOperationException("Cada turno debe tener profesional."); }
+            sumaNueva += t.Cantidad;
+        }
+
+        // Sumar turnos ya existentes para no exceder la cantidad de la asignacion.
+        var sumaExistente = await db.AsignacionTurnos
+            .Where(x => x.AsignacionId == req.AsignacionId)
+            .SumAsync(x => (int?)x.Cantidad, ct) ?? 0;
+
+        var totalProyectado = sumaExistente + sumaNueva;
+        if (totalProyectado > asig.Cantidad)
+        {
+            throw new InvalidOperationException(
+                $"La suma de turnos ({totalProyectado}) supera la cantidad del servicio ({asig.Cantidad}).");
+        }
+
+        // Insertar los nuevos turnos.
+        foreach (var t in req.Turnos)
+        {
+            db.AsignacionTurnos.Add(new AsignacionTurno
+            {
+                TenantId = tid,
+                AsignacionId = req.AsignacionId,
+                ProfesionalId = t.ProfesionalId,
+                Cantidad = t.Cantidad,
+                HorasPorTurno = t.HorasPorTurno,
+                FechaInicio = t.FechaInicio,
+                MesAsignar = t.MesAsignar
+            });
+        }
+
+        // Si la suma total iguala la cantidad del servicio, marcar como Asignado.
+        if (totalProyectado == asig.Cantidad)
+        {
+            asig.Estado = AsignacionEstado.Asignado;
+        }
+
+        await db.SaveChangesAsync(ct);
+        return req.Turnos.Count;
     }
 }

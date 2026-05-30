@@ -238,7 +238,43 @@ Luego `docker compose up -d`.
 
 ## 7. Backups de Postgres
 
-### Dump manual
+### Importar tu BD de dev al primer arranque del server
+
+Si quieres que el server NO arranque vacio sino con los datos de tu BD de desarrollo (usuarios, aseguradoras, sedes, pacientes demo, etc.), genera un dump en tu maquina y subelo al server:
+
+**En tu maquina local (PowerShell)** — genera el dump:
+```pwsh
+cd C:\DesarrolloIA\Visal\deploy\docker-prod
+$fecha = Get-Date -Format "yyyy-MM-dd"
+docker run --rm `
+  --network visal-net `
+  -v "${PWD}\dumps:/dumps" `
+  -e PGPASSWORD=visal_local_2026 `
+  postgres:16-alpine `
+  pg_dump -h visal-postgres -U visal -d visal_dev `
+    --no-owner --no-privileges --clean --if-exists `
+    -Fc -f /dumps/visal_dev_$fecha.dump
+```
+
+Esto crea `dumps/visal_dev_YYYY-MM-DD.dump` (formato PgCustom comprimido). Requiere que el stack dev de la carpeta `deploy/docker/` este corriendo localmente (red `visal-net`).
+
+**En el server** — restauralo despues del primer `docker compose up`:
+```bash
+cd /opt/visal/docker-prod
+# Asume que ya subiste el dump a dumps/visal_dev_YYYY-MM-DD.dump
+docker compose up -d postgres
+docker cp dumps/visal_dev_*.dump visal-postgres-prod:/tmp/restore.dump
+docker exec -e PGPASSWORD="$(grep ^POSTGRES_PASSWORD= .env | cut -d= -f2-)" \
+  visal-postgres-prod \
+  pg_restore -U visal -d visal --no-owner --no-privileges --clean --if-exists \
+  /tmp/restore.dump
+docker exec visal-postgres-prod rm /tmp/restore.dump
+docker compose restart visal-app
+```
+
+> El dump usa `--clean --if-exists` asi que es seguro restaurarlo sobre una BD que ya tenia las tablas creadas (por las migraciones EF). Solo borra y recrea los datos.
+
+### Dump manual del server
 ```bash
 ./deploy.sh backup
 # crea backups/visal-YYYY-MM-DD-HHMM.sql.gz

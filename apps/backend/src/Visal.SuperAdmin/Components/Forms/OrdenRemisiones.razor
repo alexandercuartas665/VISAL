@@ -1,0 +1,54 @@
+@* Diseño basado en ctrlOrdenRemisiones.ascx del legacy. Solo layout. *@
+
+<div class="od-bar">
+    <div class="od-bar-left">
+        <label>Orden de Remision a Especialidad Numero:</label>
+        <select class="form-select form-select-sm od-w-220" disabled>
+            <option>(sin ordenes)</option>
+        </select>
+    </div>
+    <div class="od-bar-right">
+        <button class="btn btn-outline-secondary btn-sm" disabled>+ Agregar</button>
+        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+    </div>
+</div>
+
+<div class="od-card">
+    <div class="od-row">
+        <div class="od-f od-c-12">
+            <label>Nombre de la Especialidad</label>
+            <input class="form-control form-control-sm" placeholder="Buscar especialidad..." />
+        </div>
+    </div>
+    <div class="od-row">
+        <div class="od-f od-c-11">
+            <label>Motivo de la Remision</label>
+            <textarea class="form-control form-control-sm" rows="2" placeholder="Motivo de la remision..."></textarea>
+        </div>
+        <div class="od-f od-c-1 od-action-col">
+            <button class="btn btn-primary btn-sm od-action-add" title="Guardar">&#128190;</button>
+        </div>
+    </div>
+
+    <div class="od-grid-wrap">
+        <table class="table table-sm od-tbl">
+            <thead>
+                <tr>
+                    <th>Nombre de la Especialidad</th>
+                    <th>Motivo de la Remision</th>
+                    <th class="text-center" style="width:50px">&#128424;</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="3" class="text-center text-muted od-empty-row">Sin remisiones agregadas.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .od-action-col { display: flex; align-items: stretch; }
+    .od-action-add { width: 100%; align-self: stretch; height: 100%; }
+</style>
+
+@code { }

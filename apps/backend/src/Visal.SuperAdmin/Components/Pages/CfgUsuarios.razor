@@ -66,6 +66,7 @@
                             <input type="checkbox" class="form-check-input" @bind="u.Global" />
                         </td>
                         <td class="ase-row-actions">
+                            <button class="btn btn-outline-primary btn-sm" title="Editar detalles" @onclick="() => SelectRow(u)">&#9998;</button>
                             <button class="btn btn-primary btn-sm" title="Guardar asignacion" @onclick="() => Asignar(u)">&#10003;</button>
                             <button class="btn btn-outline-warning btn-sm" title="Reiniciar clave" @onclick="() => ResetPassword(u)">&#128274;</button>
                             <button class="btn btn-outline-danger btn-sm" title="Quitar de la entidad" @onclick="() => Eliminar(u)">&times;</button>
@@ -77,6 +78,95 @@
         @if (_users.Count == 0) { <div class="ase-empty">Sin usuarios.</div> }
     </div>
 </div>
+
+@* ============================================================
+   PANEL DE DETALLE: campos completos + reset clave + permisos
+   coordinacion. Se muestra cuando hay un usuario seleccionado
+   (boton lapiz en la tabla).
+   ============================================================ *@
+@if (_selectedRow is Row sel)
+{
+    <div class="usu-det-grid">
+        @* --- Sidebar izquierdo: avatar + foto --- *@
+        <div class="ase-card usu-det-side">
+            <div class="usu-avatar-circle">@sel.Iniciales</div>
+            <div class="usu-avatar-nm">@(string.IsNullOrWhiteSpace(sel.DisplayName) ? sel.Email : sel.DisplayName)</div>
+            <div class="usu-avatar-em">@sel.Email</div>
+            <div class="usu-avatar-pill">@(sel.Inhabilitado ? "Inhabilitado" : "Activo")</div>
+            <hr />
+            <div class="usu-photo-drop">
+                <div class="usu-photo-ico">&#128247;</div>
+                <div class="usu-photo-t">Foto de perfil</div>
+                <div class="usu-photo-s">PNG o JPG &middot; Max. 2 MB</div>
+                <button class="btn btn-outline-secondary btn-sm" disabled title="Pendiente">Elegir archivo</button>
+                <div class="usu-photo-name">Sin archivo (pendiente de cableado)</div>
+            </div>
+        </div>
+
+        @* --- Bloque central + inferior --- *@
+        <div class="usu-det-main">
+            @if (_detalleError is not null) { <div class="ase-alert">@_detalleError</div> }
+            @if (_detalleOk is not null) { <div class="ase-ok">@_detalleOk</div> }
+
+            @* Campos que puedes modificar *@
+            <div class="ase-card">
+                <div class="ase-card-h">&#9998; Campos que puedes modificar</div>
+                <div class="ase-form usu-form-grid">
+                    <div class="ase-f"><label>Correo *</label><input class="form-control form-control-sm asg-ro" readonly value="@sel.Email" /></div>
+                    <div class="ase-f"><label>Identificacion</label><input class="form-control form-control-sm mono" @bind="sel.Documento" placeholder="Cedula" /></div>
+                    <div class="ase-f ase-f-wide"><label>Nombre (display)</label><input class="form-control form-control-sm" @bind="sel.DisplayName" /></div>
+                    <div class="ase-f"><label>Usuario (login corto)</label><input class="form-control form-control-sm mono" @bind="sel.Username" placeholder="ana.toro" /></div>
+                    <div class="ase-f"><label>Celular</label><input class="form-control form-control-sm" @bind="sel.Celular" /></div>
+                    <div class="ase-f"><label>Fijo</label><input class="form-control form-control-sm" @bind="sel.Fijo" /></div>
+                    <div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="sel.PrimerNombre" /></div>
+                    <div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="sel.SegundoNombre" /></div>
+                    <div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="sel.PrimerApellido" /></div>
+                    <div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="sel.SegundoApellido" /></div>
+                    <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="sel.Ciudad" placeholder="Cali, Bogota, ..." /></div>
+                    <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="sel.Direccion" placeholder="Ingresa la direccion principal" /></div>
+                    <label class="ase-chk"><input type="checkbox" @bind="sel.Inhabilitado" /> <span>Inhabilitar usuario</span></label>
+                </div>
+                <div class="ase-actions">
+                    <button class="btn btn-secondary btn-sm" @onclick="CerrarDetalle">Cerrar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="GuardarPerfil" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar cambios del perfil")</button>
+                </div>
+            </div>
+
+            @* Seguridad y acceso *@
+            <div class="ase-card">
+                <div class="ase-card-h">&#128274; Seguridad y acceso</div>
+                <div class="ase-form usu-form-grid">
+                    <div class="ase-f ase-f-wide">
+                        <label>Nueva clave del usuario (minimo 6 caracteres)</label>
+                        <div class="asg-input-row">
+                            <input type="password" class="form-control form-control-sm" @bind="_resetPwd" placeholder="Nueva clave temporal" />
+                            <button class="btn btn-warning btn-sm" @onclick="ResetPasswordPanel" disabled="@_busy">Reiniciar clave</button>
+                        </div>
+                        <small class="usu-help">Al guardar, el usuario deberia iniciar sesion con la nueva clave y, idealmente, cambiarla.</small>
+                    </div>
+                </div>
+            </div>
+
+            @* Permisos de uso modulo (coordinacion) *@
+            <div class="ase-card">
+                <div class="ase-card-h">Permisos de uso modulo</div>
+                <div class="usu-perm-sub">
+                    <div class="usu-perm-t">Activa los permisos por modulo</div>
+                    <div class="usu-perm-h">Habilita permisos granulares por modulo segun la configuracion general del sistema.</div>
+                </div>
+                <div class="usu-perm-list">
+                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaTerapias" /> <span class="usu-perm-lbl">COORDINADOR_TERAPIAS</span></label>
+                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaEnfermeria" /> <span class="usu-perm-lbl">COORDINADOR_ENFERMERIA</span></label>
+                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaConsultas" /> <span class="usu-perm-lbl">COORDINADOR_CONSULTAS</span></label>
+                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaEquipos" /> <span class="usu-perm-lbl">COORDINADOR_EQUIPOS</span></label>
+                </div>
+                <div class="ase-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="GuardarPermisosCoord" disabled="@_busy">@(_busy ? "Guardando..." : "Actualizar permisos del usuario")</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @* ===== Modal Crear usuario ===== *@
 @if (_showCreateModal)
@@ -177,6 +267,40 @@
     .usu-sede-pill { background: #dbeafe; color: #1e40af; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
     .usu-sede-empty { font-size: 12px; color: #94a3b8; font-style: italic; }
     .usu-sede-edit { font-size: 12px; padding: 0 4px; }
+
+    /* ====== Panel de detalle (campos + permisos coordinacion) ====== */
+    .usu-det-grid { display: grid; grid-template-columns: 280px 1fr; gap: 14px; margin-top: 14px; align-items: stretch; }
+    .usu-det-side { display: flex; flex-direction: column; align-items: center; padding: 18px; text-align: center; }
+    .usu-det-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .usu-avatar-circle { width: 96px; height: 96px; border-radius: 50%; background: #d1fae5; color: #047857; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 700; margin-bottom: 12px; }
+    .usu-avatar-nm { font-weight: 600; color: #0f172a; font-size: 14px; margin-top: 4px; }
+    .usu-avatar-em { color: #64748b; font-size: 12px; margin-bottom: 8px; }
+    .usu-avatar-pill { display: inline-block; background: #dbeafe; color: #1e40af; font-size: 11px; padding: 2px 10px; border-radius: 999px; }
+    .usu-det-side hr { width: 100%; margin: 14px 0; }
+    .usu-photo-drop { width: 100%; border: 1.5px dashed #cbd5e1; border-radius: 10px; padding: 14px; text-align: center; }
+    .usu-photo-ico { font-size: 22px; color: #94a3b8; }
+    .usu-photo-t { font-weight: 600; color: #0f172a; font-size: 13px; margin-top: 6px; }
+    .usu-photo-s { color: #94a3b8; font-size: 11px; margin-bottom: 10px; }
+    .usu-photo-name { color: #94a3b8; font-size: 11px; margin-top: 6px; font-style: italic; }
+    .usu-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+    .usu-form-grid .ase-f { display: flex; flex-direction: column; gap: 4px; }
+    .usu-form-grid .ase-f-wide { grid-column: span 2; }
+    .usu-form-grid label { font-size: 11px; color: #475569; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+    .usu-form-grid .asg-ro { background: #f1f5f9; }
+    .usu-help { color: #94a3b8; font-size: 11px; margin-top: 4px; }
+    .ase-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+    .ase-chk { display: inline-flex; align-items: center; gap: 6px; }
+
+    /* Permisos coordinacion */
+    .usu-perm-sub { padding: 0 0 12px; }
+    .usu-perm-t { font-weight: 600; color: #0f172a; font-size: 14px; }
+    .usu-perm-h { color: #64748b; font-size: 12px; margin-top: 2px; }
+    .usu-perm-list { display: flex; flex-direction: column; gap: 6px; }
+    .usu-perm-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; }
+    .usu-perm-row:has(input:checked) { background: #eff6ff; border-color: #93c5fd; }
+    .usu-perm-lbl { font-family: monospace; font-size: 13px; font-weight: 700; color: #1e40af; letter-spacing: 0.5px; }
+    .asg-input-row { display:flex; gap:6px; }
+    .asg-input-row > input { flex:1; }
 </style>
 
 @code {
@@ -193,6 +317,12 @@
     private bool _busy;
     private string? _error, _ok;
     private Row? _sedesModalUser;
+
+    // Panel de detalle / edicion completa del usuario seleccionado.
+    private Row? _selectedRow;
+    private string _resetPwd = "";
+    private string? _detalleError;
+    private string? _detalleOk;
 
     protected override async Task OnInitializedAsync()
     {
@@ -274,6 +404,85 @@
         catch (InvalidOperationException ex) { _error = ex.Message; }
     }
 
+    // ---------- Panel de detalle ----------
+
+    private void SelectRow(Row u)
+    {
+        _selectedRow = u;
+        _resetPwd = "";
+        _detalleError = null; _detalleOk = null;
+    }
+
+    private void CerrarDetalle()
+    {
+        _selectedRow = null;
+        _detalleError = null; _detalleOk = null;
+    }
+
+    private async Task GuardarPerfil()
+    {
+        if (_selectedRow is not Row u) { return; }
+        _detalleError = null; _detalleOk = null; _busy = true;
+        try
+        {
+            var req = new ActualizarPerfilUsuarioRequest(
+                u.DisplayName, u.Username, u.Documento,
+                u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido,
+                u.Celular, u.Fijo, u.Ciudad, u.Direccion, u.Inhabilitado);
+            var updated = await Svc.ActualizarPerfilAsync(u.Id, req, await Actor());
+            if (updated is not null)
+            {
+                _detalleOk = "Perfil actualizado.";
+                await Load();
+                _selectedRow = _users.FirstOrDefault(x => x.Id == u.Id);
+            }
+        }
+        catch (InvalidOperationException ex) { _detalleError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetPasswordPanel()
+    {
+        if (_selectedRow is not Row u) { return; }
+        _detalleError = null; _detalleOk = null;
+        if (string.IsNullOrWhiteSpace(_resetPwd) || _resetPwd.Length < 6)
+        {
+            _detalleError = "La nueva clave debe tener al menos 6 caracteres.";
+            return;
+        }
+        _busy = true;
+        try
+        {
+            if (await Svc.ResetPasswordAsync(u.Id, _resetPwd, await Actor()))
+            {
+                _detalleOk = $"Clave de \"{u.Email}\" reiniciada.";
+                _resetPwd = "";
+            }
+        }
+        catch (InvalidOperationException ex) { _detalleError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task GuardarPermisosCoord()
+    {
+        if (_selectedRow is not Row u) { return; }
+        _detalleError = null; _detalleOk = null; _busy = true;
+        try
+        {
+            var req = new ActualizarPermisosCoordinacionRequest(
+                u.CoordinaTerapias, u.CoordinaEnfermeria, u.CoordinaConsultas, u.CoordinaEquipos);
+            var updated = await Svc.ActualizarPermisosCoordinacionAsync(u.Id, req, await Actor());
+            if (updated is not null)
+            {
+                _detalleOk = "Permisos de coordinacion actualizados.";
+                await Load();
+                _selectedRow = _users.FirstOrDefault(x => x.Id == u.Id);
+            }
+        }
+        catch (InvalidOperationException ex) { _detalleError = ex.Message; }
+        finally { _busy = false; }
+    }
+
     private async Task Eliminar(Row u)
     {
         var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar a \"{u.Email}\" de esta entidad?");
@@ -299,13 +508,52 @@
         public List<Guid> SedesIds { get; set; } = new();
         public List<string> SedesNombres { get; set; } = new();
         public bool Global { get; set; }
+        // ----- Datos personales (PlatformUser) -----
+        public string? Documento { get; set; }
+        public string? Username { get; set; }
+        public string? PrimerNombre { get; set; }
+        public string? SegundoNombre { get; set; }
+        public string? PrimerApellido { get; set; }
+        public string? SegundoApellido { get; set; }
+        public string? Celular { get; set; }
+        public string? Fijo { get; set; }
+        public string? Ciudad { get; set; }
+        public string? Direccion { get; set; }
+        public bool Inhabilitado { get; set; }
+        // ----- Permisos de coordinacion (TenantUser) -----
+        public bool CoordinaTerapias { get; set; }
+        public bool CoordinaEnfermeria { get; set; }
+        public bool CoordinaConsultas { get; set; }
+        public bool CoordinaEquipos { get; set; }
+
+        public string Iniciales
+        {
+            get
+            {
+                var src = !string.IsNullOrWhiteSpace(DisplayName) ? DisplayName! : Email;
+                var parts = src.Split(new[] { ' ', '@', '.' }, StringSplitOptions.RemoveEmptyEntries);
+                var a = parts.Length > 0 && parts[0].Length > 0 ? char.ToUpper(parts[0][0]) : '?';
+                var b = parts.Length > 1 && parts[1].Length > 0 ? char.ToUpper(parts[1][0]) : ' ';
+                return $"{a}{b}".Trim();
+            }
+        }
+
         public static Row From(UsuarioDto d) => new()
         {
             Id = d.Id, Email = d.Email, DisplayName = d.DisplayName, Estado = d.Estado,
             RolSel = d.RolId?.ToString() ?? "",
             SedesIds = d.SucursalIds.ToList(),
             SedesNombres = d.SucursalNombres.ToList(),
-            Global = d.EsGlobal
+            Global = d.EsGlobal,
+            Documento = d.Documento, Username = d.Username,
+            PrimerNombre = d.PrimerNombre, SegundoNombre = d.SegundoNombre,
+            PrimerApellido = d.PrimerApellido, SegundoApellido = d.SegundoApellido,
+            Celular = d.Celular, Fijo = d.Fijo, Ciudad = d.Ciudad, Direccion = d.Direccion,
+            Inhabilitado = string.Equals(d.Estado, "Blocked", StringComparison.OrdinalIgnoreCase),
+            CoordinaTerapias = d.CoordinaTerapias,
+            CoordinaEnfermeria = d.CoordinaEnfermeria,
+            CoordinaConsultas = d.CoordinaConsultas,
+            CoordinaEquipos = d.CoordinaEquipos
         };
     }
 }

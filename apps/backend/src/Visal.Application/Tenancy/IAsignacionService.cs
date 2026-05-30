@@ -6,7 +6,16 @@ namespace Visal.Application.Tenancy;
 public sealed record PacienteAsignacionDto(
     Guid Id, string NumeroDocumento, string TipoDocumento, string NombreCompleto,
     string? Sede, string? Ciudad,
-    IReadOnlyList<ContratoMiniDto> Contratos);
+    IReadOnlyList<ContratoMiniDto> Contratos,
+    // ----- Campos clinicos del paciente para prefill de historias / notas -----
+    string? PrimerNombre = null, string? SegundoNombre = null,
+    string? PrimerApellido = null, string? SegundoApellido = null,
+    DateOnly? FechaNacimiento = null,
+    string? Sexo = null, string? EstadoCivil = null,
+    string? Telefono = null, string? Email = null,
+    string? Direccion = null, string? Zona = null,
+    string? Ocupacion = null, string? Regimen = null,
+    string? ContactoEmergencia = null, string? Parentesco = null, string? TelefonoEmergencia = null);
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado);
 
@@ -25,13 +34,48 @@ public sealed record PacienteFiltroResultadoDto(
 
 /// <summary>Item del catalogo de servicios filtrado por contrato + tipo de servicio.</summary>
 public sealed record ServicioCatalogoDto(
-    Guid Id, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, decimal? Tarifa);
+    Guid Id, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, decimal? Tarifa,
+    string? CodigoInterno, string? Historia, string? Clasificacion, string? Modalidad);
 
 /// <summary>Fila del historico (ultimos N) del paciente.</summary>
 public sealed record AsignacionMiniDto(
     Guid Id, string NombreServicio, string TipoServicio, int Cantidad,
     DateOnly FechaInicio, DateOnly? FechaFinal, string Estado,
     string ContratoCodigo, DateTimeOffset CreadoEn);
+
+/// <summary>Fila del grid "Servicios No Asignados" en /coordinacion. Incluye paciente y contrato.</summary>
+public sealed record AsignacionPendienteDto(
+    Guid Id, int Orden, string PacienteNombre, string PacienteDocumento, string PacienteTipoDoc,
+    string NombreServicio, int Cantidad, string? Observaciones,
+    string TipoServicio, string ContratoCodigo, string CodigoServicio,
+    DateOnly FechaInicio, DateOnly? FechaFinal,
+    string? CodigoAutorizacion, DateTimeOffset CreadoEn, string EstadoTexto);
+
+/// <summary>Profesional disponible para asignar al servicio (alimenta "Seleccione Medico Especialista").</summary>
+public sealed record EspecialistaDto(Guid Id, string NumeroDocumento, string NombreCompleto, string? TipoProfesional);
+
+/// <summary>Turno coordinado: que profesional atendera cuantos turnos.</summary>
+public sealed record TurnoCoordinadoRequest(
+    Guid ProfesionalId, int Cantidad, decimal? HorasPorTurno,
+    DateOnly? FechaInicio, short? MesAsignar);
+
+/// <summary>Turno ya guardado para una asignacion.</summary>
+public sealed record TurnoCoordinadoDto(
+    Guid Id, Guid ProfesionalId, string ProfesionalNombre,
+    int Cantidad, decimal? HorasPorTurno,
+    DateOnly? FechaInicio, short? MesAsignar);
+
+/// <summary>Payload del boton "Asignar el servicio": graba todos los turnos de un servicio en una transaccion.</summary>
+public sealed record AsignarServicioRequest(
+    Guid AsignacionId, IReadOnlyList<TurnoCoordinadoRequest> Turnos);
+
+/// <summary>Filtro de estado para el grid de Coordinacion. Equivale al cmbEstado del legacy.</summary>
+public enum AsignacionEstadoFiltro
+{
+    Pendientes = 0,
+    Asignados = 1,
+    Todos = 2
+}
 
 /// <summary>Item del carrito que se envia al guardar el lote.</summary>
 public sealed record AsignacionItemRequest(
@@ -75,4 +119,36 @@ public interface IAsignacionService
 
     /// <summary>Elimina una asignacion del lote (caso "eliminar item" de la grilla).</summary>
     Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lista las asignaciones cuyo modulo coincida con uno de los permitidos, filtradas
+    /// por estado (Pendientes/Asignados/Todos), periodo (anio + mes vigencia), numero de
+    /// orden, y documento del paciente. Es el feed del grid "SERVICIOS NO ASIGNADOS"
+    /// del modulo Coordinacion.
+    /// </summary>
+    Task<IReadOnlyList<AsignacionPendienteDto>> ListarPendientesAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        AsignacionEstadoFiltro estado = AsignacionEstadoFiltro.Pendientes,
+        int? anio = null, int? mesVigencia = null,
+        string? noOrden = null, string? documentoPaciente = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Profesionales habilitados para atender un modulo (TERAPIAS, ENFERMERIA, ...).
+    /// El filtro es por TipoProfesional.Nombre comparado case-insensitive con el modulo.
+    /// Si el catalogo de tipos esta vacio o sin matches, devuelve TODOS los profesionales.
+    /// </summary>
+    Task<IReadOnlyList<EspecialistaDto>> ListarEspecialistasPorModuloAsync(
+        string modulo, CancellationToken ct = default);
+
+    /// <summary>Lista los turnos ya coordinados para una asignacion (especialistas + cantidad).</summary>
+    Task<IReadOnlyList<TurnoCoordinadoDto>> ListarTurnosAsync(Guid asignacionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persiste los turnos de coordinacion del servicio. Valida que la suma de Cantidad
+    /// no supere Asignacion.Cantidad. Si la suma total queda igual a la cantidad de la
+    /// asignacion, marca la Asignacion como Asignada. Permite multiples turnos por
+    /// profesional distinto.
+    /// </summary>
+    Task<int> AsignarServicioAsync(AsignarServicioRequest req, Guid actor, CancellationToken ct = default);
 }

@@ -1,0 +1,60 @@
+@* Diseño basado en ctrlOrdenServicios.ascx del legacy. Solo layout. *@
+
+<div class="od-bar">
+    <div class="od-bar-left">
+        <label>Orden a Servicios Numero:</label>
+        <select class="form-select form-select-sm od-w-220" disabled>
+            <option>(sin ordenes)</option>
+        </select>
+    </div>
+    <div class="od-bar-right">
+        <button class="btn btn-outline-secondary btn-sm" disabled>&#128196; Nueva</button>
+        <button class="btn btn-outline-success btn-sm" disabled>&#128190; Guardar Ord.</button>
+        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+    </div>
+</div>
+
+<div class="od-card">
+    <div class="od-row">
+        <div class="od-f od-c-10">
+            <label>Nombre del Servicio</label>
+            <input class="form-control form-control-sm" placeholder="Nombre del Servicio (buscar CUPS)" />
+        </div>
+        <div class="od-f od-c-2">
+            <label>Cantidad</label>
+            <input class="form-control form-control-sm text-center" />
+        </div>
+    </div>
+    <div class="od-row">
+        <div class="od-f od-c-11">
+            <label>Observaciones</label>
+            <textarea class="form-control form-control-sm" rows="2" placeholder="Observaciones del servicio..."></textarea>
+        </div>
+        <div class="od-f od-c-1 od-action-col">
+            <button class="btn btn-primary btn-sm od-action-add" title="Agregar">+</button>
+        </div>
+    </div>
+
+    <div class="od-grid-wrap">
+        <table class="table table-sm od-tbl">
+            <thead>
+                <tr>
+                    <th>Nombre del Servicio</th>
+                    <th>Observaciones</th>
+                    <th class="text-center" style="width:80px">Cant.</th>
+                    <th class="text-center" style="width:50px">&#128424;</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="4" class="text-center text-muted od-empty-row">Sin servicios agregados.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .od-action-col { display: flex; align-items: stretch; }
+    .od-action-add { width: 100%; align-self: stretch; height: 100%; }
+</style>
+
+@code { }

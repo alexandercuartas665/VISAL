@@ -34,4 +34,23 @@ public class TenantUser : TenantEntity
 
     /// <summary>Sedes (sucursales) adicionales que maneja el usuario. Soporte multi-sede.</summary>
     public List<TenantUserSucursal> Sucursales { get; set; } = new();
+
+    // ---------- Permisos de COORDINACION (modulo Coordinacion) ----------
+    // Estos flags determinan que tipos de servicios puede coordinar el usuario en la
+    // pagina /coordinacion. Un usuario puede ser coordinador de uno o varios modulos
+    // (terapias, enfermeria, consultas, equipos). Si todos estan en false, el usuario
+    // no puede coordinar nada (la pagina /coordinacion no le muestra solicitudes).
+
+    public bool CoordinaTerapias { get; set; }
+    public bool CoordinaEnfermeria { get; set; }
+    public bool CoordinaConsultas { get; set; }
+    public bool CoordinaEquipos { get; set; }
+
+    /// <summary>
+    /// Si este usuario representa a un profesional clinico (terapeuta, medico, etc.),
+    /// vinculo al catalogo de Profesionales para que el modulo de Atencion pueda
+    /// listar sus turnos asignados. Null para usuarios administrativos.
+    /// </summary>
+    public Guid? ProfesionalId { get; set; }
+    public Profesional? Profesional { get; set; }
 }

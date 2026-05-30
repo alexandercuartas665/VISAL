@@ -1,0 +1,258 @@
+@page "/atencion"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
+@inject IAtencionProfesionalService Svc
+@inject IAsignacionService AsigSvc
+
+<PageTitle>Mis Servicios Asignados - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Atencion</h1>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@if (_modulos.HasValue && !_modulos.Value)
+{
+    <div class="ase-card">
+        <div class="ase-empty at-no-prof">
+            Tu usuario no esta vinculado a un profesional. El modulo de atencion solo aplica para
+            usuarios creados desde el modulo de <code>Profesionales</code>.
+        </div>
+    </div>
+}
+else
+{
+    <div class="ase-card">
+        <div class="at-tabs">
+            <button class="at-tab sel">Pacientes</button>
+        </div>
+
+        <div class="ase-form at-filtros">
+            <div class="ase-f"><label>Profesional</label><input class="form-control form-control-sm asg-ro" readonly value="@_nombreProf" /></div>
+            <div class="ase-f"><label>Especialidad</label><input class="form-control form-control-sm asg-ro" readonly value="@_especialidad" /></div>
+            <div class="ase-f ase-f-wide"><label>Paciente</label>
+                <input class="form-control form-control-sm" placeholder="BUSQUEDA DE PACIENTE POR IDENTIFICACION" @bind="_filtroPac" @oninput="OnFiltroChanged" />
+            </div>
+            <label class="ase-chk"><input type="checkbox" @bind="_mostrarVencidas" @bind:after="Cargar" /> <span>Mostrar notas vencidas</span></label>
+        </div>
+
+        <div class="at-grid-h">MIS SERVICIOS ASIGNADOS (@_visibles.Count)</div>
+        <div class="at-grid-wrap">
+            @if (_visibles.Count == 0)
+            {
+                <div class="ase-empty">No tienes servicios asignados pendientes.</div>
+            }
+            else
+            {
+                <table class="table table-sm at-tbl">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Historia Medica</th>
+                            <th>Notas</th>
+                            <th>CodInt</th>
+                            <th>CodAsig</th>
+                            <th>FechaAsig</th>
+                            <th>Orden</th>
+                            <th>Tipo</th>
+                            <th>SessionNo</th>
+                            <th>Completado</th>
+                            <th>TipoDocPac</th>
+                            <th>NoDocPac</th>
+                            <th>NomPaciente</th>
+                            <th>FecNota</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in _visibles)
+                        {
+                            <tr class="@(s.Completado ? "at-row-done" : "")">
+                                <td><input type="checkbox" disabled="@s.Completado" /></td>
+                                <td>
+                                    <button class="btn btn-outline-secondary btn-sm" title="Abrir Historias Clinicas del paciente"
+                                            @onclick="() => AbrirHistoria(s)">&#9998;</button>
+                                </td>
+                                <td>
+                                    <button class="btn btn-outline-primary btn-sm" title="Abrir Notas Medicas (registrar atencion)"
+                                            @onclick="() => AbrirNotas(s)" disabled="@s.Completado">&#9998;</button>
+                                </td>
+                                <td class="mono">@s.CodigoAsignacionInterna</td>
+                                <td class="mono">@s.CodigoAutorizacion</td>
+                                <td>@s.FechaAsignacion.ToString("dd/MM/yyyy")</td>
+                                <td class="text-center">@s.Orden</td>
+                                <td>@s.TipoServicio</td>
+                                <td class="text-center">@s.SessionNo</td>
+                                <td>
+                                    @if (s.Completado) { <span class="at-pill-done">COMPLETO</span> }
+                                    else { <span class="at-pill-no">NO</span> }
+                                </td>
+                                <td class="mono">@s.TipoDocPaciente</td>
+                                <td class="mono">@s.NumeroDocPaciente</td>
+                                <td>@s.NombrePaciente</td>
+                                <td>@(s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+@* ===== Modal full-screen: Historias Clinicas ===== *@
+@if (_showHistoriaSel is MiServicioAsignadoDto hs)
+{
+    <div class="at-fs-backdrop" @onclick="CerrarHistoria"></div>
+    <div class="at-fs-modal">
+        <div class="at-fs-h">
+            <div>
+                <h3>Historias Clinicas - @hs.NombrePaciente</h3>
+                <small>@hs.TipoDocPaciente @hs.NumeroDocPaciente</small>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarHistoria">&#10006; Cerrar</button>
+        </div>
+        <div class="at-fs-body">
+            <HistoriasClinicasModulo PacienteContexto="@_pacienteCtx" />
+        </div>
+    </div>
+}
+
+@* ===== Modal full-screen: Notas Medicas ===== *@
+@if (_showNotaSel is MiServicioAsignadoDto sel)
+{
+    <div class="at-fs-backdrop" @onclick="CerrarNotas"></div>
+    <div class="at-fs-modal">
+        <div class="at-fs-h">
+            <div>
+                <h3>Notas Medicas - Sesion @sel.SessionNo / @sel.CantidadTotal</h3>
+                <small>@sel.NombrePaciente - @sel.TipoDocPaciente @sel.NumeroDocPaciente - @sel.NombreServicio</small>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarNotas">&#10006; Cerrar</button>
+        </div>
+        <div class="at-fs-body">
+            <NotasMedicasModulo NombrePacienteCtx="@sel.NombrePaciente"
+                                DocumentoPacienteCtx="@sel.NumeroDocPaciente"
+                                SessionNoCtx="@sel.SessionNo"
+                                AsignacionTurnoIdCtx="@sel.AsignacionTurnoId" />
+        </div>
+    </div>
+}
+
+<style>
+    .at-tabs { display: flex; border-bottom: 1px solid #e2e8f0; }
+    .at-tab { padding: 10px 18px; background: none; border: none; border-bottom: 2px solid #1565c0; color: #1565c0; font-weight: 600; cursor: default; }
+    .at-tab.sel { background: #f8fafc; }
+    .at-filtros { padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .at-filtros .ase-f-wide { grid-column: span 2; }
+    .at-filtros label { font-size: 11px; color: #475569; font-weight: 600; text-transform: uppercase; }
+    .ase-chk { display: inline-flex; align-items: center; gap: 6px; padding: 6px 0; font-size: 13px; }
+    .at-grid-h { padding: 12px 14px; font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid #e2e8f0; background: #f1f5f9; }
+    .at-grid-wrap { overflow: auto; background: #fff; max-height: 600px; }
+    .at-tbl { margin: 0; font-size: 12px; min-width: 100%; }
+    .at-tbl thead th { position: sticky; top: 0; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 700; border-bottom: 1px solid #cbd5e1; white-space: nowrap; padding: 8px 10px; }
+    .at-tbl td { vertical-align: middle; padding: 8px 10px; }
+    .at-row-done { opacity: 0.6; background: #f8fafc; }
+    .at-pill-done { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .at-pill-no { background: #fef3c7; color: #92400e; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .at-no-prof { padding: 30px; }
+    .at-no-prof code { background:#f1f5f9; padding:1px 6px; border-radius:3px; }
+    .asg-ro { background: #f1f5f9; }
+    .at-paciente-meta { padding: 10px 12px; background: #eff6ff; border-radius: 8px; margin-bottom: 14px; font-size: 13px; }
+
+    /* Overlay full-screen para submodulos (Historias / Notas) */
+    .at-fs-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000; }
+    .at-fs-modal { position: fixed; top: 24px; left: 24px; right: 24px; bottom: 24px; background: #f8fafc; border-radius: 12px; box-shadow: 0 30px 80px rgba(15,23,42,.35); z-index: 1001; display: flex; flex-direction: column; overflow: hidden; }
+    .at-fs-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 22px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+    .at-fs-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .at-fs-h small { color: #64748b; font-size: 11.5px; }
+    .at-fs-body { flex: 1; overflow: auto; padding: 16px 22px; }
+    .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
+    .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .usu-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .usu-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .usu-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .usu-modal-body { padding: 18px; overflow: auto; }
+    .usu-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<MiServicioAsignadoDto> _todos = new();
+    private string _filtroPac = "";
+    private bool _mostrarVencidas = true;
+
+    private string _nombreProf = "";
+    private string _especialidad = "";
+    private bool? _modulos;
+
+    private MiServicioAsignadoDto? _showHistoriaSel;
+    private MiServicioAsignadoDto? _showNotaSel;
+    private PacienteAsignacionDto? _pacienteCtx;
+
+    private string? _error, _ok;
+
+    private List<MiServicioAsignadoDto> _visibles => string.IsNullOrWhiteSpace(_filtroPac)
+        ? _todos
+        : _todos.Where(s => s.NumeroDocPaciente.Contains(_filtroPac.Trim(), StringComparison.OrdinalIgnoreCase)
+                          || s.NombrePaciente.Contains(_filtroPac.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync() => await Cargar();
+
+    private async Task Cargar()
+    {
+        _error = _ok = null;
+        try
+        {
+            if (AuthState is null) { _error = "Sesion no detectada."; return; }
+            var st = await AuthState;
+            if (!Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var puId))
+            {
+                _error = "No se pudo identificar al usuario.";
+                return;
+            }
+            _todos = (await Svc.GetMisServiciosAsync(puId, incluirCompletados: _mostrarVencidas)).ToList();
+            // Llenar header con el primer registro (todos comparten profesional).
+            if (_todos.Count > 0)
+            {
+                _nombreProf = "(profesional vinculado)";
+                _especialidad = _todos[0].TipoServicio;
+                _modulos = true;
+            }
+            else
+            {
+                _modulos = false;
+            }
+        }
+        catch (Exception ex) { _error = "Error: " + ex.Message; }
+    }
+
+    private void OnFiltroChanged(ChangeEventArgs e) => _filtroPac = e.Value?.ToString() ?? "";
+
+    private void AbrirNotas(MiServicioAsignadoDto s) => _showNotaSel = s;
+    private void CerrarNotas() => _showNotaSel = null;
+
+    private async Task AbrirHistoria(MiServicioAsignadoDto s)
+    {
+        _showHistoriaSel = s;
+        try
+        {
+            // Cargar el paciente completo para pasarlo al modulo de Historias.
+            _pacienteCtx = await AsigSvc.GetPacienteAsync(s.PacienteId);
+        }
+        catch
+        {
+            _pacienteCtx = null;
+        }
+    }
+
+    private void CerrarHistoria() { _showHistoriaSel = null; _pacienteCtx = null; }
+}

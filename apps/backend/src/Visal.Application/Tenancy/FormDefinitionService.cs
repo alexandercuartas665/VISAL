@@ -31,7 +31,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         return await _db.FormDefinitions
             .AsNoTracking()
             .Where(f => f.Id == id)
-            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson))
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -67,6 +67,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             existing.Tipo = request.Tipo?.Trim();
             existing.SchemaJson = string.IsNullOrWhiteSpace(request.SchemaJson) ? "{\"children\":[]}" : request.SchemaJson;
             existing.Activo = request.Activo;
+            if (request.PrefillRoutesJson is not null) { existing.PrefillRoutesJson = request.PrefillRoutesJson; }
             entity = existing;
 
             _audit.Write(actorUserId, "form-definition.update", nameof(FormDefinition), entity.Id,
@@ -93,7 +94,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 Version = request.Version?.Trim(),
                 Tipo = request.Tipo?.Trim(),
                 SchemaJson = string.IsNullOrWhiteSpace(request.SchemaJson) ? "{\"children\":[]}" : request.SchemaJson,
-                Activo = request.Activo
+                Activo = request.Activo,
+                PrefillRoutesJson = request.PrefillRoutesJson
             };
             _db.FormDefinitions.Add(entity);
 
@@ -102,7 +104,18 @@ public sealed class FormDefinitionService : IFormDefinitionService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson);
+        return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson, entity.PrefillRoutesJson);
+    }
+
+    public async Task<bool> UpdatePrefillRoutesAsync(Guid id, string? prefillRoutesJson, Guid actorUserId, CancellationToken cancellationToken = default)
+    {
+        var existing = await _db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+        if (existing is null) { return false; }
+        existing.PrefillRoutesJson = string.IsNullOrWhiteSpace(prefillRoutesJson) ? null : prefillRoutesJson;
+        _audit.Write(actorUserId, "form-definition.update-prefill-routes", nameof(FormDefinition), existing.Id,
+            previousValue: null, newValue: new { existing.Codigo }, tenantId: existing.TenantId);
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken cancellationToken = default)

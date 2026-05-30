@@ -27,4 +27,13 @@ public class FormDefinition : TenantEntity
 
     /// <summary>Si el formato esta activo/publicado.</summary>
     public bool Activo { get; set; } = true;
+
+    /// <summary>
+    /// Rutas de prefill: mapeo nombrado entre campos de otros modulos (paciente,
+    /// profesional, contrato, etc.) y campos del schema de este formulario. Permite
+    /// que cuando se inicia una historia/instancia se prefille automaticamente con
+    /// datos del contexto. Estructura JSON: { "routes": [ { "name": "...", "sourceModule": "...", "mappings": [ { "source": "...", "target": "..." } ] } ] }.
+    /// Null o vacio = no hay rutas configuradas (el consumidor cae al match por nombre).
+    /// </summary>
+    public string? PrefillRoutesJson { get; set; }
 }

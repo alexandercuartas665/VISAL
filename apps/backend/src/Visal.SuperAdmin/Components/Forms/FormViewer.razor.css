@@ -1,0 +1,243 @@
+/* ====== FormViewer ====== */
+.fv-doc {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 0;
+    font-family: 'Arial', sans-serif;
+    font-size: 12.5px;
+    color: #0f172a;
+}
+
+.fv-empty {
+    padding: 60px;
+    text-align: center;
+    color: #94a3b8;
+    font-style: italic;
+}
+
+/* ----- Cabecera ----- */
+.fv-head {
+    display: grid;
+    grid-template-columns: 240px 1fr 280px;
+    align-items: stretch;
+    border-bottom: 1.5px solid #0f172a;
+}
+
+.fv-head-logo {
+    padding: 14px;
+    border-right: 1px solid #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.fv-head-logo img {
+    max-width: 200px;
+    max-height: 64px;
+    object-fit: contain;
+}
+
+.fv-logo-fallback {
+    font-size: 18px;
+    font-weight: 800;
+    color: #1565c0;
+    letter-spacing: 1px;
+}
+
+.fv-head-tag {
+    font-size: 10px;
+    color: #64748b;
+    text-align: center;
+    font-style: italic;
+}
+
+.fv-head-title {
+    padding: 14px;
+    border-right: 1px solid #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.fv-head-title h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: 0.5px;
+    text-align: center;
+}
+
+.fv-head-nit {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #475569;
+}
+
+.fv-head-meta {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #f8fafc;
+}
+
+.fv-head-meta-row {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 6px;
+    align-items: center;
+}
+
+.fv-head-meta-row label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #334155;
+    margin: 0;
+}
+
+.fv-head-meta-row input {
+    border: 1px solid #cbd5e1;
+    padding: 2px 6px;
+    height: 24px;
+    font-size: 11.5px;
+}
+
+/* ----- Secciones ----- */
+.fv-section {
+    border-bottom: 1px solid #cbd5e1;
+}
+
+.fv-section-h {
+    background: #1565c0;
+    color: #fff;
+    padding: 6px 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-size: 12px;
+}
+
+/* ----- Grid de campos ----- */
+.fv-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 0;
+    padding: 0;
+}
+
+.fv-grid-root {
+    padding: 12px;
+    gap: 8px;
+}
+
+.fv-col {
+    padding: 6px 10px;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.fv-grid-root .fv-col {
+    border: none;
+    padding: 4px;
+}
+
+.fv-col-1  { grid-column: span 1; }
+.fv-col-2  { grid-column: span 2; }
+.fv-col-3  { grid-column: span 3; }
+.fv-col-4  { grid-column: span 4; }
+.fv-col-5  { grid-column: span 5; }
+.fv-col-6  { grid-column: span 6; }
+.fv-col-7  { grid-column: span 7; }
+.fv-col-8  { grid-column: span 8; }
+.fv-col-9  { grid-column: span 9; }
+.fv-col-10 { grid-column: span 10; }
+.fv-col-11 { grid-column: span 11; }
+.fv-col-12 { grid-column: span 12; }
+
+.fv-lbl {
+    font-size: 11px;
+    color: #1e40af;
+    font-weight: 600;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.fv-col input,
+.fv-col select,
+.fv-col textarea {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    font-size: 12px;
+    padding: 4px 6px;
+    background: #fff;
+}
+
+.fv-col input:focus,
+.fv-col select:focus,
+.fv-col textarea:focus {
+    outline: none;
+    border-color: #1565c0;
+    box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.1);
+}
+
+.fv-calc {
+    background: #f1f5f9 !important;
+    color: #475569;
+}
+
+/* ----- Bloques de texto ----- */
+.fv-h { font-size: 15px; font-weight: 700; color: #0f172a; margin: 8px 0 4px; }
+.fv-sh { font-size: 13px; font-weight: 600; color: #334155; margin: 6px 0 4px; }
+.fv-p { font-size: 12.5px; color: #475569; margin: 4px 0; }
+
+/* ----- Tablas repetibles ----- */
+.fv-tbl-wrap {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+}
+
+.fv-tbl {
+    margin: 0;
+    font-size: 11.5px;
+}
+
+.fv-tbl thead th {
+    background: #eff6ff;
+    color: #1e40af;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    border-bottom: 1px solid #bfdbfe;
+}
+
+.fv-tbl td {
+    padding: 3px 6px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.fv-tbl input,
+.fv-tbl select {
+    border: 1px solid #e2e8f0;
+    padding: 2px 6px;
+    height: 22px;
+    font-size: 11.5px;
+    width: 100%;
+}
+
+.fv-tbl-rm {
+    color: #b91c1c;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+.fv-tbl-add {
+    margin: 6px;
+    font-size: 11px;
+}

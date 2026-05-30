@@ -1,0 +1,71 @@
+@* Diseño basado en ctrlOrdenIncapacidades.ascx del legacy. Solo layout. *@
+
+<div class="od-bar">
+    <div class="od-bar-left">
+        <label>Orden de Incapacidad Numero:</label>
+        <select class="form-select form-select-sm od-w-220" disabled>
+            <option>(sin ordenes)</option>
+        </select>
+    </div>
+    <div class="od-bar-right">
+        <button class="btn btn-outline-secondary btn-sm" disabled>+ Agregar</button>
+        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+    </div>
+</div>
+
+<div class="od-card">
+    <div class="od-row">
+        <div class="od-f od-c-12">
+            <label>Motivo de la Incapacidad</label>
+            <textarea class="form-control form-control-sm" rows="3" placeholder="Motivo de la incapacidad..."></textarea>
+        </div>
+    </div>
+    <div class="od-row">
+        <div class="od-f od-c-3">
+            <label>Desde</label>
+            <input type="date" class="form-control form-control-sm" />
+        </div>
+        <div class="od-f od-c-3">
+            <label>Hasta</label>
+            <input type="date" class="form-control form-control-sm" />
+        </div>
+        <div class="od-f od-c-1">
+            <label>Dias</label>
+            <input class="form-control form-control-sm text-center" readonly />
+        </div>
+        <div class="od-f od-c-4">
+            <label>Tipo</label>
+            <select class="form-select form-select-sm">
+                <option value="">SELECCIONE</option>
+                <option value="GENERAL">ENFERMEDAD GENERAL</option>
+                <option value="TRABAJO">ACCIDENTE DE TRABAJO</option>
+            </select>
+        </div>
+        <div class="od-f od-c-1 od-action-col">
+            <button class="btn btn-primary btn-sm od-action-add" title="Guardar">&#128190;</button>
+        </div>
+    </div>
+
+    <div class="od-grid-wrap">
+        <table class="table table-sm od-tbl">
+            <thead>
+                <tr>
+                    <th>Motivo de la Incapacidad</th>
+                    <th class="text-center" style="width:60px">Dias</th>
+                    <th>Tipo</th>
+                    <th class="text-center" style="width:50px">&#128424;</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="4" class="text-center text-muted od-empty-row">Sin incapacidades agregadas.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .od-action-col { display: flex; align-items: stretch; }
+    .od-action-add { width: 100%; align-self: stretch; height: 100%; }
+</style>
+
+@code { }

@@ -30,6 +30,7 @@
             @if (_currentId is not null)
             {
                 <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
+                <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
             }
             <button class="fb-btn" @onclick="NewForm">Nuevo</button>
             <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
@@ -318,6 +319,115 @@
     </div>
 </div>
 
+@* ===== Modal: Rutas de prefill ===== *@
+@if (_showPrefillModal)
+{
+    <div class="pr-backdrop" @onclick="ClosePrefillRoutesModal"></div>
+    <div class="pr-modal">
+        <div class="pr-h">
+            <div>
+                <h3>Rutas de prefill</h3>
+                <small>Formulario: <strong>@_codigo - @_nombre</strong></small>
+            </div>
+            <button class="pr-close" @onclick="ClosePrefillRoutesModal">&times;</button>
+        </div>
+        <div class="pr-body">
+            @if (_prefillError is not null) { <div class="fb-alert">@_prefillError</div> }
+            @if (_prefillOk is not null) { <div class="fb-ok">@_prefillOk</div> }
+
+            <div class="pr-info">
+                Define las <strong>rutas</strong> de prefill: cada ruta es un mapeo nombrado entre los campos
+                de un modulo origen (Paciente, Profesional...) y los campos de este formulario.
+                Cuando se inicia una instancia, los campos destino se llenan automaticamente con el dato del origen.
+            </div>
+
+            <div class="pr-routes">
+                @if (_prefillRoutes.Routes.Count == 0)
+                {
+                    <div class="pr-empty">Aun no hay rutas configuradas.</div>
+                }
+                @foreach (var route in _prefillRoutes.Routes)
+                {
+                    <div class="pr-route">
+                        <div class="pr-route-h">
+                            <input class="pr-name" @bind="route.Name" placeholder="Nombre de la ruta (ej. Paciente)" />
+                            <select class="pr-source-sel" @bind="route.SourceModule">
+                                @foreach (var mod in PrefillSourceCatalog.Campos.Keys)
+                                {
+                                    <option value="@mod">@(char.ToUpper(mod[0]) + mod[1..])</option>
+                                }
+                            </select>
+                            <button class="fb-btn fb-btn-danger" @onclick="() => RemoveRoute(route)" title="Eliminar ruta">&times;</button>
+                        </div>
+
+                        <div class="pr-mappings">
+                            <div class="pr-map-h">
+                                <span>Campo origen (@route.SourceModule)</span>
+                                <span>&rarr;</span>
+                                <span>Campo destino (este formulario)</span>
+                                <span></span>
+                            </div>
+                            @{
+                                var sourceFields = PrefillSourceCatalog.Campos.TryGetValue(route.SourceModule, out var sf) ? sf : Array.Empty<string>();
+                                var targetFields = GetSchemaFieldNames();
+                            }
+                            @foreach (var m in route.Mappings)
+                            {
+                                <div class="pr-map-row">
+                                    <select class="pr-sel" @bind="m.Source">
+                                        <option value="">Selecciona...</option>
+                                        @foreach (var s in sourceFields) { <option value="@s">@s</option> }
+                                    </select>
+                                    <span class="pr-arrow">&rarr;</span>
+                                    <select class="pr-sel" @bind="m.Target">
+                                        <option value="">Selecciona...</option>
+                                        @foreach (var t in targetFields) { <option value="@t">@t</option> }
+                                    </select>
+                                    <button class="pr-mini" @onclick="() => RemoveMapping(route, m)" title="Quitar">&times;</button>
+                                </div>
+                            }
+                            <button class="fb-btn pr-add-map" @onclick="() => AddMapping(route)">+ Agregar mapeo</button>
+                        </div>
+                    </div>
+                }
+
+                <button class="fb-btn fb-btn-primary pr-add-route" @onclick="AddRoute">+ Nueva ruta</button>
+            </div>
+        </div>
+        <div class="pr-f">
+            <button class="fb-btn" @onclick="ClosePrefillRoutesModal">Cancelar</button>
+            <button class="fb-btn fb-btn-primary" @onclick="SavePrefillRoutesAsync" disabled="@_prefillBusy">
+                @(_prefillBusy ? "Guardando..." : "Guardar rutas")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .pr-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000; }
+    .pr-modal { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); width: 920px; max-width: 95vw; max-height: calc(100vh - 80px); background: #fff; border-radius: 12px; box-shadow: 0 30px 80px rgba(15,23,42,.35); z-index: 1001; display: flex; flex-direction: column; overflow: hidden; }
+    .pr-h { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .pr-h h3 { margin: 0; font-size: 16px; font-weight: 700; }
+    .pr-h small { color: #64748b; font-size: 12px; }
+    .pr-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; }
+    .pr-body { padding: 16px 18px; overflow: auto; flex: 1; }
+    .pr-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
+    .pr-info { padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; font-size: 12px; color: #1e40af; margin-bottom: 14px; }
+    .pr-empty { padding: 30px; text-align: center; color: #94a3b8; font-style: italic; }
+    .pr-route { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+    .pr-route-h { display: grid; grid-template-columns: 1fr 180px 40px; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .pr-name { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 700; font-size: 13px; }
+    .pr-source-sel { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12.5px; }
+    .pr-mappings { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+    .pr-map-h { display: grid; grid-template-columns: 1fr 20px 1fr 32px; gap: 6px; align-items: center; font-size: 10.5px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+    .pr-map-row { display: grid; grid-template-columns: 1fr 20px 1fr 32px; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .pr-arrow { color: #1565c0; font-weight: 700; text-align: center; }
+    .pr-sel { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; width: 100%; }
+    .pr-mini { background: none; border: none; color: #b91c1c; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
+    .pr-add-map { font-size: 11.5px; margin-top: 6px; }
+    .pr-add-route { width: 100%; margin-top: 4px; }
+</style>
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -358,6 +468,66 @@
     private bool _busy;
     private string? _error;
     private string? _ok;
+
+    // Modal rutas de prefill
+    private bool _showPrefillModal;
+    private PrefillRouteSet _prefillRoutes = new();
+    private bool _prefillBusy;
+    private string? _prefillError;
+    private string? _prefillOk;
+
+    private void OpenPrefillRoutesModal()
+    {
+        if (_currentId is null) { return; }
+        _prefillError = null; _prefillOk = null;
+        _showPrefillModal = true;
+    }
+
+    private void ClosePrefillRoutesModal() => _showPrefillModal = false;
+
+    private void AddRoute() => _prefillRoutes.Routes.Add(new PrefillRoute { Name = "Paciente", SourceModule = "paciente" });
+    private void RemoveRoute(PrefillRoute r) => _prefillRoutes.Routes.Remove(r);
+    private void AddMapping(PrefillRoute r) => r.Mappings.Add(new PrefillFieldMap());
+    private void RemoveMapping(PrefillRoute r, PrefillFieldMap m) => r.Mappings.Remove(m);
+
+    /// <summary>Lista de Name de los campos del schema actual para el dropdown destino.</summary>
+    private List<string> GetSchemaFieldNames()
+    {
+        var result = new List<string>();
+        void Walk(IEnumerable<FormNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.IsSection && n.Children is not null) { Walk(n.Children); continue; }
+                if (n.IsText || n.IsTable) { continue; }
+                if (!string.IsNullOrWhiteSpace(n.Name)) { result.Add(n.Name); }
+            }
+        }
+        Walk(_schema.Children);
+        return result.Distinct().OrderBy(s => s).ToList();
+    }
+
+    private async Task SavePrefillRoutesAsync()
+    {
+        if (_currentId is not Guid id) { return; }
+        _prefillError = null; _prefillOk = null; _prefillBusy = true;
+        try
+        {
+            // Limpiar entradas vacias.
+            foreach (var r in _prefillRoutes.Routes)
+            {
+                r.Mappings = r.Mappings.Where(m => !string.IsNullOrWhiteSpace(m.Source) && !string.IsNullOrWhiteSpace(m.Target)).ToList();
+            }
+            _prefillRoutes.Routes = _prefillRoutes.Routes.Where(r => !string.IsNullOrWhiteSpace(r.Name)).ToList();
+
+            var json = _prefillRoutes.ToJson();
+            var ok = await FormsSvc.UpdatePrefillRoutesAsync(id, json, await ActorAsync());
+            if (!ok) { _prefillError = "No se pudo guardar."; return; }
+            _prefillOk = $"Rutas guardadas ({_prefillRoutes.Routes.Count}).";
+        }
+        catch (Exception ex) { _prefillError = "Error: " + ex.Message; }
+        finally { _prefillBusy = false; }
+    }
 
     protected override async Task OnInitializedAsync() => await LoadListAsync();
 
@@ -442,6 +612,7 @@
         _currentId = d.Id;
         _codigo = d.Codigo; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
         _schema = FormSchema.FromJson(d.SchemaJson);
+        _prefillRoutes = PrefillRouteSet.FromJson(d.PrefillRoutesJson);
         _selected = null; _headerSel = false;
         _error = null; _ok = null;
     }

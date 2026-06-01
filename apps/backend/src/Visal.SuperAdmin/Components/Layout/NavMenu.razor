@@ -4,10 +4,20 @@
 
 <div class="visal-brand">
     <div class="visal-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        @* Para usuarios de tenant: si configuraron un logo en /mi-cuenta lo usamos
+           aqui; si no, mostramos el SVG por defecto. Para super-admin de plataforma
+           queda siempre el SVG (es la consola, no una agencia). *@
+        @if (!_showAdmin && !string.IsNullOrWhiteSpace(_tenantLogoUrl))
+        {
+            <img src="@_tenantLogoUrl" alt="Logo" />
+        }
+        else
+        {
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        }
     </div>
     <div>
-        <div class="visal-brand-name">Visal</div>
+        <div class="visal-brand-name">@(_showAdmin || string.IsNullOrWhiteSpace(_tenantName) ? "Visal" : _tenantName)</div>
         <div class="visal-brand-sub">Salud Domiciliaria</div>
     </div>
 </div>
@@ -249,6 +259,7 @@
     private bool _showTenant;
     private string? _userName;
     private string? _tenantName;
+    private string? _tenantLogoUrl;
     private string _roleLabel = "Operador de plataforma";
     private string _avatar = "SA";
 
@@ -283,6 +294,7 @@
             {
                 var tenant = await TenantsSvc.GetAsync(tenantId);
                 _tenantName = tenant?.Name;
+                _tenantLogoUrl = tenant?.LogoUrl;
             }
         }
     }

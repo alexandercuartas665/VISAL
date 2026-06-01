@@ -4,8 +4,9 @@
 @inject Visal.Application.Admin.IPlatformBrandingService BrandingSvc
 @inject Visal.Application.Admin.IGoogleAuthConfigService GoogleCfg
 @inject Visal.Application.Tenancy.ISedeCatalogoPublicoService SedesSvc
+@inject Visal.Application.Tenancy.ITenantBrandingPublicoService TenantBrand
 
-<PageTitle>Ingresar - @_brand.PlatformName</PageTitle>
+<PageTitle>Ingresar - @_displayName</PageTitle>
 
 <div class="auth-shell @(StartSignup ? "is-signup" : "")">
 
@@ -15,9 +16,9 @@
         <div class="auth-aside-deco auth-deco-bl"></div>
 
         <div class="auth-brand">
-            @if (!string.IsNullOrWhiteSpace(_brand.LoginLogoUrl))
+            @if (!string.IsNullOrWhiteSpace(_logoUrl))
             {
-                <img class="auth-brand-logo-img" src="@_brand.LoginLogoUrl" alt="@_brand.PlatformName" />
+                <img class="auth-brand-logo-img" src="@_logoUrl" alt="@_displayName" />
             }
             else
             {
@@ -25,7 +26,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 </div>
             }
-            <span class="auth-brand-name">@_brand.PlatformName</span>
+            <span class="auth-brand-name">@_displayName</span>
         </div>
 
         <div class="auth-aside-body">
@@ -146,7 +147,7 @@
                         </div>
                     </div>
                     <p class="auth-legal">
-                        Al registrarte aceptas los Terminos del Servicio y la Politica de Privacidad de @_brand.PlatformName.
+                        Al registrarte aceptas los Terminos del Servicio y la Politica de Privacidad de @_displayName.
                     </p>
                     <button class="auth-submit" type="submit">
                         <span>Registrar cuenta</span>
@@ -179,7 +180,7 @@
 
         </div>
 
-        <footer class="auth-footer">&copy; @DateTime.UtcNow.Year @_brand.PlatformName. Todos los derechos reservados.</footer>
+        <footer class="auth-footer">&copy; @DateTime.UtcNow.Year @_displayName. Todos los derechos reservados.</footer>
     </main>
 </div>
 
@@ -223,6 +224,14 @@
     private bool _googleEnabled;
     private List<Visal.Application.Tenancy.SedePublicaDto> _sedes = new();
 
+    // Logo y nombre que finalmente se renderizan en el panel de la izquierda.
+    // Resueltos en OnInitializedAsync con la regla:
+    //   1) Branding de plataforma (configurado por super-admin) tiene prioridad.
+    //   2) Si no esta puesto, cae al logo/nombre del tenant principal (Mi cuenta).
+    //   3) Si no hay ninguno, queda el default del PlatformBrandingDto.
+    private string _displayName = "Visal";
+    private string? _logoUrl;
+
     private bool StartSignup => string.Equals(Mode, "signup", StringComparison.OrdinalIgnoreCase)
         || !string.IsNullOrWhiteSpace(RegError);
 
@@ -231,5 +240,24 @@
         _brand = await BrandingSvc.GetAsync();
         _googleEnabled = (await GoogleCfg.GetAsync())?.IsEnabled == true;
         _sedes = (await SedesSvc.ListAsync()).ToList();
+
+        // Empezamos con lo que dijo el branding de plataforma.
+        _displayName = _brand.PlatformName;
+        _logoUrl = _brand.LoginLogoUrl;
+
+        // Si la plataforma no configuro logo (o el nombre quedo en "Visal" default),
+        // intentamos cargar el branding del tenant principal de esta instancia.
+        // Eso cubre instalaciones on-premise donde hay un solo tenant operando.
+        var sinLogo = string.IsNullOrWhiteSpace(_logoUrl);
+        var nombreDefault = string.Equals(_displayName, "Visal", StringComparison.OrdinalIgnoreCase);
+        if (sinLogo || nombreDefault)
+        {
+            var t = await TenantBrand.GetDefaultAsync();
+            if (t is not null)
+            {
+                if (sinLogo) { _logoUrl = t.LogoUrl; }
+                if (nombreDefault && !string.IsNullOrWhiteSpace(t.Name)) { _displayName = t.Name; }
+            }
+        }
     }
 }

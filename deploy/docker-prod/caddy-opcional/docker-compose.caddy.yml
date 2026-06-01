@@ -1,0 +1,47 @@
+# Overlay para activar HTTPS con Caddy + Let's Encrypt automatico.
+#
+# Se compone con el docker-compose.yml principal:
+#
+#   docker compose --env-file .env \
+#       -f docker-compose.yml -f docker-compose.caddy.yml \
+#       up -d
+#
+# Requisitos antes de levantar:
+#   1) Tener un dominio apuntando al IP publico del server (registro A).
+#   2) Editar .env y definir VISAL_DOMAIN=visal.tudominio.com
+#   3) Puertos 80 y 443 abiertos en el firewall del server.
+#
+# Que hace:
+#   - Levanta un container Caddy que escucha en 80 y 443.
+#   - Caddy hace TLS termination con Let's Encrypt (cert renovado solo).
+#   - Visal-app queda EXPUESTO solo en la red Docker interna (ya no en
+#     127.0.0.1:5380), porque ahora Caddy es la unica puerta de entrada.
+
+services:
+  # Re-declaramos visal-app sin mapeo de puertos al host:
+  # con Caddy delante, no queremos doble exposicion.
+  visal-app:
+    ports: []
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: visal-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC). Si no lo quieres, comenta esta linea.
+    environment:
+      VISAL_DOMAIN: ${VISAL_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # certs, ACME state. Persistente: no perder.
+      - caddy_config:/config
+    networks:
+      - visal-net
+    depends_on:
+      - visal-app
+
+volumes:
+  caddy_data:
+  caddy_config:

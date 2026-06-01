@@ -1,0 +1,161 @@
+
+=========================================================================
+ Visal IPS RT - Bootstrap deploy Linux
+=========================================================================
+ Server  : root@10.0.0.3
+ Carpeta : /opt/visal
+ Llave   : C:\Users\acuartas\.ssh\id_ed25519_visal
+
+
+==> Validando ssh.exe y scp.exe en este Windows
+    OK    ssh.exe / scp.exe / ssh-keygen.exe disponibles
+
+==> Llave SSH dedicada para Visal
+    OK    Ya existe: C:\Users\acuartas\.ssh\id_ed25519_visal (la reutilizo)
+
+==> Copiando llave publica al server
+    info  AQUI se te pedira el password SSH del usuario root en 10.0.0.3.
+    info  Escribelo en este mismo terminal cuando ssh lo pida. Sera la unica vez.
+
+      ssh: root@10.0.0.3: Permission denied (publickey,password).
+root@10.0.0.3's password:
+    OK    Key-auth funcionando. A partir de aqui no se pedira password.
+
+==> Validando prereqs en el server remoto
+    info  Server responde:
+      29.5.2
+      5.1.4
+      SEP
+      root
+      SEP
+      Linux vmi3330253 6.8.0-117-generic #117-Ubuntu SMP PREEMPT_DYNAMIC Tue May  5 19:26:24 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+    OK    Docker y docker compose disponibles
+
+==> Preparando carpeta /opt/visal en el server
+    OK    Carpeta lista
+
+==> Subiendo archivos del deploy
+    info  subiendo docker-compose.yml
+    info  subiendo .env.example
+    info  subiendo deploy-en-linux.sh
+    info  subiendo dump visal_dev_2026-05-30-2202.dump (0.218 MB)
+    OK    Archivos subidos y script marcado ejecutable
+
+Voy a ejecutar deploy-en-linux.sh en el server. Esto:
+  - Generara .env con password Postgres aleatoria (si no existe)
+  - docker compose pull + up -d
+  - Restaurara el dump (si hay tablas, te pedira confirmacion en el server)
+  - Reiniciara visal-app
+
+
+Continuo?  [s/N]: s
+
+==> Ejecutando deploy-en-linux.sh en el server
+
+=========================================================================
+ Visal IPS RT - Deploy en server Linux
+=========================================================================
+ DeployDir : /opt/visal
+ Imagen    : ghcr.io/alexandercuartas665/visal/superadmin:latest
+ Puerto    : 127.0.0.1:5380 -> visal-app:8080
+ BD        : visal (usuario visal)
+
+
+==> Validando entorno
+    OK    Carpeta de deploy: /opt/visal
+    OK    Docker server: 29.5.2
+    OK    docker compose: 5.1.4
+    OK    docker-compose.yml presente
+    OK    Dump a restaurar: ./dumps/visal_dev.dump (0.218 MB)
+
+==> Configurando .env
+    WARN  .env no existe. Lo genero con clave aleatoria.
+    OK    .env generado (chmod 600). Password Postgres: i0x1HQvE7wMmYSf4vVq8Xy4oEvOMEsjqGloDDEmaV3c
+    WARN  Guarda esta clave en un gestor de secretos AHORA.
+    info  Sin credenciales GHCR. Si la imagen es privada, fallara el pull.
+    info  Para login despues:  echo $PAT | docker login ghcr.io -u tu-usuario --password-stdin
+
+==> Descargando imagenes (docker compose pull)
+[+] pull 25/25
+ ✔ Image ghcr.io/alexandercuartas665/visal/superadmin:latest Pulled                                                78.5s
+ ✔ Image postgres:16-alpine                                  Pulled                                                41.1s
+    OK    Imagenes al dia
+
+==> Levantando stack (docker compose up -d)
+[+] up 4/4
+ ✔ Network visal-prod_visal-net   Created                                                                           0.3s
+ ✔ Volume visal-prod_visal-pgdata Created                                                                           0.0s
+ ✔ Container visal-postgres-prod  Healthy                                                                          15.2s
+ ✔ Container visal-app            Started                                                                          14.7s
+    OK    Stack levantado
+
+==> Esperando a que Postgres este listo
+    OK    Postgres healthy en ~2 seg
+
+==> Verificando si la BD ya tiene datos
+    info  BD vacia (0 tablas). Restore limpio.
+
+==> Copiando dump adentro del container Postgres
+Successfully copied 229kB (transferred 230kB) to visal-postgres-prod:/tmp/restore.dump
+    OK    Dump dentro del container: /tmp/restore.dump
+
+==> Ejecutando pg_restore
+    OK    Restore terminado
+
+==> Verificando conteo de filas restauradas
+platform_users   30
+tenant_users     29
+tenants          1
+aseguradoras     1
+sucursales       7
+pacientes        3
+profesionales    5
+roles            2
+
+==> Reiniciando visal-app (EF Core suelta caches/conexiones)
+    OK    visal-app reiniciado
+
+==> Probe HTTP a http://localhost:5380/login
+curl: (56) Recv failure: Connection reset by peer
+    OK    La app responde en ~6 seg.
+
+=========================================================================
+ Deploy terminado
+=========================================================================
+ URL local del server  : http://localhost:5380/login
+ Container app         : visal-app
+ Container Postgres    : visal-postgres-prod (no expuesto al host)
+ .env                  : /opt/visal/.env (chmod 600)
+
+ Siguientes pasos:
+   1) Pasale al admin del server estos datos para que conecte su reverse proxy:
+        Backend HTTP       : http://127.0.0.1:5380
+        WebSockets         : SI, requeridos (Blazor SignalR)
+        Headers que envia  : ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
+                             (el app ya respeta X-Forwarded-Proto y X-Forwarded-For)
+   2) Cambia los passwords de:
+        admin@visal.travels
+        demo-admin@visal.travels
+      (el dump trae los hash de dev con Admin123*; en prod no puede quedar).
+
+ Logs:           docker logs visal-app -f --tail 100
+ Bajar stack:    docker compose down       (datos se conservan)
+ Actualizar:     docker compose pull && docker compose up -d
+
+Connection to 10.0.0.3 closed.
+
+=========================================================================
+ Bootstrap terminado OK
+=========================================================================
+
+ Para volver a entrar al server sin password:
+   ssh -i C:\Users\acuartas\.ssh\id_ed25519_visal root@10.0.0.3
+
+ Si tu admin del server ya engancho el reverse proxy, abre:
+   https://<tu-dominio>
+
+ Si todavia no, prueba con tunel SSH:
+   ssh -i C:\Users\acuartas\.ssh\id_ed25519_visal -L 5380:localhost:5380 root@10.0.0.3
+   (y abre http://localhost:5380 en tu navegador)
+
+PS C:\DesarrolloIA\Visal\deploy\docker-prod>

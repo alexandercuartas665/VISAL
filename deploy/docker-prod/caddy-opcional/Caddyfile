@@ -1,0 +1,54 @@
+# Caddyfile - reverse proxy + TLS para Visal IPS RT.
+#
+# El nombre del site lo lee de la variable VISAL_DOMAIN del .env
+# (pasada al container via docker-compose.caddy.yml).
+#
+# Que hace:
+#   - Sirve HTTPS automatico con Let's Encrypt (challenge HTTP-01 en :80).
+#   - Reenvia todo el trafico a visal-app:8080 dentro de la red Docker.
+#   - Agrega los headers que Blazor/ASP.NET Core esperan detras de un proxy
+#     (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto).
+#   - WebSockets (SignalR para Blazor Server) pasan por defecto.
+#   - Compresion gzip + zstd.
+
+{$VISAL_DOMAIN} {
+    encode gzip zstd
+
+    reverse_proxy visal-app:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Timeouts amplios para Blazor SignalR (conexiones long-lived).
+        transport http {
+            read_timeout 1h
+            write_timeout 1h
+        }
+    }
+
+    # Logs estructurados a stdout. docker logs visal-caddy los recoge.
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+
+    # Cabeceras de seguridad razonables. Ajusta si tu app las necesita distintas.
+    header {
+        # HSTS - obliga HTTPS por 1 ano. Activar SOLO cuando esten seguros del cert.
+        # Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+        # Anti-clickjacking. Si embebes Visal en un iframe legitimo, cambialo.
+        X-Frame-Options "SAMEORIGIN"
+
+        # Anti-MIME-sniff
+        X-Content-Type-Options "nosniff"
+
+        # Politica de referer
+        Referrer-Policy "strict-origin-when-cross-origin"
+
+        # Quita el header Server que delata Caddy (opcional)
+        -Server
+    }
+}

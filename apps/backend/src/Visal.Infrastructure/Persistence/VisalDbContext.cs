@@ -64,6 +64,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
     public DbSet<HistoriaClinica> HistoriasClinicas => Set<HistoriaClinica>();
+    public DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos => Set<HistoriaClinicaMedicamento>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
@@ -529,6 +530,21 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.RegistroSanitario });
             b.HasIndex(x => new { x.TenantId, x.Ium });
             b.HasIndex(x => new { x.TenantId, x.Atc });
+        });
+
+        modelBuilder.Entity<HistoriaClinicaMedicamento>(b =>
+        {
+            b.Property(x => x.NombreMedicamento).HasColumnType("text").IsRequired();
+            b.Property(x => x.Cantidad).HasColumnType("text");
+            b.Property(x => x.Frecuencia).HasColumnType("text");
+            b.Property(x => x.Dias).HasColumnType("text");
+            b.Property(x => x.Posologia).HasColumnType("text");
+            b.Property(x => x.Observacion).HasColumnType("text");
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Medicamento).WithMany().HasForeignKey(x => x.MedicamentoId)
+                .OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
         });
 
         modelBuilder.Entity<HistoriaClinica>(b =>

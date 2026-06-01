@@ -5,6 +5,7 @@
 @inject IFormDefinitionService FormsSvc
 @inject IAsignacionService AsigSvc
 @inject IHistoriaClinicaService HcSvc
+@inject IOrdenMedicamentoService OrdMedSvc
 @inject IJSRuntime JS
 
 @*
@@ -144,7 +145,14 @@
             <div class="hc-tabs">
                 @foreach (var t in _tabs)
                 {
-                    <button class="hc-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">@t</button>
+                    <button class="hc-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">
+                        @t
+                        @* Badge con conteo en la pestana de medicamentos *@
+                        @if (t == "Ordenes medicamento" && _medCount > 0)
+                        {
+                            <span class="hc-tab-badge">@_medCount</span>
+                        }
+                    </button>
                 }
             </div>
             <div class="hc-tab-body">
@@ -173,7 +181,11 @@
                                         Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato" />
                         }
                     }
-                    else if (_tabSel == "Ordenes medicamento") { <OrdenMedicamentos /> }
+                    else if (_tabSel == "Ordenes medicamento")
+                    {
+                        <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
+                                           OnCountChanged="@(c => _medCount = c)" />
+                    }
                     else if (_tabSel == "Ordenes a Servicios") { <OrdenServicios /> }
                     else if (_tabSel == "Remisiones") { <OrdenRemisiones /> }
                     else if (_tabSel == "Ordenes incapacidad") { <OrdenIncapacidades /> }
@@ -271,6 +283,8 @@
     .hc-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; padding: 0 8px; overflow-x: auto; }
     .hc-tab { padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     .hc-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
+    /* Badge con conteo dentro de la pestana (ej. cantidad de medicamentos en la orden). */
+    .hc-tab-badge { display:inline-block; background:#1565c0; color:#fff; font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; margin-left:6px; vertical-align:middle; }
     .hc-tab-body { padding: 18px; flex: 1; overflow: auto; }
     .hc-empty-detail { padding: 60px 30px; }
     .hc-placeholder { padding: 30px; text-align: center; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; }
@@ -332,6 +346,9 @@
     private List<HistoriaRow> _historias = new();
     private HistoriaRow? _historiaSel;
     private Guid? _menuAbierto;
+    /// <summary>Conteo de medicamentos para badge en la pestana. Se mantiene
+    /// sincronizado via OnCountChanged del componente OrdenMedicamentos.</summary>
+    private int _medCount;
 
     private List<FormDefinitionDto> _formatos = new();
     private FormSchema? _schemaActual;
@@ -432,6 +449,8 @@
             : $"Codigo: {detail.FormatoCodigo}";
         _tabSel = "Historial";
         _imprimirMsg = null;
+        // Refrescar el badge de la pestana de medicamentos para la nueva HC.
+        _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
     }
     private void ToggleMenu(Guid id) => _menuAbierto = _menuAbierto == id ? null : id;
 
@@ -487,6 +506,7 @@
         _historias.Insert(0, nueva);
         _historiaSel = nueva;
         _imprimirMsg = null;
+        _medCount = 0; // HC recien creada no tiene medicamentos aun
     }
 
     private async Task<string?> GetEspecialistaNombreAsync()

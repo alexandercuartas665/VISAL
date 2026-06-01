@@ -1,95 +1,346 @@
-@* Diseño basado en ctrlOrdenMedicamentos.ascx del legacy. Solo layout, sin logica. *@
+@using Visal.Application.Tenancy
+@inject IOrdenMedicamentoService OrdSvc
+@inject IJSRuntime JS
+
+@*
+   Pestana "Orden de Medicamentos" de la HC. Buscador con autocompletado
+   contra el catalogo CUM (/medicamentos), agregar/editar/eliminar items
+   atados a la HistoriaClinicaId, cada item con su observacion. Cambios
+   se persisten al instante (no requiere "Guardar" explicito).
+*@
 
 <div class="od-bar">
     <div class="od-bar-left">
-        <label>Orden de Medicamentos Numero:</label>
-        <select class="form-select form-select-sm od-w-220" disabled>
-            <option>(sin ordenes)</option>
-        </select>
-    </div>
-    <div class="od-bar-right">
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128196; Nueva</button>
-        <button class="btn btn-outline-success btn-sm" disabled>&#128190; Guardar Form.</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+        <label>Orden de Medicamentos</label>
+        <span class="od-bar-count">@_items.Count item(s)</span>
     </div>
 </div>
 
-<div class="od-card">
-    <div class="od-row">
-        <div class="od-f od-c-6">
-            <label>Nombre del Medicamento</label>
-            <input class="form-control form-control-sm" placeholder="Buscar medicamento..." />
-        </div>
-        <div class="od-f od-c-4">
-            <div class="od-posol">
-                <div class="od-posol-grid">
-                    <div>
-                        <label class="od-mini">Cantidad</label>
-                        <input class="form-control form-control-sm text-center" />
+@if (HistoriaClinicaId is null)
+{
+    <div class="od-card od-empty-hc">
+        Selecciona o inicia una historia para registrar medicamentos.
+    </div>
+}
+else
+{
+    <div class="od-card">
+        @* ---- Fila de captura: autocompletado + posologia + cantidad ---- *@
+        <div class="od-row">
+            <div class="od-f od-c-6 od-search-wrap">
+                <label>Nombre del Medicamento</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Buscar medicamento (min 2 caracteres)..."
+                       value="@_terminoBusqueda"
+                       @oninput="OnTerminoChanged" />
+                @if (_sugerencias.Count > 0)
+                {
+                    <div class="od-suggest">
+                        @foreach (var s in _sugerencias)
+                        {
+                            <button class="od-suggest-item" @onclick="() => SeleccionarSugerencia(s)">
+                                <div class="od-suggest-nm">@s.Producto</div>
+                                <div class="od-suggest-meta">
+                                    @if (!string.IsNullOrWhiteSpace(s.PrincipioActivo)) { <span>@s.PrincipioActivo</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.Concentracion)) { <span>&middot; @s.Concentracion</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.FormaFarmaceutica)) { <span>&middot; @s.FormaFarmaceutica</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.RegistroSanitario)) { <span class="od-suggest-reg">@s.RegistroSanitario</span> }
+                                </div>
+                            </button>
+                        }
                     </div>
-                    <div>
-                        <label class="od-mini">Frecuencia</label>
-                        <input class="form-control form-control-sm text-center" />
+                }
+                else if (!string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2 && !_buscando)
+                {
+                    <div class="od-suggest od-suggest-empty">Sin resultados para "@_terminoBusqueda"</div>
+                }
+            </div>
+            <div class="od-f od-c-4">
+                <div class="od-posol">
+                    <div class="od-posol-grid">
+                        <div>
+                            <label class="od-mini">Cantidad</label>
+                            <input class="form-control form-control-sm text-center"
+                                   @bind="_borrador.Cantidad" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <label class="od-mini">Frecuencia</label>
+                            <input class="form-control form-control-sm text-center"
+                                   @bind="_borrador.Frecuencia" @bind:event="oninput"
+                                   placeholder="cada 8h" />
+                        </div>
+                        <div>
+                            <label class="od-mini">Dias</label>
+                            <input class="form-control form-control-sm text-center"
+                                   @bind="_borrador.Dias" @bind:event="oninput" />
+                        </div>
                     </div>
-                    <div>
-                        <label class="od-mini">Dias</label>
-                        <input class="form-control form-control-sm text-center" />
-                    </div>
+                    <div class="od-posol-preview">@PosologiaPreview()</div>
                 </div>
-                <div class="od-posol-preview">1 cada 8 horas durante 7 dias.</div>
+            </div>
+            <div class="od-f od-c-2">
+                <label>Accion</label>
+                <button class="btn btn-primary btn-sm od-add"
+                        @onclick="AgregarAsync"
+                        disabled="@(string.IsNullOrWhiteSpace(_borrador.NombreMedicamento) || _agregando)">
+                    @(_agregando ? "Agregando..." : "+ Agregar")
+                </button>
             </div>
         </div>
-        <div class="od-f od-c-2">
-            <label>Cantidad</label>
-            <div class="od-input-group">
-                <input class="form-control form-control-sm text-center" readonly />
-                <button class="btn btn-primary btn-sm">+</button>
-            </div>
-        </div>
-    </div>
 
-    <div class="od-grid-wrap">
-        <table class="table table-sm od-tbl">
-            <thead>
-                <tr>
-                    <th>Nombre del Medicamento</th>
-                    <th class="text-center" style="width:90px">Cantidad</th>
-                    <th>Posologia</th>
-                    <th class="text-center" style="width:50px">&#128424;</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr><td colspan="4" class="text-center text-muted od-empty-row">Sin medicamentos agregados.</td></tr>
-            </tbody>
-        </table>
+        @if (!string.IsNullOrWhiteSpace(_borrador.NombreMedicamento))
+        {
+            <div class="od-borrador">
+                Medicamento seleccionado: <strong>@_borrador.NombreMedicamento</strong>
+                <button class="btn btn-link btn-sm od-borrador-x" @onclick="LimpiarBorrador" title="Quitar">&times;</button>
+            </div>
+        }
+
+        @* ---- Grilla de items agregados ---- *@
+        <div class="od-grid-wrap">
+            <table class="table table-sm od-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:40px">#</th>
+                        <th>Nombre del Medicamento</th>
+                        <th>Posologia</th>
+                        <th>Observacion</th>
+                        <th class="text-center" style="width:50px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_items.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-center text-muted od-empty-row">Sin medicamentos agregados.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td class="text-center">@it.Orden</td>
+                                <td>
+                                    <strong>@it.NombreMedicamento</strong>
+                                </td>
+                                <td>
+                                    <input class="form-control form-control-sm od-inline-input"
+                                           value="@it.Posologia"
+                                           @onchange="@(e => GuardarPosologia(it, e.Value?.ToString()))" />
+                                </td>
+                                <td>
+                                    <input class="form-control form-control-sm od-inline-input"
+                                           placeholder="Observacion clinica..."
+                                           value="@it.Observacion"
+                                           @onchange="@(e => GuardarObservacion(it, e.Value?.ToString()))" />
+                                </td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar de la orden">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
+}
 
 <style>
-    .od-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; gap: 10px; flex-wrap: wrap; }
-    .od-bar-left { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: #0f172a; }
-    .od-bar-right { display: flex; gap: 6px; }
-    .od-w-220 { max-width: 220px; }
-    .od-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; background: #fff; }
-    .od-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; margin-bottom: 12px; align-items: end; }
-    .od-f label { font-size: 11px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; display: block; }
+    .od-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .od-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .od-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .od-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; position:relative; }
+    .od-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .od-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .od-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
     .od-c-2 { grid-column: span 2; }
     .od-c-4 { grid-column: span 4; }
     .od-c-6 { grid-column: span 6; }
-    .od-c-10 { grid-column: span 10; }
-    .od-c-11 { grid-column: span 11; }
-    .od-c-12 { grid-column: span 12; }
-    .od-posol { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; }
-    .od-posol-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-    .od-mini { font-size: 10px !important; text-align: center; }
-    .od-posol-preview { font-size: 11px; color: #64748b; font-style: italic; text-align: center; margin-top: 6px; }
-    .od-input-group { display: flex; gap: 4px; }
-    .od-input-group > input { flex: 1; }
-    .od-grid-wrap { margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: auto; }
-    .od-tbl { margin: 0; font-size: 12px; }
-    .od-tbl thead th { background: #1565c0; color: #fff; padding: 8px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-    .od-tbl td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; }
-    .od-empty-row { padding: 30px !important; font-style: italic; }
+
+    .od-search-wrap { position:relative; }
+    .od-suggest { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 12px 30px rgba(15,23,42,.12); max-height:300px; overflow-y:auto; z-index:50; margin-top:4px; }
+    .od-suggest-item { display:block; width:100%; text-align:left; padding:10px 12px; border:0; background:transparent; cursor:pointer; border-bottom:1px solid #f1f5f9; }
+    .od-suggest-item:hover { background:#eff6ff; }
+    .od-suggest-item:last-child { border-bottom:0; }
+    .od-suggest-nm { font-size:13px; font-weight:700; color:#0f172a; margin-bottom:2px; }
+    .od-suggest-meta { font-size:11px; color:#64748b; display:flex; gap:4px; flex-wrap:wrap; }
+    .od-suggest-reg { background:#f1f5f9; color:#475569; padding:1px 6px; border-radius:4px; font-family:'JetBrains Mono','Consolas',monospace; }
+    .od-suggest-empty { padding:10px 12px; font-size:12px; color:#64748b; font-style:italic; }
+
+    .od-borrador { margin-bottom:12px; padding:8px 12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:12.5px; color:#1e40af; display:flex; align-items:center; gap:8px; }
+    .od-borrador-x { color:#dc2626; padding:0 4px; }
+
+    .od-posol { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:8px; padding:8px; }
+    .od-posol-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+    .od-mini { font-size:10px !important; text-align:center; }
+    .od-posol-preview { font-size:11px; color:#64748b; font-style:italic; text-align:center; margin-top:6px; min-height:14px; }
+    .od-add { width:100%; }
+    .od-grid-wrap { margin-top:14px; border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
+    .od-tbl { margin:0; font-size:12.5px; }
+    .od-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .od-tbl td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .od-empty-row { padding:30px !important; font-style:italic; }
+    .od-inline-input { font-size:12px; }
 </style>
 
-@code { }
+@code {
+    /// <summary>Id de la HC actualmente abierta. Cuando cambia, recargamos los items.</summary>
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private string _terminoBusqueda = "";
+    private List<MedicamentoSugerenciaDto> _sugerencias = new();
+    private List<OrdenMedicamentoItemDto> _items = new();
+    private bool _buscando;
+    private bool _agregando;
+    private System.Threading.CancellationTokenSource? _debounceCts;
+
+    private BorradorMed _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            _terminoBusqueda = "";
+            _sugerencias.Clear();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await OrdSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    /// <summary>Lanza busqueda al catalogo con debounce de ~200ms para no saturar.</summary>
+    private async Task OnTerminoChanged(ChangeEventArgs e)
+    {
+        _terminoBusqueda = e.Value?.ToString() ?? "";
+        _debounceCts?.Cancel();
+        _debounceCts = new();
+        var token = _debounceCts.Token;
+        try
+        {
+            await Task.Delay(200, token);
+            _buscando = true;
+            var t = _terminoBusqueda;
+            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, 12, token)).ToList();
+            _buscando = false;
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { /* siguiente tecleo cancelo */ }
+    }
+
+    private void SeleccionarSugerencia(MedicamentoSugerenciaDto s)
+    {
+        _borrador.MedicamentoId = s.Id;
+        _borrador.NombreMedicamento = ArmarNombreCompleto(s);
+        _sugerencias.Clear();
+        _terminoBusqueda = "";
+    }
+
+    private static string ArmarNombreCompleto(MedicamentoSugerenciaDto s)
+    {
+        var partes = new List<string> { s.Producto };
+        if (!string.IsNullOrWhiteSpace(s.Concentracion)) { partes.Add(s.Concentracion!); }
+        if (!string.IsNullOrWhiteSpace(s.FormaFarmaceutica)) { partes.Add(s.FormaFarmaceutica!); }
+        return string.Join(" - ", partes);
+    }
+
+    private string PosologiaPreview()
+    {
+        var c = _borrador.Cantidad?.Trim();
+        var f = _borrador.Frecuencia?.Trim();
+        var d = _borrador.Dias?.Trim();
+        if (string.IsNullOrWhiteSpace(c) && string.IsNullOrWhiteSpace(f) && string.IsNullOrWhiteSpace(d))
+        {
+            return "Define cantidad, frecuencia y dias para armar la posologia.";
+        }
+        var s = "";
+        if (!string.IsNullOrWhiteSpace(c)) { s += c + " "; }
+        if (!string.IsNullOrWhiteSpace(f)) { s += f + " "; }
+        if (!string.IsNullOrWhiteSpace(d))
+        {
+            // si parece un numero pelado, agregamos "durante X dias"
+            s += int.TryParse(d, out _) ? $"durante {d} dias" : d;
+        }
+        return s.Trim() + ".";
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.NombreMedicamento)) { return; }
+        _agregando = true;
+        try
+        {
+            var preview = PosologiaPreview();
+            var creado = await OrdSvc.AgregarAsync(hid, new AgregarMedicamentoRequest(
+                _borrador.MedicamentoId,
+                _borrador.NombreMedicamento!,
+                _borrador.Cantidad,
+                _borrador.Frecuencia,
+                _borrador.Dias,
+                preview,
+                _borrador.Observacion), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            LimpiarBorrador();
+        }
+        finally { _agregando = false; }
+    }
+
+    private void LimpiarBorrador()
+    {
+        _borrador = new();
+        _terminoBusqueda = "";
+        _sugerencias.Clear();
+    }
+
+    private async Task GuardarPosologia(OrdenMedicamentoItemDto it, string? nuevaPosologia)
+    {
+        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, nuevaPosologia, it.Observacion);
+        await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
+        var idx = _items.FindIndex(x => x.Id == it.Id);
+        if (idx >= 0) { _items[idx] = it with { Posologia = nuevaPosologia }; }
+    }
+
+    private async Task GuardarObservacion(OrdenMedicamentoItemDto it, string? nuevaObs)
+    {
+        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, it.Posologia, nuevaObs);
+        await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
+        var idx = _items.FindIndex(x => x.Id == it.Id);
+        if (idx >= 0) { _items[idx] = it with { Observacion = nuevaObs }; }
+    }
+
+    private async Task EliminarAsync(OrdenMedicamentoItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar \"{it.NombreMedicamento}\" de la orden?");
+        if (!ok) { return; }
+        await OrdSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private sealed class BorradorMed
+    {
+        public Guid? MedicamentoId { get; set; }
+        public string? NombreMedicamento { get; set; }
+        public string? Cantidad { get; set; }
+        public string? Frecuencia { get; set; }
+        public string? Dias { get; set; }
+        public string? Observacion { get; set; }
+    }
+}

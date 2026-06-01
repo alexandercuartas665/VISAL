@@ -120,7 +120,12 @@ else
             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarHistoria">&#10006; Cerrar</button>
         </div>
         <div class="at-fs-body">
-            <HistoriasClinicasModulo PacienteContexto="@_pacienteCtx" />
+            @* Pasamos el codigo del formato de historia que ya viene configurado en
+               el servicio asignado (Asignacion.FormatoHistoria <- ServicioContrato.
+               Historia). El profesional NO elige formato: si esta presente, lo
+               usamos para todas las historias nuevas que inicie desde aqui. *@
+            <HistoriasClinicasModulo PacienteContexto="@_pacienteCtx"
+                                     FormatoForzadoCodigo="@hs.FormatoHistoria" />
         </div>
     </div>
 }

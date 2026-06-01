@@ -11,7 +11,12 @@ public sealed record MiServicioAsignadoDto(
     string TipoServicio, string NombreServicio, string CodigoAsignacionInterna, string CodigoAutorizacion,
     DateOnly FechaAsignacion, int Orden,
     string TipoDocPaciente, string NumeroDocPaciente, string NombrePaciente, Guid PacienteId,
-    bool Completado, DateOnly? FechaAtencion);
+    bool Completado, DateOnly? FechaAtencion,
+    // Codigo del formato de historia (FormDefinition.Codigo) que la aseguradora
+    // configuro para este servicio - viaja desde ServicioContrato.Historia ->
+    // Asignacion.FormatoHistoria. El profesional NO lo elige: lo usamos para
+    // forzar el formato al iniciar la HC desde /atencion.
+    string? FormatoHistoria = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

@@ -585,7 +585,10 @@
                 c.FechaInicio,
                 c.FechaFinal,
                 c.Observaciones,
-                null)).ToList();
+                // Copiamos el campo HISTORIA del servicio del contrato a la asignacion
+                // para que el profesional NO tenga que elegir formato en /atencion -
+                // el servicio ya dice que formato de HC corresponde.
+                c.Servicio.Historia)).ToList();
 
             var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items);
             var r = await Svc.CrearLoteAsync(req, await Actor());

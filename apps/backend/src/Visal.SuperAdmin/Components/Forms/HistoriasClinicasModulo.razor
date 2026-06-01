@@ -44,15 +44,26 @@
             </div>
         </div>
 
+        @if (_formatoForzadoId is not null)
+        {
+            <div class="ase-card hc-forzado-card">
+                <div class="ase-card-h">Formato de historia para este servicio</div>
+                <div class="hc-form-padding">
+                    <div class="hc-forzado-name">@_formatoForzadoNombre</div>
+                    <small class="text-muted">Definido por el servicio asignado. Al iniciar una historia nueva se usa este formato automaticamente.</small>
+                </div>
+            </div>
+        }
+
         <div class="ase-card">
-            <div class="ase-card-h">Filtros</div>
+            <div class="ase-card-h">Filtros de busqueda</div>
             <div class="ase-form hc-form">
                 <div class="ase-f"><label>Fecha inicial</label><input type="date" class="form-control form-control-sm" @bind="_filFechaIni" /></div>
                 <div class="ase-f"><label>Fecha final</label><input type="date" class="form-control form-control-sm" @bind="_filFechaFin" /></div>
                 <div class="ase-f ase-f-wide">
-                    <label>Formato de historia</label>
+                    <label>Formato de historia <small class="text-muted">(opcional - filtro)</small></label>
                     <select class="form-select form-select-sm" @bind="_filFormato">
-                        <option value="">Selecciona formato...</option>
+                        <option value="">Todos los formatos</option>
                         @foreach (var f in _formatos)
                         {
                             <option value="@f.Id">[@f.Codigo] @f.Nombre</option>
@@ -109,7 +120,11 @@
     <div class="hc-col hc-col-main">
         <div class="ase-card">
             <div class="hc-actions">
-                <button class="btn btn-primary btn-sm" @onclick="IniciarHistoria" disabled="@(string.IsNullOrEmpty(_filFormato))">&#128221; Iniciar historia medica</button>
+                <button class="btn btn-primary btn-sm" @onclick="IniciarHistoria"
+                        disabled="@(_formatoForzadoId is null && string.IsNullOrEmpty(_filFormato))"
+                        title="@(_formatoForzadoId is not null ? $"Inicia historia con formato {_formatoForzadoNombre}" : "Selecciona un formato del filtro o abre desde un servicio asignado")">
+                    &#128221; Iniciar historia medica
+                </button>
                 <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Abrir vista documento en nueva pestana para imprimir o guardar PDF">&#128424; Imprimir</button>
                 <button class="btn btn-danger btn-sm" disabled="@(_schemaActual is null)" @onclick="Descartar">&#128465; Descartar</button>
                 <button class="btn btn-outline-secondary btn-sm" disabled="@(_schemaActual is null)" @onclick="Cerrar">&#10006; Cerrar</button>
@@ -268,6 +283,11 @@
     .hc-paciente-doc { font-family: monospace; font-size: 11.5px; color: #1e40af; margin-top: 2px; }
     .hc-paciente-card button { padding: 0 4px; font-size: 11px; margin-top: 4px; }
 
+    /* Card que se muestra cuando el formato de historia viene fijado por el servicio
+       asignado. Lo destacamos en amber para distinguirlo de los filtros normales. */
+    .hc-forzado-card { border-left: 3px solid #f59e0b; }
+    .hc-forzado-name { font-size: 13px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
+
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
     .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 80vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
     .cie-modal-lg { width: 900px; }
@@ -283,9 +303,24 @@
     /// <summary>Paciente para el que se abre el modulo. Si esta seteado, NO se permite cambiar.</summary>
     [Parameter] public PacienteAsignacionDto? PacienteContexto { get; set; }
 
+    /// <summary>
+    /// Codigo (no Guid) del formato de historia que ya viene configurado en el
+    /// servicio asignado. Si esta presente, el profesional NO elige formato:
+    /// se usa ESTE para crear historias nuevas y el dropdown de "Formato de
+    /// historia" pasa a ser solo filtro de busqueda de historias previas.
+    /// Cuando es null o el codigo no resuelve a un FormDefinition activo,
+    /// el modulo se comporta como antes (el profesional elige del dropdown).
+    /// </summary>
+    [Parameter] public string? FormatoForzadoCodigo { get; set; }
+
     private DateOnly? _filFechaIni;
     private DateOnly? _filFechaFin;
     private string _filFormato = "";
+    // Formato forzado por el servicio asignado (viene de Asignacion.FormatoHistoria
+    // resuelto a su FormDefinition). Cuando esta seteado, IniciarHistoria usa este
+    // formato y el dropdown queda solo como filtro de busqueda.
+    private Guid? _formatoForzadoId;
+    private string? _formatoForzadoNombre;
     private string _busqueda = "";
 
     private readonly string[] _tabs = new[] {
@@ -320,6 +355,17 @@
     protected override async Task OnInitializedAsync()
     {
         _formatos = (await FormsSvc.ListAsync()).Where(f => f.Activo).ToList();
+        // Si nos pasaron un codigo de formato forzado (viene del servicio asignado),
+        // lo resolvemos a su Guid para usarlo al iniciar historia. NO toca _filFormato
+        // (que es solo el filtro de busqueda de historias previas).
+        if (!string.IsNullOrWhiteSpace(FormatoForzadoCodigo))
+        {
+            var match = _formatos.FirstOrDefault(f =>
+                string.Equals(f.Codigo, FormatoForzadoCodigo, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.CodigoSecundario, FormatoForzadoCodigo, StringComparison.OrdinalIgnoreCase));
+            _formatoForzadoId = match?.Id;
+            _formatoForzadoNombre = match?.Nombre;
+        }
     }
 
     private void OpenPacienteModal()
@@ -405,7 +451,13 @@
 
     private async Task IniciarHistoria()
     {
-        if (!Guid.TryParse(_filFormato, out var fid)) { return; }
+        // Prioridad: 1) formato forzado por el servicio asignado (Atencion),
+        //            2) formato seleccionado en el filtro de busqueda.
+        // Si no hay ninguno, nada que iniciar.
+        Guid fid;
+        if (_formatoForzadoId is Guid forzado) { fid = forzado; }
+        else if (Guid.TryParse(_filFormato, out var fidFiltro)) { fid = fidFiltro; }
+        else { return; }
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
 
         var detail = await FormsSvc.GetAsync(fid);

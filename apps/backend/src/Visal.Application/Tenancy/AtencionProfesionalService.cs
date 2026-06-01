@@ -79,7 +79,8 @@ public sealed class AtencionProfesionalService(
                     p?.NombreCompleto ?? "(sin paciente)",
                     a.PacienteId,
                     completado,
-                    sesion?.FechaAtencion));
+                    sesion?.FechaAtencion,
+                    a.FormatoHistoria));
             }
         }
         return result;

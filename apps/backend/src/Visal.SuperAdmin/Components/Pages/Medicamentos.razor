@@ -1,0 +1,486 @@
+@page "/medicamentos"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using ClosedXML.Excel
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject IMedicamentoService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Base de datos Medicamentos - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Base de datos de Medicamentos</h1>
+        <small class="text-muted">Codigo Unico de Medicamentos (CUM) - INVIMA. @(_total) registro(s)</small>
+    </div>
+    <div class="med-toolbar">
+        <InputFile id="med-file" OnChange="OnImportExcel" style="display:none;" accept=".xlsx,.xls" />
+        <label for="med-file" class="btn btn-outline-primary @(_busy ? "disabled" : "")">&#128190; Importar Excel</label>
+        <button class="btn btn-outline-danger" @onclick="OnClearAll" disabled="@(_busy || _total == 0)">&#128465; Vaciar todo</button>
+        <button class="btn btn-primary" @onclick="OnNuevo" disabled="@_busy">+ Nuevo registro</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card">
+    <div class="med-filtros">
+        <input class="form-control" placeholder="Buscar por producto, principio activo, ATC, IUM, registro sanitario, descripcion..."
+               @bind="_termino" @bind:event="oninput" @onkeyup="OnKeyup" />
+        <button class="btn btn-outline-secondary" @onclick="Buscar" disabled="@_busy">&#128270; Buscar</button>
+    </div>
+
+    @if (_busy && _rows.Count == 0)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">
+            @(_total == 0 && string.IsNullOrEmpty(_termino)
+                ? "No hay registros. Importa el Excel del INVIMA o crea uno con el boton 'Nuevo registro'."
+                : "Sin resultados para tu busqueda.")
+        </div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl">
+                <thead>
+                    <tr>
+                        <th>Producto</th>
+                        <th>Registro</th>
+                        <th>Principio activo</th>
+                        <th>Concentracion</th>
+                        <th>Forma</th>
+                        <th>IUM</th>
+                        <th>Estado</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in _rows)
+                    {
+                        <tr>
+                            <td><strong>@m.Producto</strong>
+                                @if (!string.IsNullOrWhiteSpace(m.DescripcionComercial))
+                                {
+                                    <div class="med-desc">@m.DescripcionComercial</div>
+                                }
+                            </td>
+                            <td class="mono">@m.RegistroSanitario</td>
+                            <td>@m.PrincipioActivo</td>
+                            <td>@m.Concentracion</td>
+                            <td>@m.FormaFarmaceutica</td>
+                            <td class="mono">@m.Ium</td>
+                            <td>
+                                @if (string.Equals(m.EstadoRegistro, "Vigente", StringComparison.OrdinalIgnoreCase))
+                                { <span class="med-pill med-vig">Vigente</span> }
+                                else if (!string.IsNullOrWhiteSpace(m.EstadoRegistro))
+                                { <span class="med-pill med-vnc">@m.EstadoRegistro</span> }
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-link btn-sm" title="Editar" @onclick="() => EditarAsync(m.Id)">&#9998;</button>
+                                <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(m.Id)">&#128465;</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="med-pag">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="PrevPage" disabled="@(_skip == 0 || _busy)">&laquo; Anterior</button>
+            <span>Pagina @(((_skip / _take) + 1)) de @((Math.Max(1, (int)Math.Ceiling((double)_total / _take))))</span>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="NextPage" disabled="@((_skip + _take) >= _total || _busy)">Siguiente &raquo;</button>
+        </div>
+    }
+</div>
+
+@* ============== MODAL CREAR/EDITAR ============== *@
+@if (_edit is MedEdit ed)
+{
+    <div class="med-bk" @onclick="CerrarModal"></div>
+    <div class="med-modal">
+        <div class="med-modal-h">
+            <h3>@(ed.Id is null ? "Nuevo medicamento" : "Editar medicamento")</h3>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="CerrarModal">&#10006; Cerrar</button>
+        </div>
+        <div class="med-modal-body">
+            <div class="med-section">Producto / registro sanitario</div>
+            <div class="med-grid">
+                <div class="med-fld med-w-6"><label>Producto</label>
+                    <input class="form-control form-control-sm" @bind="ed.Producto" />
+                </div>
+                <div class="med-fld med-w-3"><label>Registro sanitario</label>
+                    <input class="form-control form-control-sm" @bind="ed.RegistroSanitario" />
+                </div>
+                <div class="med-fld med-w-3"><label>Estado registro</label>
+                    <input class="form-control form-control-sm" @bind="ed.EstadoRegistro" />
+                </div>
+                <div class="med-fld med-w-6"><label>Titular</label>
+                    <input class="form-control form-control-sm" @bind="ed.Titular" />
+                </div>
+                <div class="med-fld med-w-3"><label>Expediente</label>
+                    <input class="form-control form-control-sm" @bind="ed.Expediente" />
+                </div>
+                <div class="med-fld med-w-3"><label>Fecha expedicion</label>
+                    <input type="date" class="form-control form-control-sm" @bind="ed.FechaExpedicion" />
+                </div>
+                <div class="med-fld med-w-3"><label>Fecha vencimiento</label>
+                    <input type="date" class="form-control form-control-sm" @bind="ed.FechaVencimiento" />
+                </div>
+            </div>
+
+            <div class="med-section">CUM (presentacion comercial)</div>
+            <div class="med-grid">
+                <div class="med-fld med-w-12"><label>Descripcion comercial</label>
+                    <input class="form-control form-control-sm" @bind="ed.DescripcionComercial" />
+                </div>
+                <div class="med-fld med-w-3"><label>Expediente CUM</label>
+                    <input class="form-control form-control-sm" @bind="ed.ExpedienteCum" />
+                </div>
+                <div class="med-fld med-w-3"><label>Consecutivo CUM</label>
+                    <input class="form-control form-control-sm" @bind="ed.ConsecutivoCum" />
+                </div>
+                <div class="med-fld med-w-3"><label>Cantidad CUM</label>
+                    <input class="form-control form-control-sm" @bind="ed.CantidadCum" />
+                </div>
+                <div class="med-fld med-w-3"><label>Estado CUM</label>
+                    <input class="form-control form-control-sm" @bind="ed.EstadoCum" />
+                </div>
+                <div class="med-fld med-w-3"><label>Fecha activo</label>
+                    <input type="date" class="form-control form-control-sm" @bind="ed.FechaActivo" />
+                </div>
+                <div class="med-fld med-w-3"><label>Fecha inactivo</label>
+                    <input type="date" class="form-control form-control-sm" @bind="ed.FechaInactivo" />
+                </div>
+                <div class="med-fld med-w-3"><label>Muestra medica</label>
+                    <input class="form-control form-control-sm" @bind="ed.MuestraMedica" />
+                </div>
+                <div class="med-fld med-w-3"><label>Unidad</label>
+                    <input class="form-control form-control-sm" @bind="ed.Unidad" />
+                </div>
+            </div>
+
+            <div class="med-section">ATC y farmacologico</div>
+            <div class="med-grid">
+                <div class="med-fld med-w-3"><label>ATC</label>
+                    <input class="form-control form-control-sm" @bind="ed.Atc" />
+                </div>
+                <div class="med-fld med-w-9"><label>Descripcion ATC</label>
+                    <input class="form-control form-control-sm" @bind="ed.DescripcionAtc" />
+                </div>
+                <div class="med-fld med-w-12"><label>Principio activo</label>
+                    <input class="form-control form-control-sm" @bind="ed.PrincipioActivo" />
+                </div>
+                <div class="med-fld med-w-4"><label>Via administracion</label>
+                    <input class="form-control form-control-sm" @bind="ed.ViaAdministracion" />
+                </div>
+                <div class="med-fld med-w-4"><label>Concentracion</label>
+                    <input class="form-control form-control-sm" @bind="ed.Concentracion" />
+                </div>
+                <div class="med-fld med-w-4"><label>Forma farmaceutica</label>
+                    <input class="form-control form-control-sm" @bind="ed.FormaFarmaceutica" />
+                </div>
+                <div class="med-fld med-w-3"><label>Unidad medida</label>
+                    <input class="form-control form-control-sm" @bind="ed.UnidadMedida" />
+                </div>
+                <div class="med-fld med-w-3"><label>Cantidad</label>
+                    <input class="form-control form-control-sm" @bind="ed.Cantidad" />
+                </div>
+                <div class="med-fld med-w-3"><label>Unidad referencia</label>
+                    <input class="form-control form-control-sm" @bind="ed.UnidadReferencia" />
+                </div>
+            </div>
+
+            <div class="med-section">Rol / Modalidad / IUM</div>
+            <div class="med-grid">
+                <div class="med-fld med-w-4"><label>Nombre rol</label>
+                    <input class="form-control form-control-sm" @bind="ed.NombreRol" />
+                </div>
+                <div class="med-fld med-w-3"><label>Tipo rol</label>
+                    <input class="form-control form-control-sm" @bind="ed.TipoRol" />
+                </div>
+                <div class="med-fld med-w-3"><label>Modalidad</label>
+                    <input class="form-control form-control-sm" @bind="ed.Modalidad" />
+                </div>
+                <div class="med-fld med-w-3"><label>IUM</label>
+                    <input class="form-control form-control-sm" @bind="ed.Ium" />
+                </div>
+            </div>
+        </div>
+        <div class="med-modal-f">
+            <button class="btn btn-outline-secondary" @onclick="CerrarModal">Cancelar</button>
+            <button class="btn btn-primary" @onclick="GuardarAsync" disabled="@_busy">@(ed.Id is null ? "Crear" : "Guardar cambios")</button>
+        </div>
+    </div>
+}
+
+<style>
+    .ase-head { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:16px; }
+    .ase-eyebrow { font-size:11px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:.05em; }
+    .ase-title { font-size:24px; font-weight:700; margin:4px 0; }
+    .ase-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; }
+    .ase-alert { background:#fee2e2; color:#991b1b; padding:10px 14px; border-radius:8px; margin-bottom:10px; }
+    .ase-ok { background:#dcfce7; color:#166534; padding:10px 14px; border-radius:8px; margin-bottom:10px; }
+    .ase-empty { padding:30px; text-align:center; color:#64748b; }
+
+    .med-toolbar { display:flex; gap:8px; align-items:center; }
+
+    .med-filtros { display:flex; gap:8px; padding:14px; border-bottom:1px solid #e2e8f0; }
+    .med-filtros input { flex:1; }
+
+    .med-tbl-wrap { overflow:auto; max-height:65vh; }
+    .med-tbl { margin:0; font-size:12.5px; }
+    .med-tbl thead th { position:sticky; top:0; background:#f1f5f9; color:#334155; font-size:11px; font-weight:700; border-bottom:1px solid #cbd5e1; padding:8px 10px; }
+    .med-tbl td { vertical-align:top; padding:8px 10px; }
+    .med-desc { font-size:11px; color:#64748b; margin-top:2px; font-style:italic; }
+    .mono { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; }
+    .med-pill { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; }
+    .med-vig { background:#dcfce7; color:#166534; }
+    .med-vnc { background:#fee2e2; color:#991b1b; }
+
+    .med-pag { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-top:1px solid #e2e8f0; font-size:12.5px; color:#475569; }
+
+    .med-bk { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1000; }
+    .med-modal { position:fixed; top:24px; left:50%; transform:translateX(-50%); width:min(1100px, 96vw); max-height:calc(100vh - 48px); background:#fff; border-radius:12px; box-shadow:0 30px 80px rgba(15,23,42,.35); z-index:1001; display:flex; flex-direction:column; overflow:hidden; }
+    .med-modal-h { display:flex; justify-content:space-between; align-items:center; padding:14px 22px; border-bottom:1px solid #e2e8f0; background:#fff; }
+    .med-modal-h h3 { margin:0; font-size:16px; font-weight:700; }
+    .med-modal-body { padding:14px 22px; overflow:auto; }
+    .med-modal-f { display:flex; justify-content:flex-end; gap:8px; padding:12px 22px; border-top:1px solid #e2e8f0; background:#f8fafc; }
+    .med-section { font-size:11px; font-weight:800; color:#1565c0; text-transform:uppercase; letter-spacing:.04em; margin:14px 0 6px; border-bottom:1px solid #cbd5e1; padding-bottom:4px; }
+    .med-section:first-child { margin-top:0; }
+    .med-grid { display:grid; grid-template-columns:repeat(12, 1fr); gap:10px; }
+    .med-fld { display:flex; flex-direction:column; gap:4px; }
+    .med-fld label { font-size:11px; font-weight:600; color:#475569; text-transform:uppercase; letter-spacing:.03em; }
+    .med-w-3 { grid-column: span 3; }
+    .med-w-4 { grid-column: span 4; }
+    .med-w-6 { grid-column: span 6; }
+    .med-w-9 { grid-column: span 9; }
+    .med-w-12 { grid-column: span 12; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string? _error;
+    private string? _ok;
+    private bool _busy;
+    private string? _termino;
+    private List<MedicamentoDto> _rows = new();
+    private int _total;
+    private int _skip;
+    private int _take = 50;
+    private MedEdit? _edit;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Buscar();
+    }
+
+    private async Task Buscar()
+    {
+        _busy = true; _error = null;
+        try
+        {
+            var (rows, total) = await Svc.SearchAsync(_termino, _skip, _take);
+            _rows = rows.ToList();
+            _total = total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            _skip = 0;
+            await Buscar();
+        }
+    }
+
+    private async Task PrevPage()
+    {
+        if (_skip <= 0) { return; }
+        _skip = Math.Max(0, _skip - _take);
+        await Buscar();
+    }
+
+    private async Task NextPage()
+    {
+        if ((_skip + _take) >= _total) { return; }
+        _skip += _take;
+        await Buscar();
+    }
+
+    private void OnNuevo() { _edit = new MedEdit(); _error = _ok = null; }
+
+    private void CerrarModal() => _edit = null;
+
+    private async Task EditarAsync(Guid id)
+    {
+        var d = await Svc.GetAsync(id);
+        if (d is null) { _error = "Registro no encontrado."; return; }
+        _edit = MedEdit.From(d);
+    }
+
+    private async Task GuardarAsync()
+    {
+        if (_edit is not MedEdit ed) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var req = ed.ToRequest();
+            await Svc.SaveAsync(req, await Actor());
+            _ok = ed.Id is null ? "Medicamento creado." : "Medicamento actualizado.";
+            _edit = null;
+            await Buscar();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(Guid id)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Eliminar este medicamento?");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.DeleteAsync(id, await Actor());
+            _ok = "Medicamento eliminado.";
+            await Buscar();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnClearAll()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Borrar TODOS los {_total} registros de la base de medicamentos? Esto NO se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var n = await Svc.ClearAllAsync(await Actor());
+            _ok = $"{n} registro(s) eliminado(s).";
+            _skip = 0;
+            await Buscar();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnImportExcel(InputFileChangeEventArgs e)
+    {
+        _error = _ok = null;
+        _busy = true;
+        try
+        {
+            var rows = new List<MedicamentoImportRow>();
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(50L * 1024 * 1024).CopyToAsync(ms);
+            ms.Position = 0;
+            using var wb = new XLWorkbook(ms);
+            var ws = wb.Worksheet(1);
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cell in ws.Row(1).CellsUsed())
+            {
+                map[cell.GetString().Trim()] = cell.Address.ColumnNumber;
+            }
+            string? Col(IXLRow r, string name) =>
+                map.TryGetValue(name, out var ci) ? r.Cell(ci).GetString().Trim() : null;
+            var last = ws.LastRowUsed()?.RowNumber() ?? 1;
+            for (var i = 2; i <= last; i++)
+            {
+                var r = ws.Row(i);
+                rows.Add(new MedicamentoImportRow(
+                    Col(r, "expediente"), Col(r, "producto"), Col(r, "titular"), Col(r, "registrosanitario"),
+                    Col(r, "fechaexpedicion"), Col(r, "fechavencimiento"), Col(r, "estadoregistro"),
+                    Col(r, "expedientecum"), Col(r, "consecutivocum"), Col(r, "cantidadcum"), Col(r, "descripcioncomercial"),
+                    Col(r, "estadocum"), Col(r, "fechaactivo"), Col(r, "fechainactivo"), Col(r, "muestramedica"), Col(r, "unidad"),
+                    Col(r, "atc"), Col(r, "descripcionatc"), Col(r, "viaadministracion"), Col(r, "concentracion"),
+                    Col(r, "principioactivo"), Col(r, "unidadmedida"), Col(r, "cantidad"), Col(r, "unidadreferencia"),
+                    Col(r, "formafarmaceutica"), Col(r, "nombrerol"), Col(r, "tiporol"), Col(r, "modalidad"), Col(r, "IUM")));
+            }
+            var n = await Svc.ImportAsync(rows, await Actor());
+            _ok = $"{n} medicamento(s) importado(s) desde Excel.";
+            _skip = 0;
+            await Buscar();
+        }
+        catch (Exception ex) { _error = "No se pudo importar el Excel: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private sealed class MedEdit
+    {
+        public Guid? Id { get; set; }
+        public string? Expediente { get; set; }
+        public string? Producto { get; set; }
+        public string? Titular { get; set; }
+        public string? RegistroSanitario { get; set; }
+        public DateOnly? FechaExpedicion { get; set; }
+        public DateOnly? FechaVencimiento { get; set; }
+        public string? EstadoRegistro { get; set; }
+        public string? ExpedienteCum { get; set; }
+        public string? ConsecutivoCum { get; set; }
+        public string? CantidadCum { get; set; }
+        public string? DescripcionComercial { get; set; }
+        public string? EstadoCum { get; set; }
+        public DateOnly? FechaActivo { get; set; }
+        public DateOnly? FechaInactivo { get; set; }
+        public string? MuestraMedica { get; set; }
+        public string? Unidad { get; set; }
+        public string? Atc { get; set; }
+        public string? DescripcionAtc { get; set; }
+        public string? ViaAdministracion { get; set; }
+        public string? Concentracion { get; set; }
+        public string? PrincipioActivo { get; set; }
+        public string? UnidadMedida { get; set; }
+        public string? Cantidad { get; set; }
+        public string? UnidadReferencia { get; set; }
+        public string? FormaFarmaceutica { get; set; }
+        public string? NombreRol { get; set; }
+        public string? TipoRol { get; set; }
+        public string? Modalidad { get; set; }
+        public string? Ium { get; set; }
+
+        public static MedEdit From(MedicamentoDetailDto d) => new()
+        {
+            Id = d.Id,
+            Expediente = d.Expediente, Producto = d.Producto, Titular = d.Titular, RegistroSanitario = d.RegistroSanitario,
+            FechaExpedicion = d.FechaExpedicion, FechaVencimiento = d.FechaVencimiento, EstadoRegistro = d.EstadoRegistro,
+            ExpedienteCum = d.ExpedienteCum, ConsecutivoCum = d.ConsecutivoCum, CantidadCum = d.CantidadCum,
+            DescripcionComercial = d.DescripcionComercial, EstadoCum = d.EstadoCum,
+            FechaActivo = d.FechaActivo, FechaInactivo = d.FechaInactivo, MuestraMedica = d.MuestraMedica, Unidad = d.Unidad,
+            Atc = d.Atc, DescripcionAtc = d.DescripcionAtc, ViaAdministracion = d.ViaAdministracion,
+            Concentracion = d.Concentracion, PrincipioActivo = d.PrincipioActivo,
+            UnidadMedida = d.UnidadMedida, Cantidad = d.Cantidad, UnidadReferencia = d.UnidadReferencia,
+            FormaFarmaceutica = d.FormaFarmaceutica, NombreRol = d.NombreRol, TipoRol = d.TipoRol,
+            Modalidad = d.Modalidad, Ium = d.Ium
+        };
+
+        public SaveMedicamentoRequest ToRequest() => new(
+            Id,
+            Expediente, Producto, Titular, RegistroSanitario,
+            FechaExpedicion, FechaVencimiento, EstadoRegistro,
+            ExpedienteCum, ConsecutivoCum, CantidadCum, DescripcionComercial,
+            EstadoCum, FechaActivo, FechaInactivo, MuestraMedica, Unidad,
+            Atc, DescripcionAtc, ViaAdministracion, Concentracion,
+            PrincipioActivo, UnidadMedida, Cantidad, UnidadReferencia,
+            FormaFarmaceutica, NombreRol, TipoRol, Modalidad, Ium);
+    }
+}

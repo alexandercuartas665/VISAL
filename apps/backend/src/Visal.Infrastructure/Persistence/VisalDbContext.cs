@@ -64,6 +64,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
     public DbSet<HistoriaClinica> HistoriasClinicas => Set<HistoriaClinica>();
+    public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
@@ -480,12 +481,50 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         modelBuilder.Entity<FormDefinition>(b =>
         {
             b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.Property(x => x.CodigoSecundario).HasMaxLength(80);
             b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
             b.Property(x => x.Version).HasMaxLength(20);
             b.Property(x => x.Tipo).HasMaxLength(40);
             b.Property(x => x.SchemaJson).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.PrefillRoutesJson).HasColumnType("jsonb");
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+            // CodigoSecundario NO es unico - es un id alternativo libre.
+            b.HasIndex(x => new { x.TenantId, x.CodigoSecundario });
+        });
+
+        modelBuilder.Entity<Medicamento>(b =>
+        {
+            // Catalogo CUM. Sin uniques: la unicidad funcional viene del Excel oficial.
+            // Indices solo para busquedas frecuentes desde la UI / autocomplete.
+            b.Property(x => x.Expediente).HasMaxLength(40);
+            b.Property(x => x.Producto).HasMaxLength(300);
+            b.Property(x => x.Titular).HasMaxLength(300);
+            b.Property(x => x.RegistroSanitario).HasMaxLength(80);
+            b.Property(x => x.EstadoRegistro).HasMaxLength(40);
+            b.Property(x => x.ExpedienteCum).HasMaxLength(40);
+            b.Property(x => x.ConsecutivoCum).HasMaxLength(40);
+            b.Property(x => x.CantidadCum).HasMaxLength(40);
+            b.Property(x => x.DescripcionComercial).HasMaxLength(1000);
+            b.Property(x => x.EstadoCum).HasMaxLength(40);
+            b.Property(x => x.MuestraMedica).HasMaxLength(20);
+            b.Property(x => x.Unidad).HasMaxLength(40);
+            b.Property(x => x.Atc).HasMaxLength(40);
+            b.Property(x => x.DescripcionAtc).HasMaxLength(300);
+            b.Property(x => x.ViaAdministracion).HasMaxLength(120);
+            b.Property(x => x.Concentracion).HasMaxLength(120);
+            b.Property(x => x.PrincipioActivo).HasMaxLength(500);
+            b.Property(x => x.UnidadMedida).HasMaxLength(40);
+            b.Property(x => x.Cantidad).HasMaxLength(40);
+            b.Property(x => x.UnidadReferencia).HasMaxLength(40);
+            b.Property(x => x.FormaFarmaceutica).HasMaxLength(120);
+            b.Property(x => x.NombreRol).HasMaxLength(120);
+            b.Property(x => x.TipoRol).HasMaxLength(40);
+            b.Property(x => x.Modalidad).HasMaxLength(40);
+            b.Property(x => x.Ium).HasMaxLength(40);
+            b.HasIndex(x => new { x.TenantId, x.Producto });
+            b.HasIndex(x => new { x.TenantId, x.RegistroSanitario });
+            b.HasIndex(x => new { x.TenantId, x.Ium });
+            b.HasIndex(x => new { x.TenantId, x.Atc });
         });
 
         modelBuilder.Entity<HistoriaClinica>(b =>

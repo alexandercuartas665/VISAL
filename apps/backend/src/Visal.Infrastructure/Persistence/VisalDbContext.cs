@@ -494,33 +494,37 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<Medicamento>(b =>
         {
-            // Catalogo CUM. Sin uniques: la unicidad funcional viene del Excel oficial.
-            // Indices solo para busquedas frecuentes desde la UI / autocomplete.
-            b.Property(x => x.Expediente).HasMaxLength(40);
-            b.Property(x => x.Producto).HasMaxLength(300);
-            b.Property(x => x.Titular).HasMaxLength(300);
-            b.Property(x => x.RegistroSanitario).HasMaxLength(80);
-            b.Property(x => x.EstadoRegistro).HasMaxLength(40);
-            b.Property(x => x.ExpedienteCum).HasMaxLength(40);
-            b.Property(x => x.ConsecutivoCum).HasMaxLength(40);
-            b.Property(x => x.CantidadCum).HasMaxLength(40);
-            b.Property(x => x.DescripcionComercial).HasMaxLength(1000);
-            b.Property(x => x.EstadoCum).HasMaxLength(40);
-            b.Property(x => x.MuestraMedica).HasMaxLength(20);
-            b.Property(x => x.Unidad).HasMaxLength(40);
-            b.Property(x => x.Atc).HasMaxLength(40);
-            b.Property(x => x.DescripcionAtc).HasMaxLength(300);
-            b.Property(x => x.ViaAdministracion).HasMaxLength(120);
-            b.Property(x => x.Concentracion).HasMaxLength(120);
-            b.Property(x => x.PrincipioActivo).HasMaxLength(500);
-            b.Property(x => x.UnidadMedida).HasMaxLength(40);
-            b.Property(x => x.Cantidad).HasMaxLength(40);
-            b.Property(x => x.UnidadReferencia).HasMaxLength(40);
-            b.Property(x => x.FormaFarmaceutica).HasMaxLength(120);
-            b.Property(x => x.NombreRol).HasMaxLength(120);
-            b.Property(x => x.TipoRol).HasMaxLength(40);
-            b.Property(x => x.Modalidad).HasMaxLength(40);
-            b.Property(x => x.Ium).HasMaxLength(40);
+            // Catalogo CUM (INVIMA). Sin uniques: la unicidad funcional viene del
+            // Excel oficial. NO usamos HasMaxLength: el INVIMA cambia los anchos
+            // sin avisar (vimos campos de 40 chars desbordando el ancho oficial
+            // documentado). En Postgres `text` y `varchar(n)` tienen el mismo
+            // rendimiento, asi que dejamos text para tolerar cualquier ancho.
+            // Indices solo en las columnas que se usan en busquedas frecuentes.
+            b.Property(x => x.Expediente).HasColumnType("text");
+            b.Property(x => x.Producto).HasColumnType("text");
+            b.Property(x => x.Titular).HasColumnType("text");
+            b.Property(x => x.RegistroSanitario).HasColumnType("text");
+            b.Property(x => x.EstadoRegistro).HasColumnType("text");
+            b.Property(x => x.ExpedienteCum).HasColumnType("text");
+            b.Property(x => x.ConsecutivoCum).HasColumnType("text");
+            b.Property(x => x.CantidadCum).HasColumnType("text");
+            b.Property(x => x.DescripcionComercial).HasColumnType("text");
+            b.Property(x => x.EstadoCum).HasColumnType("text");
+            b.Property(x => x.MuestraMedica).HasColumnType("text");
+            b.Property(x => x.Unidad).HasColumnType("text");
+            b.Property(x => x.Atc).HasColumnType("text");
+            b.Property(x => x.DescripcionAtc).HasColumnType("text");
+            b.Property(x => x.ViaAdministracion).HasColumnType("text");
+            b.Property(x => x.Concentracion).HasColumnType("text");
+            b.Property(x => x.PrincipioActivo).HasColumnType("text");
+            b.Property(x => x.UnidadMedida).HasColumnType("text");
+            b.Property(x => x.Cantidad).HasColumnType("text");
+            b.Property(x => x.UnidadReferencia).HasColumnType("text");
+            b.Property(x => x.FormaFarmaceutica).HasColumnType("text");
+            b.Property(x => x.NombreRol).HasColumnType("text");
+            b.Property(x => x.TipoRol).HasColumnType("text");
+            b.Property(x => x.Modalidad).HasColumnType("text");
+            b.Property(x => x.Ium).HasColumnType("text");
             b.HasIndex(x => new { x.TenantId, x.Producto });
             b.HasIndex(x => new { x.TenantId, x.RegistroSanitario });
             b.HasIndex(x => new { x.TenantId, x.Ium });

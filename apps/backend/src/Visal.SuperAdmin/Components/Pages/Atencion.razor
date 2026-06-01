@@ -242,16 +242,19 @@ else
 
     private async Task AbrirHistoria(MiServicioAsignadoDto s)
     {
-        _showHistoriaSel = s;
+        // OJO: primero cargamos el paciente y SOLO despues montamos el modal.
+        // Si se setea _showHistoriaSel antes, el HistoriasClinicasModulo empieza
+        // a consultar la BD en paralelo con esta llamada y el DbContext scoped
+        // explota con "A second operation was started on this context instance".
         try
         {
-            // Cargar el paciente completo para pasarlo al modulo de Historias.
             _pacienteCtx = await AsigSvc.GetPacienteAsync(s.PacienteId);
         }
         catch
         {
             _pacienteCtx = null;
         }
+        _showHistoriaSel = s;
     }
 
     private void CerrarHistoria() { _showHistoriaSel = null; _pacienteCtx = null; }

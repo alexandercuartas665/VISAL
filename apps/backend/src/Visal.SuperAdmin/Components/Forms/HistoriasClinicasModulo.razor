@@ -110,7 +110,7 @@
         <div class="ase-card">
             <div class="hc-actions">
                 <button class="btn btn-primary btn-sm" @onclick="IniciarHistoria" disabled="@(string.IsNullOrEmpty(_filFormato))">&#128221; Iniciar historia medica</button>
-                <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Generar documento imprimible (pendiente de cableado)">&#128424; Imprimir</button>
+                <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Abrir vista documento en nueva pestana para imprimir o guardar PDF">&#128424; Imprimir</button>
                 <button class="btn btn-danger btn-sm" disabled="@(_schemaActual is null)" @onclick="Descartar">&#128465; Descartar</button>
                 <button class="btn btn-outline-secondary btn-sm" disabled="@(_schemaActual is null)" @onclick="Cerrar">&#10006; Cerrar</button>
             </div>
@@ -563,12 +563,29 @@
     }
 
     /// <summary>
-    /// Placeholder de impresion. Cuando se cablee, generara el PDF o abrira la
-    /// vista documento con los valores diligenciados (FormViewer en modo print).
+    /// Abre la vista documento de la historia en una pestana nueva, lista para
+    /// imprimir o guardar como PDF. La vista usa el FormSchema + valores
+    /// diligenciados + encabezado configurable y dispara window.print() al boton.
+    /// Requiere que la historia este previamente persistida (Iniciar / Cerrar).
     /// </summary>
-    private void Imprimir()
+    private async Task Imprimir()
     {
-        _imprimirMsg = $"Listo para imprimir: {_formatoActualNombre} con {_valores.Count} dato(s) diligenciado(s). Cableado de impresion pendiente.";
+        if (_historiaSel is HistoriaRow h)
+        {
+            // Persistimos cambios pendientes antes de imprimir, asi lo que se
+            // imprime es lo mismo que esta en BD (solo si esta abierta).
+            if (string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+            {
+                try { await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty); }
+                catch { /* tolerar: la impresion no debe bloquearse por un fallo de guardado */ }
+            }
+            await JS.InvokeVoidAsync("open", $"/historia-doc/{h.Id}", "_blank");
+            _imprimirMsg = null;
+        }
+        else
+        {
+            _imprimirMsg = "Selecciona o inicia una historia antes de imprimir.";
+        }
     }
 
     private sealed class HistoriaRow

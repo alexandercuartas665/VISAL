@@ -73,6 +73,10 @@ deploy/docker-prod/backups/
 # Archivos subidos en tiempo de ejecucion (logos, avatares, media de chat/agentes)
 apps/backend/src/Visal.SuperAdmin/wwwroot/uploads/
 
+# Runtime artifacts del start-visal.ps1 - no versionar
+.visal.pid
+logs/
+
 # Binarios/herramientas locales (cloudflared para el tunel de desarrollo)
 tools/
 

@@ -35,6 +35,12 @@ public sealed record SaveMedicamentoRequest(
     string? PrincipioActivo, string? UnidadMedida, string? Cantidad, string? UnidadReferencia,
     string? FormaFarmaceutica, string? NombreRol, string? TipoRol, string? Modalidad, string? Ium);
 
+/// <summary>
+/// Notificacion de avance durante la importacion. La UI la usa para pintar
+/// la barra de progreso. Fases: "Validando", "Insertando", "Listo".
+/// </summary>
+public sealed record MedicamentoImportProgress(string Fase, int Procesados, int Total);
+
 /// <summary>Fila tal como llega del Excel del INVIMA - todas string para tolerar el formato real.</summary>
 public sealed record MedicamentoImportRow(
     string? Expediente, string? Producto, string? Titular, string? RegistroSanitario,
@@ -57,8 +63,15 @@ public interface IMedicamentoService
 
     Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default);
 
-    /// <summary>Importa filas del Excel del CUM. Devuelve cuantas se insertaron.</summary>
-    Task<int> ImportAsync(IReadOnlyList<MedicamentoImportRow> rows, Guid actorUserId, CancellationToken ct = default);
+    /// <summary>
+    /// Importa filas del Excel del CUM en lotes, reportando avance via
+    /// <paramref name="progress"/>. Devuelve cuantas se insertaron en total.
+    /// </summary>
+    Task<int> ImportAsync(
+        IReadOnlyList<MedicamentoImportRow> rows,
+        Guid actorUserId,
+        IProgress<MedicamentoImportProgress>? progress = null,
+        CancellationToken ct = default);
 
     /// <summary>Borra TODA la BD de medicamentos del tenant (para recargar limpio). Devuelve cuantas se borraron.</summary>
     Task<int> ClearAllAsync(Guid actorUserId, CancellationToken ct = default);

@@ -122,14 +122,21 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
         return true;
     }
 
-    public async Task<int> ImportAsync(IReadOnlyList<MedicamentoImportRow> rows, Guid actor, CancellationToken ct = default)
+    public async Task<int> ImportAsync(
+        IReadOnlyList<MedicamentoImportRow> rows,
+        Guid actor,
+        IProgress<MedicamentoImportProgress>? progress = null,
+        CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (rows.Count == 0) { return 0; }
 
+        // Fase 1: validar y mapear a entidades en memoria. Reportamos cada ~1000 filas.
         var insert = new List<Medicamento>(rows.Count);
-        foreach (var r in rows)
+        const int chunkValidacion = 1000;
+        for (int i = 0; i < rows.Count; i++)
         {
+            var r = rows[i];
             // Saltar filas vacias
             if (string.IsNullOrWhiteSpace(r.Producto)
                 && string.IsNullOrWhiteSpace(r.RegistroSanitario)
@@ -169,13 +176,35 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
                 Modalidad = Norm(r.Modalidad),
                 Ium = Norm(r.Ium)
             });
+
+            if (progress is not null && (i + 1) % chunkValidacion == 0)
+            {
+                progress.Report(new MedicamentoImportProgress("Validando", i + 1, rows.Count));
+            }
+            ct.ThrowIfCancellationRequested();
+        }
+        progress?.Report(new MedicamentoImportProgress("Validando", rows.Count, rows.Count));
+
+        // Fase 2: insertar en lotes para mantener viable un archivo de 100k+ filas.
+        // EF + Postgres puede hacer batches grandes pero el cambio set crece, asi
+        // que cortamos cada N para no quemar memoria ni el round-trip de save.
+        const int chunkInsercion = 500;
+        var insertados = 0;
+        for (int offset = 0; offset < insert.Count; offset += chunkInsercion)
+        {
+            var batch = insert.Skip(offset).Take(chunkInsercion).ToList();
+            db.Medicamentos.AddRange(batch);
+            await db.SaveChangesAsync(ct);
+            insertados += batch.Count;
+            progress?.Report(new MedicamentoImportProgress("Insertando", insertados, insert.Count));
+            ct.ThrowIfCancellationRequested();
         }
 
-        db.Medicamentos.AddRange(insert);
-        await db.SaveChangesAsync(ct);
         audit.Write(actor, "medicamento.import", nameof(Medicamento), Guid.Empty,
-            previousValue: null, newValue: new { count = insert.Count }, tenantId: tid);
-        return insert.Count;
+            previousValue: null, newValue: new { count = insertados }, tenantId: tid);
+
+        progress?.Report(new MedicamentoImportProgress("Listo", insertados, insertados));
+        return insertados;
     }
 
     public async Task<int> ClearAllAsync(Guid actor, CancellationToken ct = default)

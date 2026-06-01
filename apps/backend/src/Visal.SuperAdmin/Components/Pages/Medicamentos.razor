@@ -27,6 +27,26 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
+@if (_progFase is not null)
+{
+    @* Overlay fijo en el centro durante la importacion. Bloquea interaccion
+       y muestra fase + barra + conteo. *@
+    <div class="med-prog-backdrop"></div>
+    <div class="med-prog-card">
+        <div class="med-prog-h">&#128190; Importando medicamentos</div>
+        <div class="med-prog-fase">@_progFase...</div>
+        <div class="med-prog-bar">
+            <div class="med-prog-bar-fill" style="width: @(_progTotal > 0 ? Math.Min(100, (_progAct * 100 / _progTotal)) : 0)%;"></div>
+        </div>
+        <div class="med-prog-counts">
+            <strong>@_progAct.ToString("N0")</strong>
+            @if (_progTotal > 0) { <span> / @_progTotal.ToString("N0") filas</span> }
+            @if (_progTotal > 0) { <span class="med-prog-pct"> (@(_progAct * 100 / _progTotal)%)</span> }
+        </div>
+        <small class="text-muted">No cierres esta pestana - el proceso se cancela.</small>
+    </div>
+}
+
 <div class="ase-card">
     <div class="med-filtros">
         <input class="form-control" placeholder="Buscar por producto, principio activo, ATC, IUM, registro sanitario, descripcion..."
@@ -262,6 +282,17 @@
     .med-w-6 { grid-column: span 6; }
     .med-w-9 { grid-column: span 9; }
     .med-w-12 { grid-column: span 12; }
+
+    /* ---- Overlay de progreso de importacion ---- */
+    .med-prog-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1000; }
+    .med-prog-card { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:min(480px, 92vw); background:#fff; border-radius:12px; box-shadow:0 30px 80px rgba(15,23,42,.35); z-index:1001; padding:24px 28px; }
+    .med-prog-h { font-size:14px; font-weight:700; color:#0f172a; margin-bottom:6px; }
+    .med-prog-fase { font-size:12.5px; color:#475569; margin-bottom:14px; font-style:italic; }
+    .med-prog-bar { height:10px; background:#f1f5f9; border-radius:999px; overflow:hidden; margin-bottom:10px; }
+    .med-prog-bar-fill { height:100%; background:linear-gradient(90deg,#1565c0,#1976d2); transition:width .25s ease; }
+    .med-prog-counts { font-size:13px; color:#0f172a; margin-bottom:8px; }
+    .med-prog-counts strong { font-family:'JetBrains Mono','Consolas',monospace; }
+    .med-prog-pct { color:#1565c0; font-weight:600; }
 </style>
 
 @code {
@@ -270,6 +301,10 @@
     private string? _error;
     private string? _ok;
     private bool _busy;
+    // Progreso de la importacion del Excel (visible solo durante import).
+    private string? _progFase;
+    private int _progAct;
+    private int _progTotal;
     private string? _termino;
     private List<MedicamentoDto> _rows = new();
     private int _total;
@@ -381,12 +416,17 @@
     {
         _error = _ok = null;
         _busy = true;
+        _progFase = "Subiendo"; _progAct = 0; _progTotal = 0;
+        await InvokeAsync(StateHasChanged);
         try
         {
-            var rows = new List<MedicamentoImportRow>();
+            // ---- Subir archivo a memoria ----
             using var ms = new MemoryStream();
             await e.File.OpenReadStream(50L * 1024 * 1024).CopyToAsync(ms);
             ms.Position = 0;
+
+            // ---- Leer headers ----
+            _progFase = "Leyendo Excel"; await InvokeAsync(StateHasChanged);
             using var wb = new XLWorkbook(ms);
             var ws = wb.Worksheet(1);
             var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -396,7 +436,11 @@
             }
             string? Col(IXLRow r, string name) =>
                 map.TryGetValue(name, out var ci) ? r.Cell(ci).GetString().Trim() : null;
+
+            // ---- Parsear filas ----
             var last = ws.LastRowUsed()?.RowNumber() ?? 1;
+            _progTotal = Math.Max(0, last - 1);
+            var rows = new List<MedicamentoImportRow>(_progTotal);
             for (var i = 2; i <= last; i++)
             {
                 var r = ws.Row(i);
@@ -408,14 +452,34 @@
                     Col(r, "atc"), Col(r, "descripcionatc"), Col(r, "viaadministracion"), Col(r, "concentracion"),
                     Col(r, "principioactivo"), Col(r, "unidadmedida"), Col(r, "cantidad"), Col(r, "unidadreferencia"),
                     Col(r, "formafarmaceutica"), Col(r, "nombrerol"), Col(r, "tiporol"), Col(r, "modalidad"), Col(r, "IUM")));
+                _progAct = i - 1;
+                // refrescamos cada 500 filas para no saturar el circuito Blazor
+                if ((i - 1) % 500 == 0) { await InvokeAsync(StateHasChanged); }
             }
-            var n = await Svc.ImportAsync(rows, await Actor());
+            _progAct = rows.Count; await InvokeAsync(StateHasChanged);
+
+            // ---- Insertar en BD con avance reportado por el servicio ----
+            // Capturamos el progreso con un Progress<T> que actualiza variables
+            // del componente y dispara StateHasChanged.
+            var ui = new Progress<MedicamentoImportProgress>(p =>
+            {
+                _progFase = p.Fase;
+                _progAct = p.Procesados;
+                _progTotal = p.Total;
+                _ = InvokeAsync(StateHasChanged);
+            });
+            var n = await Svc.ImportAsync(rows, await Actor(), ui);
             _ok = $"{n} medicamento(s) importado(s) desde Excel.";
             _skip = 0;
             await Buscar();
         }
         catch (Exception ex) { _error = "No se pudo importar el Excel: " + ex.Message; }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+            _progFase = null; _progAct = 0; _progTotal = 0;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task<Guid> Actor()

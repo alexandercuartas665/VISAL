@@ -19,21 +19,29 @@
             <span class="fb-eyebrow">Operacion Clinica</span>
             <strong class="fb-tb-title">Motor de Formularios</strong>
         </div>
+        @* Lado derecho: select arriba (fila 1) + botones de accion abajo (fila 2).
+           Las dos filas mantienen su posicion incluso cuando aparecen los botones
+           condicionales (Vista documento, Rutas de prefill, Eliminar), asi
+           Nuevo/Guardar no saltan de lugar al abrir un formulario. *@
         <div class="fb-tb-right">
-            <select class="fb-input fb-input-sm" @onchange="OnPickForm">
+            <select class="fb-input fb-input-sm fb-tb-select" @onchange="OnPickForm">
                 <option value="">— Abrir formulario —</option>
                 @foreach (var f in _forms)
                 {
                     <option value="@f.Id" selected="@(f.Id == _currentId)">@f.Nombre (@f.Codigo)</option>
                 }
             </select>
-            @if (_currentId is not null)
-            {
-                <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
-                <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
-            }
-            <button class="fb-btn" @onclick="NewForm">Nuevo</button>
-            <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
+            <div class="fb-tb-actions">
+                @if (_currentId is not null)
+                {
+                    <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
+                    <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
+                    <button class="fb-btn fb-btn-danger" @onclick="DeleteFormAsync" disabled="@_busy"
+                            title="Eliminar definitivamente este formulario">&#128465; Eliminar</button>
+                }
+                <button class="fb-btn" @onclick="NewForm">Nuevo</button>
+                <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
+            </div>
         </div>
     </div>
 
@@ -55,6 +63,10 @@
         <div class="fb-meta-field" style="max-width:160px;">
             <label>Codigo</label>
             <input class="fb-input fb-mono" @bind="_codigo" @bind:event="oninput" placeholder="HC-GENERAL" />
+        </div>
+        <div class="fb-meta-field" style="max-width:180px;" title="Identificador alternativo opcional (codigo legacy, prestador, integracion). Texto libre.">
+            <label>Codigo formulario</label>
+            <input class="fb-input fb-mono" @bind="_codigoSecundario" @bind:event="oninput" placeholder="HC-001" />
         </div>
         <div class="fb-meta-field" style="max-width:160px;">
             <label>Tipo</label>
@@ -461,6 +473,7 @@
     private bool _headerSel;
     private Guid? _currentId;
     private string _codigo = "";
+    private string? _codigoSecundario = null;
     private string _nombre = "";
     private string? _tipo;
     private string? _version;
@@ -539,10 +552,41 @@
     private void NewForm()
     {
         _currentId = null;
-        _codigo = ""; _nombre = ""; _tipo = null; _version = null; _activo = true;
+        _codigo = ""; _codigoSecundario = null; _nombre = ""; _tipo = null; _version = null; _activo = true;
         _schema = new FormSchema();
         _selected = null; _headerSel = false;
         _error = null; _ok = null;
+    }
+
+    /// <summary>
+    /// Borra definitivamente el formulario abierto. Pide confirmacion (con el
+    /// nombre real para evitar borrados por accidente), llama al servicio, recarga
+    /// la lista y limpia el editor.
+    /// </summary>
+    private async Task DeleteFormAsync()
+    {
+        if (_currentId is not Guid id) { return; }
+
+        var label = string.IsNullOrWhiteSpace(_nombre) ? _codigo : _nombre;
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eliminar definitivamente el formulario \"{label}\"? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var deleted = await FormsSvc.DeleteAsync(id, await ActorAsync());
+            if (!deleted)
+            {
+                _error = "El formulario ya no existe o no se pudo eliminar.";
+                return;
+            }
+            await LoadListAsync();
+            NewForm();
+            _ok = $"Formulario \"{label}\" eliminado.";
+        }
+        catch (Exception ex) { _error = "No se pudo eliminar: " + ex.Message; }
+        finally { _busy = false; }
     }
 
     private void AddHeader()
@@ -610,7 +654,7 @@
         var d = await FormsSvc.GetAsync(id);
         if (d is null) { return; }
         _currentId = d.Id;
-        _codigo = d.Codigo; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
+        _codigo = d.Codigo; _codigoSecundario = d.CodigoSecundario; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
         _schema = FormSchema.FromJson(d.SchemaJson);
         _prefillRoutes = PrefillRouteSet.FromJson(d.PrefillRoutesJson);
         _selected = null; _headerSel = false;
@@ -759,7 +803,7 @@
         try
         {
             var actor = await ActorAsync();
-            var req = new SaveFormDefinitionRequest(_currentId, _codigo, _nombre, _version, _tipo, _schema.ToJson(), _activo);
+            var req = new SaveFormDefinitionRequest(_currentId, _codigo, _nombre, _version, _tipo, _schema.ToJson(), _activo, CodigoSecundario: _codigoSecundario);
             var saved = await FormsSvc.SaveAsync(req, actor);
             if (saved is null)
             {

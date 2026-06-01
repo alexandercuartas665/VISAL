@@ -8,7 +8,8 @@ public sealed record FormDefinitionDto(
     string? Version,
     string? Tipo,
     bool Activo,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    string? CodigoSecundario = null);
 
 /// <summary>Detalle completo (incluye el esquema JSON del disenador y las rutas de prefill).</summary>
 public sealed record FormDefinitionDetailDto(
@@ -19,7 +20,8 @@ public sealed record FormDefinitionDetailDto(
     string? Tipo,
     bool Activo,
     string SchemaJson,
-    string? PrefillRoutesJson);
+    string? PrefillRoutesJson,
+    string? CodigoSecundario = null);
 
 /// <summary>Alta o actualizacion. Si <see cref="Id"/> es null se crea; si no, se actualiza.</summary>
 public sealed record SaveFormDefinitionRequest(
@@ -30,7 +32,8 @@ public sealed record SaveFormDefinitionRequest(
     string? Tipo,
     string SchemaJson,
     bool Activo,
-    string? PrefillRoutesJson = null);
+    string? PrefillRoutesJson = null,
+    string? CodigoSecundario = null);
 
 /// <summary>Gestion de definiciones de formularios (Motor de Formularios, 2.M10), tenant-scoped.</summary>
 public interface IFormDefinitionService

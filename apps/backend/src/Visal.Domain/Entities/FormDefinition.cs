@@ -13,6 +13,13 @@ public class FormDefinition : TenantEntity
     /// <summary>Codigo logico del formato (unico por tenant). Ej. "HC-GENERAL".</summary>
     public string Codigo { get; set; } = null!;
 
+    /// <summary>
+    /// Codigo secundario opcional (id alternativo, no unico). Sirve para mapear el
+    /// formato a un identificador externo (codigo legacy, codigo del prestador,
+    /// codigo de un sistema integrado, etc.). Texto libre, puede repetirse.
+    /// </summary>
+    public string? CodigoSecundario { get; set; }
+
     /// <summary>Nombre visible. Ej. "Historia Clinica General".</summary>
     public string Nombre { get; set; } = null!;
 

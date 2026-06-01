@@ -5,7 +5,12 @@
 .fb-tb-left { display: flex; flex-direction: column; }
 .fb-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; color: var(--primary); }
 .fb-tb-title { font-size: 20px; color: var(--foreground); }
-.fb-tb-right { display: flex; align-items: center; gap: 8px; }
+/* Lado derecho de la toolbar: dos filas verticales (select + botones de accion).
+   Mantener filas separadas evita que la fila de botones cambie su ubicacion
+   cuando aparecen los condicionales al seleccionar un formulario. */
+.fb-tb-right { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 420px; }
+.fb-tb-select { width: 100%; }
+.fb-tb-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
 /* Inputs / botones */
 .fb-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; color: var(--foreground); }
@@ -17,8 +22,13 @@
 .fb-btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 .fb-btn-primary:hover { background: #1976d2; color: #fff; }
 .fb-btn-primary:disabled { opacity: .6; cursor: default; }
-.fb-btn-danger { width: 100%; margin-top: 14px; background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+/* Botones rojos (eliminar) - compactos por default, mismo tamano que .fb-btn. */
+.fb-btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
 .fb-btn-danger:hover { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+.fb-btn-danger:disabled { opacity: .6; cursor: default; }
+/* Dentro del panel de propiedades (derecho) los danger se muestran full-width
+   debajo de los inputs - como cierre de seccion. */
+.fb-props .fb-btn-danger { width: 100%; margin-top: 14px; }
 
 .fb-alert { padding: 10px 14px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; }
 .fb-ok { padding: 10px 14px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; font-size: 13px; }
@@ -29,9 +39,9 @@
 .fb-meta-field label { font-size: 11px; font-weight: 700; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .04em; }
 .fb-check { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding-bottom: 8px; }
 
-/* Body 3 columnas */
-.fb-body { display: flex; gap: 12px; align-items: stretch; min-height: 62vh; }
-.fb-palette { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; height: fit-content; }
+/* Body 3 columnas: laterales pegadas (sticky) y centro hace el scroll de la pagina. */
+.fb-body { display: flex; gap: 12px; align-items: flex-start; min-height: 62vh; }
+.fb-palette { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
 .fb-palette-group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted-foreground); margin-top: 8px; }
 .fb-palette-group:first-child { margin-top: 0; }
 .fb-pal-btn { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; cursor: pointer; }
@@ -39,7 +49,9 @@
 .fb-pal-hint { font-size: 11px; color: var(--muted-foreground); margin-top: 8px; line-height: 1.4; }
 
 /* Lienzo */
-.fb-canvas { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; overflow: auto; }
+/* Canvas: crece naturalmente; el scroll lo hace la pagina, no el canvas (asi
+   las laterales sticky se quedan visibles arriba). */
+.fb-canvas { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
 .fb-empty { text-align: center; color: var(--muted-foreground); padding: 48px 0; font-size: 14px; }
 .fb-empty-sm { color: var(--muted-foreground); font-size: 12px; padding: 8px 2px; }
 .fb-grid { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -63,7 +75,7 @@
 .fb-mini-danger:hover { border-color: #fca5a5; color: #dc2626; background: #fef2f2; }
 
 /* Propiedades */
-.fb-props { width: 300px; flex-shrink: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; height: fit-content; }
+.fb-props { width: 300px; flex-shrink: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
 .fb-props-empty { color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
 .fb-props-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; color: var(--primary); }
 .fb-prop { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
@@ -104,5 +116,5 @@
 
 @media (max-width: 1100px) {
   .fb-body { flex-direction: column; }
-  .fb-palette, .fb-props { width: 100%; }
+  .fb-palette, .fb-props { width: 100%; position: static; max-height: none; }
 }

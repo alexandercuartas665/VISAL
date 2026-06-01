@@ -22,7 +22,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         return await _db.FormDefinitions
             .AsNoTracking()
             .OrderBy(f => f.Nombre)
-            .Select(f => new FormDefinitionDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.UpdatedAt))
+            .Select(f => new FormDefinitionDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.UpdatedAt, f.CodigoSecundario))
             .ToListAsync(cancellationToken);
     }
 
@@ -31,7 +31,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         return await _db.FormDefinitions
             .AsNoTracking()
             .Where(f => f.Id == id)
-            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson))
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -62,6 +62,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             }
 
             existing.Codigo = codigo;
+            existing.CodigoSecundario = string.IsNullOrWhiteSpace(request.CodigoSecundario) ? null : request.CodigoSecundario.Trim();
             existing.Nombre = nombre;
             existing.Version = request.Version?.Trim();
             existing.Tipo = request.Tipo?.Trim();
@@ -90,6 +91,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             {
                 TenantId = tenantId,
                 Codigo = codigo,
+                CodigoSecundario = string.IsNullOrWhiteSpace(request.CodigoSecundario) ? null : request.CodigoSecundario.Trim(),
                 Nombre = nombre,
                 Version = request.Version?.Trim(),
                 Tipo = request.Tipo?.Trim(),
@@ -104,7 +106,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson, entity.PrefillRoutesJson);
+        return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson, entity.PrefillRoutesJson, entity.CodigoSecundario);
     }
 
     public async Task<bool> UpdatePrefillRoutesAsync(Guid id, string? prefillRoutesJson, Guid actorUserId, CancellationToken cancellationToken = default)

@@ -12,6 +12,7 @@
 @inject IOrdenServicioService SrvSvc
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
+@inject IRemisionService RemSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -199,6 +200,41 @@ else
             </div>
         }
 
+        @* ============ REMISIONES ============ *@
+        @if (_incluirRem && _rem.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrRem, "Ordenes de Remision", "REM",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-REM",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de las remisiones</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:230px">Capitulo</th>
+                            <th style="width:100px">Codigo</th>
+                            <th>Especialidad</th>
+                            <th>Motivo / Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rem)
+                        {
+                            <tr>
+                                <td class="num">@r.Orden</td>
+                                <td>@r.Capitulo</td>
+                                <td class="mono">@(r.EspecialidadCodigo ?? "-")</td>
+                                <td><b>@r.EspecialidadNombre</b></td>
+                                <td>@(r.Motivo ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
         @* ============ INCAPACIDADES ============ *@
         @if (_incluirInc && _inc.Count > 0)
         {
@@ -266,26 +302,28 @@ else
 
     // Que docs incluir, calculados desde ?docs=
     private List<string> _docs = new();
-    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert;
+    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem;
 
     // HC: schema + valores
     private FormSchema? _hcSchema;
     private Dictionary<string, string?> _valores = new();
 
     // Forms para encabezado de cada orden (institucion, logo, etc.)
-    private FormDefinitionDetailDto? _fdHc, _fdMed, _fdSrv, _fdInc, _fdCert;
-    private FormSchema _schHc = new(), _schMed = new(), _schSrv = new(), _schInc = new(), _schCert = new();
+    private FormDefinitionDetailDto? _fdHc, _fdMed, _fdSrv, _fdInc, _fdCert, _fdRem;
+    private FormSchema _schHc = new(), _schMed = new(), _schSrv = new(), _schInc = new(), _schCert = new(), _schRem = new();
     private FormHeader HdrHc => _schHc.Header ?? FormHeader.Default();
     private FormHeader HdrMed => _schMed.Header ?? FormHeader.Default();
     private FormHeader HdrSrv => _schSrv.Header ?? FormHeader.Default();
     private FormHeader HdrInc => _schInc.Header ?? FormHeader.Default();
     private FormHeader HdrCert => _schCert.Header ?? FormHeader.Default();
+    private FormHeader HdrRem => _schRem.Header ?? FormHeader.Default();
 
     // Items
     private List<OrdenMedicamentoItemDto> _meds = new();
     private List<OrdenServicioItemDto> _srv = new();
     private List<IncapacidadItemDto> _inc = new();
     private List<CertificacionItemDto> _cert = new();
+    private List<RemisionItemDto> _rem = new();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -300,6 +338,7 @@ else
         _incluirSrv  = _docs.Contains("SRV");
         _incluirInc  = _docs.Contains("INC");
         _incluirCert = _docs.Contains("CERT");
+        _incluirRem  = _docs.Contains("REM");
 
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { _loading = false; return; }
@@ -346,8 +385,23 @@ else
             if (_fdCert is not null) { try { _schCert = JsonSerializer.Deserialize<FormSchema>(_fdCert.SchemaJson) ?? new(); } catch { } }
             _cert = (await CertSvc.ListarPorHistoriaAsync(HcId)).ToList();
         }
+        if (_incluirRem)
+        {
+            _fdRem = await FormsSvc.GetActivoByTipoAsync("REMISIONES");
+            if (_fdRem is not null) { try { _schRem = JsonSerializer.Deserialize<FormSchema>(_fdRem.SchemaJson) ?? new(); } catch { } }
+            _rem = (await RemSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
 
         _loading = false;
+
+        // Auto-print cuando se entra desde "Imprimir" del listado (URL trae #print=1).
+        if (Nav.Uri.Contains("#print=1"))
+        {
+            _ = Task.Delay(400).ContinueWith(async _ =>
+            {
+                try { await JS.InvokeVoidAsync("print"); } catch { }
+            });
+        }
     }
 
     private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }

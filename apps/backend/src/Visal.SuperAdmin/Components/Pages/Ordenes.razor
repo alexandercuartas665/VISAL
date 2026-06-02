@@ -1,8 +1,226 @@
 @page "/ordenes"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@inject IOrdenesClinicasService OcSvc
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@*
+   Modulo "Ordenes Clinicas". Vista de consulta + reimpresion (sin edicion).
+   Filtros: paciente (texto), rango de fechas (cierre), especialista (dropdown).
+   Listado ordenado alfabeticamente por paciente, secundario por fecha de cierre desc.
+   Cada fila muestra los conteos de cada tipo de orden ligado a esa HC.
+   El boton "Imprimir" abre /imprimir-paquete con todos los documentos disponibles.
+   El boton "Consultar" abre /imprimir-paquete tambien (es la misma vista read-only).
+*@
 
 <PageTitle>Ordenes Clinicas - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Operacion Clinica"
-                   Title="Ordenes Clinicas"
-                   Description="Medicamentos, servicios, incapacidades, certificaciones y remisiones." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Ordenes Clinicas</h1>
+        <small class="text-muted">Consulta y reimpresion de historias clinicas cerradas.</small>
+    </div>
+</div>
+
+<div class="ase-card">
+    <div class="oc-filtros">
+        <div class="oc-f oc-f-wide">
+            <label>Paciente</label>
+            <input class="form-control form-control-sm"
+                   placeholder="Nombre o documento del paciente..."
+                   @bind="_filtroPaciente" @bind:event="oninput" @onkeyup="OnKeyup" />
+        </div>
+        <div class="oc-f">
+            <label>Fecha desde</label>
+            <input type="date" class="form-control form-control-sm" @bind="_desde" />
+        </div>
+        <div class="oc-f">
+            <label>Fecha hasta</label>
+            <input type="date" class="form-control form-control-sm" @bind="_hasta" />
+        </div>
+        <div class="oc-f oc-f-wide">
+            <label>Especialista</label>
+            <select class="form-select form-select-sm" @bind="_especialista">
+                <option value="">(Todos)</option>
+                @foreach (var e in _especialistas)
+                {
+                    <option value="@e">@e</option>
+                }
+            </select>
+        </div>
+        <div class="oc-f oc-f-acts">
+            <button class="btn btn-primary btn-sm" @onclick="Buscar" disabled="@_buscando">
+                @(_buscando ? "Buscando..." : "🔍 Buscar")
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Limpiar" disabled="@_buscando">
+                Limpiar
+            </button>
+        </div>
+    </div>
+
+    <div class="oc-grid-h">
+        Historias clinicas cerradas (@_rows.Count)
+        @if (_rows.Count >= 500)
+        {
+            <span class="oc-warn">- mostrando primeros 500. Refina los filtros para ver mas.</span>
+        }
+    </div>
+
+    @if (_buscando && _rows.Count == 0)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">
+            No hay historias clinicas que coincidan con los filtros.
+        </div>
+    }
+    else
+    {
+        <div class="oc-tbl-wrap">
+            <table class="table table-sm oc-tbl">
+                <thead>
+                    <tr>
+                        <th style="min-width:220px">Paciente</th>
+                        <th style="width:160px">Documento</th>
+                        <th>Formato HC</th>
+                        <th style="width:180px">Especialista</th>
+                        <th class="text-center" style="width:130px">Fecha cierre</th>
+                        <th class="text-center" style="width:260px">Documentos</th>
+                        <th class="text-end" style="width:220px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        <tr>
+                            <td>
+                                <div class="oc-pname">@r.PacienteNombre</div>
+                                <div class="oc-pmeta">HC cerrada el @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</div>
+                            </td>
+                            <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
+                            <td>@r.FormatoNombre</td>
+                            <td>@(r.EspecialistaNombre ?? "-")</td>
+                            <td class="text-center">
+                                @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
+                            </td>
+                            <td class="text-center">
+                                <div class="oc-pills">
+                                    <span class="oc-pill" title="Historia clinica">HC</span>
+                                    @if (r.MedicamentosCount > 0)   { <span class="oc-pill oc-pill-med"  title="@r.MedicamentosCount medicamento(s)">MED @r.MedicamentosCount</span> }
+                                    @if (r.ServiciosCount > 0)      { <span class="oc-pill oc-pill-srv"  title="@r.ServiciosCount servicio(s)">SRV @r.ServiciosCount</span> }
+                                    @if (r.RemisionesCount > 0)     { <span class="oc-pill oc-pill-rem"  title="@r.RemisionesCount remision(es)">REM @r.RemisionesCount</span> }
+                                    @if (r.IncapacidadesCount > 0)  { <span class="oc-pill oc-pill-inc"  title="@r.IncapacidadesCount incapacidad(es)">INC @r.IncapacidadesCount</span> }
+                                    @if (r.CertificacionesCount > 0){ <span class="oc-pill oc-pill-cert" title="@r.CertificacionesCount certificacion(es)">CRT @r.CertificacionesCount</span> }
+                                </div>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-outline-secondary btn-sm" title="Consultar (solo lectura)"
+                                        @onclick="() => Consultar(r)">👁 Consultar</button>
+                                <button class="btn btn-primary btn-sm ms-1" title="Reimprimir paquete"
+                                        @onclick="() => Imprimir(r)">🖨 Imprimir</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<style>
+    .oc-filtros { display:grid; grid-template-columns: 1.5fr 1fr 1fr 1.4fr auto; gap:14px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; align-items:end; }
+    .oc-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; display:block; }
+    .oc-f-wide { min-width:200px; }
+    .oc-f-acts { display:flex; gap:8px; }
+    .oc-grid-h { padding:10px 6px; font-size:13px; font-weight:700; color:#0f172a; }
+    .oc-warn { color:#b45309; font-weight:500; font-size:12px; margin-left:6px; }
+    .oc-tbl-wrap { border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
+    .oc-tbl { margin:0; font-size:12.5px; }
+    .oc-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .oc-tbl td { padding:10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .oc-pname { font-weight:700; color:#0f172a; }
+    .oc-pmeta { font-size:11px; color:#64748b; }
+    .oc-pills { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; }
+    .oc-pill { display:inline-block; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:700; background:#e0e7ff; color:#3730a3; }
+    .oc-pill-med  { background:#fee2e2; color:#991b1b; }
+    .oc-pill-srv  { background:#dbeafe; color:#1e40af; }
+    .oc-pill-rem  { background:#fef3c7; color:#92400e; }
+    .oc-pill-inc  { background:#fce7f3; color:#9d174d; }
+    .oc-pill-cert { background:#d1fae5; color:#065f46; }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+    .ase-empty { text-align:center; color:#64748b; padding:16px; font-style:italic; }
+</style>
+
+@code {
+    private string _filtroPaciente = "";
+    private DateTime? _desde;
+    private DateTime? _hasta;
+    private string _especialista = "";
+    private List<string> _especialistas = new();
+    private List<OrdenClinicaItemDto> _rows = new();
+    private bool _buscando;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _especialistas = (await OcSvc.ListarEspecialistasAsync()).ToList();
+        await Buscar();
+    }
+
+    private async Task Buscar()
+    {
+        _buscando = true;
+        try
+        {
+            var f = new OrdenesClinicasFiltro(
+                PacienteTexto: string.IsNullOrWhiteSpace(_filtroPaciente) ? null : _filtroPaciente.Trim(),
+                Desde: _desde is DateTime d1 ? DateOnly.FromDateTime(d1) : (DateOnly?)null,
+                Hasta: _hasta is DateTime d2 ? DateOnly.FromDateTime(d2) : (DateOnly?)null,
+                Especialista: string.IsNullOrWhiteSpace(_especialista) ? null : _especialista,
+                SoloCerradas: true);
+            _rows = (await OcSvc.BuscarAsync(f)).ToList();
+        }
+        finally { _buscando = false; }
+    }
+
+    private async Task OnKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await Buscar(); }
+    }
+
+    private async Task Limpiar()
+    {
+        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = "";
+        await Buscar();
+    }
+
+    /// <summary>Consultar: misma vista que imprimir pero la abre normalmente (read-only).</summary>
+    private async Task Consultar(OrdenClinicaItemDto r)
+    {
+        var docs = BuildDocsQuery(r);
+        await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{r.HistoriaClinicaId}?docs={docs}", "_blank");
+    }
+
+    /// <summary>Imprimir: abre el paquete y dispara el dialogo de impresion del navegador.</summary>
+    private async Task Imprimir(OrdenClinicaItemDto r)
+    {
+        var docs = BuildDocsQuery(r);
+        // El #print=1 al final permite que la pagina detecte y haga window.print() al cargar.
+        await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{r.HistoriaClinicaId}?docs={docs}#print=1", "_blank");
+    }
+
+    private static string BuildDocsQuery(OrdenClinicaItemDto r)
+    {
+        var parts = new List<string> { "HC" };
+        if (r.MedicamentosCount > 0)   { parts.Add("MED"); }
+        if (r.ServiciosCount > 0)      { parts.Add("SRV"); }
+        if (r.RemisionesCount > 0)     { parts.Add("REM"); }
+        if (r.IncapacidadesCount > 0)  { parts.Add("INC"); }
+        if (r.CertificacionesCount > 0){ parts.Add("CERT"); }
+        return string.Join(",", parts);
+    }
+}

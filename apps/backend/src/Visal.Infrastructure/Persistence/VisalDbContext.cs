@@ -68,6 +68,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaOrdenServicio> HistoriaClinicaOrdenesServicio => Set<HistoriaClinicaOrdenServicio>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
+    public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
@@ -611,6 +612,18 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Titulo).HasMaxLength(200).IsRequired();
             b.Property(x => x.Contenido).HasColumnType("text").IsRequired();
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+        });
+
+        modelBuilder.Entity<HistoriaClinicaRemision>(b =>
+        {
+            // Texto libre (sin HasMaxLength) para tolerar capitulos / nombres largos del CUPS oficial.
+            b.Property(x => x.Capitulo).HasColumnType("text").IsRequired();
+            b.Property(x => x.EspecialidadCodigo).HasColumnType("text");
+            b.Property(x => x.EspecialidadNombre).HasColumnType("text").IsRequired();
+            b.Property(x => x.Motivo).HasColumnType("text");
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });

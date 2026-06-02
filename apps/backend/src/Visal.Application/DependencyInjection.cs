@@ -78,6 +78,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IOrdenServicioService, Tenancy.OrdenServicioService>();
         services.AddScoped<Tenancy.IIncapacidadService, Tenancy.IncapacidadService>();
         services.AddScoped<Tenancy.ICertificacionService, Tenancy.CertificacionService>();
+        services.AddScoped<Tenancy.IRemisionService, Tenancy.RemisionService>();
+        services.AddScoped<Tenancy.IOrdenesClinicasService, Tenancy.OrdenesClinicasService>();
         services.AddScoped<Tenancy.INotaMedicaService, Tenancy.NotaMedicaService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         return services;

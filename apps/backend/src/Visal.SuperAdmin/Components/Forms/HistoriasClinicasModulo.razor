@@ -9,6 +9,7 @@
 @inject IOrdenServicioService OrdSrvSvc
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
+@inject IRemisionService RemSvc
 @inject IJSRuntime JS
 
 @*
@@ -160,6 +161,11 @@
                         {
                             <span class="hc-tab-badge">@_servCount</span>
                         }
+                        @* Badge con conteo en la pestana de remisiones *@
+                        @if (t == "Remisiones" && _remCount > 0)
+                        {
+                            <span class="hc-tab-badge">@_remCount</span>
+                        }
                         @* Badge en la pestana de incapacidades *@
                         @if (t == "Ordenes incapacidad" && _incCount > 0)
                         {
@@ -209,7 +215,22 @@
                         <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
                                         OnCountChanged="@(c => _servCount = c)" />
                     }
-                    else if (_tabSel == "Remisiones") { <OrdenRemisiones /> }
+                    else if (_tabSel == "Insumos")
+                    {
+                        @* Placeholder — el modulo de insumos se trabaja en otra iteracion. *@
+                        <div class="hc-placeholder">
+                            <div class="hc-placeholder-t">Insumos</div>
+                            <div class="hc-placeholder-d">
+                                Esta seccion permitira registrar los insumos consumidos durante la atencion.
+                                Se construira en una iteracion posterior.
+                            </div>
+                        </div>
+                    }
+                    else if (_tabSel == "Remisiones")
+                    {
+                        <OrdenRemisiones HistoriaClinicaId="@_historiaSel?.Id"
+                                         OnCountChanged="@(c => _remCount = c)" />
+                    }
                     else if (_tabSel == "Ordenes incapacidad")
                     {
                         <OrdenIncapacidades HistoriaClinicaId="@_historiaSel?.Id"
@@ -450,7 +471,7 @@
 
     private readonly string[] _tabs = new[] {
         "Historial", "Ordenes medicamento", "Ordenes servicios Propias",
-        "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
+        "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
     };
     private string _tabSel = "Historial";
 
@@ -466,6 +487,8 @@
     private int _incCount;
     /// <summary>Conteo de certificaciones para badge en la pestana "Ordenes certificaciones".</summary>
     private int _certCount;
+    /// <summary>Conteo de remisiones para badge en la pestana "Remisiones".</summary>
+    private int _remCount;
 
     private List<FormDefinitionDto> _formatos = new();
     private FormSchema? _schemaActual;
@@ -579,6 +602,7 @@
         _imprimirMsg = null;
         // Refrescar el badge de la pestana de medicamentos para la nueva HC.
         _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
+        _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
     }
     private void ToggleMenu(Guid id) => _menuAbierto = _menuAbierto == id ? null : id;
 

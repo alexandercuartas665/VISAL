@@ -1,54 +1,352 @@
-@* Diseño basado en ctrlOrdenRemisiones.ascx del legacy. Solo layout. *@
+@using Visal.Application.Tenancy
+@inject IRemisionService RemSvc
+@inject IJSRuntime JS
 
-<div class="od-bar">
-    <div class="od-bar-left">
-        <label>Orden de Remision a Especialidad Numero:</label>
-        <select class="form-select form-select-sm od-w-220" disabled>
-            <option>(sin ordenes)</option>
-        </select>
+@*
+   Pestana "Remisiones" de la HC. Captura en cascada:
+   1) Capitulo  -> dropdown con los capitulos CUPS (cup.Descripcion distinto)
+   2) Especialidad -> autocomplete sobre cup.Nombre filtrado por capitulo
+   3) Motivo -> texto libre
+   Persiste atado a HistoriaClinicaId.
+*@
+
+<div class="or-bar">
+    <div class="or-bar-left">
+        <label>Orden de Remision Numero:</label>
+        <span class="or-bar-count">@_items.Count item(s)</span>
     </div>
-    <div class="od-bar-right">
-        <button class="btn btn-outline-secondary btn-sm" disabled>+ Agregar</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+    <div class="or-bar-right">
+        <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#128424; Imprimir</button>
     </div>
 </div>
 
-<div class="od-card">
-    <div class="od-row">
-        <div class="od-f od-c-12">
-            <label>Nombre de la Especialidad</label>
-            <input class="form-control form-control-sm" placeholder="Buscar especialidad..." />
-        </div>
+@if (HistoriaClinicaId is null)
+{
+    <div class="or-card or-empty-hc">
+        Selecciona o inicia una historia para registrar remisiones.
     </div>
-    <div class="od-row">
-        <div class="od-f od-c-11">
-            <label>Motivo de la Remision</label>
-            <textarea class="form-control form-control-sm" rows="2" placeholder="Motivo de la remision..."></textarea>
+}
+else
+{
+    <div class="or-card">
+        @* ---- Fila 1: Capitulo ---- *@
+        <div class="or-row">
+            <div class="or-f or-c-12">
+                <label>Capitulo</label>
+                <select class="form-select form-select-sm"
+                        @bind="_borrador.Capitulo" @bind:after="OnCambioCapitulo">
+                    <option value="">SELECCIONE UN CAPITULO</option>
+                    @foreach (var cap in _capitulos)
+                    {
+                        <option value="@cap.Nombre">@cap.Nombre (@cap.Total)</option>
+                    }
+                </select>
+            </div>
         </div>
-        <div class="od-f od-c-1 od-action-col">
-            <button class="btn btn-primary btn-sm od-action-add" title="Guardar">&#128190;</button>
-        </div>
-    </div>
 
-    <div class="od-grid-wrap">
-        <table class="table table-sm od-tbl">
-            <thead>
-                <tr>
-                    <th>Nombre de la Especialidad</th>
-                    <th>Motivo de la Remision</th>
-                    <th class="text-center" style="width:50px">&#128424;</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr><td colspan="3" class="text-center text-muted od-empty-row">Sin remisiones agregadas.</td></tr>
-            </tbody>
-        </table>
+        @* ---- Fila 2: Especialidad (autocomplete) ---- *@
+        <div class="or-row">
+            <div class="or-f or-c-12 or-ac-host">
+                <label>Especialidad</label>
+                <input class="form-control form-control-sm"
+                       placeholder="@(_borrador.Capitulo is null or "" ? "Primero selecciona un capitulo" : "Buscar especialidad por nombre o codigo...")"
+                       disabled="@(string.IsNullOrWhiteSpace(_borrador.Capitulo))"
+                       value="@_acTexto"
+                       @oninput="OnEspInput"
+                       @onfocus="OnEspFocus"
+                       @onblur="OnEspBlur" />
+                @if (_acAbierto && _acRows.Count > 0)
+                {
+                    <div class="or-ac-pop">
+                        @foreach (var e in _acRows)
+                        {
+                            <div class="or-ac-row" @onmousedown="() => SeleccionarEspecialidad(e)">
+                                <span class="or-ac-codigo">@(e.Codigo ?? "-")</span>
+                                <span class="or-ac-nombre">@e.Nombre</span>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (_acAbierto && !_acBuscando && !string.IsNullOrWhiteSpace(_acQuery))
+                {
+                    <div class="or-ac-pop or-ac-empty">Sin resultados.</div>
+                }
+            </div>
+        </div>
+
+        @* ---- Fila 3: Motivo + boton agregar ---- *@
+        <div class="or-row">
+            <div class="or-f or-c-11">
+                <label>Motivo / Observaciones</label>
+                <textarea class="form-control form-control-sm" rows="2"
+                          placeholder="Motivo clinico de la remision..."
+                          @bind="_borrador.Motivo" @bind:event="oninput"></textarea>
+            </div>
+            <div class="or-f or-c-1 or-action-col">
+                <button class="btn btn-primary btn-sm or-action-add" title="Guardar"
+                        @onclick="AgregarAsync"
+                        disabled="@(NoPuedeAgregar() || _agregando)">
+                    @(_agregando ? "..." : "💾")
+                </button>
+            </div>
+        </div>
+
+        @* ---- Grilla ---- *@
+        <div class="or-grid-wrap">
+            <table class="table table-sm or-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:40px">#</th>
+                        <th>Capitulo</th>
+                        <th style="width:100px">Codigo</th>
+                        <th>Especialidad</th>
+                        <th>Motivo</th>
+                        <th class="text-center" style="width:50px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_items.Count == 0)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted or-empty-row">Sin remisiones agregadas.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td class="text-center">@it.Orden</td>
+                                <td><span class="or-cap-pill">@CortoCapitulo(it.Capitulo)</span></td>
+                                <td class="mono">@(it.EspecialidadCodigo ?? "-")</td>
+                                <td>@it.EspecialidadNombre</td>
+                                <td>@(it.Motivo ?? "-")</td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
+}
 
 <style>
-    .od-action-col { display: flex; align-items: stretch; }
-    .od-action-add { width: 100%; align-self: stretch; height: 100%; }
+    .or-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .or-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .or-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .or-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
+    .or-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .or-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .or-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .or-c-1  { grid-column: span 1; }
+    .or-c-11 { grid-column: span 11; }
+    .or-c-12 { grid-column: span 12; }
+    .or-ac-host { position:relative; }
+    .or-ac-pop { position:absolute; left:0; right:0; top:100%; z-index:50; background:#fff; border:1px solid #cbd5e1; border-top:none; border-radius:0 0 6px 6px; max-height:260px; overflow:auto; box-shadow:0 8px 20px rgba(0,0,0,0.08); }
+    .or-ac-row { display:flex; gap:10px; padding:8px 12px; cursor:pointer; border-bottom:1px solid #f1f5f9; font-size:12.5px; }
+    .or-ac-row:hover { background:#eef6ff; }
+    .or-ac-codigo { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color:#1565c0; font-weight:700; min-width:80px; }
+    .or-ac-nombre { color:#0f172a; }
+    .or-ac-empty { padding:12px; text-align:center; color:#64748b; font-style:italic; }
+    .or-action-col { display:flex; align-items:stretch; }
+    .or-action-add { width:100%; align-self:stretch; height:100%; min-height:32px; }
+    .or-grid-wrap { margin-top:14px; border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
+    .or-tbl { margin:0; font-size:12.5px; }
+    .or-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .or-tbl td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .or-empty-row { padding:30px !important; font-style:italic; }
+    .or-cap-pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; background:#dbeafe; color:#1e40af; }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
 </style>
 
-@code { }
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private List<RemisionItemDto> _items = new();
+    private List<CapituloCupDto> _capitulos = new();
+    private bool _agregando;
+
+    // Autocomplete state
+    private string _acQuery = "";
+    private string _acTexto = "";       // lo que el usuario tipea en el input (o el nombre elegido)
+    private bool _acAbierto;
+    private bool _acBuscando;
+    private List<EspecialidadCupDto> _acRows = new();
+    private System.Threading.CancellationTokenSource? _acCts;
+
+    private BorradorRem _borrador = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarCapitulosAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            _acTexto = "";
+            _acRows.Clear();
+            _acAbierto = false;
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarCapitulosAsync()
+    {
+        _capitulos = (await RemSvc.ListarCapitulosAsync()).ToList();
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await RemSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    private async Task OnCambioCapitulo()
+    {
+        // Al cambiar capitulo, reseteamos la especialidad elegida y recargamos
+        // sugerencias sin termino (top N del capitulo).
+        _borrador.EspecialidadCodigo = null;
+        _borrador.EspecialidadNombre = null;
+        _borrador.CupId = null;
+        _acTexto = "";
+        _acQuery = "";
+        await BuscarEspecialidadesAsync();
+    }
+
+    private async Task OnEspFocus()
+    {
+        _acAbierto = true;
+        if (_acRows.Count == 0) { await BuscarEspecialidadesAsync(); }
+    }
+
+    private void OnEspBlur()
+    {
+        // Damos un margen para que el click sobre la fila dispare seleccion antes de cerrar.
+        _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() => { _acAbierto = false; StateHasChanged(); }));
+    }
+
+    private async Task OnEspInput(ChangeEventArgs e)
+    {
+        _acTexto = e.Value?.ToString() ?? "";
+        _acQuery = _acTexto;
+        // Si el usuario tipea diferente al item ya seleccionado, lo invalidamos.
+        if (_borrador.EspecialidadNombre != null && _acTexto != _borrador.EspecialidadNombre)
+        {
+            _borrador.EspecialidadCodigo = null;
+            _borrador.EspecialidadNombre = null;
+            _borrador.CupId = null;
+        }
+        _acAbierto = true;
+        await BuscarEspecialidadesAsync();
+    }
+
+    private async Task BuscarEspecialidadesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_borrador.Capitulo)) { _acRows.Clear(); return; }
+        _acCts?.Cancel();
+        _acCts = new System.Threading.CancellationTokenSource();
+        var token = _acCts.Token;
+        _acBuscando = true;
+        try
+        {
+            var rows = await RemSvc.BuscarEspecialidadesAsync(_borrador.Capitulo, _acQuery, 30, token);
+            if (!token.IsCancellationRequested)
+            {
+                _acRows = rows.ToList();
+            }
+        }
+        catch (TaskCanceledException) { }
+        finally { _acBuscando = false; }
+    }
+
+    private void SeleccionarEspecialidad(EspecialidadCupDto e)
+    {
+        _borrador.CupId = e.CupId;
+        _borrador.EspecialidadCodigo = e.Codigo;
+        _borrador.EspecialidadNombre = e.Nombre;
+        _acTexto = e.Nombre;
+        _acAbierto = false;
+    }
+
+    private bool NoPuedeAgregar()
+    {
+        return string.IsNullOrWhiteSpace(_borrador.Capitulo)
+            || string.IsNullOrWhiteSpace(_borrador.EspecialidadNombre);
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (NoPuedeAgregar()) { return; }
+        _agregando = true;
+        try
+        {
+            var creado = await RemSvc.AgregarAsync(hid, new AgregarRemisionRequest(
+                _borrador.Capitulo!,
+                _borrador.EspecialidadCodigo,
+                _borrador.EspecialidadNombre!,
+                _borrador.Motivo), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            // Reset solo la especialidad y motivo — el capitulo se conserva
+            // para registrar varias del mismo capitulo en rafaga.
+            var capActual = _borrador.Capitulo;
+            _borrador = new BorradorRem { Capitulo = capActual };
+            _acTexto = "";
+            _acQuery = "";
+            _acRows.Clear();
+        }
+        finally { _agregando = false; }
+    }
+
+    private async Task EliminarAsync(RemisionItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar la remision a \"{Truncate(it.EspecialidadNombre, 40)}\"?");
+        if (!ok) { return; }
+        await RemSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private async Task ImprimirAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/REMISIONES", "_blank");
+    }
+
+    private static string CortoCapitulo(string c)
+    {
+        // "CapItulo 03 SISTEMA VISUAL" -> "Cap 03 SISTEMA VISUAL"
+        if (string.IsNullOrEmpty(c)) { return ""; }
+        return c.Replace("CapItulo", "Cap").Replace("Capitulo", "Cap");
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s.Substring(0, max) + "...";
+
+    private sealed class BorradorRem
+    {
+        public string? Capitulo { get; set; }
+        public Guid? CupId { get; set; }
+        public string? EspecialidadCodigo { get; set; }
+        public string? EspecialidadNombre { get; set; }
+        public string? Motivo { get; set; }
+    }
+}

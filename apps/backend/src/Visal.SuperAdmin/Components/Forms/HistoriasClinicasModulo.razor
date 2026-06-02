@@ -133,6 +133,20 @@
                 <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Abrir vista documento en nueva pestana para imprimir o guardar PDF">&#128424; Imprimir</button>
                 <button class="btn btn-danger btn-sm" disabled="@(_schemaActual is null)" @onclick="Descartar">&#128465; Descartar</button>
                 <button class="btn btn-outline-secondary btn-sm" disabled="@(_schemaActual is null)" @onclick="Cerrar">&#10006; Cerrar</button>
+                @* Indicador de autoguardado. Solo se muestra cuando hay HC abierta. *@
+                @if (_historiaSel is not null && string.Equals(_historiaSel.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+                {
+                    <div class="hc-autosave hc-autosave-@_saveStatus" title="@_saveTitle">
+                        @switch (_saveStatus)
+                        {
+                            case "limpio":     <span>&#10003; Guardado</span> break;
+                            case "sucio":      <span>&#9998; Cambios sin guardar</span> break;
+                            case "guardando":  <span>&#8635; Guardando...</span> break;
+                            case "guardado":   <span>&#10003; Guardado @(_ultimoGuardado?.ToString("HH:mm:ss"))</span> break;
+                            case "error":      <span>&#9888; Error al guardar - reintento automatico</span> break;
+                        }
+                    </div>
+                }
             </div>
             @if (_imprimirMsg is not null) { <div class="hc-info-msg">@_imprimirMsg</div> }
 
@@ -202,7 +216,8 @@
                         else
                         {
                             <FormViewer Schema="@_schemaActual" Valores="@_valores"
-                                        Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato" />
+                                        Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato"
+                                        OnValueChanged="OnValorCambiado" />
                         }
                     }
                     else if (_tabSel == "Ordenes medicamento")
@@ -398,8 +413,14 @@
     .hc-menu-item:hover { background: #f1f5f9; }
     .hc-menu-item:disabled { color: #cbd5e1; cursor: not-allowed; }
 
-    .hc-actions { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end; flex-wrap: wrap; }
+    .hc-actions { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
     .hc-info-msg { padding: 8px 14px; background: #ecfdf5; border-left: 3px solid #16a34a; font-size: 12px; color: #166534; }
+    .hc-autosave { margin-left: auto; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; transition: background-color .25s, color .25s; }
+    .hc-autosave-limpio    { background: #f1f5f9; color: #475569; }
+    .hc-autosave-sucio     { background: #fef3c7; color: #92400e; }
+    .hc-autosave-guardando { background: #dbeafe; color: #1e40af; }
+    .hc-autosave-guardado  { background: #d1fae5; color: #065f46; }
+    .hc-autosave-error     { background: #fee2e2; color: #991b1b; }
     .hc-buscar { padding: 12px 14px; }
     .hc-buscar-lbl { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
     .hc-buscar-row { display: flex; gap: 6px; margin-top: 4px; max-width: 520px; }
@@ -489,6 +510,15 @@
     private int _certCount;
     /// <summary>Conteo de remisiones para badge en la pestana "Remisiones".</summary>
     private int _remCount;
+
+    // =================== AUTOGUARDADO HC HISTORIAL ===================
+    /// <summary>Estado visible del autoguardado: limpio | sucio | guardando | guardado | error.</summary>
+    private string _saveStatus = "limpio";
+    private string? _saveTitle;
+    private DateTime? _ultimoGuardado;
+    /// <summary>CTS para cancelar el debounce cuando llegan cambios nuevos.</summary>
+    private System.Threading.CancellationTokenSource? _autosaveCts;
+    private const int AutoSaveDebounceMs = 2000;
 
     private List<FormDefinitionDto> _formatos = new();
     private FormSchema? _schemaActual;
@@ -587,6 +617,11 @@
     private async Task Seleccionar(HistoriaRow h)
     {
         _menuAbierto = null;
+        // Si habia un autosave pendiente para otra HC, cancelarlo y resetear el estado visual.
+        _autosaveCts?.Cancel();
+        _saveStatus = "limpio";
+        _ultimoGuardado = null;
+        _saveTitle = null;
         _historiaSel = h;
         // Cargar la historia completa desde BD para mostrar sus valores en el FormViewer.
         var detail = await HcSvc.GetAsync(h.Id);
@@ -600,6 +635,11 @@
             : $"Codigo: {detail.FormatoCodigo}";
         _tabSel = "Historial";
         _imprimirMsg = null;
+        // Reset autoguardado para la nueva HC.
+        _autosaveCts?.Cancel();
+        _saveStatus = "limpio";
+        _ultimoGuardado = null;
+        _saveTitle = "Los cambios se guardan automaticamente cada 2 segundos.";
         // Refrescar el badge de la pestana de medicamentos para la nueva HC.
         _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
         _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
@@ -780,6 +820,9 @@
 
     private async Task Cerrar()
     {
+        // Cancelamos cualquier autoguardado pendiente — CerrarAsync ya persiste los
+        // valores actuales como parte del cierre.
+        _autosaveCts?.Cancel();
         if (_historiaSel is HistoriaRow h)
         {
             await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), Guid.Empty);
@@ -787,6 +830,8 @@
         }
         _schemaActual = null; _valores = new();
         _imprimirMsg = null;
+        _saveStatus = "limpio";
+        _ultimoGuardado = null;
     }
 
     /// <summary>
@@ -842,6 +887,80 @@
     }
 
     private void CancelarImprimir() => _showImprimirModal = false;
+
+    // =================== AUTOGUARDADO HC HISTORIAL ===================
+    /// <summary>
+    /// Handler que FormViewer dispara en cada cambio de valor del formulario.
+    /// Marca el estado como "sucio" y reinicia un debounce de @ref AutoSaveDebounceMs
+    /// milisegundos. Si llegan mas cambios antes de que expire el timer, se cancela
+    /// el anterior y se reinicia. Cuando el timer expira sin nuevos cambios,
+    /// dispara el guardado en BD.
+    /// </summary>
+    private async Task OnValorCambiado(KeyValuePair<string, string?> kv)
+    {
+        // Solo autoguardamos cuando hay HC abierta. Las cerradas son inmutables.
+        if (_historiaSel is not HistoriaRow h) { return; }
+        if (!string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase)) { return; }
+
+        _saveStatus = "sucio";
+        _saveTitle = "Los cambios se guardan automaticamente cada 2 segundos.";
+        StateHasChanged();
+
+        // Cancelamos cualquier debounce pendiente.
+        _autosaveCts?.Cancel();
+        _autosaveCts = new System.Threading.CancellationTokenSource();
+        var token = _autosaveCts.Token;
+
+        try
+        {
+            await Task.Delay(AutoSaveDebounceMs, token);
+            await GuardarAhoraAsync(token);
+        }
+        catch (TaskCanceledException) { /* otro cambio reseteo el timer; ignorar */ }
+    }
+
+    /// <summary>
+    /// Persiste el JSON de valores en la BD. Maneja errores reportandolos en el
+    /// indicador visual sin romper el flujo del usuario. El siguiente cambio
+    /// reintenta automaticamente porque vuelve a disparar el debounce.
+    /// </summary>
+    private async Task GuardarAhoraAsync(System.Threading.CancellationToken ct = default)
+    {
+        if (_historiaSel is not HistoriaRow h) { return; }
+        if (!string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase)) { return; }
+
+        _saveStatus = "guardando";
+        _saveTitle = "Guardando en la base de datos...";
+        StateHasChanged();
+
+        try
+        {
+            await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty, ct);
+            _ultimoGuardado = DateTime.Now;
+            _saveStatus = "guardado";
+            _saveTitle = $"Ultimo guardado: {_ultimoGuardado:HH:mm:ss}";
+            StateHasChanged();
+
+            // Despues de unos segundos vuelve a estado "limpio" pero conservando
+            // el ultimoGuardado para el tooltip.
+            try
+            {
+                await Task.Delay(4000, ct);
+                if (_saveStatus == "guardado")
+                {
+                    _saveStatus = "limpio";
+                    StateHasChanged();
+                }
+            }
+            catch (TaskCanceledException) { /* nuevo cambio en pleno display */ }
+        }
+        catch (Exception ex) when (ex is not TaskCanceledException)
+        {
+            _saveStatus = "error";
+            _saveTitle = "Error al guardar: " + ex.Message;
+            StateHasChanged();
+        }
+    }
 
     private sealed class HistoriaRow
     {

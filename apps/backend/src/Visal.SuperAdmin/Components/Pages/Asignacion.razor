@@ -141,8 +141,29 @@
                 @if (_ultimas.Count == 0) { <div class="ase-empty">@(_paciente == null ? "Selecciona un paciente." : "Sin asignaciones previas.")</div> }
                 @foreach (var u in _ultimas)
                 {
+                    var puedeBorrar = !string.Equals(u.Estado, "Asignado", StringComparison.OrdinalIgnoreCase)
+                                    && !string.Equals(u.Estado, "Cerrado", StringComparison.OrdinalIgnoreCase);
                     <div class="asg-hist">
-                        <div class="asg-hist-nm">@u.NombreServicio</div>
+                        <div class="asg-hist-h">
+                            <div class="asg-hist-nm">@u.NombreServicio</div>
+                            <div class="dropdown asg-hist-menu-wrap">
+                                <button class="asg-hist-menu-btn" title="Acciones"
+                                        @onclick="() => ToggleHistMenu(u.Id)" @onclick:stopPropagation="true">⋮</button>
+                                @if (_menuHistAbierto == u.Id)
+                                {
+                                    <div class="asg-hist-menu" @onclick:stopPropagation="true">
+                                        <button class="asg-hist-menu-item" @onclick="() => CopiarProgramacion(u)">
+                                            <span>&#128203;</span> Copiar programacion
+                                        </button>
+                                        <button class="asg-hist-menu-item asg-hist-menu-danger" disabled="@(!puedeBorrar)"
+                                                title="@(puedeBorrar ? "Eliminar asignacion" : "Ya esta tomada por Coordinacion - no se puede eliminar desde aqui")"
+                                                @onclick="() => EliminarUltimaAsync(u)">
+                                            <span>&#128465;</span> Eliminar
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
                         <div class="asg-hist-sub">
                             <span class="asg-pill">@u.TipoServicio</span>
                             <span>Cant: @u.Cantidad</span>
@@ -378,6 +399,16 @@
     .asg-tar { color: #1565c0; font-weight: 600; }
     .asg-historico, .asg-carrito { max-height: 480px; overflow: auto; }
     .asg-hist, .asg-cart-row { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; background: #fff; }
+    .asg-hist-h { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+    .asg-hist-menu-wrap { position:relative; }
+    .asg-hist-menu-btn { background:transparent; border:0; font-size:18px; line-height:1; color:#64748b; padding:0 6px; cursor:pointer; border-radius:4px; }
+    .asg-hist-menu-btn:hover { background:#f1f5f9; color:#0f172a; }
+    .asg-hist-menu { position:absolute; right:0; top:24px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 8px 20px rgba(15,23,42,.12); min-width:200px; z-index:100; padding:4px 0; }
+    .asg-hist-menu-item { display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px; background:none; border:0; text-align:left; font-size:12.5px; color:#0f172a; cursor:pointer; }
+    .asg-hist-menu-item:hover:not(:disabled) { background:#f1f5f9; }
+    .asg-hist-menu-item:disabled { color:#cbd5e1; cursor:not-allowed; }
+    .asg-hist-menu-danger { color:#dc2626; }
+    .asg-hist-menu-danger:hover:not(:disabled) { background:#fee2e2; }
     .asg-cart-row { display: flex; gap: 10px; align-items: flex-start; }
     .asg-cart-info { flex: 1; }
     .asg-hist-nm, .asg-cart-nm { font-size: 13px; font-weight: 600; color: #0f172a; }
@@ -464,6 +495,8 @@
 
     // Historico.
     private List<AsignacionMiniDto> _ultimas = new();
+    // Id de la tarjeta del historico con su menu (⋮) abierto. Null = ninguno.
+    private Guid? _menuHistAbierto;
 
     // Carrito.
     private List<CartItem> _carrito = new();
@@ -596,6 +629,50 @@
         _carrito = _carrito.Where(c => !c.Seleccionado).ToList();
     }
     private void LimpiarCarrito() => _carrito = new();
+
+    // ---- Menu ⋮ de cada tarjeta del historico (col 2: "Ultimo servicios agregados") ----
+
+    private void ToggleHistMenu(Guid id)
+    {
+        _menuHistAbierto = _menuHistAbierto == id ? null : id;
+    }
+
+    // "Copiar programacion": pre-llena el form de col 3 con los datos de la asignacion
+    // anterior (fechas, periodo, autorizacion, cantidad, observaciones) para que el
+    // operador pueda volver a aplicar la misma programacion a otro servicio rapidamente.
+    // El servicio en si NO se preselecciona — debe elegirse de la grilla de col 1.
+    private void CopiarProgramacion(AsignacionMiniDto u)
+    {
+        _menuHistAbierto = null;
+        _autorizacion = u.CodigoAutorizacion;
+        _fechaInicio = u.FechaInicio;
+        _fechaFinal = u.FechaFinal;
+        _cantidad = u.Cantidad;
+        _obs = u.Observaciones;
+        if (u.AnioServicio is short anio) { _anio = anio.ToString(); }
+        if (u.MesVigencia is short mv) { _mesVig = mv; }
+        if (u.MesFinal is short mf) { _mesFin = mf; } else { _mesFin = 0; }
+        _ok = $"Programacion copiada de '{u.NombreServicio}'. Selecciona un servicio de la grilla y presiona Agregar.";
+        _error = null;
+    }
+
+    // "Eliminar" desde la tarjeta del historico. El servicio decide si se puede
+    // (lanza InvalidOperationException si el estado no lo permite).
+    private async Task EliminarUltimaAsync(AsignacionMiniDto u)
+    {
+        _menuHistAbierto = null;
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar la asignacion '{u.NombreServicio}'? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        try
+        {
+            await Svc.EliminarAsignacionAsync(u.Id, await Actor());
+            _ultimas.RemoveAll(x => x.Id == u.Id);
+            _ok = "Asignacion eliminada.";
+            _error = null;
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; _ok = null; }
+        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; _ok = null; }
+    }
 
     private async Task Guardar()
     {

@@ -162,8 +162,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Where(a => a.PacienteId == pacienteId)
             .OrderByDescending(a => a.CreatedAt)
             .Take(n)
-            .Select(a => new AsignacionMiniDto(a.Id, a.NombreServicio, a.TipoServicio, a.Cantidad,
-                a.FechaInicio, a.FechaFinal, a.Estado.ToString(), a.ContratoCodigo, a.CreatedAt))
+            .Select(a => new AsignacionMiniDto(
+                a.Id, a.NombreServicio, a.TipoServicio, a.Cantidad,
+                a.FechaInicio, a.FechaFinal, a.Estado.ToString(), a.ContratoCodigo, a.CreatedAt,
+                a.CodigoAutorizacion, a.AnioServicio, a.MesVigencia, a.MesFinal, a.Observaciones))
             .ToListAsync(ct);
     }
 
@@ -222,6 +224,31 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     {
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
         if (a is null) { return false; }
+
+        // Guarda contra borrar asignaciones que ya estan en uso por Coordinacion. Una
+        // asignacion entra en estado Asignado cuando el coordinador le crea turnos; no
+        // tiene sentido eliminarla desde /asignacion porque dejaria turnos huerfanos.
+        // Tambien evitamos tocar las Cerradas (ya facturadas o terminadas).
+        if (a.Estado == AsignacionEstado.Asignado)
+        {
+            throw new InvalidOperationException(
+                "No se puede eliminar: la asignacion ya esta tomada por Coordinacion. Quitala desde alli primero.");
+        }
+        if (a.Estado == AsignacionEstado.Cerrado)
+        {
+            throw new InvalidOperationException(
+                "No se puede eliminar: la asignacion esta cerrada.");
+        }
+        // Defensa adicional: si por alguna razon hay turnos asociados pero el estado
+        // sigue Pendiente, tampoco la dejamos borrar.
+        var tieneTurnos = await db.AsignacionTurnos
+            .AnyAsync(t => t.AsignacionId == asignacionId, ct);
+        if (tieneTurnos)
+        {
+            throw new InvalidOperationException(
+                "No se puede eliminar: la asignacion tiene turnos creados por Coordinacion.");
+        }
+
         db.Asignaciones.Remove(a);
         await db.SaveChangesAsync(ct);
         return true;

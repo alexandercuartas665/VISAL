@@ -37,11 +37,15 @@ public sealed record ServicioCatalogoDto(
     Guid Id, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, decimal? Tarifa,
     string? CodigoInterno, string? Historia, string? Clasificacion, string? Modalidad);
 
-/// <summary>Fila del historico (ultimos N) del paciente.</summary>
+/// <summary>Fila del historico (ultimos N) del paciente. Incluye todos los datos
+/// de la programacion (autorizacion, periodo y observaciones) para que el menu
+/// "Copiar programacion" de la tarjeta pueda pre-llenar el formulario lateral.</summary>
 public sealed record AsignacionMiniDto(
     Guid Id, string NombreServicio, string TipoServicio, int Cantidad,
     DateOnly FechaInicio, DateOnly? FechaFinal, string Estado,
-    string ContratoCodigo, DateTimeOffset CreadoEn);
+    string ContratoCodigo, DateTimeOffset CreadoEn,
+    string? CodigoAutorizacion, short? AnioServicio,
+    short? MesVigencia, short? MesFinal, string? Observaciones);
 
 /// <summary>Fila del grid "Servicios No Asignados" en /coordinacion. Incluye paciente y contrato.</summary>
 public sealed record AsignacionPendienteDto(

@@ -90,6 +90,12 @@ public sealed class NotaMedicaService(IApplicationDbContext db, ITenantContext t
         entity.Estado = ParseEstado(req.Estado);
         entity.Criticidad = ParseCriticidad(req.Criticidad);
         entity.FirmaDataUrl = string.IsNullOrWhiteSpace(req.FirmaDataUrl) ? entity.FirmaDataUrl : req.FirmaDataUrl;
+        // Solo seteamos el especialista en la creacion, no lo sobreescribimos
+        // despues - el primer guardado marca quien hizo la nota.
+        if (string.IsNullOrWhiteSpace(entity.EspecialistaNombre) && !string.IsNullOrWhiteSpace(req.EspecialistaNombre))
+        {
+            entity.EspecialistaNombre = req.EspecialistaNombre.Trim();
+        }
 
         await db.SaveChangesAsync(ct);
 

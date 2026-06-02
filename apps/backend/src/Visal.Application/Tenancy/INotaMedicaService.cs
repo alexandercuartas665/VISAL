@@ -41,7 +41,8 @@ public sealed record GuardarNotaRequest(
     string Contenido,
     string Estado,
     string Criticidad,
-    string? FirmaDataUrl);
+    string? FirmaDataUrl,
+    string? EspecialistaNombre = null);
 
 public sealed record NotaDocumentoDto(
     Guid Id,

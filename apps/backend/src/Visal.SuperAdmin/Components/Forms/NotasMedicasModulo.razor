@@ -364,14 +364,63 @@ else if (_tabSel == "Ver Historial")
             <span class="ms-auto"></span>
             <button class="btn btn-outline-primary btn-sm" @onclick="RefrescarHistorial" disabled="@_busy">&#128260; Refrescar</button>
         </div>
-        @if (_historialPaciente.Count == 0)
+
+        @* ---- Barra de filtros ---- *@
+        <div class="nm-hist-filtros">
+            <div class="ase-f">
+                <label>Desde</label>
+                <input type="date" class="form-control form-control-sm" @bind="_histDesde" />
+            </div>
+            <div class="ase-f">
+                <label>Hasta</label>
+                <input type="date" class="form-control form-control-sm" @bind="_histHasta" />
+            </div>
+            <div class="ase-f">
+                <label>Especialista / Doctor</label>
+                <select class="form-select form-select-sm" @bind="_histEspecialista">
+                    <option value="">Todos</option>
+                    @foreach (var esp in EspecialistasDistintos())
+                    {
+                        <option value="@esp">@esp</option>
+                    }
+                </select>
+            </div>
+            <div class="ase-f">
+                <label>Estado</label>
+                <select class="form-select form-select-sm" @bind="_histEstado">
+                    <option value="">Todos</option>
+                    <option value="Definitivo">Definitivo</option>
+                    <option value="Parcial">Parcial</option>
+                </select>
+            </div>
+            <div class="ase-f">
+                <label>Criticidad</label>
+                <select class="form-select form-select-sm" @bind="_histCriticidad">
+                    <option value="">Todas</option>
+                    <option value="Estable">Estable</option>
+                    <option value="Vigilancia">Vigilancia</option>
+                    <option value="Alerta">Alerta</option>
+                    <option value="Critico">Critico</option>
+                </select>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm nm-hist-clear" @onclick="LimpiarFiltrosHistorial" title="Limpiar filtros">&#10006; Limpiar</button>
+        </div>
+        <div class="nm-hist-resumen">
+            Mostrando <strong>@_historialFiltrado.Count</strong> de @_historialPaciente.Count notas.
+        </div>
+
+        @if (_historialFiltrado.Count == 0)
         {
-            <div class="ase-empty">No hay notas previas registradas para este paciente.</div>
+            <div class="ase-empty">
+                @(_historialPaciente.Count == 0
+                    ? "No hay notas previas registradas para este paciente."
+                    : "Ningun resultado con los filtros aplicados.")
+            </div>
         }
         else
         {
             <div class="nm-cards-grid">
-                @foreach (var n in _historialPaciente)
+                @foreach (var n in _historialFiltrado)
                 {
                     <div class="nm-card-mini @CritClass(n.Criticidad)">
                         <div class="nm-card-h">
@@ -467,6 +516,14 @@ else if (_tabSel == "Ver Historial")
     .nm-w-280 { min-width: 220px; max-width: 320px; }
     .nm-counts { font-size:13px; color:#0f172a; }
     .nm-counts strong { font-size:18px; color:#1565c0; }
+
+    /* Filtros de Ver Historial */
+    .nm-hist-filtros { display:grid; grid-template-columns:repeat(5, 1fr) auto; gap:10px; align-items:end; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:10px; }
+    .nm-hist-filtros .ase-f { display:flex; flex-direction:column; gap:4px; }
+    .nm-hist-filtros label { font-size:11px; color:#475569; text-transform:uppercase; letter-spacing:.04em; font-weight:600; margin:0; }
+    .nm-hist-clear { align-self:end; }
+    .nm-hist-resumen { font-size:12px; color:#64748b; margin-bottom:10px; }
+    .nm-hist-resumen strong { color:#0f172a; }
 
     /* Cards reusables para Notas y Ver Historial */
     .nm-cards-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; }
@@ -607,6 +664,57 @@ else if (_tabSel == "Ver Historial")
     private DateOnly? _filHasta;
     private NotaMedicaDto? _filaSeleccionada;
 
+    // Filtros del tab Ver Historial (tarjetas)
+    private DateOnly? _histDesde;
+    private DateOnly? _histHasta;
+    private string _histEspecialista = "";
+    private string _histEstado = "";
+    private string _histCriticidad = "";
+
+    /// <summary>Aplica los filtros de Ver Historial al listado completo.</summary>
+    private List<NotaMedicaTarjetaDto> _historialFiltrado => _historialPaciente
+        .Where(n => !_histDesde.HasValue || n.FechaNota >= _histDesde.Value)
+        .Where(n => !_histHasta.HasValue || n.FechaNota <= _histHasta.Value)
+        .Where(n => string.IsNullOrEmpty(_histEspecialista) ||
+                    string.Equals(n.EspecialistaNombre, _histEspecialista, StringComparison.OrdinalIgnoreCase))
+        .Where(n => string.IsNullOrEmpty(_histEstado) ||
+                    string.Equals(n.Estado, _histEstado, StringComparison.OrdinalIgnoreCase))
+        .Where(n => string.IsNullOrEmpty(_histCriticidad) ||
+                    string.Equals(n.Criticidad, _histCriticidad, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    /// <summary>Lista unica de nombres de especialista del historial (para el dropdown).</summary>
+    private IEnumerable<string> EspecialistasDistintos() =>
+        _historialPaciente
+            .Where(n => !string.IsNullOrWhiteSpace(n.EspecialistaNombre))
+            .Select(n => n.EspecialistaNombre!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x);
+
+    private void LimpiarFiltrosHistorial()
+    {
+        _histDesde = null;
+        _histHasta = null;
+        _histEspecialista = "";
+        _histEstado = "";
+        _histCriticidad = "";
+    }
+
+    /// <summary>Nombre legible del profesional logueado (claim Name o email).</summary>
+    private async Task<string?> GetEspecialistaNombreAsync()
+    {
+        if (AuthState is null) { return null; }
+        try
+        {
+            var st = await AuthState;
+            return st.User.Identity?.Name
+                ?? st.User.FindFirst(ClaimTypes.Name)?.Value
+                ?? st.User.FindFirst(ClaimTypes.Email)?.Value
+                ?? st.User.FindFirst("name")?.Value;
+        }
+        catch { return null; }
+    }
+
     private List<NotaMedicaDto> _notasFiltradas => _notas
         .Where(n => !_filDesde.HasValue || n.FechaNota >= _filDesde.Value)
         .Where(n => !_filHasta.HasValue || n.FechaNota <= _filHasta.Value)
@@ -716,13 +824,15 @@ else if (_tabSel == "Ver Historial")
         {
             TimeOnly? hora = TimeOnly.TryParse(_borrador.HoraNotaStr, out var hh) ? hh : null;
             int? sesion = int.TryParse(_borrador.SessionNoStr, out var ss) ? ss : (int?)SessionNoCtx;
+            var especialista = await GetEspecialistaNombreAsync();
             var req = new GuardarNotaRequest(
                 _borrador.Id, hid, pid, AsignacionTurnoIdCtx, sesion,
                 _borrador.FechaNota ?? DateOnly.FromDateTime(DateTime.Today),
                 hora, _borrador.Contenido!,
                 definitivo ? "Definitivo" : "Parcial",
                 _borrador.Criticidad ?? "Estable",
-                null);
+                null,
+                especialista);
             var saved = await NotaSvc.GuardarAsync(req, Guid.Empty);
             _ok = definitivo ? "Nota guardada como DEFINITIVA." : "Nota guardada como PARCIAL.";
             _borrador.Id = saved.Id;

@@ -49,13 +49,17 @@ public sealed record AsignacionMiniDto(
     short? MesVigencia, short? MesFinal, string? Observaciones,
     string ServicioId, string? Modulo);
 
-/// <summary>Fila del grid "Servicios No Asignados" en /coordinacion. Incluye paciente y contrato.</summary>
+/// <summary>Fila del grid "Servicios No Asignados" en /coordinacion. Incluye paciente y contrato.
+/// TurnosCoordinados es la suma de Cantidad de los AsignacionTurnos creados para esta
+/// asignacion — sirve para distinguir "Parcial" (algun turno pero no todos) de
+/// "Pendiente" (cero turnos) cuando el filtro es TODOS.</summary>
 public sealed record AsignacionPendienteDto(
     Guid Id, int Orden, string PacienteNombre, string PacienteDocumento, string PacienteTipoDoc,
     string NombreServicio, int Cantidad, string? Observaciones,
     string TipoServicio, string ContratoCodigo, string CodigoServicio,
     DateOnly FechaInicio, DateOnly? FechaFinal,
-    string? CodigoAutorizacion, DateTimeOffset CreadoEn, string EstadoTexto);
+    string? CodigoAutorizacion, DateTimeOffset CreadoEn, string EstadoTexto,
+    int TurnosCoordinados);
 
 /// <summary>Profesional disponible para asignar al servicio (alimenta "Seleccione Medico Especialista").</summary>
 public sealed record EspecialistaDto(Guid Id, string NumeroDocumento, string NombreCompleto, string? TipoProfesional);

@@ -122,6 +122,7 @@
                                         <th>Paciente</th>
                                         <th>Servicio</th>
                                         <th>Cantidad</th>
+                                        <th>Estado</th>
                                         <th>Observaciones</th>
                                         <th>Tipo</th>
                                         <th>Contrato</th>
@@ -131,6 +132,7 @@
                                 <tbody>
                                     @foreach (var p in _pendientes)
                                     {
+                                        var (label, cls) = EstadoTag(p);
                                         <tr class="@(_solicitudSel?.Id == p.Id ? "cd-row-sel" : "")">
                                             <td><input type="checkbox" /></td>
                                             <td><button class="btn btn-outline-primary btn-sm" title="Cargar a la derecha" @onclick="() => CargarSolicitud(p)">&#9998;</button></td>
@@ -138,6 +140,7 @@
                                             <td>@p.PacienteNombre</td>
                                             <td>@p.NombreServicio</td>
                                             <td class="text-center">@p.Cantidad</td>
+                                            <td><span class="cd-estado-pill @cls">@label</span></td>
                                             <td class="cd-obs">@p.Observaciones</td>
                                             <td>@p.TipoServicio</td>
                                             <td class="mono">@p.ContratoCodigo</td>
@@ -305,7 +308,14 @@ else
     .cd-rform .ase-f-wide { grid-column: span 2; }
     .cd-rform .ase-f-wide-2 { grid-column: span 2; }
     .cd-rform .ase-f-wide-3 { grid-column: span 4; }
-    /* Fila "Seleccione Medico Especialista / Turnos" en su propia linea full width.
+    /* Pills de estado en el grid "Servicios No Asignados" (col Estado). */
+    .cd-estado-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:10.5px;
+                      font-weight:700; text-transform:uppercase; letter-spacing:.03em; white-space:nowrap; }
+    .cd-est-pendiente { background:#fef3c7; color:#92400e; }
+    .cd-est-parcial   { background:#e0e7ff; color:#3730a3; }
+    .cd-est-asignado  { background:#dcfce7; color:#166534; }
+    .cd-est-cerrado   { background:#e5e7eb; color:#374151; }
+    /* Fila Seleccione Medico Especialista / Turnos en su propia linea full width.
        El select toma la mayoria del espacio (flex:1) para que el nombre del profesional
        y su tipo se vean completos. */
     .cd-especialista-row { margin-top: 4px; }
@@ -550,4 +560,20 @@ else
         7 => "Julio", 8 => "Agosto", 9 => "Septiembre", 10 => "Octubre", 11 => "Noviembre", 12 => "Diciembre",
         _ => "--"
     };
+
+    // Calcula (etiqueta, cssClass) para la pill de estado del grid:
+    //   Pendiente   -> sin turnos coordinados y estado=Pendiente
+    //   Parcial     -> con turnos coordinados pero estado=Pendiente (no completa todavia)
+    //   Asignado    -> estado=Asignado (sum turnos == Cantidad)
+    //   Cerrado     -> estado=Cerrado (terminado / facturado)
+    private static (string label, string css) EstadoTag(AsignacionPendienteDto p)
+    {
+        if (string.Equals(p.EstadoTexto, "Asignado", StringComparison.OrdinalIgnoreCase))
+        { return ("Asignado", "cd-est-asignado"); }
+        if (string.Equals(p.EstadoTexto, "Cerrado", StringComparison.OrdinalIgnoreCase))
+        { return ("Cerrado", "cd-est-cerrado"); }
+        if (p.TurnosCoordinados > 0 && p.TurnosCoordinados < p.Cantidad)
+        { return ($"Parcial ({p.TurnosCoordinados}/{p.Cantidad})", "cd-est-parcial"); }
+        return ("Pendiente", "cd-est-pendiente");
+    }
 }

@@ -314,6 +314,15 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto, p.TipoDocumento })
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
+        // Suma de turnos ya creados por asignacion -> para mostrar "Parcial" en el grid
+        // cuando hay turnos coordinados pero aun no completan la cantidad pedida.
+        var asigIds = asigs.Select(a => a.Id).ToList();
+        var turnosPorAsig = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => asigIds.Contains(t.AsignacionId))
+            .GroupBy(t => t.AsignacionId)
+            .Select(g => new { AsignacionId = g.Key, Total = g.Sum(t => t.Cantidad) })
+            .ToDictionaryAsync(x => x.AsignacionId, x => x.Total, ct);
+
         // El "Orden" visible en la grilla es un numero corrido por created_at (mas reciente primero -> 1, 2, ...).
         var orderedById = asigs
             .Select((a, idx) => new { a.Id, Orden = idx + 1 })
@@ -322,6 +331,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return asigs.Select(a =>
         {
             pacs.TryGetValue(a.PacienteId, out var p);
+            turnosPorAsig.TryGetValue(a.Id, out var coordinados);
             return new AsignacionPendienteDto(
                 a.Id,
                 orderedById[a.Id],
@@ -338,7 +348,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 a.FechaFinal,
                 a.CodigoAutorizacion,
                 a.CreatedAt,
-                a.Estado.ToString());
+                a.Estado.ToString(),
+                coordinados);
         }).ToList();
     }
 

@@ -156,7 +156,7 @@
                             <span class="hc-tab-badge">@_medCount</span>
                         }
                         @* Badge con conteo en la pestana de servicios *@
-                        @if (t == "Ordenes a Servicios" && _servCount > 0)
+                        @if (t == "Ordenes servicios Propias" && _servCount > 0)
                         {
                             <span class="hc-tab-badge">@_servCount</span>
                         }
@@ -204,7 +204,7 @@
                         <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
                                            OnCountChanged="@(c => _medCount = c)" />
                     }
-                    else if (_tabSel == "Ordenes a Servicios")
+                    else if (_tabSel == "Ordenes servicios Propias")
                     {
                         <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
                                         OnCountChanged="@(c => _servCount = c)" />
@@ -449,7 +449,7 @@
     private string _busqueda = "";
 
     private readonly string[] _tabs = new[] {
-        "Historial", "Ordenes medicamento", "Ordenes a Servicios",
+        "Historial", "Ordenes medicamento", "Ordenes servicios Propias",
         "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
     };
     private string _tabSel = "Historial";
@@ -460,7 +460,7 @@
     /// <summary>Conteo de medicamentos para badge en la pestana. Se mantiene
     /// sincronizado via OnCountChanged del componente OrdenMedicamentos.</summary>
     private int _medCount;
-    /// <summary>Conteo de servicios para badge en la pestana "Ordenes a Servicios".</summary>
+    /// <summary>Conteo de servicios para badge en la pestana "Ordenes servicios Propias".</summary>
     private int _servCount;
     /// <summary>Conteo de incapacidades para badge en la pestana "Ordenes incapacidad".</summary>
     private int _incCount;

@@ -68,6 +68,7 @@
                             <label>Mes Vigente</label>
                             <div class="cd-input-row">
                                 <select class="form-select form-select-sm" @bind="_mes">
+                                    <option value="0">(Todos los meses)</option>
                                     @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
                                 </select>
                                 <button class="btn btn-outline-secondary btn-sm" @onclick="MesActual">Mes Actual</button>
@@ -335,7 +336,9 @@ else
     private string _tipoSel = "";
     private AsignacionEstadoFiltro _estado = AsignacionEstadoFiltro.Pendientes;
     private int _anio = DateTime.Now.Year;
-    private int _mes = DateTime.Now.Month;
+    // 0 = "(Todos los meses)" — sin filtro. Es el default para que el coordinador
+    // no se le escapen asignaciones de meses anteriores al abrir la pagina.
+    private int _mes = 0;
     private string _noOrden = "";
     private string _doc = "";
 
@@ -400,7 +403,9 @@ else
         try
         {
             var modulos = string.IsNullOrEmpty(_tipoSel) ? _modulos : new List<string> { _tipoSel };
-            _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, _mes,
+            // _mes == 0 significa "todos los meses" -> no enviamos filtro al servicio.
+            int? mesFiltro = _mes >= 1 && _mes <= 12 ? _mes : null;
+            _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
                 string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
                 string.IsNullOrWhiteSpace(_doc) ? null : _doc)).ToList();
             _solicitudSel = null;
@@ -415,7 +420,8 @@ else
     {
         _tipoSel = ""; _noOrden = ""; _doc = "";
         _estado = AsignacionEstadoFiltro.Pendientes;
-        _anio = DateTime.Now.Year; _mes = DateTime.Now.Month;
+        // Volvemos al default ancho: ano actual + todos los meses (no esconder nada).
+        _anio = DateTime.Now.Year; _mes = 0;
         _pendientes = new(); _solicitudSel = null; _especialistas = new();
     }
 

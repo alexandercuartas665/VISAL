@@ -66,6 +66,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinica> HistoriasClinicas => Set<HistoriaClinica>();
     public DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos => Set<HistoriaClinicaMedicamento>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
+    public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
+    public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
@@ -545,6 +547,36 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Medicamento).WithMany().HasForeignKey(x => x.MedicamentoId)
                 .OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+        });
+
+        modelBuilder.Entity<NotaMedica>(b =>
+        {
+            b.Property(x => x.CodigoUnico).HasMaxLength(20);
+            b.Property(x => x.Contenido).HasColumnType("text").IsRequired();
+            b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
+            b.Property(x => x.FirmaDataUrl).HasColumnType("text");
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.FechaNota });
+            b.HasIndex(x => new { x.TenantId, x.PacienteId, x.FechaNota });
+            b.HasIndex(x => new { x.TenantId, x.Estado });
+            b.HasIndex(x => new { x.TenantId, x.Criticidad });
+        });
+
+        modelBuilder.Entity<NotaMedicaDocumento>(b =>
+        {
+            b.Property(x => x.NombreOriginal).HasMaxLength(255).IsRequired();
+            b.Property(x => x.RutaArchivo).HasMaxLength(500).IsRequired();
+            b.Property(x => x.TipoMime).HasMaxLength(120);
+            b.Property(x => x.Categoria).HasMaxLength(80);
+            b.Property(x => x.TipoTerapia).HasMaxLength(80);
+            b.Property(x => x.Mes).HasMaxLength(20);
+            b.Property(x => x.Anotaciones).HasColumnType("text");
+            b.HasOne(x => x.NotaMedica).WithMany().HasForeignKey(x => x.NotaMedicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.NotaMedicaId });
         });
 
         modelBuilder.Entity<HistoriaClinica>(b =>

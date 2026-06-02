@@ -123,4 +123,15 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
         await db.SaveChangesAsync(ct);
         return true;
     }
+
+    public async Task<Guid?> BuscarUltimaAbiertaPorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
+    {
+        // Si hay varias abiertas (raro pero posible si el profesional cerro sesion
+        // sin cerrar la HC), tomamos la mas reciente.
+        return await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.PacienteId == pacienteId && h.Estado == HistoriaClinicaEstado.Abierta)
+            .OrderByDescending(h => h.FechaApertura)
+            .Select(h => (Guid?)h.Id)
+            .FirstOrDefaultAsync(ct);
+    }
 }

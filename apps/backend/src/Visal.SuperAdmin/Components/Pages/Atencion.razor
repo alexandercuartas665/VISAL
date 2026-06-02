@@ -6,6 +6,7 @@
 @using Visal.SuperAdmin.Components.Forms
 @inject IAtencionProfesionalService Svc
 @inject IAsignacionService AsigSvc
+@inject IHistoriaClinicaService HcSvc
 
 <PageTitle>Mis Servicios Asignados - Visal</PageTitle>
 
@@ -146,7 +147,9 @@ else
             <NotasMedicasModulo NombrePacienteCtx="@sel.NombrePaciente"
                                 DocumentoPacienteCtx="@sel.NumeroDocPaciente"
                                 SessionNoCtx="@sel.SessionNo"
-                                AsignacionTurnoIdCtx="@sel.AsignacionTurnoId" />
+                                AsignacionTurnoIdCtx="@sel.AsignacionTurnoId"
+                                PacienteId="@sel.PacienteId"
+                                HistoriaClinicaId="@_hcIdParaNotas" />
         </div>
     </div>
 }
@@ -201,6 +204,7 @@ else
 
     private MiServicioAsignadoDto? _showHistoriaSel;
     private MiServicioAsignadoDto? _showNotaSel;
+    private Guid? _hcIdParaNotas;
     private PacienteAsignacionDto? _pacienteCtx;
 
     private string? _error, _ok;
@@ -242,8 +246,14 @@ else
 
     private void OnFiltroChanged(ChangeEventArgs e) => _filtroPac = e.Value?.ToString() ?? "";
 
-    private void AbrirNotas(MiServicioAsignadoDto s) => _showNotaSel = s;
-    private void CerrarNotas() => _showNotaSel = null;
+    private async Task AbrirNotas(MiServicioAsignadoDto s)
+    {
+        // Resolver la HC abierta mas reciente del paciente para asociar las notas.
+        // Si no hay, el modulo mostrara mensaje pidiendo iniciar una HC primero.
+        _hcIdParaNotas = await HcSvc.BuscarUltimaAbiertaPorPacienteAsync(s.PacienteId);
+        _showNotaSel = s;
+    }
+    private void CerrarNotas() { _showNotaSel = null; _hcIdParaNotas = null; }
 
     private async Task AbrirHistoria(MiServicioAsignadoDto s)
     {

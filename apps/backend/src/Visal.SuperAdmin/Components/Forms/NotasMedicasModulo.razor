@@ -1,273 +1,344 @@
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject INotaMedicaService NotaSvc
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+
 @*
-   Modulo reutilizable de Notas Medicas.
-   Se invoca como submodulo desde /atencion recibiendo paciente + sesion como contexto.
-   No tiene @page: no es ruta independiente.
+   Modulo reutilizable de Notas Medicas. Se invoca como submodulo desde
+   /atencion recibiendo paciente + sesion + HistoriaClinicaId como contexto.
 *@
 
 <div class="nm-header">
     <div>
         <h1 class="nm-title">&#9994; Notas Medicas</h1>
-        <div class="nm-subtitle">Modulo Profesional de Terapias</div>
+        <div class="nm-subtitle">Modulo Profesional</div>
     </div>
-    <button class="btn btn-primary nm-btn-gradient">&#128190; Guardado Definitivo</button>
+    <div class="nm-header-right">
+        @if (_borrador is not null && !string.IsNullOrEmpty(_borrador.Id?.ToString()))
+        {
+            <small class="text-muted">Editando: @_borrador.CodigoUnico</small>
+        }
+    </div>
 </div>
 
 <div class="nm-tabs">
     @foreach (var t in _tabs)
     {
-        <button class="nm-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">@t</button>
+        <button class="nm-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">
+            @t
+            @if (t == "Notas")
+            {
+                <span class="nm-tab-badge">@_conteo.Definitivas/@_conteo.Parciales</span>
+            }
+        </button>
     }
 </div>
 
+@* =================== TAB DILIGENCIAMIENTO =================== *@
 @if (_tabSel == "Diligenciamiento")
 {
-    <div class="ase-card nm-panel">
-        <div class="nm-row">
-            <div class="ase-f">
-                <label>Seleccionar Fecha Nota</label>
-                <input type="date" class="form-control form-control-sm" @bind="_fechaNota" />
+    if (HistoriaClinicaId is null || PacienteId is null)
+    {
+        <div class="ase-card nm-panel"><div class="ase-empty">Selecciona o inicia una historia para registrar notas.</div></div>
+    }
+    else
+    {
+        <div class="ase-card nm-panel">
+            @if (_error is not null) { <div class="ase-alert">@_error</div> }
+            @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+            <div class="nm-row">
+                <div class="ase-f">
+                    <label>Seleccionar Fecha Nota</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_borrador.FechaNota" />
+                </div>
+                <div class="ase-f nm-col-2">
+                    <label>Nombre Paciente</label>
+                    <input class="form-control form-control-sm asg-ro" readonly value="@NombrePacienteCtx" />
+                </div>
+                <div class="ase-f">
+                    <label>Documento Paciente</label>
+                    <input class="form-control form-control-sm asg-ro mono" readonly value="@DocumentoPacienteCtx" />
+                </div>
             </div>
-            <div class="ase-f nm-col-2">
-                <label>Nombre Paciente</label>
-                <input class="form-control form-control-sm asg-ro" readonly value="@_nombrePaciente" />
+            <div class="nm-row">
+                <div class="ase-f">
+                    <label>Codigo Unico Nota</label>
+                    <input class="form-control form-control-sm asg-ro mono" readonly value="@_borrador.CodigoUnico" />
+                </div>
+                <div class="ase-f">
+                    <label>Hora Nota</label>
+                    <select class="form-select form-select-sm" @bind="_borrador.HoraNotaStr">
+                        <option value="">Selecciona...</option>
+                        @for (int h = 6; h <= 20; h++)
+                        {
+                            <option value="@($"{h:00}:00")">@($"{h:00}:00")</option>
+                            <option value="@($"{h:00}:30")">@($"{h:00}:30")</option>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Criticidad</label>
+                    <select class="form-select form-select-sm" @bind="_borrador.Criticidad">
+                        <option value="Estable">Estable</option>
+                        <option value="Vigilancia">Vigilancia</option>
+                        <option value="Alerta">Alerta</option>
+                        <option value="Critico">Critico</option>
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Sesion No</label>
+                    <input class="form-control form-control-sm mono" @bind="_borrador.SessionNoStr" />
+                </div>
             </div>
-            <div class="ase-f">
-                <label>Documento Paciente</label>
-                <input class="form-control form-control-sm asg-ro mono" readonly value="@_docPaciente" />
+            <div class="ase-f ase-f-wide nm-row-full">
+                <label>Contenido de la Nota</label>
+                <textarea class="form-control form-control-sm" rows="12" @bind="_borrador.Contenido"
+                          placeholder="Describe la atencion, hallazgos, plan, recomendaciones..."></textarea>
+            </div>
+            <div class="nm-acciones-center">
+                <button class="btn btn-outline-secondary" @onclick="() => GuardarAsync(false)" disabled="@_busy">
+                    @(_busy && !_guardandoDef ? "Guardando..." : "Guardado Parcial")
+                </button>
+                <button class="btn btn-primary nm-btn-gradient" @onclick="() => GuardarAsync(true)" disabled="@_busy">
+                    @(_busy && _guardandoDef ? "Guardando..." : "Guardado Definitivo")
+                </button>
+                <button class="btn btn-outline-danger" @onclick="NuevoBorrador" disabled="@_busy">Cancelar</button>
             </div>
         </div>
-        <div class="nm-row">
-            <div class="ase-f">
-                <label>Codigo Unico Nota</label>
-                <input class="form-control form-control-sm asg-ro mono" readonly value="@_codNota" />
-            </div>
-            <div class="ase-f">
-                <label>Hora Nota</label>
-                <select class="form-select form-select-sm" @bind="_horaNota">
-                    <option value="">Selecciona...</option>
-                    @for (int h = 6; h <= 20; h++)
-                    {
-                        <option value="@($"{h:00}:00")">@($"{h:00}:00")</option>
-                        <option value="@($"{h:00}:30")">@($"{h:00}:30")</option>
-                    }
-                </select>
-            </div>
-            <div class="ase-f">
-                <label>Fecha Agregada Nota</label>
-                <input class="form-control form-control-sm asg-ro" readonly value="@_fechaAgregada" />
-            </div>
-            <div class="ase-f">
-                <label>Sesion No</label>
-                <input class="form-control form-control-sm mono" @bind="_sesionNo" />
-            </div>
-        </div>
-        <div class="ase-f ase-f-wide nm-row-full">
-            <label>Contenido de la Nota</label>
-            <textarea class="form-control form-control-sm" rows="12" @bind="_contenido"
-                      placeholder="Describe la atencion, hallazgos, plan, recomendaciones..."></textarea>
-        </div>
-        <div class="nm-acciones-center">
-            <button class="btn btn-outline-secondary">Guardado Parcial</button>
-            <button class="btn btn-primary nm-btn-gradient">Guardado Definitivo</button>
-            <button class="btn btn-outline-danger">Cancelar</button>
-        </div>
-    </div>
+    }
 }
 
-@if (_tabSel == "Notas Completadas")
+@* =================== TAB NOTAS (antes "Notas Completadas") =================== *@
+else if (_tabSel == "Notas")
 {
     <div class="ase-card nm-panel">
         <div class="nm-row-inline">
-            <label class="nm-lbl-inline">Paciente:</label>
-            <select class="form-select form-select-sm nm-w-280" @bind="_filPaciente">
-                <option value="">Todos</option>
-                <option value="1144099887">MARIA GOMEZ</option>
-                <option value="1010101010">JUAN CARLOS PEREZ MOLINA</option>
-                <option value="2020202020">LUIS FERNANDO GONZALEZ TORRES</option>
-            </select>
-            <button class="btn btn-outline-secondary btn-sm">Ver Todos</button>
-        </div>
-        <div class="nm-row-inline">
-            <label class="nm-lbl-inline">Desde:</label>
-            <input type="date" class="form-control form-control-sm nm-w-150" @bind="_filDesde" />
-            <label class="nm-lbl-inline">Hasta:</label>
-            <input type="date" class="form-control form-control-sm nm-w-150" @bind="_filHasta" />
-            <span class="nm-sep">|</span>
-            <label class="nm-lbl-inline">Descargar Notas:</label>
-            <button class="btn btn-outline-secondary btn-sm">Generar Reporte</button>
-        </div>
-        <div class="nm-row-inline">
-            <button class="btn btn-outline-primary btn-sm">Ver Nota</button>
-            <button class="btn btn-outline-secondary btn-sm">Generar Informes Fin</button>
-            <button class="btn btn-outline-success btn-sm">Crear Cuenta de Cobro</button>
+            <span class="nm-counts">
+                <strong>@_conteo.Definitivas</strong> definitivas
+                <span class="nm-sep">/</span>
+                <strong>@_conteo.Parciales</strong> parciales
+            </span>
+            <span class="ms-auto"></span>
+            <button class="btn btn-outline-primary btn-sm" @onclick="RefrescarNotas" disabled="@_busy">&#128260; Refrescar</button>
         </div>
 
-        <div class="nm-grid-wrap">
-            <table class="table table-sm nm-tbl">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" /></th>
-                        <th>CodInt</th>
-                        <th>CodAsign</th>
-                        <th>Orden</th>
-                        <th>Tipo Terapia</th>
-                        <th>Sesion</th>
-                        <th>Completado</th>
-                        <th>Paciente ID</th>
-                        <th>Paciente</th>
-                        <th>Profesional</th>
-                        <th>Fecha Nota</th>
-                        <th>Contenido</th>
-                        <th>Mes Asignado</th>
-                        <th>Detalle Servicio</th>
-                        <th>Cod Servicio</th>
-                        <th>Contrato</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @if (_notasCompletas.Count == 0)
-                    {
-                        <tr><td colspan="16" class="ase-empty">No hay notas completadas. Cuando registres atenciones en /atencion, apareceran aqui.</td></tr>
-                    }
-                    @foreach (var n in _notasCompletas)
-                    {
-                        <tr>
-                            <td><input type="checkbox" /></td>
-                            <td class="mono">@n.CodInt</td>
-                            <td class="mono">@n.CodAsign</td>
-                            <td>@n.Orden</td>
-                            <td>@n.TipoTerapia</td>
-                            <td class="text-center">@n.SesionNo</td>
-                            <td><span class="nm-pill-ok">COMPLETO</span></td>
-                            <td class="mono">@n.NoDocPaciente</td>
-                            <td>@n.NomPaciente</td>
-                            <td>@n.Profesional</td>
-                            <td>@n.Fecha.ToString("dd/MM/yyyy")</td>
-                            <td class="nm-truncate">@n.Nota</td>
-                            <td>@n.MesAsignado</td>
-                            <td>@n.DetalleServicio</td>
-                            <td class="mono">@n.CodServicio</td>
-                            <td class="mono">@n.Contrato</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+        @if (_notas.Count == 0)
+        {
+            <div class="ase-empty">Aun no hay notas registradas para esta historia.</div>
+        }
+        else
+        {
+            <div class="nm-cards-grid">
+                @foreach (var n in _notas)
+                {
+                    <div class="nm-card-mini @CritClass(n.Criticidad)">
+                        <div class="nm-card-h">
+                            <span class="nm-card-fecha">@n.FechaNota.ToString("dd/MM/yyyy") @(n.HoraNota is TimeOnly h ? h.ToString("HH:mm") : "")</span>
+                            @if (n.Estado == "Definitivo")
+                            {
+                                <span class="nm-pill nm-pill-def">DEFINITIVO</span>
+                            }
+                            else
+                            {
+                                <span class="nm-pill nm-pill-par">PARCIAL</span>
+                            }
+                        </div>
+                        <div class="nm-card-cod">@n.CodigoUnico @if (n.SessionNo is int s) { <span class="nm-sess">Sesion @s</span> }</div>
+                        <div class="nm-card-body">@(n.Contenido.Length > 220 ? n.Contenido.Substring(0,220) + "..." : n.Contenido)</div>
+                        <div class="nm-card-f">
+                            <small>@n.EspecialistaNombre</small>
+                            <small class="nm-card-crit">@n.Criticidad</small>
+                        </div>
+                        @if (n.Estado == "Parcial")
+                        {
+                            <button class="btn btn-link btn-sm nm-card-edit" @onclick="() => CargarEnBorrador(n)">Editar</button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@* =================== TAB SEGUIMIENTO (KANBAN) =================== *@
+else if (_tabSel == "Seguimiento")
+{
+    <div class="ase-card nm-panel">
+        <div class="nm-row-inline">
+            <strong>Seguimiento por criticidad</strong>
+            <span class="ms-auto"></span>
+            <small class="text-muted">Cambia el dropdown de cada nota para moverla de columna.</small>
+        </div>
+        <div class="nm-kanban">
+            @foreach (var col in _kanbanCols)
+            {
+                var items = _notas.Where(n => n.Criticidad == col).ToList();
+                <div class="nm-kanban-col">
+                    <div class="nm-kanban-h @CritClass(col)">
+                        <span>@col</span>
+                        <span class="nm-kanban-count">@items.Count</span>
+                    </div>
+                    <div class="nm-kanban-body">
+                        @if (items.Count == 0)
+                        {
+                            <div class="nm-kanban-empty">Sin notas</div>
+                        }
+                        @foreach (var n in items)
+                        {
+                            <div class="nm-kanban-card @CritClass(n.Criticidad)">
+                                <div class="nm-card-fecha">@n.FechaNota.ToString("dd/MM/yyyy")</div>
+                                <div class="nm-kanban-prev">@(n.Contenido.Length > 90 ? n.Contenido.Substring(0,90) + "..." : n.Contenido)</div>
+                                <select class="form-select form-select-sm" value="@n.Criticidad"
+                                        @onchange="@(e => MoverEnKanban(n, e.Value?.ToString()))">
+                                    @foreach (var c in _kanbanCols) { <option value="@c">@c</option> }
+                                </select>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
         </div>
     </div>
 }
 
-@if (_tabSel == "Firma")
+@* =================== TAB FIRMA =================== *@
+else if (_tabSel == "Firma")
 {
     <div class="ase-card nm-panel nm-firma">
         <h6 class="nm-firma-h">Ingrese Firma Paciente:</h6>
-        <div class="nm-firma-acciones-top">
-            <button class="btn btn-outline-secondary btn-sm" disabled>Limpiar</button>
-        </div>
         <div class="nm-firma-canvas">
             <div class="nm-firma-placeholder">Area de firma 450 x 175 (pendiente de cableado JS).</div>
         </div>
         <div class="nm-firma-acciones">
-            <button class="btn btn-primary nm-btn-gradient">&#128190; Guardar</button>
-            <button class="btn btn-outline-danger">Cancelar</button>
+            <button class="btn btn-primary nm-btn-gradient" disabled>&#128190; Guardar</button>
+            <button class="btn btn-outline-danger" disabled>Cancelar</button>
         </div>
     </div>
 }
 
-@if (_tabSel == "Seguimiento")
+@* =================== TAB DOCUMENTOS EXTERNOS =================== *@
+else if (_tabSel == "Documentos Externos")
 {
     <div class="ase-card nm-panel">
-        <div class="nm-placeholder">
-            <div class="nm-placeholder-t">Seguimiento de notas</div>
-            <div class="nm-placeholder-d">Pendiente de implementacion. Mostrara el historial de seguimiento de la atencion del paciente.</div>
-        </div>
-    </div>
-}
-
-@if (_tabSel == "Documentos Externos")
-{
-    <div class="ase-card nm-panel">
-        <div class="nm-row-inline">
-            <label class="nm-lbl-inline">Paciente:</label>
-            <select class="form-select form-select-sm nm-w-280" @bind="_extPaciente">
-                <option value="">Selecciona paciente...</option>
-                <option value="1144099887">MARIA GOMEZ</option>
-                <option value="1010101010">JUAN CARLOS PEREZ MOLINA</option>
-            </select>
-        </div>
-        <div class="nm-row-inline">
-            <label class="nm-lbl-inline">Nombre del Archivo:</label>
-            <select class="form-select form-select-sm nm-w-280" @bind="_extTipoArchivo">
-                <option value="">Seleccione tipo de archivo...</option>
-                <option value="firmas">Lista de firmas</option>
-                <option value="escala">Escala</option>
-                <option value="formato">Formato</option>
-            </select>
-        </div>
-        <div class="nm-row-inline">
-            <label class="nm-lbl-inline">Tipo de Terapia:</label>
-            <select class="form-select form-select-sm nm-w-280" @bind="_extTipoTerapia">
-                <option value="">Selecciona tipo de terapia...</option>
-                <option>FISIOTERAPEUTA</option>
-                <option>FONOAUDIOLOGIA</option>
-                <option>TERAPIAOCUPACIONAL</option>
-                <option>TERAPIARESPIRATORIA</option>
-                <option>NEBULIZACION</option>
-                <option>TRAQUEOSTOMIA</option>
-            </select>
-            <label class="nm-lbl-inline">Mes:</label>
-            <select class="form-select form-select-sm nm-w-150" @bind="_extMes">
-                <option value="">Selecciona mes...</option>
-                @foreach (var m in new[] { "ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE" })
-                {
-                    <option>@m</option>
-                }
-            </select>
-        </div>
-
-        <div class="nm-doc-grid">
-            <div class="nm-doc-card">
-                <div class="nm-doc-h">Anotaciones</div>
-                <textarea class="form-control form-control-sm" rows="3" placeholder="Anotaciones de la imagen..." @bind="_extAnotaciones"></textarea>
-                <hr />
-                <button class="btn btn-outline-primary btn-sm" disabled>&#128206; Subir archivo</button>
-                <small class="text-muted">Pendiente: integracion con storage.</small>
+        @if (_borrador?.Id is null)
+        {
+            <div class="ase-empty">Para subir documentos primero guarda la nota como parcial o definitiva.</div>
+        }
+        else
+        {
+            <div class="nm-row-inline">
+                <label class="nm-lbl-inline">Categoria:</label>
+                <select class="form-select form-select-sm nm-w-280" @bind="_docCategoria">
+                    <option value="">Seleccione...</option>
+                    <option>Lista de firmas</option>
+                    <option>Escala</option>
+                    <option>Formato</option>
+                    <option>Examen</option>
+                    <option>Otros</option>
+                </select>
             </div>
-            <div class="nm-doc-card">
-                <div class="nm-doc-h">Carpetas</div>
-                <div class="nm-folder-tree">
-                    <div>&#128193; HC</div>
-                    <div class="indent">&#128459; mayo 2026</div>
-                    <div class="indent">&#128459; abril 2026</div>
-                    <div>&#128193; Imagenes</div>
-                    <div class="indent">&#128459; mayo 2026</div>
+            <div class="nm-row-inline">
+                <label class="nm-lbl-inline">Tipo de Terapia:</label>
+                <select class="form-select form-select-sm nm-w-280" @bind="_docTipoTerapia">
+                    <option value="">Selecciona...</option>
+                    <option>FISIOTERAPEUTA</option>
+                    <option>FONOAUDIOLOGIA</option>
+                    <option>TERAPIAOCUPACIONAL</option>
+                    <option>TERAPIARESPIRATORIA</option>
+                    <option>NEBULIZACION</option>
+                    <option>TRAQUEOSTOMIA</option>
+                </select>
+                <label class="nm-lbl-inline">Mes:</label>
+                <select class="form-select form-select-sm nm-w-150" @bind="_docMes">
+                    <option value="">Selecciona...</option>
+                    @foreach (var m in new[] { "ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE" })
+                    {
+                        <option>@m</option>
+                    }
+                </select>
+            </div>
+            <div class="nm-doc-grid">
+                <div class="nm-doc-card">
+                    <div class="nm-doc-h">Subir archivo</div>
+                    <textarea class="form-control form-control-sm" rows="3" placeholder="Anotaciones del archivo..." @bind="_docAnotaciones"></textarea>
+                    <hr />
+                    <InputFile OnChange="OnDocSeleccionado" class="form-control form-control-sm" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx" />
+                    @if (_docSubiendo) { <div class="text-muted small">Subiendo...</div> }
+                </div>
+                <div class="nm-doc-card nm-doc-list">
+                    <div class="nm-doc-h">Archivos adjuntos (@_documentos.Count)</div>
+                    @if (_documentos.Count == 0)
+                    {
+                        <div class="nm-doc-empty">Sin archivos.</div>
+                    }
+                    else
+                    {
+                        @foreach (var d in _documentos)
+                        {
+                            <div class="nm-doc-row">
+                                <a href="@d.RutaArchivo" target="_blank" class="nm-doc-nm">&#128206; @d.NombreOriginal</a>
+                                <div class="nm-doc-meta">
+                                    @if (!string.IsNullOrEmpty(d.Categoria)) { <span class="nm-doc-badge">@d.Categoria</span> }
+                                    @if (!string.IsNullOrEmpty(d.TipoTerapia)) { <span class="nm-doc-badge">@d.TipoTerapia</span> }
+                                    @if (!string.IsNullOrEmpty(d.Mes)) { <span class="nm-doc-badge">@d.Mes</span> }
+                                    <small>@FormatBytes(d.Tamano)</small>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(d.Anotaciones)) { <small class="text-muted">@d.Anotaciones</small> }
+                            </div>
+                        }
+                    }
                 </div>
             </div>
-            <div class="nm-doc-card nm-doc-viewer">
-                <div class="nm-doc-h">Visor de documentos</div>
-                <div class="nm-doc-empty">Selecciona un documento para previsualizarlo.</div>
-            </div>
-        </div>
+        }
     </div>
 }
 
-@if (_tabSel == "Ver Historias")
+@* =================== TAB VER HISTORIAL (notas anteriores del paciente) =================== *@
+else if (_tabSel == "Ver Historial")
 {
     <div class="ase-card nm-panel">
         <div class="nm-row-inline">
-            <label class="nm-lbl-inline">Paciente:</label>
-            <select class="form-select form-select-sm nm-w-280" @bind="_histPaciente">
-                <option value="">Todos</option>
-                <option>MARIA GOMEZ</option>
-                <option>JUAN CARLOS PEREZ MOLINA</option>
-            </select>
-            <button class="btn btn-outline-secondary btn-sm">Ver Todos</button>
+            <strong>Notas previas de @NombrePacienteCtx</strong>
             <span class="ms-auto"></span>
-            <button class="btn btn-outline-primary btn-sm">Ver Historia</button>
+            <button class="btn btn-outline-primary btn-sm" @onclick="RefrescarHistorial" disabled="@_busy">&#128260; Refrescar</button>
         </div>
-        <label class="nm-lbl-inline">Historias:</label>
-        <div class="nm-historias-area">
-            <div class="ase-empty">Selecciona un paciente y presiona "Ver Historia".</div>
-        </div>
+        @if (_historialPaciente.Count == 0)
+        {
+            <div class="ase-empty">No hay notas previas registradas para este paciente.</div>
+        }
+        else
+        {
+            <div class="nm-cards-grid">
+                @foreach (var n in _historialPaciente)
+                {
+                    <div class="nm-card-mini @CritClass(n.Criticidad)">
+                        <div class="nm-card-h">
+                            <span class="nm-card-fecha">@n.FechaNota.ToString("dd/MM/yyyy") @(n.HoraNota is TimeOnly h ? h.ToString("HH:mm") : "")</span>
+                            @if (n.Estado == "Definitivo")
+                            {
+                                <span class="nm-pill nm-pill-def">DEFINITIVO</span>
+                            }
+                            else
+                            {
+                                <span class="nm-pill nm-pill-par">PARCIAL</span>
+                            }
+                        </div>
+                        <div class="nm-card-cod">@n.CodigoUnico @if (n.SessionNo is int s) { <span class="nm-sess">Sesion @s</span> }</div>
+                        @if (!string.IsNullOrWhiteSpace(n.FormatoCodigo))
+                        {
+                            <div class="nm-card-fmt">@n.FormatoNombre (@n.FormatoCodigo)</div>
+                        }
+                        <div class="nm-card-body">@n.ContenidoPreview</div>
+                        <div class="nm-card-f">
+                            <small><strong>@n.EspecialistaNombre</strong></small>
+                            <small class="nm-card-crit">@n.Criticidad</small>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
     </div>
 }
 
@@ -276,12 +347,13 @@
     .nm-title { margin: 0; font-size: 22px; font-weight: 700; color: #2c3e50; }
     .nm-subtitle { font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
     .nm-btn-gradient { background: linear-gradient(135deg, #4a90e2, #00d2ff); border: none; color: #fff; padding: 8px 18px; border-radius: 8px; font-weight: 600; }
-    .nm-btn-gradient:hover { transform: translateY(-1px); color: #fff; }
 
     .nm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
-    .nm-tab { padding: 10px 18px; background: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3); border-radius: 12px; color: #7f8c8d; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .3s; }
+    .nm-tab { padding: 10px 18px; background: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3); border-radius: 12px; color: #7f8c8d; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .3s; display:inline-flex; align-items:center; gap:8px; }
     .nm-tab:hover { background: rgba(255,255,255,.9); transform: translateY(-1px); }
     .nm-tab.sel { background: linear-gradient(135deg, #4a90e2, #00d2ff); color: #fff; border-color: transparent; }
+    .nm-tab-badge { background:rgba(255,255,255,.25); color:#fff; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+    .nm-tab:not(.sel) .nm-tab-badge { background:#e2e8f0; color:#1565c0; }
 
     .nm-panel { padding: 22px; }
     .nm-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 18px; }
@@ -293,99 +365,249 @@
 
     .nm-row-inline { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
     .nm-lbl-inline { font-size: 11px; color: #7f8c8d; font-weight: 600; text-transform: uppercase; margin: 0; }
-    .nm-sep { color: #cbd5e1; }
+    .nm-sep { color: #cbd5e1; margin: 0 6px; }
     .nm-w-150 { max-width: 150px; }
     .nm-w-280 { min-width: 220px; max-width: 320px; }
+    .nm-counts { font-size:13px; color:#0f172a; }
+    .nm-counts strong { font-size:18px; color:#1565c0; }
 
-    .nm-grid-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 480px; }
-    .nm-tbl { margin: 0; font-size: 12px; min-width: 100%; }
-    .nm-tbl thead th { position: sticky; top: 0; background: #eff6ff; color: #1e40af; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #bfdbfe; white-space: nowrap; }
-    .nm-tbl td { padding: 8px 10px; font-size: 11.5px; }
-    .nm-pill-ok { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 11px; }
-    .nm-truncate { max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Cards reusables para Notas y Ver Historial */
+    .nm-cards-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; }
+    .nm-card-mini { background:#fff; border:1px solid #e2e8f0; border-left:4px solid #cbd5e1; border-radius:10px; padding:12px 14px; position:relative; }
+    .nm-card-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+    .nm-card-fecha { font-size:12px; font-weight:700; color:#0f172a; }
+    .nm-card-cod { font-family:'JetBrains Mono','Consolas',monospace; font-size:11px; color:#64748b; margin-bottom:6px; }
+    .nm-sess { background:#eff6ff; color:#1565c0; padding:1px 6px; border-radius:4px; margin-left:6px; }
+    .nm-card-fmt { font-size:11px; color:#1565c0; font-style:italic; margin-bottom:6px; }
+    .nm-card-body { font-size:12.5px; color:#334155; line-height:1.4; max-height:5.6em; overflow:hidden; }
+    .nm-card-f { display:flex; justify-content:space-between; margin-top:8px; padding-top:6px; border-top:1px solid #f1f5f9; }
+    .nm-card-crit { font-weight:700; color:#475569; }
+    .nm-card-edit { position:absolute; top:6px; right:6px; padding:0 6px; font-size:11px; }
 
-    .nm-firma { text-align: center; }
-    .nm-firma-h { text-align: left; font-weight: 700; color: #0f172a; margin-bottom: 12px; }
-    .nm-firma-acciones-top { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-    .nm-firma-canvas { border: 2px solid #cbd5e1; border-radius: 8px; background: #fff; padding: 60px 0; max-width: 480px; margin: 0 auto; }
-    .nm-firma-placeholder { color: #94a3b8; font-style: italic; }
-    .nm-firma-acciones { display: flex; justify-content: space-between; margin-top: 20px; max-width: 480px; margin-left: auto; margin-right: auto; }
+    /* Pills de estado */
+    .nm-pill { font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; letter-spacing:.04em; }
+    .nm-pill-def { background:#dcfce7; color:#166534; }
+    .nm-pill-par { background:#fef3c7; color:#92400e; }
 
-    .nm-placeholder { padding: 50px 30px; text-align: center; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; }
-    .nm-placeholder-t { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
-    .nm-placeholder-d { font-size: 13px; color: #64748b; }
+    /* Colores por criticidad (borde izquierdo) */
+    .nm-crit-Estable { border-left-color:#10b981; }
+    .nm-crit-Vigilancia { border-left-color:#f59e0b; }
+    .nm-crit-Alerta { border-left-color:#f97316; }
+    .nm-crit-Critico { border-left-color:#dc2626; }
 
-    .nm-doc-grid { display: grid; grid-template-columns: 220px 200px 1fr; gap: 14px; margin-top: 16px; }
-    .nm-doc-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
-    .nm-doc-h { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
-    .nm-folder-tree { font-size: 12.5px; color: #0f172a; }
-    .nm-folder-tree > div { padding: 4px 0; }
-    .nm-folder-tree .indent { padding-left: 18px; color: #475569; }
-    .nm-doc-viewer { min-height: 240px; }
-    .nm-doc-empty { color: #94a3b8; font-style: italic; padding: 30px 0; text-align: center; }
+    /* Kanban */
+    .nm-kanban { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
+    .nm-kanban-col { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; display:flex; flex-direction:column; min-height:300px; }
+    .nm-kanban-h { padding:10px 12px; background:#fff; border-bottom:1px solid #e2e8f0; border-radius:10px 10px 0 0; display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:13px; border-left:4px solid #cbd5e1; }
+    .nm-kanban-h.nm-crit-Estable { border-left-color:#10b981; color:#065f46; }
+    .nm-kanban-h.nm-crit-Vigilancia { border-left-color:#f59e0b; color:#92400e; }
+    .nm-kanban-h.nm-crit-Alerta { border-left-color:#f97316; color:#9a3412; }
+    .nm-kanban-h.nm-crit-Critico { border-left-color:#dc2626; color:#7f1d1d; }
+    .nm-kanban-count { background:#1565c0; color:#fff; font-size:11px; padding:1px 8px; border-radius:999px; }
+    .nm-kanban-body { padding:10px; display:flex; flex-direction:column; gap:8px; flex:1; }
+    .nm-kanban-card { background:#fff; border-radius:8px; padding:10px; border:1px solid #e2e8f0; border-left:3px solid #cbd5e1; }
+    .nm-kanban-prev { font-size:11.5px; color:#475569; margin:4px 0 6px; }
+    .nm-kanban-empty { font-size:11px; color:#94a3b8; font-style:italic; text-align:center; padding:12px; }
 
-    .nm-historias-area { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #f8f9fa; min-height: 220px; margin-top: 8px; }
-    .asg-ro { background: #f1f5f9; }
+    /* Documentos */
+    .nm-doc-grid { display:grid; grid-template-columns:280px 1fr; gap:14px; margin-top:16px; }
+    .nm-doc-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px; }
+    .nm-doc-h { font-size:11px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; }
+    .nm-doc-empty { color:#94a3b8; font-style:italic; padding:20px 0; text-align:center; }
+    .nm-doc-list { max-height:480px; overflow:auto; }
+    .nm-doc-row { padding:8px 0; border-bottom:1px solid #f1f5f9; }
+    .nm-doc-nm { display:block; font-weight:700; color:#1565c0; text-decoration:none; font-size:13px; margin-bottom:2px; }
+    .nm-doc-meta { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .nm-doc-badge { font-size:10px; background:#eff6ff; color:#1565c0; padding:2px 7px; border-radius:999px; font-weight:600; }
+
+    .nm-firma { text-align:center; }
+    .nm-firma-h { text-align:left; font-weight:700; color:#0f172a; margin-bottom:12px; }
+    .nm-firma-canvas { border:2px solid #cbd5e1; border-radius:8px; background:#fff; padding:60px 0; max-width:480px; margin:0 auto; }
+    .nm-firma-placeholder { color:#94a3b8; font-style:italic; }
+    .nm-firma-acciones { display:flex; justify-content:space-between; margin-top:20px; max-width:480px; margin:auto; }
+    .asg-ro { background:#f1f5f9; }
 </style>
 
 @code {
-    /// <summary>Nombre del paciente que llega desde /atencion. Si esta seteado, se prefilla y readonly.</summary>
     [Parameter] public string? NombrePacienteCtx { get; set; }
     [Parameter] public string? DocumentoPacienteCtx { get; set; }
     [Parameter] public int? SessionNoCtx { get; set; }
     [Parameter] public Guid? AsignacionTurnoIdCtx { get; set; }
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public Guid? PacienteId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private readonly string[] _tabs = new[] {
-        "Notas Completadas", "Diligenciamiento", "Firma", "Seguimiento", "Documentos Externos", "Ver Historias"
+        "Notas", "Diligenciamiento", "Firma", "Seguimiento", "Documentos Externos", "Ver Historial"
     };
+    private readonly string[] _kanbanCols = new[] { "Estable", "Vigilancia", "Alerta", "Critico" };
     private string _tabSel = "Diligenciamiento";
 
-    private DateOnly? _fechaNota = DateOnly.FromDateTime(DateTime.Today);
-    private string _nombrePaciente = "";
-    private string _docPaciente = "";
-    private string _codNota = "";
-    private string _horaNota = "";
-    private string _fechaAgregada = "";
-    private string _sesionNo = "";
-    private string _contenido = "";
+    private NotaBorrador _borrador = new();
+    private NotaConteoDto _conteo = new(0, 0);
+    private List<NotaMedicaDto> _notas = new();
+    private List<NotaMedicaTarjetaDto> _historialPaciente = new();
+    private List<NotaDocumentoDto> _documentos = new();
+    private bool _busy;
+    private bool _guardandoDef;
+    private bool _docSubiendo;
+    private string? _error;
+    private string? _ok;
 
-    protected override void OnParametersSet()
+    private string _docCategoria = "";
+    private string _docTipoTerapia = "";
+    private string _docMes = "";
+    private string _docAnotaciones = "";
+
+    private Guid? _ultimoHcId;
+
+    protected override async Task OnParametersSetAsync()
     {
-        if (!string.IsNullOrEmpty(NombrePacienteCtx)) { _nombrePaciente = NombrePacienteCtx; }
-        if (!string.IsNullOrEmpty(DocumentoPacienteCtx)) { _docPaciente = DocumentoPacienteCtx; }
-        if (SessionNoCtx is int sn) { _sesionNo = sn.ToString(); }
-        if (AsignacionTurnoIdCtx is Guid g) { _codNota = g.ToString()[..8]; }
-        if (string.IsNullOrEmpty(_fechaAgregada)) { _fechaAgregada = DateTime.Today.ToString("yyyy-MM-dd"); }
+        if (HistoriaClinicaId != _ultimoHcId)
+        {
+            _ultimoHcId = HistoriaClinicaId;
+            NuevoBorrador();
+            await Refrescar();
+        }
     }
 
-    private string _filPaciente = "";
-    private DateOnly? _filDesde;
-    private DateOnly? _filHasta;
-    private List<NotaRow> _notasCompletas = new();
-
-    private string _extPaciente = "";
-    private string _extTipoArchivo = "";
-    private string _extTipoTerapia = "";
-    private string _extMes = "";
-    private string _extAnotaciones = "";
-
-    private string _histPaciente = "";
-
-    private sealed class NotaRow
+    private async Task Refrescar()
     {
-        public string CodInt { get; set; } = "";
-        public string CodAsign { get; set; } = "";
-        public int Orden { get; set; }
-        public string TipoTerapia { get; set; } = "";
-        public int SesionNo { get; set; }
-        public string NoDocPaciente { get; set; } = "";
-        public string NomPaciente { get; set; } = "";
-        public string Profesional { get; set; } = "";
-        public DateOnly Fecha { get; set; }
-        public string Nota { get; set; } = "";
-        public string MesAsignado { get; set; } = "";
-        public string DetalleServicio { get; set; } = "";
-        public string CodServicio { get; set; } = "";
-        public string Contrato { get; set; } = "";
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            _conteo = await NotaSvc.ContarPorHistoriaAsync(hid);
+            _notas = (await NotaSvc.ListarPorHistoriaAsync(hid)).ToList();
+            if (PacienteId is Guid pid)
+            {
+                _historialPaciente = (await NotaSvc.ListarHistorialPacienteAsync(pid)).ToList();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RefrescarNotas() => await Refrescar();
+    private async Task RefrescarHistorial() => await Refrescar();
+
+    private void NuevoBorrador()
+    {
+        _borrador = new NotaBorrador
+        {
+            FechaNota = DateOnly.FromDateTime(DateTime.Today),
+            SessionNoStr = SessionNoCtx?.ToString() ?? "",
+            CodigoUnico = "",
+            Criticidad = "Estable",
+            Contenido = ""
+        };
+        _error = _ok = null;
+    }
+
+    private void CargarEnBorrador(NotaMedicaDto n)
+    {
+        _borrador = new NotaBorrador
+        {
+            Id = n.Id,
+            FechaNota = n.FechaNota,
+            HoraNotaStr = n.HoraNota is TimeOnly t ? t.ToString("HH:mm") : "",
+            SessionNoStr = n.SessionNo?.ToString() ?? "",
+            CodigoUnico = n.CodigoUnico,
+            Criticidad = n.Criticidad,
+            Contenido = n.Contenido
+        };
+        _tabSel = "Diligenciamiento";
+        _ok = null;
+        _error = null;
+    }
+
+    private async Task GuardarAsync(bool definitivo)
+    {
+        if (HistoriaClinicaId is not Guid hid || PacienteId is not Guid pid)
+        {
+            _error = "Falta paciente o historia."; return;
+        }
+        if (string.IsNullOrWhiteSpace(_borrador.Contenido))
+        {
+            _error = "El contenido es obligatorio."; return;
+        }
+
+        _busy = true; _guardandoDef = definitivo; _error = _ok = null;
+        try
+        {
+            TimeOnly? hora = TimeOnly.TryParse(_borrador.HoraNotaStr, out var hh) ? hh : null;
+            int? sesion = int.TryParse(_borrador.SessionNoStr, out var ss) ? ss : (int?)SessionNoCtx;
+            var req = new GuardarNotaRequest(
+                _borrador.Id, hid, pid, AsignacionTurnoIdCtx, sesion,
+                _borrador.FechaNota ?? DateOnly.FromDateTime(DateTime.Today),
+                hora, _borrador.Contenido!,
+                definitivo ? "Definitivo" : "Parcial",
+                _borrador.Criticidad ?? "Estable",
+                null);
+            var saved = await NotaSvc.GuardarAsync(req, Guid.Empty);
+            _ok = definitivo ? "Nota guardada como DEFINITIVA." : "Nota guardada como PARCIAL.";
+            _borrador.Id = saved.Id;
+            _borrador.CodigoUnico = saved.CodigoUnico;
+            await Refrescar();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; _guardandoDef = false; }
+    }
+
+    private async Task MoverEnKanban(NotaMedicaDto n, string? nuevaCritStr)
+    {
+        if (string.IsNullOrWhiteSpace(nuevaCritStr) || nuevaCritStr == n.Criticidad) { return; }
+        await NotaSvc.ActualizarCriticidadAsync(n.Id, nuevaCritStr, Guid.Empty);
+        var idx = _notas.FindIndex(x => x.Id == n.Id);
+        if (idx >= 0) { _notas[idx] = n with { Criticidad = nuevaCritStr }; }
+    }
+
+    private async Task OnDocSeleccionado(InputFileChangeEventArgs e)
+    {
+        if (_borrador.Id is not Guid notaId) { _error = "Guarda la nota primero."; return; }
+        _docSubiendo = true; _error = null;
+        try
+        {
+            var f = e.File;
+            var ext = Path.GetExtension(f.Name);
+            var nombreEnDisco = $"{Guid.NewGuid()}{ext}";
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "notas");
+            Directory.CreateDirectory(dir);
+            var rutaDisco = Path.Combine(dir, nombreEnDisco);
+            await using (var fs = File.Create(rutaDisco))
+            await using (var rs = f.OpenReadStream(20L * 1024 * 1024))
+            {
+                await rs.CopyToAsync(fs);
+            }
+            var rutaWeb = $"/uploads/notas/{nombreEnDisco}";
+
+            var d = await NotaSvc.AdjuntarDocumentoAsync(new AdjuntarDocumentoRequest(
+                notaId, f.Name, rutaWeb, f.ContentType, f.Size,
+                _docCategoria, _docTipoTerapia, _docMes, _docAnotaciones), Guid.Empty);
+            _documentos.Insert(0, d);
+            _docAnotaciones = "";
+        }
+        catch (Exception ex) { _error = "No se pudo subir el archivo: " + ex.Message; }
+        finally { _docSubiendo = false; }
+    }
+
+    private static string CritClass(string crit) => $"nm-crit-{crit}";
+
+    private static string FormatBytes(long b)
+    {
+        if (b < 1024) return $"{b} B";
+        if (b < 1024 * 1024) return $"{b / 1024} KB";
+        return $"{b / (1024 * 1024)} MB";
+    }
+
+    private sealed class NotaBorrador
+    {
+        public Guid? Id { get; set; }
+        public DateOnly? FechaNota { get; set; }
+        public string HoraNotaStr { get; set; } = "";
+        public string SessionNoStr { get; set; } = "";
+        public string CodigoUnico { get; set; } = "";
+        public string Criticidad { get; set; } = "Estable";
+        public string? Contenido { get; set; } = "";
     }
 }

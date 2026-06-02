@@ -54,6 +54,8 @@ public interface IApplicationDbContext
     DbSet<HistoriaClinica> HistoriasClinicas { get; }
     DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos { get; }
     DbSet<Medicamento> Medicamentos { get; }
+    DbSet<NotaMedica> NotasMedicas { get; }
+    DbSet<NotaMedicaDocumento> NotaMedicaDocumentos { get; }
     DbSet<Cie11Config> Cie11Configs { get; }
     DbSet<Pais> Paises { get; }
     DbSet<Departamento> Departamentos { get; }

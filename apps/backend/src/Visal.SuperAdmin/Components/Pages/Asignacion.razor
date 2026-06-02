@@ -18,7 +18,8 @@
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
-@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+@* _ok se renderiza dentro de la columna 3, antes de "Datos del servicio a agregar",
+   para dar feedback contextual al lado de la accion. *@
 
 <div class="asg-grid">
 
@@ -75,16 +76,17 @@
         <div class="ase-card">
             <div class="ase-card-h">2. Seleccione el Servicio</div>
             <div class="ase-form">
-                <div class="ase-f ase-f-wide">
+                <div class="ase-f ase-f-full">
                     <label>Busqueda por servicio</label>
-                    <div class="asg-input-row">
+                    <div class="asg-input-row asg-search-svc">
+                        <button class="btn btn-outline-secondary btn-sm asg-search-ico" title="Buscar" tabindex="-1" type="button">&#128269;</button>
                         <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..."
                                value="@_filtroSvc" @oninput="e => _filtroSvc = e.Value?.ToString() ?? string.Empty" />
-                        <button class="btn btn-outline-secondary btn-sm" title="Filtrar">&#9776;</button>
+                        <button class="btn btn-outline-secondary btn-sm" title="Filtros avanzados">&#9776;</button>
                     </div>
                 </div>
             </div>
-            <div class="asg-grid-wrap">
+            <div class="asg-grid-wrap asg-grid-svc">
                 @if (_serviciosVisibles.Count == 0)
                 {
                     <div class="ase-empty">
@@ -188,8 +190,12 @@
                 }
             </div>
 
+            @* Mensaje contextual: aparece justo encima del bloque "Datos del servicio".
+               Cubre los 3 momentos: preseleccion, agregado al carrito y guardado del lote. *@
+            @if (_ok is not null) { <div class="ase-ok asg-svc-ok">@_ok</div> }
+
             <div class="ase-card-h" style="margin-top:14px;">Datos del servicio a agregar</div>
-            <div class="ase-form">
+            <div class="ase-form asg-form-col3">
                 <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_servicioSel == null)" /></div>
                 <div class="ase-f"><label>INICIO</label><input type="date" class="form-control form-control-sm" @bind="_fechaInicio" disabled="@(_servicioSel == null)" /></div>
                 <div class="ase-f"><label>FINAL</label><input type="date" class="form-control form-control-sm" @bind="_fechaFinal" disabled="@(_servicioSel == null)" /></div>
@@ -325,8 +331,23 @@
     /* La ultima card de cada columna crece para igualar la altura entre las 3. */
     .asg-col > .ase-card:last-child { flex: 1; display: flex; flex-direction: column; }
     .asg-col-full { flex: 1; display: flex; flex-direction: column; }
-    .asg-input-row { display:flex; gap:6px; }
-    .asg-input-row > input, .asg-input-row > select { flex:1; }
+    .asg-input-row { display:flex; gap:6px; min-width:0; }
+    .asg-input-row > input, .asg-input-row > select { flex:1; min-width:0; }
+    /* Busqueda de servicio (card 2): lupa antes del input, separacion contra la tabla. */
+    .asg-search-svc { align-items:center; }
+    .asg-search-ico { background:#f1f5f9; color:#475569; pointer-events:none; }
+    .asg-grid-svc { margin-top:12px; }
+    /* Mensaje "Servicio preseleccionado/agregado" mostrado dentro de la columna 3,
+       justo encima de "Datos del servicio a agregar". */
+    .asg-svc-ok { margin-top:14px; padding:8px 12px; background:#ecfdf5; border:1px solid #a7f3d0;
+                  border-left:3px solid #10b981; border-radius:6px; font-size:12.5px; color:#065f46; }
+    /* Form de la columna 3: en lugar de heredar el grid global de 4 columnas (que es muy
+       angosto en col 3 y desborda en ventanas pequenas), usamos solo 2 columnas internas
+       para que los inputs y la textarea respiren y no se salgan. */
+    .asg-form-col3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .asg-form-col3 .ase-f { min-width:0; }
+    .asg-form-col3 textarea { resize:vertical; max-width:100%; box-sizing:border-box; }
+    .asg-form-col3 input, .asg-form-col3 select { min-width:0; }
     .asg-ro { background: #f1f5f9; color: #475569; }
     .asg-tipos { display: flex; flex-wrap: wrap; gap: 8px; }
     .asg-radio { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1.5px solid #e2e8f0; border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 600; color: #475569; }

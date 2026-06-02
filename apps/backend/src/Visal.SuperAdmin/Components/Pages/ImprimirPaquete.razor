@@ -1,0 +1,442 @@
+@page "/imprimir-paquete/{HcId:guid}"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
+@using Microsoft.AspNetCore.WebUtilities
+@using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
+@inject IHistoriaClinicaService HcSvc
+@inject IAsignacionService AsigSvc
+@inject IFormDefinitionService FormsSvc
+@inject IOrdenMedicamentoService MedSvc
+@inject IOrdenServicioService SrvSvc
+@inject IIncapacidadService IncSvc
+@inject ICertificacionService CertSvc
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@*
+   Vista "paquete": renderiza en una sola pagina varios documentos seleccionados
+   por el especialista (HC + 0..N ordenes). Cada documento queda en su propia
+   pagina al imprimir gracias a page-break-after:always. La lista de docs viene
+   en query string ?docs=HC,MED,SRV,INC,CERT.
+*@
+
+<PageTitle>Paquete de impresion - Visal</PageTitle>
+
+<style>
+    .doc-actions { display:flex; gap:8px; align-items:center; margin:14px auto; max-width:920px; }
+    .doc-actions .dbtn { padding:8px 14px; border:1px solid var(--border); border-radius:8px; background:var(--card); font-size:13px; font-weight:600; cursor:pointer; color:var(--foreground); text-decoration:none; }
+    .doc-actions .dbtn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+    .doc-actions .spacer { flex:1; }
+    .doc-actions .meta { font-size:12px; color:var(--muted-foreground); }
+
+    .pack { max-width:920px; margin: 0 auto; }
+    .pack-doc { background:#fff; color:#000; font-family:'Segoe UI', Arial, sans-serif; font-size:12px; line-height:1.35; border:1px solid #000; margin-bottom: 22px; }
+    .pack-header { border-bottom:1px solid #000; padding:8px 10px; }
+    .pack-hdr-top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .pack-hdr-brand { display:flex; align-items:center; gap:8px; }
+    .pack-hdr-brand svg { width:30px; height:30px; color:#1565c0; }
+    .pack-hdr-logo { max-height:48px; max-width:180px; object-fit:contain; }
+    .pack-hdr-inst { font-size:16px; font-weight:800; color:#1565c0; }
+    .pack-hdr-tag { font-size:10px; font-style:italic; color:#555; }
+    .pack-hdr-nohist { font-size:11px; white-space:nowrap; text-align:right; }
+    .pack-hdr-nohist b { font-size:12px; color:#1565c0; }
+    .pack-hdr-title { text-align:center; font-size:15px; font-weight:800; text-transform:uppercase; margin:6px 0; }
+    .pack-hdr-meta { display:flex; gap:28px; font-size:11px; flex-wrap:wrap; }
+    .pack-hdr-meta b { color:#1565c0; }
+
+    .pack-band { background:#dde7f3; font-weight:800; font-size:11px; padding:4px 8px; text-transform:uppercase; border-bottom:1px solid #000; letter-spacing:.04em; }
+    .pack-sub { font-weight:700; font-size:11px; padding:4px 8px; background:#f3f6fb; border-bottom:1px solid #000; }
+    .pack-para { padding:4px 8px; border-bottom:1px solid #000; color:#222; white-space:pre-wrap; }
+    .pack-grid { display:grid; grid-template-columns: repeat(12, 1fr); }
+    .pack-cell { border-right:1px solid #000; border-bottom:1px solid #000; padding:2px 6px 4px; min-height:34px; }
+    .pack-label { font-size:9px; font-weight:700; text-transform:uppercase; color:#333; }
+    .pack-value { min-height:14px; border-bottom:1px dotted #999; margin-top:4px; padding:1px 2px; font-size:12px; color:#000; white-space:pre-wrap; word-break:break-word; }
+
+    .pack-table { width:100%; border-collapse:collapse; }
+    .pack-table th { border:1px solid #000; background:#dde7f3; font-size:10px; padding:4px 6px; text-align:left; font-weight:700; text-transform:uppercase; }
+    .pack-table td { border:1px solid #000; padding:4px 6px; font-size:11px; vertical-align:top; }
+    .pack-table td.mono { font-family:'JetBrains Mono','Consolas',monospace; font-size:10.5px; }
+    .pack-table td.num { text-align:center; }
+    .pack-empty-row { text-align:center; font-style:italic; color:#666; padding:18px !important; }
+
+    .pack-section { padding:8px 10px; border-bottom:1px solid #000; white-space:pre-wrap; font-size:11.5px; }
+    .pack-section h4 { margin:0 0 4px; font-size:11px; text-transform:uppercase; color:#1565c0; }
+
+    .pack-footer { display:flex; justify-content:space-between; gap:24px; padding:24px 14px 12px; border-top:1px solid #000; font-size:11px; }
+    .pack-firma { flex:1; max-width:280px; }
+    .pack-firma-line { border-top:1px solid #000; padding-top:4px; font-weight:700; }
+    .pack-firma-rol { font-size:10px; color:#555; }
+
+    /* Cada documento es una pagina al imprimir. */
+    .pack-doc { page-break-after: always; break-after: page; }
+    .pack-doc:last-child { page-break-after: auto; break-after: auto; }
+
+    @@media print {
+        .visal-sidebar, .visal-topbar, .doc-actions { display:none !important; }
+        .visal-main, .visal-shell { margin:0 !important; padding:0 !important; }
+        .pack { max-width:none; }
+        .pack-doc { margin-bottom:0; border:1px solid #000; }
+        body { background:#fff !important; }
+        @@page { size: A4; margin: 12mm; }
+    }
+</style>
+
+@if (_loading)
+{
+    <p class="doc-actions">Cargando paquete...</p>
+}
+else if (_hc is null)
+{
+    <p class="doc-actions">Historia clinica no encontrada.</p>
+}
+else
+{
+    <div class="doc-actions">
+        <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
+        <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir todo / Guardar PDF</button>
+        <span class="spacer"></span>
+        <span class="meta">@_docs.Count documento(s) en el paquete</span>
+    </div>
+
+    <div class="pack">
+        @* ============ DOCUMENTO 1: HISTORIA CLINICA ============ *@
+        @if (_incluirHc && _hcSchema is not null)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrHc, _hc.FormatoNombre, "HC", _hc.Id.ToString().Substring(0, 8).ToUpperInvariant(),
+                    $"Apertura: {_hc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+
+                @foreach (var node in _hcSchema.Children)
+                {
+                    <div class="pack-grid" style="grid-column: span 12;">
+                        @if (node.IsSection)
+                        {
+                            @foreach (var ch in node.Children ?? new())
+                            {
+                                @RenderDocNode(ch)
+                            }
+                        }
+                        else
+                        {
+                            @RenderDocNode(node)
+                        }
+                    </div>
+                }
+
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ ORDEN DE MEDICAMENTOS ============ *@
+        @if (_incluirMed && _meds.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrMed, "Orden de Medicamentos", "MED",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th>Medicamento</th>
+                            <th style="width:140px">Posologia</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observacion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in _meds)
+                        {
+                            <tr>
+                                <td class="num">@m.Orden</td>
+                                <td><b>@m.NombreMedicamento</b></td>
+                                <td>@(string.IsNullOrWhiteSpace(m.Posologia) ? "-" : m.Posologia)</td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(m.Cantidad) ? "-" : m.Cantidad)</td>
+                                <td>@(m.Observacion ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ ORDEN A SERVICIOS ============ *@
+        @if (_incluirSrv && _srv.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrSrv, "Orden a Servicios", "SRV",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRV",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:110px">Cod. Servicio</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in _srv)
+                        {
+                            <tr>
+                                <td class="num">@s.Orden</td>
+                                <td class="mono">@(s.CodigoServicio ?? "-")</td>
+                                <td><b>@s.Descripcion</b></td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(s.Cantidad) ? "-" : s.Cantidad)</td>
+                                <td>@(s.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ INCAPACIDADES ============ *@
+        @if (_incluirInc && _inc.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrInc, "Orden de Incapacidad", "INC",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INC",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th>Motivo</th>
+                            <th style="width:90px">Desde</th>
+                            <th style="width:90px">Hasta</th>
+                            <th style="width:50px">Dias</th>
+                            <th style="width:160px">Tipo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var i in _inc)
+                        {
+                            <tr>
+                                <td class="num">@i.Orden</td>
+                                <td>@i.Motivo</td>
+                                <td class="num">@(i.FechaDesde?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td class="num">@(i.FechaHasta?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td class="num">@(i.Dias?.ToString() ?? "-")</td>
+                                <td>@(i.Tipo ?? "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ CERTIFICACIONES ============ *@
+        @if (_incluirCert && _cert.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrCert, "Certificacion Medica", "CERT",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-CERT",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle</div>
+                @foreach (var c in _cert)
+                {
+                    <div class="pack-section">
+                        <h4>#@c.Orden &middot; @c.Titulo</h4>
+                        @c.Contenido
+                    </div>
+                }
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Guid HcId { get; set; }
+
+    private bool _loading = true;
+    private HistoriaClinicaDetailDto? _hc;
+    private PacienteAsignacionDto? _paciente;
+
+    // Que docs incluir, calculados desde ?docs=
+    private List<string> _docs = new();
+    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert;
+
+    // HC: schema + valores
+    private FormSchema? _hcSchema;
+    private Dictionary<string, string?> _valores = new();
+
+    // Forms para encabezado de cada orden (institucion, logo, etc.)
+    private FormDefinitionDetailDto? _fdHc, _fdMed, _fdSrv, _fdInc, _fdCert;
+    private FormSchema _schHc = new(), _schMed = new(), _schSrv = new(), _schInc = new(), _schCert = new();
+    private FormHeader HdrHc => _schHc.Header ?? FormHeader.Default();
+    private FormHeader HdrMed => _schMed.Header ?? FormHeader.Default();
+    private FormHeader HdrSrv => _schSrv.Header ?? FormHeader.Default();
+    private FormHeader HdrInc => _schInc.Header ?? FormHeader.Default();
+    private FormHeader HdrCert => _schCert.Header ?? FormHeader.Default();
+
+    // Items
+    private List<OrdenMedicamentoItemDto> _meds = new();
+    private List<OrdenServicioItemDto> _srv = new();
+    private List<IncapacidadItemDto> _inc = new();
+    private List<CertificacionItemDto> _cert = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        var query = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        var raw = query.TryGetValue("docs", out var v) ? v.ToString() : "HC";
+        _docs = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                   .Select(s => s.ToUpperInvariant())
+                   .ToList();
+        _incluirHc   = _docs.Contains("HC");
+        _incluirMed  = _docs.Contains("MED");
+        _incluirSrv  = _docs.Contains("SRV");
+        _incluirInc  = _docs.Contains("INC");
+        _incluirCert = _docs.Contains("CERT");
+
+        _hc = await HcSvc.GetAsync(HcId);
+        if (_hc is null) { _loading = false; return; }
+        _paciente = await AsigSvc.GetPacienteAsync(_hc.PacienteId);
+
+        // Si va a salir HC, cargar su schema + valores.
+        if (_incluirHc)
+        {
+            _fdHc = await FormsSvc.GetAsync(_hc.FormDefinitionId);
+            if (_fdHc is not null)
+            {
+                try { _schHc = JsonSerializer.Deserialize<FormSchema>(_fdHc.SchemaJson) ?? new(); }
+                catch { _schHc = new(); }
+                _hcSchema = _schHc;
+            }
+            if (!string.IsNullOrWhiteSpace(_hc.ValoresJson))
+            {
+                try { _valores = JsonSerializer.Deserialize<Dictionary<string, string?>>(_hc.ValoresJson) ?? new(); }
+                catch { _valores = new(); }
+            }
+        }
+
+        if (_incluirMed)
+        {
+            _fdMed = await FormsSvc.GetActivoByTipoAsync("ORDEN_MEDICAMENTOS");
+            if (_fdMed is not null) { try { _schMed = JsonSerializer.Deserialize<FormSchema>(_fdMed.SchemaJson) ?? new(); } catch { } }
+            _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+        if (_incluirSrv)
+        {
+            _fdSrv = await FormsSvc.GetActivoByTipoAsync("ORDEN_SERVICIOS");
+            if (_fdSrv is not null) { try { _schSrv = JsonSerializer.Deserialize<FormSchema>(_fdSrv.SchemaJson) ?? new(); } catch { } }
+            _srv = (await SrvSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+        if (_incluirInc)
+        {
+            _fdInc = await FormsSvc.GetActivoByTipoAsync("INCAPACIDADES");
+            if (_fdInc is not null) { try { _schInc = JsonSerializer.Deserialize<FormSchema>(_fdInc.SchemaJson) ?? new(); } catch { } }
+            _inc = (await IncSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+        if (_incluirCert)
+        {
+            _fdCert = await FormsSvc.GetActivoByTipoAsync("CERTIFICADOS");
+            if (_fdCert is not null) { try { _schCert = JsonSerializer.Deserialize<FormSchema>(_fdCert.SchemaJson) ?? new(); } catch { } }
+            _cert = (await CertSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+
+        _loading = false;
+    }
+
+    private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
+
+    // ---- helpers de render ----
+
+    private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea) => __builder =>
+    {
+        <div class="pack-header">
+            <div class="pack-hdr-top">
+                <div class="pack-hdr-brand">
+                    @if (!string.IsNullOrWhiteSpace(hd.LogoUrl))
+                    {
+                        <img class="pack-hdr-logo" src="@hd.LogoUrl" alt="logo" />
+                    }
+                    else
+                    {
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    }
+                    <div>
+                        <div class="pack-hdr-inst">@hd.Institucion</div>
+                        <div class="pack-hdr-tag">@hd.Tagline</div>
+                    </div>
+                </div>
+                <div class="pack-hdr-nohist">
+                    @tipoCorto N°: <b>@ordenNum</b><br />
+                    @fechaLinea<br />
+                    HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
+                </div>
+            </div>
+            <div class="pack-hdr-title">@titulo</div>
+            <div class="pack-hdr-meta">
+                <span><b>Paciente:</b> @(_paciente?.NombreCompleto ?? "-")</span>
+                <span><b>Doc:</b> @(_paciente?.TipoDocumento) @(_paciente?.NumeroDocumento)</span>
+                @if (!string.IsNullOrWhiteSpace(_hc.EspecialistaNombre))
+                {
+                    <span><b>Atiende:</b> @_hc.EspecialistaNombre</span>
+                }
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderFirma(string? nombreProf, string rol) => __builder =>
+    {
+        <div class="pack-footer">
+            <div class="pack-firma">
+                <div class="pack-firma-line">@(nombreProf ?? "Especialista")</div>
+                <div class="pack-firma-rol">@rol</div>
+            </div>
+            <div class="pack-firma">
+                <div class="pack-firma-line">@(_paciente?.NombreCompleto ?? "Paciente")</div>
+                <div class="pack-firma-rol">Recibido por paciente / acudiente</div>
+            </div>
+        </div>
+    };
+
+    // Renderizador minimo del HC schema (clone de HistoriaDoc, simplificado).
+    private RenderFragment RenderDocNode(FormNode n) => __builder =>
+    {
+        if (n.IsText)
+        {
+            <div class="pack-para" style="grid-column: span 12;">@(n.Content ?? "")</div>
+            return;
+        }
+        if (n.IsTable)
+        {
+            <div style="grid-column: span 12; border-bottom:1px solid #000;">
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            @foreach (var col in n.Columns ?? new()) { <th>@col.Label</th> }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @* En el paquete impreso renderizamos 1 fila vacia por columna
+                           (las tablas repetibles se diligencian en la HC en vivo). *@
+                        <tr>
+                            @foreach (var col in n.Columns ?? new()) { <td>&nbsp;</td> }
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            return;
+        }
+        var key = n.Name ?? $"fld:{n.Id}";
+        var val = _valores.TryGetValue(key, out var vv) ? vv : null;
+        <div class="pack-cell" style="grid-column: span 12;">
+            <div class="pack-label">@n.Label</div>
+            <div class="pack-value">@(val ?? "")</div>
+        </div>
+    };
+}

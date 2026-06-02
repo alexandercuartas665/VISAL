@@ -23,12 +23,18 @@ public sealed class RemisionService(IApplicationDbContext db, ITenantContext ten
     {
         // El "capitulo" CUPS vive en Cup.Descripcion (ej: "CapItulo 03 SISTEMA VISUAL").
         // Devolvemos la lista distinta ordenada alfabeticamente con su conteo de procedimientos.
-        return await db.Cups.AsNoTracking()
+        // NOTA: el OrderBy se hace despues de materializar porque EF Core 9 no puede traducir
+        // OrderBy(x => x.Nombre) sobre un GroupBy proyectado a un record (CapituloCupDto).
+        var rows = await db.Cups.AsNoTracking()
             .Where(c => c.Descripcion != null && c.Descripcion != "")
             .GroupBy(c => c.Descripcion!)
-            .Select(g => new CapituloCupDto(g.Key, g.Count()))
-            .OrderBy(x => x.Nombre)
+            .Select(g => new { Nombre = g.Key, Total = g.Count() })
             .ToListAsync(ct);
+
+        return rows
+            .OrderBy(r => r.Nombre, StringComparer.OrdinalIgnoreCase)
+            .Select(r => new CapituloCupDto(r.Nombre, r.Total))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<EspecialidadCupDto>> BuscarEspecialidadesAsync(

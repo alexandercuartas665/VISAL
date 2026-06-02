@@ -159,8 +159,11 @@
     @* ============ COLUMNA 3: Carrito "Servicios Agregados" ============ *@
     <div class="asg-col">
         <div class="ase-card">
-            <div class="ase-card-h">3. Servicios Agregados (@_carrito.Count)
-                <button class="btn btn-primary btn-sm ms-2" title="Eliminar items seleccionados" @onclick="EliminarSeleccionados" disabled="@(_carrito.Count == 0)">Eliminar items</button>
+            <div class="ase-card-h">3. Servicios Agregados (@_carrito.Count)</div>
+            @* Botones del carrito en su propia fila, debajo del titulo. Asi no compiten por
+               ancho con el titulo y no se desbordan a una segunda linea solo cuando se acomodan. *@
+            <div class="asg-carrito-acts">
+                <button class="btn btn-primary btn-sm" title="Eliminar items seleccionados" @onclick="EliminarSeleccionados" disabled="@(_carrito.Count == 0)">Eliminar items</button>
                 <button class="btn btn-danger btn-sm" title="Limpiar carrito" @onclick="LimpiarCarrito" disabled="@(_carrito.Count == 0)">Limpiar items</button>
             </div>
             <div class="asg-carrito">
@@ -218,16 +221,17 @@
                     </select>
                 </div>
                 <div class="ase-f ase-f-wide"><label>Observaciones</label><textarea class="form-control form-control-sm" @bind="_obs" rows="2" disabled="@(_servicioSel == null)"></textarea></div>
-                <div class="ase-f"><label>Cantidad</label>
-                    <div class="asg-input-row">
-                        <input type="number" min="1" class="form-control form-control-sm" @bind="_cantidad" disabled="@(_servicioSel == null)" />
+                @* Fila final: Cantidad + Agregar (de la izquierda) y Guardar registro a la
+                   derecha, todos en linea. Ocupamos el ancho completo (ase-f-wide) y
+                   dejamos que asg-input-row distribuya los 3 controles. *@
+                <div class="ase-f ase-f-wide">
+                    <label>Cantidad</label>
+                    <div class="asg-input-row asg-final-row">
+                        <input type="number" min="1" class="form-control form-control-sm asg-cant-inp" @bind="_cantidad" disabled="@(_servicioSel == null)" />
                         <button class="btn btn-primary btn-sm" @onclick="Agregar" disabled="@(_servicioSel == null)">Agregar</button>
+                        <button class="btn btn-primary btn-sm asg-guardar-btn" @onclick="Guardar" disabled="@(_busy || _carrito.Count == 0 || _paciente == null)">@(_busy ? "Guardando..." : "Guardar registro")</button>
                     </div>
                 </div>
-            </div>
-
-            <div class="ase-actions" style="margin-top:10px;">
-                <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@(_busy || _carrito.Count == 0 || _paciente == null)">@(_busy ? "Guardando..." : "Guardar registro")</button>
             </div>
         </div>
     </div>
@@ -341,6 +345,13 @@
        justo encima de "Datos del servicio a agregar". */
     .asg-svc-ok { margin-top:14px; padding:8px 12px; background:#ecfdf5; border:1px solid #a7f3d0;
                   border-left:3px solid #10b981; border-radius:6px; font-size:12.5px; color:#065f46; }
+    /* Botones de accion del carrito (col 3): fila propia debajo del titulo. */
+    .asg-carrito-acts { display:flex; gap:8px; margin:8px 0 10px; flex-wrap:wrap; }
+    /* Fila final del form col 3 (Cantidad + Agregar + Guardar registro en linea).
+       El input de cantidad se queda pequeno (no se estira), los botones flexibles. */
+    .asg-final-row { align-items:stretch; flex-wrap:wrap; }
+    .asg-final-row .asg-cant-inp { flex: 0 0 72px; text-align:center; }
+    .asg-final-row .asg-guardar-btn { margin-left:auto; }
     /* Form de la columna 3: en lugar de heredar el grid global de 4 columnas (que es muy
        angosto en col 3 y desborda en ventanas pequenas), usamos solo 2 columnas internas
        para que los inputs y la textarea respiren y no se salgan. */

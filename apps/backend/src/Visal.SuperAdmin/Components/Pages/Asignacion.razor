@@ -561,6 +561,14 @@
     private async Task OnContratoChanged(ChangeEventArgs e)
     {
         _contratoIdSel = e.Value?.ToString() ?? "";
+        await CargarServiciosDelContrato();
+    }
+
+    // Carga los servicios y modulos del contrato seleccionado (_contratoIdSel).
+    // Se llama desde OnContratoChanged y desde CopiarProgramacion (que setea el
+    // _contratoIdSel directamente sin disparar el @onchange).
+    private async Task CargarServiciosDelContrato()
+    {
         _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;
         if (Guid.TryParse(_contratoIdSel, out var cid))
         {
@@ -642,13 +650,17 @@
         _menuHistAbierto = _menuHistAbierto == id ? null : id;
     }
 
-    // "Copiar programacion": pre-llena el form de col 3 con los datos de la asignacion
-    // anterior (fechas, periodo, autorizacion, cantidad, observaciones) para que el
-    // operador pueda volver a aplicar la misma programacion a otro servicio rapidamente.
-    // El servicio en si NO se preselecciona — debe elegirse de la grilla de col 1.
-    private void CopiarProgramacion(AsignacionMiniDto u)
+    // "Copiar programacion": replica la asignacion anterior en el form de col 3 dejando
+    // todo listo para Agregar. Carga (1) los datos de programacion (fechas, periodo,
+    // autorizacion, cantidad, observaciones), (2) el contrato matching por codigo,
+    // (3) el modulo y (4) el ServicioCatalogoDto matching por id, para que el boton
+    // Agregar quede habilitado de inmediato.
+    private async Task CopiarProgramacion(AsignacionMiniDto u)
     {
         _menuHistAbierto = null;
+        _error = null;
+
+        // 1) Datos de programacion (siempre se aplican).
         _autorizacion = u.CodigoAutorizacion;
         _fechaInicio = u.FechaInicio;
         _fechaFinal = u.FechaFinal;
@@ -657,8 +669,45 @@
         if (u.AnioServicio is short anio) { _anio = anio.ToString(); }
         if (u.MesVigencia is short mv) { _mesVig = mv; }
         if (u.MesFinal is short mf) { _mesFin = mf; } else { _mesFin = 0; }
+
+        // 2) Localizar el contrato original por codigo. Si no lo encontramos (puede que
+        //    el contrato haya sido archivado / la lista no lo incluya) el operador puede
+        //    escoger uno manual y el resto del form sigue editable.
+        var contrato = _todosContratos.FirstOrDefault(c =>
+            string.Equals(c.CodigoContrato, u.ContratoCodigo, StringComparison.OrdinalIgnoreCase));
+        if (contrato is null)
+        {
+            _ok = $"Programacion copiada de '{u.NombreServicio}'. El contrato original ({u.ContratoCodigo}) ya no esta disponible — selecciona uno manualmente.";
+            return;
+        }
+
+        if (_contratoIdSel != contrato.ContratoId.ToString())
+        {
+            _contratoIdSel = contrato.ContratoId.ToString();
+            await CargarServiciosDelContrato();
+        }
+
+        // 3) Modulo (TipoServicio del legacy mapea al campo Modulo del ServicioContrato).
+        var moduloTarget = !string.IsNullOrWhiteSpace(u.Modulo) ? u.Modulo! : u.TipoServicio;
+        if (_modulos.Contains(moduloTarget))
+        {
+            _moduloSel = moduloTarget;
+        }
+
+        // 4) Pre-seleccionar el ServicioCatalogoDto por id. El ServicioId persistido en
+        //    Asignacion es el Guid del ServicioContrato serializado a string.
+        if (Guid.TryParse(u.ServicioId, out var sid))
+        {
+            var match = _servicios.FirstOrDefault(s => s.Id == sid);
+            if (match != null)
+            {
+                _servicioSel = match;
+                _ok = $"Programacion copiada de '{u.NombreServicio}'. Revisa los datos y presiona Agregar.";
+                return;
+            }
+        }
+
         _ok = $"Programacion copiada de '{u.NombreServicio}'. Selecciona un servicio de la grilla y presiona Agregar.";
-        _error = null;
     }
 
     // "Eliminar" desde la tarjeta del historico. El servicio decide si se puede

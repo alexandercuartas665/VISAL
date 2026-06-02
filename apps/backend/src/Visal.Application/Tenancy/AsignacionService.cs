@@ -165,7 +165,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Select(a => new AsignacionMiniDto(
                 a.Id, a.NombreServicio, a.TipoServicio, a.Cantidad,
                 a.FechaInicio, a.FechaFinal, a.Estado.ToString(), a.ContratoCodigo, a.CreatedAt,
-                a.CodigoAutorizacion, a.AnioServicio, a.MesVigencia, a.MesFinal, a.Observaciones))
+                a.CodigoAutorizacion, a.AnioServicio, a.MesVigencia, a.MesFinal, a.Observaciones,
+                a.ServicioId, a.Modulo))
             .ToListAsync(ct);
     }
 

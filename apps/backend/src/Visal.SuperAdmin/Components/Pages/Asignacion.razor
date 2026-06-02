@@ -219,37 +219,42 @@
             @if (_ok is not null) { <div class="ase-ok asg-svc-ok">@_ok</div> }
 
             <div class="ase-card-h" style="margin-top:14px;">Datos del servicio a agregar</div>
+            @* Los campos del form son editables cuando hay paciente cargado, no requieren
+               que se haya preseleccionado un servicio. Asi el operador puede ajustar la
+               programacion (sea recien escrita o copiada desde una tarjeta) antes de
+               elegir un servicio en la grilla. El boton Agregar si sigue gateado por
+               la preseleccion de servicio, porque sin servicio no hay nada que agregar. *@
             <div class="ase-form asg-form-col3">
-                <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_servicioSel == null)" /></div>
-                <div class="ase-f"><label>INICIO</label><input type="date" class="form-control form-control-sm" @bind="_fechaInicio" disabled="@(_servicioSel == null)" /></div>
-                <div class="ase-f"><label>FINAL</label><input type="date" class="form-control form-control-sm" @bind="_fechaFinal" disabled="@(_servicioSel == null)" /></div>
+                <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_paciente == null)" /></div>
+                <div class="ase-f"><label>INICIO</label><input type="date" class="form-control form-control-sm" @bind="_fechaInicio" disabled="@(_paciente == null)" /></div>
+                <div class="ase-f"><label>FINAL</label><input type="date" class="form-control form-control-sm" @bind="_fechaFinal" disabled="@(_paciente == null)" /></div>
                 <div class="ase-f"><label>Periodo (Año)</label>
-                    <select class="form-select form-select-sm" @bind="_anio" disabled="@(_servicioSel == null)">
+                    <select class="form-select form-select-sm" @bind="_anio" disabled="@(_paciente == null)">
                         <option value="">--</option>
                         @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
                     </select>
                 </div>
                 <div class="ase-f"><label>Mes Vigencia</label>
-                    <select class="form-select form-select-sm" @bind="_mesVig" disabled="@(_servicioSel == null)">
+                    <select class="form-select form-select-sm" @bind="_mesVig" disabled="@(_paciente == null)">
                         <option value="0">--</option>
                         @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
                     </select>
                 </div>
                 <div class="ase-f"><label>Mes final</label>
-                    <select class="form-select form-select-sm" @bind="_mesFin" disabled="@(_servicioSel == null)">
+                    <select class="form-select form-select-sm" @bind="_mesFin" disabled="@(_paciente == null)">
                         <option value="0">--</option>
                         @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
                     </select>
                 </div>
-                <div class="ase-f ase-f-wide"><label>Observaciones</label><textarea class="form-control form-control-sm" @bind="_obs" rows="2" disabled="@(_servicioSel == null)"></textarea></div>
+                <div class="ase-f ase-f-wide"><label>Observaciones</label><textarea class="form-control form-control-sm" @bind="_obs" rows="2" disabled="@(_paciente == null)"></textarea></div>
                 @* Fila final: Cantidad + Agregar (de la izquierda) y Guardar registro a la
                    derecha, todos en linea. Ocupamos el ancho completo (ase-f-wide) y
                    dejamos que asg-input-row distribuya los 3 controles. *@
                 <div class="ase-f ase-f-wide">
                     <label>Cantidad</label>
                     <div class="asg-input-row asg-final-row">
-                        <input type="number" min="1" class="form-control form-control-sm asg-cant-inp" @bind="_cantidad" disabled="@(_servicioSel == null)" />
-                        <button class="btn btn-primary btn-sm" @onclick="Agregar" disabled="@(_servicioSel == null)">Agregar</button>
+                        <input type="number" min="1" class="form-control form-control-sm asg-cant-inp" @bind="_cantidad" disabled="@(_paciente == null)" />
+                        <button class="btn btn-primary btn-sm" @onclick="Agregar" disabled="@(_servicioSel == null)" title="@(_servicioSel == null ? "Selecciona primero un servicio en la grilla" : "Agregar al lote")">Agregar</button>
                         <button class="btn btn-primary btn-sm asg-guardar-btn" @onclick="Guardar" disabled="@(_busy || _carrito.Count == 0 || _paciente == null)">@(_busy ? "Guardando..." : "Guardar registro")</button>
                     </div>
                 </div>

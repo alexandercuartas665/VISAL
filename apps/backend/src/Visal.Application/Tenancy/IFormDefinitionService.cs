@@ -45,4 +45,12 @@ public interface IFormDefinitionService
 
     /// <summary>Actualiza solo las rutas de prefill del formulario, sin tocar schema ni metadatos.</summary>
     Task<bool> UpdatePrefillRoutesAsync(Guid id, string? prefillRoutesJson, Guid actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Devuelve el formulario activo del tenant cuyo Tipo coincide con el parametro.
+    /// Lo usa la impresion de ordenes para resolver "que formulario imprimo cuando
+    /// el profesional pide Orden de Medicamentos / Servicios / etc.". Si hay varios
+    /// activos del mismo tipo, devuelve el ultimo actualizado (mas reciente).
+    /// </summary>
+    Task<FormDefinitionDetailDto?> GetActivoByTipoAsync(string tipo, CancellationToken cancellationToken = default);
 }

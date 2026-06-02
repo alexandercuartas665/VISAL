@@ -14,6 +14,11 @@
         <label>Orden de Medicamentos</label>
         <span class="od-bar-count">@_items.Count item(s)</span>
     </div>
+    <div class="od-bar-right">
+        <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#128424; Imprimir</button>
+    </div>
 </div>
 
 @if (HistoriaClinicaId is null)
@@ -332,6 +337,13 @@ else
         await OrdSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+    }
+
+    /// <summary>Abre la vista imprimible /orden-doc en una nueva pestana del navegador.</summary>
+    private async Task ImprimirAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/ORDEN_MEDICAMENTOS", "_blank");
     }
 
     private sealed class BorradorMed

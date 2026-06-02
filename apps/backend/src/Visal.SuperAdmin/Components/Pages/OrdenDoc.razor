@@ -1,0 +1,356 @@
+@page "/orden-doc/{HcId:guid}/{Tipo}"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
+@inject IHistoriaClinicaService HcSvc
+@inject IAsignacionService AsigSvc
+@inject IFormDefinitionService FormsSvc
+@inject IOrdenMedicamentoService MedSvc
+@inject IOrdenServicioService SrvSvc
+@inject IIncapacidadService IncSvc
+@inject ICertificacionService CertSvc
+@inject IJSRuntime JS
+
+@*
+   Vista documento de una "Orden" emitida durante una atencion. Resuelve el
+   FormDefinition activo por Tipo (ORDEN_MEDICAMENTOS / ORDEN_SERVICIOS /
+   REMISIONES / INCAPACIDADES / CERTIFICADOS) y arma una pagina imprimible:
+   encabezado (del Form), datos del paciente (de la HC), una tabla con los
+   items YA persistidos en la HC para ese tipo, y el pie de firma.
+*@
+
+<PageTitle>@(_titulo) - Visal</PageTitle>
+
+<style>
+    .doc-actions { display: flex; gap: 8px; align-items: center; margin: 14px auto; max-width: 920px; }
+    .doc-actions .dbtn { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; font-weight: 600; cursor: pointer; color: var(--foreground); text-decoration: none; }
+    .doc-actions .dbtn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .doc-actions .spacer { flex: 1; }
+    .doc-actions .meta { font-size: 12px; color: var(--muted-foreground); }
+
+    .doc { max-width: 920px; margin: 0 auto; background: #fff; color: #000; font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; line-height: 1.35; border: 1px solid #000; }
+    .doc-header { border-bottom: 1px solid #000; padding: 8px 10px; }
+    .doc-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .doc-hdr-brand { display: flex; align-items: center; gap: 8px; }
+    .doc-hdr-brand svg { width: 30px; height: 30px; color: #1565c0; }
+    .doc-hdr-logo { max-height: 48px; max-width: 180px; object-fit: contain; }
+    .doc-hdr-inst { font-size: 16px; font-weight: 800; color: #1565c0; letter-spacing: .02em; }
+    .doc-hdr-tag { font-size: 10px; font-style: italic; color: #555; }
+    .doc-hdr-nohist { font-size: 11px; white-space: nowrap; text-align: right; }
+    .doc-hdr-nohist b { font-size: 12px; color: #1565c0; }
+    .doc-hdr-title { text-align: center; font-size: 15px; font-weight: 800; text-transform: uppercase; margin: 6px 0; }
+    .doc-hdr-meta { display: flex; gap: 28px; font-size: 11px; flex-wrap: wrap; }
+    .doc-hdr-meta b { color: #1565c0; }
+
+    .doc-band { background: #dde7f3; font-weight: 800; font-size: 11px; padding: 4px 8px; text-transform: uppercase; border-bottom: 1px solid #000; letter-spacing: .04em; }
+    .doc-table { width: 100%; border-collapse: collapse; }
+    .doc-table th { border: 1px solid #000; background: #dde7f3; font-size: 10px; padding: 4px 6px; text-align: left; font-weight: 700; text-transform: uppercase; }
+    .doc-table td { border: 1px solid #000; padding: 4px 6px; font-size: 11px; vertical-align: top; }
+    .doc-table td.mono { font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 10.5px; }
+    .doc-table td.num { text-align: center; }
+    .doc-empty-row { text-align: center; font-style: italic; color: #666; padding: 18px !important; }
+
+    .doc-section { padding: 8px 10px; border-bottom: 1px solid #000; white-space: pre-wrap; font-size: 11.5px; }
+    .doc-section h4 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; color: #1565c0; }
+
+    .doc-footer { display: flex; justify-content: space-between; gap: 24px; padding: 24px 14px 12px; border-top: 1px solid #000; margin-top: 0; font-size: 11px; }
+    .doc-firma { flex: 1; max-width: 280px; }
+    .doc-firma-line { border-top: 1px solid #000; padding-top: 4px; font-weight: 700; }
+    .doc-firma-rol { font-size: 10px; color: #555; }
+
+    @@media print {
+        .visal-sidebar, .visal-topbar, .doc-actions { display: none !important; }
+        .visal-main, .visal-shell { margin: 0 !important; padding: 0 !important; }
+        .doc { max-width: none; border: 1px solid #000; }
+        body { background: #fff !important; }
+        @@page { size: A4; margin: 12mm; }
+    }
+</style>
+
+@if (_loading)
+{
+    <p class="doc-actions">Cargando orden...</p>
+}
+else if (_hc is null)
+{
+    <p class="doc-actions">Historia clinica no encontrada.</p>
+}
+else if (_form is null)
+{
+    <p class="doc-actions">
+        No hay un formulario activo del tipo <b>@Tipo</b> en este tenant.
+        Crea uno desde <a href="/formularios" target="_blank">/formularios</a> antes de imprimir.
+    </p>
+}
+else
+{
+    <div class="doc-actions">
+        <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
+        <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir / Guardar PDF</button>
+        <span class="spacer"></span>
+        <span class="meta">Formato: <b>@_form.Codigo</b> &middot; @_tipoLabel</span>
+    </div>
+
+    <div class="doc">
+        @* ============ ENCABEZADO (del FormDefinition) ============ *@
+        <div class="doc-header">
+            <div class="doc-hdr-top">
+                <div class="doc-hdr-brand">
+                    @if (!string.IsNullOrWhiteSpace(Hdr.LogoUrl))
+                    {
+                        <img class="doc-hdr-logo" src="@Hdr.LogoUrl" alt="logo" />
+                    }
+                    else
+                    {
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    }
+                    <div>
+                        <div class="doc-hdr-inst">@Hdr.Institucion</div>
+                        <div class="doc-hdr-tag">@Hdr.Tagline</div>
+                    </div>
+                </div>
+                <div class="doc-hdr-nohist">
+                    Orden N°: <b>@_ordenNumero</b><br />
+                    Fecha: @DateTime.Now.ToString("dd/MM/yyyy HH:mm")<br />
+                    HC: <b>@_hc.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
+                </div>
+            </div>
+            <div class="doc-hdr-title">@(_form.Nombre ?? _tipoLabel)</div>
+            <div class="doc-hdr-meta">
+                <span><b>Paciente:</b> @(_paciente?.NombreCompleto ?? "-")</span>
+                <span><b>Doc:</b> @(_paciente?.TipoDocumento) @(_paciente?.NumeroDocumento)</span>
+                @if (!string.IsNullOrWhiteSpace(_hc.EspecialistaNombre))
+                {
+                    <span><b>Atiende:</b> @_hc.EspecialistaNombre</span>
+                }
+            </div>
+        </div>
+
+        @* ============ CUERPO: tabla / texto segun Tipo ============ *@
+        <div class="doc-band">Detalle de la orden</div>
+
+        @switch (Tipo.ToUpperInvariant())
+        {
+            case "ORDEN_MEDICAMENTOS":
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th>Medicamento</th>
+                            <th style="width:140px">Posologia</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observacion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_meds.Count == 0)
+                        {
+                            <tr><td colspan="5" class="doc-empty-row">No hay medicamentos registrados en esta historia.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var m in _meds)
+                            {
+                                <tr>
+                                    <td class="num">@m.Orden</td>
+                                    <td><b>@m.NombreMedicamento</b></td>
+                                    <td>@(string.IsNullOrWhiteSpace(m.Posologia) ? "-" : m.Posologia)</td>
+                                    <td class="num">@(string.IsNullOrWhiteSpace(m.Cantidad) ? "-" : m.Cantidad)</td>
+                                    <td>@(m.Observacion ?? "")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                break;
+
+            case "ORDEN_SERVICIOS":
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:110px">Cod. Servicio</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_srv.Count == 0)
+                        {
+                            <tr><td colspan="5" class="doc-empty-row">No hay servicios registrados en esta historia.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var s in _srv)
+                            {
+                                <tr>
+                                    <td class="num">@s.Orden</td>
+                                    <td class="mono">@(s.CodigoServicio ?? "-")</td>
+                                    <td><b>@s.Descripcion</b></td>
+                                    <td class="num">@(string.IsNullOrWhiteSpace(s.Cantidad) ? "-" : s.Cantidad)</td>
+                                    <td>@(s.Observaciones ?? "")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                break;
+
+            case "INCAPACIDADES":
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th>Motivo</th>
+                            <th style="width:90px">Desde</th>
+                            <th style="width:90px">Hasta</th>
+                            <th style="width:50px">Dias</th>
+                            <th style="width:160px">Tipo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_inc.Count == 0)
+                        {
+                            <tr><td colspan="6" class="doc-empty-row">No hay incapacidades registradas en esta historia.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var i in _inc)
+                            {
+                                <tr>
+                                    <td class="num">@i.Orden</td>
+                                    <td>@i.Motivo</td>
+                                    <td class="num">@(i.FechaDesde?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                    <td class="num">@(i.FechaHasta?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                    <td class="num">@(i.Dias?.ToString() ?? "-")</td>
+                                    <td>@(i.Tipo ?? "-")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                break;
+
+            case "CERTIFICADOS":
+                @if (_cert.Count == 0)
+                {
+                    <div class="doc-section"><i>No hay certificaciones registradas en esta historia.</i></div>
+                }
+                else
+                {
+                    @foreach (var c in _cert)
+                    {
+                        <div class="doc-section">
+                            <h4>#@c.Orden &middot; @c.Titulo</h4>
+                            @c.Contenido
+                        </div>
+                    }
+                }
+                break;
+
+            case "REMISIONES":
+                <div class="doc-section">
+                    <i>Modulo de remisiones en desarrollo. El formulario sera completado en una proxima iteracion.</i>
+                </div>
+                break;
+
+            default:
+                <div class="doc-section">
+                    Tipo de orden desconocido: <b>@Tipo</b>.
+                </div>
+                break;
+        }
+
+        @* ============ PIE: firma del profesional ============ *@
+        <div class="doc-footer">
+            <div class="doc-firma">
+                <div class="doc-firma-line">@(_hc.EspecialistaNombre ?? "Especialista")</div>
+                <div class="doc-firma-rol">Firma del profesional tratante</div>
+            </div>
+            <div class="doc-firma">
+                <div class="doc-firma-line">@(_paciente?.NombreCompleto ?? "Paciente")</div>
+                <div class="doc-firma-rol">Recibido por paciente / acudiente</div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid HcId { get; set; }
+    [Parameter] public string Tipo { get; set; } = "";
+
+    private HistoriaClinicaDetailDto? _hc;
+    private PacienteAsignacionDto? _paciente;
+    private FormDefinitionDetailDto? _form;
+    private FormSchema _schema = new();
+    private bool _loading = true;
+    private string _titulo = "Orden";
+    private string _tipoLabel = "Orden";
+    private string _ordenNumero = "-";
+
+    // Listas por tipo (solo se llena la que aplica).
+    private List<OrdenMedicamentoItemDto> _meds = new();
+    private List<OrdenServicioItemDto> _srv = new();
+    private List<IncapacidadItemDto> _inc = new();
+    private List<CertificacionItemDto> _cert = new();
+
+    private FormHeader Hdr => _schema.Header ?? FormHeader.Default();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _meds = new(); _srv = new(); _inc = new(); _cert = new();
+
+        _tipoLabel = TipoLabel(Tipo);
+        _titulo = $"{_tipoLabel}";
+
+        _hc = await HcSvc.GetAsync(HcId);
+        if (_hc is null) { _loading = false; return; }
+        _paciente = await AsigSvc.GetPacienteAsync(_hc.PacienteId);
+        _form = await FormsSvc.GetActivoByTipoAsync(Tipo);
+        if (_form is not null)
+        {
+            try { _schema = JsonSerializer.Deserialize<FormSchema>(_form.SchemaJson) ?? new(); }
+            catch { _schema = new(); }
+        }
+
+        // Numero corto de orden basado en HC + tipo (visible en el encabezado).
+        _ordenNumero = $"{_hc.Id.ToString().Substring(0,8).ToUpperInvariant()}-{Tipo.Substring(0, Math.Min(4, Tipo.Length))}";
+
+        switch (Tipo.ToUpperInvariant())
+        {
+            case "ORDEN_MEDICAMENTOS":
+                _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                break;
+            case "ORDEN_SERVICIOS":
+                _srv = (await SrvSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                break;
+            case "INCAPACIDADES":
+                _inc = (await IncSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                break;
+            case "CERTIFICADOS":
+                _cert = (await CertSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                break;
+            case "REMISIONES":
+                /* sin servicio aun */
+                break;
+        }
+
+        _loading = false;
+    }
+
+    private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
+
+    private static string TipoLabel(string tipo) => tipo.ToUpperInvariant() switch
+    {
+        "ORDEN_MEDICAMENTOS" => "Orden de Medicamentos",
+        "ORDEN_SERVICIOS"    => "Orden a Servicios",
+        "REMISIONES"         => "Orden de Remision",
+        "INCAPACIDADES"      => "Orden de Incapacidad",
+        "CERTIFICADOS"       => "Certificacion Medica",
+        _                    => "Orden"
+    };
+}

@@ -35,6 +35,18 @@ public sealed class FormDefinitionService : IFormDefinitionService
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<FormDefinitionDetailDto?> GetActivoByTipoAsync(string tipo, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(tipo)) { return null; }
+        var t = tipo.Trim();
+        return await _db.FormDefinitions
+            .AsNoTracking()
+            .Where(f => f.Activo && f.Tipo == t)
+            .OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt)
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<FormDefinitionDetailDto?> SaveAsync(SaveFormDefinitionRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
         var codigo = request.Codigo.Trim();

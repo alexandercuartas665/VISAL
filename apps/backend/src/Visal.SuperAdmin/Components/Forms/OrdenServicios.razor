@@ -17,8 +17,9 @@
         <span class="os-bar-count">@_items.Count item(s)</span>
     </div>
     <div class="os-bar-right">
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128196; Nueva</button>
-        <button class="btn btn-outline-success btn-sm" disabled>&#128190; Guardar Ord.</button>
+        <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#128424; Imprimir</button>
         <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
     </div>
 </div>
@@ -309,6 +310,13 @@ else
         await OrdSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+    }
+
+    /// <summary>Abre la vista imprimible /orden-doc en una nueva pestana del navegador.</summary>
+    private async Task ImprimirAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/ORDEN_SERVICIOS", "_blank");
     }
 
     private sealed class BorradorServ

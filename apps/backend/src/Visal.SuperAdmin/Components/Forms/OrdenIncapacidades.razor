@@ -13,6 +13,11 @@
         <label>Orden de Incapacidad Numero:</label>
         <span class="oi-bar-count">@_items.Count item(s)</span>
     </div>
+    <div class="oi-bar-right">
+        <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#128424; Imprimir</button>
+    </div>
 </div>
 
 @if (HistoriaClinicaId is null)
@@ -206,6 +211,13 @@ else
         await IncSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+    }
+
+    /// <summary>Abre la vista imprimible /orden-doc en una nueva pestana del navegador.</summary>
+    private async Task ImprimirAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/INCAPACIDADES", "_blank");
     }
 
     private static string Truncate(string s, int max) =>

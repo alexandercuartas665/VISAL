@@ -199,10 +199,13 @@
                             </div>
                             <div class="ase-f"><label>Horas x Turnos</label><input type="number" min="0" step="0.5" class="form-control form-control-sm" @bind="_horasPorTurno" /></div>
 
-                            <div class="ase-f ase-f-wide-2">
+                            @* "Seleccione Medico Especialista / Turnos" en su propia fila full width.
+                               El select del profesional necesita aire para mostrar el nombre completo,
+                               y el row queda mucho mas legible separado de Turnos x Asignar / Horas. *@
+                            <div class="ase-f ase-f-wide-3 cd-especialista-row">
                                 <label>Seleccione Medico Especialista / Turnos</label>
-                                <div class="cd-input-row">
-                                    <select class="form-select form-select-sm" @bind="_especialistaSel">
+                                <div class="cd-input-row cd-especialista-input">
+                                    <select class="form-select form-select-sm cd-especialista-sel" @bind="_especialistaSel">
                                         <option value="">Seleccione Especialista</option>
                                         @foreach (var e in _especialistas)
                                         {
@@ -302,6 +305,13 @@ else
     .cd-rform .ase-f-wide { grid-column: span 2; }
     .cd-rform .ase-f-wide-2 { grid-column: span 2; }
     .cd-rform .ase-f-wide-3 { grid-column: span 4; }
+    /* Fila "Seleccione Medico Especialista / Turnos" en su propia linea full width.
+       El select toma la mayoria del espacio (flex:1) para que el nombre del profesional
+       y su tipo se vean completos. */
+    .cd-especialista-row { margin-top: 4px; }
+    .cd-especialista-input { gap: 8px; align-items: stretch; }
+    .cd-especialista-sel { flex: 1; min-width: 0; }
+    .cd-input-row .cd-turnos { flex: 0 0 110px; }
     .cd-rform label { font-size: 11px; color: #475569; font-weight: 600; }
     .asg-ro { background: #f8fafc; color: #475569; }
     .cd-blue label { color: #0f172a; }

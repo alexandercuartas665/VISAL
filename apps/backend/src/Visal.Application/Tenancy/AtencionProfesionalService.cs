@@ -12,15 +12,30 @@ public sealed class AtencionProfesionalService(
 {
     public async Task<IReadOnlyList<MiServicioAsignadoDto>> GetMisServiciosAsync(Guid platformUserId, bool incluirCompletados = true, CancellationToken ct = default)
     {
-        // El profesional vinculado al usuario logueado.
-        var tu = await db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
-        if (tu is null || tu.ProfesionalId is not Guid profId) { return Array.Empty<MiServicioAsignadoDto>(); }
+        // Datos del usuario logueado: nivel de tenant (Owner/Advisor) + Rol con permisos.
+        var tu = await db.TenantUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
+        if (tu is null) { return Array.Empty<MiServicioAsignadoDto>(); }
 
-        // Turnos coordinados a este profesional.
-        var turnos = await db.AsignacionTurnos.AsNoTracking()
-            .Where(t => t.ProfesionalId == profId)
-            .OrderBy(t => t.CreatedAt)
-            .ToListAsync(ct);
+        // Admin = TenantRole.Owner o Rol.Nombre = "Administrador". Los admin ven TODOS los
+        // turnos del tenant (no se restringe por profesional). Los demas (especialistas) ven
+        // solo lo coordinado a su propio profesional vinculado.
+        var rolNombre = tu.RolId is Guid rolId
+            ? await db.Roles.AsNoTracking().Where(r => r.Id == rolId).Select(r => r.Nombre).FirstOrDefaultAsync(ct)
+            : null;
+        var esAdmin = tu.TenantRole == TenantRole.Owner
+                    || string.Equals(rolNombre, "Administrador", StringComparison.OrdinalIgnoreCase);
+
+        // Construimos la query base (filtrada por tenant via el global filter de EF).
+        var turnosQ = db.AsignacionTurnos.AsNoTracking().AsQueryable();
+        if (!esAdmin)
+        {
+            // Especialista: solo sus propios turnos. Sin profesional vinculado -> grid vacio.
+            if (tu.ProfesionalId is not Guid profId) { return Array.Empty<MiServicioAsignadoDto>(); }
+            turnosQ = turnosQ.Where(t => t.ProfesionalId == profId);
+        }
+
+        var turnos = await turnosQ.OrderBy(t => t.CreatedAt).ToListAsync(ct);
         if (turnos.Count == 0) { return Array.Empty<MiServicioAsignadoDto>(); }
 
         var turnoIds = turnos.Select(t => t.Id).ToList();

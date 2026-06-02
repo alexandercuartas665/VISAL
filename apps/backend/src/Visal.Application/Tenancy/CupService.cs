@@ -86,7 +86,8 @@ public sealed class CupService(IApplicationDbContext db, ITenantContext tenant, 
         entity.ExtraX = Norm(r.ExtraX);
         entity.ValorRegistro = Norm(r.ValorRegistro);
         entity.UsuarioResponsable = Norm(r.UsuarioResponsable);
-        entity.FechaActualizacion = r.FechaActualizacion;
+        // Normalizamos a UTC para que Npgsql acepte el timestamptz.
+        entity.FechaActualizacion = r.FechaActualizacion?.ToUniversalTime();
         entity.IsPublicPrivate = Norm(r.IsPublicPrivate);
 
         audit.Write(actor,
@@ -198,6 +199,9 @@ public sealed class CupService(IApplicationDbContext db, ITenantContext tenant, 
     /// <summary>
     /// Parsea fechas/timestamps del archivo CUPS. El muestra trae cosas como
     /// "2026-02-20 01:36:23 PM". Toleramos formatos comunes ISO y locales.
+    /// Postgres con Npgsql 6+ requiere timestamps en UTC (offset 0), asi que
+    /// si el texto no trae zona horaria asumimos local y convertimos a UTC
+    /// antes de devolverlo.
     /// </summary>
     private static DateTimeOffset? ParseDateTime(string? s)
     {
@@ -210,11 +214,11 @@ public sealed class CupService(IApplicationDbContext db, ITenantContext tenant, 
         };
         if (DateTimeOffset.TryParseExact(t, formats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt))
         {
-            return dt;
+            return dt.ToUniversalTime();
         }
         if (DateTimeOffset.TryParse(t, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out dt))
         {
-            return dt;
+            return dt.ToUniversalTime();
         }
         return null;
     }

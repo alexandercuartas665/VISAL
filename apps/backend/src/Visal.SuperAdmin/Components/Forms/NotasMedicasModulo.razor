@@ -115,50 +115,87 @@ else if (_tabSel == "Notas")
 {
     <div class="ase-card nm-panel">
         <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Paciente:</label>
+            <select class="form-select form-select-sm nm-w-280" @bind="_filPaciente">
+                <option value="">Todos</option>
+                <option value="@DocumentoPacienteCtx">@NombrePacienteCtx</option>
+            </select>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="RefrescarNotas" disabled="@_busy">Ver Todos</button>
+        </div>
+        <div class="nm-row-inline">
+            <label class="nm-lbl-inline">Desde:</label>
+            <input type="date" class="form-control form-control-sm nm-w-150" @bind="_filDesde" />
+            <label class="nm-lbl-inline">Hasta:</label>
+            <input type="date" class="form-control form-control-sm nm-w-150" @bind="_filHasta" />
+            <span class="nm-sep">|</span>
             <span class="nm-counts">
                 <strong>@_conteo.Definitivas</strong> definitivas
                 <span class="nm-sep">/</span>
                 <strong>@_conteo.Parciales</strong> parciales
             </span>
             <span class="ms-auto"></span>
-            <button class="btn btn-outline-primary btn-sm" @onclick="RefrescarNotas" disabled="@_busy">&#128260; Refrescar</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled>Generar Reporte</button>
+        </div>
+        <div class="nm-row-inline">
+            <button class="btn btn-outline-primary btn-sm" disabled="@(_filaSeleccionada is null)" @onclick="VerNotaSeleccionada">Ver Nota</button>
+            <button class="btn btn-outline-secondary btn-sm" disabled>Generar Informes Fin</button>
+            <button class="btn btn-outline-success btn-sm" disabled>Crear Cuenta de Cobro</button>
         </div>
 
-        @if (_notas.Count == 0)
-        {
-            <div class="ase-empty">Aun no hay notas registradas para esta historia.</div>
-        }
-        else
-        {
-            <div class="nm-cards-grid">
-                @foreach (var n in _notas)
-                {
-                    <div class="nm-card-mini @CritClass(n.Criticidad)">
-                        <div class="nm-card-h">
-                            <span class="nm-card-fecha">@n.FechaNota.ToString("dd/MM/yyyy") @(n.HoraNota is TimeOnly h ? h.ToString("HH:mm") : "")</span>
-                            @if (n.Estado == "Definitivo")
-                            {
-                                <span class="nm-pill nm-pill-def">DEFINITIVO</span>
-                            }
-                            else
-                            {
-                                <span class="nm-pill nm-pill-par">PARCIAL</span>
-                            }
-                        </div>
-                        <div class="nm-card-cod">@n.CodigoUnico @if (n.SessionNo is int s) { <span class="nm-sess">Sesion @s</span> }</div>
-                        <div class="nm-card-body">@(n.Contenido.Length > 220 ? n.Contenido.Substring(0,220) + "..." : n.Contenido)</div>
-                        <div class="nm-card-f">
-                            <small>@n.EspecialistaNombre</small>
-                            <small class="nm-card-crit">@n.Criticidad</small>
-                        </div>
-                        @if (n.Estado == "Parcial")
-                        {
-                            <button class="btn btn-link btn-sm nm-card-edit" @onclick="() => CargarEnBorrador(n)">Editar</button>
-                        }
-                    </div>
-                }
-            </div>
-        }
+        <div class="nm-grid-wrap">
+            <table class="table table-sm nm-tbl">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>CodInt</th>
+                        <th>CodAsign</th>
+                        <th>Tipo</th>
+                        <th>Sesion</th>
+                        <th>Estado</th>
+                        <th>Criticidad</th>
+                        <th>Paciente ID</th>
+                        <th>Paciente</th>
+                        <th>Profesional</th>
+                        <th>Fecha Nota</th>
+                        <th>Hora</th>
+                        <th>Contenido</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_notasFiltradas.Count == 0)
+                    {
+                        <tr><td colspan="13" class="ase-empty">No hay notas registradas. Usa "Diligenciamiento" para crear una.</td></tr>
+                    }
+                    @foreach (var n in _notasFiltradas)
+                    {
+                        <tr class="@(n.Id == _filaSeleccionada?.Id ? "nm-row-sel" : "")" @onclick="() => _filaSeleccionada = n">
+                            <td><input type="radio" checked="@(n.Id == _filaSeleccionada?.Id)" /></td>
+                            <td class="mono">@n.CodigoUnico</td>
+                            <td class="mono">@CodAsignDe(n)</td>
+                            <td>@TipoDe(n)</td>
+                            <td class="text-center">@(n.SessionNo?.ToString() ?? "-")</td>
+                            <td>
+                                @if (n.Estado == "Definitivo")
+                                {
+                                    <span class="nm-pill nm-pill-def">DEFINITIVO</span>
+                                }
+                                else
+                                {
+                                    <span class="nm-pill nm-pill-par">PARCIAL</span>
+                                }
+                            </td>
+                            <td><span class="nm-crit-tag @CritClass(n.Criticidad)">@n.Criticidad</span></td>
+                            <td class="mono">@DocumentoPacienteCtx</td>
+                            <td>@NombrePacienteCtx</td>
+                            <td>@(n.EspecialistaNombre ?? "")</td>
+                            <td>@n.FechaNota.ToString("dd/MM/yyyy")</td>
+                            <td>@(n.HoraNota is TimeOnly h ? h.ToString("HH:mm") : "")</td>
+                            <td class="nm-truncate" title="@n.Contenido">@n.Contenido</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 }
 
@@ -389,6 +426,21 @@ else if (_tabSel == "Ver Historial")
     .nm-pill-def { background:#dcfce7; color:#166534; }
     .nm-pill-par { background:#fef3c7; color:#92400e; }
 
+    /* Tabla del tab Notas */
+    .nm-grid-wrap { overflow:auto; border:1px solid #e2e8f0; border-radius:8px; max-height:480px; margin-top:8px; }
+    .nm-tbl { margin:0; font-size:12px; min-width:100%; }
+    .nm-tbl thead th { position:sticky; top:0; background:#eff6ff; color:#1e40af; font-size:11px; font-weight:700; text-transform:uppercase; padding:8px 10px; border-bottom:1px solid #bfdbfe; white-space:nowrap; }
+    .nm-tbl td { padding:8px 10px; font-size:11.5px; vertical-align:middle; cursor:pointer; }
+    .nm-tbl tbody tr:hover { background:#f8fafc; }
+    .nm-row-sel { background:#eff6ff !important; }
+    .nm-truncate { max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .nm-crit-tag { font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; }
+    .nm-crit-tag.nm-crit-Estable { background:#d1fae5; color:#065f46; }
+    .nm-crit-tag.nm-crit-Vigilancia { background:#fef3c7; color:#92400e; }
+    .nm-crit-tag.nm-crit-Alerta { background:#fed7aa; color:#9a3412; }
+    .nm-crit-tag.nm-crit-Critico { background:#fecaca; color:#7f1d1d; }
+    .mono { font-family:'JetBrains Mono','Consolas',monospace; }
+
     /* Colores por criticidad (borde izquierdo) */
     .nm-crit-Estable { border-left-color:#10b981; }
     .nm-crit-Vigilancia { border-left-color:#f59e0b; }
@@ -458,6 +510,26 @@ else if (_tabSel == "Ver Historial")
     private string _docTipoTerapia = "";
     private string _docMes = "";
     private string _docAnotaciones = "";
+
+    // Filtros del tab Notas (tabla)
+    private string _filPaciente = "";
+    private DateOnly? _filDesde;
+    private DateOnly? _filHasta;
+    private NotaMedicaDto? _filaSeleccionada;
+
+    private List<NotaMedicaDto> _notasFiltradas => _notas
+        .Where(n => !_filDesde.HasValue || n.FechaNota >= _filDesde.Value)
+        .Where(n => !_filHasta.HasValue || n.FechaNota <= _filHasta.Value)
+        .OrderByDescending(n => n.FechaNota).ThenByDescending(n => n.HoraNota)
+        .ToList();
+
+    private string CodAsignDe(NotaMedicaDto n) => AsignacionTurnoIdCtx?.ToString()[..8] ?? "";
+    private string TipoDe(NotaMedicaDto n) => "";
+
+    private void VerNotaSeleccionada()
+    {
+        if (_filaSeleccionada is NotaMedicaDto n) { CargarEnBorrador(n); }
+    }
 
     private Guid? _ultimoHcId;
 

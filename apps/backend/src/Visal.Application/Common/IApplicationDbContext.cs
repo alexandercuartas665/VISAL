@@ -53,6 +53,7 @@ public interface IApplicationDbContext
     DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones { get; }
     DbSet<HistoriaClinica> HistoriasClinicas { get; }
     DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos { get; }
+    DbSet<HistoriaClinicaOrdenServicio> HistoriaClinicaOrdenesServicio { get; }
     DbSet<Medicamento> Medicamentos { get; }
     DbSet<NotaMedica> NotasMedicas { get; }
     DbSet<NotaMedicaDocumento> NotaMedicaDocumentos { get; }

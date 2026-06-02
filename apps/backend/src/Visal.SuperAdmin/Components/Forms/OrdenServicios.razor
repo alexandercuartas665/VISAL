@@ -1,60 +1,322 @@
-@* Diseño basado en ctrlOrdenServicios.ascx del legacy. Solo layout. *@
+@using Visal.Application.Tenancy
+@inject IOrdenServicioService OrdSvc
+@inject IJSRuntime JS
 
-<div class="od-bar">
-    <div class="od-bar-left">
+@*
+   Pestana "Ordenes a Servicios" de la HC. Buscador con autocompletado
+   contra el catalogo de servicios de los contratos de aseguradoras
+   (ServicioContrato): se muestra la DESCRIPCION en la sugerencia, pero a la
+   orden viaja el CODIGO DE SERVICIO. Cada item queda atado a la
+   HistoriaClinicaId con su cantidad y observaciones. Los cambios se
+   persisten al instante (no requiere "Guardar" explicito).
+*@
+
+<div class="os-bar">
+    <div class="os-bar-left">
         <label>Orden a Servicios Numero:</label>
-        <select class="form-select form-select-sm od-w-220" disabled>
-            <option>(sin ordenes)</option>
-        </select>
+        <span class="os-bar-count">@_items.Count item(s)</span>
     </div>
-    <div class="od-bar-right">
+    <div class="os-bar-right">
         <button class="btn btn-outline-secondary btn-sm" disabled>&#128196; Nueva</button>
         <button class="btn btn-outline-success btn-sm" disabled>&#128190; Guardar Ord.</button>
         <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
     </div>
 </div>
 
-<div class="od-card">
-    <div class="od-row">
-        <div class="od-f od-c-10">
-            <label>Nombre del Servicio</label>
-            <input class="form-control form-control-sm" placeholder="Nombre del Servicio (buscar CUPS)" />
-        </div>
-        <div class="od-f od-c-2">
-            <label>Cantidad</label>
-            <input class="form-control form-control-sm text-center" />
-        </div>
+@if (HistoriaClinicaId is null)
+{
+    <div class="os-card os-empty-hc">
+        Selecciona o inicia una historia para registrar servicios.
     </div>
-    <div class="od-row">
-        <div class="od-f od-c-11">
-            <label>Observaciones</label>
-            <textarea class="form-control form-control-sm" rows="2" placeholder="Observaciones del servicio..."></textarea>
+}
+else
+{
+    <div class="os-card">
+        @* ---- Fila de captura: autocompletado + cantidad ---- *@
+        <div class="os-row">
+            <div class="os-f os-c-10 os-search-wrap">
+                <label>Nombre del Servicio</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Buscar servicio por descripcion o codigo (min 2 caracteres)..."
+                       value="@_terminoBusqueda"
+                       @oninput="OnTerminoChanged" />
+                @if (_sugerencias.Count > 0)
+                {
+                    <div class="os-suggest">
+                        @foreach (var s in _sugerencias)
+                        {
+                            <button class="os-suggest-item" @onclick="() => SeleccionarSugerencia(s)">
+                                <div class="os-suggest-nm">@s.Descripcion</div>
+                                <div class="os-suggest-meta">
+                                    @if (!string.IsNullOrWhiteSpace(s.CodigoServicio)) { <span class="os-suggest-cod">@s.CodigoServicio</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.Modulo)) { <span>&middot; @s.Modulo</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.Especialidad)) { <span>&middot; @s.Especialidad</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.Aseguradora)) { <span>&middot; @s.Aseguradora</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.Contrato)) { <span>&middot; @s.Contrato</span> }
+                                </div>
+                            </button>
+                        }
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2 && !_buscando)
+                {
+                    <div class="os-suggest os-suggest-empty">Sin resultados para "@_terminoBusqueda"</div>
+                }
+            </div>
+            <div class="os-f os-c-2">
+                <label>Cantidad</label>
+                <input class="form-control form-control-sm text-center"
+                       @bind="_borrador.Cantidad" @bind:event="oninput" />
+            </div>
         </div>
-        <div class="od-f od-c-1 od-action-col">
-            <button class="btn btn-primary btn-sm od-action-add" title="Agregar">+</button>
-        </div>
-    </div>
 
-    <div class="od-grid-wrap">
-        <table class="table table-sm od-tbl">
-            <thead>
-                <tr>
-                    <th>Nombre del Servicio</th>
-                    <th>Observaciones</th>
-                    <th class="text-center" style="width:80px">Cant.</th>
-                    <th class="text-center" style="width:50px">&#128424;</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr><td colspan="4" class="text-center text-muted od-empty-row">Sin servicios agregados.</td></tr>
-            </tbody>
-        </table>
+        <div class="os-row">
+            <div class="os-f os-c-11">
+                <label>Observaciones</label>
+                <textarea class="form-control form-control-sm" rows="2"
+                          placeholder="Observaciones del servicio..."
+                          @bind="_borrador.Observaciones" @bind:event="oninput"></textarea>
+            </div>
+            <div class="os-f os-c-1 os-action-col">
+                <button class="btn btn-primary btn-sm os-action-add" title="Agregar"
+                        @onclick="AgregarAsync"
+                        disabled="@(string.IsNullOrWhiteSpace(_borrador.Descripcion) || _agregando)">
+                    @(_agregando ? "..." : "+")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_borrador.Descripcion))
+        {
+            <div class="os-borrador">
+                Servicio seleccionado:
+                @if (!string.IsNullOrWhiteSpace(_borrador.CodigoServicio))
+                {
+                    <span class="os-borrador-cod">@_borrador.CodigoServicio</span>
+                }
+                <strong>@_borrador.Descripcion</strong>
+                <button class="btn btn-link btn-sm os-borrador-x" @onclick="LimpiarBorrador" title="Quitar">&times;</button>
+            </div>
+        }
+
+        @* ---- Grilla de items agregados ---- *@
+        <div class="os-grid-wrap">
+            <table class="table table-sm os-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:40px">#</th>
+                        <th style="width:110px">Cod. Servicio</th>
+                        <th>Nombre del Servicio</th>
+                        <th>Observaciones</th>
+                        <th class="text-center" style="width:80px">Cant.</th>
+                        <th class="text-center" style="width:50px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_items.Count == 0)
+                    {
+                        <tr><td colspan="6" class="text-center text-muted os-empty-row">Sin servicios agregados.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td class="text-center">@it.Orden</td>
+                                <td class="os-cod-cell">@(it.CodigoServicio ?? "-")</td>
+                                <td>
+                                    <strong>@it.Descripcion</strong>
+                                </td>
+                                <td>
+                                    <input class="form-control form-control-sm os-inline-input"
+                                           placeholder="Observaciones..."
+                                           value="@it.Observaciones"
+                                           @onchange="@(e => GuardarObservaciones(it, e.Value?.ToString()))" />
+                                </td>
+                                <td>
+                                    <input class="form-control form-control-sm os-inline-input text-center"
+                                           value="@it.Cantidad"
+                                           @onchange="@(e => GuardarCantidad(it, e.Value?.ToString()))" />
+                                </td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar de la orden">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
+}
 
 <style>
-    .od-action-col { display: flex; align-items: stretch; }
-    .od-action-add { width: 100%; align-self: stretch; height: 100%; }
+    .os-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .os-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .os-bar-right { display:flex; gap:6px; }
+    .os-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .os-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; position:relative; }
+    .os-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .os-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .os-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .os-c-1  { grid-column: span 1; }
+    .os-c-2  { grid-column: span 2; }
+    .os-c-10 { grid-column: span 10; }
+    .os-c-11 { grid-column: span 11; }
+
+    .os-search-wrap { position:relative; }
+    .os-suggest { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 12px 30px rgba(15,23,42,.12); max-height:320px; overflow-y:auto; z-index:50; margin-top:4px; }
+    .os-suggest-item { display:block; width:100%; text-align:left; padding:10px 12px; border:0; background:transparent; cursor:pointer; border-bottom:1px solid #f1f5f9; }
+    .os-suggest-item:hover { background:#eff6ff; }
+    .os-suggest-item:last-child { border-bottom:0; }
+    .os-suggest-nm { font-size:13px; font-weight:700; color:#0f172a; margin-bottom:2px; }
+    .os-suggest-meta { font-size:11px; color:#64748b; display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
+    .os-suggest-cod { background:#1565c0; color:#fff; padding:1px 7px; border-radius:4px; font-family:'JetBrains Mono','Consolas',monospace; font-weight:700; }
+    .os-suggest-empty { padding:10px 12px; font-size:12px; color:#64748b; font-style:italic; }
+
+    .os-borrador { margin-bottom:12px; padding:8px 12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:12.5px; color:#1e40af; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .os-borrador-cod { background:#1565c0; color:#fff; padding:1px 7px; border-radius:4px; font-family:'JetBrains Mono','Consolas',monospace; font-weight:700; font-size:11px; }
+    .os-borrador-x { color:#dc2626; padding:0 4px; }
+
+    .os-action-col { display:flex; align-items:stretch; }
+    .os-action-add { width:100%; align-self:stretch; height:100%; min-height:38px; }
+
+    .os-grid-wrap { margin-top:14px; border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
+    .os-tbl { margin:0; font-size:12.5px; }
+    .os-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .os-tbl td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .os-cod-cell { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#0f172a; font-weight:700; }
+    .os-empty-row { padding:30px !important; font-style:italic; }
+    .os-inline-input { font-size:12px; }
 </style>
 
-@code { }
+@code {
+    /// <summary>Id de la HC actualmente abierta. Cuando cambia, recargamos los items.</summary>
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private string _terminoBusqueda = "";
+    private List<ServicioSugerenciaDto> _sugerencias = new();
+    private List<OrdenServicioItemDto> _items = new();
+    private bool _buscando;
+    private bool _agregando;
+    private System.Threading.CancellationTokenSource? _debounceCts;
+
+    private BorradorServ _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            _terminoBusqueda = "";
+            _sugerencias.Clear();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await OrdSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    /// <summary>Lanza busqueda al catalogo con debounce de ~200ms para no saturar.</summary>
+    private async Task OnTerminoChanged(ChangeEventArgs e)
+    {
+        _terminoBusqueda = e.Value?.ToString() ?? "";
+        _debounceCts?.Cancel();
+        _debounceCts = new();
+        var token = _debounceCts.Token;
+        try
+        {
+            await Task.Delay(200, token);
+            _buscando = true;
+            var t = _terminoBusqueda;
+            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, 12, token)).ToList();
+            _buscando = false;
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { /* siguiente tecleo cancelo */ }
+    }
+
+    private void SeleccionarSugerencia(ServicioSugerenciaDto s)
+    {
+        _borrador.ServicioContratoId = s.Id;
+        _borrador.CodigoServicio = s.CodigoServicio;
+        _borrador.Descripcion = s.Descripcion;
+        _sugerencias.Clear();
+        _terminoBusqueda = "";
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Descripcion)) { return; }
+        _agregando = true;
+        try
+        {
+            var creado = await OrdSvc.AgregarAsync(hid, new AgregarServicioRequest(
+                _borrador.ServicioContratoId,
+                _borrador.CodigoServicio,
+                _borrador.Descripcion!,
+                _borrador.Cantidad,
+                _borrador.Observaciones), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            LimpiarBorrador();
+        }
+        finally { _agregando = false; }
+    }
+
+    private void LimpiarBorrador()
+    {
+        _borrador = new();
+        _terminoBusqueda = "";
+        _sugerencias.Clear();
+    }
+
+    private async Task GuardarCantidad(OrdenServicioItemDto it, string? nueva)
+    {
+        var req = new ActualizarServicioRequest(nueva, it.Observaciones);
+        await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
+        var idx = _items.FindIndex(x => x.Id == it.Id);
+        if (idx >= 0) { _items[idx] = it with { Cantidad = nueva }; }
+    }
+
+    private async Task GuardarObservaciones(OrdenServicioItemDto it, string? nuevas)
+    {
+        var req = new ActualizarServicioRequest(it.Cantidad, nuevas);
+        await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
+        var idx = _items.FindIndex(x => x.Id == it.Id);
+        if (idx >= 0) { _items[idx] = it with { Observaciones = nuevas }; }
+    }
+
+    private async Task EliminarAsync(OrdenServicioItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar \"{it.Descripcion}\" de la orden?");
+        if (!ok) { return; }
+        await OrdSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private sealed class BorradorServ
+    {
+        public Guid? ServicioContratoId { get; set; }
+        public string? CodigoServicio { get; set; }
+        public string? Descripcion { get; set; }
+        public string? Cantidad { get; set; }
+        public string? Observaciones { get; set; }
+    }
+}

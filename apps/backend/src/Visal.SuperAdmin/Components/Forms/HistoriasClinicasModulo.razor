@@ -152,6 +152,11 @@
                         {
                             <span class="hc-tab-badge">@_medCount</span>
                         }
+                        @* Badge con conteo en la pestana de servicios *@
+                        @if (t == "Ordenes a Servicios" && _servCount > 0)
+                        {
+                            <span class="hc-tab-badge">@_servCount</span>
+                        }
                     </button>
                 }
             </div>
@@ -186,7 +191,11 @@
                         <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
                                            OnCountChanged="@(c => _medCount = c)" />
                     }
-                    else if (_tabSel == "Ordenes a Servicios") { <OrdenServicios /> }
+                    else if (_tabSel == "Ordenes a Servicios")
+                    {
+                        <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
+                                        OnCountChanged="@(c => _servCount = c)" />
+                    }
                     else if (_tabSel == "Remisiones") { <OrdenRemisiones /> }
                     else if (_tabSel == "Ordenes incapacidad") { <OrdenIncapacidades /> }
                     else if (_tabSel == "Ordenes certificaciones") { <OrdenCertificaciones /> }
@@ -349,6 +358,8 @@
     /// <summary>Conteo de medicamentos para badge en la pestana. Se mantiene
     /// sincronizado via OnCountChanged del componente OrdenMedicamentos.</summary>
     private int _medCount;
+    /// <summary>Conteo de servicios para badge en la pestana "Ordenes a Servicios".</summary>
+    private int _servCount;
 
     private List<FormDefinitionDto> _formatos = new();
     private FormSchema? _schemaActual;
@@ -470,12 +481,15 @@
 
     private async Task IniciarHistoria()
     {
-        // Prioridad: 1) formato forzado por el servicio asignado (Atencion),
-        //            2) formato seleccionado en el filtro de busqueda.
+        // Prioridad: 1) si el usuario eligio EXPLICITAMENTE un formato en el
+        //               filtro (dropdown), ese gana. Permite aplicar escalas o
+        //               formatos secundarios sobre el mismo servicio.
+        //            2) si no, el formato forzado por el servicio asignado
+        //               (Atencion).
         // Si no hay ninguno, nada que iniciar.
         Guid fid;
-        if (_formatoForzadoId is Guid forzado) { fid = forzado; }
-        else if (Guid.TryParse(_filFormato, out var fidFiltro)) { fid = fidFiltro; }
+        if (Guid.TryParse(_filFormato, out var fidFiltro)) { fid = fidFiltro; }
+        else if (_formatoForzadoId is Guid forzado) { fid = forzado; }
         else { return; }
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
 

@@ -68,6 +68,15 @@ public sealed record AdjuntarDocumentoRequest(
     string? Mes,
     string? Anotaciones);
 
+/// <summary>
+/// Resultado de la validacion previa antes de abrir el modulo de notas.
+/// Ok=false significa que el profesional debe primero crear / renovar la HC
+/// del paciente para el formato que pide el servicio. HistoriaId es el id
+/// de la HC vigente que satisface la regla (si Ok=true).
+/// </summary>
+public sealed record ValidarHcParaNotaResult(
+    bool Ok, string Mensaje, Guid? HistoriaId);
+
 public interface INotaMedicaService
 {
     /// <summary>Notas de una HC (todas: parciales y definitivas).</summary>
@@ -83,6 +92,16 @@ public interface INotaMedicaService
         Guid pacienteId, CancellationToken ct = default);
 
     Task<NotaMedicaDto?> GetAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Antes de abrir el editor de notas en /atencion, valida que exista una HC
+    /// para el paciente con el formato exigido por el servicio (formatoCodigo),
+    /// y que esa HC este dentro del rango de "Validez de Historia Clinica (Meses)"
+    /// configurado en la empresa. Si no cumple devuelve Ok=false con el mensaje
+    /// orientativo para el usuario.
+    /// </summary>
+    Task<ValidarHcParaNotaResult> ValidarHcParaNotaAsync(
+        Guid pacienteId, string? formatoCodigo, CancellationToken ct = default);
 
     Task<NotaMedicaDto> GuardarAsync(
         GuardarNotaRequest req, Guid actorUserId, CancellationToken ct = default);

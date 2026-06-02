@@ -4,7 +4,10 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class NotaMedicaService(IApplicationDbContext db, ITenantContext tenant) : INotaMedicaService
+public sealed class NotaMedicaService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IConfiguracionClinicaService clinica) : INotaMedicaService
 {
     public async Task<IReadOnlyList<NotaMedicaDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -55,6 +58,73 @@ public sealed class NotaMedicaService(IApplicationDbContext db, ITenantContext t
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<ValidarHcParaNotaResult> ValidarHcParaNotaAsync(
+        Guid pacienteId, string? formatoCodigo, CancellationToken ct = default)
+    {
+        // Regla: el profesional no puede crear notas de un servicio si el paciente
+        // no tiene una Historia Clinica del formato que pide el servicio, y si esa
+        // historia no esta dentro de la ventana de validez configurada por la
+        // empresa (Config Empresa > Validez de Historia Clinica en meses).
+
+        // 1) Buscar la HC mas reciente NO inactiva del paciente que ademas matchee
+        //    el formato exigido (por Codigo o CodigoSecundario del FormDefinition).
+        //    Si el servicio no trae formato configurado, dejamos pasar — no podemos
+        //    forzar una regla sin saber que formato exigir.
+        if (string.IsNullOrWhiteSpace(formatoCodigo))
+        {
+            // Falta data en el servicio. Buscamos cualquier HC activa como fallback.
+            var hcAny = await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => h.PacienteId == pacienteId && h.Estado != HistoriaClinicaEstado.Inactiva)
+                .OrderByDescending(h => h.FechaApertura)
+                .FirstOrDefaultAsync(ct);
+            if (hcAny is null)
+            {
+                return new ValidarHcParaNotaResult(false,
+                    "El paciente no tiene historia clinica creada. Crea una historia clinica antes de registrar notas.",
+                    null);
+            }
+            return await VerificarVigenciaAsync(hcAny, ct);
+        }
+
+        var codigo = formatoCodigo.Trim();
+        var hc = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.PacienteId == pacienteId && h.Estado != HistoriaClinicaEstado.Inactiva)
+            .Join(db.FormDefinitions.AsNoTracking(),
+                  h => h.FormDefinitionId, f => f.Id,
+                  (h, f) => new { h, f })
+            .Where(x => x.f.Codigo == codigo || x.f.CodigoSecundario == codigo)
+            .OrderByDescending(x => x.h.FechaApertura)
+            .Select(x => x.h)
+            .FirstOrDefaultAsync(ct);
+
+        if (hc is null)
+        {
+            return new ValidarHcParaNotaResult(false,
+                $"El servicio requiere una historia clinica con formato '{codigo}'. " +
+                "El paciente no tiene una. Crea la historia clinica primero desde el modulo Historia Medica.",
+                null);
+        }
+
+        return await VerificarVigenciaAsync(hc, ct);
+    }
+
+    private async Task<ValidarHcParaNotaResult> VerificarVigenciaAsync(
+        HistoriaClinica hc, CancellationToken ct)
+    {
+        var meses = await clinica.GetMesesValidezHistoriaClinicaAsync(ct);
+        if (meses <= 0) { return new ValidarHcParaNotaResult(true, "OK", hc.Id); }
+        var corte = DateTimeOffset.UtcNow.AddMonths(-meses);
+        if (hc.FechaApertura < corte)
+        {
+            var antig = (DateTimeOffset.UtcNow - hc.FechaApertura).TotalDays / 30.0;
+            return new ValidarHcParaNotaResult(false,
+                $"La historia clinica del paciente esta vencida (abierta hace {antig:N1} meses, " +
+                $"validez configurada: {meses} mes(es)). Crea una historia clinica nueva antes de registrar notas.",
+                hc.Id);
+        }
+        return new ValidarHcParaNotaResult(true, "OK", hc.Id);
+    }
+
     public async Task<NotaMedicaDto> GuardarAsync(
         GuardarNotaRequest req, Guid actor, CancellationToken ct = default)
     {
@@ -73,6 +143,27 @@ public sealed class NotaMedicaService(IApplicationDbContext db, ITenantContext t
         }
         else
         {
+            // Defensa en backend: aunque la UI ya valida al abrir el modal, comprobamos
+            // de nuevo aqui que la HC objetivo este vigente. Esto bloquea el guardado si
+            // alguien intenta postear sin pasar por el flujo. Solo aplica al crear.
+            var hcCheck = await db.HistoriasClinicas.AsNoTracking()
+                .FirstOrDefaultAsync(h => h.Id == req.HistoriaClinicaId, ct);
+            if (hcCheck is null)
+            {
+                throw new InvalidOperationException(
+                    "La historia clinica de destino no existe. Crea una historia clinica antes de registrar notas.");
+            }
+            if (hcCheck.Estado == HistoriaClinicaEstado.Inactiva)
+            {
+                throw new InvalidOperationException(
+                    "La historia clinica esta inactiva. No se pueden agregar notas a una HC inactiva.");
+            }
+            var meses = await clinica.GetMesesValidezHistoriaClinicaAsync(ct);
+            if (meses > 0 && hcCheck.FechaApertura < DateTimeOffset.UtcNow.AddMonths(-meses))
+            {
+                throw new InvalidOperationException(
+                    $"La historia clinica esta vencida (validez: {meses} mes(es)). Crea una nueva HC antes de registrar notas.");
+            }
             entity = new NotaMedica
             {
                 TenantId = tid,

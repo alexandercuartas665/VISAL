@@ -7,6 +7,7 @@
 @inject IAtencionProfesionalService Svc
 @inject IAsignacionService AsigSvc
 @inject IHistoriaClinicaService HcSvc
+@inject INotaMedicaService NotaSvc
 
 <PageTitle>Mis Servicios Asignados - Visal</PageTitle>
 
@@ -248,9 +249,18 @@ else
 
     private async Task AbrirNotas(MiServicioAsignadoDto s)
     {
-        // Resolver la HC abierta mas reciente del paciente para asociar las notas.
-        // Si no hay, el modulo mostrara mensaje pidiendo iniciar una HC primero.
-        _hcIdParaNotas = await HcSvc.BuscarUltimaAbiertaPorPacienteAsync(s.PacienteId);
+        _error = null; _ok = null;
+        // Regla de negocio: para crear notas, el paciente debe tener una HC vigente
+        // del formato que pide el servicio (FormatoHistoria) y la vigencia se mide
+        // contra la "Validez de Historia Clinica (Meses)" configurada en la empresa.
+        // Si no cumple, no abrimos el modal de notas y mostramos un mensaje claro.
+        var val = await NotaSvc.ValidarHcParaNotaAsync(s.PacienteId, s.FormatoHistoria);
+        if (!val.Ok)
+        {
+            _error = val.Mensaje;
+            return;
+        }
+        _hcIdParaNotas = val.HistoriaId;
         _showNotaSel = s;
     }
     private void CerrarNotas() { _showNotaSel = null; _hcIdParaNotas = null; }

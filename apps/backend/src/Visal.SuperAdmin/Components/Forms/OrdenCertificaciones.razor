@@ -1,27 +1,161 @@
-@* Diseño basado en ctrlOrdenCertificaciones.ascx del legacy. Solo layout. *@
+@using Visal.Application.Tenancy
+@inject ICertificacionService CertSvc
+@inject IJSRuntime JS
 
-<div class="od-bar">
-    <div class="od-bar-left">
+@*
+   Pestana "Ordenes de Certificacion" de la HC. No depende de catalogo: el
+   profesional escribe el titulo + cuerpo del certificado. Persiste atado
+   a la HistoriaClinicaId.
+*@
+
+<div class="oc-bar">
+    <div class="oc-bar-left">
         <label>Orden de Certificacion Numero:</label>
-        <select class="form-select form-select-sm od-w-220" disabled>
-            <option>(sin ordenes)</option>
-        </select>
-    </div>
-    <div class="od-bar-right">
-        <button class="btn btn-outline-secondary btn-sm" disabled>+ Agregar</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128190; Guardar</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128424; Imprimir</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+        <span class="oc-bar-count">@_items.Count item(s)</span>
     </div>
 </div>
 
-<div class="od-card">
-    <div class="od-row">
-        <div class="od-f od-c-12">
-            <label>Descripcion de la Certificacion</label>
-            <textarea class="form-control form-control-sm" rows="15" placeholder="Escriba la certificacion aqui..."></textarea>
+@if (HistoriaClinicaId is null)
+{
+    <div class="oc-card oc-empty-hc">
+        Selecciona o inicia una historia para registrar certificaciones.
+    </div>
+}
+else
+{
+    <div class="oc-card">
+        @* ---- Fila de captura ---- *@
+        <div class="oc-row">
+            <div class="oc-f oc-c-12">
+                <label>Titulo de la Certificacion</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: Certificado de asistencia, Constancia medica..."
+                       @bind="_borrador.Titulo" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="oc-row">
+            <div class="oc-f oc-c-12">
+                <label>Descripcion / Contenido de la Certificacion</label>
+                <textarea class="form-control form-control-sm" rows="10"
+                          placeholder="Escriba el cuerpo del certificado aqui..."
+                          @bind="_borrador.Contenido" @bind:event="oninput"></textarea>
+            </div>
+        </div>
+        <div class="oc-row oc-row-action">
+            <button class="btn btn-primary btn-sm"
+                    @onclick="AgregarAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_borrador.Titulo) || _agregando)">
+                @(_agregando ? "Guardando..." : "+ Agregar certificacion")
+            </button>
+        </div>
+
+        @* ---- Lista de certificaciones agregadas ---- *@
+        <div class="oc-list">
+            @if (_items.Count == 0)
+            {
+                <div class="oc-empty-row">Sin certificaciones agregadas.</div>
+            }
+            else
+            {
+                @foreach (var it in _items)
+                {
+                    <div class="oc-card-item">
+                        <div class="oc-card-item-h">
+                            <div class="oc-card-item-orden">#@it.Orden</div>
+                            <div class="oc-card-item-titulo">@it.Titulo</div>
+                            <button class="btn btn-sm btn-link text-danger"
+                                    @onclick="() => EliminarAsync(it)"
+                                    title="Quitar">&#128465;</button>
+                        </div>
+                        <div class="oc-card-item-body">@it.Contenido</div>
+                    </div>
+                }
+            }
         </div>
     </div>
-</div>
+}
 
-@code { }
+<style>
+    .oc-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .oc-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .oc-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oc-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
+    .oc-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .oc-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .oc-row-action { display:flex; justify-content:flex-end; }
+    .oc-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .oc-c-12 { grid-column: span 12; }
+
+    .oc-list { margin-top:16px; display:flex; flex-direction:column; gap:10px; }
+    .oc-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
+    .oc-card-item { border:1px solid #e2e8f0; border-left:3px solid #1565c0; border-radius:8px; padding:12px 14px; background:#fff; }
+    .oc-card-item-h { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .oc-card-item-orden { font-size:11px; color:#64748b; background:#f1f5f9; padding:1px 8px; border-radius:999px; font-weight:700; }
+    .oc-card-item-titulo { flex:1; font-size:13px; font-weight:700; color:#0f172a; }
+    .oc-card-item-body { font-size:12.5px; color:#475569; white-space:pre-wrap; line-height:1.5; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private List<CertificacionItemDto> _items = new();
+    private bool _agregando;
+
+    private BorradorCert _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await CertSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Titulo)) { return; }
+        _agregando = true;
+        try
+        {
+            var creado = await CertSvc.AgregarAsync(hid, new AgregarCertificacionRequest(
+                _borrador.Titulo!,
+                _borrador.Contenido ?? ""), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            _borrador = new();
+        }
+        finally { _agregando = false; }
+    }
+
+    private async Task EliminarAsync(CertificacionItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar la certificacion \"{it.Titulo}\"?");
+        if (!ok) { return; }
+        await CertSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private sealed class BorradorCert
+    {
+        public string? Titulo { get; set; }
+        public string? Contenido { get; set; }
+    }
+}

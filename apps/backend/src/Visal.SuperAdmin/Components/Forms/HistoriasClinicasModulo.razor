@@ -157,6 +157,16 @@
                         {
                             <span class="hc-tab-badge">@_servCount</span>
                         }
+                        @* Badge en la pestana de incapacidades *@
+                        @if (t == "Ordenes incapacidad" && _incCount > 0)
+                        {
+                            <span class="hc-tab-badge">@_incCount</span>
+                        }
+                        @* Badge en la pestana de certificaciones *@
+                        @if (t == "Ordenes certificaciones" && _certCount > 0)
+                        {
+                            <span class="hc-tab-badge">@_certCount</span>
+                        }
                     </button>
                 }
             </div>
@@ -197,8 +207,16 @@
                                         OnCountChanged="@(c => _servCount = c)" />
                     }
                     else if (_tabSel == "Remisiones") { <OrdenRemisiones /> }
-                    else if (_tabSel == "Ordenes incapacidad") { <OrdenIncapacidades /> }
-                    else if (_tabSel == "Ordenes certificaciones") { <OrdenCertificaciones /> }
+                    else if (_tabSel == "Ordenes incapacidad")
+                    {
+                        <OrdenIncapacidades HistoriaClinicaId="@_historiaSel?.Id"
+                                            OnCountChanged="@(c => _incCount = c)" />
+                    }
+                    else if (_tabSel == "Ordenes certificaciones")
+                    {
+                        <OrdenCertificaciones HistoriaClinicaId="@_historiaSel?.Id"
+                                              OnCountChanged="@(c => _certCount = c)" />
+                    }
                 }
             </div>
         </div>
@@ -360,6 +378,10 @@
     private int _medCount;
     /// <summary>Conteo de servicios para badge en la pestana "Ordenes a Servicios".</summary>
     private int _servCount;
+    /// <summary>Conteo de incapacidades para badge en la pestana "Ordenes incapacidad".</summary>
+    private int _incCount;
+    /// <summary>Conteo de certificaciones para badge en la pestana "Ordenes certificaciones".</summary>
+    private int _certCount;
 
     private List<FormDefinitionDto> _formatos = new();
     private FormSchema? _schemaActual;

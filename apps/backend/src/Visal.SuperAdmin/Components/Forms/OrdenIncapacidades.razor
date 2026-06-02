@@ -1,71 +1,221 @@
-@* Diseño basado en ctrlOrdenIncapacidades.ascx del legacy. Solo layout. *@
+@using Visal.Application.Tenancy
+@inject IIncapacidadService IncSvc
+@inject IJSRuntime JS
 
-<div class="od-bar">
-    <div class="od-bar-left">
+@*
+   Pestana "Ordenes de Incapacidad" de la HC. No depende de catalogo: el
+   profesional digita motivo, fechas y tipo. Persiste atado a la
+   HistoriaClinicaId. "Dias" se calcula automaticamente de (Hasta-Desde+1).
+*@
+
+<div class="oi-bar">
+    <div class="oi-bar-left">
         <label>Orden de Incapacidad Numero:</label>
-        <select class="form-select form-select-sm od-w-220" disabled>
-            <option>(sin ordenes)</option>
-        </select>
-    </div>
-    <div class="od-bar-right">
-        <button class="btn btn-outline-secondary btn-sm" disabled>+ Agregar</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+        <span class="oi-bar-count">@_items.Count item(s)</span>
     </div>
 </div>
 
-<div class="od-card">
-    <div class="od-row">
-        <div class="od-f od-c-12">
-            <label>Motivo de la Incapacidad</label>
-            <textarea class="form-control form-control-sm" rows="3" placeholder="Motivo de la incapacidad..."></textarea>
-        </div>
+@if (HistoriaClinicaId is null)
+{
+    <div class="oi-card oi-empty-hc">
+        Selecciona o inicia una historia para registrar incapacidades.
     </div>
-    <div class="od-row">
-        <div class="od-f od-c-3">
-            <label>Desde</label>
-            <input type="date" class="form-control form-control-sm" />
+}
+else
+{
+    <div class="oi-card">
+        @* ---- Fila de captura ---- *@
+        <div class="oi-row">
+            <div class="oi-f oi-c-12">
+                <label>Motivo de la Incapacidad</label>
+                <textarea class="form-control form-control-sm" rows="2"
+                          placeholder="Describa el motivo clinico de la incapacidad..."
+                          @bind="_borrador.Motivo" @bind:event="oninput"></textarea>
+            </div>
         </div>
-        <div class="od-f od-c-3">
-            <label>Hasta</label>
-            <input type="date" class="form-control form-control-sm" />
+        <div class="oi-row">
+            <div class="oi-f oi-c-3">
+                <label>Desde</label>
+                <input type="date" class="form-control form-control-sm"
+                       @bind="_borrador.FechaDesde" @bind:event="oninput" />
+            </div>
+            <div class="oi-f oi-c-3">
+                <label>Hasta</label>
+                <input type="date" class="form-control form-control-sm"
+                       @bind="_borrador.FechaHasta" @bind:event="oninput" />
+            </div>
+            <div class="oi-f oi-c-1">
+                <label>Dias</label>
+                <input class="form-control form-control-sm text-center" readonly
+                       value="@DiasCalculados(_borrador.FechaDesde, _borrador.FechaHasta)" />
+            </div>
+            <div class="oi-f oi-c-4">
+                <label>Tipo</label>
+                <select class="form-select form-select-sm" @bind="_borrador.Tipo">
+                    <option value="">SELECCIONE</option>
+                    <option value="ENFERMEDAD GENERAL">ENFERMEDAD GENERAL</option>
+                    <option value="ACCIDENTE DE TRABAJO">ACCIDENTE DE TRABAJO</option>
+                </select>
+            </div>
+            <div class="oi-f oi-c-1 oi-action-col">
+                <button class="btn btn-primary btn-sm oi-action-add" title="Guardar"
+                        @onclick="AgregarAsync"
+                        disabled="@(string.IsNullOrWhiteSpace(_borrador.Motivo) || _agregando)">
+                    @(_agregando ? "..." : "💾")
+                </button>
+            </div>
         </div>
-        <div class="od-f od-c-1">
-            <label>Dias</label>
-            <input class="form-control form-control-sm text-center" readonly />
-        </div>
-        <div class="od-f od-c-4">
-            <label>Tipo</label>
-            <select class="form-select form-select-sm">
-                <option value="">SELECCIONE</option>
-                <option value="GENERAL">ENFERMEDAD GENERAL</option>
-                <option value="TRABAJO">ACCIDENTE DE TRABAJO</option>
-            </select>
-        </div>
-        <div class="od-f od-c-1 od-action-col">
-            <button class="btn btn-primary btn-sm od-action-add" title="Guardar">&#128190;</button>
-        </div>
-    </div>
 
-    <div class="od-grid-wrap">
-        <table class="table table-sm od-tbl">
-            <thead>
-                <tr>
-                    <th>Motivo de la Incapacidad</th>
-                    <th class="text-center" style="width:60px">Dias</th>
-                    <th>Tipo</th>
-                    <th class="text-center" style="width:50px">&#128424;</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr><td colspan="4" class="text-center text-muted od-empty-row">Sin incapacidades agregadas.</td></tr>
-            </tbody>
-        </table>
+        @* ---- Grilla de items agregados ---- *@
+        <div class="oi-grid-wrap">
+            <table class="table table-sm oi-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:40px">#</th>
+                        <th>Motivo de la Incapacidad</th>
+                        <th class="text-center" style="width:110px">Desde</th>
+                        <th class="text-center" style="width:110px">Hasta</th>
+                        <th class="text-center" style="width:60px">Dias</th>
+                        <th style="width:200px">Tipo</th>
+                        <th class="text-center" style="width:50px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_items.Count == 0)
+                    {
+                        <tr><td colspan="7" class="text-center text-muted oi-empty-row">Sin incapacidades agregadas.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td class="text-center">@it.Orden</td>
+                                <td>@it.Motivo</td>
+                                <td class="text-center">@(it.FechaDesde?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td class="text-center">@(it.FechaHasta?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td class="text-center"><strong>@(it.Dias?.ToString() ?? "-")</strong></td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(it.Tipo))
+                                    {
+                                        <span class="oi-tipo-pill @(it.Tipo == "ACCIDENTE DE TRABAJO" ? "oi-tipo-trab" : "oi-tipo-gen")">@it.Tipo</span>
+                                    }
+                                </td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
+}
 
 <style>
-    .od-action-col { display: flex; align-items: stretch; }
-    .od-action-add { width: 100%; align-self: stretch; height: 100%; }
+    .oi-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .oi-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .oi-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oi-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
+    .oi-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .oi-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .oi-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .oi-c-1  { grid-column: span 1; }
+    .oi-c-3  { grid-column: span 3; }
+    .oi-c-4  { grid-column: span 4; }
+    .oi-c-12 { grid-column: span 12; }
+    .oi-action-col { display:flex; align-items:stretch; }
+    .oi-action-add { width:100%; align-self:stretch; height:100%; min-height:32px; }
+    .oi-grid-wrap { margin-top:14px; border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
+    .oi-tbl { margin:0; font-size:12.5px; }
+    .oi-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .oi-tbl td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .oi-empty-row { padding:30px !important; font-style:italic; }
+    .oi-tipo-pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase; }
+    .oi-tipo-gen { background:#dbeafe; color:#1e40af; }
+    .oi-tipo-trab { background:#fee2e2; color:#991b1b; }
 </style>
 
-@code { }
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private List<IncapacidadItemDto> _items = new();
+    private bool _agregando;
+
+    private BorradorInc _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await IncSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    private static int? DiasCalculados(DateOnly? desde, DateOnly? hasta)
+    {
+        if (desde is null || hasta is null) { return null; }
+        var d = hasta.Value.DayNumber - desde.Value.DayNumber + 1;
+        return d > 0 ? d : null;
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Motivo)) { return; }
+        _agregando = true;
+        try
+        {
+            var dias = DiasCalculados(_borrador.FechaDesde, _borrador.FechaHasta);
+            var creado = await IncSvc.AgregarAsync(hid, new AgregarIncapacidadRequest(
+                _borrador.Motivo!,
+                _borrador.FechaDesde,
+                _borrador.FechaHasta,
+                dias,
+                _borrador.Tipo), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            _borrador = new();
+        }
+        finally { _agregando = false; }
+    }
+
+    private async Task EliminarAsync(IncapacidadItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar la incapacidad \"{Truncate(it.Motivo, 40)}\"?");
+        if (!ok) { return; }
+        await IncSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s.Substring(0, max) + "...";
+
+    private sealed class BorradorInc
+    {
+        public string? Motivo { get; set; }
+        public DateOnly? FechaDesde { get; set; }
+        public DateOnly? FechaHasta { get; set; }
+        public string? Tipo { get; set; }
+    }
+}

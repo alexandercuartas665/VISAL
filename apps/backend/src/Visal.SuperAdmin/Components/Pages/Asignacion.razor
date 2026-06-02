@@ -28,7 +28,9 @@
             <div class="ase-card-h">1. Agregar Servicios</div>
 
             <div class="ase-form">
-                <div class="ase-f">
+                @* La fila de busqueda ocupa toda la columna 1 para dar aire al input + lupa + reset.
+                   Numero Historia y Tipo doc quedan en una fila aparte (2 cols cada uno). *@
+                <div class="ase-f ase-f-full">
                     <label>Numero Documento</label>
                     <div class="asg-input-row">
                         <input class="form-control form-control-sm mono" placeholder="Busqueda por identificacion"
@@ -37,11 +39,11 @@
                         <button class="btn btn-primary btn-sm" title="Buscar" @onclick="BuscarPorDocumento">&#128269;</button>
                     </div>
                 </div>
-                <div class="ase-f"><label>Numero Historia</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_paciente?.NumeroDocumento" /></div>
-                <div class="ase-f"><label>Tipo doc</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_paciente?.TipoDocumento" /></div>
-                <div class="ase-f ase-f-wide"><label>Nombre paciente</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.NombreCompleto" /></div>
-                <div class="ase-f"><label>Sede</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.Sede" /></div>
-                <div class="ase-f"><label>Municipio</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.Ciudad" /></div>
+                <div class="ase-f ase-f-wide"><label>Numero Historia</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_paciente?.NumeroDocumento" /></div>
+                <div class="ase-f ase-f-wide"><label>Tipo doc</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_paciente?.TipoDocumento" /></div>
+                <div class="ase-f ase-f-full"><label>Nombre paciente</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.NombreCompleto" /></div>
+                <div class="ase-f ase-f-wide"><label>Sede</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.Sede" /></div>
+                <div class="ase-f ase-f-wide"><label>Municipio</label><input class="form-control form-control-sm asg-ro" readonly value="@_paciente?.Ciudad" /></div>
                 <div class="ase-f ase-f-wide">
                     <label>Contratos</label>
                     <select class="form-select form-select-sm" value="@_contratoIdSel" @onchange="OnContratoChanged" disabled="@(_paciente == null)">
@@ -317,7 +319,7 @@
 }
 
 <style>
-    .asg-grid { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 14px; align-items: stretch; }
+    .asg-grid { display: grid; grid-template-columns: 1.55fr 0.85fr 1.15fr; gap: 14px; align-items: stretch; }
     /* min-width:0 impide que las tablas internas (asg-grid-wrap) empujen el ancho del track. */
     .asg-col { display: flex; flex-direction: column; gap: 14px; min-height: 760px; min-width: 0; }
     /* La ultima card de cada columna crece para igualar la altura entre las 3. */

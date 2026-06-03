@@ -24,15 +24,25 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<IReadOnlyList<EscalaItemDto>> ListarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
-        return await db.HistoriaClinicaEscalas.AsNoTracking()
+        // OrderBy se hace tras materializar porque EF Core 9 no traduce OrderBy
+        // sobre propiedades de un record DTO proyectado desde joins.
+        var rows = await db.HistoriaClinicaEscalas.AsNoTracking()
             .Where(e => e.HistoriaClinicaId == historiaId)
-            .Join(db.FormDefinitions.AsNoTracking(), e => e.FormDefinitionId, f => f.Id, (e, f) => new EscalaItemDto(
+            .Join(db.FormDefinitions.AsNoTracking(), e => e.FormDefinitionId, f => f.Id, (e, f) => new
+            {
                 e.Id, e.HistoriaClinicaId, e.FormDefinitionId,
-                f.Codigo, f.Nombre,
-                e.Estado.ToString(), e.FechaApertura, e.FechaCierre,
-                e.EspecialistaNombre))
-            .OrderByDescending(x => x.FechaApertura)
+                FormatoCodigo = f.Codigo, FormatoNombre = f.Nombre,
+                e.Estado, e.FechaApertura, e.FechaCierre, e.EspecialistaNombre
+            })
             .ToListAsync(ct);
+        return rows
+            .OrderByDescending(r => r.FechaApertura)
+            .Select(r => new EscalaItemDto(
+                r.Id, r.HistoriaClinicaId, r.FormDefinitionId,
+                r.FormatoCodigo, r.FormatoNombre,
+                r.Estado.ToString(), r.FechaApertura, r.FechaCierre,
+                r.EspecialistaNombre))
+            .ToList();
     }
 
     public async Task<EscalaDetailDto> IniciarAsync(IniciarEscalaRequest req, Guid actor, CancellationToken ct = default)
@@ -72,15 +82,23 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<EscalaDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        return await db.HistoriaClinicaEscalas.AsNoTracking()
+        // Misma tactica: proyectar a anonimo, materializar, mapear al record.
+        var r = await db.HistoriaClinicaEscalas.AsNoTracking()
             .Where(e => e.Id == id)
-            .Join(db.FormDefinitions.AsNoTracking(), e => e.FormDefinitionId, f => f.Id, (e, f) => new EscalaDetailDto(
+            .Join(db.FormDefinitions.AsNoTracking(), e => e.FormDefinitionId, f => f.Id, (e, f) => new
+            {
                 e.Id, e.HistoriaClinicaId, e.FormDefinitionId,
-                f.Codigo, f.Nombre, f.Version,
+                FormatoCodigo = f.Codigo, FormatoNombre = f.Nombre, FormatoVersion = f.Version,
                 f.SchemaJson, f.PrefillRoutesJson, e.ValoresJson,
-                e.Estado.ToString(), e.FechaApertura, e.FechaCierre,
-                e.EspecialistaNombre))
+                e.Estado, e.FechaApertura, e.FechaCierre, e.EspecialistaNombre
+            })
             .FirstOrDefaultAsync(ct);
+        return r is null ? null : new EscalaDetailDto(
+            r.Id, r.HistoriaClinicaId, r.FormDefinitionId,
+            r.FormatoCodigo, r.FormatoNombre, r.FormatoVersion,
+            r.SchemaJson, r.PrefillRoutesJson, r.ValoresJson,
+            r.Estado.ToString(), r.FechaApertura, r.FechaCierre,
+            r.EspecialistaNombre);
     }
 
     public async Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)

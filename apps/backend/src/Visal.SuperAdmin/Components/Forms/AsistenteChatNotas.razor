@@ -1,5 +1,6 @@
 @using Visal.Application.Tenancy
 @inject IAsistenteIaService AsistSvc
+@inject IJSRuntime JS
 
 @*
    Chat con el asistente IA de Notas Medicas. Esta atado a la HC que el
@@ -122,6 +123,8 @@
 </style>
 
 @code {
+    /// <summary>Paciente al que pertenece el chat. El historial es PROPIO DEL PACIENTE.</summary>
+    [Parameter] public Guid? PacienteId { get; set; }
     /// <summary>HC actualmente en diligenciamiento.</summary>
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     /// <summary>Contenido en vivo de la nota que se esta escribiendo.</summary>
@@ -136,6 +139,7 @@
     [Parameter] public AutoRevisarSignal? UltimoGuardado { get; set; }
     public sealed record AutoRevisarSignal(long Tick, bool Definitivo);
     private long _ultimoTickProcesado = -1;
+    private Guid? _pacienteCargado;
 
     private AsistenteContextoDto? _ctx;
     private string _borrador = "";
@@ -150,6 +154,13 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // Si cambio el paciente, recargamos su historial completo desde BD.
+        if (PacienteId != _pacienteCargado)
+        {
+            _pacienteCargado = PacienteId;
+            await CargarHistorialAsync();
+        }
+
         // Si llegó una senal de guardado nueva (tick distinto al ultimo procesado),
         // disparamos la auto-revision. Este patron es mas robusto que @ref porque
         // funciona aun si el chat no estaba renderizado cuando se hizo el click.
@@ -158,6 +169,19 @@
             _ultimoTickProcesado = sig.Tick;
             await AutoRevisarTrasGuardadoAsync(sig.Definitivo);
         }
+    }
+
+    private async Task CargarHistorialAsync()
+    {
+        _mensajes.Clear();
+        if (PacienteId is not Guid pid) { StateHasChanged(); return; }
+        try
+        {
+            var hist = await AsistSvc.ListarHistorialPorPacienteAsync(pid);
+            _mensajes.AddRange(hist);
+        }
+        catch { /* tolerar fallo de carga — el chat sigue funcional */ }
+        StateHasChanged();
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
@@ -180,6 +204,7 @@
     private async Task EnviarAsync(string mensaje)
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
+        if (PacienteId is not Guid pid) { return; }
         if (_ctx?.TieneAgente != true) { return; }
         _pensando = true;
         _mensajes.Add(new AsistenteMensajeDto("user", mensaje, DateTimeOffset.UtcNow));
@@ -187,7 +212,7 @@
 
         try
         {
-            var resp = await AsistSvc.EnviarMensajeAsync(hid, ContenidoNota ?? "", mensaje, _mensajes);
+            var resp = await AsistSvc.EnviarMensajeAsync(pid, hid, ContenidoNota ?? "", mensaje, _mensajes);
             _mensajes.Add(new AsistenteMensajeDto("assistant", resp.Texto, DateTimeOffset.UtcNow));
             _aviso = resp.Aviso;
         }
@@ -202,10 +227,20 @@
         }
     }
 
-    private void Limpiar()
+    private async Task Limpiar()
     {
+        // El boton limpia el historial PERSISTENTE del paciente para que no aparezca de nuevo
+        // la proxima vez. Confirmamos con prompt nativo.
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Eliminar todo el historial de chat del paciente con el asistente? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        if (PacienteId is Guid pid)
+        {
+            try { await AsistSvc.LimpiarHistorialPorPacienteAsync(pid); } catch { }
+        }
         _mensajes.Clear();
         _aviso = null;
+        StateHasChanged();
     }
 
     /// <summary>
@@ -222,6 +257,7 @@
     public async Task AutoRevisarTrasGuardadoAsync(bool definitivo)
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
+        if (PacienteId is not Guid pid) { return; }
         // Re-resolver contexto para tomar la config actualizada.
         _ctx = await AsistSvc.ResolverContextoAsync();
         StateHasChanged();
@@ -230,17 +266,29 @@
         if (!debe) { return; }
 
         var etiqueta = definitivo ? "Guardado Definitivo" : "Guardado Parcial";
-        // Divider visible en el historial — informa el evento sin parecer
-        // mensaje del doctor.
-        _mensajes.Add(new AsistenteMensajeDto("system", $"Auto-revision tras {etiqueta}", DateTimeOffset.UtcNow));
+        // Divider visible — se persiste como "system" en el historial del paciente.
+        var systemMsgTexto = $"Auto-revision tras {etiqueta}";
+        try
+        {
+            var sysMsg = await AsistSvc.AgregarMensajeAsync(
+                pid, "system", systemMsgTexto,
+                historiaClinicaId: hid,
+                agenteId: _ctx.AgenteId,
+                agenteNombre: _ctx.AgenteNombre);
+            _mensajes.Add(sysMsg);
+        }
+        catch { _mensajes.Add(new AsistenteMensajeDto("system", systemMsgTexto, DateTimeOffset.UtcNow)); }
         _pensando = true;
         StateHasChanged();
 
         try
         {
             // Internamente le pasamos "Revisa la nota actual" como instruccion al
-            // backend pero ese texto nunca aparece como burbuja del usuario.
-            var resp = await AsistSvc.EnviarMensajeAsync(hid, ContenidoNota ?? "", "Revisa la nota actual.", _mensajes);
+            // backend pero ese texto nunca aparece como burbuja del usuario y
+            // NO se persiste como mensaje "user" (persistirMensajeUsuario: false).
+            var resp = await AsistSvc.EnviarMensajeAsync(
+                pid, hid, ContenidoNota ?? "", "Revisa la nota actual.",
+                _mensajes, persistirMensajeUsuario: false);
             _mensajes.Add(new AsistenteMensajeDto("assistant", resp.Texto, DateTimeOffset.UtcNow));
             _aviso = resp.Aviso;
         }

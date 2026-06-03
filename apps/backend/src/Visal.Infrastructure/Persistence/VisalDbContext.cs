@@ -69,6 +69,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
+    public DbSet<AsistenteChatMensaje> AsistenteChatMensajes => Set<AsistenteChatMensaje>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
@@ -630,6 +631,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+        });
+
+        modelBuilder.Entity<AsistenteChatMensaje>(b =>
+        {
+            b.Property(x => x.Rol).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Texto).HasColumnType("text").IsRequired();
+            b.Property(x => x.AgenteNombreSnapshot).HasMaxLength(200);
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.PacienteId, x.Cuando });
         });
 
         modelBuilder.Entity<NotaMedica>(b =>

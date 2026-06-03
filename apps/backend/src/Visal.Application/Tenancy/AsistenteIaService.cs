@@ -63,10 +63,12 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
     }
 
     public async Task<AsistenteRespuestaDto> EnviarMensajeAsync(
+        Guid pacienteId,
         Guid historiaClinicaId,
         string contenidoNotaActual,
         string mensajeUsuario,
         IReadOnlyList<AsistenteMensajeDto> historial,
+        bool persistirMensajeUsuario = true,
         CancellationToken ct = default)
     {
         var ctx = await ResolverContextoAsync(ct);
@@ -77,6 +79,11 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
                 ctx.AgenteNombre ?? "Sin agente",
                 ProveedorReal: false,
                 Aviso: ctx.RazonSinAgente);
+        }
+
+        if (tenant.TenantId is not Guid tid)
+        {
+            return new("Sin tenant activo.", ctx.AgenteNombre ?? "?", false, "Sin tenant.");
         }
 
         using var scope = scopes.CreateScope();
@@ -106,6 +113,36 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
             contenidoNotaActual,
             mensajeUsuario);
 
+        // Persistir el mensaje del usuario (opcional, se omite en auto-revisiones)
+        // y la respuesta del asistente, ambos atados al paciente.
+        var ahora = DateTimeOffset.UtcNow;
+        if (persistirMensajeUsuario)
+        {
+            db.AsistenteChatMensajes.Add(new AsistenteChatMensaje
+            {
+                TenantId = tid,
+                PacienteId = pacienteId,
+                Rol = "user",
+                Texto = mensajeUsuario ?? "",
+                Cuando = ahora,
+                HistoriaClinicaId = historiaClinicaId,
+                AgenteId = agenteId,
+                AgenteNombreSnapshot = agente.Name
+            });
+        }
+        db.AsistenteChatMensajes.Add(new AsistenteChatMensaje
+        {
+            TenantId = tid,
+            PacienteId = pacienteId,
+            Rol = "assistant",
+            Texto = respuesta,
+            Cuando = ahora.AddMilliseconds(1), // garantiza orden estable user -> assistant
+            HistoriaClinicaId = historiaClinicaId,
+            AgenteId = agenteId,
+            AgenteNombreSnapshot = agente.Name
+        });
+        await db.SaveChangesAsync(ct);
+
         return new(
             respuesta,
             agente.Name,
@@ -113,6 +150,58 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
             Aviso: hayApiReal
                 ? null
                 : "Modo demo: no hay AiProviderConfig activa. Configura una API key para respuestas reales del LLM.");
+    }
+
+    public async Task<IReadOnlyList<AsistenteMensajeDto>> ListarHistorialPorPacienteAsync(
+        Guid pacienteId, int? limit = null, CancellationToken ct = default)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var q = db.AsistenteChatMensajes.AsNoTracking()
+            .Where(m => m.PacienteId == pacienteId)
+            .OrderBy(m => m.Cuando)
+            .AsQueryable();
+        if (limit is int n && n > 0) { q = q.TakeLast(n).AsQueryable(); }
+        return await q
+            .Select(m => new AsistenteMensajeDto(m.Rol, m.Texto, m.Cuando))
+            .ToListAsync(ct);
+    }
+
+    public async Task<AsistenteMensajeDto> AgregarMensajeAsync(
+        Guid pacienteId, string rol, string texto,
+        Guid? historiaClinicaId = null,
+        Guid? notaMedicaId = null,
+        Guid? agenteId = null,
+        string? agenteNombre = null,
+        CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        var entity = new AsistenteChatMensaje
+        {
+            TenantId = tid,
+            PacienteId = pacienteId,
+            Rol = string.IsNullOrWhiteSpace(rol) ? "system" : rol.Trim(),
+            Texto = texto ?? "",
+            Cuando = DateTimeOffset.UtcNow,
+            HistoriaClinicaId = historiaClinicaId,
+            NotaMedicaId = notaMedicaId,
+            AgenteId = agenteId,
+            AgenteNombreSnapshot = agenteNombre
+        };
+        db.AsistenteChatMensajes.Add(entity);
+        await db.SaveChangesAsync(ct);
+        return new AsistenteMensajeDto(entity.Rol, entity.Texto, entity.Cuando);
+    }
+
+    public async Task<int> LimpiarHistorialPorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        return await db.AsistenteChatMensajes
+            .Where(m => m.PacienteId == pacienteId)
+            .ExecuteDeleteAsync(ct);
     }
 
     private static async Task<string> ConstruirResumenHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)

@@ -225,9 +225,16 @@ app.MapPost("/auth/login", async (
         claims.Add(new Claim("tenant_role", (membership?.TenantRole ?? TenantRole.Owner).ToString()));
         claims.Add(new Claim("sucursal_id", sucursalId.ToString()));
         if (user.EsGlobal) { claims.Add(new Claim("global_access", "1")); }
+        // Si el TenantUser esta vinculado a un Profesional, el claim "profesional_id"
+        // marca al usuario como perfil de campo (solo Atencion en el menu lateral).
+        if (membership?.ProfesionalId is Guid pidSede)
+        {
+            claims.Add(new Claim("profesional_id", pidSede.ToString()));
+        }
         var idSede = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idSede));
-        return Results.Redirect("/mi-cuenta");
+        // Profesionales van directo a Atencion; el resto, al panel Mi cuenta.
+        return Results.Redirect(membership?.ProfesionalId is not null ? "/atencion" : "/mi-cuenta");
     }
 
     // Sin sede valida: fallback al flujo anterior (compatibilidad).
@@ -236,6 +243,7 @@ app.MapPost("/auth/login", async (
         var m = memberships[0];
         claims.Add(new Claim("tenant_id", m.TenantId.ToString()));
         claims.Add(new Claim("tenant_role", m.TenantRole.ToString()));
+        if (m.ProfesionalId is Guid pidFb) { claims.Add(new Claim("profesional_id", pidFb.ToString())); }
     }
     else
     {

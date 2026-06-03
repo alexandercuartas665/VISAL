@@ -159,40 +159,29 @@
             </div>
         </div>
 
-        <div class="ase-card hc-col-full">
-            <div class="hc-tabs">
-                @foreach (var t in _tabs)
-                {
-                    <button class="hc-tab @(t == _tabSel ? "sel" : "")" @onclick="() => _tabSel = t">
-                        @t
-                        @* Badge con conteo en la pestana de medicamentos *@
-                        @if (t == "Ordenes medicamento" && _medCount > 0)
-                        {
-                            <span class="hc-tab-badge">@_medCount</span>
-                        }
-                        @* Badge con conteo en la pestana de servicios *@
-                        @if (t == "Ordenes servicios Propias" && _servCount > 0)
-                        {
-                            <span class="hc-tab-badge">@_servCount</span>
-                        }
-                        @* Badge con conteo en la pestana de remisiones *@
-                        @if (t == "Remisiones" && _remCount > 0)
-                        {
-                            <span class="hc-tab-badge">@_remCount</span>
-                        }
-                        @* Badge en la pestana de incapacidades *@
-                        @if (t == "Ordenes incapacidad" && _incCount > 0)
-                        {
-                            <span class="hc-tab-badge">@_incCount</span>
-                        }
-                        @* Badge en la pestana de certificaciones *@
-                        @if (t == "Ordenes certificaciones" && _certCount > 0)
-                        {
-                            <span class="hc-tab-badge">@_certCount</span>
-                        }
-                    </button>
-                }
-            </div>
+        <div class="ase-card hc-col-full hc-with-menu @(_menuColapsado ? "menu-colapsado" : "")">
+            @* ===== Menu lateral del modulo (izquierda) ===== *@
+            <aside class="hc-side-menu">
+                <button class="hc-side-toggle" title="@(_menuColapsado ? "Expandir menu" : "Colapsar menu")"
+                        @onclick="() => _menuColapsado = !_menuColapsado">
+                    @if (_menuColapsado) { <span>&raquo;</span> } else { <span>&laquo;</span> <span class="hc-side-toggle-lbl">Menu</span> }
+                </button>
+                <nav class="hc-side-nav">
+                    @foreach (var t in _tabs)
+                    {
+                        var (icono, badge) = IconoYBadge(t);
+                        <button class="hc-side-item @(t == _tabSel ? "sel" : "")"
+                                title="@t"
+                                @onclick="() => _tabSel = t">
+                            <span class="hc-side-icon">@icono</span>
+                            <span class="hc-side-lbl">@t</span>
+                            @if (badge > 0) { <span class="hc-side-badge">@badge</span> }
+                        </button>
+                    }
+                </nav>
+            </aside>
+
+            @* ===== Cuerpo del tab seleccionado (derecha) ===== *@
             <div class="hc-tab-body">
                 @if (_historiaSel is null)
                 {
@@ -426,9 +415,27 @@
     .hc-buscar-row { display: flex; gap: 6px; margin-top: 4px; max-width: 520px; }
     .hc-buscar-row > input { flex: 1; }
 
-    .hc-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; padding: 0 8px; overflow-x: auto; }
-    .hc-tab { padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-    .hc-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
+    /* Menu lateral del modulo (reemplaza los tabs horizontales) */
+    .hc-with-menu { display: grid; grid-template-columns: 230px 1fr; grid-template-rows: 1fr; gap: 0; min-height: 0; }
+    .hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr; }
+    .hc-side-menu { background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow: hidden; }
+    .hc-side-toggle { background: none; border: none; border-bottom: 1px solid #e2e8f0; padding: 10px 12px; font-size: 14px; color: #1565c0; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; text-align: left; }
+    .hc-side-toggle:hover { background: #eef6ff; }
+    .hc-side-toggle-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #475569; font-weight: 700; }
+    .hc-side-nav { flex: 1; overflow-y: auto; padding: 6px 0; }
+    .hc-side-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 14px; background: none; border: none; border-left: 3px solid transparent; color: #334155; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: left; position: relative; transition: background .15s, border-color .15s; }
+    .hc-side-item:hover { background: #eef6ff; }
+    .hc-side-item.sel { background: #dbeafe; color: #1565c0; border-left-color: #1565c0; }
+    .hc-side-icon { font-size: 16px; flex-shrink: 0; width: 22px; text-align: center; }
+    .hc-side-lbl { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hc-side-badge { background: #1565c0; color: #fff; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; flex-shrink: 0; }
+    .menu-colapsado .hc-side-lbl, .menu-colapsado .hc-side-badge { display: none; }
+    .menu-colapsado .hc-side-item { justify-content: center; padding: 10px 6px; }
+    .menu-colapsado .hc-side-toggle { justify-content: center; padding: 10px 6px; }
+    /* Conservamos las clases tab por compat — escondidas (no se renderizan) */
+    .hc-tabs { display: none; }
+    .hc-tab { display: none; }
+    .hc-tab.sel { display: none; }
     /* Badge con conteo dentro de la pestana (ej. cantidad de medicamentos en la orden). */
     .hc-tab-badge { display:inline-block; background:#1565c0; color:#fff; font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; margin-left:6px; vertical-align:middle; }
     .hc-tab-body { padding: 18px; flex: 1; overflow: auto; }
@@ -493,6 +500,21 @@
     private readonly string[] _tabs = new[] {
         "Historial", "Ordenes medicamento", "Ordenes servicios Propias",
         "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
+    };
+    /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
+    private bool _menuColapsado;
+
+    /// <summary>Devuelve (icono unicode, conteo de badge) para una etiqueta del menu.</summary>
+    private (string icono, int badge) IconoYBadge(string tab) => tab switch
+    {
+        "Historial" => ("\U0001F4DD", 0),                      // notepad
+        "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
+        "Ordenes servicios Propias" => ("\U0001F3E5", _servCount), // hospital
+        "Insumos" => ("\U0001F4E6", 0),                        // box
+        "Remisiones" => ("↗", _remCount),                 // arrow up-right
+        "Ordenes incapacidad" => ("\U0001F4C4", _incCount),    // page facing up
+        "Ordenes certificaciones" => ("\U0001F4DC", _certCount), // scroll
+        _ => ("•", 0)
     };
     private string _tabSel = "Historial";
 

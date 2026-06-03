@@ -6,6 +6,7 @@
 @inject IAutomationService AutoSvc
 @inject IPipelineService PipelineSvc
 @inject IAiAgentService AgentSvc
+@inject IJSRuntime JS
 
 <PageTitle>Automatizaciones - Visal</PageTitle>
 
@@ -75,10 +76,16 @@ else
                 <div class="auto-card" @onclick="() => OpenEdit(r)">
                     <div class="auto-card-top">
                         <span class="auto-name">@r.Name</span>
-                        <label class="ag-switch" @onclick:stopPropagation="true" title="@(r.IsActive ? "Pausar" : "Activar")">
-                            <input type="checkbox" checked="@r.IsActive" @onchange="@(e => ToggleAsync(r, (bool)e.Value!))" disabled="@_busy" />
-                            <span class="ag-slider"></span>
-                        </label>
+                        <div style="display:flex;gap:8px;align-items:center;" @onclick:stopPropagation="true">
+                            <label class="ag-switch" title="@(r.IsActive ? "Pausar" : "Activar")">
+                                <input type="checkbox" checked="@r.IsActive" @onchange="@(e => ToggleAsync(r, (bool)e.Value!))" disabled="@_busy" />
+                                <span class="ag-slider"></span>
+                            </label>
+                            <button class="auto-del-btn" title="Eliminar regla"
+                                    @onclick="() => DeleteAsync(r)" disabled="@_busy">
+                                &#128465;
+                            </button>
+                        </div>
                     </div>
                     <div class="auto-flow">
                         <span class="auto-trig">@TriggerText(r)</span>
@@ -320,6 +327,21 @@ else
         if (_editId is null) { return; }
         _busy = true;
         try { var actor = await ActorAsync(); await AutoSvc.DeleteAsync(_editId.Value, actor); _editorOpen = false; await ReloadAsync(); }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Eliminar regla directamente desde la tarjeta, con confirmacion.</summary>
+    private async Task DeleteAsync(AutomationRuleDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar la regla \"{r.Name}\"? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            await AutoSvc.DeleteAsync(r.Id, actor);
+            await ReloadAsync();
+        }
         finally { _busy = false; }
     }
 

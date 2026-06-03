@@ -1,0 +1,173 @@
+@using Visal.Application.Tenancy
+@inject IAsistenteIaService AsistSvc
+
+@*
+   Chat con el asistente IA de Notas Medicas. Esta atado a la HC que el
+   especialista esta diligenciando. El agente concreto y su prompt vienen
+   resueltos desde la regla de automatizacion activa de tipo
+   "Revisar notas medicas con IA". El componente lee Contenido en vivo desde
+   el modulo padre via parametro y permite enviar mensajes que el agente
+   responde acotado a validacion documental (no diagnostico ni tratamiento).
+*@
+
+<div class="ai-chat">
+    <div class="ai-chat-head">
+        <div class="ai-chat-title">
+            <span class="ai-chat-emoji">&#129302;</span>
+            <div>
+                <div class="ai-chat-name">@(_ctx?.AgenteNombre ?? "Asistente de Notas")</div>
+                <div class="ai-chat-role">@(_ctx?.AgenteRole ?? "Supervisor de calidad documental")</div>
+            </div>
+        </div>
+        <button class="ai-chat-clear" @onclick="Limpiar" title="Limpiar conversacion">&#128465;</button>
+    </div>
+
+    @if (_ctx is not null && !_ctx.TieneAgente)
+    {
+        <div class="ai-chat-warn">
+            @(_ctx.RazonSinAgente ?? "Asistente no disponible.")
+        </div>
+    }
+
+    <div class="ai-chat-msgs" id="ai-chat-msgs">
+        @if (_mensajes.Count == 0)
+        {
+            <div class="ai-chat-empty">
+                Hola, soy tu asistente para revisar la nota que estas escribiendo. Pregunta o pide
+                <em>"revisa la nota"</em> y validare calidad, completitud, ortografia.
+                <br /><br />
+                <b>Mi alcance es solo documental.</b> No diagnostico, no recomiendo tratamientos.
+            </div>
+        }
+        @foreach (var m in _mensajes)
+        {
+            <div class="ai-msg ai-msg-@(m.Rol)">
+                <div class="ai-msg-h">@(m.Rol == "user" ? "Tu" : (_ctx?.AgenteNombre ?? "Asistente")) - @m.Cuando.LocalDateTime.ToString("HH:mm")</div>
+                <div class="ai-msg-body">@m.Texto</div>
+            </div>
+        }
+        @if (_pensando)
+        {
+            <div class="ai-msg ai-msg-assistant">
+                <div class="ai-msg-h">@(_ctx?.AgenteNombre ?? "Asistente")</div>
+                <div class="ai-msg-body ai-msg-typing">Pensando...</div>
+            </div>
+        }
+    </div>
+
+    @if (_aviso is not null)
+    {
+        <div class="ai-chat-aviso" title="@_aviso">&#9888; @_aviso</div>
+    }
+
+    <div class="ai-chat-input">
+        <button class="ai-quick" @onclick="@(() => EnviarAsync("Revisa la nota actual"))"
+                disabled="@(_pensando || HistoriaClinicaId is null || _ctx?.TieneAgente != true)"
+                title="Pedir revision de la nota actual">&#128270; Revisar nota</button>
+        <textarea class="form-control form-control-sm ai-chat-textarea"
+                  rows="2" placeholder="Pregunta del doctor..."
+                  @bind="_borrador" @bind:event="oninput"
+                  @onkeydown="OnKeyDown"
+                  disabled="@(_pensando || HistoriaClinicaId is null || _ctx?.TieneAgente != true)"></textarea>
+        <button class="btn btn-primary btn-sm ai-chat-send"
+                @onclick="EnviarBorrador"
+                disabled="@(_pensando || string.IsNullOrWhiteSpace(_borrador) || HistoriaClinicaId is null || _ctx?.TieneAgente != true)">
+            Enviar
+        </button>
+    </div>
+</div>
+
+<style>
+    .ai-chat { display:flex; flex-direction:column; height:100%; background:#f8fafc; border-left:1px solid #e2e8f0; }
+    .ai-chat-head { padding:12px 14px; background:#1565c0; color:#fff; display:flex; justify-content:space-between; align-items:center; }
+    .ai-chat-title { display:flex; gap:10px; align-items:center; }
+    .ai-chat-emoji { font-size:22px; }
+    .ai-chat-name { font-weight:700; font-size:13px; }
+    .ai-chat-role { font-size:11px; opacity:.85; }
+    .ai-chat-clear { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; padding:2px 8px; cursor:pointer; font-size:13px; }
+    .ai-chat-clear:hover { background:rgba(255,255,255,.15); }
+    .ai-chat-warn { background:#fef3c7; color:#92400e; padding:10px 14px; font-size:12px; border-bottom:1px solid #fde68a; }
+    .ai-chat-msgs { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+    .ai-chat-empty { color:#64748b; font-size:12.5px; padding:18px; text-align:center; font-style:italic; }
+    .ai-msg { padding:8px 12px; border-radius:8px; max-width:92%; }
+    .ai-msg-h { font-size:10.5px; font-weight:700; opacity:.7; margin-bottom:4px; }
+    .ai-msg-body { font-size:12.5px; white-space:pre-wrap; line-height:1.45; }
+    .ai-msg-user { background:#1565c0; color:#fff; align-self:flex-end; }
+    .ai-msg-user .ai-msg-h { color:#dbeafe; }
+    .ai-msg-assistant { background:#fff; border:1px solid #e2e8f0; align-self:flex-start; }
+    .ai-msg-assistant .ai-msg-h { color:#1565c0; }
+    .ai-msg-typing { color:#64748b; font-style:italic; }
+    .ai-chat-aviso { background:#fffbeb; color:#92400e; padding:6px 12px; font-size:11px; border-top:1px solid #fde68a; }
+    .ai-chat-input { padding:10px; border-top:1px solid #e2e8f0; background:#fff; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+    .ai-chat-textarea { resize:none; flex:1; min-width:120px; }
+    .ai-chat-send { white-space:nowrap; }
+    .ai-quick { background:#eef6ff; color:#1565c0; border:1px solid #bfdbfe; border-radius:6px; padding:6px 10px; font-size:11.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .ai-quick:hover:not(:disabled) { background:#dbeafe; }
+    .ai-quick:disabled { opacity:.5; cursor:not-allowed; }
+</style>
+
+@code {
+    /// <summary>HC actualmente en diligenciamiento.</summary>
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    /// <summary>Contenido en vivo de la nota que se esta escribiendo.</summary>
+    [Parameter] public string? ContenidoNota { get; set; }
+
+    private AsistenteContextoDto? _ctx;
+    private string _borrador = "";
+    private bool _pensando;
+    private string? _aviso;
+    private readonly List<AsistenteMensajeDto> _mensajes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _ctx = await AsistSvc.ResolverContextoAsync();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            // Enter envia (Shift+Enter inserta linea nueva)
+            await EnviarBorrador();
+        }
+    }
+
+    private async Task EnviarBorrador()
+    {
+        var t = _borrador?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(t)) { return; }
+        _borrador = "";
+        await EnviarAsync(t);
+    }
+
+    private async Task EnviarAsync(string mensaje)
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (_ctx?.TieneAgente != true) { return; }
+        _pensando = true;
+        _mensajes.Add(new AsistenteMensajeDto("user", mensaje, DateTimeOffset.UtcNow));
+        StateHasChanged();
+
+        try
+        {
+            var resp = await AsistSvc.EnviarMensajeAsync(hid, ContenidoNota ?? "", mensaje, _mensajes);
+            _mensajes.Add(new AsistenteMensajeDto("assistant", resp.Texto, DateTimeOffset.UtcNow));
+            _aviso = resp.Aviso;
+        }
+        catch (Exception ex)
+        {
+            _mensajes.Add(new AsistenteMensajeDto("assistant", $"Error: {ex.Message}", DateTimeOffset.UtcNow));
+        }
+        finally
+        {
+            _pensando = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Limpiar()
+    {
+        _mensajes.Clear();
+        _aviso = null;
+    }
+}

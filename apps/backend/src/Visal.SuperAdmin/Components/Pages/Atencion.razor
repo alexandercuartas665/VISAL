@@ -144,13 +144,20 @@ else
             </div>
             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarNotas">&#10006; Cerrar</button>
         </div>
-        <div class="at-fs-body">
-            <NotasMedicasModulo NombrePacienteCtx="@sel.NombrePaciente"
-                                DocumentoPacienteCtx="@sel.NumeroDocPaciente"
-                                SessionNoCtx="@sel.SessionNo"
-                                AsignacionTurnoIdCtx="@sel.AsignacionTurnoId"
-                                PacienteId="@sel.PacienteId"
-                                HistoriaClinicaId="@_hcIdParaNotas" />
+        <div class="at-fs-body at-fs-body-with-chat">
+            <div class="at-fs-notas">
+                <NotasMedicasModulo NombrePacienteCtx="@sel.NombrePaciente"
+                                    DocumentoPacienteCtx="@sel.NumeroDocPaciente"
+                                    SessionNoCtx="@sel.SessionNo"
+                                    AsignacionTurnoIdCtx="@sel.AsignacionTurnoId"
+                                    PacienteId="@sel.PacienteId"
+                                    HistoriaClinicaId="@_hcIdParaNotas"
+                                    @bind-ContenidoNotaActual="_contenidoNotaActual" />
+            </div>
+            <div class="at-fs-aichat">
+                <AsistenteChatNotas HistoriaClinicaId="@_hcIdParaNotas"
+                                    ContenidoNota="@_contenidoNotaActual" />
+            </div>
         </div>
     </div>
 }
@@ -183,6 +190,13 @@ else
     .at-fs-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
     .at-fs-h small { color: #64748b; font-size: 11.5px; }
     .at-fs-body { flex: 1; overflow: auto; padding: 16px 22px; }
+    .at-fs-body-with-chat { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; padding: 0; overflow: hidden; }
+    .at-fs-notas { overflow: auto; padding: 16px 22px; }
+    .at-fs-aichat { overflow: hidden; display: flex; flex-direction: column; }
+    @@media (max-width: 1100px) {
+        .at-fs-body-with-chat { grid-template-columns: 1fr; }
+        .at-fs-aichat { border-top: 1px solid #e2e8f0; max-height: 360px; }
+    }
     .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
     .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
     .usu-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
@@ -206,6 +220,8 @@ else
     private MiServicioAsignadoDto? _showHistoriaSel;
     private MiServicioAsignadoDto? _showNotaSel;
     private Guid? _hcIdParaNotas;
+    /// <summary>Contenido en vivo de la nota — espejado desde NotasMedicasModulo via @@bind para que el chat IA lo lea sin tener que pegarlo manualmente.</summary>
+    private string? _contenidoNotaActual;
     private PacienteAsignacionDto? _pacienteCtx;
 
     private string? _error, _ok;

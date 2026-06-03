@@ -504,6 +504,9 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .auto-card:hover { border-color: oklch(0.55 0.22 258 / 0.4); }
 .auto-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .auto-name { font-weight: 700; font-size: 14.5px; }
+.auto-del-btn { background: transparent; border: 1px solid #fecaca; color: #b91c1c; border-radius: 6px; padding: 2px 8px; font-size: 14px; cursor: pointer; transition: background 0.15s; }
+.auto-del-btn:hover { background: #fee2e2; }
+.auto-del-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .auto-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .auto-trig { background: var(--accent); color: var(--primary); border-radius: 9px; padding: 7px 11px; font-size: 12px; font-weight: 600; }
 .auto-arrow { color: var(--muted-foreground); }

@@ -94,7 +94,8 @@
             </div>
             <div class="ase-f ase-f-wide nm-row-full">
                 <label>Contenido de la Nota</label>
-                <textarea class="form-control form-control-sm" rows="12" @bind="_borrador.Contenido"
+                <textarea class="form-control form-control-sm" rows="12"
+                          @bind="_borrador.Contenido" @bind:event="oninput" @bind:after="EmitirContenidoActualAsync"
                           placeholder="Describe la atencion, hallazgos, plan, recomendaciones..."></textarea>
             </div>
             <div class="nm-acciones-center">
@@ -630,7 +631,19 @@ else if (_tabSel == "Ver Historial")
     [Parameter] public Guid? AsignacionTurnoIdCtx { get; set; }
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public Guid? PacienteId { get; set; }
+    /// <summary>Two-way binding del contenido de la nota en redaccion para que el chat IA externo pueda leerlo sin reaches al servicio.</summary>
+    [Parameter] public string? ContenidoNotaActual { get; set; }
+    [Parameter] public EventCallback<string?> ContenidoNotaActualChanged { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    /// <summary>Notifica al parent cada vez que el textarea cambia, para que el chat IA tenga el texto en vivo.</summary>
+    private async Task EmitirContenidoActualAsync()
+    {
+        if (ContenidoNotaActualChanged.HasDelegate)
+        {
+            await ContenidoNotaActualChanged.InvokeAsync(_borrador?.Contenido);
+        }
+    }
 
     private readonly string[] _tabs = new[] {
         "Notas", "Diligenciamiento", "Firma", "Seguimiento", "Documentos Externos", "Ver Historial"

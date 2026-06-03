@@ -1,0 +1,345 @@
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@inject IDocumentoHcService DocSvc
+@inject IJSRuntime JS
+
+@*
+   Submodulo de documentos secundarios de la HC, parametrizado por Tipo
+   ("EVOLUCION" o "CONSENTIMIENTO"). Misma mecanica que HcEscalas:
+   - Lista los documentos ya iniciados (cards Abrir / Eliminar).
+   - Boton "+ Nueva ..." abre modal con miniaturas. Aqui los formatos se
+     resuelven desde relaciones_formulario (origen = FormDefId de la HC,
+     TipoRelacion = Tipo), no del catalogo general.
+   - Visor (FormViewer) para diligenciar, con botones Guardar y Marcar
+     como definitiva.
+*@
+
+@if (HistoriaClinicaId is null)
+{
+    <div class="ase-empty hc-doc-empty">
+        Para iniciar @TextoSing.ToLower() necesitas haber iniciado primero una historia medica del paciente.
+    </div>
+}
+else
+{
+    <div class="hc-doc-cab">
+        <div>
+            <h6 class="hc-doc-h">@TextoPlural diligenciad@(EsFemenino ? "as" : "os")</h6>
+            <small class="text-muted">@_documentos.Count @(TextoSing.ToLower())(s) en esta HC.</small>
+        </div>
+        <button class="btn btn-primary btn-sm" @onclick="AbrirCatalogoAsync" disabled="@_busy">
+            + Nuev@(EsFemenino ? "a" : "o") @TextoSing.ToLower()
+        </button>
+    </div>
+
+    @if (_msg is not null) { <div class="hc-info-msg">@_msg</div> }
+    @if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+    @if (_visor is { } visor)
+    {
+        @* === Visor del documento seleccionado === *@
+        <div class="hc-doc-visor">
+            <div class="hc-doc-visor-h">
+                <div>
+                    <div class="hc-doc-visor-t">@visor.FormatoNombre</div>
+                    <div class="hc-doc-visor-s">@visor.FormatoCodigo - @visor.Estado @(visor.Estado == "Cerrada" ? $"el {visor.FechaCierre?.ToLocalTime():dd/MM/yyyy HH:mm}" : "")</div>
+                </div>
+                <div class="hc-doc-visor-acts">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVisor" disabled="@_busy">&times; Cerrar visor</button>
+                    @if (visor.Estado == "Abierta")
+                    {
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="GuardarValoresAsync" disabled="@_busy">&#128190; Guardar</button>
+                        <button class="btn btn-primary btn-sm" @onclick="CerrarDocAsync" disabled="@_busy">&#10003; Marcar como definitiv@(EsFemenino ? "a" : "o")</button>
+                    }
+                </div>
+            </div>
+            <FormViewer Schema="@_visorSchema" Valores="@_visorValores"
+                        Titulo="@visor.FormatoNombre" Subtitulo="@visor.FormatoCodigo"
+                        ReadOnly="@(visor.Estado != "Abierta")" />
+        </div>
+    }
+    else
+    {
+        @* === Lista de documentos === *@
+        @if (_documentos.Count == 0)
+        {
+            <div class="ase-empty hc-doc-empty">
+                Aun no hay @TextoPlural.ToLower() en esta historia. Pulsa <b>+ Nuev@(EsFemenino ? "a" : "o") @TextoSing.ToLower()</b> para iniciar @(EsFemenino ? "una" : "uno").
+            </div>
+        }
+        else
+        {
+            <div class="hc-doc-grid">
+                @foreach (var d in _documentos)
+                {
+                    <div class="hc-doc-card @(d.Estado == "Cerrada" ? "hc-doc-card-cerrada" : "")">
+                        <div class="hc-doc-card-h">
+                            <span class="hc-doc-tipo hc-doc-tipo-@Tipo.ToLowerInvariant()">@Tipo</span>
+                            @if (d.Estado == "Cerrada") { <span class="hc-doc-pill ok">Cerrada</span> }
+                            else { <span class="hc-doc-pill abierta">Abierta</span> }
+                        </div>
+                        <div class="hc-doc-nombre">@d.FormatoNombre</div>
+                        <div class="hc-doc-meta">
+                            @d.FormatoCodigo &middot; @(d.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))
+                            @if (!string.IsNullOrWhiteSpace(d.EspecialistaNombre)) { <span> &middot; @d.EspecialistaNombre</span> }
+                        </div>
+                        <div class="hc-doc-acts">
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisorAsync(d.Id)" disabled="@_busy">
+                                &#9998; @(d.Estado == "Cerrada" ? "Ver" : "Diligenciar")
+                            </button>
+                            <button class="btn btn-link btn-sm text-danger" @onclick="() => EliminarAsync(d)" disabled="@_busy" title="Eliminar">&#128465;</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+}
+
+@* ====== MODAL CATALOGO DE FORMATOS RELACIONADOS ====== *@
+@if (_catalogoAbierto)
+{
+    <div class="cie-backdrop" @onclick="CerrarCatalogo"></div>
+    <div class="cie-modal" style="width: min(840px, 95vw);">
+        <div class="cie-modal-h">
+            <h3>Seleccionar @TextoSing.ToLower() a iniciar</h3>
+            <button class="cie-modal-close" @onclick="CerrarCatalogo">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            @if (_formatos.Count == 0)
+            {
+                <div class="ase-empty">
+                    No hay formatos de <b>@TextoSing.ToLower()</b> configurados para esta historia.
+                    Crea la relacion en <b>Configuracion del sistema -> Relaciones de formularios</b>
+                    eligiendo como origen el formato de esta HC y como tipo "@Tipo".
+                </div>
+            }
+            else
+            {
+                <div class="hc-doc-minis">
+                    @foreach (var f in _formatos)
+                    {
+                        <div class="hc-doc-mini @(_seleccionFormatoId == f.Id ? "sel" : "")"
+                             @onclick="() => _seleccionFormatoId = f.Id">
+                            <div class="hc-doc-mini-icon">@IconoMini</div>
+                            <div class="hc-doc-mini-nombre">@f.Nombre</div>
+                            <div class="hc-doc-mini-meta">@f.Codigo @(string.IsNullOrEmpty(f.Version) ? "" : $"v{f.Version}")</div>
+                            @if (!string.IsNullOrWhiteSpace(f.Observacion))
+                            {
+                                <div class="hc-doc-mini-obs" title="@f.Observacion">@f.Observacion</div>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(f.Tipo))
+                            {
+                                <div class="hc-doc-mini-tipo">@f.Tipo</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            @if (_catalogoError is not null) { <div class="text-danger small mt-2">@_catalogoError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarCatalogo">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="IniciarSeleccionAsync"
+                    disabled="@(_busy || _seleccionFormatoId is null)">
+                &#9658; Iniciar @TextoSing.ToLower()
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .hc-doc-cab { display: flex; justify-content: space-between; align-items: center; padding: 4px 0 14px; }
+    .hc-doc-h { margin: 0; font-weight: 700; color: #0f172a; font-size: 14px; }
+    .hc-doc-empty { padding: 26px; text-align: center; color: #64748b; font-style: italic; background: #f8fafc; border-radius: 8px; }
+
+    .hc-doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .hc-doc-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+    .hc-doc-card-cerrada { background: #f8fafc; }
+    .hc-doc-card-h { display: flex; justify-content: space-between; align-items: center; }
+    .hc-doc-tipo { font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 2px 6px; border-radius: 4px; }
+    .hc-doc-tipo-evolucion { background: #dbeafe; color: #1e40af; }
+    .hc-doc-tipo-consentimiento { background: #fef3c7; color: #92400e; }
+    .hc-doc-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+    .hc-doc-pill.ok { background: #d1fae5; color: #065f46; }
+    .hc-doc-pill.abierta { background: #dbeafe; color: #1e40af; }
+    .hc-doc-nombre { font-weight: 700; color: #0f172a; font-size: 13px; }
+    .hc-doc-meta { font-size: 11px; color: #64748b; }
+    .hc-doc-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+
+    .hc-doc-visor { display: flex; flex-direction: column; gap: 12px; }
+    .hc-doc-visor-h { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; gap: 10px; flex-wrap: wrap; }
+    .hc-doc-visor-t { font-weight: 700; color: #0f172a; }
+    .hc-doc-visor-s { font-size: 11px; color: #64748b; }
+    .hc-doc-visor-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .hc-doc-minis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; max-height: 50vh; overflow-y: auto; padding-right: 4px; }
+    .hc-doc-mini { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; cursor: pointer; transition: background .15s, border-color .15s, transform .1s; text-align: center; background: #fff; }
+    .hc-doc-mini:hover { background: #eef6ff; border-color: #1565c0; }
+    .hc-doc-mini.sel { background: #dbeafe; border-color: #1565c0; box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.25); }
+    .hc-doc-mini-icon { font-size: 28px; }
+    .hc-doc-mini-nombre { font-weight: 700; font-size: 12.5px; color: #0f172a; margin-top: 4px; line-height: 1.2; }
+    .hc-doc-mini-meta { font-size: 10.5px; color: #64748b; font-family: ui-monospace, Menlo, Consolas, monospace; margin-top: 2px; }
+    .hc-doc-mini-tipo { font-size: 9.5px; color: #1565c0; text-transform: uppercase; margin-top: 4px; letter-spacing: .04em; }
+    .hc-doc-mini-obs { font-size: 10px; color: #475569; margin-top: 4px; font-style: italic; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+</style>
+
+@code {
+    /// <summary>Tipo de documento: "EVOLUCION" o "CONSENTIMIENTO". Determina el filtrado de formatos y queries.</summary>
+    [Parameter, EditorRequired] public string Tipo { get; set; } = "EVOLUCION";
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public Guid? PacienteId { get; set; }
+    [Parameter] public string? EspecialistaNombre { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private string _ultimoCargado = "";
+    private List<DocumentoHcItemDto> _documentos = new();
+    private List<DocumentoHcFormatoDto> _formatos = new();
+    private bool _busy;
+    private string? _msg;
+    private string? _error;
+
+    // ---- Catalogo ----
+    private bool _catalogoAbierto;
+    private Guid? _seleccionFormatoId;
+    private string? _catalogoError;
+
+    // ---- Visor ----
+    private DocumentoHcDetailDto? _visor;
+    private FormSchema? _visorSchema;
+    private Dictionary<string, string?> _visorValores = new();
+
+    // -------- Helpers de UI -------- //
+    private string TipoNorm => string.IsNullOrWhiteSpace(Tipo) ? "EVOLUCION" : Tipo.Trim().ToUpperInvariant();
+    private bool EsEvolucion => TipoNorm == "EVOLUCION";
+    private bool EsFemenino => EsEvolucion; // "una evolucion" vs "un consentimiento"
+    private string TextoSing => EsEvolucion ? "Evolucion" : "Consentimiento";
+    private string TextoPlural => EsEvolucion ? "Evoluciones" : "Consentimientos";
+    private string IconoMini => EsEvolucion ? "\U0001F4DD" : "\U0001F4DC"; // memo / scroll
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{TipoNorm}|{HistoriaClinicaId}";
+        if (key != _ultimoCargado)
+        {
+            _ultimoCargado = key;
+            _visor = null;
+            _msg = _error = null;
+            await CargarAsync();
+        }
+    }
+
+    private async Task CargarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _documentos = new(); return; }
+        try
+        {
+            _documentos = (await DocSvc.ListarPorHistoriaAsync(hid, TipoNorm)).ToList();
+            if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_documentos.Count); }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task AbrirCatalogoAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        _catalogoError = null;
+        _seleccionFormatoId = null;
+        try { _formatos = (await DocSvc.ListarFormatosDisponiblesAsync(hid, TipoNorm)).ToList(); }
+        catch (Exception ex) { _catalogoError = ex.Message; _formatos = new(); }
+        _catalogoAbierto = true;
+    }
+
+    private void CerrarCatalogo() => _catalogoAbierto = false;
+
+    private async Task IniciarSeleccionAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _catalogoError = "Falta historia clinica."; return; }
+        if (_seleccionFormatoId is not Guid fid) { _catalogoError = "Selecciona un formato."; return; }
+        _busy = true; _catalogoError = null;
+        try
+        {
+            var req = new IniciarDocumentoHcRequest(hid, fid, TipoNorm, "{}", EspecialistaNombre);
+            var detail = await DocSvc.IniciarAsync(req, Guid.Empty);
+            _catalogoAbierto = false;
+            await CargarAsync();
+            await AbrirVisorDetail(detail);
+            _msg = $"{TextoSing} '{detail.FormatoNombre}' iniciad{(EsFemenino ? "a" : "o")}.";
+        }
+        catch (Exception ex) { _catalogoError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task AbrirVisorAsync(Guid id)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            var detail = await DocSvc.GetAsync(id);
+            if (detail is null) { _error = "No se encontro el documento."; return; }
+            await AbrirVisorDetail(detail);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task AbrirVisorDetail(DocumentoHcDetailDto d)
+    {
+        _visor = d;
+        try { _visorSchema = JsonSerializer.Deserialize<FormSchema>(d.SchemaJson) ?? new(); }
+        catch { _visorSchema = new(); }
+        try { _visorValores = JsonSerializer.Deserialize<Dictionary<string, string?>>(d.ValoresJson) ?? new(); }
+        catch { _visorValores = new(); }
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void CerrarVisor() { _visor = null; _visorSchema = null; _visorValores = new(); }
+
+    private async Task GuardarValoresAsync()
+    {
+        if (_visor is null) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            var json = JsonSerializer.Serialize(_visorValores);
+            await DocSvc.GuardarValoresAsync(_visor.Id, json, Guid.Empty);
+            _msg = "Cambios guardados.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task CerrarDocAsync()
+    {
+        if (_visor is null) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Marcar {TextoSing.ToLower()} como DEFINITIV{(EsFemenino ? "A" : "O")}? Despues solo se podra ver, no editar.");
+        if (!ok) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            var json = JsonSerializer.Serialize(_visorValores);
+            await DocSvc.CerrarAsync(_visor.Id, json, Guid.Empty);
+            await CargarAsync();
+            CerrarVisor();
+            _msg = $"{TextoSing} marcad{(EsFemenino ? "a" : "o")} como definitiv{(EsFemenino ? "a" : "o")}.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(DocumentoHcItemDto d)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar {TextoSing.ToLower()} '{d.FormatoNombre}'? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            await DocSvc.EliminarAsync(d.Id, Guid.Empty);
+            await CargarAsync();
+            _msg = $"{TextoSing} eliminad{(EsFemenino ? "a" : "o")}.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

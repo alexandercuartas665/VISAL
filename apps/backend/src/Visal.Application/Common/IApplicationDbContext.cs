@@ -60,6 +60,7 @@ public interface IApplicationDbContext
     DbSet<AsistenteChatMensaje> AsistenteChatMensajes { get; }
     DbSet<RelacionFormulario> RelacionesFormulario { get; }
     DbSet<HistoriaClinicaEscala> HistoriaClinicaEscalas { get; }
+    DbSet<HistoriaClinicaDocumento> HistoriaClinicaDocumentos { get; }
     DbSet<Medicamento> Medicamentos { get; }
     DbSet<Cup> Cups { get; }
     DbSet<NotaMedica> NotasMedicas { get; }

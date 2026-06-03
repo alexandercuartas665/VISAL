@@ -11,6 +11,7 @@
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
 @inject IEscalaService EscSvc
+@inject IDocumentoHcService DocSvc
 @inject IJSRuntime JS
 
 @*
@@ -217,6 +218,22 @@
                                    EspecialistaNombre="@_historiaSel?.Especialista"
                                    OnCountChanged="@(c => _escCount = c)" />
                     }
+                    else if (_tabSel == "Evoluciones")
+                    {
+                        <HcDocumentos Tipo="EVOLUCION"
+                                      HistoriaClinicaId="@_historiaSel?.Id"
+                                      PacienteId="@PacienteActivo?.Id"
+                                      EspecialistaNombre="@_historiaSel?.Especialista"
+                                      OnCountChanged="@(c => _evoCount = c)" />
+                    }
+                    else if (_tabSel == "Consentimientos")
+                    {
+                        <HcDocumentos Tipo="CONSENTIMIENTO"
+                                      HistoriaClinicaId="@_historiaSel?.Id"
+                                      PacienteId="@PacienteActivo?.Id"
+                                      EspecialistaNombre="@_historiaSel?.Especialista"
+                                      OnCountChanged="@(c => _conCount = c)" />
+                    }
                     else if (_tabSel == "Ordenes medicamento")
                     {
                         <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
@@ -327,10 +344,28 @@
                     </label>
                 </div>
             }
-            @if (_imprMedCount == 0 && _imprSrvCount == 0 && _imprIncCount == 0 && _imprCertCount == 0 && _imprEscCount == 0)
+            @if (_imprEvoCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirEvo" />
+                        <span><b>Evoluciones diligenciadas</b> <em>(@_imprEvoCount evolucion@(_imprEvoCount == 1 ? "" : "es"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_imprConCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirCon" />
+                        <span><b>Consentimientos diligenciados</b> <em>(@_imprConCount consentimiento@(_imprConCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_imprMedCount == 0 && _imprSrvCount == 0 && _imprIncCount == 0 && _imprCertCount == 0 && _imprEscCount == 0 && _imprEvoCount == 0 && _imprConCount == 0)
             {
                 <div style="font-size:12px; color:#94a3b8; font-style:italic; padding:10px 0;">
-                    Esta historia no tiene ordenes ni escalas registradas.
+                    Esta historia no tiene ordenes, escalas, evoluciones ni consentimientos registrados.
                 </div>
             }
 
@@ -517,7 +552,8 @@
     private string _busqueda = "";
 
     private readonly string[] _tabs = new[] {
-        "Historial", "Escalas", "Ordenes medicamento", "Ordenes servicios Propias",
+        "Historial", "Escalas", "Evoluciones", "Consentimientos",
+        "Ordenes medicamento", "Ordenes servicios Propias",
         "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
     };
     /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
@@ -528,6 +564,8 @@
     {
         "Historial" => ("\U0001F4DD", 0),                      // notepad
         "Escalas" => ("\U0001F4CB", _escCount),                // clipboard
+        "Evoluciones" => ("\U0001F4C8", _evoCount),            // chart up
+        "Consentimientos" => ("✅", _conCount),            // check mark
         "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
         "Ordenes servicios Propias" => ("\U0001F3E5", _servCount), // hospital
         "Insumos" => ("\U0001F4E6", 0),                        // box
@@ -554,6 +592,10 @@
     private int _remCount;
     /// <summary>Conteo de escalas para badge en la pestana "Escalas".</summary>
     private int _escCount;
+    /// <summary>Conteo de evoluciones diligenciadas para badge en la pestana "Evoluciones".</summary>
+    private int _evoCount;
+    /// <summary>Conteo de consentimientos diligenciados para badge en la pestana "Consentimientos".</summary>
+    private int _conCount;
 
     // =================== AUTOGUARDADO HC HISTORIAL ===================
     /// <summary>Estado visible del autoguardado: limpio | sucio | guardando | guardado | error.</summary>
@@ -582,7 +624,9 @@
     private bool _imprIncluirInc;
     private bool _imprIncluirCert;
     private bool _imprIncluirEsc;
-    private int _imprMedCount, _imprSrvCount, _imprIncCount, _imprCertCount, _imprEscCount;
+    private bool _imprIncluirEvo;
+    private bool _imprIncluirCon;
+    private int _imprMedCount, _imprSrvCount, _imprIncCount, _imprCertCount, _imprEscCount, _imprEvoCount, _imprConCount;
 
     private PacienteAsignacionDto? _paciente;
 
@@ -689,6 +733,8 @@
         _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
         _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
         _escCount = await EscSvc.ContarPorHistoriaAsync(h.Id);
+        _evoCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
+        _conCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
     }
     private void ToggleMenu(Guid id) => _menuAbierto = _menuAbierto == id ? null : id;
 
@@ -903,6 +949,8 @@
             _imprIncCount  = await IncSvc.ContarPorHistoriaAsync(h.Id);
             _imprCertCount = await CertSvc.ContarPorHistoriaAsync(h.Id);
             _imprEscCount  = await EscSvc.ContarPorHistoriaAsync(h.Id);
+            _imprEvoCount  = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
+            _imprConCount  = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
             // Sleccion por defecto: todo lo que tiene datos.
             _imprIncluirHc   = true;
             _imprIncluirMed  = _imprMedCount  > 0;
@@ -910,6 +958,8 @@
             _imprIncluirInc  = _imprIncCount  > 0;
             _imprIncluirCert = _imprCertCount > 0;
             _imprIncluirEsc  = _imprEscCount  > 0;
+            _imprIncluirEvo  = _imprEvoCount  > 0;
+            _imprIncluirCon  = _imprConCount  > 0;
             _showImprimirModal = true;
             _imprimirMsg = null;
         }
@@ -930,6 +980,8 @@
         if (_imprIncluirInc)  { docs.Add("INC");  }
         if (_imprIncluirCert) { docs.Add("CERT"); }
         if (_imprIncluirEsc)  { docs.Add("ESC");  }
+        if (_imprIncluirEvo)  { docs.Add("EVO");  }
+        if (_imprIncluirCon)  { docs.Add("CON");  }
         if (docs.Count == 0) { _imprimirMsg = "Selecciona al menos un documento."; return; }
         _showImprimirModal = false;
         await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{h.Id}?docs={string.Join(",", docs)}", "_blank");

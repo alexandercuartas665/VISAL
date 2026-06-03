@@ -14,6 +14,7 @@
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
 @inject IEscalaService EscSvc
+@inject IDocumentoHcService DocSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -324,6 +325,72 @@ else
                 </div>
             }
         }
+
+        @* ============ EVOLUCIONES DILIGENCIADAS ============ *@
+        @if (_incluirEvo && _evoDetails.Count > 0)
+        {
+            @foreach (var doc in _evoDetails)
+            {
+                var schDoc = TryParseSchema(doc.SchemaJson);
+                var valDoc = TryParseValores(doc.ValoresJson);
+                <div class="pack-doc">
+                    @RenderHeader(FormHeader.Default(), doc.FormatoNombre, "EVO",
+                        doc.Id.ToString().Substring(0,8).ToUpperInvariant(),
+                        $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+                    <div class="pack-band">Evolucion</div>
+                    @if (schDoc is not null)
+                    {
+                        @foreach (var node in schDoc.Children)
+                        {
+                            <div class="pack-grid" style="grid-column: span 12;">
+                                @if (node.IsSection)
+                                {
+                                    @foreach (var ch in node.Children ?? new()) { @RenderDocNodeForEscala(ch, valDoc) }
+                                }
+                                else
+                                {
+                                    @RenderDocNodeForEscala(node, valDoc)
+                                }
+                            </div>
+                        }
+                    }
+                    @RenderFirma(doc.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
+                </div>
+            }
+        }
+
+        @* ============ CONSENTIMIENTOS DILIGENCIADOS ============ *@
+        @if (_incluirCon && _conDetails.Count > 0)
+        {
+            @foreach (var doc in _conDetails)
+            {
+                var schDoc = TryParseSchema(doc.SchemaJson);
+                var valDoc = TryParseValores(doc.ValoresJson);
+                <div class="pack-doc">
+                    @RenderHeader(FormHeader.Default(), doc.FormatoNombre, "CON",
+                        doc.Id.ToString().Substring(0,8).ToUpperInvariant(),
+                        $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+                    <div class="pack-band">Consentimiento informado</div>
+                    @if (schDoc is not null)
+                    {
+                        @foreach (var node in schDoc.Children)
+                        {
+                            <div class="pack-grid" style="grid-column: span 12;">
+                                @if (node.IsSection)
+                                {
+                                    @foreach (var ch in node.Children ?? new()) { @RenderDocNodeForEscala(ch, valDoc) }
+                                }
+                                else
+                                {
+                                    @RenderDocNodeForEscala(node, valDoc)
+                                }
+                            </div>
+                        }
+                    }
+                    @RenderFirma(doc.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
+                </div>
+            }
+        }
     </div>
 }
 
@@ -336,8 +403,10 @@ else
 
     // Que docs incluir, calculados desde ?docs=
     private List<string> _docs = new();
-    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc;
+    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc, _incluirEvo, _incluirCon;
     private List<EscalaDetailDto> _escalasDetails = new();
+    private List<DocumentoHcDetailDto> _evoDetails = new();
+    private List<DocumentoHcDetailDto> _conDetails = new();
 
     // HC: schema + valores
     private FormSchema? _hcSchema;
@@ -375,6 +444,8 @@ else
         _incluirCert = _docs.Contains("CERT");
         _incluirRem  = _docs.Contains("REM");
         _incluirEsc  = _docs.Contains("ESC");
+        _incluirEvo  = _docs.Contains("EVO");
+        _incluirCon  = _docs.Contains("CON");
 
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { _loading = false; return; }
@@ -436,6 +507,25 @@ else
             {
                 var d = await EscSvc.GetAsync(it.Id);
                 if (d is not null) { _escalasDetails.Add(d); }
+            }
+        }
+        if (_incluirEvo)
+        {
+            // Solo los documentos cerrados se incluyen en el paquete impreso.
+            var items = await DocSvc.ListarPorHistoriaAsync(HcId, "EVOLUCION");
+            foreach (var it in items.Where(x => x.Estado == "Cerrada"))
+            {
+                var d = await DocSvc.GetAsync(it.Id);
+                if (d is not null) { _evoDetails.Add(d); }
+            }
+        }
+        if (_incluirCon)
+        {
+            var items = await DocSvc.ListarPorHistoriaAsync(HcId, "CONSENTIMIENTO");
+            foreach (var it in items.Where(x => x.Estado == "Cerrada"))
+            {
+                var d = await DocSvc.GetAsync(it.Id);
+                if (d is not null) { _conDetails.Add(d); }
             }
         }
 

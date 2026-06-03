@@ -8,17 +8,27 @@ public sealed class RelacionFormularioService(IApplicationDbContext db, ITenantC
 {
     public async Task<IReadOnlyList<RelacionFormularioDto>> ListarAsync(CancellationToken ct = default)
     {
+        // OrderBy se hace despues de materializar porque EF Core 9 no traduce
+        // OrderBy sobre propiedades de un record proyectado desde joins.
         var rows = await db.RelacionesFormulario.AsNoTracking()
             .Join(db.FormDefinitions.AsNoTracking(), r => r.FormularioOrigenId, o => o.Id, (r, o) => new { r, o })
-            .Join(db.FormDefinitions.AsNoTracking(), x => x.r.FormularioDestinoId, d => d.Id, (x, d) =>
-                new RelacionFormularioDto(
-                    x.r.Id,
-                    x.o.Id, x.o.Codigo, x.o.Nombre, x.o.Tipo,
-                    d.Id, d.Codigo, d.Nombre, d.Tipo,
-                    x.r.Activo, x.r.Observacion))
-            .OrderBy(r => r.OrigenNombre).ThenBy(r => r.DestinoNombre)
+            .Join(db.FormDefinitions.AsNoTracking(), x => x.r.FormularioDestinoId, d => d.Id, (x, d) => new
+            {
+                x.r.Id,
+                OrigenId = x.o.Id, OrigenCodigo = x.o.Codigo, OrigenNombre = x.o.Nombre, OrigenTipo = x.o.Tipo,
+                DestinoId = d.Id, DestinoCodigo = d.Codigo, DestinoNombre = d.Nombre, DestinoTipo = d.Tipo,
+                x.r.Activo, x.r.Observacion
+            })
             .ToListAsync(ct);
-        return rows;
+        return rows
+            .OrderBy(r => r.OrigenNombre, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.DestinoNombre, StringComparer.OrdinalIgnoreCase)
+            .Select(r => new RelacionFormularioDto(
+                r.Id,
+                r.OrigenId, r.OrigenCodigo, r.OrigenNombre, r.OrigenTipo,
+                r.DestinoId, r.DestinoCodigo, r.DestinoNombre, r.DestinoTipo,
+                r.Activo, r.Observacion))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<OpcionFormularioDto>> ListarOpcionesAsync(CancellationToken ct = default)

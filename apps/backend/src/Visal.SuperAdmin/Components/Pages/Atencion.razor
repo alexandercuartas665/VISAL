@@ -158,7 +158,8 @@ else
             <div class="at-fs-aichat">
                 <AsistenteChatNotas @ref="_chatRef"
                                     HistoriaClinicaId="@_hcIdParaNotas"
-                                    ContenidoNota="@_contenidoNotaActual" />
+                                    ContenidoNota="@_contenidoNotaActual"
+                                    UltimoGuardado="@_ultimoGuardadoSignal" />
             </div>
         </div>
     </div>
@@ -224,13 +225,22 @@ else
     private Guid? _hcIdParaNotas;
     /// <summary>Contenido en vivo de la nota — espejado desde NotasMedicasModulo via @@bind para que el chat IA lo lea sin tener que pegarlo manualmente.</summary>
     private string? _contenidoNotaActual;
-    /// <summary>Ref al chat IA para invocar AutoRevisarTrasGuardadoAsync cuando NotasMedicasModulo confirma un guardado.</summary>
+    /// <summary>Ref al chat IA — kept for back-compat pero ya no es el camino principal de la auto-revision.</summary>
     private Visal.SuperAdmin.Components.Forms.AsistenteChatNotas? _chatRef;
+    /// <summary>
+    /// Senal reactiva del guardado de la nota. Cada guardado bumpea un tick y el
+    /// chat reacciona via OnParametersSetAsync. Mas robusto que @ref porque
+    /// funciona aun si el chat no estaba completamente renderizado.
+    /// </summary>
+    private Visal.SuperAdmin.Components.Forms.AsistenteChatNotas.AutoRevisarSignal? _ultimoGuardadoSignal;
+    private long _tickGuardado;
 
-    /// <summary>Handler del evento OnNotaGuardada del modulo de notas — delega al chat para que decida si auto-revisa segun la config de la regla.</summary>
-    private async Task OnNotaGuardadaAsync(bool definitivo)
+    /// <summary>Handler del evento OnNotaGuardada del modulo de notas — bumpea el signal para que el chat decida si auto-revisa segun la config de la regla.</summary>
+    private void OnNotaGuardadaAsync(bool definitivo)
     {
-        if (_chatRef is not null) { await _chatRef.AutoRevisarTrasGuardadoAsync(definitivo); }
+        _tickGuardado++;
+        _ultimoGuardadoSignal = new Visal.SuperAdmin.Components.Forms.AsistenteChatNotas.AutoRevisarSignal(_tickGuardado, definitivo);
+        StateHasChanged();
     }
     private PacienteAsignacionDto? _pacienteCtx;
 

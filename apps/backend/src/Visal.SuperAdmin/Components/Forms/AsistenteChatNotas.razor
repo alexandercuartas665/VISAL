@@ -126,6 +126,16 @@
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     /// <summary>Contenido en vivo de la nota que se esta escribiendo.</summary>
     [Parameter] public string? ContenidoNota { get; set; }
+    /// <summary>
+    /// Senal reactiva que el padre actualiza al guardar una nota. Cualquier
+    /// cambio de este valor (distinto al ultimo procesado) dispara la auto-
+    /// revision si la regla lo configuro. Usar parameter es mas robusto que
+    /// @ref porque sobrevive a race conditions entre el render del chat y
+    /// el click del boton de guardar.
+    /// </summary>
+    [Parameter] public AutoRevisarSignal? UltimoGuardado { get; set; }
+    public sealed record AutoRevisarSignal(long Tick, bool Definitivo);
+    private long _ultimoTickProcesado = -1;
 
     private AsistenteContextoDto? _ctx;
     private string _borrador = "";
@@ -136,6 +146,18 @@
     protected override async Task OnInitializedAsync()
     {
         _ctx = await AsistSvc.ResolverContextoAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Si llegó una senal de guardado nueva (tick distinto al ultimo procesado),
+        // disparamos la auto-revision. Este patron es mas robusto que @ref porque
+        // funciona aun si el chat no estaba renderizado cuando se hizo el click.
+        if (UltimoGuardado is { } sig && sig.Tick != _ultimoTickProcesado)
+        {
+            _ultimoTickProcesado = sig.Tick;
+            await AutoRevisarTrasGuardadoAsync(sig.Definitivo);
+        }
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)

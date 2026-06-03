@@ -1,0 +1,260 @@
+@page "/relaciones-formularios"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IRelacionFormularioService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Relaciones de formularios - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Relaciones de formularios</h1>
+        <small class="text-muted">Cada fila indica que el formulario destino (ej. una evolucion) debe sugerirse cuando se trabaja con el formulario origen (ej. una historia clinica).</small>
+    </div>
+    <div class="med-toolbar">
+        <button class="btn btn-primary" @onclick="OnNueva" disabled="@_busy">+ Nueva relacion</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card">
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">
+            Aun no hay relaciones configuradas. Crea la primera con "+ Nueva relacion".
+        </div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl">
+                <thead>
+                    <tr>
+                        <th>Formulario origen</th>
+                        <th class="text-center" style="width:60px"></th>
+                        <th>Formulario destino</th>
+                        <th>Observacion</th>
+                        <th style="width:90px" class="text-center">Activo</th>
+                        <th style="width:80px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        <tr class="@(r.Activo ? "" : "rf-row-inactiva")">
+                            <td>
+                                <div class="rf-nombre">@r.OrigenNombre</div>
+                                <div class="rf-meta">@r.OrigenCodigo @(string.IsNullOrWhiteSpace(r.OrigenTipo) ? "" : $" - {r.OrigenTipo}")</div>
+                            </td>
+                            <td class="text-center"><span class="rf-flecha">&rarr;</span></td>
+                            <td>
+                                <div class="rf-nombre">@r.DestinoNombre</div>
+                                <div class="rf-meta">@r.DestinoCodigo @(string.IsNullOrWhiteSpace(r.DestinoTipo) ? "" : $" - {r.DestinoTipo}")</div>
+                            </td>
+                            <td>@(r.Observacion ?? "-")</td>
+                            <td class="text-center">
+                                <label class="ag-switch" title="@(r.Activo ? "Pausar" : "Activar")">
+                                    <input type="checkbox" checked="@r.Activo" @onchange="@(e => ToggleAsync(r, (bool)e.Value!))" disabled="@_busy" />
+                                    <span class="ag-slider"></span>
+                                </label>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-link btn-sm" title="Editar" @onclick="() => OnEditar(r)">&#9998;</button>
+                                <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => OnEliminarAsync(r)">&#128465;</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ============= MODAL CREAR / EDITAR ============= *@
+@if (_modalAbierto)
+{
+    <div class="cie-backdrop" @onclick="CerrarModal"></div>
+    <div class="cie-modal" style="width: 600px; max-width: 95vw;">
+        <div class="cie-modal-h">
+            <h3>@(_editId is null ? "Nueva relacion de formularios" : "Editar relacion")</h3>
+            <button class="cie-modal-close" @onclick="CerrarModal">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Formulario origen *</label>
+                    <select class="form-select form-select-sm" @bind="_fOrigenId">
+                        <option value="">Selecciona un formulario...</option>
+                        @foreach (var grp in _opciones.GroupBy(o => o.Tipo ?? "(sin tipo)"))
+                        {
+                            <optgroup label="@grp.Key">
+                                @foreach (var o in grp)
+                                {
+                                    <option value="@o.Id">@(o.Activo ? "" : "[apagado] ")@o.Codigo - @o.Nombre</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Formulario destino *</label>
+                    <select class="form-select form-select-sm" @bind="_fDestinoId">
+                        <option value="">Selecciona un formulario...</option>
+                        @foreach (var grp in _opciones.GroupBy(o => o.Tipo ?? "(sin tipo)"))
+                        {
+                            <optgroup label="@grp.Key">
+                                @foreach (var o in grp)
+                                {
+                                    <option value="@o.Id">@(o.Activo ? "" : "[apagado] ")@o.Codigo - @o.Nombre</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <label>Observacion (opcional)</label>
+                    <input class="form-control form-control-sm" @bind="_fObservacion"
+                           placeholder="Ej: HC inicial sugiere evolucion de fisioterapia" />
+                </div>
+                <label class="ase-chk" style="margin-top:4px;">
+                    <input type="checkbox" @bind="_fActivo" /> <span>Relacion activa</span>
+                </label>
+            </div>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModal">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAsync" disabled="@_busy">
+                @(_editId is null ? "Crear" : "Guardar")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .rf-nombre { font-weight: 600; color: #0f172a; font-size: 13px; }
+    .rf-meta { color: #64748b; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .rf-flecha { font-size: 18px; color: #1565c0; font-weight: 700; }
+    .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private List<RelacionFormularioDto> _rows = new();
+    private List<OpcionFormularioDto> _opciones = new();
+
+    private bool _modalAbierto;
+    private Guid? _editId;
+    private string _fOrigenId = "";
+    private string _fDestinoId = "";
+    private bool _fActivo = true;
+    private string? _fObservacion;
+    private string? _modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarAsync();
+        _loading = false;
+    }
+
+    private async Task CargarAsync()
+    {
+        try
+        {
+            _rows = (await Svc.ListarAsync()).ToList();
+            _opciones = (await Svc.ListarOpcionesAsync()).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void OnNueva()
+    {
+        _editId = null; _modalError = null;
+        _fOrigenId = ""; _fDestinoId = ""; _fActivo = true; _fObservacion = null;
+        _modalAbierto = true;
+    }
+
+    private void OnEditar(RelacionFormularioDto r)
+    {
+        _editId = r.Id; _modalError = null;
+        _fOrigenId = r.OrigenId.ToString();
+        _fDestinoId = r.DestinoId.ToString();
+        _fActivo = r.Activo;
+        _fObservacion = r.Observacion;
+        _modalAbierto = true;
+    }
+
+    private void CerrarModal() => _modalAbierto = false;
+
+    private async Task GuardarAsync()
+    {
+        _modalError = null;
+        if (!Guid.TryParse(_fOrigenId, out var oid)) { _modalError = "Selecciona el formulario origen."; return; }
+        if (!Guid.TryParse(_fDestinoId, out var did)) { _modalError = "Selecciona el formulario destino."; return; }
+        if (oid == did) { _modalError = "Origen y destino deben ser distintos."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var actor = await ActorAsync();
+            var req = new SaveRelacionFormularioRequest(_editId, oid, did, _fActivo, _fObservacion);
+            var dto = await Svc.GuardarAsync(req, actor);
+            _ok = _editId is null ? "Relacion creada." : "Relacion actualizada.";
+            _modalAbierto = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnEliminarAsync(RelacionFormularioDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eliminar la relacion \"{r.OrigenNombre}\" → \"{r.DestinoNombre}\"? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var actor = await ActorAsync();
+            await Svc.EliminarAsync(r.Id, actor);
+            _ok = "Relacion eliminada.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleAsync(RelacionFormularioDto r, bool activo)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            var actor = await ActorAsync();
+            await Svc.SetActivoAsync(r.Id, activo, actor);
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+}

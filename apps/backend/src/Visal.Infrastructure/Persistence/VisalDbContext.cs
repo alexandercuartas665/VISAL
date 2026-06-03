@@ -70,6 +70,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
     public DbSet<AsistenteChatMensaje> AsistenteChatMensajes => Set<AsistenteChatMensaje>();
+    public DbSet<RelacionFormulario> RelacionesFormulario => Set<RelacionFormulario>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
@@ -641,6 +642,17 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.PacienteId, x.Cuando });
+        });
+
+        modelBuilder.Entity<RelacionFormulario>(b =>
+        {
+            b.Property(x => x.Observacion).HasMaxLength(500);
+            b.HasOne(x => x.FormularioOrigen).WithMany().HasForeignKey(x => x.FormularioOrigenId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.FormularioDestino).WithMany().HasForeignKey(x => x.FormularioDestinoId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // No se permite el mismo par (origen, destino) duplicado dentro del tenant.
+            b.HasIndex(x => new { x.TenantId, x.FormularioOrigenId, x.FormularioDestinoId }).IsUnique();
         });
 
         modelBuilder.Entity<NotaMedica>(b =>

@@ -41,10 +41,22 @@
         }
         @foreach (var m in _mensajes)
         {
-            <div class="ai-msg ai-msg-@(m.Rol)">
-                <div class="ai-msg-h">@(m.Rol == "user" ? "Tu" : (_ctx?.AgenteNombre ?? "Asistente")) - @m.Cuando.LocalDateTime.ToString("HH:mm")</div>
-                <div class="ai-msg-body">@m.Texto</div>
-            </div>
+            @if (m.Rol == "system")
+            {
+                @* Notificacion sutil tipo divider para eventos del sistema (ej: auto-revision tras guardado). *@
+                <div class="ai-msg-divider">
+                    <span class="ai-msg-divider-line"></span>
+                    <span class="ai-msg-divider-text">&#9889; @m.Texto - @m.Cuando.LocalDateTime.ToString("HH:mm")</span>
+                    <span class="ai-msg-divider-line"></span>
+                </div>
+            }
+            else
+            {
+                <div class="ai-msg ai-msg-@(m.Rol)">
+                    <div class="ai-msg-h">@(m.Rol == "user" ? "Tu" : (_ctx?.AgenteNombre ?? "Asistente")) - @m.Cuando.LocalDateTime.ToString("HH:mm")</div>
+                    <div class="ai-msg-body">@m.Texto</div>
+                </div>
+            }
         }
         @if (_pensando)
         {
@@ -97,6 +109,9 @@
     .ai-msg-assistant { background:#fff; border:1px solid #e2e8f0; align-self:flex-start; }
     .ai-msg-assistant .ai-msg-h { color:#1565c0; }
     .ai-msg-typing { color:#64748b; font-style:italic; }
+    .ai-msg-divider { display:flex; align-items:center; gap:8px; margin:6px 4px; }
+    .ai-msg-divider-line { flex:1; height:1px; background:#cbd5e1; }
+    .ai-msg-divider-text { font-size:10.5px; font-weight:700; color:#1565c0; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
     .ai-chat-aviso { background:#fffbeb; color:#92400e; padding:6px 12px; font-size:11px; border-top:1px solid #fde68a; }
     .ai-chat-input { padding:10px; border-top:1px solid #e2e8f0; background:#fff; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
     .ai-chat-textarea { resize:none; flex:1; min-width:120px; }
@@ -175,18 +190,46 @@
     /// Llamada desde el padre (Atencion) cuando el doctor acaba de guardar una
     /// nota. Refresca el contexto (la regla puede haber cambiado en otra
     /// pestana) y, si el flag correspondiente esta encendido, dispara una
-    /// revision automatica de la nota con un mensaje canonico.
+    /// revision automatica de la nota.
+    ///
+    /// A diferencia del envio manual, NO agrega un mensaje "user" al historial.
+    /// En su lugar inyecta un divider sutil tipo "Auto-revision tras Guardado
+    /// Parcial" y la respuesta del agente — para que se sienta espontaneo, no
+    /// como si el doctor hubiera tecleado "Revisa la nota".
     /// </summary>
     public async Task AutoRevisarTrasGuardadoAsync(bool definitivo)
     {
-        if (HistoriaClinicaId is not Guid) { return; }
+        if (HistoriaClinicaId is not Guid hid) { return; }
         // Re-resolver contexto para tomar la config actualizada.
         _ctx = await AsistSvc.ResolverContextoAsync();
         StateHasChanged();
         if (_ctx?.TieneAgente != true) { return; }
         var debe = definitivo ? _ctx.RevisarAlGuardarDefinitivo : _ctx.RevisarAlGuardarParcial;
         if (!debe) { return; }
+
         var etiqueta = definitivo ? "Guardado Definitivo" : "Guardado Parcial";
-        await EnviarAsync($"[Auto-revision tras {etiqueta}] Revisa la nota actual.");
+        // Divider visible en el historial — informa el evento sin parecer
+        // mensaje del doctor.
+        _mensajes.Add(new AsistenteMensajeDto("system", $"Auto-revision tras {etiqueta}", DateTimeOffset.UtcNow));
+        _pensando = true;
+        StateHasChanged();
+
+        try
+        {
+            // Internamente le pasamos "Revisa la nota actual" como instruccion al
+            // backend pero ese texto nunca aparece como burbuja del usuario.
+            var resp = await AsistSvc.EnviarMensajeAsync(hid, ContenidoNota ?? "", "Revisa la nota actual.", _mensajes);
+            _mensajes.Add(new AsistenteMensajeDto("assistant", resp.Texto, DateTimeOffset.UtcNow));
+            _aviso = resp.Aviso;
+        }
+        catch (Exception ex)
+        {
+            _mensajes.Add(new AsistenteMensajeDto("assistant", $"Error: {ex.Message}", DateTimeOffset.UtcNow));
+        }
+        finally
+        {
+            _pensando = false;
+            StateHasChanged();
+        }
     }
 }

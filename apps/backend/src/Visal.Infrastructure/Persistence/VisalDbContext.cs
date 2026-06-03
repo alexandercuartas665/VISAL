@@ -71,6 +71,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
     public DbSet<AsistenteChatMensaje> AsistenteChatMensajes => Set<AsistenteChatMensaje>();
     public DbSet<RelacionFormulario> RelacionesFormulario => Set<RelacionFormulario>();
+    public DbSet<HistoriaClinicaEscala> HistoriaClinicaEscalas => Set<HistoriaClinicaEscala>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
@@ -653,6 +654,17 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
                 .OnDelete(DeleteBehavior.Restrict);
             // No se permite el mismo par (origen, destino) duplicado dentro del tenant.
             b.HasIndex(x => new { x.TenantId, x.FormularioOrigenId, x.FormularioDestinoId }).IsUnique();
+        });
+
+        modelBuilder.Entity<HistoriaClinicaEscala>(b =>
+        {
+            b.Property(x => x.ValoresJson).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.FormDefinition).WithMany().HasForeignKey(x => x.FormDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.FechaApertura });
         });
 
         modelBuilder.Entity<NotaMedica>(b =>

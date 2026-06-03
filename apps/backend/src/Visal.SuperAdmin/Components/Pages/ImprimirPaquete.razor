@@ -13,6 +13,7 @@
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
+@inject IEscalaService EscSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -290,6 +291,39 @@ else
                 @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
             </div>
         }
+
+        @* ============ ESCALAS DILIGENCIADAS ============ *@
+        @if (_incluirEsc && _escalasDetails.Count > 0)
+        {
+            @foreach (var esc in _escalasDetails)
+            {
+                var schEsc = TryParseSchema(esc.SchemaJson);
+                var valEsc = TryParseValores(esc.ValoresJson);
+                <div class="pack-doc">
+                    @RenderHeader(FormHeader.Default(), esc.FormatoNombre, "ESC",
+                        esc.Id.ToString().Substring(0,8).ToUpperInvariant(),
+                        $"Aplicada: {esc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+                    <div class="pack-band">Resultado</div>
+                    @if (schEsc is not null)
+                    {
+                        @foreach (var node in schEsc.Children)
+                        {
+                            <div class="pack-grid" style="grid-column: span 12;">
+                                @if (node.IsSection)
+                                {
+                                    @foreach (var ch in node.Children ?? new()) { @RenderDocNodeForEscala(ch, valEsc) }
+                                }
+                                else
+                                {
+                                    @RenderDocNodeForEscala(node, valEsc)
+                                }
+                            </div>
+                        }
+                    }
+                    @RenderFirma(esc.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
+                </div>
+            }
+        }
     </div>
 }
 
@@ -302,7 +336,8 @@ else
 
     // Que docs incluir, calculados desde ?docs=
     private List<string> _docs = new();
-    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem;
+    private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc;
+    private List<EscalaDetailDto> _escalasDetails = new();
 
     // HC: schema + valores
     private FormSchema? _hcSchema;
@@ -339,6 +374,7 @@ else
         _incluirInc  = _docs.Contains("INC");
         _incluirCert = _docs.Contains("CERT");
         _incluirRem  = _docs.Contains("REM");
+        _incluirEsc  = _docs.Contains("ESC");
 
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { _loading = false; return; }
@@ -390,6 +426,17 @@ else
             _fdRem = await FormsSvc.GetActivoByTipoAsync("REMISIONES");
             if (_fdRem is not null) { try { _schRem = JsonSerializer.Deserialize<FormSchema>(_fdRem.SchemaJson) ?? new(); } catch { } }
             _rem = (await RemSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+        if (_incluirEsc)
+        {
+            // Cada escala usa su propio FormDefinition; cargamos solo las definitivas
+            // (estado "Cerrada"). Si quieres incluir las abiertas, quita el filtro.
+            var items = await EscSvc.ListarPorHistoriaAsync(HcId);
+            foreach (var it in items.Where(x => x.Estado == "Cerrada"))
+            {
+                var d = await EscSvc.GetAsync(it.Id);
+                if (d is not null) { _escalasDetails.Add(d); }
+            }
         }
 
         _loading = false;
@@ -493,4 +540,51 @@ else
             <div class="pack-value">@(val ?? "")</div>
         </div>
     };
+
+    // Render por escala: usa el diccionario de valores especifico de cada escala
+    // (no el de la HC). Misma logica que RenderDocNode pero parametrizada.
+    private RenderFragment RenderDocNodeForEscala(FormNode n, Dictionary<string, string?> vals) => __builder =>
+    {
+        if (n.IsText)
+        {
+            <div class="pack-para" style="grid-column: span 12;">@(n.Content ?? "")</div>
+            return;
+        }
+        if (n.IsTable)
+        {
+            <div style="grid-column: span 12; border-bottom:1px solid #000;">
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            @foreach (var col in n.Columns ?? new()) { <th>@col.Label</th> }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            @foreach (var col in n.Columns ?? new()) { <td>&nbsp;</td> }
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            return;
+        }
+        var key = n.Name ?? $"fld:{n.Id}";
+        var val = vals.TryGetValue(key, out var vv) ? vv : null;
+        <div class="pack-cell" style="grid-column: span 12;">
+            <div class="pack-label">@n.Label</div>
+            <div class="pack-value">@(val ?? "")</div>
+        </div>
+    };
+
+    private static FormSchema? TryParseSchema(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return null; }
+        try { return JsonSerializer.Deserialize<FormSchema>(json); } catch { return null; }
+    }
+
+    private static Dictionary<string, string?> TryParseValores(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return new(); }
+        try { return JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? new(); } catch { return new(); }
+    }
 }

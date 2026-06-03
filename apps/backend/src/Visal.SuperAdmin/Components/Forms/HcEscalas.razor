@@ -1,0 +1,325 @@
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@inject IEscalaService EscSvc
+@inject IFormDefinitionService FormsSvc
+@inject IJSRuntime JS
+
+@*
+   Submodulo "Escalas" del modal de Historias Clinicas. Muestra:
+   1) Lista de escalas ya iniciadas para la HC (cards) con botones Abrir / Eliminar.
+   2) Boton "+ Nueva escala" que abre un modal con miniaturas de TODOS los
+      formatos cuyo Tipo contiene "escala" — el doctor elige uno y pulsa
+      "Iniciar escala" para activarla.
+   3) Visor (FormViewer) para diligenciar la escala seleccionada, con boton
+      "Guardar" y "Cerrar definitivo".
+
+   La escala SIEMPRE esta atada a una HC: si HistoriaClinicaId es null, se
+   muestra un mensaje vacio sin permitir crear nada.
+*@
+
+@if (HistoriaClinicaId is null)
+{
+    <div class="ase-empty hc-escalas-empty">
+        Para iniciar una escala necesitas haber iniciado primero una historia medica del paciente.
+    </div>
+}
+else
+{
+    <div class="hc-escalas-cab">
+        <div>
+            <h6 class="hc-escalas-h">Escalas diligenciadas</h6>
+            <small class="text-muted">@_escalas.Count escala(s) en esta HC.</small>
+        </div>
+        <button class="btn btn-primary btn-sm" @onclick="AbrirCatalogoAsync" disabled="@_busy">
+            + Nueva escala
+        </button>
+    </div>
+
+    @if (_msg is not null) { <div class="hc-info-msg">@_msg</div> }
+    @if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+    @if (_visor is { } visor)
+    {
+        @* === Visor de la escala seleccionada === *@
+        <div class="hc-escalas-visor">
+            <div class="hc-escalas-visor-h">
+                <div>
+                    <div class="hc-escalas-visor-t">@visor.FormatoNombre</div>
+                    <div class="hc-escalas-visor-s">@visor.FormatoCodigo - @visor.Estado @(visor.Estado == "Cerrada" ? $"el {visor.FechaCierre?.ToLocalTime():dd/MM/yyyy HH:mm}" : "")</div>
+                </div>
+                <div class="hc-escalas-visor-acts">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVisor" disabled="@_busy">&times; Cerrar visor</button>
+                    @if (visor.Estado == "Abierta")
+                    {
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="GuardarValoresAsync" disabled="@_busy">&#128190; Guardar</button>
+                        <button class="btn btn-primary btn-sm" @onclick="CerrarEscalaAsync" disabled="@_busy">&#10003; Marcar como definitiva</button>
+                    }
+                </div>
+            </div>
+            <FormViewer Schema="@_visorSchema" Valores="@_visorValores"
+                        Titulo="@visor.FormatoNombre" Subtitulo="@visor.FormatoCodigo"
+                        ReadOnly="@(visor.Estado != "Abierta")" />
+        </div>
+    }
+    else
+    {
+        @* === Lista de escalas iniciadas === *@
+        @if (_escalas.Count == 0)
+        {
+            <div class="ase-empty hc-escalas-empty">
+                Aun no hay escalas en esta historia. Pulsa <b>+ Nueva escala</b> para iniciar una.
+            </div>
+        }
+        else
+        {
+            <div class="hc-escalas-grid">
+                @foreach (var e in _escalas)
+                {
+                    <div class="hc-escala-card @(e.Estado == "Cerrada" ? "hc-escala-card-cerrada" : "")">
+                        <div class="hc-escala-card-h">
+                            <span class="hc-escala-tipo">ESCALA</span>
+                            @if (e.Estado == "Cerrada") { <span class="hc-escala-pill ok">Cerrada</span> }
+                            else { <span class="hc-escala-pill abierta">Abierta</span> }
+                        </div>
+                        <div class="hc-escala-nombre">@e.FormatoNombre</div>
+                        <div class="hc-escala-meta">
+                            @e.FormatoCodigo &middot; @(e.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))
+                            @if (!string.IsNullOrWhiteSpace(e.EspecialistaNombre)) { <span> &middot; @e.EspecialistaNombre</span> }
+                        </div>
+                        <div class="hc-escala-acts">
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisorAsync(e.Id)" disabled="@_busy">
+                                &#9998; @(e.Estado == "Cerrada" ? "Ver" : "Diligenciar")
+                            </button>
+                            <button class="btn btn-link btn-sm text-danger" @onclick="() => EliminarAsync(e)" disabled="@_busy" title="Eliminar">&#128465;</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+}
+
+@* ====== MODAL CATALOGO DE FORMATOS DE ESCALA ====== *@
+@if (_catalogoAbierto)
+{
+    <div class="cie-backdrop" @onclick="CerrarCatalogo"></div>
+    <div class="cie-modal" style="width: min(840px, 95vw);">
+        <div class="cie-modal-h">
+            <h3>Seleccionar escala a iniciar</h3>
+            <button class="cie-modal-close" @onclick="CerrarCatalogo">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            @if (_formatos.Count == 0)
+            {
+                <div class="ase-empty">
+                    No hay formatos de tipo <b>escala</b> activos. Crealos en el modulo de Formularios con
+                    tipo "ESCALAS".
+                </div>
+            }
+            else
+            {
+                <div class="hc-escala-minis">
+                    @foreach (var f in _formatos)
+                    {
+                        <div class="hc-escala-mini @(_seleccionFormatoId == f.Id ? "sel" : "")"
+                             @onclick="() => _seleccionFormatoId = f.Id">
+                            <div class="hc-escala-mini-icon">&#128203;</div>
+                            <div class="hc-escala-mini-nombre">@f.Nombre</div>
+                            <div class="hc-escala-mini-meta">@f.Codigo @(string.IsNullOrEmpty(f.Version) ? "" : $"v{f.Version}")</div>
+                            <div class="hc-escala-mini-tipo">@f.Tipo</div>
+                        </div>
+                    }
+                </div>
+            }
+            @if (_catalogoError is not null) { <div class="text-danger small mt-2">@_catalogoError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarCatalogo">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="IniciarSeleccionAsync"
+                    disabled="@(_busy || _seleccionFormatoId is null)">
+                &#9658; Iniciar escala
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .hc-escalas-cab { display: flex; justify-content: space-between; align-items: center; padding: 4px 0 14px; }
+    .hc-escalas-h { margin: 0; font-weight: 700; color: #0f172a; font-size: 14px; }
+    .hc-escalas-empty { padding: 26px; text-align: center; color: #64748b; font-style: italic; background: #f8fafc; border-radius: 8px; }
+
+    .hc-escalas-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .hc-escala-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+    .hc-escala-card-cerrada { background: #f8fafc; }
+    .hc-escala-card-h { display: flex; justify-content: space-between; align-items: center; }
+    .hc-escala-tipo { font-size: 10px; font-weight: 700; color: #1565c0; letter-spacing: .05em; }
+    .hc-escala-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+    .hc-escala-pill.ok { background: #d1fae5; color: #065f46; }
+    .hc-escala-pill.abierta { background: #dbeafe; color: #1e40af; }
+    .hc-escala-nombre { font-weight: 700; color: #0f172a; font-size: 13px; }
+    .hc-escala-meta { font-size: 11px; color: #64748b; }
+    .hc-escala-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+
+    .hc-escalas-visor { display: flex; flex-direction: column; gap: 12px; }
+    .hc-escalas-visor-h { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; gap: 10px; flex-wrap: wrap; }
+    .hc-escalas-visor-t { font-weight: 700; color: #0f172a; }
+    .hc-escalas-visor-s { font-size: 11px; color: #64748b; }
+    .hc-escalas-visor-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .hc-escala-minis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; max-height: 50vh; overflow-y: auto; padding-right: 4px; }
+    .hc-escala-mini { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; cursor: pointer; transition: background .15s, border-color .15s, transform .1s; text-align: center; background: #fff; }
+    .hc-escala-mini:hover { background: #eef6ff; border-color: #1565c0; }
+    .hc-escala-mini.sel { background: #dbeafe; border-color: #1565c0; box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.25); }
+    .hc-escala-mini-icon { font-size: 28px; }
+    .hc-escala-mini-nombre { font-weight: 700; font-size: 12.5px; color: #0f172a; margin-top: 4px; line-height: 1.2; }
+    .hc-escala-mini-meta { font-size: 10.5px; color: #64748b; font-family: ui-monospace, Menlo, Consolas, monospace; margin-top: 2px; }
+    .hc-escala-mini-tipo { font-size: 9.5px; color: #1565c0; text-transform: uppercase; margin-top: 4px; letter-spacing: .04em; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public Guid? PacienteId { get; set; }
+    [Parameter] public string? EspecialistaNombre { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoHcCargada;
+    private List<EscalaItemDto> _escalas = new();
+    private List<EscalaFormatoDto> _formatos = new();
+    private bool _busy;
+    private string? _msg;
+    private string? _error;
+
+    // ---- Catalogo ----
+    private bool _catalogoAbierto;
+    private Guid? _seleccionFormatoId;
+    private string? _catalogoError;
+
+    // ---- Visor ----
+    private EscalaDetailDto? _visor;
+    private FormSchema? _visorSchema;
+    private Dictionary<string, string?> _visorValores = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoHcCargada)
+        {
+            _ultimoHcCargada = HistoriaClinicaId;
+            _visor = null;
+            _msg = _error = null;
+            await CargarEscalasAsync();
+        }
+    }
+
+    private async Task CargarEscalasAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _escalas = new(); return; }
+        try
+        {
+            _escalas = (await EscSvc.ListarPorHistoriaAsync(hid)).ToList();
+            if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_escalas.Count); }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task AbrirCatalogoAsync()
+    {
+        _catalogoError = null;
+        _seleccionFormatoId = null;
+        try { _formatos = (await EscSvc.ListarFormatosAsync()).ToList(); }
+        catch (Exception ex) { _catalogoError = ex.Message; _formatos = new(); }
+        _catalogoAbierto = true;
+    }
+
+    private void CerrarCatalogo() => _catalogoAbierto = false;
+
+    private async Task IniciarSeleccionAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _catalogoError = "Falta historia clinica."; return; }
+        if (_seleccionFormatoId is not Guid fid) { _catalogoError = "Selecciona un formato."; return; }
+        _busy = true; _catalogoError = null;
+        try
+        {
+            var req = new IniciarEscalaRequest(hid, fid, "{}", EspecialistaNombre);
+            var detail = await EscSvc.IniciarAsync(req, Guid.Empty);
+            _catalogoAbierto = false;
+            await CargarEscalasAsync();
+            await AbrirVisorDetail(detail);
+            _msg = $"Escala '{detail.FormatoNombre}' iniciada.";
+        }
+        catch (Exception ex) { _catalogoError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task AbrirVisorAsync(Guid escalaId)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            var detail = await EscSvc.GetAsync(escalaId);
+            if (detail is null) { _error = "No se encontro la escala."; return; }
+            await AbrirVisorDetail(detail);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task AbrirVisorDetail(EscalaDetailDto d)
+    {
+        _visor = d;
+        try { _visorSchema = JsonSerializer.Deserialize<FormSchema>(d.SchemaJson) ?? new(); }
+        catch { _visorSchema = new(); }
+        try { _visorValores = JsonSerializer.Deserialize<Dictionary<string, string?>>(d.ValoresJson) ?? new(); }
+        catch { _visorValores = new(); }
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void CerrarVisor() { _visor = null; _visorSchema = null; _visorValores = new(); }
+
+    private async Task GuardarValoresAsync()
+    {
+        if (_visor is null) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            var json = JsonSerializer.Serialize(_visorValores);
+            await EscSvc.GuardarValoresAsync(_visor.Id, json, Guid.Empty);
+            _msg = "Cambios guardados.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task CerrarEscalaAsync()
+    {
+        if (_visor is null) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm", "Marcar la escala como DEFINITIVA? Despues solo se podra ver, no editar.");
+        if (!ok) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            var json = JsonSerializer.Serialize(_visorValores);
+            await EscSvc.CerrarAsync(_visor.Id, json, Guid.Empty);
+            await CargarEscalasAsync();
+            CerrarVisor();
+            _msg = "Escala marcada como definitiva.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(EscalaItemDto e)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar la escala '{e.FormatoNombre}'? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            await EscSvc.EliminarAsync(e.Id, Guid.Empty);
+            await CargarEscalasAsync();
+            _msg = "Escala eliminada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

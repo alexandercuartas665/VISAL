@@ -36,6 +36,7 @@ public sealed class AutomationService : IAutomationService
                     x.r.TimeWindowStart, x.r.TimeWindowEnd, x.r.Action,
                     x.r.FollowUpTitle, x.r.TemplateCategory, x.r.ShiftName,
                     x.r.AiAgentId, a == null ? null : a.Name,
+                    x.r.RevisarAlGuardarParcial, x.r.RevisarAlGuardarDefinitivo,
                     x.r.IsActive, x.r.ExecutionCount, x.r.LastRunAt))
             .ToListAsync(cancellationToken);
         return rows;
@@ -171,10 +172,16 @@ public sealed class AutomationService : IAutomationService
         // Solo conservamos AiAgentId cuando la accion realmente lo usa, asi evitamos
         // referencias huerfanas si el usuario cambia de accion sin limpiar el dropdown.
         rule.AiAgentId = r.Action == AutomationAction.ReviewMedicalNotesWithAi ? r.AiAgentId : null;
+        // Los flags de auto-revision solo aplican a la accion IA: si la accion cambia,
+        // los apagamos para evitar configuracion fantasma.
+        var esIa = r.Action == AutomationAction.ReviewMedicalNotesWithAi;
+        rule.RevisarAlGuardarParcial = esIa && r.RevisarAlGuardarParcial;
+        rule.RevisarAlGuardarDefinitivo = esIa && r.RevisarAlGuardarDefinitivo;
     }
 
     private static AutomationRuleDto Map(AutomationRule r) =>
         new(r.Id, r.Name, r.Trigger, r.ThresholdMinutes, r.StageId, r.TimeWindowStart, r.TimeWindowEnd,
             r.Action, r.FollowUpTitle, r.TemplateCategory, r.ShiftName, r.AiAgentId, null,
+            r.RevisarAlGuardarParcial, r.RevisarAlGuardarDefinitivo,
             r.IsActive, r.ExecutionCount, r.LastRunAt);
 }

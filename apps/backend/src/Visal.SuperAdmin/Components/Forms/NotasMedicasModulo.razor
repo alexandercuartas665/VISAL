@@ -634,6 +634,8 @@ else if (_tabSel == "Ver Historial")
     /// <summary>Two-way binding del contenido de la nota en redaccion para que el chat IA externo pueda leerlo sin reaches al servicio.</summary>
     [Parameter] public string? ContenidoNotaActual { get; set; }
     [Parameter] public EventCallback<string?> ContenidoNotaActualChanged { get; set; }
+    /// <summary>Notifica al padre cuando una nota se guarda con exito. bool true = Definitivo, false = Parcial.</summary>
+    [Parameter] public EventCallback<bool> OnNotaGuardada { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     /// <summary>Notifica al parent cada vez que el textarea cambia, para que el chat IA tenga el texto en vivo.</summary>
@@ -852,6 +854,8 @@ else if (_tabSel == "Ver Historial")
             _borrador.CodigoUnico = saved.CodigoUnico;
             await Refrescar();
             await RecargarDocumentos();
+            // Notificar al padre para que pueda disparar la auto-revision IA si la regla lo configuro.
+            if (OnNotaGuardada.HasDelegate) { await OnNotaGuardada.InvokeAsync(definitivo); }
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; _guardandoDef = false; }

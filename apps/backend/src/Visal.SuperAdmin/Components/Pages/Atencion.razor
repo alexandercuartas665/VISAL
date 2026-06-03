@@ -152,10 +152,12 @@ else
                                     AsignacionTurnoIdCtx="@sel.AsignacionTurnoId"
                                     PacienteId="@sel.PacienteId"
                                     HistoriaClinicaId="@_hcIdParaNotas"
-                                    @bind-ContenidoNotaActual="_contenidoNotaActual" />
+                                    @bind-ContenidoNotaActual="_contenidoNotaActual"
+                                    OnNotaGuardada="OnNotaGuardadaAsync" />
             </div>
             <div class="at-fs-aichat">
-                <AsistenteChatNotas HistoriaClinicaId="@_hcIdParaNotas"
+                <AsistenteChatNotas @ref="_chatRef"
+                                    HistoriaClinicaId="@_hcIdParaNotas"
                                     ContenidoNota="@_contenidoNotaActual" />
             </div>
         </div>
@@ -222,6 +224,14 @@ else
     private Guid? _hcIdParaNotas;
     /// <summary>Contenido en vivo de la nota — espejado desde NotasMedicasModulo via @@bind para que el chat IA lo lea sin tener que pegarlo manualmente.</summary>
     private string? _contenidoNotaActual;
+    /// <summary>Ref al chat IA para invocar AutoRevisarTrasGuardadoAsync cuando NotasMedicasModulo confirma un guardado.</summary>
+    private Visal.SuperAdmin.Components.Forms.AsistenteChatNotas? _chatRef;
+
+    /// <summary>Handler del evento OnNotaGuardada del modulo de notas — delega al chat para que decida si auto-revisa segun la config de la regla.</summary>
+    private async Task OnNotaGuardadaAsync(bool definitivo)
+    {
+        if (_chatRef is not null) { await _chatRef.AutoRevisarTrasGuardadoAsync(definitivo); }
+    }
     private PacienteAsignacionDto? _pacienteCtx;
 
     private string? _error, _ok;

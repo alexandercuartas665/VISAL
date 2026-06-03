@@ -14,7 +14,9 @@ public sealed record AsistenteContextoDto(
     string? AgenteNombre,
     string? AgenteRole,
     bool TieneAgente,
-    string? RazonSinAgente);
+    string? RazonSinAgente,
+    bool RevisarAlGuardarParcial = false,
+    bool RevisarAlGuardarDefinitivo = false);
 
 public interface IAsistenteIaService
 {

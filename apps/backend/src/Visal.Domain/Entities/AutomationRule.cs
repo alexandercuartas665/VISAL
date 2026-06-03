@@ -42,6 +42,20 @@ public class AutomationRule : TenantEntity
     public Guid? AiAgentId { get; set; }
     public AiAgent? AiAgent { get; set; }
 
+    /// <summary>
+    /// Solo aplica a la accion ReviewMedicalNotesWithAi. Si esta encendido,
+    /// el chat IA del modal de notas dispara automaticamente una revision
+    /// cuando el doctor hace "Guardado Parcial".
+    /// </summary>
+    public bool RevisarAlGuardarParcial { get; set; }
+
+    /// <summary>
+    /// Solo aplica a la accion ReviewMedicalNotesWithAi. Si esta encendido,
+    /// el chat IA del modal de notas dispara automaticamente una revision
+    /// cuando el doctor hace "Guardado Definitivo".
+    /// </summary>
+    public bool RevisarAlGuardarDefinitivo { get; set; }
+
     public bool IsActive { get; set; }
 
     public int SortOrder { get; set; }

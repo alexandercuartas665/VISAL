@@ -170,4 +170,23 @@
         _mensajes.Clear();
         _aviso = null;
     }
+
+    /// <summary>
+    /// Llamada desde el padre (Atencion) cuando el doctor acaba de guardar una
+    /// nota. Refresca el contexto (la regla puede haber cambiado en otra
+    /// pestana) y, si el flag correspondiente esta encendido, dispara una
+    /// revision automatica de la nota con un mensaje canonico.
+    /// </summary>
+    public async Task AutoRevisarTrasGuardadoAsync(bool definitivo)
+    {
+        if (HistoriaClinicaId is not Guid) { return; }
+        // Re-resolver contexto para tomar la config actualizada.
+        _ctx = await AsistSvc.ResolverContextoAsync();
+        StateHasChanged();
+        if (_ctx?.TieneAgente != true) { return; }
+        var debe = definitivo ? _ctx.RevisarAlGuardarDefinitivo : _ctx.RevisarAlGuardarParcial;
+        if (!debe) { return; }
+        var etiqueta = definitivo ? "Guardado Definitivo" : "Guardado Parcial";
+        await EnviarAsync($"[Auto-revision tras {etiqueta}] Revisa la nota actual.");
+    }
 }

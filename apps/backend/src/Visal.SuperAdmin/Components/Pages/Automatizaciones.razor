@@ -215,6 +215,22 @@ else
                             <div class="text-muted small mt-1">El agente seleccionado revisara las notas medicas pendientes con su prompt de sistema.</div>
                         }
                     </div>
+                    <div class="field">
+                        <label class="form-label">Auto-revision al guardar la nota</label>
+                        <div style="display:flex; flex-direction:column; gap:6px; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+                            <label style="display:flex; gap:8px; align-items:center; font-weight:500; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" @bind="_fRevisarParcial" />
+                                <span>Revisar automaticamente cuando el doctor haga <b>Guardado Parcial</b></span>
+                            </label>
+                            <label style="display:flex; gap:8px; align-items:center; font-weight:500; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" @bind="_fRevisarDefinitivo" />
+                                <span>Revisar automaticamente cuando el doctor haga <b>Guardado Definitivo</b></span>
+                            </label>
+                            <div class="text-muted small">
+                                Si estan apagados, el doctor debe pulsar &quot;Revisar nota&quot; en el chat manualmente.
+                            </div>
+                        </div>
+                    </div>
                 }
                 @if (_editorError is not null)
                 {
@@ -259,6 +275,8 @@ else
     private string? _fTemplateCategory;
     private string? _fShift;
     private string? _fAiAgentId;
+    private bool _fRevisarParcial;
+    private bool _fRevisarDefinitivo;
     private List<AiAgentDto> _agents = new();
 
     protected override async Task OnInitializedAsync()
@@ -279,7 +297,7 @@ else
         _editId = null; _editorError = null;
         _fName = ""; _fTrigger = AutomationTrigger.NoReply; _fMinutes = 30; _fWinStart = null; _fWinEnd = null; _fStageId = null;
         _fAction = AutomationAction.CreateFollowUp; _fTitle = null; _fTemplateCategory = null; _fShift = null;
-        _fAiAgentId = null;
+        _fAiAgentId = null; _fRevisarParcial = false; _fRevisarDefinitivo = false;
         _editorOpen = true;
     }
 
@@ -290,6 +308,8 @@ else
         _fWinStart = r.TimeWindowStart; _fWinEnd = r.TimeWindowEnd; _fStageId = r.StageId?.ToString();
         _fAction = r.Action; _fTitle = r.FollowUpTitle; _fTemplateCategory = r.TemplateCategory; _fShift = r.ShiftName;
         _fAiAgentId = r.AiAgentId?.ToString();
+        _fRevisarParcial = r.RevisarAlGuardarParcial;
+        _fRevisarDefinitivo = r.RevisarAlGuardarDefinitivo;
         _editorOpen = true;
     }
 
@@ -306,7 +326,7 @@ else
         try
         {
             var actor = await ActorAsync();
-            var req = new SaveAutomationRuleRequest(_fName, _fTrigger, _fMinutes, stageId, _fWinStart, _fWinEnd, _fAction, _fTitle, _fTemplateCategory, _fShift, aiAgentId);
+            var req = new SaveAutomationRuleRequest(_fName, _fTrigger, _fMinutes, stageId, _fWinStart, _fWinEnd, _fAction, _fTitle, _fTemplateCategory, _fShift, aiAgentId, _fRevisarParcial, _fRevisarDefinitivo);
             if (_editId is null) { await AutoSvc.CreateAsync(req, actor); }
             else { await AutoSvc.UpdateAsync(_editId.Value, req, actor); }
             _editorOpen = false;

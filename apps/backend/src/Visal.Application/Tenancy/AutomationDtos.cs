@@ -16,6 +16,8 @@ public sealed record AutomationRuleDto(
     string? ShiftName,
     Guid? AiAgentId,
     string? AiAgentName,
+    bool RevisarAlGuardarParcial,
+    bool RevisarAlGuardarDefinitivo,
     bool IsActive,
     int ExecutionCount,
     DateTimeOffset? LastRunAt);
@@ -31,6 +33,8 @@ public sealed record SaveAutomationRuleRequest(
     string? FollowUpTitle,
     string? TemplateCategory,
     string? ShiftName,
-    Guid? AiAgentId);
+    Guid? AiAgentId,
+    bool RevisarAlGuardarParcial,
+    bool RevisarAlGuardarDefinitivo);
 
 public sealed record AutomationRunResult(int RulesEvaluated, int FollowUpsCreated);

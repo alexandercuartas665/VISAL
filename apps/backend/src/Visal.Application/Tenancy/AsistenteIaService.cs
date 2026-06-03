@@ -58,7 +58,8 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
                 $"El agente '{agente.Name}' esta apagado. Activalo en /agentes.");
         }
 
-        return new(agente.Id, agente.Name, agente.Role, true, null);
+        return new(agente.Id, agente.Name, agente.Role, true, null,
+            regla.RevisarAlGuardarParcial, regla.RevisarAlGuardarDefinitivo);
     }
 
     public async Task<AsistenteRespuestaDto> EnviarMensajeAsync(

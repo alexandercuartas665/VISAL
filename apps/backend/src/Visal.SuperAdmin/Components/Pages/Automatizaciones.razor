@@ -5,6 +5,7 @@
 @using Visal.Domain.Enums
 @inject IAutomationService AutoSvc
 @inject IPipelineService PipelineSvc
+@inject IAiAgentService AgentSvc
 
 <PageTitle>Automatizaciones - Visal</PageTitle>
 
@@ -157,6 +158,7 @@ else
                         <option value="@AutomationAction.NotifySupervisor">Notificar supervisor</option>
                         <option value="@AutomationAction.AssignToShift">Asignar a turno</option>
                         <option value="@AutomationAction.GenerateWompiLink">Generar link Wompi</option>
+                        <option value="@AutomationAction.ReviewMedicalNotesWithAi">Revisar notas medicas con IA</option>
                     </select>
                 </div>
                 @if (_fAction == AutomationAction.CreateFollowUp)
@@ -178,6 +180,33 @@ else
                     <div class="field">
                         <label class="form-label">Turno</label>
                         <input class="form-control" @bind="_fShift" placeholder="turno noche" autocomplete="off" />
+                    </div>
+                }
+                else if (_fAction == AutomationAction.ReviewMedicalNotesWithAi)
+                {
+                    @* Selector del agente IA que ejecutara la accion. Solo se muestran agentes
+                       activos. Si no hay ninguno, mostramos un aviso para que el admin lo cree. *@
+                    <div class="field">
+                        <label class="form-label">Agente IA a utilizar</label>
+                        @if (_agents.Count == 0)
+                        {
+                            <div class="text-muted small">
+                                No tienes agentes IA configurados. Crealos primero en <a href="/agentes">/agentes</a>.
+                            </div>
+                        }
+                        else
+                        {
+                            <select class="form-control" @bind="_fAiAgentId">
+                                <option value="">Selecciona un agente...</option>
+                                @foreach (var a in _agents)
+                                {
+                                    <option value="@a.Id">
+                                        @a.Name @(string.IsNullOrWhiteSpace(a.Role) ? "" : $"({a.Role})") @(a.IsActive ? "" : " - apagado")
+                                    </option>
+                                }
+                            </select>
+                            <div class="text-muted small mt-1">El agente seleccionado revisara las notas medicas pendientes con su prompt de sistema.</div>
+                        }
                     </div>
                 }
                 @if (_editorError is not null)
@@ -222,10 +251,13 @@ else
     private string? _fTitle;
     private string? _fTemplateCategory;
     private string? _fShift;
+    private string? _fAiAgentId;
+    private List<AiAgentDto> _agents = new();
 
     protected override async Task OnInitializedAsync()
     {
         _stages = (await PipelineSvc.ListStagesAsync()).ToList();
+        _agents = (await AgentSvc.ListAsync()).ToList();
         await AutoSvc.SeedDefaultsAsync();
         await ReloadAsync();
         _loading = false;
@@ -240,6 +272,7 @@ else
         _editId = null; _editorError = null;
         _fName = ""; _fTrigger = AutomationTrigger.NoReply; _fMinutes = 30; _fWinStart = null; _fWinEnd = null; _fStageId = null;
         _fAction = AutomationAction.CreateFollowUp; _fTitle = null; _fTemplateCategory = null; _fShift = null;
+        _fAiAgentId = null;
         _editorOpen = true;
     }
 
@@ -249,6 +282,7 @@ else
         _fName = r.Name; _fTrigger = r.Trigger; _fMinutes = r.ThresholdMinutes;
         _fWinStart = r.TimeWindowStart; _fWinEnd = r.TimeWindowEnd; _fStageId = r.StageId?.ToString();
         _fAction = r.Action; _fTitle = r.FollowUpTitle; _fTemplateCategory = r.TemplateCategory; _fShift = r.ShiftName;
+        _fAiAgentId = r.AiAgentId?.ToString();
         _editorOpen = true;
     }
 
@@ -258,11 +292,14 @@ else
         if (string.IsNullOrWhiteSpace(_fName)) { _editorError = "El nombre es obligatorio."; return; }
         Guid? stageId = _fTrigger == AutomationTrigger.StageEntered && Guid.TryParse(_fStageId, out var sid) ? sid : null;
         if (_fTrigger == AutomationTrigger.StageEntered && stageId is null) { _editorError = "Selecciona una etapa."; return; }
+        Guid? aiAgentId = _fAction == AutomationAction.ReviewMedicalNotesWithAi && Guid.TryParse(_fAiAgentId, out var aid) ? aid : null;
+        if (_fAction == AutomationAction.ReviewMedicalNotesWithAi && aiAgentId is null)
+        { _editorError = "Selecciona el agente IA que ejecutara esta accion."; return; }
         _busy = true;
         try
         {
             var actor = await ActorAsync();
-            var req = new SaveAutomationRuleRequest(_fName, _fTrigger, _fMinutes, stageId, _fWinStart, _fWinEnd, _fAction, _fTitle, _fTemplateCategory, _fShift);
+            var req = new SaveAutomationRuleRequest(_fName, _fTrigger, _fMinutes, stageId, _fWinStart, _fWinEnd, _fAction, _fTitle, _fTemplateCategory, _fShift, aiAgentId);
             if (_editId is null) { await AutoSvc.CreateAsync(req, actor); }
             else { await AutoSvc.UpdateAsync(_editId.Value, req, actor); }
             _editorOpen = false;
@@ -319,6 +356,9 @@ else
         AutomationAction.NotifySupervisor => "Notificar supervisor",
         AutomationAction.AssignToShift => $"Asignar a {r.ShiftName ?? "turno"}",
         AutomationAction.GenerateWompiLink => "Generar link Wompi",
+        AutomationAction.ReviewMedicalNotesWithAi =>
+            r.AiAgentName is null ? "Revisar notas medicas con IA (agente no asignado)"
+                                  : $"Revisar notas medicas con IA ({r.AiAgentName})",
         _ => r.Action.ToString()
     };
 

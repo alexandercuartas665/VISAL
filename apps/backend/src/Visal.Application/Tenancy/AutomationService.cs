@@ -24,10 +24,21 @@ public sealed class AutomationService : IAutomationService
 
     public async Task<IReadOnlyList<AutomationRuleDto>> ListAsync(CancellationToken cancellationToken = default)
     {
-        return await _db.AutomationRules.AsNoTracking()
+        // Join opcional con AiAgent para incluir el nombre del agente en la tarjeta.
+        var rows = await _db.AutomationRules.AsNoTracking()
             .OrderBy(r => r.SortOrder).ThenBy(r => r.Name)
-            .Select(r => Map(r))
+            .GroupJoin(_db.AiAgents.AsNoTracking(),
+                r => r.AiAgentId, a => a.Id,
+                (r, ags) => new { r, ags })
+            .SelectMany(x => x.ags.DefaultIfEmpty(),
+                (x, a) => new AutomationRuleDto(
+                    x.r.Id, x.r.Name, x.r.Trigger, x.r.ThresholdMinutes, x.r.StageId,
+                    x.r.TimeWindowStart, x.r.TimeWindowEnd, x.r.Action,
+                    x.r.FollowUpTitle, x.r.TemplateCategory, x.r.ShiftName,
+                    x.r.AiAgentId, a == null ? null : a.Name,
+                    x.r.IsActive, x.r.ExecutionCount, x.r.LastRunAt))
             .ToListAsync(cancellationToken);
+        return rows;
     }
 
     public async Task<AutomationRuleDto?> CreateAsync(SaveAutomationRuleRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
@@ -136,7 +147,9 @@ public sealed class AutomationService : IAutomationService
                 Trigger = AutomationTrigger.ChatInTimeWindow, TimeWindowStart = "22:00", TimeWindowEnd = "06:00",
                 Action = AutomationAction.AssignToShift, ShiftName = "turno noche" },
             new() { TenantId = tenantId, SortOrder = 3, IsActive = false, Name = "Cotizacion aprobada -> pago",
-                Trigger = AutomationTrigger.StageEntered, Action = AutomationAction.GenerateWompiLink }
+                Trigger = AutomationTrigger.StageEntered, Action = AutomationAction.GenerateWompiLink },
+            new() { TenantId = tenantId, SortOrder = 4, IsActive = false, Name = "Revisar notas medicas con IA",
+                Trigger = AutomationTrigger.LeadCreated, Action = AutomationAction.ReviewMedicalNotesWithAi }
         };
         _db.AutomationRules.AddRange(seed);
         await _db.SaveChangesAsync(cancellationToken);
@@ -155,9 +168,13 @@ public sealed class AutomationService : IAutomationService
         rule.FollowUpTitle = r.FollowUpTitle?.Trim();
         rule.TemplateCategory = r.TemplateCategory?.Trim();
         rule.ShiftName = r.ShiftName?.Trim();
+        // Solo conservamos AiAgentId cuando la accion realmente lo usa, asi evitamos
+        // referencias huerfanas si el usuario cambia de accion sin limpiar el dropdown.
+        rule.AiAgentId = r.Action == AutomationAction.ReviewMedicalNotesWithAi ? r.AiAgentId : null;
     }
 
     private static AutomationRuleDto Map(AutomationRule r) =>
         new(r.Id, r.Name, r.Trigger, r.ThresholdMinutes, r.StageId, r.TimeWindowStart, r.TimeWindowEnd,
-            r.Action, r.FollowUpTitle, r.TemplateCategory, r.ShiftName, r.IsActive, r.ExecutionCount, r.LastRunAt);
+            r.Action, r.FollowUpTitle, r.TemplateCategory, r.ShiftName, r.AiAgentId, null,
+            r.IsActive, r.ExecutionCount, r.LastRunAt);
 }

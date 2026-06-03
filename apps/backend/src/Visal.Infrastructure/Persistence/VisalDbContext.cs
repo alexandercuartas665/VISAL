@@ -483,7 +483,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.TimeWindowEnd).HasMaxLength(5);
             b.Property(x => x.TemplateCategory).HasMaxLength(40);
             b.Property(x => x.ShiftName).HasMaxLength(60);
+            b.HasOne(x => x.AiAgent).WithMany().HasForeignKey(x => x.AiAgentId)
+                .OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.SortOrder });
+            b.HasIndex(x => x.AiAgentId);
         });
 
         modelBuilder.Entity<FormDefinition>(b =>

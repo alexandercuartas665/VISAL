@@ -38,5 +38,12 @@ public enum AutomationAction
     AssignToShift,
 
     /// <summary>Genera un link de pago Wompi para el lead.</summary>
-    GenerateWompiLink
+    GenerateWompiLink,
+
+    /// <summary>
+    /// Pasa las notas medicas pendientes por un agente IA configurado del tenant
+    /// para que revise calidad, ortografia, completitud y coherencia clinica.
+    /// El agente concreto se selecciona en la regla (AutomationRule.AiAgentId).
+    /// </summary>
+    ReviewMedicalNotesWithAi
 }

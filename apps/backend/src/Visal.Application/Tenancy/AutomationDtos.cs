@@ -14,6 +14,8 @@ public sealed record AutomationRuleDto(
     string? FollowUpTitle,
     string? TemplateCategory,
     string? ShiftName,
+    Guid? AiAgentId,
+    string? AiAgentName,
     bool IsActive,
     int ExecutionCount,
     DateTimeOffset? LastRunAt);
@@ -28,6 +30,7 @@ public sealed record SaveAutomationRuleRequest(
     AutomationAction Action,
     string? FollowUpTitle,
     string? TemplateCategory,
-    string? ShiftName);
+    string? ShiftName,
+    Guid? AiAgentId);
 
 public sealed record AutomationRunResult(int RulesEvaluated, int FollowUpsCreated);

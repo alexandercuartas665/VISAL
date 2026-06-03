@@ -35,6 +35,13 @@ public class AutomationRule : TenantEntity
     /// <summary>Nombre del turno destino (accion AssignToShift).</summary>
     public string? ShiftName { get; set; }
 
+    /// <summary>
+    /// Agente IA que debe ejecutar la accion cuando esta requiere IA
+    /// (ej: AutomationAction.ReviewMedicalNotesWithAi). Null si la accion no usa IA.
+    /// </summary>
+    public Guid? AiAgentId { get; set; }
+    public AiAgent? AiAgent { get; set; }
+
     public bool IsActive { get; set; }
 
     public int SortOrder { get; set; }

@@ -47,11 +47,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
             <span>Atencion</span>
         </NavLink>
-
-        <NavLink class="visal-nav-link" href="mi-cuenta">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <span>Mi cuenta</span>
-        </NavLink>
     }
     else if (_showTenant)
     {
@@ -204,10 +199,15 @@
             <span>Plantillas</span>
         </NavLink>
 
-        <NavLink class="visal-nav-link" href="mi-cuenta">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <span>Mi cuenta</span>
-        </NavLink>
+        @if (_esAdminAgencia)
+        {
+            @* Mi cuenta expone datos de la empresa, plan y facturacion: solo los admins
+               de la agencia (Owner / Admin) deberian poder verla. *@
+            <NavLink class="visal-nav-link" href="mi-cuenta">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span>Mi cuenta</span>
+            </NavLink>
+        }
     }
 
     @if (_showAdmin)
@@ -286,6 +286,9 @@
     /// <summary>True cuando el usuario logueado es un profesional de campo (TenantUser con
     /// ProfesionalId). En ese caso el menu lateral se reduce solo al item Atencion.</summary>
     private bool _esProfesional;
+    /// <summary>True cuando el tenant_role es Owner o Admin. Solo estos perfiles ven
+    /// "Mi cuenta" (datos de la agencia, plan, facturacion).</summary>
+    private bool _esAdminAgencia;
     private string? _userName;
     private string? _tenantName;
     private string? _tenantLogoUrl;
@@ -309,6 +312,8 @@
         _showAdmin = isPlatformOperator;
         _showTenant = isPlatformOperator || isTenantUser;
         _esProfesional = state.User.FindFirst("profesional_id") is not null;
+        var rol = state.User.FindFirst("tenant_role")?.Value ?? "";
+        _esAdminAgencia = isPlatformOperator || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase) || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase);
 
         _userName = state.User.Identity?.Name;
         _avatar = Initials(_userName);

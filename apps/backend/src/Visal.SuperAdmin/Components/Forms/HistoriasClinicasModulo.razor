@@ -416,10 +416,10 @@
     .hc-buscar-row > input { flex: 1; }
 
     /* Menu lateral del modulo (reemplaza los tabs horizontales).
-       Selector ".hc-col-full.hc-with-menu" para vencer al display:flex
-       declarado antes en .hc-col-full por specificity. */
-    .hc-col-full.hc-with-menu { display: grid; grid-template-columns: 230px 1fr; grid-template-rows: 1fr; gap: 0; min-height: 0; }
-    .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr; }
+       Usamos !important porque hay reglas heredadas en app.css que aplican
+       display:flex a .ase-card y vencen a la specificity de 2 clases. */
+    .hc-col-full.hc-with-menu { display: grid !important; grid-template-columns: 230px 1fr !important; grid-template-rows: 1fr; gap: 0; min-height: 0; }
+    .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr !important; }
     .hc-side-menu { background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow: hidden; }
     .hc-side-toggle { background: none; border: none; border-bottom: 1px solid #e2e8f0; padding: 10px 12px; font-size: 14px; color: #1565c0; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; text-align: left; }
     .hc-side-toggle:hover { background: #eef6ff; }

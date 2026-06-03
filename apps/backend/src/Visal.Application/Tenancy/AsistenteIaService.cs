@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
@@ -9,11 +10,15 @@ namespace Visal.Application.Tenancy;
 /// <summary>
 /// Asistente IA invocado desde el modal de notas medicas. Resuelve el agente
 /// configurado en la regla de automatizacion activa y arma el contexto con la
-/// HC del paciente + nota en redaccion. La llamada al LLM real (Claude/OpenAI)
-/// se hace si hay una AiProviderConfig activa con API key; si no, devuelve una
-/// respuesta de stub explicativa para no romper el flujo en demo.
+/// HC del paciente + nota en redaccion.
+///
+/// IMPORTANTE: usa <see cref="IServiceScopeFactory"/> para crear un scope propio
+/// en cada operacion en lugar de compartir el <see cref="IApplicationDbContext"/>
+/// scoped del circuito Blazor. Esto evita el clasico "second operation was
+/// started on this context instance" cuando el chat lateral y el modulo de
+/// notas hacen consultas en paralelo durante la apertura del modal.
 /// </summary>
-public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext tenant) : IAsistenteIaService
+public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantContext tenant) : IAsistenteIaService
 {
     public async Task<AsistenteContextoDto> ResolverContextoAsync(CancellationToken ct = default)
     {
@@ -22,8 +27,9 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
             return new(null, null, null, false, "No hay tenant activo.");
         }
 
-        // Buscamos la regla activa cuya accion es "Revisar notas medicas con IA"
-        // y que tenga un agente asignado.
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+
         var regla = await db.AutomationRules.AsNoTracking()
             .Where(r => r.IsActive
                      && r.Action == AutomationAction.ReviewMedicalNotesWithAi
@@ -72,6 +78,9 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
                 Aviso: ctx.RazonSinAgente);
         }
 
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+
         var agente = await db.AiAgents.AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == agenteId, ct);
         if (agente is null)
@@ -79,21 +88,12 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
             return new("El agente ya no existe.", "?", false, "Agente inexistente.");
         }
 
-        // Construir el contexto que se enviaria al LLM:
-        // 1) System prompt del agente (define las reglas del asistente)
-        // 2) Snapshot resumido de la HC del paciente
-        // 3) Nota actual en redaccion
-        // 4) Historial de la conversacion
-        // 5) Mensaje del usuario
         var sysPrompt = string.IsNullOrWhiteSpace(agente.SystemPrompt)
             ? "Eres un asistente que valida notas medicas."
             : agente.SystemPrompt;
 
-        var hcResumen = await ConstruirResumenHcAsync(historiaClinicaId, ct);
+        var hcResumen = await ConstruirResumenHcAsync(db, historiaClinicaId, ct);
 
-        // Si hay un provider con API key configurada, llamariamos al LLM aqui.
-        // Por ahora se devuelve una respuesta de stub que sigue las reglas del prompt
-        // sin necesidad de API externa, para que el flujo funcione end-to-end.
         var provider = await db.AiProviderConfigs.AsNoTracking()
             .FirstOrDefaultAsync(p => p.IsEnabled && p.ApiKeyEncrypted != null && p.ApiKeyEncrypted != "", ct);
         var hayApiReal = provider is not null;
@@ -114,7 +114,7 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
                 : "Modo demo: no hay AiProviderConfig activa. Configura una API key para respuestas reales del LLM.");
     }
 
-    private async Task<string> ConstruirResumenHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ConstruirResumenHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
         var hc = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId)
@@ -155,7 +155,6 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
         sb.Append("Estado: ").AppendLine(hc.Estado.ToString());
         sb.Append("Especialista: ").AppendLine(hc.EspecialistaNombre ?? "-");
 
-        // Notas anteriores recientes (max 3) para dar continuidad clinica.
         var notas = await db.NotasMedicas.AsNoTracking()
             .Where(n => n.HistoriaClinicaId == hcId)
             .OrderByDescending(n => n.FechaNota)
@@ -174,11 +173,6 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Respuesta predeterminada que respeta las reglas del prompt del agente
-    /// sin llamar al LLM externo. Hace un analisis basico de completitud sobre
-    /// la nota para que el demo se sienta util.
-    /// </summary>
     private static string ComponerRespuestaStub(
         string agenteName,
         string sysPrompt,
@@ -188,8 +182,6 @@ public sealed class AsistenteIaService(IApplicationDbContext db, ITenantContext 
     {
         var sb = new StringBuilder();
 
-        // Heuristica: si el mensaje del usuario no tiene nada que ver con la nota,
-        // el agente "rechaza" educadamente segun su rol.
         var msg = (mensajeUsuario ?? "").Trim().ToLowerInvariant();
         var temasInvalidos = new[] {
             "diagnostic", "tratamiento", "que medicamento", "que receta", "que hago", "como curo",

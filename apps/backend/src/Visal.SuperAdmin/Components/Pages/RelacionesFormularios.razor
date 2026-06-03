@@ -42,6 +42,7 @@
                         <th>Formulario origen</th>
                         <th class="text-center" style="width:60px"></th>
                         <th>Formulario destino</th>
+                        <th style="width:140px">Tipo</th>
                         <th>Observacion</th>
                         <th style="width:90px" class="text-center">Activo</th>
                         <th style="width:80px"></th>
@@ -59,6 +60,13 @@
                             <td>
                                 <div class="rf-nombre">@r.DestinoNombre</div>
                                 <div class="rf-meta">@r.DestinoCodigo @(string.IsNullOrWhiteSpace(r.DestinoTipo) ? "" : $" - {r.DestinoTipo}")</div>
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(r.TipoRelacion))
+                                {
+                                    <span class="rf-tipo-pill rf-tipo-@(r.TipoRelacion.ToLowerInvariant())">@r.TipoRelacion</span>
+                                }
+                                else { <span class="rf-meta">-</span> }
                             </td>
                             <td>@(r.Observacion ?? "-")</td>
                             <td class="text-center">
@@ -120,6 +128,14 @@
                         }
                     </select>
                 </div>
+                <div class="ase-f">
+                    <label>Tipo de relacion</label>
+                    <select class="form-select form-select-sm" @bind="_fTipo">
+                        <option value="">(Sin tipo)</option>
+                        <option value="EVOLUCION">EVOLUCION</option>
+                        <option value="CONSENTIMIENTO">CONSENTIMIENTO</option>
+                    </select>
+                </div>
                 <div class="ase-f ase-f-wide">
                     <label>Observacion (opcional)</label>
                     <input class="form-control form-control-sm" @bind="_fObservacion"
@@ -145,6 +161,9 @@
     .rf-meta { color: #64748b; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; }
     .rf-flecha { font-size: 18px; color: #1565c0; font-weight: 700; }
     .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
+    .rf-tipo-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+    .rf-tipo-evolucion { background: #dbeafe; color: #1e40af; }
+    .rf-tipo-consentimiento { background: #fef3c7; color: #92400e; }
 </style>
 
 @code {
@@ -162,6 +181,7 @@
     private Guid? _editId;
     private string _fOrigenId = "";
     private string _fDestinoId = "";
+    private string _fTipo = "";
     private bool _fActivo = true;
     private string? _fObservacion;
     private string? _modalError;
@@ -185,7 +205,7 @@
     private void OnNueva()
     {
         _editId = null; _modalError = null;
-        _fOrigenId = ""; _fDestinoId = ""; _fActivo = true; _fObservacion = null;
+        _fOrigenId = ""; _fDestinoId = ""; _fTipo = ""; _fActivo = true; _fObservacion = null;
         _modalAbierto = true;
     }
 
@@ -194,6 +214,7 @@
         _editId = r.Id; _modalError = null;
         _fOrigenId = r.OrigenId.ToString();
         _fDestinoId = r.DestinoId.ToString();
+        _fTipo = r.TipoRelacion ?? "";
         _fActivo = r.Activo;
         _fObservacion = r.Observacion;
         _modalAbierto = true;
@@ -211,7 +232,7 @@
         try
         {
             var actor = await ActorAsync();
-            var req = new SaveRelacionFormularioRequest(_editId, oid, did, _fActivo, _fObservacion);
+            var req = new SaveRelacionFormularioRequest(_editId, oid, did, string.IsNullOrWhiteSpace(_fTipo) ? null : _fTipo, _fActivo, _fObservacion);
             var dto = await Svc.GuardarAsync(req, actor);
             _ok = _editId is null ? "Relacion creada." : "Relacion actualizada.";
             _modalAbierto = false;

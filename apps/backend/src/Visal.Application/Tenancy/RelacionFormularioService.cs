@@ -17,7 +17,7 @@ public sealed class RelacionFormularioService(IApplicationDbContext db, ITenantC
                 x.r.Id,
                 OrigenId = x.o.Id, OrigenCodigo = x.o.Codigo, OrigenNombre = x.o.Nombre, OrigenTipo = x.o.Tipo,
                 DestinoId = d.Id, DestinoCodigo = d.Codigo, DestinoNombre = d.Nombre, DestinoTipo = d.Tipo,
-                x.r.Activo, x.r.Observacion
+                x.r.TipoRelacion, x.r.Activo, x.r.Observacion
             })
             .ToListAsync(ct);
         return rows
@@ -27,7 +27,7 @@ public sealed class RelacionFormularioService(IApplicationDbContext db, ITenantC
                 r.Id,
                 r.OrigenId, r.OrigenCodigo, r.OrigenNombre, r.OrigenTipo,
                 r.DestinoId, r.DestinoCodigo, r.DestinoNombre, r.DestinoTipo,
-                r.Activo, r.Observacion))
+                r.TipoRelacion, r.Activo, r.Observacion))
             .ToList();
     }
 
@@ -68,6 +68,7 @@ public sealed class RelacionFormularioService(IApplicationDbContext db, ITenantC
         }
         entity.FormularioOrigenId = req.OrigenId;
         entity.FormularioDestinoId = req.DestinoId;
+        entity.TipoRelacion = string.IsNullOrWhiteSpace(req.TipoRelacion) ? null : req.TipoRelacion.Trim().ToUpperInvariant();
         entity.Activo = req.Activo;
         entity.Observacion = string.IsNullOrWhiteSpace(req.Observacion) ? null : req.Observacion.Trim();
 

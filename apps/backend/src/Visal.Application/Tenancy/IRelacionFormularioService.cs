@@ -10,6 +10,7 @@ public sealed record RelacionFormularioDto(
     string DestinoCodigo,
     string DestinoNombre,
     string? DestinoTipo,
+    string? TipoRelacion,
     bool Activo,
     string? Observacion);
 
@@ -17,6 +18,7 @@ public sealed record SaveRelacionFormularioRequest(
     Guid? Id,
     Guid OrigenId,
     Guid DestinoId,
+    string? TipoRelacion,
     bool Activo,
     string? Observacion);
 

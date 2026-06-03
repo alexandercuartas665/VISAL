@@ -647,6 +647,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<RelacionFormulario>(b =>
         {
+            b.Property(x => x.TipoRelacion).HasMaxLength(40);
             b.Property(x => x.Observacion).HasMaxLength(500);
             b.HasOne(x => x.FormularioOrigen).WithMany().HasForeignKey(x => x.FormularioOrigenId)
                 .OnDelete(DeleteBehavior.Restrict);

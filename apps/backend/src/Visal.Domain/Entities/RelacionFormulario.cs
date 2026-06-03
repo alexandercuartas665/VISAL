@@ -21,6 +21,15 @@ public class RelacionFormulario : TenantEntity
     public Guid FormularioDestinoId { get; set; }
     public FormDefinition? FormularioDestino { get; set; }
 
+    /// <summary>
+    /// Categoria de la relacion para que el sistema sepa con que proposito usarla:
+    /// "EVOLUCION" cuando el destino es una nota de evolucion derivada del origen,
+    /// "CONSENTIMIENTO" cuando es un consentimiento informado que se sugiere al
+    /// abrir el origen. Valor libre — el modelo no obliga a usar estas dos cadenas
+    /// pero la UI ofrece el dropdown.
+    /// </summary>
+    public string? TipoRelacion { get; set; }
+
     /// <summary>Si la relacion esta vigente. Las desactivadas no se usan para sugerir.</summary>
     public bool Activo { get; set; } = true;
 

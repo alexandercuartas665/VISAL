@@ -181,6 +181,7 @@ public sealed class NotaMedicaService(
         entity.Estado = ParseEstado(req.Estado);
         entity.Criticidad = ParseCriticidad(req.Criticidad);
         entity.FirmaDataUrl = string.IsNullOrWhiteSpace(req.FirmaDataUrl) ? entity.FirmaDataUrl : req.FirmaDataUrl;
+        entity.FirmaPacienteDataUrl = string.IsNullOrWhiteSpace(req.FirmaPacienteDataUrl) ? entity.FirmaPacienteDataUrl : req.FirmaPacienteDataUrl;
         // Solo seteamos el especialista en la creacion, no lo sobreescribimos
         // despues - el primer guardado marca quien hizo la nota.
         if (string.IsNullOrWhiteSpace(entity.EspecialistaNombre) && !string.IsNullOrWhiteSpace(req.EspecialistaNombre))
@@ -272,7 +273,7 @@ public sealed class NotaMedicaService(
         n.Id, n.HistoriaClinicaId, n.PacienteId, n.CodigoUnico,
         n.FechaNota, n.HoraNota, n.SessionNo, n.Contenido,
         n.EspecialistaNombre, n.Estado.ToString(), n.Criticidad.ToString(),
-        n.FirmaDataUrl, n.CreatedAt);
+        n.FirmaDataUrl, n.FirmaPacienteDataUrl, n.CreatedAt);
 
     private static NotaMedicaEstado ParseEstado(string? s) =>
         Enum.TryParse<NotaMedicaEstado>(s, true, out var v) ? v : NotaMedicaEstado.Parcial;

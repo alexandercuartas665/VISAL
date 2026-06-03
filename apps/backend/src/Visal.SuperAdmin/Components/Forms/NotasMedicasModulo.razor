@@ -244,23 +244,52 @@ else if (_tabSel == "Seguimiento")
 @* =================== TAB FIRMA (DEL PROFESIONAL) =================== *@
 else if (_tabSel == "Firma")
 {
-    <div class="ase-card nm-panel nm-firma">
-        <h6 class="nm-firma-h">Firma del Profesional</h6>
+    <div class="ase-card nm-panel">
         @if (_borrador?.Id is null)
         {
             <div class="ase-empty">Guarda primero la nota (parcial o definitiva) para poder firmar.</div>
         }
         else
         {
-            <div class="nm-firma-instr">Firma con el dedo (movil) o el mouse (escritorio). Despues presiona Guardar firma.</div>
-            <canvas id="nm-firma-canvas" class="nm-firma-canvas-real"></canvas>
-            <div class="nm-firma-acciones">
-                <button class="btn btn-outline-secondary" @onclick="LimpiarFirmaAsync" disabled="@_busy">&#129529; Limpiar</button>
-                <button class="btn btn-primary nm-btn-gradient" @onclick="GuardarFirmaAsync" disabled="@_busy">&#128190; Guardar firma</button>
+            <div class="nm-firmas-grid">
+                @* ====== Firma del Profesional ====== *@
+                <div class="nm-firma-block">
+                    <h6 class="nm-firma-h">
+                        Firma del Profesional
+                        @if (!string.IsNullOrEmpty(_firmaActual)) { <span class="nm-firma-badge nm-firma-badge-ok">&#10003; Firmada</span> }
+                        else { <span class="nm-firma-badge nm-firma-badge-pendiente">Pendiente</span> }
+                    </h6>
+                    <div class="nm-firma-subt">@(NombreEspecialistaActual ?? "(sin nombre)")</div>
+                    <div class="nm-firma-instr">Firma con el dedo (movil) o el mouse (escritorio).</div>
+                    <canvas id="nm-firma-canvas" class="nm-firma-canvas-real"></canvas>
+                    <div class="nm-firma-acciones">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFirmaAsync" disabled="@_busy">&#129529; Limpiar</button>
+                        <button class="btn btn-primary btn-sm nm-btn-gradient" @onclick="GuardarFirmaAsync" disabled="@_busy">&#128190; Guardar firma profesional</button>
+                    </div>
+                </div>
+
+                @* ====== Firma del Paciente ====== *@
+                <div class="nm-firma-block">
+                    <h6 class="nm-firma-h">
+                        Firma del Paciente
+                        @if (!string.IsNullOrEmpty(_firmaPacienteActual)) { <span class="nm-firma-badge nm-firma-badge-ok">&#10003; Firmada</span> }
+                        else { <span class="nm-firma-badge nm-firma-badge-pendiente">Pendiente</span> }
+                    </h6>
+                    <div class="nm-firma-subt">@(NombrePacienteCtx ?? "(sin nombre)")</div>
+                    <div class="nm-firma-instr">El paciente o acudiente confirma haber recibido la atencion.</div>
+                    <canvas id="nm-firma-paciente-canvas" class="nm-firma-canvas-real"></canvas>
+                    <div class="nm-firma-acciones">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFirmaPacienteAsync" disabled="@_busy">&#129529; Limpiar</button>
+                        <button class="btn btn-primary btn-sm nm-btn-gradient" @onclick="GuardarFirmaPacienteAsync" disabled="@_busy">&#128190; Guardar firma paciente</button>
+                    </div>
+                </div>
             </div>
-            @if (!string.IsNullOrEmpty(_firmaActual))
+
+            @if (!string.IsNullOrEmpty(_firmaActual) || !string.IsNullOrEmpty(_firmaPacienteActual))
             {
-                <div class="nm-firma-prev-info">Esta nota ya tiene firma guardada. Al guardar la sobrescribiras.</div>
+                <div class="nm-firma-prev-info">
+                    Al guardar de nuevo cualquier firma se sobrescribira la anterior.
+                </div>
             }
         }
     </div>
@@ -591,11 +620,18 @@ else if (_tabSel == "Ver Historial")
     .nm-doc-badge { font-size:10px; background:#eff6ff; color:#1565c0; padding:2px 7px; border-radius:999px; font-weight:600; }
 
     .nm-firma { text-align:center; }
-    .nm-firma-h { text-align:left; font-weight:700; color:#0f172a; margin-bottom:8px; font-size:14px; }
+    .nm-firmas-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+    @@media (max-width: 1100px) { .nm-firmas-grid { grid-template-columns:1fr; } }
+    .nm-firma-block { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:14px; }
+    .nm-firma-h { font-weight:700; color:#0f172a; margin-bottom:4px; font-size:14px; display:flex; align-items:center; gap:8px; }
+    .nm-firma-subt { font-size:12.5px; color:#475569; margin-bottom:8px; font-weight:600; }
     .nm-firma-instr { font-size:12px; color:#64748b; margin-bottom:10px; }
-    .nm-firma-canvas-real { display:block; width:100%; max-width:600px; height:200px; border:2px solid #cbd5e1; border-radius:8px; background:#fff; margin:0 auto; cursor:crosshair; touch-action:none; }
-    .nm-firma-acciones { display:flex; justify-content:center; gap:10px; margin-top:14px; }
-    .nm-firma-prev-info { margin-top:10px; font-size:11.5px; color:#92400e; background:#fef3c7; padding:6px 12px; border-radius:8px; display:inline-block; }
+    .nm-firma-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
+    .nm-firma-badge-ok { background:#d1fae5; color:#065f46; }
+    .nm-firma-badge-pendiente { background:#fef3c7; color:#92400e; }
+    .nm-firma-canvas-real { display:block; width:100%; height:180px; border:2px solid #cbd5e1; border-radius:8px; background:#fff; cursor:crosshair; touch-action:none; }
+    .nm-firma-acciones { display:flex; justify-content:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .nm-firma-prev-info { margin-top:14px; font-size:11.5px; color:#92400e; background:#fef3c7; padding:6px 12px; border-radius:8px; display:inline-block; }
 
     /* Documentos: thumbnails */
     .nm-doc-thumbs { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:12px; }
@@ -670,7 +706,11 @@ else if (_tabSel == "Ver Historial")
     private string _docAnotaciones = "";
     private NotaDocumentoDto? _preview;
     private string? _firmaActual;
+    private string? _firmaPacienteActual;
     private bool _firmaCanvasInicializado;
+    private bool _firmaPacienteCanvasInicializado;
+    /// <summary>Cache del nombre del profesional para mostrar bajo la firma. Se setea al cargar la nota.</summary>
+    private string? NombreEspecialistaActual;
     [Inject] IJSRuntime JsRt { get; set; } = default!;
 
     // Filtros del tab Notas (tabla)
@@ -807,7 +847,10 @@ else if (_tabSel == "Ver Historial")
             Contenido = n.Contenido
         };
         _firmaActual = n.FirmaDataUrl;
+        _firmaPacienteActual = n.FirmaPacienteDataUrl;
+        NombreEspecialistaActual = n.EspecialistaNombre;
         _firmaCanvasInicializado = false; // forzar re-init si se entra a tab Firma
+        _firmaPacienteCanvasInicializado = false;
         _tabSel = "Diligenciamiento";
         _ok = null;
         _error = null;
@@ -930,23 +973,39 @@ else if (_tabSel == "Ver Historial")
     // ---- Firma canvas ----
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_tabSel == "Firma" && _borrador?.Id is not null && !_firmaCanvasInicializado)
+        if (_tabSel == "Firma" && _borrador?.Id is not null)
         {
-            // Inicializar canvas la primera vez que se entra al tab.
-            await Task.Delay(50); // dar tiempo al DOM
-            var ok = await JsRt.InvokeAsync<bool>("visalFirma.init", "nm-firma-canvas");
-            if (ok)
+            if (!_firmaCanvasInicializado)
             {
-                _firmaCanvasInicializado = true;
-                if (!string.IsNullOrEmpty(_firmaActual))
+                await Task.Delay(50);
+                var ok = await JsRt.InvokeAsync<bool>("visalFirma.init", "nm-firma-canvas");
+                if (ok)
                 {
-                    await JsRt.InvokeVoidAsync("visalFirma.load", "nm-firma-canvas", _firmaActual);
+                    _firmaCanvasInicializado = true;
+                    if (!string.IsNullOrEmpty(_firmaActual))
+                    {
+                        await JsRt.InvokeVoidAsync("visalFirma.load", "nm-firma-canvas", _firmaActual);
+                    }
+                }
+            }
+            if (!_firmaPacienteCanvasInicializado)
+            {
+                await Task.Delay(50);
+                var okP = await JsRt.InvokeAsync<bool>("visalFirma.init", "nm-firma-paciente-canvas");
+                if (okP)
+                {
+                    _firmaPacienteCanvasInicializado = true;
+                    if (!string.IsNullOrEmpty(_firmaPacienteActual))
+                    {
+                        await JsRt.InvokeVoidAsync("visalFirma.load", "nm-firma-paciente-canvas", _firmaPacienteActual);
+                    }
                 }
             }
         }
         else if (_tabSel != "Firma")
         {
             _firmaCanvasInicializado = false;
+            _firmaPacienteCanvasInicializado = false;
         }
     }
 
@@ -955,11 +1014,16 @@ else if (_tabSel == "Ver Historial")
         await JsRt.InvokeVoidAsync("visalFirma.clear", "nm-firma-canvas");
     }
 
+    private async Task LimpiarFirmaPacienteAsync()
+    {
+        await JsRt.InvokeVoidAsync("visalFirma.clear", "nm-firma-paciente-canvas");
+    }
+
     private async Task GuardarFirmaAsync()
     {
         if (_borrador?.Id is not Guid nid) { return; }
         var dataUrl = await JsRt.InvokeAsync<string?>("visalFirma.getDataUrl", "nm-firma-canvas");
-        if (string.IsNullOrWhiteSpace(dataUrl)) { _error = "Firma vacia."; return; }
+        if (string.IsNullOrWhiteSpace(dataUrl)) { _error = "Firma del profesional vacia."; return; }
         _busy = true; _error = _ok = null;
         try
         {
@@ -971,10 +1035,40 @@ else if (_tabSel == "Ver Historial")
             var req = new GuardarNotaRequest(
                 nid, actual.HistoriaClinicaId, actual.PacienteId, AsignacionTurnoIdCtx,
                 actual.SessionNo, actual.FechaNota, hora, actual.Contenido,
-                actual.Estado, actual.Criticidad, dataUrl);
+                actual.Estado, actual.Criticidad, dataUrl,
+                EspecialistaNombre: null,
+                FirmaPacienteDataUrl: null);
             await NotaSvc.GuardarAsync(req, Guid.Empty);
             _firmaActual = dataUrl;
-            _ok = "Firma guardada.";
+            _ok = "Firma del profesional guardada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task GuardarFirmaPacienteAsync()
+    {
+        if (_borrador?.Id is not Guid nid) { return; }
+        var dataUrl = await JsRt.InvokeAsync<string?>("visalFirma.getDataUrl", "nm-firma-paciente-canvas");
+        if (string.IsNullOrWhiteSpace(dataUrl)) { _error = "Firma del paciente vacia."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var actual = await NotaSvc.GetAsync(nid);
+            if (actual is null) { _error = "Nota no encontrada."; return; }
+
+            TimeOnly? hora = TimeOnly.TryParse(_borrador.HoraNotaStr, out var hh) ? hh : actual.HoraNota;
+            // Solo enviamos la firma del paciente; la del profesional queda como esta.
+            var req = new GuardarNotaRequest(
+                nid, actual.HistoriaClinicaId, actual.PacienteId, AsignacionTurnoIdCtx,
+                actual.SessionNo, actual.FechaNota, hora, actual.Contenido,
+                actual.Estado, actual.Criticidad,
+                FirmaDataUrl: null,
+                EspecialistaNombre: null,
+                FirmaPacienteDataUrl: dataUrl);
+            await NotaSvc.GuardarAsync(req, Guid.Empty);
+            _firmaPacienteActual = dataUrl;
+            _ok = "Firma del paciente guardada.";
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }

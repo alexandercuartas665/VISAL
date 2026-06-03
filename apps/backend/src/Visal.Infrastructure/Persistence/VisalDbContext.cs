@@ -638,6 +638,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Contenido).HasColumnType("text").IsRequired();
             b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
             b.Property(x => x.FirmaDataUrl).HasColumnType("text");
+            b.Property(x => x.FirmaPacienteDataUrl).HasColumnType("text");
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId)

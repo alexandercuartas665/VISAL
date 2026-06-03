@@ -13,6 +13,7 @@ public sealed record NotaMedicaDto(
     string Estado,            // "Parcial" | "Definitivo"
     string Criticidad,        // "Estable" | "Vigilancia" | "Alerta" | "Critico"
     string? FirmaDataUrl,
+    string? FirmaPacienteDataUrl,
     DateTimeOffset CreatedAt);
 
 public sealed record NotaMedicaTarjetaDto(
@@ -42,7 +43,8 @@ public sealed record GuardarNotaRequest(
     string Estado,
     string Criticidad,
     string? FirmaDataUrl,
-    string? EspecialistaNombre = null);
+    string? EspecialistaNombre = null,
+    string? FirmaPacienteDataUrl = null);
 
 public sealed record NotaDocumentoDto(
     Guid Id,

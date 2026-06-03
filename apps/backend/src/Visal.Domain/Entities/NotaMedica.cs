@@ -55,6 +55,9 @@ public class NotaMedica : TenantEntity
 
     public NotaMedicaCriticidad Criticidad { get; set; } = NotaMedicaCriticidad.Estable;
 
-    /// <summary>Data URL de la firma (base64 png). Null si no se firmo.</summary>
+    /// <summary>Data URL de la firma del profesional (base64 png). Null si no se firmo.</summary>
     public string? FirmaDataUrl { get; set; }
+
+    /// <summary>Data URL de la firma del paciente (base64 png). Null si no se firmo.</summary>
+    public string? FirmaPacienteDataUrl { get; set; }
 }

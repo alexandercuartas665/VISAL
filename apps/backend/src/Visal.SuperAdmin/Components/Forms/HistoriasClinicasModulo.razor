@@ -20,12 +20,29 @@
    No tiene @page: no es ruta independiente.
 *@
 
-<div class="hc-grid">
+<div class="hc-grid @(_pacienteColapsado ? "paciente-colapsado" : "") @(_chatColapsado ? "chat-colapsado" : "")">
 
     @* =========== SIDEBAR IZQUIERDO: filtros + lista historias =========== *@
+    @* Colapsable: si _pacienteColapsado es true se reduce a una franja vertical
+       que solo muestra el boton para volver a expandir. Asi el doctor maximiza
+       el ancho del modulo de historias en pantallas chicas. *@
+    @if (_pacienteColapsado)
+    {
+        <div class="hc-paciente-strip">
+            <button class="hc-paciente-expand" @onclick="() => _pacienteColapsado = false" title="Mostrar paciente y filtros">
+                <span class="hc-paciente-expand-ico">&#128100;</span>
+                <span class="hc-paciente-expand-text">Paciente</span>
+            </button>
+        </div>
+    }
+    else
+    {
     <div class="hc-col">
         <div class="ase-card">
-            <div class="ase-card-h">Paciente</div>
+            <div class="ase-card-h" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>Paciente</span>
+                <button class="hc-col-toggle" @onclick="() => _pacienteColapsado = true" title="Ocultar columna paciente">&laquo;</button>
+            </div>
             <div class="hc-form-padding">
                 @if (PacienteContexto is PacienteAsignacionDto pc)
                 {
@@ -122,6 +139,17 @@
             </div>
         </div>
     </div>
+    }
+
+    @* =========== COLUMNA CENTRAL: chat WhatsApp del paciente =========== *@
+    @* Vive en el hc-grid (no dentro del modal) para que el doctor pueda colapsar
+       paciente + chat y dejar el modulo de historia a maximo ancho. *@
+    <div class="hc-chat-outer @(_chatColapsado ? "hc-chat-colapsado" : "")">
+        <WhatsAppChatPanel Telefono="@PacienteActivo?.Telefono"
+                           NombreContacto="@PacienteActivo?.NombreCompleto"
+                           Colapsable="true"
+                           @bind-Colapsado="_chatColapsado" />
+    </div>
 
     @* =========== PANEL DERECHO: detalle + tabs =========== *@
     <div class="hc-col hc-col-main">
@@ -161,7 +189,7 @@
             </div>
         </div>
 
-        <div class="ase-card hc-col-full hc-with-menu @(_menuColapsado ? "menu-colapsado" : "") @(_chatColapsado ? "chat-colapsado" : "")">
+        <div class="ase-card hc-col-full hc-with-menu @(_menuColapsado ? "menu-colapsado" : "")">
             @* ===== Menu lateral del modulo (izquierda) ===== *@
             <aside class="hc-side-menu">
                 <button class="hc-side-toggle" title="@(_menuColapsado ? "Expandir menu" : "Colapsar menu")"
@@ -275,14 +303,6 @@
                                               OnCountChanged="@(c => _certCount = c)" />
                     }
                 }
-            </div>
-
-            @* ===== Columna lateral: chat WhatsApp del paciente ===== *@
-            <div class="hc-chat-col">
-                <WhatsAppChatPanel Telefono="@PacienteActivo?.Telefono"
-                                   NombreContacto="@PacienteActivo?.NombreCompleto"
-                                   Colapsable="true"
-                                   @bind-Colapsado="_chatColapsado" />
             </div>
         </div>
     </div>
@@ -435,9 +455,25 @@
 }
 
 <style>
-    .hc-grid { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: stretch; }
+    /* Grid externo de 3 columnas: paciente (320px) | chat WhatsApp (320px) | modulo
+       de historias (1fr). Cada columna puede colapsar a 50px (paciente/chat) para
+       que el modulo de historias respire en pantallas chicas. */
+    .hc-grid { display: grid; grid-template-columns: 320px 320px 1fr; gap: 14px; align-items: stretch; }
+    .hc-grid.paciente-colapsado { grid-template-columns: 50px 320px 1fr; }
+    .hc-grid.chat-colapsado { grid-template-columns: 320px 50px 1fr; }
+    .hc-grid.paciente-colapsado.chat-colapsado { grid-template-columns: 50px 50px 1fr; }
     .hc-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 600px; }
     .hc-col-main { min-width: 0; }
+    .hc-chat-outer { display: flex; flex-direction: column; min-width: 0; min-height: 600px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
+
+    /* Franja vertical cuando la columna paciente esta colapsada. */
+    .hc-paciente-strip { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; align-items: flex-start; justify-content: center; padding-top: 12px; min-height: 600px; }
+    .hc-paciente-expand { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; cursor: pointer; min-width: 36px; }
+    .hc-paciente-expand:hover { background: #eef6ff; border-color: #1565c0; }
+    .hc-paciente-expand-ico { font-size: 18px; }
+    .hc-paciente-expand-text { font-size: 9px; font-weight: 700; color: #475569; writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .04em; text-transform: uppercase; }
+    .hc-col-toggle { background: rgba(255,255,255,.7); border: 1px solid #e2e8f0; color: #1e40af; padding: 0 8px; border-radius: 4px; cursor: pointer; font-size: 14px; line-height: 22px; }
+    .hc-col-toggle:hover { background: #fff; border-color: #1565c0; }
     .hc-col > .ase-card:last-child { flex: 1; display: flex; flex-direction: column; min-height: 0; }
     .hc-col-full { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
@@ -482,13 +518,10 @@
     /* Menu lateral del modulo (reemplaza los tabs horizontales).
        Usamos !important porque hay reglas heredadas en app.css que aplican
        display:flex a .ase-card y vencen a la specificity de 2 clases. */
-    /* Grid de 3 columnas: menu lateral (izquierda) | cuerpo del tab (centro) | chat WhatsApp (derecha).
-       El chat por default ocupa 320px; cuando se colapsa baja a 50px (franja vertical). */
-    .hc-col-full.hc-with-menu { display: grid !important; grid-template-columns: 230px 1fr 320px !important; grid-template-rows: 1fr; gap: 0; min-height: 0; }
-    .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr 320px !important; }
-    .hc-col-full.hc-with-menu.chat-colapsado { grid-template-columns: 230px 1fr 50px !important; }
-    .hc-col-full.hc-with-menu.menu-colapsado.chat-colapsado { grid-template-columns: 56px 1fr 50px !important; }
-    .hc-chat-col { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    /* Grid del modal interno (vuelve a 2 columnas tras sacar el chat al grid externo):
+       menu lateral (izquierda) | cuerpo del tab (centro). */
+    .hc-col-full.hc-with-menu { display: grid !important; grid-template-columns: 230px 1fr !important; grid-template-rows: 1fr; gap: 0; min-height: 0; }
+    .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr !important; }
     .hc-side-menu { background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow: hidden; }
     .hc-side-toggle { background: none; border: none; border-bottom: 1px solid #e2e8f0; padding: 10px 12px; font-size: 14px; color: #1565c0; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; text-align: left; }
     .hc-side-toggle:hover { background: #eef6ff; }
@@ -577,6 +610,11 @@
     private bool _menuColapsado;
     /// <summary>Estado de colapso de la columna del chat WhatsApp (lateral derecha).</summary>
     private bool _chatColapsado;
+    /// <summary>Estado de colapso de la columna izquierda (paciente + filtros + lista
+    /// de historias). Cuando se colapsa, queda una franja vertical con boton para
+    /// volver a expandir. Combinada con chat colapsado, el modulo de historias usa
+    /// todo el ancho disponible.</summary>
+    private bool _pacienteColapsado;
 
     /// <summary>Devuelve (icono unicode, conteo de badge) para una etiqueta del menu.</summary>
     private (string icono, int badge) IconoYBadge(string tab) => tab switch

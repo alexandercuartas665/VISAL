@@ -94,6 +94,25 @@ public static class PrefillSourceCatalog
             "email", "displayName", "documento", "username",
             "primerNombre", "segundoNombre", "primerApellido", "segundoApellido",
             "celular", "fijo", "ciudad", "direccion"
+        },
+        // Datos derivados de la instancia actual de HC (no del paciente). Se
+        // refresca en tiempo real cuando el doctor agrega/quita items en los
+        // submodulos de la HC (orden de medicamentos, etc.). Los campos
+        // marcados aqui se vuelven readonly en el FormViewer.
+        ["historiaMedica"] = new[]
+        {
+            "medicamentos.lista_numerada"
         }
+    };
+
+    /// <summary>Nombre legible del sourceModule para el dropdown del modal Rutas de prefill.</summary>
+    public static string NombreLegible(string sourceModule) => sourceModule switch
+    {
+        "paciente" => "Paciente",
+        "profesional" => "Profesional",
+        "contrato" => "Contrato",
+        "usuario" => "Usuario",
+        "historiaMedica" => "Historia Medica",
+        _ => sourceModule
     };
 }

@@ -368,7 +368,7 @@
                             <select class="pr-source-sel" @bind="route.SourceModule">
                                 @foreach (var mod in PrefillSourceCatalog.Campos.Keys)
                                 {
-                                    <option value="@mod">@(char.ToUpper(mod[0]) + mod[1..])</option>
+                                    <option value="@mod">@PrefillSourceCatalog.NombreLegible(mod)</option>
                                 }
                             </select>
                             <button class="fb-btn fb-btn-danger" @onclick="() => RemoveRoute(route)" title="Eliminar ruta">&times;</button>

@@ -208,6 +208,7 @@
                         {
                             <FormViewer Schema="@_schemaActual" Valores="@_valores"
                                         Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato"
+                                        ReadOnlyKeys="@_hcReadOnlyKeys"
                                         OnValueChanged="OnValorCambiado" />
                         }
                     }
@@ -240,7 +241,7 @@
                     else if (_tabSel == "Ordenes medicamento")
                     {
                         <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
-                                           OnCountChanged="@(c => _medCount = c)" />
+                                           OnCountChanged="OnMedicamentosCountChanged" />
                     }
                     else if (_tabSel == "Ordenes servicios Propias")
                     {
@@ -613,6 +614,11 @@
     private FormSchema? _schemaActual;
     private PrefillRouteSet _prefillRoutesActual = new();
     private Dictionary<string, string?> _valores = new();
+    /// <summary>Names del schema que estan poblados desde la fuente derivada
+    /// "historiaMedica" (medicamentos.lista_numerada, etc.). Se recalcula cada
+    /// vez que cambian los datos derivados (al agregar/quitar medicamentos).
+    /// El FormViewer los renderiza disabled con badge "auto".</summary>
+    private HashSet<string> _hcReadOnlyKeys = new();
     private string? _formatoActualNombre;
     private string? _subtituloFormato;
     private string? _imprimirMsg;
@@ -738,6 +744,55 @@
         _escCount = await EscSvc.ContarPorHistoriaAsync(h.Id);
         _evoCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
         _conCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
+        // Aplicar fuente derivada "historiaMedica" (medicamentos.lista_numerada, etc.)
+        // ANTES de pintar. Asi al abrir una HC vieja el contenido refleja la orden
+        // actual aunque haya cambiado entre sesiones, no el ValoresJson historico.
+        await RefrescarPrefillHistoriaMedicaAsync(h.Id);
+    }
+
+    /// <summary>
+    /// Carga la fuente derivada (medicamentos de la HC actual), aplica los mapeos
+    /// configurados en la ruta sourceModule = "historiaMedica" y actualiza
+    /// _hcReadOnlyKeys para que el FormViewer marque esos campos como auto.
+    /// Llamada al abrir la HC y cada vez que el doctor agrega/quita un medicamento.
+    /// </summary>
+    private async Task RefrescarPrefillHistoriaMedicaAsync(Guid hcId)
+    {
+        try
+        {
+            var meds = await OrdMedSvc.ListarPorHistoriaAsync(hcId);
+            _hcReadOnlyKeys = HistoriaMedicaPrefillHelper.Aplicar(_valores, meds, _prefillRoutesActual);
+        }
+        catch
+        {
+            // No bloquear el render si fallamos cargando los medicamentos.
+            _hcReadOnlyKeys = new();
+        }
+    }
+
+    /// <summary>
+    /// Handler que el componente OrdenMedicamentos invoca tras cada Add/Delete.
+    /// Refresca el badge y, sobre todo, re-aplica el prefill historiaMedica para
+    /// que los campos del formulario (visible o no) reflejen la nueva lista. Luego
+    /// dispara un autoguardado para persistir el cambio.
+    /// </summary>
+    private async Task OnMedicamentosCountChanged(int count)
+    {
+        _medCount = count;
+        if (_historiaSel is HistoriaRow h)
+        {
+            await RefrescarPrefillHistoriaMedicaAsync(h.Id);
+            // Marcar como sucio y guardar inmediatamente (sin debounce) — el doctor
+            // espera que los campos auto-poblados ya esten persistidos cuando vuelva
+            // al tab Historial.
+            if (string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+            {
+                _saveStatus = "guardando";
+                try { await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty); _saveStatus = "guardado"; _ultimoGuardado = DateTime.Now; }
+                catch { _saveStatus = "error"; }
+            }
+            StateHasChanged();
+        }
     }
     private void ToggleMenu(Guid id) => _menuAbierto = _menuAbierto == id ? null : id;
 

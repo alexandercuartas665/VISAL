@@ -82,14 +82,203 @@ else
     [Parameter] public string? Titulo { get; set; }
     [Parameter] public string? Subtitulo { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>
+    /// Conjunto de Names de campos cuyo valor viene de una fuente derivada
+    /// (sourceModule = "historiaMedica"). El FormViewer los renderiza como
+    /// disabled y muestra un badge "auto" para que el usuario sepa que no debe
+    /// editarlos a mano (su valor se recalcula desde la fuente).
+    /// </summary>
+    [Parameter] public HashSet<string>? ReadOnlyKeys { get; set; }
     [Parameter] public EventCallback<KeyValuePair<string, string?>> OnValueChanged { get; set; }
+
+    /// <summary>True si el nodo concreto debe renderizarse readonly: porque el visor
+    /// entero esta en modo lectura, o porque su Name esta en ReadOnlyKeys.</summary>
+    private bool IsNodeReadOnly(FormNode n) =>
+        ReadOnly || (!string.IsNullOrEmpty(n.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(n.Name));
 
     private string? GetValue(string key) => Valores.TryGetValue(key, out var v) ? v : null;
 
     private async Task SetValue(string key, string? value)
     {
         Valores[key] = value;
+        // Recalcular todos los campos calculated tras cualquier cambio.
+        // Cada calculated puede depender de N campos; lo mas simple es revaluar todo.
+        // Para fórmulas que dependen de OTROS calculated (ej: cases(total)), hacemos
+        // dos pasadas para que el orden de declaracion no importe.
+        RecalculateAll();
+        RecalculateAll();
         if (OnValueChanged.HasDelegate) { await OnValueChanged.InvokeAsync(new(key, value)); }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Calcular valores iniciales al abrir/cambiar de schema.
+        RecalculateAll();
+        RecalculateAll();
+    }
+
+    private void RecalculateAll()
+    {
+        if (Schema is null) { return; }
+        foreach (var n in WalkNodes(Schema.Children))
+        {
+            if (n.FieldType == "calculated" && !string.IsNullOrWhiteSpace(n.Formula))
+            {
+                var key = n.Name ?? $"fld:{n.Id}";
+                Valores[key] = EvalFormula(n.Formula!, Valores);
+            }
+        }
+    }
+
+    private static IEnumerable<FormNode> WalkNodes(List<FormNode>? nodes)
+    {
+        if (nodes is null) { yield break; }
+        foreach (var n in nodes)
+        {
+            yield return n;
+            if (n.Children is not null)
+            {
+                foreach (var c in WalkNodes(n.Children)) { yield return c; }
+            }
+        }
+    }
+
+    // Evaluador minimo de formulas usado por campos calculated.
+    // Sintaxis soportada:
+    //   sum(a, b, c, ...)                   -> suma numerica de los campos por nombre
+    //   cases(ref, "lo-hi=Etiqueta; lo-hi=Etiqueta; default=X")  -> mapeo por rango
+    //   edad(fecha_nacimiento)              -> anios desde la fecha al hoy
+    private static string EvalFormula(string formula, Dictionary<string, string?> values)
+    {
+        var f = formula.Trim();
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+
+        // sum(...)
+        var mSum = System.Text.RegularExpressions.Regex.Match(
+            f, @"^sum\s*\(([^)]*)\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mSum.Success)
+        {
+            double total = 0;
+            // Para extraer el numero al principio de strings tipo "10 - Independiente..."
+            var numFirst = new System.Text.RegularExpressions.Regex(@"-?\d+(?:[.,]\d+)?");
+            foreach (var raw in mSum.Groups[1].Value.Split(','))
+            {
+                var name = raw.Trim();
+                if (string.IsNullOrEmpty(name)) { continue; }
+                if (!values.TryGetValue(name, out var v) || string.IsNullOrWhiteSpace(v)) { continue; }
+
+                // Primero intentamos parse directo (campos number puros).
+                if (double.TryParse(v, System.Globalization.NumberStyles.Any, ci, out var nDirect))
+                {
+                    total += nDirect;
+                    continue;
+                }
+                // Fallback: extraer el primer numero del string (selects tipo "10 - texto...").
+                var m = numFirst.Match(v);
+                if (m.Success &&
+                    double.TryParse(m.Value.Replace(',', '.'), System.Globalization.NumberStyles.Any, ci, out var nExtract))
+                {
+                    total += nExtract;
+                }
+            }
+            return (total == Math.Floor(total) ? ((long)total).ToString(ci) : total.ToString(ci));
+        }
+
+        // sumprod(field1:peso1, field2:peso2, ...)  -> Sum(valorField * peso)
+        // Util para escalas donde cada item tiene un ponderador distinto
+        // (ej: Escala Visal de requerimiento de enfermeria).
+        var mSp = System.Text.RegularExpressions.Regex.Match(
+            f, @"^sumprod\s*\(([^)]*)\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mSp.Success)
+        {
+            double total = 0;
+            var numFirst = new System.Text.RegularExpressions.Regex(@"-?\d+(?:[.,]\d+)?");
+            foreach (var raw in mSp.Groups[1].Value.Split(','))
+            {
+                var pair = raw.Split(':');
+                if (pair.Length != 2) { continue; }
+                var name = pair[0].Trim();
+                if (!double.TryParse(pair[1].Trim().Replace(',', '.'),
+                        System.Globalization.NumberStyles.Any, ci, out var peso)) { continue; }
+                if (!values.TryGetValue(name, out var v) || string.IsNullOrWhiteSpace(v)) { continue; }
+
+                double n;
+                if (!double.TryParse(v, System.Globalization.NumberStyles.Any, ci, out n))
+                {
+                    var m = numFirst.Match(v);
+                    if (!m.Success ||
+                        !double.TryParse(m.Value.Replace(',', '.'), System.Globalization.NumberStyles.Any, ci, out n))
+                    { continue; }
+                }
+                total += (n * peso);
+            }
+            // Mostrar con un decimal cuando no es entero (Enfermeria da fraccionarios).
+            return (total == Math.Floor(total)
+                ? ((long)total).ToString(ci)
+                : total.ToString("0.0", ci));
+        }
+
+        // cases(refName, "0-19=DEPENDENCIA TOTAL;20-35=DEPENDENCIA SEVERA;...")
+        var mCases = System.Text.RegularExpressions.Regex.Match(
+            f, @"^cases\s*\(\s*([A-Za-z0-9_]+)\s*,\s*""(.+)""\s*\)\s*$");
+        if (mCases.Success)
+        {
+            var refName = mCases.Groups[1].Value;
+            var rules = mCases.Groups[2].Value;
+            if (!values.TryGetValue(refName, out var refVal) || string.IsNullOrWhiteSpace(refVal))
+            {
+                return "";
+            }
+            double num;
+            if (!double.TryParse(refVal, System.Globalization.NumberStyles.Any, ci, out num))
+            {
+                // Mismo fallback que sum(): extraer el primer numero del string.
+                var m = System.Text.RegularExpressions.Regex.Match(refVal, @"-?\d+(?:[.,]\d+)?");
+                if (!m.Success ||
+                    !double.TryParse(m.Value.Replace(',', '.'), System.Globalization.NumberStyles.Any, ci, out num))
+                {
+                    return "";
+                }
+            }
+            foreach (var rule in rules.Split(';'))
+            {
+                var parts = rule.Split(new[] { '=' }, 2);
+                if (parts.Length != 2) { continue; }
+                var range = parts[0].Trim();
+                var label = parts[1].Trim();
+                if (string.Equals(range, "default", StringComparison.OrdinalIgnoreCase)) { return label; }
+                var mr = System.Text.RegularExpressions.Regex.Match(
+                    range, @"^(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)$");
+                if (mr.Success)
+                {
+                    var lo = double.Parse(mr.Groups[1].Value, ci);
+                    var hi = double.Parse(mr.Groups[2].Value, ci);
+                    if (num >= lo && num <= hi) { return label; }
+                }
+            }
+            return "";
+        }
+
+        // edad(fecha_nacimiento) - util en HC.
+        var mEdad = System.Text.RegularExpressions.Regex.Match(
+            f, @"^edad\s*\(\s*([A-Za-z0-9_]+)\s*\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mEdad.Success)
+        {
+            if (values.TryGetValue(mEdad.Groups[1].Value, out var dv) && !string.IsNullOrWhiteSpace(dv) &&
+                DateTime.TryParse(dv, ci, System.Globalization.DateTimeStyles.None, out var dob))
+            {
+                var today = DateTime.Today;
+                var age = today.Year - dob.Year;
+                if (dob.Date > today.AddYears(-age)) { age--; }
+                return age.ToString(ci);
+            }
+            return "";
+        }
+
+        return ""; // formula no reconocida -> dejamos vacio
     }
 
     private RenderFragment RenderField(FormNode node) => __builder =>
@@ -156,7 +345,11 @@ else
             }
             else
             {
-                <label class="fv-lbl">@node.Label @(node.Required ? "*" : "")</label>
+                var auto = !string.IsNullOrEmpty(node.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(node.Name);
+                <label class="fv-lbl">
+                    @node.Label @(node.Required ? "*" : "")
+                    @if (auto) { <span class="fv-auto-badge" title="Este campo se llena automaticamente desde la HC. No se edita manualmente.">auto</span> }
+                </label>
                 @RenderInput(node)
             }
         </div>
@@ -166,30 +359,31 @@ else
     {
         var key = node.Name ?? $"fld:{node.Id}";
         var val = GetValue(key) ?? node.DefaultValue ?? "";
+        var ro = IsNodeReadOnly(node);
         switch (node.FieldType)
         {
             case "textarea":
                 <textarea class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
-                          disabled="@ReadOnly" value="@val"
+                          disabled="@ro" value="@val"
                           @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
                 break;
             case "number":
                 <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"
-                       disabled="@ReadOnly" value="@val"
+                       disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "date":
                 <input type="date" class="form-control form-control-sm"
-                       disabled="@ReadOnly" value="@val"
+                       disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "email":
                 <input type="email" class="form-control form-control-sm" placeholder="@node.Placeholder"
-                       disabled="@ReadOnly" value="@val"
+                       disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "select":
-                <select class="form-select form-select-sm" disabled="@ReadOnly" value="@val"
+                <select class="form-select form-select-sm" disabled="@ro" value="@val"
                         @onchange="e => SetValue(key, e.Value?.ToString())">
                     <option value="">Seleccione...</option>
                     @if (node.Options is not null)
@@ -203,15 +397,19 @@ else
                 break;
             case "autocomplete":
                 <input class="form-control form-control-sm" placeholder="@(node.Placeholder ?? $"Buscar en {node.Catalog}...")"
-                       disabled="@ReadOnly" value="@val"
+                       disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "calculated":
-                <input class="form-control form-control-sm fv-calc" readonly value="@val" placeholder="@node.Formula" />
+                <input class="form-control form-control-sm fv-calc"
+                       readonly
+                       value="@val"
+                       placeholder="(automatico: @node.Formula)"
+                       title="@($"Calculado por formula: {node.Formula}")" />
                 break;
             default:
                 <input type="text" class="form-control form-control-sm" placeholder="@node.Placeholder"
-                       disabled="@ReadOnly" value="@val"
+                       disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
         }

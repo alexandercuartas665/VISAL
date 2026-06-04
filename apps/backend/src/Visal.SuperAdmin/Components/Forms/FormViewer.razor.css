@@ -167,6 +167,23 @@
     display: block;
 }
 
+/* Badge "auto" para campos cuyo valor viene de una fuente derivada (orden de
+   medicamentos de la HC, etc). Indica al usuario que no debe editarlos a mano. */
+.fv-auto-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: #e0f2fe;
+    color: #0369a1;
+    border: 1px solid #bae6fd;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    vertical-align: middle;
+}
+
 .fv-col input,
 .fv-col select,
 .fv-col textarea {
@@ -186,8 +203,10 @@
 }
 
 .fv-calc {
-    background: #f1f5f9 !important;
-    color: #475569;
+    background: #eff6ff !important;
+    color: #0f172a;
+    font-weight: 700;
+    border-color: #1565c0 !important;
 }
 
 /* ----- Bloques de texto ----- */

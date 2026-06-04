@@ -232,10 +232,11 @@ public sealed class FormDefinitionService : IFormDefinitionService
     /// </summary>
     private static string? InferirCampoPaciente(string name, string? label)
     {
-        // Normalizamos: minusculas, sin tildes, sin separadores.
-        static string Norm(string? s) => Normalizar(s);
-        var n = Norm(name);
-        var l = Norm(label);
+        // Normalizamos: minusculas, sin tildes, sin separadores. Esto resuelve casos
+        // tipo "direcci_n" (la "o" con tilde fue sustituida por "_" al sanitizar el
+        // Name) y "tel_fono" (la "e" con tilde quedo en "_").
+        var n = Normalizar(name);
+        var l = Normalizar(label);
 
         // Match exacto del catalogo: si el Name es identico al campo paciente, mapeamos directo.
         var directos = new[]
@@ -253,65 +254,149 @@ public sealed class FormDefinitionService : IFormDefinitionService
             if (n == d) { return CanonPaciente(d); }
         }
 
-        // Heuristica por contiene (con prioridad alta a baja).
-        // (Sustring, campoPaciente)
+        // Casos de Name corto / abreviado donde el match exacto es la unica forma
+        // de evitar falsos positivos. "cc", "ti", "ce", "rc" como Name de un campo
+        // suelen ser tipos de documento o el numero de documento.
+        if (n == "cc" || n == "ti" || n == "ce" || n == "rc" || n == "pa" || n == "pep" || n == "ms")
+        {
+            return "numeroDocumento";
+        }
+        if (n == "tipodoc" || n == "tipid" || n == "tipoid" || n == "tipdocide" || n == "tipoide")
+        {
+            return "tipoDocumento";
+        }
+
+        // Heuristica por contains (de mas especifico a mas generico). El primer match gana.
+        // Cubrimos snake_case con separadores ya removidos por Normalizar(), camelCase,
+        // formatos legacy (NomPaciente, FecNac, NoDocIde, etc.) y variantes con/sin tilde.
         var reglas = new (string fragmento, string campo)[]
         {
-            ("fechanacimiento",     "fechaNacimiento"),
-            ("fechanac",            "fechaNacimiento"),
-            ("fecnac",              "fechaNacimiento"),
-            ("fechadenacimiento",   "fechaNacimiento"),
-            ("estadocivil",         "estadoCivil"),
-            ("contactoemergencia",  "contactoEmergencia"),
-            ("acompanante",         "contactoEmergencia"),
-            ("telefonoemergencia",  "telefonoEmergencia"),
-            ("celemergencia",       "telefonoEmergencia"),
-            ("parentesco",          "parentesco"),
-            ("primernombre",        "primerNombre"),
-            ("segundonombre",       "segundoNombre"),
-            ("primerapellido",      "primerApellido"),
-            ("segundoapellido",     "segundoApellido"),
-            ("nombrecompleto",      "nombreCompleto"),
-            ("nombrespaciente",     "nombreCompleto"),
-            ("nombresapellidos",    "nombreCompleto"),
-            ("nombrespapaciente",   "nombreCompleto"),
-            ("nompaciente",         "nombreCompleto"),
-            ("nombre",              "nombreCompleto"),
-            ("apellido",            "nombreCompleto"),
-            ("tipodocumento",       "tipoDocumento"),
-            ("tipodoc",             "tipoDocumento"),
-            ("tipoid",              "tipoDocumento"),
-            ("tipoidentificacion",  "tipoDocumento"),
-            ("numerodocumento",     "numeroDocumento"),
-            ("numdoc",              "numeroDocumento"),
-            ("nodoc",               "numeroDocumento"),
-            ("nrodoc",              "numeroDocumento"),
-            ("nodocumento",         "numeroDocumento"),
-            ("documento",           "numeroDocumento"),
-            ("identificacion",      "numeroDocumento"),
-            ("cedula",              "numeroDocumento"),
-            ("cc",                  "numeroDocumento"),
-            ("regimen",             "regimen"),
-            ("ocupacion",           "ocupacion"),
-            ("profesion",           "ocupacion"),
-            ("direccion",           "direccion"),
-            ("residencia",          "direccion"),
-            ("ciudad",              "ciudad"),
-            ("municipio",           "ciudad"),
-            ("zona",                "zona"),
-            ("urbanorural",         "zona"),
-            ("sede",                "sede"),
-            ("sucursal",            "sede"),
-            ("telefonofijo",        "telefono"),
-            ("telefono",            "telefono"),
-            ("celular",             "telefono"),
-            ("movil",               "telefono"),
-            ("contacto",            "telefono"),
-            ("email",               "email"),
-            ("correo",              "email"),
-            ("mail",                "email"),
-            ("sexo",                "sexo"),
-            ("genero",              "sexo")
+            // Fecha de nacimiento (alta prioridad — "fecha" sola podria capturar otras fechas).
+            ("fechadenacimiento",      "fechaNacimiento"),
+            ("fechanacimiento",        "fechaNacimiento"),
+            ("fecnacimiento",          "fechaNacimiento"),
+            ("fechanac",               "fechaNacimiento"),
+            ("fecnac",                 "fechaNacimiento"),
+            ("fnacimiento",            "fechaNacimiento"),
+            ("fechadenac",             "fechaNacimiento"),
+            ("nacimiento",             "fechaNacimiento"),
+            // Estado civil.
+            ("estadocivil",            "estadoCivil"),
+            ("estciv",                 "estadoCivil"),
+            ("edocivil",               "estadoCivil"),
+            // Contacto/telefono de emergencia (antes de telefono generico).
+            ("telefonoemergencia",     "telefonoEmergencia"),
+            ("telefonodeemergencia",   "telefonoEmergencia"),
+            ("telacudiente",           "telefonoEmergencia"),
+            ("telefonoacudiente",      "telefonoEmergencia"),
+            ("celularacudiente",       "telefonoEmergencia"),
+            ("celemergencia",          "telefonoEmergencia"),
+            ("contactoemergencia",     "contactoEmergencia"),
+            ("acompanante",            "contactoEmergencia"),
+            ("acudiente",              "contactoEmergencia"),
+            ("responsable",            "contactoEmergencia"),
+            ("encasodeemergencia",     "contactoEmergencia"),
+            ("encasoemergencia",       "contactoEmergencia"),
+            ("parentesco",             "parentesco"),
+            // Nombres y apellidos (antes que "nombre" generico, que es lo mas amplio).
+            ("primernombre",           "primerNombre"),
+            ("segundonombre",          "segundoNombre"),
+            ("primerapellido",         "primerApellido"),
+            ("segundoapellido",        "segundoApellido"),
+            ("nombrecompleto",         "nombreCompleto"),
+            ("nombresyapellidos",      "nombreCompleto"),
+            ("nombresapellidos",       "nombreCompleto"),
+            ("nombreyapellido",        "nombreCompleto"),
+            ("nombresapell",           "nombreCompleto"),
+            ("nomyapell",              "nombreCompleto"),
+            ("nomyape",                "nombreCompleto"),
+            ("nomape",                 "nombreCompleto"),
+            ("nompaciente",            "nombreCompleto"),
+            ("nombrepaciente",         "nombreCompleto"),
+            ("nompac",                 "nombreCompleto"),
+            ("nombres",                "nombreCompleto"),
+            ("nombre",                 "nombreCompleto"),
+            ("apellidos",              "nombreCompleto"),
+            ("apellido",               "nombreCompleto"),
+            ("paciente",               "nombreCompleto"),
+            // Tipo de documento / numero de documento.
+            ("tipodocumento",          "tipoDocumento"),
+            ("tipodeidentificacion",   "tipoDocumento"),
+            ("tipodocide",             "tipoDocumento"),
+            ("tipdocide",              "tipoDocumento"),
+            ("tipid",                  "tipoDocumento"),
+            ("tipoid",                 "tipoDocumento"),
+            ("tipdoc",                 "tipoDocumento"),
+            ("tipodoc",                "tipoDocumento"),
+            ("tipoidentificacion",     "tipoDocumento"),
+            ("numerodeidentificacion", "numeroDocumento"),
+            ("numerodocumento",        "numeroDocumento"),
+            ("nrodocumento",           "numeroDocumento"),
+            ("nrdocumento",            "numeroDocumento"),
+            ("nrodoc",                 "numeroDocumento"),
+            ("nrdoc",                  "numeroDocumento"),
+            ("numdoc",                 "numeroDocumento"),
+            ("nodoc",                  "numeroDocumento"),
+            ("nodocide",               "numeroDocumento"),
+            ("documentodeidentidad",   "numeroDocumento"),
+            ("documentoidentidad",     "numeroDocumento"),
+            ("documento",              "numeroDocumento"),
+            ("identificacion",         "numeroDocumento"),
+            ("identidad",              "numeroDocumento"),
+            ("cedula",                 "numeroDocumento"),
+            // Direccion / ciudad / zona.
+            ("residencia",             "direccion"),
+            ("lugarderesidencia",      "direccion"),
+            ("direccion",              "direccion"),
+            ("direccin",               "direccion"), // "direcci_n" -> "direccin" tras quitar separadores
+            ("dir",                    "direccion"), // ultimo recurso; "dir" es ambiguo, mantener al final del grupo
+            ("ciudad",                 "ciudad"),
+            ("ciudadyfecha",           "ciudad"),
+            ("municipio",              "ciudad"),
+            ("urbanorural",            "zona"),
+            ("zonaresidencia",         "zona"),
+            ("zona",                   "zona"),
+            // Sede.
+            ("sedepaciente",           "sede"),
+            ("sucursalpaciente",       "sede"),
+            ("sede",                   "sede"),
+            ("sucursal",               "sede"),
+            // Ocupacion / profesion / regimen.
+            ("ocupacion",              "ocupacion"),
+            ("ocupacin",               "ocupacion"), // tras quitar tilde-separador
+            // "profesion" SIN "al" final: matchea "profesion", "profesindelpac" pero
+            // NO el campo "profesional" (rol del medico), que es legitimo aparte.
+            ("profesiondel",           "ocupacion"),
+            ("regimensubsidiado",      "regimen"),
+            ("regimencontributivo",    "regimen"),
+            ("regimen",                "regimen"),
+            // Telefono / celular / email. Cuidado: "contacto" solo aplica al campo de
+            // telefono cuando esta acompanado de telefono/numero/cel; demasiado generico
+            // de lo contrario, asi que no lo metemos como fragmento suelto.
+            ("telefonofijo",           "telefono"),
+            ("telcontacto",            "telefono"),
+            ("numtelefono",            "telefono"),
+            ("notelefono",             "telefono"),
+            ("telefono",               "telefono"),
+            ("telefonn",               "telefono"), // tel_fonn etc.
+            ("telefono",               "telefono"),
+            ("telfono",                "telefono"), // "tel_fono" sin "_"
+            ("celular",                "telefono"),
+            ("celpaciente",            "telefono"),
+            ("nocelular",              "telefono"),
+            // "movil" SIN sufijos: evitamos falsos positivos con "movilidad" o
+            // "movilizacion" exigiendo una variante mas restringida.
+            ("telefonomovil",          "telefono"),
+            ("numeromovil",            "telefono"),
+            ("correoelectronico",      "email"),
+            ("emailpaciente",          "email"),
+            ("email",                  "email"),
+            ("correo",                 "email"),
+            ("mail",                   "email"),
+            // Sexo / genero.
+            ("sexo",                   "sexo"),
+            ("genero",                 "sexo"),
+            ("generop",                "sexo")
         };
 
         foreach (var (frag, campo) in reglas)

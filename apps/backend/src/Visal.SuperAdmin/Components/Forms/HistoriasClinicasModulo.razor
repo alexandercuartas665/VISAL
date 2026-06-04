@@ -161,7 +161,7 @@
             </div>
         </div>
 
-        <div class="ase-card hc-col-full hc-with-menu @(_menuColapsado ? "menu-colapsado" : "")">
+        <div class="ase-card hc-col-full hc-with-menu @(_menuColapsado ? "menu-colapsado" : "") @(_chatColapsado ? "chat-colapsado" : "")">
             @* ===== Menu lateral del modulo (izquierda) ===== *@
             <aside class="hc-side-menu">
                 <button class="hc-side-toggle" title="@(_menuColapsado ? "Expandir menu" : "Colapsar menu")"
@@ -183,7 +183,7 @@
                 </nav>
             </aside>
 
-            @* ===== Cuerpo del tab seleccionado (derecha) ===== *@
+            @* ===== Cuerpo del tab seleccionado (centro) ===== *@
             <div class="hc-tab-body">
                 @if (_historiaSel is null)
                 {
@@ -275,6 +275,14 @@
                                               OnCountChanged="@(c => _certCount = c)" />
                     }
                 }
+            </div>
+
+            @* ===== Columna lateral: chat WhatsApp del paciente ===== *@
+            <div class="hc-chat-col">
+                <WhatsAppChatPanel Telefono="@PacienteActivo?.Telefono"
+                                   NombreContacto="@PacienteActivo?.NombreCompleto"
+                                   Colapsable="true"
+                                   @bind-Colapsado="_chatColapsado" />
             </div>
         </div>
     </div>
@@ -474,8 +482,13 @@
     /* Menu lateral del modulo (reemplaza los tabs horizontales).
        Usamos !important porque hay reglas heredadas en app.css que aplican
        display:flex a .ase-card y vencen a la specificity de 2 clases. */
-    .hc-col-full.hc-with-menu { display: grid !important; grid-template-columns: 230px 1fr !important; grid-template-rows: 1fr; gap: 0; min-height: 0; }
-    .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr !important; }
+    /* Grid de 3 columnas: menu lateral (izquierda) | cuerpo del tab (centro) | chat WhatsApp (derecha).
+       El chat por default ocupa 320px; cuando se colapsa baja a 50px (franja vertical). */
+    .hc-col-full.hc-with-menu { display: grid !important; grid-template-columns: 230px 1fr 320px !important; grid-template-rows: 1fr; gap: 0; min-height: 0; }
+    .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 56px 1fr 320px !important; }
+    .hc-col-full.hc-with-menu.chat-colapsado { grid-template-columns: 230px 1fr 50px !important; }
+    .hc-col-full.hc-with-menu.menu-colapsado.chat-colapsado { grid-template-columns: 56px 1fr 50px !important; }
+    .hc-chat-col { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
     .hc-side-menu { background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow: hidden; }
     .hc-side-toggle { background: none; border: none; border-bottom: 1px solid #e2e8f0; padding: 10px 12px; font-size: 14px; color: #1565c0; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; text-align: left; }
     .hc-side-toggle:hover { background: #eef6ff; }
@@ -562,6 +575,8 @@
     };
     /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
     private bool _menuColapsado;
+    /// <summary>Estado de colapso de la columna del chat WhatsApp (lateral derecha).</summary>
+    private bool _chatColapsado;
 
     /// <summary>Devuelve (icono unicode, conteo de badge) para una etiqueta del menu.</summary>
     private (string icono, int badge) IconoYBadge(string tab) => tab switch

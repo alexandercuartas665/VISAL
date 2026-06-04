@@ -1,0 +1,291 @@
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject IChatService Chat
+@inject IWhatsAppLineService LineasSvc
+@inject IJSRuntime JS
+
+@*
+   Panel WhatsApp embebible. Se usa hoy en el modal de Historias Clinicas, manana
+   en Notas Medicas y Paciente. La idea es portable: recibe un telefono + nombre
+   y maneja todo el thread internamente.
+
+   Reglas de diseño:
+   - Si no hay telefono: mensaje + boton "Asignar" (event callback que el padre maneja).
+   - Si hay telefono: carga/crea la conversacion y lista los mensajes.
+   - Selector de linea WhatsApp si hay varias conectadas.
+   - Boton « para colapsar a una franja estrecha vertical.
+   - Tema visual estilo WhatsApp (burbujas in/out, fondo claro).
+*@
+
+<div class="wac @(_colapsado ? "wac-colapsado" : "")">
+    @if (_colapsado)
+    {
+        <button class="wac-expand" @onclick="ToggleColapsado" title="Abrir chat WhatsApp">
+            <span class="wac-expand-ico">&#128172;</span>
+            <span class="wac-expand-text">WhatsApp</span>
+            @if (_mensajes.Count > 0)
+            {
+                <span class="wac-expand-badge">@_mensajes.Count</span>
+            }
+        </button>
+    }
+    else
+    {
+        <div class="wac-head">
+            <div class="wac-head-l">
+                <span class="wac-head-ico">&#128172;</span>
+                <div>
+                    <div class="wac-head-t">WhatsApp</div>
+                    <div class="wac-head-s">@(string.IsNullOrWhiteSpace(NombreContacto) ? "Sin contacto" : NombreContacto) · @(string.IsNullOrWhiteSpace(_telefonoDigits) ? "(sin numero)" : "+" + _telefonoDigits)</div>
+                </div>
+            </div>
+            @if (Colapsable)
+            {
+                <button class="wac-head-toggle" @onclick="ToggleColapsado" title="Colapsar">&laquo;</button>
+            }
+        </div>
+
+        @if (string.IsNullOrWhiteSpace(_telefonoDigits))
+        {
+            <div class="wac-empty">
+                <div class="wac-empty-ico">&#128241;</div>
+                <div class="wac-empty-t">Paciente sin telefono</div>
+                <div class="wac-empty-d">Asigna un numero al paciente para empezar a conversar por WhatsApp.</div>
+                @if (OnAsignarTelefono.HasDelegate)
+                {
+                    <button class="wac-empty-btn" @onclick="() => OnAsignarTelefono.InvokeAsync()">Asignar telefono</button>
+                }
+            </div>
+        }
+        else if (_lineasConectadas.Count == 0)
+        {
+            <div class="wac-empty">
+                <div class="wac-empty-ico">&#128226;</div>
+                <div class="wac-empty-t">Sin lineas WhatsApp conectadas</div>
+                <div class="wac-empty-d">Configura y conecta una linea en el modulo "Lineas WhatsApp" antes de enviar mensajes.</div>
+            </div>
+        }
+        else
+        {
+            @if (_lineasConectadas.Count > 1)
+            {
+                <div class="wac-line-sel">
+                    <label>Linea</label>
+                    <select class="form-select form-select-sm" @bind="_lineaSelIdStr">
+                        @foreach (var l in _lineasConectadas)
+                        {
+                            <option value="@l.Id">+@(l.PhoneNumber ?? l.InstanceName)</option>
+                        }
+                    </select>
+                </div>
+            }
+
+            <div class="wac-thread" @ref="_threadRef">
+                @if (_cargando)
+                {
+                    <div class="wac-loading">Cargando mensajes...</div>
+                }
+                else if (_mensajes.Count == 0)
+                {
+                    <div class="wac-thread-empty">Sin mensajes. Escribe el primero abajo.</div>
+                }
+                else
+                {
+                    @foreach (var m in _mensajes)
+                    {
+                        var entrada = m.Direction == MessageDirection.Inbound;
+                        <div class="wac-msg @(entrada ? "wac-in" : "wac-out")">
+                            <div class="wac-msg-body">@m.Body</div>
+                            <div class="wac-msg-meta">
+                                @if (!entrada && !string.IsNullOrWhiteSpace(m.SentByName)) { <span>@m.SentByName · </span> }
+                                <span>@m.SentAt.ToLocalTime().ToString("dd/MM HH:mm")</span>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="wac-input">
+                <textarea class="form-control form-control-sm wac-input-text"
+                          rows="2"
+                          placeholder="Escribe un mensaje..."
+                          @bind="_borrador"
+                          @bind:event="oninput"
+                          disabled="@_enviando"></textarea>
+                <button class="wac-send" @onclick="EnviarAsync"
+                        disabled="@(_enviando || string.IsNullOrWhiteSpace(_borrador))"
+                        title="Enviar (Ctrl+Enter)">
+                    @(_enviando ? "..." : "Enviar")
+                </button>
+            </div>
+
+            @if (_error is not null) { <div class="wac-error">@_error</div> }
+        }
+    }
+</div>
+
+<style>
+    /* Tema WhatsApp simple. Verde header, fondo claro, burbujas redondeadas. */
+    .wac { display: flex; flex-direction: column; background: #efeae2; border-left: 1px solid #d4d4d4; border-right: 1px solid #d4d4d4; height: 100%; min-height: 360px; overflow: hidden; }
+    .wac-colapsado { background: transparent; border: none; align-items: center; padding-top: 12px; }
+
+    .wac-expand { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 8px; cursor: pointer; min-width: 44px; }
+    .wac-expand:hover { background: #eef6ff; border-color: #25d366; }
+    .wac-expand-ico { font-size: 18px; }
+    .wac-expand-text { font-size: 9px; font-weight: 700; color: #475569; writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .04em; text-transform: uppercase; }
+    .wac-expand-badge { background: #25d366; color: white; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 999px; }
+
+    .wac-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #128c7e; color: white; }
+    .wac-head-l { display: flex; align-items: center; gap: 8px; }
+    .wac-head-ico { font-size: 18px; }
+    .wac-head-t { font-weight: 700; font-size: 12px; }
+    .wac-head-s { font-size: 10px; opacity: .9; }
+    .wac-head-toggle { background: rgba(255,255,255,.15); border: none; color: white; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .wac-head-toggle:hover { background: rgba(255,255,255,.25); }
+
+    .wac-line-sel { padding: 6px 10px; background: #f0f0f0; border-bottom: 1px solid #d4d4d4; display: flex; align-items: center; gap: 8px; }
+    .wac-line-sel label { font-size: 10px; color: #64748b; font-weight: 600; margin: 0; }
+
+    .wac-thread { flex: 1; overflow-y: auto; padding: 10px 8px; background: #efeae2; display: flex; flex-direction: column; gap: 4px; }
+    .wac-loading, .wac-thread-empty { text-align: center; color: #64748b; font-size: 11px; font-style: italic; margin: auto; }
+
+    .wac-msg { max-width: 80%; padding: 6px 9px; border-radius: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); font-size: 12px; word-wrap: break-word; }
+    .wac-msg-body { white-space: pre-wrap; color: #0f172a; }
+    .wac-msg-meta { font-size: 9px; color: #64748b; margin-top: 2px; text-align: right; }
+    .wac-in { background: #ffffff; align-self: flex-start; border-top-left-radius: 0; }
+    .wac-out { background: #dcf8c6; align-self: flex-end; border-top-right-radius: 0; }
+
+    .wac-input { display: flex; gap: 6px; padding: 8px; background: #f0f0f0; border-top: 1px solid #d4d4d4; }
+    .wac-input-text { resize: none; font-size: 12px; }
+    .wac-send { background: #25d366; border: none; color: white; padding: 0 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 700; }
+    .wac-send:hover:not(:disabled) { background: #128c7e; }
+    .wac-send:disabled { opacity: .55; cursor: not-allowed; }
+
+    .wac-error { padding: 6px 10px; background: #fee2e2; color: #991b1b; font-size: 11px; border-top: 1px solid #fecaca; }
+
+    .wac-empty { padding: 30px 16px; text-align: center; background: #fff; flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px; }
+    .wac-empty-ico { font-size: 32px; opacity: .6; }
+    .wac-empty-t { font-weight: 700; color: #0f172a; font-size: 13px; }
+    .wac-empty-d { color: #64748b; font-size: 11px; max-width: 220px; }
+    .wac-empty-btn { background: #25d366; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; margin-top: 6px; }
+    .wac-empty-btn:hover { background: #128c7e; }
+</style>
+
+@code {
+    /// <summary>Telefono del paciente. Si es nulo/vacio se muestra el panel sin
+    /// telefono con el boton "Asignar" (si OnAsignarTelefono esta enganchado).</summary>
+    [Parameter] public string? Telefono { get; set; }
+
+    /// <summary>Nombre del contacto, solo se usa para el header y como ContactName
+    /// inicial al crear la conversacion.</summary>
+    [Parameter] public string? NombreContacto { get; set; }
+
+    /// <summary>Si true, muestra el boton « para colapsar el panel a una franja vertical.</summary>
+    [Parameter] public bool Colapsable { get; set; } = true;
+
+    /// <summary>Estado inicial del colapso (controlado por el padre si quiere persistirlo).</summary>
+    [Parameter] public bool Colapsado { get; set; }
+    [Parameter] public EventCallback<bool> ColapsadoChanged { get; set; }
+
+    /// <summary>Callback opcional que el padre engancha cuando el panel sugiere
+    /// asignar telefono. Pensado para abrir el modal de edicion de paciente.</summary>
+    [Parameter] public EventCallback OnAsignarTelefono { get; set; }
+
+    private bool _colapsado;
+    private string _telefonoDigits = "";
+    private string _ultimoTelefono = "";
+    private ConversationDto? _conv;
+    private List<MessageDto> _mensajes = new();
+    private List<WhatsAppLineDto> _lineasConectadas = new();
+    private string _lineaSelIdStr = "";
+    private string _borrador = "";
+    private bool _cargando;
+    private bool _enviando;
+    private string? _error;
+    private ElementReference _threadRef;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _colapsado = Colapsado;
+        var nuevo = SoloDigitos(Telefono);
+        if (nuevo != _ultimoTelefono)
+        {
+            _ultimoTelefono = nuevo;
+            _telefonoDigits = nuevo;
+            _error = null;
+            await CargarTodoAsync();
+        }
+    }
+
+    private async Task CargarTodoAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_telefonoDigits))
+        {
+            _conv = null; _mensajes = new(); _lineasConectadas = new(); return;
+        }
+        _cargando = true;
+        try
+        {
+            var lineas = await LineasSvc.ListAsync();
+            _lineasConectadas = lineas.Where(l => l.Status == WhatsAppLineStatus.Connected).ToList();
+            if (_lineasConectadas.Count > 0 && string.IsNullOrEmpty(_lineaSelIdStr))
+            {
+                _lineaSelIdStr = _lineasConectadas[0].Id.ToString();
+            }
+
+            _conv = await Chat.GetOrCreateByPhoneAsync(_telefonoDigits, NombreContacto);
+            if (_conv is not null)
+            {
+                var lst = await Chat.ListMessagesAsync(_conv.Id);
+                _mensajes = lst.ToList();
+            }
+            else
+            {
+                _mensajes = new();
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _cargando = false; }
+    }
+
+    private async Task EnviarAsync()
+    {
+        if (_conv is null) { _error = "No hay conversacion."; return; }
+        if (string.IsNullOrWhiteSpace(_borrador)) { return; }
+        if (!Guid.TryParse(_lineaSelIdStr, out var lineId))
+        {
+            _error = "Selecciona una linea WhatsApp."; return;
+        }
+        _enviando = true; _error = null;
+        try
+        {
+            var result = await Chat.SendViaLineAsync(_conv.Id, lineId, _borrador.Trim(), Guid.Empty);
+            if (!result.Ok)
+            {
+                _error = result.Error ?? "No se pudo enviar.";
+                return;
+            }
+            _borrador = "";
+            // Recargar para ver el mensaje recien persistido.
+            var lst = await Chat.ListMessagesAsync(_conv.Id);
+            _mensajes = lst.ToList();
+            // Scroll al final.
+            try { await JS.InvokeVoidAsync("eval", "setTimeout(() => { var el = document.querySelector('.wac-thread'); if (el) el.scrollTop = el.scrollHeight; }, 50);"); }
+            catch { /* no critico */ }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _enviando = false; }
+    }
+
+    private async Task ToggleColapsado()
+    {
+        _colapsado = !_colapsado;
+        if (ColapsadoChanged.HasDelegate) { await ColapsadoChanged.InvokeAsync(_colapsado); }
+    }
+
+    private static string SoloDigitos(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) { return ""; }
+        return new string(s.Where(char.IsDigit).ToArray());
+    }
+}

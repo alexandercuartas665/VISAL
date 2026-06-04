@@ -12,6 +12,14 @@ public interface IChatService
     /// <summary>Devuelve (o crea) la conversacion del lead segun su telefono. Null si el lead no tiene telefono.</summary>
     Task<ConversationDto?> GetOrCreateForLeadAsync(Guid leadId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Devuelve (o crea) una conversacion por telefono directo. Pensado para el panel
+    /// WhatsApp embebible en HC / Notas / Paciente, donde el origen es el telefono
+    /// del paciente, no un lead del pipeline. Si la conversacion ya existe se
+    /// actualiza ContactName cuando viene no vacio. Null si el telefono es vacio.
+    /// </summary>
+    Task<ConversationDto?> GetOrCreateByPhoneAsync(string telefono, string? contactName, CancellationToken cancellationToken = default);
+
     /// <summary>Conversaciones con mensajes entrantes sin responder, indexadas por telefono (solo digitos). Para colorear el pipeline.</summary>
     Task<IReadOnlyDictionary<string, LeadChatStateDto>> GetUnansweredByPhoneAsync(CancellationToken cancellationToken = default);
 

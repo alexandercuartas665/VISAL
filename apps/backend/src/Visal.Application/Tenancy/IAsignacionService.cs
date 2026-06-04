@@ -67,13 +67,15 @@ public sealed record EspecialistaDto(Guid Id, string NumeroDocumento, string Nom
 /// <summary>Turno coordinado: que profesional atendera cuantos turnos.</summary>
 public sealed record TurnoCoordinadoRequest(
     Guid ProfesionalId, int Cantidad, decimal? HorasPorTurno,
-    DateOnly? FechaInicio, short? MesAsignar);
+    DateOnly? FechaInicio, short? MesAsignar,
+    decimal? Tarifa = null);
 
 /// <summary>Turno ya guardado para una asignacion.</summary>
 public sealed record TurnoCoordinadoDto(
     Guid Id, Guid ProfesionalId, string ProfesionalNombre,
     int Cantidad, decimal? HorasPorTurno,
-    DateOnly? FechaInicio, short? MesAsignar);
+    DateOnly? FechaInicio, short? MesAsignar,
+    decimal? Tarifa = null);
 
 /// <summary>Payload del boton "Asignar el servicio": graba todos los turnos de un servicio en una transaccion.</summary>
 public sealed record AsignarServicioRequest(

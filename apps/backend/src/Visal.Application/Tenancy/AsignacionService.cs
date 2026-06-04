@@ -421,7 +421,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return turnos.Select(t => new TurnoCoordinadoDto(
             t.Id, t.ProfesionalId,
             profDict.TryGetValue(t.ProfesionalId, out var n) ? n : "(desconocido)",
-            t.Cantidad, t.HorasPorTurno, t.FechaInicio, t.MesAsignar)).ToList();
+            t.Cantidad, t.HorasPorTurno, t.FechaInicio, t.MesAsignar, t.Tarifa)).ToList();
     }
 
     public async Task<int> AsignarServicioAsync(AsignarServicioRequest req, Guid actor, CancellationToken ct = default)
@@ -464,7 +464,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 Cantidad = t.Cantidad,
                 HorasPorTurno = t.HorasPorTurno,
                 FechaInicio = t.FechaInicio,
-                MesAsignar = t.MesAsignar
+                MesAsignar = t.MesAsignar,
+                Tarifa = t.Tarifa
             });
         }
 

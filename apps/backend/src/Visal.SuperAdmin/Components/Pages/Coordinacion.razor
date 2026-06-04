@@ -511,7 +511,8 @@ else
             Cantidad = _turnosAAgregarN,
             HorasPorTurno = _horasPorTurno,
             FechaInicio = _fechaInicio,
-            MesAsignar = _mesAsignar > 0 ? (short)_mesAsignar : (short?)null
+            MesAsignar = _mesAsignar > 0 ? (short)_mesAsignar : (short?)null,
+            Tarifa = _tarifa
         });
         // Reset para el siguiente turno; sugerir lo que aun falta.
         _especialistaSel = "";
@@ -530,7 +531,7 @@ else
             var req = new AsignarServicioRequest(
                 _solicitudSel.Id,
                 _carritoTurnos.Select(c => new TurnoCoordinadoRequest(
-                    c.ProfesionalId, c.Cantidad, c.HorasPorTurno, c.FechaInicio, c.MesAsignar)).ToList());
+                    c.ProfesionalId, c.Cantidad, c.HorasPorTurno, c.FechaInicio, c.MesAsignar, c.Tarifa)).ToList());
             var n = await Svc.AsignarServicioAsync(req, Guid.Empty);
             _ok = $"Servicio coordinado: {n} turno(s) guardados.";
             // Refrescar grilla y limpiar panel.
@@ -562,6 +563,7 @@ else
         public decimal? HorasPorTurno { get; set; }
         public DateOnly? FechaInicio { get; set; }
         public short? MesAsignar { get; set; }
+        public decimal? Tarifa { get; set; }
     }
 
     private static string MesNombre(int m) => m switch

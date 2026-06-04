@@ -32,4 +32,9 @@ public class AsignacionTurno : TenantEntity
 
     /// <summary>Mes en que se asigna (1..12). Equivale a la columna mes_asignar del legacy.</summary>
     public short? MesAsignar { get; set; }
+
+    /// <summary>Tarifa pactada para este turno. Se pre-llena con la del ServicioContrato
+    /// al momento de coordinarlo, pero el coordinador puede ajustarla manualmente
+    /// (por descuento, tarifa especial, etc.). Persiste el valor final.</summary>
+    public decimal? Tarifa { get; set; }
 }

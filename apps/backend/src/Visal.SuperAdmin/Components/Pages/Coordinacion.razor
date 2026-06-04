@@ -193,7 +193,7 @@
                                     @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
                                 </select>
                             </div>
-                            <div class="ase-f"><label>Tarifa</label><input class="form-control form-control-sm asg-ro" readonly /></div>
+                            <div class="ase-f"><label>Tarifa</label><input type="number" min="0" step="0.01" class="form-control form-control-sm" @bind="_tarifa" placeholder="Pactada en el contrato" title="Tarifa pactada en el contrato. Puedes ajustarla manualmente." /></div>
 
                             <div class="ase-f"><label>Cantidad servicio</label><input type="number" class="form-control form-control-sm asg-ro" readonly value="@s.Cantidad" /></div>
                             <div class="ase-f"><label>Turnos x Asignar</label>
@@ -372,6 +372,10 @@ else
     private DateOnly? _fechaInicio;
     private int _mesAsignar;
     private decimal? _horasPorTurno;
+    /// <summary>Tarifa editable por el coordinador. Se pre-llena al seleccionar la
+    /// solicitud con la tarifa del ServicioContrato (contratoCodigo + codigoServicio)
+    /// pero el coordinador puede ajustarla manualmente.</summary>
+    private decimal? _tarifa;
     // Lista de profesionales filtrada por el modulo del servicio elegido.
     private List<EspecialistaDto> _especialistas = new();
     private string _especialistaSel = "";
@@ -453,6 +457,7 @@ else
         _fechaInicio = p.FechaInicio;
         _mesAsignar = 0;
         _horasPorTurno = null;
+        _tarifa = null;
         _idProfAsig = "";
         _profesionalPred = "";
         _especialistaSel = "";
@@ -463,6 +468,10 @@ else
         {
             _especialistas = (await Svc.ListarEspecialistasPorModuloAsync(p.TipoServicio)).ToList();
             _turnosGuardados = (await Svc.ListarTurnosAsync(p.Id)).ToList();
+            // Pre-llenar TARIFA con la pactada en el ServicioContrato. El coordinador
+            // puede ajustarla manualmente despues si necesita (negociacion puntual,
+            // tarifa especial, etc.) — el input no es readonly.
+            _tarifa = await Svc.ObtenerTarifaServicioAsync(p.ContratoCodigo, p.CodigoServicio);
             // Si ya hay turnos faltantes, sugerir turnosAAgregar = lo que falta.
             if (_turnosFaltan > 0) { _turnosAAgregarN = _turnosFaltan; }
         }
@@ -539,6 +548,7 @@ else
         _solicitudSel = null;
         _observaciones = ""; _fechaInicio = null; _mesAsignar = 0;
         _horasPorTurno = null;
+        _tarifa = null;
         _idProfAsig = ""; _profesionalPred = "";
         _especialistas = new(); _especialistaSel = ""; _turnosAAgregarN = 1;
         _carritoTurnos = new(); _turnosGuardados = new();

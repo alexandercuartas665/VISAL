@@ -390,6 +390,21 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             p.TipoProfesionalId is Guid tid && tiposDict.TryGetValue(tid, out var tn) ? tn : null)).ToList();
     }
 
+    public async Task<decimal?> ObtenerTarifaServicioAsync(string contratoCodigo, string codigoServicio, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(contratoCodigo) || string.IsNullOrWhiteSpace(codigoServicio)) { return null; }
+        var c = contratoCodigo.Trim();
+        var s = codigoServicio.Trim();
+        // Join ServicioContrato -> ContratoAseguradora por CodigoContrato. La asignacion
+        // guarda el ContratoCodigo (texto) y el CodigoServicio (texto), no los GUID, por
+        // eso resolvemos por codigos.
+        return await db.ServiciosContrato.AsNoTracking()
+            .Join(db.ContratosAseguradora.AsNoTracking(), sv => sv.ContratoId, ct2 => ct2.Id, (sv, ct2) => new { sv, ct2 })
+            .Where(x => x.ct2.CodigoContrato == c && x.sv.CodigoServicio == s)
+            .Select(x => x.sv.Tarifa)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<IReadOnlyList<TurnoCoordinadoDto>> ListarTurnosAsync(Guid asignacionId, CancellationToken ct = default)
     {
         var turnos = await db.AsignacionTurnos.AsNoTracking()

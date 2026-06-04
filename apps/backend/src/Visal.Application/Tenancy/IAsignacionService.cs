@@ -87,6 +87,9 @@ public enum AsignacionEstadoFiltro
     Todos = 2
 }
 
+/// <summary>Tarifa del ServicioContrato consultada por (contratoCodigo, codigoServicio).</summary>
+public sealed record TarifaServicioDto(decimal? Tarifa);
+
 /// <summary>Item del carrito que se envia al guardar el lote.</summary>
 public sealed record AsignacionItemRequest(
     string ServicioId, string NombreServicio, string TipoServicio, string? Modulo,
@@ -153,6 +156,13 @@ public interface IAsignacionService
 
     /// <summary>Lista los turnos ya coordinados para una asignacion (especialistas + cantidad).</summary>
     Task<IReadOnlyList<TurnoCoordinadoDto>> ListarTurnosAsync(Guid asignacionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Devuelve la tarifa pactada en el ServicioContrato para un (contratoCodigo,
+    /// codigoServicio) dado. Se usa para pre-llenar el campo TARIFA en el formulario
+    /// de coordinacion. Devuelve null si no se encuentra el servicio o el contrato.
+    /// </summary>
+    Task<decimal?> ObtenerTarifaServicioAsync(string contratoCodigo, string codigoServicio, CancellationToken ct = default);
 
     /// <summary>
     /// Persiste los turnos de coordinacion del servicio. Valida que la suma de Cantidad

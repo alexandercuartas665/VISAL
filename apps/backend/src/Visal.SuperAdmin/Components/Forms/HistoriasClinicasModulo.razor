@@ -215,6 +215,7 @@
                     {
                         <HcEscalas HistoriaClinicaId="@_historiaSel?.Id"
                                    PacienteId="@PacienteActivo?.Id"
+                                   Paciente="@PacienteActivo"
                                    EspecialistaNombre="@_historiaSel?.Especialista"
                                    OnCountChanged="@(c => _escCount = c)" />
                     }
@@ -223,6 +224,7 @@
                         <HcDocumentos Tipo="EVOLUCION"
                                       HistoriaClinicaId="@_historiaSel?.Id"
                                       PacienteId="@PacienteActivo?.Id"
+                                      Paciente="@PacienteActivo"
                                       EspecialistaNombre="@_historiaSel?.Especialista"
                                       OnCountChanged="@(c => _evoCount = c)" />
                     }
@@ -231,6 +233,7 @@
                         <HcDocumentos Tipo="CONSENTIMIENTO"
                                       HistoriaClinicaId="@_historiaSel?.Id"
                                       PacienteId="@PacienteActivo?.Id"
+                                      Paciente="@PacienteActivo"
                                       EspecialistaNombre="@_historiaSel?.Especialista"
                                       OnCountChanged="@(c => _conCount = c)" />
                     }
@@ -812,83 +815,10 @@
 
     private void PrefillFromPaciente()
     {
-        if (PacienteActivo is not PacienteAsignacionDto p || _schemaActual is null) { return; }
-
-        // 1) Valores del paciente disponibles para usarse como origen.
-        // Las claves coinciden con PrefillSourceCatalog.Campos["paciente"].
-        var pacienteValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["numeroDocumento"] = p.NumeroDocumento,
-            ["tipoDocumento"] = p.TipoDocumento,
-            ["nombreCompleto"] = p.NombreCompleto,
-            ["primerNombre"] = p.PrimerNombre,
-            ["segundoNombre"] = p.SegundoNombre,
-            ["primerApellido"] = p.PrimerApellido,
-            ["segundoApellido"] = p.SegundoApellido,
-            ["fechaNacimiento"] = p.FechaNacimiento?.ToString("yyyy-MM-dd"),
-            ["sexo"] = p.Sexo,
-            ["estadoCivil"] = p.EstadoCivil,
-            ["telefono"] = p.Telefono,
-            ["email"] = p.Email,
-            ["direccion"] = p.Direccion,
-            ["ciudad"] = p.Ciudad,
-            ["zona"] = p.Zona,
-            ["ocupacion"] = p.Ocupacion,
-            ["regimen"] = p.Regimen,
-            ["contactoEmergencia"] = p.ContactoEmergencia,
-            ["parentesco"] = p.Parentesco,
-            ["telefonoEmergencia"] = p.TelefonoEmergencia,
-            ["sede"] = p.Sede
-        };
-
-        // 2) Buscar la ruta "paciente" en las rutas configuradas del formulario.
-        var rutaPaciente = _prefillRoutesActual.Routes
-            .FirstOrDefault(r => string.Equals(r.SourceModule, "paciente", StringComparison.OrdinalIgnoreCase));
-
-        if (rutaPaciente is not null && rutaPaciente.Mappings.Count > 0)
-        {
-            // Modo configurado: aplicar mapeos.
-            foreach (var m in rutaPaciente.Mappings)
-            {
-                if (string.IsNullOrWhiteSpace(m.Source) || string.IsNullOrWhiteSpace(m.Target)) { continue; }
-                if (pacienteValues.TryGetValue(m.Source, out var v) && v is not null)
-                {
-                    _valores[m.Target] = v;
-                }
-            }
-            return;
-        }
-
-        // 3) Fallback: matching por convencion de nombre (heuristica usada antes de tener rutas).
-        var heuristic = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["documento"] = p.NumeroDocumento,
-            ["identificacion"] = p.NumeroDocumento,
-            ["nombre"] = p.NombreCompleto,
-            ["nombres_apellidos"] = p.NombreCompleto,
-            ["sede"] = p.Sede,
-            ["ciudad"] = p.Ciudad
-        };
-        void Recurse(IEnumerable<FormNode> nodes)
-        {
-            foreach (var n in nodes)
-            {
-                if (n.IsSection && n.Children is not null) { Recurse(n.Children); continue; }
-                if (n.IsText || n.IsTable) { continue; }
-                var name = (n.Name ?? n.Label ?? "").ToLowerInvariant().Replace(" ", "_");
-                if (string.IsNullOrEmpty(name)) { continue; }
-                foreach (var kv in heuristic)
-                {
-                    if (name.Contains(kv.Key.ToLowerInvariant()))
-                    {
-                        var key = n.Name ?? $"fld:{n.Id}";
-                        _valores[key] = kv.Value;
-                        break;
-                    }
-                }
-            }
-        }
-        Recurse(_schemaActual.Children);
+        if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+        // Logica centralizada en PacientePrefillHelper para que HC, Escalas,
+        // Evoluciones y Consentimientos compartan exactamente el mismo prefill.
+        PacientePrefillHelper.Aplicar(_valores, p, _schemaActual, _prefillRoutesActual);
     }
 
     private async Task Descartar()

@@ -1,6 +1,8 @@
 @using System.Text.Json
 @using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
 @inject IDocumentoHcService DocSvc
+@inject IFormDefinitionService FormsSvc
 @inject IJSRuntime JS
 
 @*
@@ -189,6 +191,9 @@ else
     [Parameter, EditorRequired] public string Tipo { get; set; } = "EVOLUCION";
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public Guid? PacienteId { get; set; }
+    /// <summary>Paciente activo de la HC. Si llega no-nulo, se aplica prefill al
+    /// iniciar el documento (lee las rutas configuradas en el FormDefinition destino).</summary>
+    [Parameter] public PacienteAsignacionDto? Paciente { get; set; }
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
 
@@ -259,7 +264,24 @@ else
         _busy = true; _catalogoError = null;
         try
         {
-            var req = new IniciarDocumentoHcRequest(hid, fid, TipoNorm, "{}", EspecialistaNombre);
+            // Aplicar prefill desde el paciente usando las rutas del FormDefinition
+            // destino (igual que HC y Escalas). Si no hay paciente o el formato no
+            // tiene rutas, se envia "{}" y el documento queda en blanco.
+            var valoresJson = "{}";
+            if (Paciente is not null)
+            {
+                var detalleFormato = await FormsSvc.GetAsync(fid);
+                if (detalleFormato is not null)
+                {
+                    var schema = FormSchema.FromJson(detalleFormato.SchemaJson);
+                    var rutas = PrefillRouteSet.FromJson(detalleFormato.PrefillRoutesJson);
+                    var valores = new Dictionary<string, string?>();
+                    PacientePrefillHelper.Aplicar(valores, Paciente, schema, rutas);
+                    valoresJson = JsonSerializer.Serialize(valores);
+                }
+            }
+
+            var req = new IniciarDocumentoHcRequest(hid, fid, TipoNorm, valoresJson, EspecialistaNombre);
             var detail = await DocSvc.IniciarAsync(req, Guid.Empty);
             _catalogoAbierto = false;
             await CargarAsync();

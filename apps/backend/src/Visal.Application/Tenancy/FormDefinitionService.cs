@@ -319,6 +319,14 @@ public sealed class FormDefinitionService : IFormDefinitionService
             ("apellidos",              "nombreCompleto"),
             ("apellido",               "nombreCompleto"),
             ("paciente",               "nombreCompleto"),
+            // Edad (calculada server-side desde FechaNacimiento por
+            // PacientePrefillHelper). El form puede declarar el campo como
+            // "edad", "edadanios", etc.
+            ("edadanios",              "edad"),
+            ("edadanos",               "edad"),
+            ("edadenanos",             "edad"),
+            ("edaddelpaciente",        "edad"),
+            ("edad",                   "edad"),
             // Tipo de documento / numero de documento.
             ("tipodocumento",          "tipoDocumento"),
             ("tipodeidentificacion",   "tipoDocumento"),

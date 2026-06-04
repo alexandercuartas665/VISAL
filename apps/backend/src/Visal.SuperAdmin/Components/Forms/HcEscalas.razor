@@ -1,5 +1,6 @@
 @using System.Text.Json
 @using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
 @inject IEscalaService EscSvc
 @inject IFormDefinitionService FormsSvc
 @inject IJSRuntime JS
@@ -179,6 +180,9 @@ else
 @code {
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public Guid? PacienteId { get; set; }
+    /// <summary>Paciente activo de la HC. Si llega no-nulo, se aplica prefill al
+    /// iniciar la escala (lee las rutas configuradas en el FormDefinition destino).</summary>
+    [Parameter] public PacienteAsignacionDto? Paciente { get; set; }
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
 
@@ -239,7 +243,24 @@ else
         _busy = true; _catalogoError = null;
         try
         {
-            var req = new IniciarEscalaRequest(hid, fid, "{}", EspecialistaNombre);
+            // Calcular prefill desde el paciente (si esta disponible) usando las
+            // rutas configuradas en el FormDefinition destino. Asi el doctor no
+            // tiene que retipear nombres, documento, edad, etc. al iniciar.
+            var valoresJson = "{}";
+            if (Paciente is not null)
+            {
+                var detalleFormato = await FormsSvc.GetAsync(fid);
+                if (detalleFormato is not null)
+                {
+                    var schema = FormSchema.FromJson(detalleFormato.SchemaJson);
+                    var rutas = PrefillRouteSet.FromJson(detalleFormato.PrefillRoutesJson);
+                    var valores = new Dictionary<string, string?>();
+                    PacientePrefillHelper.Aplicar(valores, Paciente, schema, rutas);
+                    valoresJson = JsonSerializer.Serialize(valores);
+                }
+            }
+
+            var req = new IniciarEscalaRequest(hid, fid, valoresJson, EspecialistaNombre);
             var detail = await EscSvc.IniciarAsync(req, Guid.Empty);
             _catalogoAbierto = false;
             await CargarEscalasAsync();

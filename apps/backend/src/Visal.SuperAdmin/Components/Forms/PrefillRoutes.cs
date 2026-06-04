@@ -74,7 +74,7 @@ public static class PrefillSourceCatalog
         {
             "numeroDocumento", "tipoDocumento", "nombreCompleto",
             "primerNombre", "segundoNombre", "primerApellido", "segundoApellido",
-            "fechaNacimiento", "sexo", "estadoCivil",
+            "fechaNacimiento", "edad", "sexo", "estadoCivil",
             "telefono", "email", "direccion", "ciudad", "zona",
             "ocupacion", "regimen",
             "contactoEmergencia", "parentesco", "telefonoEmergencia",

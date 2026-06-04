@@ -113,19 +113,7 @@ else
 
                 @foreach (var node in _hcSchema.Children)
                 {
-                    <div class="pack-grid" style="grid-column: span 12;">
-                        @if (node.IsSection)
-                        {
-                            @foreach (var ch in node.Children ?? new())
-                            {
-                                @RenderDocNode(ch)
-                            }
-                        }
-                        else
-                        {
-                            @RenderDocNode(node)
-                        }
-                    </div>
+                    @RenderTopNode(node, _valores)
                 }
 
                 @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
@@ -307,19 +295,7 @@ else
                     <div class="pack-band">Resultado</div>
                     @if (schEsc is not null)
                     {
-                        @foreach (var node in schEsc.Children)
-                        {
-                            <div class="pack-grid" style="grid-column: span 12;">
-                                @if (node.IsSection)
-                                {
-                                    @foreach (var ch in node.Children ?? new()) { @RenderDocNodeForEscala(ch, valEsc) }
-                                }
-                                else
-                                {
-                                    @RenderDocNodeForEscala(node, valEsc)
-                                }
-                            </div>
-                        }
+                        @foreach (var node in schEsc.Children) { @RenderTopNode(node, valEsc) }
                     }
                     @RenderFirma(esc.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
                 </div>
@@ -340,19 +316,7 @@ else
                     <div class="pack-band">Evolucion</div>
                     @if (schDoc is not null)
                     {
-                        @foreach (var node in schDoc.Children)
-                        {
-                            <div class="pack-grid" style="grid-column: span 12;">
-                                @if (node.IsSection)
-                                {
-                                    @foreach (var ch in node.Children ?? new()) { @RenderDocNodeForEscala(ch, valDoc) }
-                                }
-                                else
-                                {
-                                    @RenderDocNodeForEscala(node, valDoc)
-                                }
-                            </div>
-                        }
+                        @foreach (var node in schDoc.Children) { @RenderTopNode(node, valDoc) }
                     }
                     @RenderFirma(doc.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
                 </div>
@@ -373,19 +337,7 @@ else
                     <div class="pack-band">Consentimiento informado</div>
                     @if (schDoc is not null)
                     {
-                        @foreach (var node in schDoc.Children)
-                        {
-                            <div class="pack-grid" style="grid-column: span 12;">
-                                @if (node.IsSection)
-                                {
-                                    @foreach (var ch in node.Children ?? new()) { @RenderDocNodeForEscala(ch, valDoc) }
-                                }
-                                else
-                                {
-                                    @RenderDocNodeForEscala(node, valDoc)
-                                }
-                            </div>
-                        }
+                        @foreach (var node in schDoc.Children) { @RenderTopNode(node, valDoc) }
                     }
                     @RenderFirma(doc.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
                 </div>
@@ -595,17 +547,52 @@ else
         </div>
     };
 
-    // Renderizador minimo del HC schema (clone de HistoriaDoc, simplificado).
-    private RenderFragment RenderDocNode(FormNode n) => __builder =>
+    // Render de un nodo del primer nivel del schema.
+    // - Si es bloque de texto: una fila completa con el contenido.
+    // - Si es seccion: subtitulo (si tiene label) + grid de 12 columnas con sus hijos,
+    //   donde cada hijo respeta su WidthColumns (1..12).
+    // - Si es campo/tabla suelto en el top-level: lo metemos en su propio grid para
+    //   que tambien respete su WidthColumns.
+    private RenderFragment RenderTopNode(FormNode n, Dictionary<string, string?> vals) => __builder =>
     {
         if (n.IsText)
         {
-            <div class="pack-para" style="grid-column: span 12;">@(n.Content ?? "")</div>
+            <div class="pack-para">@(n.Content ?? "")</div>
+            return;
+        }
+        if (n.IsSection)
+        {
+            if (!string.IsNullOrWhiteSpace(n.Label))
+            {
+                <div class="pack-sub">@n.Label</div>
+            }
+            <div class="pack-grid">
+                @foreach (var ch in n.Children ?? new()) { @RenderDocNode(ch, vals) }
+            </div>
+            return;
+        }
+        // Campo o tabla en top-level: contenedor grid para que respete WidthColumns.
+        <div class="pack-grid">
+            @RenderDocNode(n, vals)
+        </div>
+    };
+
+    /// <summary>
+    /// Render de un nodo hoja dentro de una grid de 12 columnas. Usa el WidthColumns del
+    /// nodo (1..12, clamped) para que el ancho de cada campo coincida con el disenador.
+    /// Si no tiene WidthColumns valido, se asume 12 (toda la fila).
+    /// </summary>
+    private RenderFragment RenderDocNode(FormNode n, Dictionary<string, string?> vals) => __builder =>
+    {
+        var span = Math.Clamp(n.WidthColumns <= 0 ? 12 : n.WidthColumns, 1, 12);
+        if (n.IsText)
+        {
+            <div class="pack-para" style="grid-column: span @span;">@(n.Content ?? "")</div>
             return;
         }
         if (n.IsTable)
         {
-            <div style="grid-column: span 12; border-bottom:1px solid #000;">
+            <div style="grid-column: span @span; border-bottom:1px solid #000;">
                 <table class="pack-table">
                     <thead>
                         <tr>
@@ -624,43 +611,8 @@ else
             return;
         }
         var key = n.Name ?? $"fld:{n.Id}";
-        var val = _valores.TryGetValue(key, out var vv) ? vv : null;
-        <div class="pack-cell" style="grid-column: span 12;">
-            <div class="pack-label">@n.Label</div>
-            <div class="pack-value">@(val ?? "")</div>
-        </div>
-    };
-
-    // Render por escala: usa el diccionario de valores especifico de cada escala
-    // (no el de la HC). Misma logica que RenderDocNode pero parametrizada.
-    private RenderFragment RenderDocNodeForEscala(FormNode n, Dictionary<string, string?> vals) => __builder =>
-    {
-        if (n.IsText)
-        {
-            <div class="pack-para" style="grid-column: span 12;">@(n.Content ?? "")</div>
-            return;
-        }
-        if (n.IsTable)
-        {
-            <div style="grid-column: span 12; border-bottom:1px solid #000;">
-                <table class="pack-table">
-                    <thead>
-                        <tr>
-                            @foreach (var col in n.Columns ?? new()) { <th>@col.Label</th> }
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            @foreach (var col in n.Columns ?? new()) { <td>&nbsp;</td> }
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            return;
-        }
-        var key = n.Name ?? $"fld:{n.Id}";
         var val = vals.TryGetValue(key, out var vv) ? vv : null;
-        <div class="pack-cell" style="grid-column: span 12;">
+        <div class="pack-cell" style="grid-column: span @span;">
             <div class="pack-label">@n.Label</div>
             <div class="pack-value">@(val ?? "")</div>
         </div>

@@ -53,4 +53,18 @@ public interface IFormDefinitionService
     /// activos del mismo tipo, devuelve el ultimo actualizado (mas reciente).
     /// </summary>
     Task<FormDefinitionDetailDto?> GetActivoByTipoAsync(string tipo, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Recorre todos los formularios del tenant y, por cada uno, infiere mapeos de
+    /// prefill desde el modulo "paciente" basado en el Name/Label de los campos.
+    /// Preserva los mapeos manuales que ya existen (no los sobrescribe). Devuelve
+    /// estadisticas del proceso.
+    /// </summary>
+    Task<AutoEnlazarPacienteResultDto> AutoEnlazarPacienteEnTodosAsync(Guid actorUserId, CancellationToken cancellationToken = default);
 }
+
+public sealed record AutoEnlazarPacienteResultDto(
+    int FormulariosRevisados,
+    int FormulariosActualizados,
+    int MapeosAgregados,
+    int FormulariosSinCambios);

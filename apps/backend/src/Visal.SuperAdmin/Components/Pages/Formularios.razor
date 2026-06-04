@@ -39,6 +39,8 @@
                     <button class="fb-btn fb-btn-danger" @onclick="DeleteFormAsync" disabled="@_busy"
                             title="Eliminar definitivamente este formulario">&#128465; Eliminar</button>
                 }
+                <button class="fb-btn" @onclick="AutoEnlazarPacienteAsync" disabled="@_busy"
+                        title="Recorre todos los formularios e infiere mapeos prefill desde el modulo Paciente segun el nombre/etiqueta de cada campo. No sobrescribe mapeos existentes.">&#128279; Auto-enlazar Paciente</button>
                 <button class="fb-btn" @onclick="NewForm">Nuevo</button>
                 <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
             </div>
@@ -563,6 +565,30 @@
     /// nombre real para evitar borrados por accidente), llama al servicio, recarga
     /// la lista y limpia el editor.
     /// </summary>
+    private async Task AutoEnlazarPacienteAsync()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Auto-enlazar campos Paciente en TODOS los formularios? Esto agrega mapeos prefill inferidos del nombre/etiqueta de cada campo. Los mapeos que ya existen no se modifican.");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var r = await FormsSvc.AutoEnlazarPacienteEnTodosAsync(await ActorAsync());
+            _ok = $"Listo. {r.FormulariosRevisados} revisados, {r.FormulariosActualizados} actualizados (+{r.MapeosAgregados} mapeos), {r.FormulariosSinCambios} sin cambios.";
+            // Si el form actual fue uno de los actualizados, recargar sus rutas en memoria.
+            if (_currentId is Guid id)
+            {
+                var detail = await FormsSvc.GetAsync(id);
+                if (detail is not null)
+                {
+                    _prefillRoutes = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
+                }
+            }
+        }
+        catch (Exception ex) { _error = "No se pudo auto-enlazar: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
     private async Task DeleteFormAsync()
     {
         if (_currentId is not Guid id) { return; }

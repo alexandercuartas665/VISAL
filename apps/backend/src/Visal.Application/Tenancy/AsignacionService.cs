@@ -453,20 +453,29 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 $"La suma de turnos ({totalProyectado}) supera la cantidad del servicio ({asig.Cantidad}).");
         }
 
-        // Insertar los nuevos turnos.
+        // Insertar los nuevos turnos. Modelo de negocio: cada turno individual produce
+        // UN registro independiente en asignacion_turnos. Si el coordinador pide
+        // "Carlos: 2 turnos" en el carrito, se materializa como 2 filas con Cantidad=1
+        // cada una. Esto permite que cada turno tenga su propia HC, sus propias notas,
+        // su propia tarifa (negociable a posteriori) y su propia trazabilidad en
+        // facturacion. La columna Cantidad queda como 1 por convencion para turnos
+        // nuevos (las viejas con Cantidad>1 se respetan por compatibilidad).
         foreach (var t in req.Turnos)
         {
-            db.AsignacionTurnos.Add(new AsignacionTurno
+            for (int i = 0; i < t.Cantidad; i++)
             {
-                TenantId = tid,
-                AsignacionId = req.AsignacionId,
-                ProfesionalId = t.ProfesionalId,
-                Cantidad = t.Cantidad,
-                HorasPorTurno = t.HorasPorTurno,
-                FechaInicio = t.FechaInicio,
-                MesAsignar = t.MesAsignar,
-                Tarifa = t.Tarifa
-            });
+                db.AsignacionTurnos.Add(new AsignacionTurno
+                {
+                    TenantId = tid,
+                    AsignacionId = req.AsignacionId,
+                    ProfesionalId = t.ProfesionalId,
+                    Cantidad = 1,
+                    HorasPorTurno = t.HorasPorTurno,
+                    FechaInicio = t.FechaInicio,
+                    MesAsignar = t.MesAsignar,
+                    Tarifa = t.Tarifa
+                });
+            }
         }
 
         // Si la suma total iguala la cantidad del servicio, marcar como Asignado.

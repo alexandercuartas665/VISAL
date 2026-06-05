@@ -23,4 +23,12 @@ public interface IFirmaResolverService
     /// (por ejemplo desde el claim "profesional_id" del usuario logueado).
     /// Evita el lookup adicional a TenantUser. Null si no hay firma cargada.</summary>
     Task<string?> ResolverFirmaPorProfesionalAsync(Guid profesionalId, CancellationToken ct = default);
+
+    /// <summary>Resuelve la firma del usuario logueado a partir del
+    /// PlatformUserId (claim NameIdentifier) + TenantId (claim "tenant_id").
+    /// Util para administradores que no llevan el claim "profesional_id"
+    /// pero igual tienen un Profesional vinculado en su TenantUser. Hace el
+    /// join completo: TenantUser by (platform_user_id, tenant_id) ->
+    /// ProfesionalId -> Profesional.FirmaUrl.</summary>
+    Task<string?> ResolverFirmaProfesionalPorPlatformUserAsync(Guid platformUserId, Guid tenantId, CancellationToken ct = default);
 }

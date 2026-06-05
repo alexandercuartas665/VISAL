@@ -49,4 +49,21 @@ public sealed class FirmaResolverService : IFirmaResolverService
             .Select(p => p.FirmaUrl)
             .FirstOrDefaultAsync(ct);
     }
+
+    public async Task<string?> ResolverFirmaProfesionalPorPlatformUserAsync(Guid platformUserId, Guid tenantId, CancellationToken ct = default)
+    {
+        if (platformUserId == Guid.Empty || tenantId == Guid.Empty) { return null; }
+        // Buscar TenantUser por (platform_user_id, tenant_id) y devolver
+        // su Profesional.FirmaUrl. Util para usuarios admin que no llevan
+        // claim profesional_id pero igual tienen profesional vinculado.
+        var profesionalId = await _db.TenantUsers.AsNoTracking()
+            .Where(u => u.PlatformUserId == platformUserId && u.TenantId == tenantId)
+            .Select(u => u.ProfesionalId)
+            .FirstOrDefaultAsync(ct);
+        if (profesionalId is not Guid pid || pid == Guid.Empty) { return null; }
+        return await _db.Profesionales.AsNoTracking()
+            .Where(p => p.Id == pid)
+            .Select(p => p.FirmaUrl)
+            .FirstOrDefaultAsync(ct);
+    }
 }

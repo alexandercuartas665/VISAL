@@ -282,11 +282,11 @@ else
                             }
                             else
                             {
-                                var sub = state.User.FindFirst("tenant_user_id")?.Value
-                                    ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                                if (Guid.TryParse(sub, out var tuid))
+                                var puid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                                var tidStr = state.User.FindFirst("tenant_id")?.Value;
+                                if (Guid.TryParse(puid, out var platformUserId) && Guid.TryParse(tidStr, out var tid))
                                 {
-                                    firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalAsync(tuid);
+                                    firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(platformUserId, tid);
                                 }
                             }
                         }

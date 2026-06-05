@@ -295,10 +295,12 @@ else
                         if (AuthState is not null)
                         {
                             var state = await AuthState;
-                            // El login setea el claim "profesional_id" cuando el
-                            // usuario esta vinculado a un profesional. Lo usamos
-                            // como ruta directa; si no existe, caemos al lookup
-                            // por tenant_user_id (compat con sesiones distintas).
+                            // 1) Caso "perfil de campo": el login setea el claim
+                            //    "profesional_id" para usuarios profesionales
+                            //    (rama de sede especifica). Lookup directo.
+                            // 2) Fallback admin: NameIdentifier (platform_user_id)
+                            //    + claim "tenant_id". Resuelve TenantUser por
+                            //    (platform_user, tenant) -> profesional -> firma.
                             var profClaim = state.User.FindFirst("profesional_id")?.Value;
                             if (Guid.TryParse(profClaim, out var pid) && pid != Guid.Empty)
                             {
@@ -306,11 +308,11 @@ else
                             }
                             else
                             {
-                                var sub = state.User.FindFirst("tenant_user_id")?.Value
-                                    ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                                if (Guid.TryParse(sub, out var tuid))
+                                var puid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                                var tidStr = state.User.FindFirst("tenant_id")?.Value;
+                                if (Guid.TryParse(puid, out var platformUserId) && Guid.TryParse(tidStr, out var tid))
                                 {
-                                    firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalAsync(tuid);
+                                    firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(platformUserId, tid);
                                 }
                             }
                         }

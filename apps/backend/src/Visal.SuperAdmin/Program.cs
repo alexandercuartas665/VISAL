@@ -198,13 +198,11 @@ app.MapPost("/auth/login", async (
         claims.Add(new Claim("tenant_id", tenantId.ToString()));
         claims.Add(new Claim("tenant_role", rol.ToString()));
         claims.Add(new Claim("global_access", "1"));
-        // Si el TenantUser de la membership elegida tiene un Profesional
-        // vinculado, exponerlo en el claim. Lo usan los modulos de HC para
-        // resolver la firma del profesional logueado (FirmaResolverService).
-        if (memberships.Count > 0 && memberships[0].ProfesionalId is Guid pidGlob)
-        {
-            claims.Add(new Claim("profesional_id", pidGlob.ToString()));
-        }
+        // NOTA: No agregamos profesional_id en el flujo global. Ese claim
+        // tiene un side-effect (NavMenu lo interpreta como "perfil de campo"
+        // y oculta el resto de los modulos). Para firmas se resuelve via
+        // FirmaResolverService.ResolverFirmaProfesionalPorPlatformUserAsync
+        // a partir del NameIdentifier (platform_user_id) + tenant_id.
         var idGlobal = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idGlobal));
         return Results.Redirect("/mi-cuenta");

@@ -184,10 +184,38 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 if (!string.IsNullOrWhiteSpace(tgt)) { targetsExistentes.Add(tgt); }
             }
 
+            // Tambien preparamos las rutas firmaPaciente y firmaProfesional para
+            // detectar campos de firma. Se crean lazy: solo si la heuristica
+            // matchea al menos un campo.
+            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null;
+            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null;
+
             int agregadosEnEsteForm = 0;
             foreach (var (name, label) in names)
             {
                 if (targetsExistentes.Contains(name)) { continue; } // mapeo manual: respetar
+
+                // Orden de prueba: firma paciente, firma profesional, paciente.
+                // Es importante chequear firmas ANTES que paciente porque algunos
+                // nombres como "firma_profesional" o "firma_paciente" contienen
+                // "paciente"/"profesional" y podrian colisionar con la heuristica
+                // generica si la corremos primero.
+                if (InferirCampoFirmaPaciente(name, label))
+                {
+                    EnsureRuta(routes, "firmaPaciente", "Firma del Paciente", ref rutaFirmaPac, ref mappingsFirmaPac);
+                    mappingsFirmaPac!.Add(new JsonObject { ["source"] = "url", ["target"] = name });
+                    targetsExistentes.Add(name);
+                    agregadosEnEsteForm++;
+                    continue;
+                }
+                if (InferirCampoFirmaProfesional(name, label))
+                {
+                    EnsureRuta(routes, "firmaProfesional", "Firma del Profesional", ref rutaFirmaProf, ref mappingsFirmaProf);
+                    mappingsFirmaProf!.Add(new JsonObject { ["source"] = "url", ["target"] = name });
+                    targetsExistentes.Add(name);
+                    agregadosEnEsteForm++;
+                    continue;
+                }
 
                 var source = InferirCampoPaciente(name, label);
                 if (source is null) { continue; }
@@ -203,8 +231,10 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
             if (agregadosEnEsteForm == 0) { sinCambios++; continue; }
 
-            // Aseguramos que la ruta tenga el array actualizado.
+            // Aseguramos que las rutas tengan los arrays actualizados.
             ruta["mappings"] = mappingsArr;
+            if (rutaFirmaPac is not null && mappingsFirmaPac is not null) { rutaFirmaPac["mappings"] = mappingsFirmaPac; }
+            if (rutaFirmaProf is not null && mappingsFirmaProf is not null) { rutaFirmaProf["mappings"] = mappingsFirmaProf; }
 
             // Reconstruir PrefillRoutesJson.
             var nuevoJson = new JsonObject { ["routes"] = routes }.ToJsonString();
@@ -223,6 +253,81 @@ public sealed class FormDefinitionService : IFormDefinitionService
         }
 
         return new AutoEnlazarPacienteResultDto(revisados, actualizados, mapeosAgregados, sinCambios);
+    }
+
+    /// <summary>Asegura que exista la ruta con el sourceModule indicado en el array de
+    /// rutas. Si no existe la crea (con un id y nombre legible) y asigna sus referencias
+    /// out a los punteros del caller. Si ya existia, reutiliza sus mappings actuales.</summary>
+    private static void EnsureRuta(JsonArray routes, string sourceModule, string nombre, ref JsonObject? ruta, ref JsonArray? mappings)
+    {
+        if (ruta is not null) { return; }
+        var existente = routes.FirstOrDefault(r =>
+            string.Equals(r?["sourceModule"]?.GetValue<string>(), sourceModule, StringComparison.OrdinalIgnoreCase)) as JsonObject;
+        if (existente is not null)
+        {
+            ruta = existente;
+            mappings = (ruta["mappings"] as JsonArray) ?? new JsonArray();
+            return;
+        }
+        ruta = new JsonObject
+        {
+            ["id"] = Guid.NewGuid().ToString("N")[..8],
+            ["name"] = nombre,
+            ["sourceModule"] = sourceModule,
+            ["mappings"] = new JsonArray()
+        };
+        routes.Add(ruta);
+        mappings = (JsonArray)ruta["mappings"]!;
+    }
+
+    /// <summary>Heuristica para detectar si un campo del formulario es la firma del paciente.
+    /// Devuelve true cuando matchea. La lista es extensible: agregar nuevos fragmentos al
+    /// array conforme aparezcan nombres legacy en formularios reales del cliente.</summary>
+    private static bool InferirCampoFirmaPaciente(string name, string? label)
+    {
+        var n = Normalizar(name);
+        var l = Normalizar(label);
+        // Fragmentos en orden de MAS especifico a mas generico. Importante que firma
+        // profesional/medico/doctor NO matcheen aqui.
+        var fragmentos = new[]
+        {
+            "firmapaciente", "firmapac", "firmapacient",
+            "firmausuario", "firmacliente", "firmadelpaciente",
+            "firmadelusuario", "firmadelacudiente", "firmaacudiente",
+            "firmarecibe", "firmaderecibido", "firmaderecibo",
+            "huellapaciente", "huelladelpaciente",
+            "firmapacciente", // typo comun en formularios legacy
+            "signaturepaciente", "signaturepac", "signaturepatient"
+        };
+        foreach (var f in fragmentos)
+        {
+            if (n.Contains(f) || (l is not null && l.Contains(f))) { return true; }
+        }
+        return false;
+    }
+
+    /// <summary>Heuristica para detectar si un campo del formulario es la firma del profesional.
+    /// Devuelve true cuando matchea. La lista es extensible.</summary>
+    private static bool InferirCampoFirmaProfesional(string name, string? label)
+    {
+        var n = Normalizar(name);
+        var l = Normalizar(label);
+        var fragmentos = new[]
+        {
+            "firmaprofesional", "firmaespecialista", "firmaprof",
+            "firmadoctor", "firmadr", "firmamedico", "firmadelmedico",
+            "firmaterapeuta", "firmaenfermera", "firmaenfermero", "firmaenf",
+            "firmafisioterapeuta", "firmafonoaudiologa", "firmafonoaudiologo",
+            "firmaterapeutaocupacional",
+            "firmaresponsable", // a veces "firma del responsable" = el profesional
+            "firmaquienatiende", "firmaquienatendio",
+            "signaturedoctor", "signatureprof", "signaturemedico"
+        };
+        foreach (var f in fragmentos)
+        {
+            if (n.Contains(f) || (l is not null && l.Contains(f))) { return true; }
+        }
+        return false;
     }
 
     /// <summary>

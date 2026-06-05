@@ -12,7 +12,9 @@
 @inject IRemisionService RemSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
+@inject IFirmaResolverService FirmaResolverSvc
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 @*
    Modulo reutilizable de Historias Clinicas.
@@ -147,8 +149,11 @@
     <div class="hc-chat-outer @(_chatColapsado ? "hc-chat-colapsado" : "")">
         <WhatsAppChatPanel Telefono="@PacienteActivo?.Telefono"
                            NombreContacto="@PacienteActivo?.NombreCompleto"
+                           Cedula="@PacienteActivo?.NumeroDocumento"
+                           PacienteId="@PacienteActivo?.Id"
                            Colapsable="true"
-                           @bind-Colapsado="_chatColapsado" />
+                           @bind-Colapsado="_chatColapsado"
+                           OnTelefonoActualizado="HandleTelefonoActualizado" />
     </div>
 
     @* =========== PANEL DERECHO: detalle + tabs =========== *@
@@ -457,14 +462,27 @@
 <style>
     /* Grid externo de 3 columnas: paciente (320px) | chat WhatsApp (320px) | modulo
        de historias (1fr). Cada columna puede colapsar a 50px (paciente/chat) para
-       que el modulo de historias respire en pantallas chicas. */
-    .hc-grid { display: grid; grid-template-columns: 320px 320px 1fr; gap: 14px; align-items: stretch; }
+       que el modulo de historias respire en pantallas chicas. align-items: start
+       permite que el chat se quede sticky cuando se hace scroll en la HC. */
+    .hc-grid { display: grid; grid-template-columns: 320px 320px 1fr; gap: 14px; align-items: start; }
     .hc-grid.paciente-colapsado { grid-template-columns: 50px 320px 1fr; }
     .hc-grid.chat-colapsado { grid-template-columns: 320px 50px 1fr; }
     .hc-grid.paciente-colapsado.chat-colapsado { grid-template-columns: 50px 50px 1fr; }
     .hc-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 600px; }
     .hc-col-main { min-width: 0; }
-    .hc-chat-outer { display: flex; flex-direction: column; min-width: 0; min-height: 600px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
+    /* Chat WhatsApp: queda sticky al hacer scroll en la HC. Forzamos 600px de
+       altura para que el panel sea generoso (thread amplio que crece via flex
+       aunque no haya mensajes aun). Sticky top deja el panel fijo arriba al
+       scrollear la HC. */
+    .hc-chat-outer {
+        display: flex; flex-direction: column; min-width: 0;
+        border-radius: 8px; overflow: hidden;
+        box-shadow: 0 1px 3px rgba(15,23,42,.08);
+        position: sticky; top: 12px;
+        height: 600px;
+    }
+    .hc-chat-outer > * { flex: 1; min-height: 0; }
+    .hc-chat-outer.hc-chat-colapsado { height: 240px; }
 
     /* Franja vertical cuando la columna paciente esta colapsada. */
     .hc-paciente-strip { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; align-items: flex-start; justify-content: center; padding-top: 12px; min-height: 600px; }
@@ -608,8 +626,25 @@
     };
     /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
     private bool _menuColapsado;
-    /// <summary>Estado de colapso de la columna del chat WhatsApp (lateral derecha).</summary>
-    private bool _chatColapsado;
+    /// <summary>Estado de colapso de la columna del chat WhatsApp (lateral derecha).
+    /// Inicia en true (colapsado) para que el doctor no tenga el chat encima desde el
+    /// arranque; lo expande con un click cuando necesita escribir al paciente.</summary>
+    private bool _chatColapsado = true;
+
+    /// <summary>Callback del panel WhatsApp tras guardar el telefono del paciente desde
+    /// su propio mini-modal. Refresca el render para que el PacienteActivo refleje el
+    /// nuevo numero (el panel ya lo tiene actualizado internamente).</summary>
+    private async Task HandleTelefonoActualizado(string nuevoTelefono)
+    {
+        // Si el paciente vino como contexto (param) no podemos mutarlo aqui; el padre
+        // (Atencion.razor) deberia rehidratarlo al re-renderizar. Si tenemos el _paciente
+        // interno (modo "Buscar paciente") lo reemplazamos con el nuevo telefono via record-with.
+        if (_paciente is PacienteAsignacionDto p)
+        {
+            _paciente = p with { Telefono = nuevoTelefono };
+        }
+        await InvokeAsync(StateHasChanged);
+    }
     /// <summary>Estado de colapso de la columna izquierda (paciente + filtros + lista
     /// de historias). Cuando se colapsa, queda una franja vertical con boton para
     /// volver a expandir. Combinada con chat colapsado, el modulo de historias usa
@@ -882,7 +917,7 @@
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = new();
-        PrefillFromPaciente();
+        await PrefillFromPaciente();
         _formatoActualNombre = detail.Nombre;
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version) ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}" : $"Codigo: {detail.Codigo}";
         _tabSel = "Historial";
@@ -921,12 +956,43 @@
         catch { return null; }
     }
 
-    private void PrefillFromPaciente()
+    private async Task PrefillFromPaciente()
     {
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
-        // Logica centralizada en PacientePrefillHelper para que HC, Escalas,
-        // Evoluciones y Consentimientos compartan exactamente el mismo prefill.
+        // Datos del paciente (logica centralizada en PacientePrefillHelper para
+        // que HC, Escalas, Evoluciones y Consentimientos compartan el mismo prefill).
         PacientePrefillHelper.Aplicar(_valores, p, _schemaActual, _prefillRoutesActual);
+
+        // Firmas: paciente (mas reciente capturada) + profesional logueado.
+        try
+        {
+            var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(p.Id);
+            string? firmaProf = null;
+            if (AuthState is not null)
+            {
+                var state = await AuthState;
+                // El claim "profesional_id" se setea en el login cuando el
+                // usuario esta vinculado a un profesional. Es la ruta directa
+                // a Profesional.FirmaUrl. Si no esta, fallback al lookup viejo
+                // por tenant_user_id / NameIdentifier.
+                var profClaim = state.User.FindFirst("profesional_id")?.Value;
+                if (Guid.TryParse(profClaim, out var pid) && pid != Guid.Empty)
+                {
+                    firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+                }
+                else
+                {
+                    var sub = state.User.FindFirst("tenant_user_id")?.Value
+                           ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                    if (Guid.TryParse(sub, out var tuid))
+                    {
+                        firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalAsync(tuid);
+                    }
+                }
+            }
+            FirmasPrefillHelper.Aplicar(_valores, firmaPac, firmaProf, _prefillRoutesActual);
+        }
+        catch { /* las firmas son opcionales: si fallan, el form sigue funcionando */ }
     }
 
     private async Task Descartar()

@@ -1,0 +1,161 @@
+@page "/cfg-tipologia-archivos"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject ITipologiaArchivoService Svc
+
+<PageTitle>Tipologia Archivos - Visal</PageTitle>
+
+<div class="cat-head">
+    <div>
+        <div class="cat-eyebrow">Configuracion del Sistema</div>
+        <h1 class="cat-title">Tipologia Archivos</h1>
+        <p class="cat-sub">Conceptos que se asignan a los archivos adjuntos en notas medicas (firma, escala, examen, etc.).
+            Lo que configures aqui aparece como dropdown "Categoria" en el tab "Documentos Externos" del modulo Notas.</p>
+    </div>
+    <button class="btn btn-primary btn-sm" @onclick="Add">+ Agregar</button>
+</div>
+
+@if (_error is not null) { <div class="cat-alert">@_error</div> }
+@if (_ok is not null) { <div class="cat-ok">@_ok</div> }
+
+<div class="cat-card">
+    @if (_items.Count == 0)
+    {
+        <div class="text-center text-muted" style="padding:28px;">
+            <p style="margin:0 0 10px;">Aun no hay tipologias configuradas.</p>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SembrarDefaultsAsync">Sembrar tipologias por defecto</button>
+            <p class="text-muted" style="font-size:11px;margin-top:8px;">Crea las 5 categorias estandar (Firma del Paciente, Lista de firmas, Escala, Formato, Examen, Otros).</p>
+        </div>
+    }
+    else
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width:40%">Nombre</th>
+                    <th style="width:120px">Color</th>
+                    <th style="width:140px">Vista previa</th>
+                    <th style="width:80px">Activo</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var it in _items)
+                {
+                    <tr>
+                        <td><input class="form-control form-control-sm" @bind="it.Nombre" maxlength="120" placeholder="Nombre de la tipologia" /></td>
+                        <td>
+                            <div class="tip-color-input">
+                                <input type="color" @bind="it.Color" />
+                                <input class="form-control form-control-sm tip-color-hex" @bind="it.Color" maxlength="7" />
+                            </div>
+                        </td>
+                        <td>
+                            <span class="tip-chip" style="background:@(LightBg(it.Color));color:@(it.Color);border:1px solid @(it.Color);">
+                                @(string.IsNullOrWhiteSpace(it.Nombre) ? "(sin nombre)" : it.Nombre)
+                            </span>
+                        </td>
+                        <td><input type="checkbox" class="form-check-input" @bind="it.Activo" /></td>
+                        <td class="cat-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="() => SaveAsync(it)" title="Guardar">&#10003;</button>
+                            @if (it.Id is not null)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(it)" title="Borrar">&times;</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<style>
+    .tip-color-input { display: flex; gap: 6px; align-items: center; }
+    .tip-color-input input[type="color"] { width: 38px; height: 32px; padding: 2px; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; }
+    .tip-color-hex { width: 80px; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 11px; }
+    .tip-chip { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+</style>
+
+@code {
+    private List<Item> _items = new();
+    private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        // Si el tenant aun no tiene ninguna tipologia, sembrar defaults
+        // para que el operador empiece con algo util sin tener que adivinar.
+        if (_items.Count == 0)
+        {
+            await Svc.SeedDefaultsAsync();
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _items = (await Svc.ListAsync(soloActivos: false))
+            .Select(t => new Item { Id = t.Id, Nombre = t.Nombre, Color = t.Color, Activo = t.Activo })
+            .ToList();
+    }
+
+    private void Add()
+    {
+        _items.Insert(0, new Item { Nombre = "", Color = "#64748b", Activo = true });
+    }
+
+    private async Task SaveAsync(Item it)
+    {
+        _error = _ok = null;
+        if (string.IsNullOrWhiteSpace(it.Nombre)) { _error = "El nombre es obligatorio."; return; }
+        try
+        {
+            var saved = await Svc.SaveAsync(new SaveTipologiaArchivoRequest(it.Id, it.Nombre.Trim(), it.Color, it.Activo), Guid.Empty);
+            if (saved is null) { _error = "No se pudo guardar."; return; }
+            it.Id = saved.Id;
+            it.Color = saved.Color;
+            _ok = "Tipologia guardada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task DeleteAsync(Item it)
+    {
+        _error = _ok = null;
+        if (it.Id is not Guid id) { _items.Remove(it); return; }
+        try
+        {
+            await Svc.DeleteAsync(id, Guid.Empty);
+            _items.Remove(it);
+            _ok = "Tipologia eliminada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task SembrarDefaultsAsync()
+    {
+        await Svc.SeedDefaultsAsync();
+        await ReloadAsync();
+        _ok = "Sembrado.";
+    }
+
+    /// <summary>Color de fondo claro derivado del color principal: 12% opacity sobre blanco.
+    /// Lo calculamos con CSS color-mix() del browser; si el navegador no lo soporta,
+    /// queda el color principal como fallback.</summary>
+    private static string LightBg(string color)
+    {
+        if (string.IsNullOrWhiteSpace(color) || !color.StartsWith("#")) { return "#f1f5f9"; }
+        return $"color-mix(in srgb, {color} 14%, white)";
+    }
+
+    private sealed class Item
+    {
+        public Guid? Id { get; set; }
+        public string Nombre { get; set; } = "";
+        public string Color { get; set; } = "#64748b";
+        public bool Activo { get; set; } = true;
+    }
+}

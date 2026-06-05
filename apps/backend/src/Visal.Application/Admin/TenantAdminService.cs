@@ -105,10 +105,12 @@ public sealed class TenantAdminService : ITenantAdminService
         tenant.Country = request.Country?.Trim();
         tenant.Currency = request.Currency?.Trim();
         tenant.LogoUrl = string.IsNullOrWhiteSpace(request.LogoUrl) ? tenant.LogoUrl : request.LogoUrl.Trim();
+        // Slogan: cadena vacia equivale a "limpiar" (queda null y el sidebar usa el lema default).
+        tenant.Slogan = string.IsNullOrWhiteSpace(request.Slogan) ? null : request.Slogan!.Trim();
 
         _audit.Write(actorUserId, "tenant.profile.update", nameof(Tenant), tenant.Id,
             previousValue: null,
-            newValue: new { tenant.Name, tenant.LegalName, tenant.TaxId, tenant.Country, tenant.Currency, HasLogo = tenant.LogoUrl is not null },
+            newValue: new { tenant.Name, tenant.LegalName, tenant.TaxId, tenant.Country, tenant.Currency, HasLogo = tenant.LogoUrl is not null, tenant.Slogan },
             tenantId: tenant.Id);
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -116,5 +118,5 @@ public sealed class TenantAdminService : ITenantAdminService
     }
 
     private static TenantDetail Map(Tenant t) =>
-        new(t.Id, t.Name, t.LegalName, t.TaxId, t.Country, t.Currency, t.Status, t.Kind, t.CreatedAt, t.LogoUrl);
+        new(t.Id, t.Name, t.LegalName, t.TaxId, t.Country, t.Currency, t.Status, t.Kind, t.CreatedAt, t.LogoUrl, t.Slogan);
 }

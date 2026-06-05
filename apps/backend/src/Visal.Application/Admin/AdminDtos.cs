@@ -32,7 +32,8 @@ public sealed record TenantDetail(
     TenantStatus Status,
     TenantKind Kind,
     DateTimeOffset CreatedAt,
-    string? LogoUrl = null);
+    string? LogoUrl = null,
+    string? Slogan = null);
 
 /// <summary>Actualizacion del perfil de la agencia por su propio administrador (modulo 1.6).</summary>
 public sealed record UpdateTenantProfileRequest(
@@ -41,7 +42,8 @@ public sealed record UpdateTenantProfileRequest(
     string? TaxId,
     string? Country,
     string? Currency,
-    string? LogoUrl);
+    string? LogoUrl,
+    string? Slogan = null);
 
 // --- Plans ---
 public sealed record PlanLimitInput(

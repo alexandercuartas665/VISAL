@@ -25,16 +25,16 @@ public sealed record UpdateMessageTemplateRequest(
     string? MediaUrl = null,
     string? MediaMimeType = null);
 
-/// <summary>Categorias estandar de pregrabados (clave + etiqueta para la UI).</summary>
+/// <summary>Categorias estandar de pregrabados clinicos (clave + etiqueta para la UI).</summary>
 public static class MessageTemplateCategories
 {
     public static readonly IReadOnlyList<(string Key, string Label)> All = new[]
     {
         ("saludo", "Saludo"),
+        ("recordatorio", "Recordatorio"),
         ("info", "Pedir info"),
-        ("cotizacion", "Cotizacion"),
         ("seguimiento", "Seguimiento"),
-        ("cierre", "Cierre")
+        ("alta", "Alta / Cierre")
     };
 
     public static string Label(string key) =>

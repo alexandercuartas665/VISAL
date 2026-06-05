@@ -355,11 +355,44 @@ else
         </div>
     };
 
+    /// <summary>Detecta si un Name corresponde a un campo de firma. Usado para
+    /// renderizar un preview de imagen cuando el valor es una URL de PNG.</summary>
+    private static bool IsFirmaField(string? name) =>
+        !string.IsNullOrWhiteSpace(name) &&
+        name.Contains("firma", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True si el valor parece una URL renderizable como <img>: ruta
+    /// relativa (/uploads/...), http(s)://, o data:image/...</summary>
+    private static bool IsImageUrlLike(string? v) =>
+        !string.IsNullOrWhiteSpace(v) &&
+        (v.StartsWith('/') ||
+         v.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+         v.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+         v.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase));
+
     private RenderFragment RenderInput(FormNode node) => __builder =>
     {
         var key = node.Name ?? $"fld:{node.Id}";
         var val = GetValue(key) ?? node.DefaultValue ?? "";
         var ro = IsNodeReadOnly(node);
+
+        // Caso especial: campo de firma con URL -> mostrar la imagen ademas
+        // del input de texto. Esto cubre firma_paciente_consent,
+        // firma_profesional_consent, y cualquier otro campo cuyo name contenga
+        // "firma" y reciba una URL como valor (clip de FirmasPrefillHelper o
+        // pegado manualmente por el usuario).
+        if (IsFirmaField(node.Name) && IsImageUrlLike(val))
+        {
+            <div class="fv-firma-prev">
+                <img src="@val" alt="firma" class="fv-firma-img"
+                     style="max-height:90px;max-width:100%;border:1px solid #e2e8f0;border-radius:4px;background:#fff;padding:4px;display:block;margin-bottom:6px;" />
+            </div>
+            <input type="text" class="form-control form-control-sm"
+                   disabled="@ro" value="@val"
+                   @onchange="e => SetValue(key, e.Value?.ToString())" />
+            return;
+        }
+
         switch (node.FieldType)
         {
             case "textarea":

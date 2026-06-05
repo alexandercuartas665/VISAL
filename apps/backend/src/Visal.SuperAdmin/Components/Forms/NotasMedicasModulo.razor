@@ -1,8 +1,15 @@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Forms
 @using Visal.Application.Tenancy
+@using Visal.Domain.Enums
 @inject INotaMedicaService NotaSvc
+@inject IFirmaRemotaService FirmaSvc
+@inject IWhatsAppLineService LineasSvc
+@inject IPacienteService PacientesSvc
+@inject ITipologiaArchivoService TipSvc
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@inject NavigationManager Nav
+@implements IDisposable
 
 @*
    Modulo reutilizable de Notas Medicas. Se invoca como submodulo desde
@@ -282,6 +289,37 @@ else if (_tabSel == "Firma")
                         <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFirmaPacienteAsync" disabled="@_busy">&#129529; Limpiar</button>
                         <button class="btn btn-primary btn-sm nm-btn-gradient" @onclick="GuardarFirmaPacienteAsync" disabled="@_busy">&#128190; Guardar firma paciente</button>
                     </div>
+
+                    @* ===== Solicitud remota de firma por WhatsApp ===== *@
+                    @if (_borrador?.Id is Guid notaIdParaFirma)
+                    {
+                        <div class="nm-firma-remota">
+                            @if (_firmaSolicitudActiva is null)
+                            {
+                                <button class="btn btn-success btn-sm" @onclick="SolicitarFirmaWhatsAppAsync" disabled="@_firmaRemotaBusy" title="Genera un link y lo envia por WhatsApp al paciente">
+                                    &#128241; Solicitar firma por WhatsApp
+                                </button>
+                            }
+                            else if (_firmaSolicitudActiva.Status == FirmaRequestStatus.Pendiente)
+                            {
+                                <div class="nm-firma-remota-pend">
+                                    <div><strong>Solicitud enviada</strong> al +@_firmaSolicitudActiva.Telefono</div>
+                                    <div class="text-muted" style="font-size:11px;">Esperando que el paciente firme desde su celular. Refrescando cada 5 segundos...</div>
+                                    <div class="text-muted" style="font-size:11px;">Vence: @_firmaSolicitudActiva.ExpiresAt.LocalDateTime.ToString("dd/MM HH:mm")</div>
+                                    <button class="btn btn-link btn-sm" @onclick="CancelarFirmaRemotaAsync" disabled="@_firmaRemotaBusy">Cancelar solicitud</button>
+                                </div>
+                            }
+                            else if (_firmaSolicitudActiva.Status == FirmaRequestStatus.Completada)
+                            {
+                                <div class="nm-firma-remota-ok">
+                                    &#10003; Firma capturada por WhatsApp el @(_firmaSolicitudActiva.CompletedAt?.LocalDateTime.ToString("dd/MM HH:mm") ?? "-").
+                                    <button class="btn btn-link btn-sm" @onclick="SolicitarFirmaWhatsAppAsync" disabled="@_firmaRemotaBusy">Solicitar nueva firma</button>
+                                </div>
+                            }
+                            @if (_firmaRemotaMsg is not null) { <div class="text-muted small" style="margin-top:4px;">@_firmaRemotaMsg</div> }
+                            @if (_firmaRemotaError is not null) { <div class="text-danger small" style="margin-top:4px;">@_firmaRemotaError</div> }
+                        </div>
+                    }
                 </div>
             </div>
 
@@ -309,12 +347,17 @@ else if (_tabSel == "Documentos Externos")
                 <label class="nm-lbl-inline">Categoria:</label>
                 <select class="form-select form-select-sm nm-w-280" @bind="_docCategoria">
                     <option value="">Seleccione...</option>
-                    <option>Lista de firmas</option>
-                    <option>Escala</option>
-                    <option>Formato</option>
-                    <option>Examen</option>
-                    <option>Otros</option>
+                    @foreach (var t in _tipologias)
+                    {
+                        <option value="@t.Nombre">@t.Nombre</option>
+                    }
                 </select>
+                @if (_tipologias.Count == 0)
+                {
+                    <span class="text-muted" style="font-size:11px;margin-left:8px;">
+                        (Configura tipologias en <em>Configuracion del Sistema -> Tipologia Archivos</em>)
+                    </span>
+                }
             </div>
             <div class="nm-row-inline">
                 <label class="nm-lbl-inline">Tipo de Terapia:</label>
@@ -345,7 +388,10 @@ else if (_tabSel == "Documentos Externos")
                     @if (_docSubiendo) { <div class="text-muted small">Subiendo...</div> }
                 </div>
                 <div class="nm-doc-card nm-doc-list">
-                    <div class="nm-doc-h">Archivos adjuntos (@_documentos.Count)</div>
+                    <div class="nm-doc-h" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span>Archivos adjuntos (@_documentos.Count)</span>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="RecargarDocumentos" title="Refrescar lista">&#128260; Refrescar</button>
+                    </div>
                     @if (_documentos.Count == 0)
                     {
                         <div class="nm-doc-empty">Sin archivos.</div>
@@ -709,6 +755,17 @@ else if (_tabSel == "Ver Historial")
     private string? _firmaPacienteActual;
     private bool _firmaCanvasInicializado;
     private bool _firmaPacienteCanvasInicializado;
+
+    // Tipologias activas para el dropdown Categoria del tab Documentos Externos.
+    private List<TipologiaArchivoDto> _tipologias = new();
+
+    // ===== Firma remota por WhatsApp =====
+    private FirmaRequestDto? _firmaSolicitudActiva;
+    private bool _firmaRemotaBusy;
+    private string? _firmaRemotaMsg;
+    private string? _firmaRemotaError;
+    /// <summary>Timer del polling cada 5s mientras esperamos la firma del paciente.</summary>
+    private System.Threading.Timer? _firmaPollTimer;
     /// <summary>Cache del nombre del profesional para mostrar bajo la firma. Se setea al cargar la nota.</summary>
     private string? NombreEspecialistaActual;
     [Inject] IJSRuntime JsRt { get; set; } = default!;
@@ -793,6 +850,14 @@ else if (_tabSel == "Ver Historial")
             _ultimoHcId = HistoriaClinicaId;
             NuevoBorrador();
             await Refrescar();
+            // Tipologias para el dropdown Categoria del tab Documentos Externos.
+            // Si el tenant no tiene ninguna, sembramos defaults para no quedarse vacio.
+            _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList();
+            if (_tipologias.Count == 0)
+            {
+                await TipSvc.SeedDefaultsAsync();
+                _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList();
+            }
         }
     }
 
@@ -854,6 +919,11 @@ else if (_tabSel == "Ver Historial")
         _tabSel = "Diligenciamiento";
         _ok = null;
         _error = null;
+        // Refrescar estado de solicitud de firma remota (si hay alguna pendiente o
+        // completada para esta nota), para que el bloque del tab Firma muestre
+        // el boton "Solicitar" o el estado actual. Disparado en fire-and-forget
+        // porque CargarEnBorrador es void; no es critico esperarlo.
+        _ = RefrescarSolicitudFirmaAsync();
         _ = RecargarDocumentos();
     }
 
@@ -1017,6 +1087,143 @@ else if (_tabSel == "Ver Historial")
     private async Task LimpiarFirmaPacienteAsync()
     {
         await JsRt.InvokeVoidAsync("visalFirma.clear", "nm-firma-paciente-canvas");
+    }
+
+    // ===== Firma remota por WhatsApp =====
+    private async Task SolicitarFirmaWhatsAppAsync()
+    {
+        _firmaRemotaError = _firmaRemotaMsg = null;
+        if (_borrador?.Id is not Guid notaId) { _firmaRemotaError = "Primero guarda la nota como parcial."; return; }
+        if (PacienteId is not Guid pacienteId) { _firmaRemotaError = "Falta el paciente."; return; }
+
+        _firmaRemotaBusy = true;
+        try
+        {
+            // 1. Cargar el paciente para tener el telefono.
+            var paciente = await PacientesSvc.GetAsync(pacienteId);
+            if (paciente?.Telefono is null or "")
+            {
+                _firmaRemotaError = "El paciente no tiene telefono asignado. Edita su telefono desde el chat WhatsApp del modulo.";
+                return;
+            }
+
+            // 2. Buscar una linea WhatsApp conectada del tenant.
+            var lineas = (await LineasSvc.ListAsync())
+                .Where(l => l.Status == Visal.Domain.Enums.WhatsAppLineStatus.Connected)
+                .ToList();
+            if (lineas.Count == 0)
+            {
+                _firmaRemotaError = "No hay lineas WhatsApp conectadas. Conecta una en el modulo Lineas WhatsApp.";
+                return;
+            }
+
+            // 3. Crear la solicitud (o reutilizar la pendiente).
+            var req = await FirmaSvc.CrearOReutilizarAsync(notaId, pacienteId, paciente.Telefono!, paciente.NombreCompleto, Guid.Empty);
+            if (req is null)
+            {
+                _firmaRemotaError = "No se pudo crear la solicitud de firma.";
+                return;
+            }
+
+            // 4. Construir URL absoluta del link publico.
+            var urlAbsoluta = new Uri(new Uri(Nav.BaseUri), req.PublicPath).ToString();
+
+            // 5. Enviar por WhatsApp con la primera linea conectada.
+            var send = await FirmaSvc.EnviarPorWhatsAppAsync(req.Id, lineas[0].Id, urlAbsoluta, Guid.Empty);
+            if (!send.Ok)
+            {
+                _firmaRemotaError = "El link se genero pero no se pudo enviar el WhatsApp: " + (send.Error ?? "(sin detalle)");
+                _firmaSolicitudActiva = req;
+                return;
+            }
+
+            _firmaSolicitudActiva = req;
+            _firmaRemotaMsg = $"Link enviado al +{req.Telefono}. Vence el {req.ExpiresAt.LocalDateTime:dd/MM HH:mm}.";
+            ArrancarPollingFirmaAsync(req.Id);
+        }
+        catch (Exception ex) { _firmaRemotaError = ex.Message; }
+        finally { _firmaRemotaBusy = false; }
+    }
+
+    private async Task CancelarFirmaRemotaAsync()
+    {
+        if (_firmaSolicitudActiva is null) { return; }
+        _firmaRemotaBusy = true;
+        try
+        {
+            await FirmaSvc.CancelarAsync(_firmaSolicitudActiva.Id, Guid.Empty);
+            _firmaSolicitudActiva = null;
+            _firmaRemotaMsg = "Solicitud cancelada.";
+            DetenerPollingFirma();
+        }
+        finally { _firmaRemotaBusy = false; }
+    }
+
+    /// <summary>Arranca un timer de polling cada 5s para detectar cuando el paciente firmo.
+    /// Cuando la solicitud queda en Completada, dibuja la firma en el canvas + persiste.</summary>
+    private void ArrancarPollingFirmaAsync(Guid solicitudId)
+    {
+        DetenerPollingFirma();
+        _firmaPollTimer = new System.Threading.Timer(async _ =>
+        {
+            try
+            {
+                var estado = await FirmaSvc.ObtenerEstadoAsync(solicitudId);
+                if (estado is null) { return; }
+                if (estado.Status == Visal.Domain.Enums.FirmaRequestStatus.Completada && !string.IsNullOrEmpty(estado.ImageDataUrl))
+                {
+                    DetenerPollingFirma();
+                    await InvokeAsync(async () =>
+                    {
+                        _firmaPacienteActual = estado.ImageDataUrl;
+                        if (_firmaSolicitudActiva is not null) { _firmaSolicitudActiva = _firmaSolicitudActiva with { Status = estado.Status, CompletedAt = estado.CompletedAt }; }
+                        // Refrescar el canvas con la firma capturada.
+                        try { await JsRt.InvokeVoidAsync("visalFirma.load", "nm-firma-paciente-canvas", estado.ImageDataUrl); } catch { }
+                        // Refrescar la lista de Documentos Externos: el backend creo un PNG con
+                        // categoria "Firma del Paciente" y queremos que aparezca sin recargar la nota.
+                        await RecargarDocumentos();
+                        _firmaRemotaMsg = "Firma capturada y guardada. Tambien queda como documento externo (categoria 'Firma del Paciente').";
+                        StateHasChanged();
+                    });
+                }
+                else if (estado.Status == Visal.Domain.Enums.FirmaRequestStatus.Expirada
+                      || estado.Status == Visal.Domain.Enums.FirmaRequestStatus.Cancelada)
+                {
+                    DetenerPollingFirma();
+                    await InvokeAsync(() =>
+                    {
+                        if (_firmaSolicitudActiva is not null) { _firmaSolicitudActiva = _firmaSolicitudActiva with { Status = estado.Status }; }
+                        _firmaRemotaError = estado.Status == Visal.Domain.Enums.FirmaRequestStatus.Expirada ? "El link expiro sin firma." : "Solicitud cancelada.";
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch { /* polling resiliente */ }
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private void DetenerPollingFirma()
+    {
+        _firmaPollTimer?.Dispose();
+        _firmaPollTimer = null;
+    }
+
+    /// <summary>Cuando se carga una nota guardada, refrescamos la solicitud de firma activa
+    /// (si la hay) para que el bloque del tab Firma muestre el estado correcto al volver.</summary>
+    private async Task RefrescarSolicitudFirmaAsync()
+    {
+        if (_borrador?.Id is not Guid notaId) { _firmaSolicitudActiva = null; DetenerPollingFirma(); return; }
+        _firmaSolicitudActiva = await FirmaSvc.ObtenerActivaPorNotaAsync(notaId);
+        if (_firmaSolicitudActiva?.Status == FirmaRequestStatus.Pendiente)
+        {
+            ArrancarPollingFirmaAsync(_firmaSolicitudActiva.Id);
+        }
+        else { DetenerPollingFirma(); }
+    }
+
+    public void Dispose()
+    {
+        DetenerPollingFirma();
     }
 
     private async Task GuardarFirmaAsync()

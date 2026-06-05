@@ -2,11 +2,12 @@
 @inject NavigationManager Navigation
 @inject ITenantAdminService TenantsSvc
 
-<div class="visal-brand">
-    <div class="visal-logo">
+<div class="visal-brand visal-brand-stack">
+    <div class="visal-logo @( !_showAdmin && !string.IsNullOrWhiteSpace(_tenantLogoUrl) ? "visal-logo-wide" : "" )">
         @* Para usuarios de tenant: si configuraron un logo en /mi-cuenta lo usamos
            aqui; si no, mostramos el SVG por defecto. Para super-admin de plataforma
-           queda siempre el SVG (es la consola, no una agencia). *@
+           queda siempre el SVG (es la consola, no una agencia). El logo del tenant
+           se muestra ancho para que se vea completo (no recortado en cuadrado). *@
         @if (!_showAdmin && !string.IsNullOrWhiteSpace(_tenantLogoUrl))
         {
             <img src="@_tenantLogoUrl" alt="Logo" />
@@ -16,9 +17,9 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         }
     </div>
-    <div>
+    <div class="visal-brand-text">
         <div class="visal-brand-name">@(_showAdmin || string.IsNullOrWhiteSpace(_tenantName) ? "Visal" : _tenantName)</div>
-        <div class="visal-brand-sub">Salud Domiciliaria</div>
+        <div class="visal-brand-sub">@(_showAdmin ? "Consola de gobierno" : (string.IsNullOrWhiteSpace(_tenantSlogan) ? "Salud Domiciliaria" : _tenantSlogan))</div>
     </div>
 </div>
 
@@ -169,6 +170,11 @@
             <span>Relaciones de formularios</span>
         </NavLink>
 
+        <NavLink class="visal-nav-link" href="cfg-tipologia-archivos">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            <span>Tipologia Archivos</span>
+        </NavLink>
+
         <div class="visal-nav-label">Configuracion de la Entidad</div>
 
         <NavLink class="visal-nav-link" href="cfg-empresa">
@@ -292,6 +298,7 @@
     private string? _userName;
     private string? _tenantName;
     private string? _tenantLogoUrl;
+    private string? _tenantSlogan;
     private string _roleLabel = "Operador de plataforma";
     private string _avatar = "SA";
 
@@ -330,6 +337,7 @@
                 var tenant = await TenantsSvc.GetAsync(tenantId);
                 _tenantName = tenant?.Name;
                 _tenantLogoUrl = tenant?.LogoUrl;
+                _tenantSlogan = tenant?.Slogan;
             }
         }
     }

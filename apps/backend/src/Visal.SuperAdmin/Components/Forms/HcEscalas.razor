@@ -1,8 +1,10 @@
 @using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
 @using Visal.Application.Tenancy
 @using Visal.SuperAdmin.Components.Forms
 @inject IEscalaService EscSvc
 @inject IFormDefinitionService FormsSvc
+@inject IFirmaResolverService FirmaResolverSvc
 @inject IJSRuntime JS
 
 @*
@@ -186,6 +188,11 @@ else
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
 
+    /// <summary>Estado de autenticacion del usuario logueado. Se usa para
+    /// resolver la firma del profesional logueado al iniciar una escala que
+    /// tenga ruta firmaProfesional configurada.</summary>
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private Guid? _ultimoHcCargada;
     private List<EscalaItemDto> _escalas = new();
     private List<EscalaFormatoDto> _formatos = new();
@@ -256,6 +263,37 @@ else
                     var rutas = PrefillRouteSet.FromJson(detalleFormato.PrefillRoutesJson);
                     var valores = new Dictionary<string, string?>();
                     PacientePrefillHelper.Aplicar(valores, Paciente, schema, rutas);
+
+                    // Firmas (paciente + profesional logueado). Si la escala
+                    // tiene rutas firmaPaciente / firmaProfesional configuradas
+                    // y existe URL para cada una, se cablean al iniciar. Si
+                    // alguna falla, el visor queda con esos campos vacios.
+                    try
+                    {
+                        var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(Paciente.Id);
+                        string? firmaProf = null;
+                        if (AuthState is not null)
+                        {
+                            var state = await AuthState;
+                            var profClaim = state.User.FindFirst("profesional_id")?.Value;
+                            if (Guid.TryParse(profClaim, out var pid) && pid != Guid.Empty)
+                            {
+                                firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+                            }
+                            else
+                            {
+                                var sub = state.User.FindFirst("tenant_user_id")?.Value
+                                    ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                                if (Guid.TryParse(sub, out var tuid))
+                                {
+                                    firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalAsync(tuid);
+                                }
+                            }
+                        }
+                        FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+                    }
+                    catch { /* firmas opcionales */ }
+
                     valoresJson = JsonSerializer.Serialize(valores);
                 }
             }

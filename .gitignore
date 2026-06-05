@@ -84,3 +84,10 @@ tools/
 # pensada para el prototipo JS, lo estaba ignorando y rompia el CSS en produccion).
 !apps/backend/src/Visal.SuperAdmin/wwwroot/lib/
 !apps/backend/src/Visal.SuperAdmin/wwwroot/lib/**
+
+# Local binaries cache (stable rebuild backup)
+stable-bin/
+
+# Local data exports (no deben ir al repo)
+formularios-historias.xlsx
+formularios-historias.csv

@@ -235,14 +235,52 @@ public sealed class NotaMedicaService(
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<DocumentoPacienteDto>> ListarDocumentosPorPacienteAsync(
+        Guid pacienteId, CancellationToken ct = default)
+    {
+        // EF Core 9 NO traduce .ToString() sobre un enum dentro de la proyeccion
+        // (igual que el caso de Escalas en task #135). Materializamos primero los
+        // datos primitivos + el enum tal cual, despues proyectamos al DTO en memoria.
+        var raw = await db.NotaMedicaDocumentos.AsNoTracking()
+            .Where(d => d.PacienteId == pacienteId)
+            .Join(db.NotasMedicas.AsNoTracking(),
+                  d => d.NotaMedicaId,
+                  n => n.Id,
+                  (d, n) => new
+                  {
+                      d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
+                      d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
+                      d.Anotaciones, d.CreatedAt,
+                      n.FechaNota, n.CodigoUnico, n.Estado
+                  })
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync(ct);
+
+        return raw
+            .Select(x => new DocumentoPacienteDto(
+                x.Id, x.NotaMedicaId, x.NombreOriginal, x.RutaArchivo,
+                x.TipoMime, x.Tamano, x.Categoria, x.TipoTerapia, x.Mes,
+                x.Anotaciones, x.CreatedAt,
+                x.FechaNota, x.CodigoUnico, x.Estado.ToString()))
+            .ToList();
+    }
+
     public async Task<NotaDocumentoDto> AdjuntarDocumentoAsync(
         AdjuntarDocumentoRequest req, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        // Resolver PacienteId desde la nota para que el documento quede asociado
+        // tambien al paciente (visible desde el tab Documentos de Admision).
+        var pacienteId = await db.NotasMedicas.AsNoTracking()
+            .Where(n => n.Id == req.NotaMedicaId)
+            .Select(n => n.PacienteId)
+            .FirstOrDefaultAsync(ct);
+        if (pacienteId == Guid.Empty) { throw new InvalidOperationException("Nota medica no encontrada."); }
         var entity = new NotaMedicaDocumento
         {
             TenantId = tid,
             NotaMedicaId = req.NotaMedicaId,
+            PacienteId = pacienteId,
             NombreOriginal = req.NombreOriginal,
             RutaArchivo = req.RutaArchivo,
             TipoMime = req.TipoMime,

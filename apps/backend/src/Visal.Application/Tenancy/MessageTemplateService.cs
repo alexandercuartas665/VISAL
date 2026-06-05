@@ -123,41 +123,41 @@ public sealed class MessageTemplateService : IMessageTemplateService
     private static MessageTemplateDto Map(MessageTemplate t) =>
         new(t.Id, t.Category, t.Body, t.MediaType, t.MediaUrl, t.MediaMimeType, t.SortOrder);
 
-    // Mensajes del prototipo (embudo-ventas v0). {asesor} y {destino} se rellenan al usarlos.
+    // Mensajes del prototipo (IPS clinica). Los tokens {paciente}, {cedula}, {fecha} se
+    // rellenan en el cliente al pulsar el chip (con datos del PacienteActivo).
     private static readonly (string Category, string[] Items)[] _defaults =
     {
         ("saludo", new[]
         {
-            "Hola! Buen dia. Soy {asesor} de la agencia. Vi tu solicitud de viaje a {destino}.",
-            "Hola, como estas? Te escribo del area comercial. Estoy a la orden para tu viaje.",
-            "Buenas tardes. Recibi tu interes en viajar a {destino}. Tienes unos minutos para revisar opciones?"
+            "Hola {paciente}! Le escribo de IPS Visal para coordinar su atencion domiciliaria.",
+            "Buen dia {paciente}, soy de la IPS Visal. Le escribo para confirmar la atencion de hoy.",
+            "Hola, le saluda IPS Visal RT. Como se encuentra hoy {paciente}?"
+        }),
+        ("recordatorio", new[]
+        {
+            "Le recordamos su cita / visita domiciliaria programada para el {fecha}. Por favor confirme su disponibilidad.",
+            "{paciente}, su profesional pasa hoy por su domicilio. Por favor tenga lista la documentacion (CC {cedula}).",
+            "Recuerde tener listos los medicamentos y la historia clinica para la visita de hoy."
         }),
         ("info", new[]
         {
-            "Para preparar tu cotizacion, me confirmas fechas exactas y cantidad de pasajeros?",
-            "Los menores que edad tienen? Lo necesito para tarifas aereas y de hotel.",
-            "Tienes preferencia por aerolinea o salida en algun horario especifico?",
-            "Te interesa un plan con todo incluido o solo hotel + vuelos?"
-        }),
-        ("cotizacion", new[]
-        {
-            "Te comparto la cotizacion con vuelos y hotel para tu viaje a {destino}.",
-            "Los precios incluyen impuestos, traslados aeropuerto-hotel y desayuno.",
-            "Tambien tengo una alternativa mas economica. Te la comparto?"
+            "Para programar su atencion necesitamos confirmar su direccion actual y un telefono adicional. Nos puede ayudar?",
+            "{paciente}, podria indicarnos si presenta alguna novedad o sintoma nuevo desde la ultima visita?",
+            "Necesitamos la autorizacion vigente de la EPS. La puede compartir por este mismo medio?",
+            "Tiene algun medicamento que se le este por agotar? Asi lo coordinamos con anticipacion."
         }),
         ("seguimiento", new[]
         {
-            "Hola! Pudiste revisar la cotizacion que te envie?",
-            "Hay algo que pueda ajustar en la propuesta para que se acomode mejor?",
-            "Solo paso por aqui para recordarte que los cupos estan limitados para esas fechas.",
-            "Quedo atento por si tienes alguna duda."
+            "Hola {paciente}, queriamos saber como se encuentra despues de la ultima visita.",
+            "Le recordamos que el profesional pasa por su domicilio segun lo programado. Cualquier novedad nos avisa.",
+            "Estamos pendientes de su evolucion. Si necesita reagendar la atencion por favor nos lo comunica.",
+            "Por aqui me cuenta si tuvo algun inconveniente o si todo esta bien."
         }),
-        ("cierre", new[]
+        ("alta", new[]
         {
-            "Perfecto! Procedo con la reserva. Te envio instrucciones de pago en un momento.",
-            "Para asegurar tu cupo necesito un abono del 50%. Pagas por transferencia o PSE?",
-            "Confirmado! Ya tienes tu reserva. Te enviare los vouchers 48h antes del viaje.",
-            "Muchas gracias por confiar en nosotros! Cualquier cosa me escribes."
+            "{paciente}, su profesional le da de alta del servicio actual. Gracias por la confianza en IPS Visal RT.",
+            "Se ha cerrado el ciclo de atencion. Para una nueva orden de servicio por favor contactarnos con la nueva autorizacion.",
+            "Gracias por permitirnos cuidar de su salud. Cualquier emergencia comuniquese con nuestra linea de atencion."
         })
     };
 }

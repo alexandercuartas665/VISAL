@@ -1555,6 +1555,94 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("evolution_master_configs", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.FirmaPacienteRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("ImageDataUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("image_data_url");
+
+                    b.Property<string>("NombreContacto")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("nombre_contacto");
+
+                    b.Property<Guid>("NotaMedicaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("nota_medica_id");
+
+                    b.Property<Guid>("PacienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("paciente_id");
+
+                    b.Property<Guid?>("SolicitadaPorTenantUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("solicitada_por_tenant_user_id");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Telefono")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("telefono");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_firma_paciente_requests");
+
+                    b.HasIndex("Token")
+                        .IsUnique()
+                        .HasDatabaseName("ix_firma_paciente_requests_token");
+
+                    b.HasIndex("TenantId", "PacienteId")
+                        .HasDatabaseName("ix_firma_paciente_requests_tenant_id_paciente_id");
+
+                    b.HasIndex("TenantId", "NotaMedicaId", "Status")
+                        .HasDatabaseName("ix_firma_paciente_requests_tenant_id_nota_medica_id_status");
+
+                    b.ToTable("firma_paciente_requests", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.FollowUpTask", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3149,6 +3237,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("nota_medica_id");
 
+                    b.Property<Guid>("PacienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("paciente_id");
+
                     b.Property<string>("RutaArchivo")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -3189,6 +3281,9 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "NotaMedicaId")
                         .HasDatabaseName("ix_nota_medica_documentos_tenant_id_nota_medica_id");
+
+                    b.HasIndex("TenantId", "PacienteId")
+                        .HasDatabaseName("ix_nota_medica_documentos_tenant_id_paciente_id");
 
                     b.ToTable("nota_medica_documentos", (string)null);
                 });
@@ -4893,6 +4988,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
+                    b.Property<string>("Slogan")
+                        .HasColumnType("text")
+                        .HasColumnName("slogan");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -5477,6 +5576,62 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tipos_profesional_tenant_id_nombre");
 
                     b.ToTable("tipos_profesional", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.TipologiaArchivo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("color");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("nombre");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tipologia_archivos");
+
+                    b.HasIndex("TenantId", "Activo")
+                        .HasDatabaseName("ix_tipologia_archivos_tenant_id_activo");
+
+                    b.HasIndex("TenantId", "Nombre")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tipologia_archivos_tenant_id_nombre");
+
+                    b.ToTable("tipologia_archivos", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.WhatsAppLine", b =>

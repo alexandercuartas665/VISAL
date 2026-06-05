@@ -1,0 +1,170 @@
+@page "/firma/{Token}"
+@attribute [AllowAnonymous]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@layout Visal.SuperAdmin.Components.Layout.EmptyLayout
+@using Microsoft.AspNetCore.Authorization
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject IFirmaRemotaService FirmaSvc
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Firmar - @(_req?.NombreTenant ?? "IPS Visal RT")</PageTitle>
+
+<div class="fp-shell">
+    <div class="fp-card">
+        <div class="fp-brand">
+            <div class="fp-brand-name">@(_req?.NombreTenant ?? "IPS Visal RT")</div>
+            <div class="fp-brand-sub">Confirmacion de atencion</div>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="fp-state">Cargando solicitud...</div>
+        }
+        else if (_req is null)
+        {
+            <div class="fp-state fp-state-err">
+                <div class="fp-state-h">Link invalido</div>
+                <p>Esta solicitud de firma no existe o el link es incorrecto.</p>
+            </div>
+        }
+        else if (_req.Status == FirmaRequestStatus.Completada)
+        {
+            <div class="fp-state fp-state-ok">
+                <div class="fp-state-ico">&#10003;</div>
+                <div class="fp-state-h">Firma registrada</div>
+                <p>Gracias <strong>@_req.NombrePaciente</strong>. Tu firma quedo guardada en el sistema de la IPS.</p>
+            </div>
+        }
+        else if (_req.Status == FirmaRequestStatus.Expirada)
+        {
+            <div class="fp-state fp-state-err">
+                <div class="fp-state-h">Link vencido</div>
+                <p>Este link expiro. Por favor pide al profesional que te envie uno nuevo.</p>
+            </div>
+        }
+        else if (_req.Status == FirmaRequestStatus.Cancelada)
+        {
+            <div class="fp-state fp-state-err">
+                <div class="fp-state-h">Solicitud cancelada</div>
+                <p>El profesional cancelo esta solicitud.</p>
+            </div>
+        }
+        else if (_enviado)
+        {
+            <div class="fp-state fp-state-ok">
+                <div class="fp-state-ico">&#10003;</div>
+                <div class="fp-state-h">Gracias!</div>
+                <p>Tu firma se envio correctamente. Ya puedes cerrar esta ventana.</p>
+            </div>
+        }
+        else
+        {
+            <div class="fp-msg">
+                <p>Hola <strong>@_req.NombrePaciente</strong>,</p>
+                <p>@(string.IsNullOrWhiteSpace(_req.NombreProfesional) ? "Tu profesional" : "El profesional " + _req.NombreProfesional) te solicita confirmar la atencion recibida hoy.</p>
+                <p>Por favor firma con el dedo en el recuadro y pulsa <strong>Confirmar firma</strong>.</p>
+            </div>
+            <canvas id="fp-canvas" class="fp-canvas"></canvas>
+            <div class="fp-actions">
+                <button class="fp-btn fp-btn-ghost" @onclick="LimpiarAsync" disabled="@_enviando">Borrar y volver a firmar</button>
+                <button class="fp-btn fp-btn-primary" @onclick="ConfirmarAsync" disabled="@_enviando">@(_enviando ? "Enviando..." : "Confirmar firma")</button>
+            </div>
+            @if (_error is not null)
+            {
+                <div class="fp-error">@_error</div>
+            }
+            <div class="fp-foot">
+                El link vence el @_req.ExpiresAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm").
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { background: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; }
+    .fp-shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .fp-card { width: 100%; max-width: 480px; background: white; border-radius: 14px; box-shadow: 0 8px 30px rgba(15,23,42,.12); padding: 22px 22px 18px; }
+    .fp-brand { text-align: center; padding-bottom: 14px; border-bottom: 1px solid #e2e8f0; margin-bottom: 18px; }
+    .fp-brand-name { font-weight: 800; font-size: 18px; color: #0b5b54; letter-spacing: .02em; }
+    .fp-brand-sub { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .14em; font-weight: 600; margin-top: 4px; }
+    .fp-msg p { font-size: 14px; line-height: 1.5; margin: 0 0 10px; color: #334155; }
+    .fp-canvas { width: 100%; height: 260px; background: #fff; border: 2px dashed #cbd5e1; border-radius: 10px; display: block; margin: 14px 0 12px; touch-action: none; }
+    .fp-actions { display: flex; gap: 8px; flex-direction: column; }
+    .fp-btn { font-size: 15px; font-weight: 700; padding: 12px 16px; border-radius: 10px; border: none; cursor: pointer; }
+    .fp-btn-primary { background: #128c7e; color: white; }
+    .fp-btn-primary:disabled { opacity: .6; }
+    .fp-btn-ghost { background: white; color: #475569; border: 1px solid #cbd5e1; }
+    .fp-btn-ghost:disabled { opacity: .6; }
+    .fp-foot { text-align: center; color: #94a3b8; font-size: 11px; margin-top: 14px; }
+    .fp-error { background: #fee2e2; color: #991b1b; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-top: 10px; text-align: center; }
+    .fp-state { text-align: center; padding: 24px 8px; }
+    .fp-state-h { font-weight: 800; font-size: 18px; color: #0f172a; margin-bottom: 8px; }
+    .fp-state p { color: #475569; font-size: 14px; }
+    .fp-state-ok .fp-state-h { color: #166534; }
+    .fp-state-err .fp-state-h { color: #991b1b; }
+    .fp-state-ico { font-size: 48px; color: #16a34a; margin-bottom: 8px; }
+</style>
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    private FirmaRequestPublicDto? _req;
+    private bool _loading = true;
+    private bool _enviando;
+    private bool _enviado;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _req = await FirmaSvc.ObtenerPorTokenPublicoAsync(Token);
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Inicializar el canvas de firma reusando el mismo JS que usa Notas Medicas.
+        if (firstRender && _req is { Status: FirmaRequestStatus.Pendiente } && !_enviado)
+        {
+            try { await JS.InvokeVoidAsync("visalFirma.init", "fp-canvas"); }
+            catch { }
+        }
+    }
+
+    private async Task LimpiarAsync()
+    {
+        try { await JS.InvokeVoidAsync("visalFirma.clear", "fp-canvas"); }
+        catch { }
+    }
+
+    private async Task ConfirmarAsync()
+    {
+        _error = null;
+        string dataUrl;
+        try { dataUrl = await JS.InvokeAsync<string>("visalFirma.getDataUrl", "fp-canvas"); }
+        catch (Exception ex) { _error = "No se pudo capturar la firma: " + ex.Message; return; }
+
+        if (string.IsNullOrWhiteSpace(dataUrl) || dataUrl.Length < 100)
+        {
+            _error = "Por favor dibuja la firma antes de confirmar.";
+            return;
+        }
+
+        _enviando = true;
+        try
+        {
+            var http = new HttpClient { BaseAddress = new Uri(Nav.BaseUri) };
+            var resp = await http.PostAsJsonAsync($"api/firma/{Token}/submit", new { dataUrl });
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = "No se pudo guardar la firma. Es posible que el link haya expirado.";
+                return;
+            }
+            _enviado = true;
+        }
+        catch (Exception ex) { _error = "Error de red: " + ex.Message; }
+        finally { _enviando = false; }
+    }
+}

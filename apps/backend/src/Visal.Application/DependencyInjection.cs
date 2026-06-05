@@ -41,6 +41,9 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IFollowUpTaskService, Tenancy.FollowUpTaskService>();
         services.AddScoped<Tenancy.IChatService, Tenancy.ChatService>();
         services.AddScoped<Tenancy.IMessageTemplateService, Tenancy.MessageTemplateService>();
+        services.AddScoped<Tenancy.IFirmaRemotaService, Tenancy.FirmaRemotaService>();
+        services.AddScoped<Tenancy.IFirmaResolverService, Tenancy.FirmaResolverService>();
+        services.AddScoped<Tenancy.ITipologiaArchivoService, Tenancy.TipologiaArchivoService>();
         services.AddScoped<Tenancy.IQuoteTemplateService, Tenancy.QuoteTemplateService>();
         services.AddScoped<Tenancy.ITemplateAssetService, Tenancy.TemplateAssetService>();
         services.AddScoped<Tenancy.IQuoteRenderService, Tenancy.QuoteRenderService>();

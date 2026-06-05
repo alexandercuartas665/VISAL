@@ -22,7 +22,11 @@ param(
     [switch]$DryRun,
     [string]$Only = "",
     [switch]$Reprocess,
-    [switch]$NoMove
+    [switch]$NoMove,
+    # Si se pasa, fuerza este valor en el campo "tipo" para todos los formatos
+    # de la corrida (en vez de usar el nombre de la subcarpeta). Ej:
+    # -ForceTipo "CONSENTIMIENTO"
+    [string]$ForceTipo = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -559,7 +563,11 @@ Write-Host "==> Inventario en $SourceDir" -ForegroundColor Cyan
 
 $files = Get-ChildItem -Path $SourceDir -Recurse -File |
     Where-Object {
-        ($NoMove -or ($_.FullName -notlike "$ProcessedDir*")) -and
+        # Excluir cualquier subcarpeta llamada PROCESADO (no solo la default),
+        # salvo que estemos en modo -NoMove explicito (reprocesar PROCESADO).
+        ($NoMove -or
+            ($_.FullName -notlike "$ProcessedDir*" -and
+             ($_.FullName -split '[\\/]') -notcontains "PROCESADO")) -and
         ($_.Extension -ieq ".docx" -or $_.Extension -ieq ".xlsx")
     } |
     Sort-Object FullName
@@ -616,9 +624,14 @@ foreach ($f in $files) {
         $textCount  = (@($blocks) | Where-Object { $_.type -eq 'text' }).Count
         Write-Host "    Bloques extraidos: $($blocks.Count) (campos=$fieldCount textos=$textCount)"
 
-        # Tipo segun subcarpeta (varchar(40) en BD)
-        $tipo = $rel.Split([char[]]@('\','/'))[0]
-        if (-not $tipo) { $tipo = "FORMATO" }
+        # Tipo: si se paso -ForceTipo, gana; sino se toma la subcarpeta.
+        # (varchar(40) en BD)
+        if ($ForceTipo) {
+            $tipo = $ForceTipo
+        } else {
+            $tipo = $rel.Split([char[]]@('\','/'))[0]
+            if (-not $tipo) { $tipo = "FORMATO" }
+        }
         if ($tipo.Length -gt 40) { $tipo = $tipo.Substring(0,40) }
 
         $schemaJson = Build-SchemaJson -Titulo $base -Blocks $blocks

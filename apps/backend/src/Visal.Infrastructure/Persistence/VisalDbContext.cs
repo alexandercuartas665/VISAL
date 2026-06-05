@@ -77,6 +77,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
+    public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
+    public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
@@ -710,6 +712,29 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.NotaMedica).WithMany().HasForeignKey(x => x.NotaMedicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.NotaMedicaId });
+            // Indice por paciente para que el tab "Documentos" de Admision liste rapido.
+            b.HasIndex(x => new { x.TenantId, x.PacienteId });
+        });
+
+        modelBuilder.Entity<FirmaPacienteRequest>(b =>
+        {
+            b.Property(x => x.Token).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Telefono).HasMaxLength(20).IsRequired();
+            b.Property(x => x.NombreContacto).HasMaxLength(200);
+            b.Property(x => x.ImageDataUrl).HasColumnType("text");
+            // Token globalmente unico (no por tenant): es la clave de la URL publica
+            // y por eso lo buscamos via IgnoreQueryFilters en la pagina anonima.
+            b.HasIndex(x => x.Token).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.NotaMedicaId, x.Status });
+            b.HasIndex(x => new { x.TenantId, x.PacienteId });
+        });
+
+        modelBuilder.Entity<TipologiaArchivo>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Color).HasMaxLength(20).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Nombre }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Activo });
         });
 
         modelBuilder.Entity<HistoriaClinica>(b =>

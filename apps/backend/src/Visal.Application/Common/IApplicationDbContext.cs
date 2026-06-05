@@ -65,6 +65,8 @@ public interface IApplicationDbContext
     DbSet<Cup> Cups { get; }
     DbSet<NotaMedica> NotasMedicas { get; }
     DbSet<NotaMedicaDocumento> NotaMedicaDocumentos { get; }
+    DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }
+    DbSet<TipologiaArchivo> TipologiaArchivos { get; }
     DbSet<Cie11Config> Cie11Configs { get; }
     DbSet<Pais> Paises { get; }
     DbSet<Departamento> Departamentos { get; }

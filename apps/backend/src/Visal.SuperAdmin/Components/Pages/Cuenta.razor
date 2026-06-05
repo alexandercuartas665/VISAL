@@ -353,6 +353,11 @@ else
                     <label class="form-label">Nombre para mostrar</label>
                     <input class="form-control" @bind="_pf.Name" />
                 </div>
+                <div class="field">
+                    <label class="form-label">Lema</label>
+                    <input class="form-control" @bind="_pf.Slogan" maxlength="60" placeholder="Ej: Salud Domiciliaria" />
+                    <div class="text-muted" style="font-size:11px;margin-top:4px;">Aparece bajo el nombre en el sidebar (max 60 caracteres). Si lo dejas vacio se usa el lema por defecto.</div>
+                </div>
                 <div class="field-row">
                     <div class="field">
                         <label class="form-label">Razon social</label>
@@ -699,6 +704,7 @@ else
         _profileError = null;
         _logoFile = null;
         _logoPreview = null;
+        _pf.Slogan = _tenant?.Slogan;
         _pf.Name = _tenant?.Name ?? string.Empty;
         _pf.LegalName = _tenant?.LegalName;
         _pf.TaxId = _tenant?.TaxId;
@@ -758,7 +764,7 @@ else
             }
 
             var actor = await ActorAsync();
-            var request = new UpdateTenantProfileRequest(_pf.Name, _pf.LegalName, _pf.TaxId, _pf.Country, _pf.Currency, logoUrl);
+            var request = new UpdateTenantProfileRequest(_pf.Name, _pf.LegalName, _pf.TaxId, _pf.Country, _pf.Currency, logoUrl, _pf.Slogan);
             var result = await TenantsSvc.UpdateProfileAsync(_tenantId, request, actor);
             if (result is null)
             {
@@ -976,5 +982,7 @@ else
         public string? TaxId { get; set; }
         public string? Country { get; set; }
         public string? Currency { get; set; }
+        /// <summary>Lema corto que aparece bajo el nombre en el sidebar. Editable por el admin del tenant.</summary>
+        public string? Slogan { get; set; }
     }
 }

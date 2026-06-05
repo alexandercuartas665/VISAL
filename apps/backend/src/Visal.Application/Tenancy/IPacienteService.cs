@@ -73,4 +73,8 @@ public interface IPacienteService
     Task<PacienteDetailDto?> GetAsync(Guid id, CancellationToken ct = default);
     Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Actualiza solo el telefono del paciente (rapido desde el chat WhatsApp).
+    /// Devuelve null si el paciente no existe, o el telefono ya normalizado a digitos.</summary>
+    Task<string?> UpdateTelefonoAsync(Guid pacienteId, string telefono, Guid actor, CancellationToken ct = default);
 }

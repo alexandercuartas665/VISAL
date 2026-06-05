@@ -167,6 +167,20 @@ public sealed class PacienteService : IPacienteService
         return true;
     }
 
+    public async Task<string?> UpdateTelefonoAsync(Guid pacienteId, string telefono, Guid actor, CancellationToken ct = default)
+    {
+        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
+        if (p is null) { return null; }
+        // Normalizamos a solo digitos (descartamos +, espacios, guiones). El sistema
+        // siempre guarda el telefono como cadena de digitos pura para que el chat lo
+        // pueda usar como ContactPhone de Evolution sin transformaciones extra.
+        var digits = new string((telefono ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (digits.Length == 0) { return null; }
+        p.Telefono = digits;
+        await _db.SaveChangesAsync(ct);
+        return digits;
+    }
+
     private static int? CalcularEdad(DateOnly? fechaNacimiento)
     {
         if (fechaNacimiento is not DateOnly fn) { return null; }

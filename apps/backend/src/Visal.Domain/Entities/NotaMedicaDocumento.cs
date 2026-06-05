@@ -12,6 +12,11 @@ public class NotaMedicaDocumento : TenantEntity
     public Guid NotaMedicaId { get; set; }
     public NotaMedica? NotaMedica { get; set; }
 
+    /// <summary>Paciente al que pertenece este documento. Se copia desde la nota al adjuntar
+    /// para que el modulo de Admision pueda listar todos los documentos del paciente sin
+    /// tener que ir nota por nota.</summary>
+    public Guid PacienteId { get; set; }
+
     public string NombreOriginal { get; set; } = "";
 
     /// <summary>Ruta relativa servida por wwwroot (ej. /uploads/notas/{tid}/abc.pdf).</summary>

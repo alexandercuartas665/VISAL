@@ -1,8 +1,10 @@
 @using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
 @using Visal.Application.Tenancy
 @using Visal.SuperAdmin.Components.Forms
 @inject IDocumentoHcService DocSvc
 @inject IFormDefinitionService FormsSvc
+@inject IFirmaResolverService FirmaResolverSvc
 @inject IJSRuntime JS
 
 @*
@@ -197,6 +199,11 @@ else
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
 
+    /// <summary>Estado de autenticacion del usuario logueado. Lo usamos para
+    /// resolver la firma del profesional al iniciar un documento (firma_url del
+    /// profesional vinculado al tenant_user).</summary>
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private string _ultimoCargado = "";
     private List<DocumentoHcItemDto> _documentos = new();
     private List<DocumentoHcFormatoDto> _formatos = new();
@@ -277,6 +284,40 @@ else
                     var rutas = PrefillRouteSet.FromJson(detalleFormato.PrefillRoutesJson);
                     var valores = new Dictionary<string, string?>();
                     PacientePrefillHelper.Aplicar(valores, Paciente, schema, rutas);
+
+                    // Resolver firmas (rutas firmaPaciente / firmaProfesional)
+                    // y aplicarlas si el formato las tiene configuradas.
+                    // Errores aqui no deben tumbar el inicio del documento.
+                    try
+                    {
+                        var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(Paciente.Id);
+                        string? firmaProf = null;
+                        if (AuthState is not null)
+                        {
+                            var state = await AuthState;
+                            // El login setea el claim "profesional_id" cuando el
+                            // usuario esta vinculado a un profesional. Lo usamos
+                            // como ruta directa; si no existe, caemos al lookup
+                            // por tenant_user_id (compat con sesiones distintas).
+                            var profClaim = state.User.FindFirst("profesional_id")?.Value;
+                            if (Guid.TryParse(profClaim, out var pid) && pid != Guid.Empty)
+                            {
+                                firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+                            }
+                            else
+                            {
+                                var sub = state.User.FindFirst("tenant_user_id")?.Value
+                                    ?? state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                                if (Guid.TryParse(sub, out var tuid))
+                                {
+                                    firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalAsync(tuid);
+                                }
+                            }
+                        }
+                        FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+                    }
+                    catch { /* firmas opcionales: el documento se abre vacio en esos campos */ }
+
                     valoresJson = JsonSerializer.Serialize(valores);
                 }
             }

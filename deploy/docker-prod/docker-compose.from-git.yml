@@ -48,7 +48,7 @@ services:
     ports:
       # Publica SOLO al loopback del server (no expuesto a internet).
       # Tu reverse proxy global hace TLS y forwardea a este puerto.
-      - "127.0.0.1:${VISAL_PORT:-5380}:8080"
+      - "${VISAL_PORT:-5380}:8080"
     depends_on:
       postgres:
         condition: service_healthy

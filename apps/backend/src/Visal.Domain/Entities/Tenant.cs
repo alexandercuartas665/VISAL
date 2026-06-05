@@ -14,6 +14,14 @@ public class Tenant : BaseEntity
 
     /// <summary>Ruta del logo de la agencia (subido por el cliente), p.ej. /uploads/tenant-{id}.png.</summary>
     public string? LogoUrl { get; set; }
+
+    /// <summary>
+    /// Lema corto de la agencia (p.ej. "Salud Domiciliaria"). Lo edita el admin del tenant
+    /// desde Mi Cuenta y aparece bajo el nombre en el sidebar. Si es nulo el sidebar muestra
+    /// el lema por defecto de la plataforma.
+    /// </summary>
+    public string? Slogan { get; set; }
+
     public TenantStatus Status { get; set; } = TenantStatus.Trial;
     public TenantKind Kind { get; set; } = TenantKind.Standard;
 }

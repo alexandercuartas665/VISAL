@@ -55,6 +55,9 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<Visal.Application.Tenancy.IChatBroadcaster, Visal.SuperAdmin.RealTime.SignalRChatBroadcaster>();
 // Tunel de desarrollo real (cloudflared); reemplaza el no-op de Application.
 builder.Services.AddSingleton<Visal.Application.Tenancy.IDevTunnel, Visal.SuperAdmin.RealTime.CloudflaredTunnel>();
+// Storage de archivos servibles (wwwroot/uploads) para que servicios de Application
+// puedan persistir binarios (ej. firmas remotas) sin acoplarse a IWebHostEnvironment.
+builder.Services.AddSingleton<Visal.Application.Common.IUploadStorage, Visal.SuperAdmin.RealTime.WwwRootUploadStorage>();
 
 var app = builder.Build();
 
@@ -195,6 +198,13 @@ app.MapPost("/auth/login", async (
         claims.Add(new Claim("tenant_id", tenantId.ToString()));
         claims.Add(new Claim("tenant_role", rol.ToString()));
         claims.Add(new Claim("global_access", "1"));
+        // Si el TenantUser de la membership elegida tiene un Profesional
+        // vinculado, exponerlo en el claim. Lo usan los modulos de HC para
+        // resolver la firma del profesional logueado (FirmaResolverService).
+        if (memberships.Count > 0 && memberships[0].ProfesionalId is Guid pidGlob)
+        {
+            claims.Add(new Claim("profesional_id", pidGlob.ToString()));
+        }
         var idGlobal = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idGlobal));
         return Results.Redirect("/mi-cuenta");
@@ -617,4 +627,21 @@ app.MapPost("/webhooks/evolution", async (
         : Results.Accepted();
 }).AllowAnonymous().DisableAntiforgery();
 
+// Endpoint publico que recibe la firma capturada en el celular del paciente.
+// La pagina /firma/{token} la sirve la propia app Blazor (componente FirmaPacienteRemota).
+// La submission usa este POST API porque persistir desde el Blazor anonimo sin tenant
+// scope era enredado: con un POST plano es trivial.
+app.MapPost("/api/firma/{token}/submit", async (
+    string token,
+    SubmitFirmaPayload payload,
+    Visal.Application.Tenancy.IFirmaRemotaService svc,
+    CancellationToken ct) =>
+{
+    var ok = await svc.GuardarFirmaPorTokenAsync(token, payload?.DataUrl ?? string.Empty, ct);
+    return ok ? Results.Ok(new { ok = true }) : Results.BadRequest(new { ok = false, error = "Solicitud invalida, ya cerrada o expirada." });
+}).AllowAnonymous().DisableAntiforgery();
+
 app.Run();
+
+// Payload del POST publico de firma (queda al fondo del file porque Program.cs es top-level).
+record SubmitFirmaPayload(string DataUrl);

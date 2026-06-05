@@ -1,19 +1,29 @@
 @using Visal.Application.Tenancy
 @using Visal.Domain.Enums
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.Components.Forms
 @inject IChatService Chat
 @inject IWhatsAppLineService LineasSvc
+@inject IMessageTemplateService TplSvc
+@inject IPacienteService PacientesSvc
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
+@inject NavigationManager Nav
+@implements IAsyncDisposable
 
 @*
    Panel WhatsApp embebible. Se usa hoy en el modal de Historias Clinicas, manana
    en Notas Medicas y Paciente. La idea es portable: recibe un telefono + nombre
    y maneja todo el thread internamente.
 
-   Reglas de diseño:
+   Reglas de diseno:
    - Si no hay telefono: mensaje + boton "Asignar" (event callback que el padre maneja).
    - Si hay telefono: carga/crea la conversacion y lista los mensajes.
-   - Selector de linea WhatsApp si hay varias conectadas.
-   - Boton « para colapsar a una franja estrecha vertical.
+   - Chip de linea siempre visible cuando hay >=1 conectada (selector si hay >1).
+   - Plantillas pregrabadas (chips + tabs + modal gestor + token replacement).
+   - Adjuntos (clip + submenu + drop zone + render media).
+   - Date divider entre dias en el thread.
+   - Boton << para colapsar a una franja estrecha vertical.
    - Tema visual estilo WhatsApp (burbujas in/out, fondo claro).
 *@
 
@@ -31,12 +41,12 @@
     }
     else
     {
-        <div class="wac-head">
-            <div class="wac-head-l">
+        <div class="wac-head" title="@(PacienteId is null ? null : "Click para editar el telefono")">
+            <div class="wac-head-l @(PacienteId is null ? "" : "wac-head-clickable")" @onclick="OpenEditTelefono">
                 <span class="wac-head-ico">&#128172;</span>
                 <div>
                     <div class="wac-head-t">WhatsApp</div>
-                    <div class="wac-head-s">@(string.IsNullOrWhiteSpace(NombreContacto) ? "Sin contacto" : NombreContacto) · @(string.IsNullOrWhiteSpace(_telefonoDigits) ? "(sin numero)" : "+" + _telefonoDigits)</div>
+                    <div class="wac-head-s">@(string.IsNullOrWhiteSpace(NombreContacto) ? "Sin contacto" : NombreContacto) &middot; @(string.IsNullOrWhiteSpace(_telefonoDigits) ? "(sin numero)" : "+" + _telefonoDigits)</div>
                 </div>
             </div>
             @if (Colapsable)
@@ -51,7 +61,11 @@
                 <div class="wac-empty-ico">&#128241;</div>
                 <div class="wac-empty-t">Paciente sin telefono</div>
                 <div class="wac-empty-d">Asigna un numero al paciente para empezar a conversar por WhatsApp.</div>
-                @if (OnAsignarTelefono.HasDelegate)
+                @if (PacienteId is not null)
+                {
+                    <button class="wac-empty-btn" @onclick="OpenEditTelefono">Asignar telefono</button>
+                }
+                else if (OnAsignarTelefono.HasDelegate)
                 {
                     <button class="wac-empty-btn" @onclick="() => OnAsignarTelefono.InvokeAsync()">Asignar telefono</button>
                 }
@@ -67,46 +81,148 @@
         }
         else
         {
-            @if (_lineasConectadas.Count > 1)
-            {
-                <div class="wac-line-sel">
-                    <label>Linea</label>
-                    <select class="form-select form-select-sm" @bind="_lineaSelIdStr">
-                        @foreach (var l in _lineasConectadas)
-                        {
-                            <option value="@l.Id">+@(l.PhoneNumber ?? l.InstanceName)</option>
-                        }
-                    </select>
-                </div>
-            }
-
-            <div class="wac-thread" @ref="_threadRef">
-                @if (_cargando)
+            @* Chip de linea siempre visible. Si hay >1 se muestra como selector real. *@
+            <div class="wac-line-bar">
+                <span class="wac-line-dot"></span>
+                <span class="wac-line-label">Linea</span>
+                @if (_lineasConectadas.Count == 1)
                 {
-                    <div class="wac-loading">Cargando mensajes...</div>
-                }
-                else if (_mensajes.Count == 0)
-                {
-                    <div class="wac-thread-empty">Sin mensajes. Escribe el primero abajo.</div>
+                    var l = _lineasConectadas[0];
+                    <span class="wac-line-name" title="@l.InstanceName">@l.InstanceName @(string.IsNullOrWhiteSpace(l.PhoneNumber) ? "" : "(+" + l.PhoneNumber + ")")</span>
                 }
                 else
                 {
-                    @foreach (var m in _mensajes)
-                    {
-                        var entrada = m.Direction == MessageDirection.Inbound;
-                        <div class="wac-msg @(entrada ? "wac-in" : "wac-out")">
-                            <div class="wac-msg-body">@m.Body</div>
-                            <div class="wac-msg-meta">
-                                @if (!entrada && !string.IsNullOrWhiteSpace(m.SentByName)) { <span>@m.SentByName · </span> }
-                                <span>@m.SentAt.ToLocalTime().ToString("dd/MM HH:mm")</span>
-                            </div>
-                        </div>
-                    }
+                    <select class="wac-line-select" @bind="_lineaSelIdStr" title="Linea WhatsApp a usar para enviar">
+                        @foreach (var l in _lineasConectadas)
+                        {
+                            <option value="@l.Id">@l.InstanceName @(string.IsNullOrWhiteSpace(l.PhoneNumber) ? "" : "(+" + l.PhoneNumber + ")")</option>
+                        }
+                    </select>
                 }
             </div>
 
+            <div class="wac-bodywrap @(_dragOver ? "wac-dragover" : "")"
+                 @ondragenter:preventDefault="true" @ondragover:preventDefault="true"
+                 @ondragenter="OnDragEnter" @ondragleave="OnDragLeave" @ondrop="OnDrop">
+                <div class="wac-dropmask">Suelta el archivo para adjuntarlo</div>
+                <div class="wac-thread" @ref="_threadRef">
+                    @if (_cargando)
+                    {
+                        <div class="wac-thread-empty">Cargando mensajes...</div>
+                    }
+                    else if (_mensajes.Count == 0)
+                    {
+                        <div class="wac-thread-empty">Sin mensajes. Escribe el primero abajo.</div>
+                    }
+                    else
+                    {
+                        DateTime? lastDay = null;
+                        @foreach (var m in _mensajes)
+                        {
+                            var day = m.SentAt.LocalDateTime.Date;
+                            if (lastDay != day)
+                            {
+                                lastDay = day;
+                                <div class="wac-date-divider"><span>@FormatDayHeader(day)</span></div>
+                            }
+                            var entrada = m.Direction == MessageDirection.Inbound;
+                            <div class="wac-msg @(entrada ? "wac-in" : "wac-out")">
+                                @switch (m.MediaType)
+                                {
+                                    case MessageMediaType.Image:
+                                        <img class="wac-media-img" src="@m.MediaUrl" alt="imagen" loading="lazy" />
+                                        break;
+                                    case MessageMediaType.Video:
+                                        <video class="wac-media-img" src="@m.MediaUrl" controls></video>
+                                        break;
+                                    case MessageMediaType.Audio:
+                                        <audio src="@m.MediaUrl" controls class="wac-media-audio"></audio>
+                                        break;
+                                    case MessageMediaType.Document:
+                                        <a class="wac-media-doc" href="@m.MediaUrl" target="_blank">&#128206; Documento adjunto</a>
+                                        break;
+                                    case MessageMediaType.Location:
+                                        <a class="wac-media-doc" href="@MapsLink(m.MediaUrl)" target="_blank">&#128205; Ver ubicacion en el mapa</a>
+                                        break;
+                                }
+                                @if (!string.IsNullOrWhiteSpace(m.Body))
+                                {
+                                    <div class="wac-msg-body">@m.Body</div>
+                                }
+                                <div class="wac-msg-meta">
+                                    @if (!entrada && !string.IsNullOrWhiteSpace(m.SentByName)) { <span>@m.SentByName &middot; </span> }
+                                    <span>@m.SentAt.ToLocalTime().ToString("HH:mm")</span>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            @* Plantillas pregrabadas: tabs + chips + boton + Gestionar. *@
+            <div class="wac-quick">
+                <div class="wac-quick-head">
+                    <span>Mensajes pregrabados</span>
+                    <div class="wac-quick-tabs">
+                        @foreach (var cat in QrCategories)
+                        {
+                            <button class="wac-qr-tab @(cat.Key == _qrCategory ? "active" : "")" @onclick="() => _qrCategory = cat.Key">@cat.Label</button>
+                        }
+                        <button class="wac-qr-tab wac-qr-tab-manage" @onclick="OpenTemplateManager" title="Crear/editar pregrabados">+ Gestionar</button>
+                    </div>
+                </div>
+                <div class="wac-quick-list">
+                    @foreach (var tpl in CurrentTemplates())
+                    {
+                        var filled = FillTemplate(tpl.Body);
+                        <button class="wac-chip" title="@filled" @onclick="() => UseTemplateAsync(tpl)">
+                            @if (tpl.MediaType != MessageMediaType.None) { <span>@MediaIcon(tpl.MediaType) </span> }
+                            @(string.IsNullOrWhiteSpace(filled) ? tpl.MediaType.ToString() : filled)
+                        </button>
+                    }
+                    @if (CurrentTemplates().Count == 0)
+                    {
+                        <span class="wac-quick-hint">Sin pregrabados en esta categoria. Usa "+ Gestionar".</span>
+                    }
+                </div>
+            </div>
+
             <div class="wac-input">
-                <textarea class="form-control form-control-sm wac-input-text"
+                <div class="wac-attach">
+                    <button class="wac-attach-btn" title="Adjuntar" @onclick="() => _attachOpen = !_attachOpen" disabled="@_enviando">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                    </button>
+                    @if (_attachOpen)
+                    {
+                        <div class="wac-attach-menu" @onmouseleave="() => _attachOpen = false">
+                            <label class="wac-attach-item">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+                                Imagen
+                                <InputFile OnChange="@(e => OnAttachAsync(e, MessageMediaType.Image))" accept="image/*" style="display:none;" />
+                            </label>
+                            <label class="wac-attach-item">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+                                Video
+                                <InputFile OnChange="@(e => OnAttachAsync(e, MessageMediaType.Video))" accept="video/*" style="display:none;" />
+                            </label>
+                            <label class="wac-attach-item">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                                Audio
+                                <InputFile OnChange="@(e => OnAttachAsync(e, MessageMediaType.Audio))" accept="audio/*" style="display:none;" />
+                            </label>
+                            <label class="wac-attach-item">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                                Documento
+                                <InputFile OnChange="@(e => OnAttachAsync(e, MessageMediaType.Document))" accept="*/*" style="display:none;" />
+                            </label>
+                            <button class="wac-attach-item" @onclick="OpenLocation" type="button">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                                Ubicacion
+                            </button>
+                        </div>
+                    }
+                </div>
+                <textarea class="wac-input-text"
                           rows="2"
                           placeholder="Escribe un mensaje..."
                           @bind="_borrador"
@@ -115,7 +231,7 @@
                 <button class="wac-send" @onclick="EnviarAsync"
                         disabled="@(_enviando || string.IsNullOrWhiteSpace(_borrador))"
                         title="Enviar (Ctrl+Enter)">
-                    @(_enviando ? "..." : "Enviar")
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
             </div>
 
@@ -124,8 +240,136 @@
     }
 </div>
 
+@* ===== Modal: gestor de pregrabados ===== *@
+@if (_tplManagerOpen)
+{
+    <div class="wac-modal-ov" @onclick="() => _tplManagerOpen = false">
+        <div class="wac-modal" @onclick:stopPropagation="true">
+            <div class="wac-modal-head">
+                <h3>Mensajes pregrabados</h3>
+                <button class="wac-modal-close" @onclick="() => _tplManagerOpen = false">&times;</button>
+            </div>
+            <div class="wac-modal-body">
+                <div class="wac-field">
+                    <label>Categoria</label>
+                    <input class="form-control" list="wac-tpl-cats" @bind="_tplFormCategory" placeholder="Elige una o escribe una nueva" autocomplete="off" />
+                    <datalist id="wac-tpl-cats">
+                        @foreach (var cat in QrCategories)
+                        {
+                            <option value="@cat.Key">@cat.Label</option>
+                        }
+                    </datalist>
+                </div>
+                <div class="wac-field">
+                    <label>Mensaje</label>
+                    <textarea class="form-control" rows="3" @bind="_tplFormBody"
+                              placeholder="Tip: usa {paciente}, {cedula} o {fecha} para reemplazar con datos del paciente activo."></textarea>
+                </div>
+                @if (_tplFormError is not null)
+                {
+                    <div class="wac-error">@_tplFormError</div>
+                }
+                <div class="wac-modal-actions">
+                    <button class="btn btn-primary" @onclick="SaveTemplateAsync" disabled="@_tplBusy">@(_tplEditId is null ? "+ Agregar" : "Guardar cambios")</button>
+                    @if (_tplEditId is not null)
+                    {
+                        <button class="btn btn-outline-secondary" @onclick="ResetTemplateForm">Cancelar edicion</button>
+                    }
+                </div>
+
+                <hr style="margin:14px 0;" />
+
+                @foreach (var cat in QrCategories)
+                {
+                    var items = _templates.Where(t => t.Category == cat.Key).OrderBy(t => t.SortOrder).ToList();
+                    if (items.Count == 0) { continue; }
+                    <div class="wac-tpl-cat">
+                        <div class="wac-tpl-cat-h">@cat.Label</div>
+                        @foreach (var t in items)
+                        {
+                            <div class="wac-tpl-row">
+                                <div class="wac-tpl-body">@t.Body</div>
+                                <div class="wac-tpl-actions">
+                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => EditTemplate(t)">Editar</button>
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteTemplateAsync(t.Id)" disabled="@_tplBusy">Eliminar</button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ===== Modal: actualizar telefono del paciente =====
+   Usamos <dialog> con showModal() para que el browser lo mande al "top layer"
+   y supere CUALQUIER stacking context (ej. el modal de HC que tiene z-index 1001
+   y crearia un nuevo contexto que limitaria nuestros overlays normales). *@
+<dialog id="wac-tel-dialog" class="wac-dialog" @onclose="OnTelDialogClosed">
+    <div class="wac-modal-head">
+        <h3>Telefono del paciente</h3>
+        <button class="wac-modal-close" @onclick="CloseTelefonoAsync" type="button">&times;</button>
+    </div>
+    <div class="wac-modal-body">
+        <div class="wac-field">
+            <label>Pais / Codigo</label>
+            <select class="form-control" @bind="_telCodigoPais">
+                @foreach (var p in PaisesCodigos)
+                {
+                    <option value="@p.Codigo">@p.Nombre (+@p.Codigo)</option>
+                }
+            </select>
+        </div>
+        <div class="wac-field">
+            <label>Numero local (sin codigo de pais)</label>
+            <input class="form-control wac-tel-input" @bind="_telNumero" placeholder="Ej: 3001234567" inputmode="numeric" maxlength="15" />
+            <div class="wac-tel-preview">Se guardara: <strong>+@_telCodigoPais @(_telNumero ?? "")</strong></div>
+        </div>
+        @if (_telError is not null) { <div class="wac-error">@_telError</div> }
+        <div class="wac-modal-actions">
+            <button class="btn btn-primary" @onclick="SaveTelefonoAsync" disabled="@_telBusy" type="button">@(_telBusy ? "Guardando..." : "Guardar")</button>
+            <button class="btn btn-outline-secondary" @onclick="CloseTelefonoAsync" disabled="@_telBusy" type="button">Cancelar</button>
+        </div>
+    </div>
+</dialog>
+
+@* ===== Modal: enviar ubicacion ===== *@
+@if (_locationOpen)
+{
+    <div class="wac-modal-ov" @onclick="() => _locationOpen = false">
+        <div class="wac-modal wac-modal-sm" @onclick:stopPropagation="true">
+            <div class="wac-modal-head">
+                <h3>Enviar ubicacion</h3>
+                <button class="wac-modal-close" @onclick="() => _locationOpen = false">&times;</button>
+            </div>
+            <div class="wac-modal-body">
+                <div class="wac-field">
+                    <label>Nombre (opcional)</label>
+                    <input class="form-control" @bind="_locName" placeholder="Ej: Sede principal Visal" />
+                </div>
+                <div class="wac-field-row">
+                    <div class="wac-field">
+                        <label>Latitud</label>
+                        <input class="form-control" @bind="_locLat" placeholder="4.6097" />
+                    </div>
+                    <div class="wac-field">
+                        <label>Longitud</label>
+                        <input class="form-control" @bind="_locLng" placeholder="-74.0817" />
+                    </div>
+                </div>
+                @if (_locError is not null) { <div class="wac-error">@_locError</div> }
+                <div class="wac-modal-actions">
+                    <button class="btn btn-primary" @onclick="SendLocationAsync" disabled="@_enviando">Enviar</button>
+                    <button class="btn btn-outline-secondary" @onclick="() => _locationOpen = false">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
-    /* Tema WhatsApp simple. Verde header, fondo claro, burbujas redondeadas. */
+    /* Tema WhatsApp sobrio: verde header, fondo claro, burbujas redondeadas. */
     .wac { display: flex; flex-direction: column; background: #efeae2; border-left: 1px solid #d4d4d4; border-right: 1px solid #d4d4d4; height: 100%; min-height: 360px; overflow: hidden; }
     .wac-colapsado { background: transparent; border: none; align-items: center; padding-top: 12px; }
 
@@ -136,18 +380,36 @@
     .wac-expand-badge { background: #25d366; color: white; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 999px; }
 
     .wac-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #128c7e; color: white; }
-    .wac-head-l { display: flex; align-items: center; gap: 8px; }
+    .wac-head-l { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .wac-head-clickable { cursor: pointer; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; transition: background .15s; }
+    .wac-head-clickable:hover { background: rgba(255,255,255,.15); }
     .wac-head-ico { font-size: 18px; }
     .wac-head-t { font-weight: 700; font-size: 12px; }
     .wac-head-s { font-size: 10px; opacity: .9; }
     .wac-head-toggle { background: rgba(255,255,255,.15); border: none; color: white; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 14px; }
     .wac-head-toggle:hover { background: rgba(255,255,255,.25); }
+    .wac-tel-input { font-family: ui-monospace, "Cascadia Code", monospace; letter-spacing: .04em; font-size: 14px; }
+    .wac-tel-preview { font-size: 11px; color: #64748b; margin-top: 4px; }
+    .wac-tel-preview strong { color: #128c7e; font-family: ui-monospace, "Cascadia Code", monospace; }
 
-    .wac-line-sel { padding: 6px 10px; background: #f0f0f0; border-bottom: 1px solid #d4d4d4; display: flex; align-items: center; gap: 8px; }
-    .wac-line-sel label { font-size: 10px; color: #64748b; font-weight: 600; margin: 0; }
+    /* Chip de linea conectada (siempre visible cuando hay >=1 linea). */
+    .wac-line-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f0f0f0; border-bottom: 1px solid #d4d4d4; font-size: 11px; }
+    .wac-line-dot { width: 8px; height: 8px; border-radius: 50%; background: #25d366; box-shadow: 0 0 0 2px rgba(37,211,102,.2); flex-shrink: 0; }
+    .wac-line-label { color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 9.5px; }
+    .wac-line-name { color: #0f172a; font-weight: 700; font-size: 11px; }
+    .wac-line-select { border: 1px solid #cbd5e1; background: white; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 600; color: #0f172a; cursor: pointer; }
+
+    /* Thread + drop zone. */
+    .wac-bodywrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .wac-dropmask { display: none; position: absolute; inset: 8px; z-index: 5; border: 2px dashed #128c7e; border-radius: 12px; background: rgba(18,140,126,.08); color: #128c7e; font-weight: 700; align-items: center; justify-content: center; text-align: center; pointer-events: none; font-size: 13px; }
+    .wac-bodywrap.wac-dragover .wac-dropmask { display: flex; }
 
     .wac-thread { flex: 1; overflow-y: auto; padding: 10px 8px; background: #efeae2; display: flex; flex-direction: column; gap: 4px; }
-    .wac-loading, .wac-thread-empty { text-align: center; color: #64748b; font-size: 11px; font-style: italic; margin: auto; }
+    .wac-thread-empty { text-align: center; color: #64748b; font-size: 11px; font-style: italic; margin: auto; }
+
+    .wac-date-divider { text-align: center; font-size: 9.5px; color: #64748b; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; margin: 6px 0 4px; display: flex; align-items: center; gap: 10px; }
+    .wac-date-divider::before, .wac-date-divider::after { content: ""; flex: 1; height: 1px; background: #d4d4d4; }
+    .wac-date-divider span { background: rgba(255,255,255,.6); padding: 2px 10px; border-radius: 999px; }
 
     .wac-msg { max-width: 80%; padding: 6px 9px; border-radius: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); font-size: 12px; word-wrap: break-word; }
     .wac-msg-body { white-space: pre-wrap; color: #0f172a; }
@@ -155,11 +417,41 @@
     .wac-in { background: #ffffff; align-self: flex-start; border-top-left-radius: 0; }
     .wac-out { background: #dcf8c6; align-self: flex-end; border-top-right-radius: 0; }
 
-    .wac-input { display: flex; gap: 6px; padding: 8px; background: #f0f0f0; border-top: 1px solid #d4d4d4; }
-    .wac-input-text { resize: none; font-size: 12px; }
-    .wac-send { background: #25d366; border: none; color: white; padding: 0 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 700; }
+    .wac-media-img { max-width: 220px; max-height: 220px; border-radius: 6px; display: block; margin-bottom: 4px; }
+    .wac-media-audio { max-width: 220px; display: block; margin-bottom: 4px; }
+    .wac-media-doc { display: inline-block; font-size: 12px; text-decoration: underline; margin-bottom: 4px; color: #0b5b54; }
+
+    /* Plantillas pregrabadas. */
+    .wac-quick { padding: 6px 8px; background: #f8fafc; border-top: 1px solid #d4d4d4; }
+    .wac-quick-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
+    .wac-quick-head > span { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: #64748b; }
+    .wac-quick-tabs { display: flex; gap: 3px; flex-wrap: wrap; }
+    .wac-qr-tab { font-size: 10px; padding: 2px 8px; border-radius: 999px; color: #64748b; font-weight: 700; border: none; background: none; cursor: pointer; }
+    .wac-qr-tab:hover { color: #0f172a; }
+    .wac-qr-tab.active { background: #128c7e; color: #fff; }
+    .wac-qr-tab-manage { border: 1px solid #cbd5e1; }
+    .wac-quick-list { display: flex; gap: 4px; flex-wrap: wrap; max-height: 64px; overflow-y: auto; }
+    .wac-chip { font-size: 10.5px; padding: 4px 8px; border-radius: 999px; border: 1px solid #cbd5e1; background: white; color: #0f172a; cursor: pointer; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wac-chip:hover { border-color: #25d366; color: #128c7e; background: #f0fff4; }
+    .wac-quick-hint { font-size: 10px; color: #94a3b8; font-style: italic; padding: 4px 0; }
+
+    /* Input + attach. */
+    .wac-input { display: flex; gap: 6px; padding: 8px; background: #f0f0f0; border-top: 1px solid #d4d4d4; align-items: flex-end; }
+    .wac-attach { position: relative; flex-shrink: 0; }
+    .wac-attach-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid #cbd5e1; background: white; color: #64748b; display: grid; place-items: center; cursor: pointer; }
+    .wac-attach-btn:hover { color: #128c7e; border-color: #128c7e; }
+    .wac-attach-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .wac-attach-btn svg { width: 16px; height: 16px; }
+    .wac-attach-menu { position: absolute; bottom: 40px; left: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; display: flex; flex-direction: column; gap: 2px; z-index: 20; min-width: 150px; }
+    .wac-attach-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; font-size: 12px; color: #0f172a; background: none; border: none; cursor: pointer; text-align: left; }
+    .wac-attach-item:hover { background: #f0fff4; color: #128c7e; }
+    .wac-attach-item svg { width: 14px; height: 14px; color: inherit; }
+    .wac-input-text { resize: none; font-size: 12px; flex: 1; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; }
+    .wac-input-text:focus { outline: none; border-color: #128c7e; }
+    .wac-send { width: 34px; height: 34px; border-radius: 50%; background: #25d366; border: none; color: white; cursor: pointer; display: grid; place-items: center; flex-shrink: 0; }
     .wac-send:hover:not(:disabled) { background: #128c7e; }
     .wac-send:disabled { opacity: .55; cursor: not-allowed; }
+    .wac-send svg { width: 14px; height: 14px; }
 
     .wac-error { padding: 6px 10px; background: #fee2e2; color: #991b1b; font-size: 11px; border-top: 1px solid #fecaca; }
 
@@ -169,6 +461,42 @@
     .wac-empty-d { color: #64748b; font-size: 11px; max-width: 220px; }
     .wac-empty-btn { background: #25d366; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; margin-top: 6px; }
     .wac-empty-btn:hover { background: #128c7e; }
+
+    /* Modal gestor de plantillas + ubicacion. z-index alto porque vivimos
+       dentro del modal de Historia Clinica (z-index 1001) y necesitamos quedar arriba
+       del menu lateral y de cualquier dropdown interno. */
+    .wac-modal-ov { position: fixed !important; inset: 0 !important; background: rgba(0,0,0,.55); z-index: 99999 !important; display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+    /* Dialog del telefono: usa el elemento HTML dialog con showModal() que va al TOP
+       LAYER del browser. Esto bypasea cualquier stacking context (clave para que el
+       modal HC z-index 1001 no nos confine). El backdrop nativo se estila via ::backdrop. */
+    dialog.wac-dialog {
+        border: none; border-radius: 10px; padding: 0;
+        width: 100%; max-width: 420px; max-height: 90vh;
+        background: white; box-shadow: 0 20px 60px rgba(0,0,0,.3);
+        display: flex; flex-direction: column; overflow: hidden;
+    }
+    dialog.wac-dialog:not([open]) { display: none; }
+    dialog.wac-dialog::backdrop { background: rgba(0,0,0,.55); }
+    dialog.wac-dialog .wac-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+    dialog.wac-dialog .wac-modal-head h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    dialog.wac-dialog .wac-modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; line-height: 1; }
+    dialog.wac-dialog .wac-modal-body { padding: 16px 18px; overflow-y: auto; }
+    .wac-modal { background: white; border-radius: 10px; width: 100%; max-width: 620px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+    .wac-modal-sm { max-width: 420px; }
+    .wac-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .wac-modal-head h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .wac-modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; line-height: 1; }
+    .wac-modal-body { padding: 16px 18px; overflow-y: auto; }
+    .wac-modal-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .wac-field { margin-bottom: 12px; }
+    .wac-field label { display: block; font-size: 11px; font-weight: 700; color: #475569; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+    .wac-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .wac-tpl-cat { margin-bottom: 12px; }
+    .wac-tpl-cat-h { font-size: 11px; font-weight: 700; color: #128c7e; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .wac-tpl-row { display: flex; gap: 8px; padding: 6px 8px; border-radius: 6px; background: #f8fafc; margin-bottom: 4px; align-items: flex-start; }
+    .wac-tpl-body { flex: 1; font-size: 12px; color: #0f172a; }
+    .wac-tpl-actions { display: flex; gap: 4px; flex-shrink: 0; }
 </style>
 
 @code {
@@ -179,6 +507,18 @@
     /// <summary>Nombre del contacto, solo se usa para el header y como ContactName
     /// inicial al crear la conversacion.</summary>
     [Parameter] public string? NombreContacto { get; set; }
+
+    /// <summary>Documento (cedula) del paciente. Se usa para el token {cedula} en plantillas.</summary>
+    [Parameter] public string? Cedula { get; set; }
+
+    /// <summary>Id del paciente. Si esta presente, el header del chat es clickable y abre
+    /// el modal "Actualizar telefono" para editar el numero directamente desde aqui.</summary>
+    [Parameter] public Guid? PacienteId { get; set; }
+
+    /// <summary>Callback opcional que el padre engancha para refrescar PacienteActivo
+    /// despues de que el usuario actualice el telefono desde el chat. Recibe el telefono
+    /// ya normalizado a digitos.</summary>
+    [Parameter] public EventCallback<string> OnTelefonoActualizado { get; set; }
 
     /// <summary>Si true, muestra el boton « para colapsar el panel a una franja vertical.</summary>
     [Parameter] public bool Colapsable { get; set; } = true;
@@ -204,6 +544,67 @@
     private string? _error;
     private ElementReference _threadRef;
 
+    // SignalR
+    private HubConnection? _hub;
+    private string? _joinedConversation;
+
+    // Serializa accesos al DbContext (Chat, Lineas, Templates, Pacientes comparten scope
+    // del circuito Blazor). Sin esto, OnParametersSetAsync + MessageAdded del hub pueden
+    // arrancar dos queries simultaneos y EF revienta con "A second operation was started".
+    private readonly System.Threading.SemaphoreSlim _dbLock = new(1, 1);
+
+    // Plantillas pregrabadas
+    private List<MessageTemplateDto> _templates = new();
+    private string _qrCategory = "saludo";
+    private bool _tplManagerOpen;
+    private Guid? _tplEditId;
+    private string _tplFormCategory = "saludo";
+    private string? _tplFormBody;
+    private string? _tplFormError;
+    private bool _tplBusy;
+
+    // Adjuntos
+    private bool _attachOpen;
+    private bool _dragOver;
+
+    // Ubicacion
+    private bool _locationOpen;
+    private string? _locName;
+    private string? _locLat;
+    private string? _locLng;
+    private string? _locError;
+
+    // Edicion de telefono del paciente (modal abierto al clickear el header).
+    private bool _telOpen;
+    private bool _telBusy;
+    private string _telCodigoPais = "57"; // Colombia por defecto.
+    private string? _telNumero;
+    private string? _telError;
+
+    /// <summary>Lista corta de paises (Latam + comunes) con codigo internacional.</summary>
+    private static readonly (string Codigo, string Nombre, string Bandera)[] PaisesCodigos = new[]
+    {
+        ("57",  "Colombia",        "\U0001F1E8\U0001F1F4"),
+        ("52",  "Mexico",          "\U0001F1F2\U0001F1FD"),
+        ("51",  "Peru",            "\U0001F1F5\U0001F1EA"),
+        ("593", "Ecuador",         "\U0001F1EA\U0001F1E8"),
+        ("58",  "Venezuela",       "\U0001F1FB\U0001F1EA"),
+        ("56",  "Chile",           "\U0001F1E8\U0001F1F1"),
+        ("54",  "Argentina",       "\U0001F1E6\U0001F1F7"),
+        ("591", "Bolivia",         "\U0001F1E7\U0001F1F4"),
+        ("595", "Paraguay",        "\U0001F1F5\U0001F1FE"),
+        ("598", "Uruguay",         "\U0001F1FA\U0001F1FE"),
+        ("507", "Panama",          "\U0001F1F5\U0001F1E6"),
+        ("506", "Costa Rica",      "\U0001F1E8\U0001F1F7"),
+        ("503", "El Salvador",     "\U0001F1F8\U0001F1FB"),
+        ("502", "Guatemala",       "\U0001F1EC\U0001F1F9"),
+        ("504", "Honduras",        "\U0001F1ED\U0001F1F3"),
+        ("505", "Nicaragua",       "\U0001F1F3\U0001F1EE"),
+        ("1",   "Estados Unidos",  "\U0001F1FA\U0001F1F8"),
+        ("34",  "Espana",          "\U0001F1EA\U0001F1F8"),
+    };
+
+    private bool _primerLoad = true;
     protected override async Task OnParametersSetAsync()
     {
         _colapsado = Colapsado;
@@ -213,22 +614,108 @@
             _ultimoTelefono = nuevo;
             _telefonoDigits = nuevo;
             _error = null;
+            // Si compartimos el DbContext de un circuito Blazor donde tambien viven
+            // otros componentes pesados (NotasMedicasModulo + AsistenteChatNotas),
+            // demoramos 400ms el primer query para que el componente principal
+            // termine antes y EF Core no reviente con "A second operation was started".
+            if (_primerLoad)
+            {
+                _primerLoad = false;
+                await Task.Delay(400);
+            }
             await CargarTodoAsync();
+            await JoinConversationRealtimeAsync();
         }
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await EnsureHubAsync();
+            await JoinConversationRealtimeAsync();
+        }
+    }
+
+    // ===== SignalR =====
+    private async Task EnsureHubAsync()
+    {
+        if (_hub is not null) { return; }
+        try
+        {
+            _hub = new HubConnectionBuilder()
+                .WithUrl(Nav.ToAbsoluteUri("/hubs/chat"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hub.On<MessageDto>("MessageAdded", async msg =>
+            {
+                if (_conv is not null && msg.ConversationId == _conv.Id && _mensajes.All(m => m.Id != msg.Id))
+                {
+                    _mensajes.Add(msg);
+                    await InvokeAsync(StateHasChanged);
+                    try { await JS.InvokeVoidAsync("eval", "setTimeout(() => { var el = document.querySelector('.wac-thread'); if (el) el.scrollTop = el.scrollHeight; }, 50);"); }
+                    catch { }
+                }
+            });
+
+            await _hub.StartAsync();
+        }
+        catch
+        {
+            _hub = null;
+        }
+    }
+
+    private async Task JoinConversationRealtimeAsync()
+    {
+        if (_hub is null || _conv is null) { return; }
+        try
+        {
+            var nuevo = _conv.Id.ToString();
+            if (_joinedConversation == nuevo) { return; }
+            if (_joinedConversation is not null)
+            {
+                await _hub.SendAsync("LeaveConversation", _joinedConversation);
+            }
+            await _hub.SendAsync("JoinConversation", nuevo);
+            _joinedConversation = nuevo;
+        }
+        catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub is not null)
+        {
+            try
+            {
+                if (_joinedConversation is not null)
+                {
+                    await _hub.SendAsync("LeaveConversation", _joinedConversation);
+                }
+                await _hub.DisposeAsync();
+            }
+            catch { }
+            _hub = null;
+            _joinedConversation = null;
+        }
+    }
+
+    // ===== Carga + envio basico =====
     private async Task CargarTodoAsync()
     {
         if (string.IsNullOrWhiteSpace(_telefonoDigits))
         {
             _conv = null; _mensajes = new(); _lineasConectadas = new(); return;
         }
+        await _dbLock.WaitAsync();
         _cargando = true;
         try
         {
             var lineas = await LineasSvc.ListAsync();
             _lineasConectadas = lineas.Where(l => l.Status == WhatsAppLineStatus.Connected).ToList();
-            if (_lineasConectadas.Count > 0 && string.IsNullOrEmpty(_lineaSelIdStr))
+            if (_lineasConectadas.Count > 0 && (string.IsNullOrEmpty(_lineaSelIdStr) || !_lineasConectadas.Any(l => l.Id.ToString() == _lineaSelIdStr)))
             {
                 _lineaSelIdStr = _lineasConectadas[0].Id.ToString();
             }
@@ -243,9 +730,17 @@
             {
                 _mensajes = new();
             }
+
+            // Plantillas: cargar y, si no hay nada, sembrar defaults una vez.
+            _templates = (await TplSvc.ListAsync()).ToList();
+            if (_templates.Count == 0)
+            {
+                var seeded = await TplSvc.SeedDefaultsAsync();
+                if (seeded > 0) { _templates = (await TplSvc.ListAsync()).ToList(); }
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _cargando = false; }
+        finally { _cargando = false; _dbLock.Release(); }
     }
 
     private async Task EnviarAsync()
@@ -256,6 +751,7 @@
         {
             _error = "Selecciona una linea WhatsApp."; return;
         }
+        await _dbLock.WaitAsync();
         _enviando = true; _error = null;
         try
         {
@@ -266,15 +762,21 @@
                 return;
             }
             _borrador = "";
-            // Recargar para ver el mensaje recien persistido.
-            var lst = await Chat.ListMessagesAsync(_conv.Id);
-            _mensajes = lst.ToList();
-            // Scroll al final.
+
+            if (_hub is null || _hub.State != HubConnectionState.Connected)
+            {
+                var lst = await Chat.ListMessagesAsync(_conv.Id);
+                _mensajes = lst.ToList();
+            }
+            else if (result.Message is { } sent && _mensajes.All(m => m.Id != sent.Id))
+            {
+                _mensajes.Add(sent);
+            }
             try { await JS.InvokeVoidAsync("eval", "setTimeout(() => { var el = document.querySelector('.wac-thread'); if (el) el.scrollTop = el.scrollHeight; }, 50);"); }
-            catch { /* no critico */ }
+            catch { }
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _enviando = false; }
+        finally { _enviando = false; _dbLock.Release(); }
     }
 
     private async Task ToggleColapsado()
@@ -287,5 +789,318 @@
     {
         if (string.IsNullOrWhiteSpace(s)) { return ""; }
         return new string(s.Where(char.IsDigit).ToArray());
+    }
+
+    // ===== Plantillas pregrabadas =====
+    private List<(string Key, string Label)> QrCategories
+    {
+        get
+        {
+            var keys = MessageTemplateCategories.All.Select(c => c.Key).ToList();
+            foreach (var t in _templates)
+            {
+                if (!keys.Contains(t.Category)) { keys.Add(t.Category); }
+            }
+            return keys.Select(k => (k, CategoryLabel(k))).ToList();
+        }
+    }
+
+    private static string CategoryLabel(string key)
+    {
+        var lbl = MessageTemplateCategories.Label(key);
+        if (lbl == key && key.Length > 0) { return char.ToUpperInvariant(key[0]) + key[1..]; }
+        return lbl;
+    }
+
+    private List<MessageTemplateDto> CurrentTemplates()
+        => _templates.Where(t => t.Category == _qrCategory).OrderBy(t => t.SortOrder).ToList();
+
+    private string FillTemplate(string template)
+    {
+        var paciente = string.IsNullOrWhiteSpace(NombreContacto) ? "paciente" : NombreContacto!.Split(' ').FirstOrDefault() ?? NombreContacto!;
+        var cedula = string.IsNullOrWhiteSpace(Cedula) ? "" : Cedula!;
+        var fecha = DateTime.Now.ToString("dd 'de' MMMM yyyy", new System.Globalization.CultureInfo("es-CO"));
+        return template
+            .Replace("{paciente}", paciente)
+            .Replace("{cedula}", cedula)
+            .Replace("{fecha}", fecha)
+            .Replace("{telefono}", _telefonoDigits);
+    }
+
+    private static string MediaIcon(MessageMediaType t) => t switch
+    {
+        MessageMediaType.Image => "[IMG]",
+        MessageMediaType.Video => "[VID]",
+        MessageMediaType.Audio => "[AUD]",
+        MessageMediaType.Document => "[DOC]",
+        MessageMediaType.Location => "[UBI]",
+        _ => ""
+    };
+
+    private static string MapsLink(string? coords) => $"https://www.google.com/maps?q={coords}";
+
+    private async Task UseTemplateAsync(MessageTemplateDto t)
+    {
+        _error = null;
+        if (t.MediaType == MessageMediaType.None)
+        {
+            // Rellena el borrador para que el operador pueda editar antes de enviar.
+            _borrador = FillTemplate(t.Body);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        // Plantillas con media adjunta: por ahora solo se permite plantilla de texto.
+        // (El gestor solo guarda texto en esta version.) Si la plantilla tiene media,
+        // dejamos el caption en el borrador para que el operador la adjunte manualmente.
+        _borrador = FillTemplate(t.Body);
+    }
+
+    private void OpenTemplateManager()
+    {
+        _attachOpen = false;
+        ResetTemplateForm();
+        _tplFormCategory = _qrCategory;
+        _tplManagerOpen = true;
+    }
+
+    private void EditTemplate(MessageTemplateDto t)
+    {
+        _tplEditId = t.Id;
+        _tplFormCategory = t.Category;
+        _tplFormBody = t.Body;
+        _tplFormError = null;
+    }
+
+    private void ResetTemplateForm()
+    {
+        _tplEditId = null;
+        _tplFormBody = null;
+        _tplFormError = null;
+    }
+
+    private async Task SaveTemplateAsync()
+    {
+        _tplFormError = null;
+        if (string.IsNullOrWhiteSpace(_tplFormBody))
+        {
+            _tplFormError = "Escribe un mensaje.";
+            return;
+        }
+        await _dbLock.WaitAsync();
+        _tplBusy = true;
+        try
+        {
+            if (_tplEditId is null)
+            {
+                await TplSvc.CreateAsync(new CreateMessageTemplateRequest(_tplFormCategory, _tplFormBody ?? ""), Guid.Empty);
+            }
+            else
+            {
+                await TplSvc.UpdateAsync(_tplEditId.Value, new UpdateMessageTemplateRequest(_tplFormCategory, _tplFormBody ?? ""), Guid.Empty);
+            }
+            _templates = (await TplSvc.ListAsync()).ToList();
+            ResetTemplateForm();
+        }
+        catch (Exception ex) { _tplFormError = ex.Message; }
+        finally { _tplBusy = false; _dbLock.Release(); }
+    }
+
+    private async Task DeleteTemplateAsync(Guid id)
+    {
+        await _dbLock.WaitAsync();
+        _tplBusy = true;
+        try
+        {
+            await TplSvc.DeleteAsync(id, Guid.Empty);
+            _templates = (await TplSvc.ListAsync()).ToList();
+            if (_tplEditId == id) { ResetTemplateForm(); }
+        }
+        finally { _tplBusy = false; _dbLock.Release(); }
+    }
+
+    // ===== Adjuntos =====
+    private async Task OnAttachAsync(InputFileChangeEventArgs e, MessageMediaType type)
+    {
+        _attachOpen = false;
+        _error = null;
+        if (_conv is null) { _error = "No hay conversacion."; return; }
+        if (!Guid.TryParse(_lineaSelIdStr, out var lineId)) { _error = "Selecciona una linea."; return; }
+
+        var saved = await SaveChatFileAsync(e.File, type);
+        if (saved is null) { _error = "Archivo invalido o supera 16 MB."; return; }
+        await _dbLock.WaitAsync();
+        _enviando = true;
+        try
+        {
+            var caption = string.IsNullOrWhiteSpace(_borrador) ? null : _borrador!.Trim();
+            var r = await Chat.SendMediaViaLineAsync(_conv.Id, lineId, type, saved.Value.Base64, saved.Value.Url, saved.Value.Mime, saved.Value.Name, caption, Guid.Empty);
+            if (!r.Ok) { _error = r.Error; return; }
+            if (r.Message is { } sent && _mensajes.All(m => m.Id != sent.Id)) { _mensajes.Add(sent); }
+            _borrador = "";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _enviando = false; _dbLock.Release(); }
+    }
+
+    private async Task<(string Url, string Base64, string Mime, string Name)?> SaveChatFileAsync(IBrowserFile file, MessageMediaType type)
+    {
+        const long max = 16L * 1024 * 1024;
+        if (file.Size <= 0 || file.Size > max) { return null; }
+        using var ms = new MemoryStream();
+        await file.OpenReadStream(max).CopyToAsync(ms);
+        var bytes = ms.ToArray();
+        var ext = Path.GetExtension(file.Name);
+        if (string.IsNullOrWhiteSpace(ext))
+        {
+            ext = type switch
+            {
+                MessageMediaType.Image => ".jpg",
+                MessageMediaType.Video => ".mp4",
+                MessageMediaType.Audio => ".ogg",
+                _ => ".bin"
+            };
+        }
+        var dir = Path.Combine(Env.WebRootPath, "uploads", "chat");
+        Directory.CreateDirectory(dir);
+        var name = $"chat-{Guid.NewGuid():N}{ext}";
+        await File.WriteAllBytesAsync(Path.Combine(dir, name), bytes);
+        var mime = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+        return ($"/uploads/chat/{name}", Convert.ToBase64String(bytes), mime, file.Name);
+    }
+
+    // ===== Drop zone =====
+    private void OnDragEnter(DragEventArgs e)
+    {
+        _dragOver = true;
+    }
+
+    private void OnDragLeave(DragEventArgs e)
+    {
+        _dragOver = false;
+    }
+
+    private void OnDrop(DragEventArgs e)
+    {
+        // Nota: drop nativo de archivos requiere lectura de DataTransfer.Files via JS.
+        // Por ahora reseteamos el overlay; los adjuntos van via el menu clip.
+        _dragOver = false;
+    }
+
+    // ===== Ubicacion =====
+    private void OpenLocation()
+    {
+        _attachOpen = false;
+        _locName = null; _locLat = null; _locLng = null; _locError = null;
+        _locationOpen = true;
+    }
+
+    private async Task SendLocationAsync()
+    {
+        _locError = null;
+        if (_conv is null) { _locError = "No hay conversacion."; return; }
+        if (!Guid.TryParse(_lineaSelIdStr, out var lineId)) { _locError = "Selecciona una linea."; return; }
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        if (!double.TryParse(_locLat, System.Globalization.NumberStyles.Any, ci, out var lat)
+            || !double.TryParse(_locLng, System.Globalization.NumberStyles.Any, ci, out var lng))
+        {
+            _locError = "Latitud y longitud invalidas.";
+            return;
+        }
+        await _dbLock.WaitAsync();
+        _enviando = true;
+        try
+        {
+            var r = await Chat.SendLocationViaLineAsync(_conv.Id, lineId, lat, lng, _locName, Guid.Empty);
+            if (!r.Ok) { _locError = r.Error; return; }
+            if (r.Message is { } sent && _mensajes.All(m => m.Id != sent.Id)) { _mensajes.Add(sent); }
+            _locationOpen = false;
+        }
+        catch (Exception ex) { _locError = ex.Message; }
+        finally { _enviando = false; _dbLock.Release(); }
+    }
+
+    private static string FormatDayHeader(DateTime day)
+    {
+        var today = DateTime.Today;
+        if (day == today) { return "HOY"; }
+        if (day == today.AddDays(-1)) { return "AYER"; }
+        return day.ToString("dd 'DE' MMMM yyyy", new System.Globalization.CultureInfo("es-CO")).ToUpperInvariant();
+    }
+
+    // ===== Edicion de telefono del paciente =====
+    private async Task OpenEditTelefono()
+    {
+        if (PacienteId is null) { return; }
+        _telError = null;
+        var actual = _telefonoDigits ?? string.Empty;
+        var match = PaisesCodigos
+            .OrderByDescending(p => p.Codigo.Length)
+            .FirstOrDefault(p => actual.StartsWith(p.Codigo) && actual.Length > p.Codigo.Length);
+        if (!string.IsNullOrEmpty(match.Codigo))
+        {
+            _telCodigoPais = match.Codigo;
+            _telNumero = actual.Substring(match.Codigo.Length);
+        }
+        else
+        {
+            _telCodigoPais = "57";
+            _telNumero = string.IsNullOrWhiteSpace(actual) ? null : actual;
+        }
+        _telOpen = true;
+        // Llamar showModal() del <dialog> para que vaya al top layer del browser y
+        // se renderice por encima de cualquier stacking context (como el modal HC).
+        try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-tel-dialog'); if (d && !d.open) d.showModal();"); }
+        catch { }
+    }
+
+    private async Task CloseTelefonoAsync()
+    {
+        _telOpen = false;
+        try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-tel-dialog'); if (d && d.open) d.close();"); }
+        catch { }
+    }
+
+    private void OnTelDialogClosed()
+    {
+        // El user cerro con ESC: solo sincronizamos el flag.
+        _telOpen = false;
+    }
+
+    private async Task SaveTelefonoAsync()
+    {
+        _telError = null;
+        if (PacienteId is not Guid pid) { _telError = "No hay paciente."; return; }
+        var numero = new string((_telNumero ?? "").Where(char.IsDigit).ToArray());
+        if (numero.Length < 6)
+        {
+            _telError = "El numero local debe tener al menos 6 digitos.";
+            return;
+        }
+        await _dbLock.WaitAsync();
+        _telBusy = true;
+        try
+        {
+            var completo = _telCodigoPais + numero;
+            var guardado = await PacientesSvc.UpdateTelefonoAsync(pid, completo, Guid.Empty);
+            if (string.IsNullOrEmpty(guardado))
+            {
+                _telError = "No se pudo guardar el telefono.";
+                return;
+            }
+            _telefonoDigits = guardado;
+            _ultimoTelefono = guardado;
+            _telOpen = false;
+            try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-tel-dialog'); if (d && d.open) d.close();"); }
+            catch { }
+        }
+        catch (Exception ex) { _telError = ex.Message; }
+        finally { _telBusy = false; _dbLock.Release(); }
+        // Recargamos fuera del lock: CargarTodoAsync vuelve a tomarlo internamente.
+        await CargarTodoAsync();
+        await JoinConversationRealtimeAsync();
+        if (OnTelefonoActualizado.HasDelegate && !string.IsNullOrEmpty(_telefonoDigits))
+        {
+            await OnTelefonoActualizado.InvokeAsync(_telefonoDigits);
+        }
     }
 }

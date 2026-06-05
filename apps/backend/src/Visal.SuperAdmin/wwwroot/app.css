@@ -131,6 +131,15 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   padding: 18px 16px;
   border-bottom: 1px solid var(--sidebar-border);
 }
+/* Variante en columna: logo grande arriba, nombre debajo, lema debajo.
+   Es la que usamos en el tenant para que el logo se vea completo. */
+.visal-brand.visal-brand-stack {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  text-align: center;
+}
 .visal-logo {
   position: relative;
   width: 38px; height: 38px;
@@ -140,22 +149,40 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   box-shadow: var(--shadow-soft);
   color: #fff;
 }
+/* Logo subido por el tenant: bloque ancho rectangular (~170x60) para que se
+   vea completo sin recortar las proporciones del archivo. Sin gradiente. */
+.visal-logo.visal-logo-wide {
+  width: 100%;
+  max-width: 200px;
+  height: 64px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 4px;
+  box-shadow: var(--shadow-soft);
+}
 .visal-logo svg { width: 18px; height: 18px; transform: rotate(-45deg); }
-/* Cuando el tenant subio su propio logo (img), ocupar todo el cuadro
-   sin el degradado violeta de fondo - se ve la imagen tal cual. */
+/* Logo cuadrado (default): el SVG centrado en el bloque 38x38. */
 .visal-logo img {
   width: 100%; height: 100%; object-fit: cover;
   border-radius: 12px; display: block;
 }
-.visal-logo:has(img) { background: #fff; }
-.visal-logo::after {
+/* Logo wide del tenant: object-fit contain para no recortar la imagen. */
+.visal-logo.visal-logo-wide img {
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+}
+.visal-logo:has(img):not(.visal-logo-wide) { background: #fff; }
+.visal-logo:not(.visal-logo-wide)::after {
   content: ""; position: absolute; bottom: -2px; right: -2px;
   width: 11px; height: 11px; border-radius: 50%;
   background: var(--gold); border: 2px solid var(--sidebar);
 }
-.visal-brand-name { font-weight: 800; font-size: 15px; letter-spacing: -0.02em; line-height: 1; }
+.visal-brand-text { width: 100%; }
+.visal-brand-stack .visal-brand-text { text-align: center; }
+.visal-brand-name { font-weight: 800; font-size: 15px; letter-spacing: -0.02em; line-height: 1.15; }
 .visal-brand-name span { color: var(--primary); }
-.visal-brand-sub { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted-foreground); font-weight: 600; margin-top: 3px; }
+.visal-brand-sub { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted-foreground); font-weight: 600; margin-top: 4px; }
 
 .visal-agency {
   margin: 12px 14px 4px;

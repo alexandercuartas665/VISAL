@@ -59,6 +59,26 @@ public sealed record NotaDocumentoDto(
     string? Anotaciones,
     DateTimeOffset CreatedAt);
 
+/// <summary>Documento extendido con datos de la nota a la que pertenece. Lo usa el
+/// tab "Documentos" de Admision para mostrar contexto de cada adjunto (fecha y
+/// codigo de la nota origen).</summary>
+public sealed record DocumentoPacienteDto(
+    Guid Id,
+    Guid NotaMedicaId,
+    string NombreOriginal,
+    string RutaArchivo,
+    string? TipoMime,
+    long Tamano,
+    string? Categoria,
+    string? TipoTerapia,
+    string? Mes,
+    string? Anotaciones,
+    DateTimeOffset CreatedAt,
+    // Datos de la nota origen para mostrar contexto.
+    DateOnly? FechaNota,
+    string? CodigoNota,
+    string? Estado);
+
 public sealed record AdjuntarDocumentoRequest(
     Guid NotaMedicaId,
     string NombreOriginal,
@@ -117,6 +137,12 @@ public interface INotaMedicaService
     // ---- Documentos adjuntos ----
     Task<IReadOnlyList<NotaDocumentoDto>> ListarDocumentosAsync(
         Guid notaId, CancellationToken ct = default);
+
+    /// <summary>Documentos de TODAS las notas del paciente (para el tab Documentos
+    /// del modulo Admision). Devuelve con datos de la nota origen para mostrar
+    /// contexto.</summary>
+    Task<IReadOnlyList<DocumentoPacienteDto>> ListarDocumentosPorPacienteAsync(
+        Guid pacienteId, CancellationToken ct = default);
 
     Task<NotaDocumentoDto> AdjuntarDocumentoAsync(
         AdjuntarDocumentoRequest req, Guid actorUserId, CancellationToken ct = default);

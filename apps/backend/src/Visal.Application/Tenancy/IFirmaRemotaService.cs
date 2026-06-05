@@ -1,0 +1,77 @@
+using Visal.Domain.Enums;
+
+namespace Visal.Application.Tenancy;
+
+/// <summary>Solicitud de firma remota lista para enviarse por WhatsApp.</summary>
+public sealed record FirmaRequestDto(
+    Guid Id,
+    Guid PacienteId,
+    Guid NotaMedicaId,
+    string Token,
+    string Telefono,
+    string? NombreContacto,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? CompletedAt,
+    FirmaRequestStatus Status,
+    /// <summary>URL publica relativa, ej. /firma/abc123. El frontend la concatena con
+    /// el origen actual para mostrarla al profesional o enviarla por WhatsApp.</summary>
+    string PublicPath);
+
+/// <summary>Estado actual de una solicitud, usado para polling.</summary>
+public sealed record FirmaRequestStateDto(
+    Guid Id,
+    FirmaRequestStatus Status,
+    DateTimeOffset? CompletedAt,
+    /// <summary>Si la firma ya llego, viene aqui para que el frontend la dibuje
+    /// en el canvas del modulo de Notas Medicas.</summary>
+    string? ImageDataUrl);
+
+/// <summary>Vista de la solicitud que se sirve a la pagina publica /firma/{token}.</summary>
+public sealed record FirmaRequestPublicDto(
+    Guid Id,
+    string Token,
+    string NombrePaciente,
+    string? NombreProfesional,
+    string? NombreTenant,
+    DateTimeOffset ExpiresAt,
+    FirmaRequestStatus Status);
+
+/// <summary>
+/// Servicio de solicitud y captura de firma remota del paciente. Genera un token
+/// publico, envia el link por WhatsApp via IChatService, y al recibir la firma la
+/// persiste en NotaMedica.FirmaPacienteDataUrl. Politica acordada con el negocio:
+/// link vence en 2 horas, solo una solicitud activa por nota.
+/// </summary>
+public interface IFirmaRemotaService
+{
+    /// <summary>Crea (o reutiliza) la solicitud activa de la nota. Si ya hay una
+    /// pendiente sin expirar, la devuelve tal cual; si no, crea una nueva.</summary>
+    Task<FirmaRequestDto?> CrearOReutilizarAsync(Guid notaMedicaId, Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default);
+
+    /// <summary>Envia el link de la solicitud al paciente por WhatsApp via la
+    /// linea elegida. Devuelve el resultado del envio (Ok/Error + texto del mensaje).</summary>
+    Task<ChatSendResult> EnviarPorWhatsAppAsync(Guid solicitudId, Guid lineaId, string urlAbsoluta, Guid actorTenantUserId, CancellationToken ct = default);
+
+    /// <summary>Cancela la solicitud activa (el link queda invalido). El profesional
+    /// puede crear otra despues.</summary>
+    Task<bool> CancelarAsync(Guid solicitudId, Guid actorTenantUserId, CancellationToken ct = default);
+
+    /// <summary>Estado actual de la solicitud para polling desde el modulo de Notas.</summary>
+    Task<FirmaRequestStateDto?> ObtenerEstadoAsync(Guid solicitudId, CancellationToken ct = default);
+
+    /// <summary>Devuelve la solicitud activa (Pendiente o Completada) para una nota,
+    /// o null si no existe ninguna. Usado para mostrar el estado al cargar el tab Firma.</summary>
+    Task<FirmaRequestDto?> ObtenerActivaPorNotaAsync(Guid notaMedicaId, CancellationToken ct = default);
+
+    // ===== Operaciones publicas (sin tenant context, validan por token) =====
+
+    /// <summary>Obtiene la solicitud por token publico para mostrar la pagina /firma/{token}.
+    /// Si esta expirada la marca como tal antes de devolverla. Devuelve null si no existe.</summary>
+    Task<FirmaRequestPublicDto?> ObtenerPorTokenPublicoAsync(string token, CancellationToken ct = default);
+
+    /// <summary>Guarda la firma capturada por el paciente. Valida que la solicitud este
+    /// Pendiente y no expirada. Persiste la firma en NotaMedica.FirmaPacienteDataUrl y
+    /// marca la solicitud como Completada.</summary>
+    Task<bool> GuardarFirmaPorTokenAsync(string token, string imageDataUrl, CancellationToken ct = default);
+}

@@ -40,7 +40,7 @@ services:
     ports:
       # Publica al host en un puerto uncommon. Por default 5380 (ASCII de "S-D" : SuperAdmin).
       # Tu reverse proxy global apunta a http://localhost:${VISAL_PORT}.
-      - "127.0.0.1:${VISAL_PORT:-5380}:8080"
+      - "${VISAL_PORT:-5380}:8080"
     depends_on:
       postgres:
         condition: service_healthy

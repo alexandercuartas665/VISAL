@@ -102,7 +102,14 @@ public static class PrefillSourceCatalog
         ["historiaMedica"] = new[]
         {
             "medicamentos.lista_numerada"
-        }
+        },
+        // Firma del paciente: PNG/URL del archivo mas reciente en NotaMedicaDocumento
+        // con categoria "Firma del Paciente" para el paciente activo. Se resuelve en
+        // runtime via FirmasPrefillHelper.
+        ["firmaPaciente"] = new[] { "url" },
+        // Firma del profesional logueado: Profesional.FirmaUrl del TenantUser que
+        // esta llenando el formulario (resuelto por TenantUser.ProfesionalId).
+        ["firmaProfesional"] = new[] { "url" }
     };
 
     /// <summary>Nombre legible del sourceModule para el dropdown del modal Rutas de prefill.</summary>
@@ -113,6 +120,8 @@ public static class PrefillSourceCatalog
         "contrato" => "Contrato",
         "usuario" => "Usuario",
         "historiaMedica" => "Historia Medica",
+        "firmaPaciente" => "Firma del Paciente",
+        "firmaProfesional" => "Firma del Profesional",
         _ => sourceModule
     };
 }

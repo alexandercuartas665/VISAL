@@ -144,7 +144,9 @@ else
             </div>
             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarNotas">&#10006; Cerrar</button>
         </div>
-        <div class="at-fs-body at-fs-body-with-chat">
+        <div class="at-fs-body at-fs-body-with-chat
+                    @(_notasWaColapsado ? "wa-colapsado" : "")
+                    @(_notasMonitorColapsado ? "mon-colapsado" : "")">
             <div class="at-fs-notas">
                 <NotasMedicasModulo NombrePacienteCtx="@sel.NombrePaciente"
                                     DocumentoPacienteCtx="@sel.NumeroDocPaciente"
@@ -155,12 +157,48 @@ else
                                     @bind-ContenidoNotaActual="_contenidoNotaActual"
                                     OnNotaGuardada="OnNotaGuardadaAsync" />
             </div>
-            <div class="at-fs-aichat">
-                <AsistenteChatNotas @ref="_chatRef"
-                                    PacienteId="@sel.PacienteId"
-                                    HistoriaClinicaId="@_hcIdParaNotas"
-                                    ContenidoNota="@_contenidoNotaActual"
-                                    UltimoGuardado="@_ultimoGuardadoSignal" />
+
+            @* ===== Columna WhatsApp del paciente (mismo componente que usa HC) ===== *@
+            <div class="at-fs-whatsapp @(_notasWaColapsado ? "is-colapsado" : "")">
+                @if (_notasWaColapsado)
+                {
+                    <button class="at-side-strip" @onclick="() => _notasWaColapsado = false" title="Abrir WhatsApp">
+                        <span class="at-side-strip-ico">&#128172;</span>
+                        <span class="at-side-strip-text">WhatsApp</span>
+                    </button>
+                }
+                else
+                {
+                    <WhatsAppChatPanel Telefono="@_pacienteCtxNotas?.Telefono"
+                                       NombreContacto="@sel.NombrePaciente"
+                                       Cedula="@sel.NumeroDocPaciente"
+                                       PacienteId="@sel.PacienteId"
+                                       Colapsable="true"
+                                       @bind-Colapsado="_notasWaColapsado" />
+                }
+            </div>
+
+            @* ===== Columna Monitor de Notas IA (colapsable) ===== *@
+            <div class="at-fs-aichat @(_notasMonitorColapsado ? "is-colapsado" : "")">
+                @if (_notasMonitorColapsado)
+                {
+                    <button class="at-side-strip at-side-strip-monitor" @onclick="() => _notasMonitorColapsado = false" title="Abrir monitor de notas IA">
+                        <span class="at-side-strip-ico">&#129302;</span>
+                        <span class="at-side-strip-text">Monitor IA</span>
+                    </button>
+                }
+                else
+                {
+                    <div class="at-monitor-head">
+                        <span>Monitor de Notas IA</span>
+                        <button class="at-monitor-toggle" @onclick="() => _notasMonitorColapsado = true" title="Ocultar">&raquo;</button>
+                    </div>
+                    <AsistenteChatNotas @ref="_chatRef"
+                                        PacienteId="@sel.PacienteId"
+                                        HistoriaClinicaId="@_hcIdParaNotas"
+                                        ContenidoNota="@_contenidoNotaActual"
+                                        UltimoGuardado="@_ultimoGuardadoSignal" />
+                }
             </div>
         </div>
     </div>
@@ -194,12 +232,33 @@ else
     .at-fs-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
     .at-fs-h small { color: #64748b; font-size: 11.5px; }
     .at-fs-body { flex: 1; overflow: auto; padding: 16px 22px; }
-    .at-fs-body-with-chat { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; padding: 0; overflow: hidden; }
+    /* Grid de 3 columnas: notas (fluida) | WhatsApp (320px) | Monitor IA (360px).
+       Cada auxiliar puede colapsarse a 44px (franja vertical con boton para expandir),
+       devolviendo todo el ancho extra a la columna de notas. */
+    .at-fs-body-with-chat { display: grid; grid-template-columns: minmax(0, 1fr) 320px 360px; gap: 0; padding: 0; overflow: hidden; }
+    .at-fs-body-with-chat.wa-colapsado { grid-template-columns: minmax(0, 1fr) 44px 360px; }
+    .at-fs-body-with-chat.mon-colapsado { grid-template-columns: minmax(0, 1fr) 320px 44px; }
+    .at-fs-body-with-chat.wa-colapsado.mon-colapsado { grid-template-columns: minmax(0, 1fr) 44px 44px; }
     .at-fs-notas { overflow: auto; padding: 16px 22px; }
-    .at-fs-aichat { overflow: hidden; display: flex; flex-direction: column; }
-    @@media (max-width: 1100px) {
-        .at-fs-body-with-chat { grid-template-columns: 1fr; }
-        .at-fs-aichat { border-top: 1px solid #e2e8f0; max-height: 360px; }
+    .at-fs-whatsapp { display: flex; flex-direction: column; min-width: 0; border-left: 1px solid #e2e8f0; background: #f8fafc; overflow: hidden; }
+    .at-fs-whatsapp.is-colapsado { padding: 8px 4px; align-items: center; background: #f1f5f9; }
+    .at-fs-aichat { overflow: hidden; display: flex; flex-direction: column; border-left: 1px solid #e2e8f0; }
+    .at-fs-aichat.is-colapsado { padding: 8px 4px; align-items: center; background: #f1f5f9; }
+    /* Header del monitor IA con boton de colapso. */
+    .at-monitor-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; }
+    .at-monitor-toggle { background: none; border: 1px solid #cbd5e1; color: #475569; padding: 0 7px; border-radius: 4px; cursor: pointer; font-size: 14px; line-height: 22px; }
+    .at-monitor-toggle:hover { background: #fff; color: #1565c0; }
+    /* Franja vertical cuando una columna esta colapsada. */
+    .at-side-strip { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; cursor: pointer; min-width: 36px; }
+    .at-side-strip:hover { background: #eef6ff; border-color: #25d366; }
+    .at-side-strip.at-side-strip-monitor:hover { border-color: #1565c0; }
+    .at-side-strip-ico { font-size: 16px; }
+    .at-side-strip-text { font-size: 9px; font-weight: 700; color: #475569; writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .04em; text-transform: uppercase; }
+    @@media (max-width: 1300px) {
+        /* En pantallas chicas dejamos el grid en 2 columnas (notas + monitor) y ocultamos
+           el WhatsApp por defecto. El usuario puede colapsarlo/expandirlo con el chip. */
+        .at-fs-body-with-chat { grid-template-columns: minmax(0, 1fr) 44px 360px; }
+        .at-fs-body-with-chat.wa-colapsado { grid-template-columns: minmax(0, 1fr) 44px 360px; }
     }
     .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
     .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
@@ -244,6 +303,16 @@ else
         StateHasChanged();
     }
     private PacienteAsignacionDto? _pacienteCtx;
+    /// <summary>Paciente cargado al abrir el modal de Notas (para que el panel WhatsApp
+    /// tenga acceso a Telefono y datos del paciente sin tener que consultarlo el solo).</summary>
+    private PacienteAsignacionDto? _pacienteCtxNotas;
+
+    /// <summary>Estado de colapso de la columna WhatsApp dentro del modal de notas.
+    /// Inicia en true (colapsado) para no tapar el espacio de notas al abrir el modal.
+    /// El operador lo expande con un click si necesita escribirle al paciente.</summary>
+    private bool _notasWaColapsado = true;
+    /// <summary>Estado de colapso del monitor IA dentro del modal de notas.</summary>
+    private bool _notasMonitorColapsado;
 
     private string? _error, _ok;
 
@@ -297,10 +366,16 @@ else
             _error = val.Mensaje;
             return;
         }
+        // Cargar el paciente PRIMERO para tener Telefono disponible en el panel
+        // WhatsApp del modal de notas. Mismo patron defensivo que AbrirHistoria:
+        // si seteamos _showNotaSel antes, los submodulos arrancan a consultar la
+        // BD en paralelo y el DbContext scoped revienta.
+        try { _pacienteCtxNotas = await AsigSvc.GetPacienteAsync(s.PacienteId); }
+        catch { _pacienteCtxNotas = null; }
         _hcIdParaNotas = val.HistoriaId;
         _showNotaSel = s;
     }
-    private void CerrarNotas() { _showNotaSel = null; _hcIdParaNotas = null; }
+    private void CerrarNotas() { _showNotaSel = null; _hcIdParaNotas = null; _pacienteCtxNotas = null; }
 
     private async Task AbrirHistoria(MiServicioAsignadoDto s)
     {

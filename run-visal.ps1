@@ -44,15 +44,26 @@ if ($Clean) {
     Ok "Listo."
 }
 
-# 2) Matar cualquier dotnet previo que tenga lockeados los DLL (sin perdonar lo que sea Visal).
-Step "Cerrando instancias previas de Visal.SuperAdmin (si quedaron colgadas)"
-$busy = Get-Process -Name "Visal.SuperAdmin" -ErrorAction SilentlyContinue
-if ($busy) {
-    $busy | Stop-Process -Force -ErrorAction SilentlyContinue
+# 2) Matar instancias previas de DEV solamente (las que corren desde bin\Debug).
+# La instancia ESTABLE (corre desde stable-bin\) NO la tocamos para no cortarle
+# la sesion al usuario.
+Step "Cerrando instancias previas de DEV de Visal.SuperAdmin"
+$devBin = (Join-Path $startup "bin").ToLowerInvariant()
+$stoppedCount = 0
+foreach ($p in (Get-Process -Name "Visal.SuperAdmin" -ErrorAction SilentlyContinue)) {
+    try {
+        $path = $p.MainModule.FileName
+        if ($path -and $path.ToLowerInvariant().StartsWith($devBin)) {
+            Stop-Process -Id $p.Id -Force
+            $stoppedCount++
+        }
+    } catch { }
+}
+if ($stoppedCount -gt 0) {
     Start-Sleep -Milliseconds 800
-    Ok "Procesos detenidos: $($busy.Count)."
+    Ok "Procesos dev detenidos: $stoppedCount (estable intacto)."
 } else {
-    Ok "No habia procesos previos."
+    Ok "No habia dev previo."
 }
 
 # 3) Verificar que el puerto este libre

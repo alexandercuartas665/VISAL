@@ -14,7 +14,16 @@
         <h1 class="ase-title">Relaciones de formularios</h1>
         <small class="text-muted">Cada fila indica que el formulario destino (ej. una evolucion) debe sugerirse cuando se trabaja con el formulario origen (ej. una historia clinica).</small>
     </div>
-    <div class="med-toolbar">
+    <div class="med-toolbar" style="gap:10px; align-items:center;">
+        <label class="rf-filtro">
+            <span>Tipo:</span>
+            <select class="form-select form-select-sm" @bind="_filtroTipo" @bind:after="StateHasChanged">
+                <option value="">Todos</option>
+                <option value="EVOLUCION">EVOLUCION</option>
+                <option value="CONSENTIMIENTO">CONSENTIMIENTO</option>
+                <option value="__none__">(Sin tipo)</option>
+            </select>
+        </label>
         <button class="btn btn-primary" @onclick="OnNueva" disabled="@_busy">+ Nueva relacion</button>
     </div>
 </div>
@@ -35,21 +44,29 @@
     }
     else
     {
+        var rowsVisibles = RowsVisibles();
+        <div class="rf-summary">
+            Mostrando <strong>@rowsVisibles.Count</strong> de @_rows.Count relacion(es)@(string.IsNullOrEmpty(_filtroTipo) ? "" : " (filtro activo)").
+        </div>
         <div class="med-tbl-wrap">
             <table class="table table-sm med-tbl">
                 <thead>
                     <tr>
-                        <th>Formulario origen</th>
+                        <th class="rf-th-sort" @onclick='() => SetSort("origen")'>Formulario origen @SortIndicator("origen")</th>
                         <th class="text-center" style="width:60px"></th>
-                        <th>Formulario destino</th>
-                        <th style="width:140px">Tipo</th>
+                        <th class="rf-th-sort" @onclick='() => SetSort("destino")'>Formulario destino @SortIndicator("destino")</th>
+                        <th class="rf-th-sort" style="width:160px" @onclick='() => SetSort("tipo")'>Tipo @SortIndicator("tipo")</th>
                         <th>Observacion</th>
                         <th style="width:90px" class="text-center">Activo</th>
                         <th style="width:80px"></th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var r in _rows)
+                    @if (rowsVisibles.Count == 0)
+                    {
+                        <tr><td colspan="7" class="text-center text-muted" style="padding:18px;">No hay relaciones que coincidan con el filtro.</td></tr>
+                    }
+                    @foreach (var r in rowsVisibles)
                     {
                         <tr class="@(r.Activo ? "" : "rf-row-inactiva")">
                             <td>
@@ -164,6 +181,13 @@
     .rf-tipo-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
     .rf-tipo-evolucion { background: #dbeafe; color: #1e40af; }
     .rf-tipo-consentimiento { background: #fef3c7; color: #92400e; }
+    .rf-filtro { display:flex; align-items:center; gap:6px; font-size:12px; color:#475569; margin:0; }
+    .rf-filtro span { white-space:nowrap; font-weight:600; }
+    .rf-filtro select { min-width:160px; }
+    .rf-th-sort { cursor:pointer; user-select:none; }
+    .rf-th-sort:hover { background:#f1f5f9; }
+    .rf-sort-arrow { font-size:10px; color:#1565c0; margin-left:4px; }
+    .rf-summary { padding:8px 14px; font-size:12px; color:#475569; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
 </style>
 
 @code {
@@ -176,6 +200,16 @@
 
     private List<RelacionFormularioDto> _rows = new();
     private List<OpcionFormularioDto> _opciones = new();
+
+    // Filtro por tipo: "" = todos, "EVOLUCION" / "CONSENTIMIENTO" = match exacto,
+    // "__none__" = solo las que no tienen tipo asignado.
+    private string _filtroTipo = "";
+
+    // Sort: columna ("tipo" | "origen" | "destino") + direccion. Por defecto
+    // ordenamos por tipo y luego por origen (lo que pidio el usuario para
+    // agrupar visualmente las EVOLUCION y los CONSENTIMIENTO).
+    private string _sortCol = "tipo";
+    private bool _sortAsc = true;
 
     private bool _modalAbierto;
     private Guid? _editId;
@@ -278,4 +312,42 @@
         var st = await AuthState;
         return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
     }
+
+    /// <summary>Aplica el filtro de tipo + el ordenamiento elegido sobre _rows.
+    /// Se recalcula en cada render; el set de relaciones nunca es grande
+    /// (decenas, no miles), asi que no vale la pena memoizar.</summary>
+    private List<RelacionFormularioDto> RowsVisibles()
+    {
+        IEnumerable<RelacionFormularioDto> q = _rows;
+        if (!string.IsNullOrEmpty(_filtroTipo))
+        {
+            q = _filtroTipo == "__none__"
+                ? q.Where(r => string.IsNullOrWhiteSpace(r.TipoRelacion))
+                : q.Where(r => string.Equals(r.TipoRelacion, _filtroTipo, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Comparador segun la columna activa. Para "tipo" desempatamos con
+        // origen + destino; para "origen"/"destino" desempatamos con el otro
+        // extremo para que el orden sea estable.
+        Func<RelacionFormularioDto, string> primario = _sortCol switch
+        {
+            "origen"  => r => (r.OrigenNombre ?? "") + "|" + (r.DestinoNombre ?? ""),
+            "destino" => r => (r.DestinoNombre ?? "") + "|" + (r.OrigenNombre ?? ""),
+            _         => r => (r.TipoRelacion ?? "ZZZ") + "|" + (r.OrigenNombre ?? "") + "|" + (r.DestinoNombre ?? "")
+        };
+        q = _sortAsc ? q.OrderBy(primario, StringComparer.OrdinalIgnoreCase)
+                     : q.OrderByDescending(primario, StringComparer.OrdinalIgnoreCase);
+        return q.ToList();
+    }
+
+    private void SetSort(string col)
+    {
+        if (_sortCol == col) { _sortAsc = !_sortAsc; }
+        else { _sortCol = col; _sortAsc = true; }
+    }
+
+    private MarkupString SortIndicator(string col) =>
+        _sortCol == col
+            ? new MarkupString($"<span class=\"rf-sort-arrow\">{(_sortAsc ? "&#9650;" : "&#9660;")}</span>")
+            : new MarkupString("");
 }

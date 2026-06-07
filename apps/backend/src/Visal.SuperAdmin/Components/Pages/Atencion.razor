@@ -25,8 +25,14 @@
 {
     <div class="ase-card">
         <div class="ase-empty at-no-prof">
-            Tu usuario no esta vinculado a un profesional. El modulo de atencion solo aplica para
-            usuarios creados desde el modulo de <code>Profesionales</code>.
+            @if (_tieneProfesionalVinculado)
+            {
+                <text>No tienes servicios asignados todavia. Pide al coordinador que te asigne turnos desde el modulo <code>Coordinacion</code>.</text>
+            }
+            else
+            {
+                <text>Tu usuario no esta vinculado a un profesional. El modulo de atencion solo aplica para usuarios creados desde el modulo de <code>Profesionales</code>.</text>
+            }
         </div>
     </div>
 }
@@ -279,6 +285,10 @@ else
     private string _nombreProf = "";
     private string _especialidad = "";
     private bool? _modulos;
+    /// <summary>True si el claim "profesional_id" esta presente: el usuario es
+    /// un profesional. Permite diferenciar "no estas vinculado" vs "vinculado
+    /// pero sin turnos asignados" cuando _modulos = false.</summary>
+    private bool _tieneProfesionalVinculado;
 
     private MiServicioAsignadoDto? _showHistoriaSel;
     private MiServicioAsignadoDto? _showNotaSel;
@@ -335,6 +345,10 @@ else
                 _error = "No se pudo identificar al usuario.";
                 return;
             }
+            // Si el claim "profesional_id" existe, el usuario SI es un
+            // profesional. Lo usamos para distinguir "no vinculado" de
+            // "vinculado sin turnos" cuando _todos.Count == 0.
+            _tieneProfesionalVinculado = !string.IsNullOrEmpty(st.User.FindFirst("profesional_id")?.Value);
             _todos = (await Svc.GetMisServiciosAsync(puId, incluirCompletados: _mostrarVencidas)).ToList();
             // Llenar header con el primer registro (todos comparten profesional).
             if (_todos.Count > 0)

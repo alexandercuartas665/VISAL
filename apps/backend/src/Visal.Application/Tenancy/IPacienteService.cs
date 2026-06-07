@@ -72,7 +72,14 @@ public interface IPacienteService
     Task<IReadOnlyList<PacienteDto>> ListAsync(string? filtro, CancellationToken ct = default);
     Task<PacienteDetailDto?> GetAsync(Guid id, CancellationToken ct = default);
     Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default);
+    /// <summary>Hard delete. Lanza InvalidOperationException con mensaje legible
+    /// si el paciente tiene HC, notas o asignaciones (FK con ON DELETE RESTRICT).
+    /// Para esos casos, usar DesactivarAsync.</summary>
     Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Soft delete: marca Activo=false sin borrar. Util cuando el
+    /// paciente tiene datos clinicos que impiden el hard delete.</summary>
+    Task<bool> DesactivarAsync(Guid id, Guid actor, CancellationToken ct = default);
 
     /// <summary>Actualiza solo el telefono del paciente (rapido desde el chat WhatsApp).
     /// Devuelve null si el paciente no existe, o el telefono ya normalizado a digitos.</summary>

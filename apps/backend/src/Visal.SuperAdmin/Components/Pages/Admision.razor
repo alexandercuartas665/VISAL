@@ -10,6 +10,7 @@
 @inject IGeografiaService GeoSvc
 @inject ICie11Service Cie11Svc
 @inject INotaMedicaService NotaSvc
+@inject IJSRuntime JS
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
 
@@ -335,7 +336,8 @@
                     <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar paciente")</button>
                     @if (_id is not null)
                     {
-                        <button class="btn btn-outline-danger btn-sm" @onclick="Delete">Eliminar</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="Desactivar" disabled="@_busy" title="Marcar como inactivo sin borrar el historial clinico">Desactivar</button>
+                        <button class="btn btn-outline-danger btn-sm" @onclick="Delete" disabled="@_busy" title="Eliminar definitivamente. Solo se puede si el paciente no tiene HC, notas ni asignaciones.">Eliminar</button>
                     }
                 </div>
             </div>
@@ -696,8 +698,45 @@
     private async Task Delete()
     {
         if (_id is not Guid id) { return; }
-        await Svc.DeleteAsync(id, await Actor());
-        _showForm = false; _id = null; await LoadLista(); _ok = "Paciente eliminado.";
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var ok = await JS.InvokeAsync<bool>("confirm",
+                "Eliminar definitivamente este paciente? Esta accion no se puede deshacer.");
+            if (!ok) { return; }
+            await Svc.DeleteAsync(id, await Actor());
+            _showForm = false; _id = null; await LoadLista(); _ok = "Paciente eliminado.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Mensaje legible del servicio (paciente con HC/notas/asignaciones).
+            _error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            // Error inesperado (incluye violaciones de FK no anticipadas).
+            _error = "No se pudo eliminar el paciente: " + ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Desactivar()
+    {
+        if (_id is not Guid id) { return; }
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var ok = await JS.InvokeAsync<bool>("confirm",
+                "Marcar este paciente como inactivo? El historial clinico se conserva. Podras reactivarlo despues editando.");
+            if (!ok) { return; }
+            await Svc.DesactivarAsync(id, await Actor());
+            await LoadLista();
+            _ok = "Paciente desactivado.";
+            // Reflejar el cambio en el form sin cerrar.
+            _activo = false;
+        }
+        catch (Exception ex) { _error = "No se pudo desactivar: " + ex.Message; }
+        finally { _busy = false; }
     }
 
     private async Task<Guid> Actor()

@@ -162,7 +162,38 @@ public sealed class PacienteService : IPacienteService
     {
         var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return false; }
+
+        // Las FK a pacientes en asignaciones / historias_clinicas / notas_medicas
+        // estan en ON DELETE RESTRICT, asi que el hard delete revienta con un
+        // error crudo de Postgres si el paciente ya tiene datos clinicos. Aqui
+        // lo chequeamos antes y devolvemos un mensaje legible. Si necesita
+        // desactivarlo, el usuario tiene el flag Activo en la UI.
+        var hcs    = await _db.HistoriasClinicas.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
+        var notas  = await _db.NotasMedicas.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
+        var asigs  = await _db.Asignaciones.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
+        if (hcs + notas + asigs > 0)
+        {
+            var partes = new List<string>();
+            if (hcs   > 0) { partes.Add($"{hcs} historia(s) clinica(s)"); }
+            if (notas > 0) { partes.Add($"{notas} nota(s) medica(s)"); }
+            if (asigs > 0) { partes.Add($"{asigs} asignacion(es)"); }
+            throw new InvalidOperationException(
+                $"No se puede eliminar el paciente \"{p.NombreCompleto}\" porque tiene datos clinicos asociados: "
+                + string.Join(", ", partes)
+                + ". Usa el switch \"Activo\" para desactivarlo.");
+        }
+
         _db.Pacientes.Remove(p);
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> DesactivarAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null) { return false; }
+        if (!p.Activo) { return true; }
+        p.Activo = false;
         await _db.SaveChangesAsync(ct);
         return true;
     }

@@ -14,16 +14,7 @@
         <h1 class="ase-title">Relaciones de formularios</h1>
         <small class="text-muted">Cada fila indica que el formulario destino (ej. una evolucion) debe sugerirse cuando se trabaja con el formulario origen (ej. una historia clinica).</small>
     </div>
-    <div class="med-toolbar" style="gap:10px; align-items:center;">
-        <label class="rf-filtro">
-            <span>Tipo:</span>
-            <select class="form-select form-select-sm" @bind="_filtroTipo" @bind:after="StateHasChanged">
-                <option value="">Todos</option>
-                <option value="EVOLUCION">EVOLUCION</option>
-                <option value="CONSENTIMIENTO">CONSENTIMIENTO</option>
-                <option value="__none__">(Sin tipo)</option>
-            </select>
-        </label>
+    <div class="med-toolbar">
         <button class="btn btn-primary" @onclick="OnNueva" disabled="@_busy">+ Nueva relacion</button>
     </div>
 </div>
@@ -46,7 +37,18 @@
     {
         var rowsVisibles = RowsVisibles();
         <div class="rf-summary">
-            Mostrando <strong>@rowsVisibles.Count</strong> de @_rows.Count relacion(es)@(string.IsNullOrEmpty(_filtroTipo) ? "" : " (filtro activo)").
+            <div class="rf-summary-info">
+                Mostrando <strong>@rowsVisibles.Count</strong> de @_rows.Count relacion(es)@(string.IsNullOrEmpty(_filtroTipo) ? "" : " (filtro activo)").
+            </div>
+            <label class="rf-filtro">
+                <span>Filtrar por tipo:</span>
+                <select class="form-select form-select-sm" @bind="_filtroTipo" @bind:after="StateHasChanged">
+                    <option value="">Todos</option>
+                    <option value="EVOLUCION">EVOLUCION</option>
+                    <option value="CONSENTIMIENTO">CONSENTIMIENTO</option>
+                    <option value="__none__">(Sin tipo)</option>
+                </select>
+            </label>
         </div>
         <div class="med-tbl-wrap">
             <table class="table table-sm med-tbl">
@@ -181,13 +183,18 @@
     .rf-tipo-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
     .rf-tipo-evolucion { background: #dbeafe; color: #1e40af; }
     .rf-tipo-consentimiento { background: #fef3c7; color: #92400e; }
-    .rf-filtro { display:flex; align-items:center; gap:6px; font-size:12px; color:#475569; margin:0; }
+    .rf-filtro { display:flex; align-items:center; gap:8px; font-size:12px; color:#475569; margin:0; }
     .rf-filtro span { white-space:nowrap; font-weight:600; }
-    .rf-filtro select { min-width:160px; }
+    .rf-filtro select { min-width:170px; }
     .rf-th-sort { cursor:pointer; user-select:none; }
     .rf-th-sort:hover { background:#f1f5f9; }
     .rf-sort-arrow { font-size:10px; color:#1565c0; margin-left:4px; }
-    .rf-summary { padding:8px 14px; font-size:12px; color:#475569; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+    .rf-summary {
+        display:flex; align-items:center; justify-content:space-between; gap:16px;
+        padding:10px 14px; font-size:12px; color:#475569;
+        background:#f8fafc; border-bottom:1px solid #e2e8f0; flex-wrap:wrap;
+    }
+    .rf-summary-info { min-width:0; }
 </style>
 
 @code {

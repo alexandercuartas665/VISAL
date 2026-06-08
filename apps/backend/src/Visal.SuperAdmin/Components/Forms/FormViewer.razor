@@ -313,34 +313,69 @@ else
                                     {
                                         <th>@c.Label</th>
                                     }
-                                    <th style="width:32px"></th>
+                                    @if (!node.LockRows)
+                                    {
+                                        <th style="width:32px"></th>
+                                    }
                                 }
                             </tr>
                         </thead>
                         <tbody>
-                            @{ var key = $"tbl:{node.Id}"; var rows = GetRowCount(key); }
-                            @for (int i = 0; i < rows; i++)
+                            @{
+                                var key = $"tbl:{node.Id}";
+                                var seedCount = node.SeedRows?.Count ?? 0;
+                                // GetRowCount cuenta solo las filas EXTRAS (las que el usuario agrega).
+                                // Para tablas LockRows=true el contador se ignora.
+                                var extraRows = node.LockRows ? 0 : GetRowCount(key);
+                                var totalRows = seedCount + extraRows;
+                            }
+                            @for (int i = 0; i < totalRows; i++)
                             {
                                 var idx = i;
-                                <tr>
+                                var isSeed = i < seedCount;
+                                var seedRow = isSeed ? node.SeedRows![i] : null;
+                                <tr class="@(isSeed ? "fv-tbl-seed-row" : "")">
                                     @if (node.Columns is not null)
                                     {
+                                        var colIdx = 0;
                                         @foreach (var c in node.Columns)
                                         {
+                                            // Si esta fila es semilla y la celda tiene valor en seedRow,
+                                            // mostramos texto fijo. Si esta vacia (null/empty), es editable.
+                                            var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
                                             var cellKey = $"{key}:{idx}:{c.Id}";
                                             <td>
-                                                @RenderTableCell(c, cellKey)
+                                                @if (!string.IsNullOrEmpty(seedVal))
+                                                {
+                                                    <span class="fv-tbl-seed-cell">@seedVal</span>
+                                                }
+                                                else
+                                                {
+                                                    @RenderTableCell(c, cellKey)
+                                                }
+                                            </td>
+                                            colIdx++;
+                                        }
+                                        @if (!node.LockRows)
+                                        {
+                                            <td>
+                                                @if (!isSeed)
+                                                {
+                                                    // El idx que ve RemoveRow es el indice en el espacio EXTRAS.
+                                                    var extraIdx = idx - seedCount;
+                                                    <button class="btn btn-link btn-sm fv-tbl-rm" @onclick="() => RemoveRow(key, extraIdx)" disabled="@ReadOnly">&times;</button>
+                                                }
                                             </td>
                                         }
-                                        <td>
-                                            <button class="btn btn-link btn-sm fv-tbl-rm" @onclick="() => RemoveRow(key, idx)" disabled="@ReadOnly">&times;</button>
-                                        </td>
                                     }
                                 </tr>
                             }
                         </tbody>
                     </table>
-                    <button class="btn btn-outline-secondary btn-sm fv-tbl-add" @onclick="() => AddRow(key)" disabled="@ReadOnly">+ Agregar fila</button>
+                    @if (!node.LockRows)
+                    {
+                        <button class="btn btn-outline-secondary btn-sm fv-tbl-add" @onclick="() => AddRow(key)" disabled="@ReadOnly">+ Agregar fila</button>
+                    }
                 </div>
             }
             else

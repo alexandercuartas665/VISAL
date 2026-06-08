@@ -209,6 +209,18 @@
     border-color: #1565c0 !important;
 }
 
+/* Filas semilla (pre-rellenadas) en tablas: visualmente distintas */
+.fv-tbl-seed-row {
+    background: #f8fafc;
+}
+.fv-tbl-seed-cell {
+    display: inline-block;
+    padding: 4px 6px;
+    font-weight: 600;
+    color: #0f172a;
+    font-size: 12px;
+}
+
 /* ----- Bloques de texto ----- */
 .fv-h { font-size: 15px; font-weight: 700; color: #0f172a; margin: 8px 0 4px; }
 .fv-sh { font-size: 13px; font-weight: 600; color: #334155; margin: 6px 0 4px; }

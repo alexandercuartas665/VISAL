@@ -103,6 +103,23 @@ public sealed class FormNode
     [JsonPropertyName("options")]
     public List<string>? Options { get; set; }
 
+    // ── Tabla con filas pre-semilladas (FieldType = "table") ──
+    /// <summary>
+    /// Filas iniciales que ya vienen rellenadas. Cada fila es una lista paralela
+    /// a Columns; null o vacio = celda editable, valor = texto fijo (no editable).
+    /// Util para tablas matriciales tipo escala/test (TEST MOVILIDAD ARTICULAR,
+    /// FUERZA MUSCULAR MRC, etc.).
+    /// </summary>
+    [JsonPropertyName("seedRows")]
+    public List<List<string?>>? SeedRows { get; set; }
+
+    /// <summary>
+    /// Si true, oculta el boton "+ Agregar fila" para que la tabla quede limitada
+    /// a las filas semilla. Por defecto false (permite agregar).
+    /// </summary>
+    [JsonPropertyName("lockRows")]
+    public bool LockRows { get; set; }
+
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";

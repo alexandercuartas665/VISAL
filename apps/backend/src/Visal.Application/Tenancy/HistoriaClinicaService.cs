@@ -37,7 +37,7 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
             .Select(x => new HistoriaClinicaResumenDto(
                 x.h.Id, x.f.Id, x.f.Codigo, x.f.Nombre,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
-                x.h.EspecialistaNombre, x.h.MotivoInactivacion))
+                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId))
             .ToListAsync(ct);
 
         return rows;
@@ -52,7 +52,7 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
                 x.h.Id, x.h.PacienteId, x.f.Id, x.f.Codigo, x.f.Nombre, x.f.Version,
                 x.f.SchemaJson, x.f.PrefillRoutesJson, x.h.ValoresJson,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
-                x.h.EspecialistaNombre, x.h.MotivoInactivacion))
+                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId))
             .FirstOrDefaultAsync(ct);
         return row;
     }
@@ -77,7 +77,8 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
             ValoresJson = string.IsNullOrWhiteSpace(req.ValoresJson) ? "{}" : req.ValoresJson,
             Estado = HistoriaClinicaEstado.Abierta,
             FechaApertura = DateTimeOffset.UtcNow,
-            EspecialistaNombre = req.EspecialistaNombre
+            EspecialistaNombre = req.EspecialistaNombre,
+            ProfesionalId = req.ProfesionalId
         };
         db.HistoriasClinicas.Add(entity);
         await db.SaveChangesAsync(ct);
@@ -130,6 +131,20 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
         // sin cerrar la HC), tomamos la mas reciente.
         return await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId && h.Estado == HistoriaClinicaEstado.Abierta)
+            .OrderByDescending(h => h.FechaApertura)
+            .Select(h => (Guid?)h.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<Guid?> BuscarAbiertaDelProfesionalAsync(Guid pacienteId, Guid profesionalId, Guid formDefinitionId, CancellationToken ct = default)
+    {
+        // Reanudar HC en curso: solo cuenta una abierta del mismo profesional
+        // sobre el mismo formato. Si hay varias (raro), la mas reciente.
+        return await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.PacienteId == pacienteId
+                     && h.ProfesionalId == profesionalId
+                     && h.FormDefinitionId == formDefinitionId
+                     && h.Estado == HistoriaClinicaEstado.Abierta)
             .OrderByDescending(h => h.FechaApertura)
             .Select(h => (Guid?)h.Id)
             .FirstOrDefaultAsync(ct);

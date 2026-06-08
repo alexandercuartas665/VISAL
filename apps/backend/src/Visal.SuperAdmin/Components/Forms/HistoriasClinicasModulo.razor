@@ -239,9 +239,18 @@
                         }
                         else
                         {
+                            @if (_hcEsDeOtroDoctor)
+                            {
+                                <div class="ase-alert" style="background:#fef3c7;color:#92400e;border-color:#fbbf24;margin-bottom:10px;">
+                                    <strong>&#128274; Solo lectura.</strong>
+                                    Esta historia clinica fue iniciada por <strong>@_historiaSel?.Especialista</strong>.
+                                    No puedes modificarla. Inicia una nueva con tu usuario si necesitas registrar tu propia atencion.
+                                </div>
+                            }
                             <FormViewer Schema="@_schemaActual" Valores="@_valores"
                                         Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato"
                                         ReadOnlyKeys="@_hcReadOnlyKeys"
+                                        ReadOnly="@_hcEsDeOtroDoctor"
                                         OnValueChanged="OnValorCambiado" />
                         }
                     }
@@ -671,6 +680,15 @@
     private List<HistoriaRow> _historias = new();
     private HistoriaRow? _historiaSel;
     private Guid? _menuAbierto;
+    /// <summary>ProfesionalId del usuario logueado (claim "profesional_id"). Null
+    /// si el usuario es admin (no esta vinculado a un profesional). Sirve para:
+    /// (1) reanudar la HC abierta del MISMO doctor al pulsar Iniciar; (2) decidir
+    /// si la HC seleccionada se muestra readonly (pertenece a otro doctor).</summary>
+    private Guid? _miProfesionalId;
+    /// <summary>True cuando la HC seleccionada NO pertenece al doctor logueado:
+    /// el FormViewer va en modo lectura para impedir modificar HC ajenas. Los
+    /// usuarios admin sin profesional_id NO entran en este modo.</summary>
+    private bool _hcEsDeOtroDoctor;
     /// <summary>Conteo de medicamentos para badge en la pestana. Se mantiene
     /// sincronizado via OnCountChanged del componente OrdenMedicamentos.</summary>
     private int _medCount;
@@ -796,8 +814,25 @@
             Especialista = r.EspecialistaNombre ?? "(sin nombre)",
             Fecha = DateOnly.FromDateTime(r.FechaApertura.LocalDateTime),
             Estado = r.Estado,
-            Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : "")
+            Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : ""),
+            ProfesionalId = r.ProfesionalId
         }).ToList();
+    }
+
+    /// <summary>Lee el claim "profesional_id" del usuario logueado, una sola
+    /// vez por sesion del componente. Null para admins (no son profesionales).</summary>
+    private async Task<Guid?> ResolverMiProfesionalIdAsync()
+    {
+        if (_miProfesionalId is Guid cached) { return cached; }
+        if (AuthState is null) { return null; }
+        var st = await AuthState;
+        var raw = st.User.FindFirst("profesional_id")?.Value;
+        if (Guid.TryParse(raw, out var pid))
+        {
+            _miProfesionalId = pid;
+            return pid;
+        }
+        return null;
     }
 
     private async Task Seleccionar(HistoriaRow h)
@@ -809,6 +844,13 @@
         _ultimoGuardado = null;
         _saveTitle = null;
         _historiaSel = h;
+        // Decidir si el FormViewer debe ir en lectura: la HC pertenece a otro
+        // profesional Y el usuario logueado SI es un profesional (admin sin
+        // profesional_id sigue pudiendo editar todo).
+        var miProf = await ResolverMiProfesionalIdAsync();
+        _hcEsDeOtroDoctor = miProf is Guid mi
+                            && h.ProfesionalId is Guid duenio
+                            && mi != duenio;
         // Cargar la historia completa desde BD para mostrar sus valores en el FormViewer.
         var detail = await HcSvc.GetAsync(h.Id);
         if (detail is null) { return; }
@@ -912,6 +954,32 @@
         else { return; }
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
 
+        // Reanudar HC abierta del mismo doctor sobre el mismo paciente y formato
+        // si existe. Asi al volver al paciente NO se duplican HCs y el doctor
+        // sigue editando la que ya empezo. Solo aplica si el usuario es un
+        // profesional (admins sin profesional_id siempre crean una nueva).
+        var miProf = await ResolverMiProfesionalIdAsync();
+        if (miProf is Guid pidProf)
+        {
+            var enCurso = await HcSvc.BuscarAbiertaDelProfesionalAsync(p.Id, pidProf, fid);
+            if (enCurso is Guid hcId)
+            {
+                // Si la HC ya esta en la lista la seleccionamos; si no, refrescamos
+                // la lista y luego la seleccionamos.
+                var existente = _historias.FirstOrDefault(x => x.Id == hcId);
+                if (existente is null)
+                {
+                    await MostrarHistorias();
+                    existente = _historias.FirstOrDefault(x => x.Id == hcId);
+                }
+                if (existente is not null)
+                {
+                    await Seleccionar(existente);
+                    return;
+                }
+            }
+        }
+
         var detail = await FormsSvc.GetAsync(fid);
         if (detail is null) { return; }
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
@@ -925,7 +993,7 @@
         // Persistir la historia recien creada con los valores de prefill.
         var especialista = await GetEspecialistaNombreAsync();
         var creada = await HcSvc.CrearAsync(
-            new CrearHistoriaRequest(p.Id, fid, SerializeValores(_valores), especialista),
+            new CrearHistoriaRequest(p.Id, fid, SerializeValores(_valores), especialista, miProf),
             Guid.Empty);
 
         var nueva = new HistoriaRow
@@ -934,10 +1002,12 @@
             Especialista = creada.EspecialistaNombre ?? "(usuario actual)",
             Fecha = DateOnly.FromDateTime(creada.FechaApertura.LocalDateTime),
             Estado = creada.Estado,
-            Observaciones = $"Iniciada con formato {detail.Codigo} para {p.NombreCompleto}"
+            Observaciones = $"Iniciada con formato {detail.Codigo} para {p.NombreCompleto}",
+            ProfesionalId = creada.ProfesionalId
         };
         _historias.Insert(0, nueva);
         _historiaSel = nueva;
+        _hcEsDeOtroDoctor = false; // la acabamos de crear nosotros
         _imprimirMsg = null;
         _medCount = 0; // HC recien creada no tiene medicamentos aun
     }
@@ -1176,5 +1246,8 @@
         public string Estado { get; set; } = "Abierta";
         public string? Observaciones { get; set; }
         public string? MotivoInactivacion { get; set; }
+        /// <summary>Dueno de la HC. Permite distinguir cuando el usuario logueado
+        /// la abre como editor (es el mismo profesional) o solo en lectura.</summary>
+        public Guid? ProfesionalId { get; set; }
     }
 }

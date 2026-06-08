@@ -10,7 +10,8 @@ public sealed record HistoriaClinicaResumenDto(
     DateTimeOffset FechaApertura,
     DateTimeOffset? FechaCierre,
     string? EspecialistaNombre,
-    string? MotivoInactivacion);
+    string? MotivoInactivacion,
+    Guid? ProfesionalId);
 
 /// <summary>Detalle completo de una historia (incluye valores diligenciados).</summary>
 public sealed record HistoriaClinicaDetailDto(
@@ -27,13 +28,15 @@ public sealed record HistoriaClinicaDetailDto(
     DateTimeOffset FechaApertura,
     DateTimeOffset? FechaCierre,
     string? EspecialistaNombre,
-    string? MotivoInactivacion);
+    string? MotivoInactivacion,
+    Guid? ProfesionalId);
 
 public sealed record CrearHistoriaRequest(
     Guid PacienteId,
     Guid FormDefinitionId,
     string ValoresJson,
-    string? EspecialistaNombre);
+    string? EspecialistaNombre,
+    Guid? ProfesionalId = null);
 
 public interface IHistoriaClinicaService
 {
@@ -61,4 +64,9 @@ public interface IHistoriaClinicaService
 
     /// <summary>Id de la HC abierta mas reciente del paciente, o null si no hay.</summary>
     Task<Guid?> BuscarUltimaAbiertaPorPacienteAsync(Guid pacienteId, CancellationToken ct = default);
+
+    /// <summary>Busca la HC abierta del MISMO profesional para el paciente y el
+    /// formato dado. Sirve para reanudar la HC en curso cuando el doctor vuelve
+    /// al paciente (en vez de crear una nueva). Null si no hay.</summary>
+    Task<Guid?> BuscarAbiertaDelProfesionalAsync(Guid pacienteId, Guid profesionalId, Guid formDefinitionId, CancellationToken ct = default);
 }

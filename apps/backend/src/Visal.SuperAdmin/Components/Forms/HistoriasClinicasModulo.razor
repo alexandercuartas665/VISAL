@@ -768,6 +768,43 @@
             _formatoForzadoId = match?.Id;
             _formatoForzadoNombre = match?.Nombre;
         }
+        await AutoCargarHcEnCursoSiCorrespondeAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Cuando el modal cambia de paciente sin recrear el componente (raro pero
+        // posible), re-evaluamos si hay HC en curso para auto-cargar.
+        await AutoCargarHcEnCursoSiCorrespondeAsync();
+    }
+
+    private bool _autoCargaIntentada;
+
+    /// <summary>Al entrar el doctor al modal de HC con un paciente activo y un
+    /// formato del servicio: si ya hay una HC abierta de ese doctor sobre ese
+    /// formato + paciente, la pre-seleccionamos automaticamente. Asi el doctor
+    /// no tiene que pulsar "Iniciar historia medica" para retomar la HC en curso.
+    /// Se ejecuta una sola vez por sesion del componente.</summary>
+    private async Task AutoCargarHcEnCursoSiCorrespondeAsync()
+    {
+        if (_autoCargaIntentada) { return; }
+        if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+        if (_formatoForzadoId is not Guid fid) { return; }
+        _autoCargaIntentada = true;
+
+        var miProf = await ResolverMiProfesionalIdAsync();
+        if (miProf is not Guid pidProf) { return; }
+
+        var hcId = await HcSvc.BuscarAbiertaDelProfesionalAsync(p.Id, pidProf, fid);
+        if (hcId is not Guid id) { return; }
+
+        // Cargar las HC del paciente (para tenerlas en la lista lateral) y
+        // seleccionar la que esta en curso.
+        await MostrarHistorias();
+        var fila = _historias.FirstOrDefault(x => x.Id == id);
+        if (fila is null) { return; }
+        await Seleccionar(fila);
+        StateHasChanged();
     }
 
     private void OpenPacienteModal()

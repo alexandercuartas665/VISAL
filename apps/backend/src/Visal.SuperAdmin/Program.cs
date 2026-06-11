@@ -205,7 +205,7 @@ app.MapPost("/auth/login", async (
         // a partir del NameIdentifier (platform_user_id) + tenant_id.
         var idGlobal = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idGlobal));
-        return Results.Redirect("/mi-cuenta");
+        return Results.Redirect("/admision");
     }
 
     // Sede especifica: el usuario eligio en que sucursal trabajar.
@@ -241,8 +241,9 @@ app.MapPost("/auth/login", async (
         }
         var idSede = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idSede));
-        // Profesionales van directo a Atencion; el resto, al panel Mi cuenta.
-        return Results.Redirect(membership?.ProfesionalId is not null ? "/atencion" : "/mi-cuenta");
+        // Profesionales van directo a Atencion; el resto (admin/coordinador), a Admision
+        // que es el punto de partida natural del flujo clinico.
+        return Results.Redirect(membership?.ProfesionalId is not null ? "/atencion" : "/admision");
     }
 
     // Sin sede valida: fallback al flujo anterior (compatibilidad).
@@ -260,7 +261,7 @@ app.MapPost("/auth/login", async (
     }
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
-    return Results.Redirect(memberships.Count == 1 && !user.EsGlobal ? "/mi-cuenta" : "/seleccionar-empresa");
+    return Results.Redirect(memberships.Count == 1 && !user.EsGlobal ? "/admision" : "/seleccionar-empresa");
 }).DisableAntiforgery();
 
 // Selector de empresa: el usuario eligio un tenant tras el login. Validamos que pueda entrar
@@ -352,7 +353,7 @@ app.MapPost("/auth/select-sede", async (
     var identity = new ClaimsIdentity(keep, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
-    return Results.Redirect("/mi-cuenta");
+    return Results.Redirect("/admision");
 }).DisableAntiforgery();
 
 // Auto-registro (autogestion): un visitante crea su propia agencia + usuario Owner y queda

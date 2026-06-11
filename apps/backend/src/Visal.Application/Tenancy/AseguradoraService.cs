@@ -230,4 +230,16 @@ public sealed class AseguradoraService : IAseguradoraService
         if (n > 0) { await _db.SaveChangesAsync(ct); }
         return n;
     }
+
+    public async Task<int> EliminarServiciosDeContratoAsync(Guid contratoId, Guid actor, CancellationToken ct = default)
+    {
+        var existentes = await _db.ServiciosContrato
+            .Where(s => s.ContratoId == contratoId)
+            .ToListAsync(ct);
+        if (existentes.Count == 0) { return 0; }
+        _db.ServiciosContrato.RemoveRange(existentes);
+        await _db.SaveChangesAsync(ct);
+        return existentes.Count;
+    }
+
 }

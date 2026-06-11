@@ -6,6 +6,7 @@
 @using ClosedXML.Excel
 @using Visal.Application.Tenancy
 @inject IAseguradoraService Svc
+@inject IJSRuntime JS
 
 <PageTitle>Entidades Aseguradoras - Visal</PageTitle>
 
@@ -121,10 +122,12 @@
                             <span class="ase-tools">
                                 <input class="form-control form-control-sm ase-filter" placeholder="Filtrar servicios..." value="@_filtro" @oninput="OnFiltroInput" />
                                 <button class="btn btn-outline-primary btn-sm" @onclick="AddServicio">+ Servicio</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="DescargarPlantilla" disabled="@_busy" title="Descarga un Excel con las columnas esperadas y un ejemplo.">&#11015; Plantilla</button>
                                 <label class="btn btn-primary btn-sm mb-0">
                                     Importar Excel
                                     <InputFile OnChange="OnImportExcel" accept=".xlsx" style="display:none" />
                                 </label>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="BorrarTodosLosServicios" disabled="@(_busy || _contratoId is null)" title="Borra TODOS los servicios de este contrato. Util cuando hiciste un import incorrecto.">&#128465; Borrar todos</button>
                             </span>
                         </div>
                         <div class="table-responsive">
@@ -368,6 +371,91 @@
         if (AuthState is null) { return Guid.Empty; }
         var st = await AuthState;
         return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private async Task DescargarPlantilla()
+    {
+        _error = _ok = null;
+        _busy = true;
+        try
+        {
+            // Columnas EN EL MISMO ORDEN que espera OnImportExcel para que el
+            // usuario llene la plantilla y reimporte sin renombrar nada.
+            var columnas = new (string Cabecera, string Significado, string Ejemplo)[]
+            {
+                ("CONTRATO",        "Codigo del contrato (informativo, no se importa).", "NAC-006-25-PGP"),
+                ("SEDE",            "Sede o sucursal del servicio. Opcional.",            "IBAGUE"),
+                ("HISTORIA",        "Codigo del formato de historia clinica (HC-FO-XX). Conecta este servicio con la HC que se abre al atenderlo.", "HC-FO-08"),
+                ("CODIGO_SERVICIO", "Codigo CUPS o interno del servicio.",                "890201"),
+                ("CODIGO_INTERNO",  "Codigo interno de la aseguradora. Opcional.",        "S001"),
+                ("DESCRIPCION",     "Descripcion del servicio que aparecera en el listado.", "HC-FO-08 FORMATO HC GENERAL VERSION 02"),
+                ("TARIFA",          "Valor unitario en pesos (solo numero, sin separadores).", "65000"),
+                ("MODULO",          "Modulo operativo: CONSULTAS / TERAPIAS / ENFERMERIA / EQUIPOS.", "CONSULTAS"),
+                ("ESPECIALIDAD",    "Especialidad medica si aplica. Opcional.",           "GENERAL"),
+                ("MODALIDAD",       "Modalidad de atencion (ambulatoria, domiciliaria, etc.). Opcional.", "DOMICILIARIA"),
+                ("CLASIFICACION",   "Clasificacion interna. Opcional.",                   ""),
+                ("OBSERVACIONES",   "Notas libres. Opcional.",                            "")
+            };
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Servicios");
+            for (var i = 0; i < columnas.Length; i++)
+            {
+                ws.Cell(1, i + 1).Value = columnas[i].Cabecera;
+                ws.Cell(2, i + 1).Value = columnas[i].Ejemplo;
+            }
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            ws.Columns().AdjustToContents();
+            ws.SheetView.FreezeRows(1);
+
+            var wsHelp = wb.Worksheets.Add("Instrucciones");
+            wsHelp.Cell(1, 1).Value = "Columna";
+            wsHelp.Cell(1, 2).Value = "Significado";
+            wsHelp.Row(1).Style.Font.Bold = true;
+            wsHelp.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            for (var i = 0; i < columnas.Length; i++)
+            {
+                wsHelp.Cell(i + 2, 1).Value = columnas[i].Cabecera;
+                wsHelp.Cell(i + 2, 2).Value = columnas[i].Significado;
+            }
+            wsHelp.Column(1).Width = 22;
+            wsHelp.Column(2).Width = 90;
+            wsHelp.Cell(columnas.Length + 4, 1).Value = "NOTA:";
+            wsHelp.Cell(columnas.Length + 4, 1).Style.Font.Bold = true;
+            wsHelp.Cell(columnas.Length + 4, 2).Value =
+                "Borra la fila de ejemplo de la hoja 'Servicios' antes de importar. "
+                + "El campo HISTORIA es el unico que conecta el servicio con un formato de HC; "
+                + "si lo dejas vacio el servicio se podra asignar pero no abrira HC automaticamente.";
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var b64 = Convert.ToBase64String(ms.ToArray());
+            var dataUrl = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + b64;
+            await JS.InvokeVoidAsync("eval",
+                $"(()=>{{const a=document.createElement('a');a.href='{dataUrl}';a.download='plantilla-servicios-contrato.xlsx';document.body.appendChild(a);a.click();a.remove();}})()");
+            _ok = "Plantilla descargada.";
+        }
+        catch (Exception ex) { _error = "No se pudo generar la plantilla: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task BorrarTodosLosServicios()
+    {
+        _error = _ok = null;
+        if (_contratoId is not Guid id) { _error = "Selecciona un contrato primero."; return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Vas a borrar TODOS los servicios de este contrato. Esta accion no se puede deshacer y dejara sin servicio_contrato_id las asignaciones que los referenciaban. Continuar?");
+        if (!ok) { return; }
+        _busy = true;
+        try
+        {
+            var n = await Svc.EliminarServiciosDeContratoAsync(id, await Actor());
+            await LoadServicios();
+            _ok = $"{n} servicio(s) borrado(s).";
+        }
+        catch (Exception ex) { _error = "No se pudieron borrar: " + ex.Message; }
+        finally { _busy = false; }
     }
 
     private sealed class ContratoEdit

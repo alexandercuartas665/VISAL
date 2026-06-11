@@ -50,4 +50,10 @@ public interface IAseguradoraService
     Task<ServicioDto?> SaveServicioAsync(SaveServicioRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteServicioAsync(Guid id, Guid actor, CancellationToken ct = default);
     Task<int> ImportServiciosAsync(Guid contratoId, IReadOnlyList<ServicioImportRow> rows, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Borra todos los servicios de un contrato. Devuelve cantidad borrada.
+    /// Pensado para corregir un import erroneo (ej. cargar de nuevo sin codigo de
+    /// historia). Las asignaciones existentes que referencien al servicio quedan
+    /// con servicio_contrato_id en NULL (FK ON DELETE SET NULL).</summary>
+    Task<int> EliminarServiciosDeContratoAsync(Guid contratoId, Guid actor, CancellationToken ct = default);
 }

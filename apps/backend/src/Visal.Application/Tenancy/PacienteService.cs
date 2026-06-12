@@ -34,28 +34,34 @@ public sealed class PacienteService : IPacienteService
 
     public async Task<PacienteDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        return await _db.Pacientes.AsNoTracking().Where(p => p.Id == id)
-            .Select(p => new PacienteDetailDto(
-                p.Id, p.NumeroDocumento, p.TipoDocumento,
-                p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
-                p.NombreCompleto, p.FechaNacimiento, p.Edad,
-                p.IpsComentaId, p.CodigoAceptacion, p.FechaComentan,
-                p.AseguradoraId, p.FechaIngresoPad, p.FechaEgresoPad,
-                p.DiasEstancia, p.OpIngresoDias,
-                p.Incapacidad, p.GrupoRh, p.TipoUsuarioId, p.Estado,
-                p.ClasificacionPacienteId, p.ClasificacionGrupoPatologiaId,
-                p.EstratoSocial, p.Sexo, p.EstadoCivil, p.Zona,
-                p.Ocupacion, p.Regimen,
-                p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
-                p.Cie10Id, p.Cie10Codigo, p.DiagnosticoPrincipal,
-                p.Tutela, p.TipoTutelaId, p.MedContratadoId,
-                p.PaisResidenciaId, p.PaisOrigenId, p.DepartamentoId, p.MunicipioId,
-                p.Direccion, p.Barrio, p.Ciudad,
-                p.Telefono, p.Email,
-                p.SedeAtencionId,
-                p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
-                p.Activo))
-            .FirstOrDefaultAsync(ct);
+        var p = await _db.Pacientes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null) { return null; }
+        var contactos = await _db.PacienteContactosEmergencia.AsNoTracking()
+            .Where(c => c.PacienteId == id)
+            .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
+            .Select(c => new PacienteContactoEmergenciaDto(c.Id, c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden))
+            .ToListAsync(ct);
+        return new PacienteDetailDto(
+            p.Id, p.NumeroDocumento, p.TipoDocumento,
+            p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
+            p.NombreCompleto, p.FechaNacimiento, p.Edad,
+            p.IpsComentaId, p.CodigoAceptacion, p.FechaComentan,
+            p.AseguradoraId, p.FechaIngresoPad, p.FechaEgresoPad,
+            p.DiasEstancia, p.OpIngresoDias,
+            p.Incapacidad, p.GrupoRh, p.TipoUsuarioId, p.Estado,
+            p.ClasificacionPacienteId, p.ClasificacionGrupoPatologiaId,
+            p.EstratoSocial, p.Sexo, p.EstadoCivil, p.Zona,
+            p.Ocupacion, p.Regimen,
+            p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
+            p.Cie10Id, p.Cie10Codigo, p.DiagnosticoPrincipal,
+            p.Tutela, p.TipoTutelaId, p.MedContratadoId,
+            p.PaisResidenciaId, p.PaisOrigenId, p.DepartamentoId, p.MunicipioId,
+            p.Direccion, p.Barrio, p.Ciudad,
+            p.CodigoPaisTelefono, p.Telefono, p.Email,
+            p.SedeAtencionId,
+            p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
+            contactos,
+            p.Activo);
     }
 
     public async Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default)
@@ -142,19 +148,58 @@ public sealed class PacienteService : IPacienteService
         p.Ciudad = req.Ciudad?.Trim();
 
         // Contacto
+        p.CodigoPaisTelefono = string.IsNullOrWhiteSpace(req.CodigoPaisTelefono) ? "+57" : req.CodigoPaisTelefono.Trim();
         p.Telefono = req.Telefono?.Trim();
         p.Email = req.Email?.Trim();
 
         // Sede
         p.SedeAtencionId = req.SedeAtencionId;
 
-        // Emergencia
-        p.ContactoEmergencia = req.ContactoEmergencia?.Trim();
-        p.Parentesco = req.Parentesco?.Trim();
-        p.TelefonoEmergencia = req.TelefonoEmergencia?.Trim();
+        // Emergencia (campos legacy: el primer contacto de la lista pisa estos)
+        var primero = req.ContactosEmergencia.FirstOrDefault();
+        if (primero is not null && !string.IsNullOrWhiteSpace(primero.Nombre))
+        {
+            p.ContactoEmergencia = primero.Nombre.Trim();
+            p.Parentesco = primero.Parentesco?.Trim();
+            p.TelefonoEmergencia = primero.Telefono?.Trim();
+        }
+        else
+        {
+            p.ContactoEmergencia = req.ContactoEmergencia?.Trim();
+            p.Parentesco = req.Parentesco?.Trim();
+            p.TelefonoEmergencia = req.TelefonoEmergencia?.Trim();
+        }
 
         p.Activo = req.Activo;
         await _db.SaveChangesAsync(ct);
+
+        // Sincronizar lista de contactos. Estrategia simple: borrar todos los
+        // existentes y reescribir desde la request. Es seguro porque la entidad
+        // no tiene FKs entrantes (no rompe datos clinicos).
+        if (_tenant.TenantId is Guid tidSync)
+        {
+            var anteriores = await _db.PacienteContactosEmergencia
+                .Where(c => c.PacienteId == p.Id)
+                .ToListAsync(ct);
+            if (anteriores.Count > 0) { _db.PacienteContactosEmergencia.RemoveRange(anteriores); }
+
+            var nuevos = req.ContactosEmergencia
+                .Where(c => !string.IsNullOrWhiteSpace(c.Nombre))
+                .Select((c, i) => new PacienteContactoEmergencia
+                {
+                    TenantId = tidSync,
+                    PacienteId = p.Id,
+                    Nombre = c.Nombre.Trim(),
+                    Parentesco = c.Parentesco?.Trim(),
+                    CodigoPais = string.IsNullOrWhiteSpace(c.CodigoPais) ? "+57" : c.CodigoPais.Trim(),
+                    Telefono = c.Telefono?.Trim(),
+                    Orden = c.Orden > 0 ? c.Orden : i + 1
+                })
+                .ToList();
+            if (nuevos.Count > 0) { _db.PacienteContactosEmergencia.AddRange(nuevos); }
+            await _db.SaveChangesAsync(ct);
+        }
+
         return await GetAsync(p.Id, ct);
     }
 

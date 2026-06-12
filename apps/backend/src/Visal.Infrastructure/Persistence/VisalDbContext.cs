@@ -92,6 +92,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Sucursal> Sucursales => Set<Sucursal>();
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
+    public DbSet<PacienteContactoEmergencia> PacienteContactosEmergencia => Set<PacienteContactoEmergencia>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
     public DbSet<AsignacionLote> AsignacionLotes => Set<AsignacionLote>();
     public DbSet<Asignacion> Asignaciones => Set<Asignacion>();
@@ -885,16 +886,28 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Barrio).HasMaxLength(120);
             b.Property(x => x.Ciudad).HasMaxLength(120);
             // Contacto
+            b.Property(x => x.CodigoPaisTelefono).HasMaxLength(5);
             b.Property(x => x.Telefono).HasMaxLength(40);
             b.Property(x => x.Email).HasMaxLength(160);
-            // Emergencia
+            // Emergencia (legacy: primer contacto duplicado en columnas planas)
             b.Property(x => x.ContactoEmergencia).HasMaxLength(200);
             b.Property(x => x.Parentesco).HasMaxLength(80);
             b.Property(x => x.TelefonoEmergencia).HasMaxLength(40);
             // FKs concretas (las catalogo se haran luego)
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.SedeAtencion).WithMany().HasForeignKey(x => x.SedeAtencionId).OnDelete(DeleteBehavior.SetNull);
+            b.HasMany(x => x.ContactosEmergencia).WithOne(x => x.Paciente!)
+                .HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.NumeroDocumento }).IsUnique();
+        });
+
+        modelBuilder.Entity<PacienteContactoEmergencia>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Parentesco).HasMaxLength(80);
+            b.Property(x => x.CodigoPais).HasMaxLength(5).IsRequired();
+            b.Property(x => x.Telefono).HasMaxLength(40);
+            b.HasIndex(x => x.PacienteId);
         });
 
         modelBuilder.Entity<TenantUser>(b =>

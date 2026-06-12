@@ -224,7 +224,14 @@
                         <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>
                         <div class="ase-f"><label>Barrio</label><input class="form-control form-control-sm" @bind="_barrio" /></div>
                         <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
-                        <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_tel" /></div>
+                        <div class="ase-f"><label>Telefono</label>
+                            <div style="display:flex;gap:6px;">
+                                <select class="form-select form-select-sm" style="max-width:110px;" @bind="_codPaisTel">
+                                    @foreach (var cp in _codigosPais) { <option value="@cp.Codigo">@cp.Codigo @cp.Pais</option> }
+                                </select>
+                                <input class="form-control form-control-sm" @bind="_tel" placeholder="Solo numero" />
+                            </div>
+                        </div>
                         <div class="ase-f"><label>Correo Electronico</label><input class="form-control form-control-sm" @bind="_email" /></div>
                         <div class="ase-f"><label>Sede Atencion</label>
                             <select class="form-select form-select-sm" @bind="_sedeId">
@@ -249,13 +256,38 @@
                         </div>
                     </div>
 
-                    <div class="ase-card-h" style="margin-top:14px;">Contacto de emergencia</div>
-                    <div class="ase-form">
-                        <div class="ase-f ase-f-wide"><label>Informar a</label><input class="form-control form-control-sm" @bind="_emerNombre" /></div>
-                        <div class="ase-f"><label>Parentesco</label><input class="form-control form-control-sm" @bind="_emerParentesco" /></div>
-                        <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_emerTel" /></div>
-                        <label class="ase-chk" style="align-self:end;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
+                    <div class="ase-card-h" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;">
+                        <span>Contactos de emergencia</span>
+                        <button type="button" class="btn btn-outline-primary btn-sm" @onclick="AgregarContactoEmergencia">+ Agregar contacto</button>
                     </div>
+                    @if (_contactos.Count == 0)
+                    {
+                        <div class="ase-empty" style="padding:14px;">Sin contactos. Pulsa "+ Agregar contacto" para registrar uno.</div>
+                    }
+                    @for (var i = 0; i < _contactos.Count; i++)
+                    {
+                        var idx = i;
+                        var c = _contactos[idx];
+                        <div class="ase-form" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;">
+                            <div class="ase-f ase-f-wide"><label>Nombre (#@(idx + 1))</label>
+                                <input class="form-control form-control-sm" @bind="c.Nombre" />
+                            </div>
+                            <div class="ase-f"><label>Parentesco</label>
+                                <input class="form-control form-control-sm" @bind="c.Parentesco" placeholder="Madre, padre, conyuge..." />
+                            </div>
+                            <div class="ase-f ase-f-wide"><label>Telefono</label>
+                                <div style="display:flex;gap:6px;">
+                                    <select class="form-select form-select-sm" style="max-width:110px;" @bind="c.CodigoPais">
+                                        @foreach (var cp in _codigosPais) { <option value="@cp.Codigo">@cp.Codigo @cp.Pais</option> }
+                                    </select>
+                                    <input class="form-control form-control-sm" @bind="c.Telefono" placeholder="Solo numero" />
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-link text-danger btn-sm" style="align-self:end;" @onclick="() => QuitarContactoEmergencia(idx)" title="Quitar contacto">&#128465; Quitar</button>
+                        </div>
+                    }
+
+                    <label class="ase-chk" style="margin-top:8px;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
                 }
 
                 @* ===== TAB DETALLE ===== *@
@@ -532,6 +564,7 @@
 
     // Geografia
     private string? _dir, _barrio, _ciudad;
+    private string _codPaisTel = "+57";
     private string? _tel, _email;
     private string _sedeId = "";
 
@@ -541,9 +574,53 @@
     private List<MunicipioDto> _municipios = new();
     private string _paisResidencia = "", _paisOrigen = "", _departamento = "", _municipio = "";
 
-    // Emergencia
+    // Emergencia (legacy, mantenido como fallback de display)
     private string? _emerNombre, _emerParentesco, _emerTel;
     private bool _activo = true;
+
+    /// <summary>Lista N de contactos de emergencia editables. La primera fila
+    /// sustituye a los campos legacy al guardar.</summary>
+    private List<ContactoEmergenciaEdit> _contactos = new();
+
+    /// <summary>Catalogo simple de codigos de pais frecuentes. Si necesitas mas,
+    /// se agregan aqui; no requiere migracion.</summary>
+    private static readonly (string Codigo, string Pais)[] _codigosPais = new[]
+    {
+        ("+57",  "Colombia"),
+        ("+58",  "Venezuela"),
+        ("+593", "Ecuador"),
+        ("+51",  "Peru"),
+        ("+56",  "Chile"),
+        ("+54",  "Argentina"),
+        ("+591", "Bolivia"),
+        ("+52",  "Mexico"),
+        ("+1",   "EE.UU./Canada"),
+        ("+34",  "Espana")
+    };
+
+    private void AgregarContactoEmergencia()
+    {
+        _contactos.Add(new ContactoEmergenciaEdit { CodigoPais = "+57", Orden = _contactos.Count + 1 });
+    }
+
+    private void QuitarContactoEmergencia(int idx)
+    {
+        if (idx < 0 || idx >= _contactos.Count) { return; }
+        _contactos.RemoveAt(idx);
+        for (var i = 0; i < _contactos.Count; i++) { _contactos[i].Orden = i + 1; }
+    }
+
+    /// <summary>Modelo editable de UI para un contacto de emergencia. No persiste
+    /// directo: en Save se convierte a PacienteContactoEmergenciaDto.</summary>
+    private sealed class ContactoEmergenciaEdit
+    {
+        public Guid? Id { get; set; }
+        public string Nombre { get; set; } = "";
+        public string? Parentesco { get; set; }
+        public string CodigoPais { get; set; } = "+57";
+        public string? Telefono { get; set; }
+        public int Orden { get; set; }
+    }
 
     private bool _busy; private string? _error, _ok;
 
@@ -610,10 +687,12 @@
         _medContratado = "";
         _cie10Codigo = null;
         _dir = _barrio = _ciudad = null;
+        _codPaisTel = "+57";
         _tel = _email = null; _sedeId = "";
         _paisResidencia = _paisOrigen = _departamento = _municipio = "";
         _departamentos = new(); _municipios = new();
         _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
+        _contactos = new();
         _showForm = true; _tab = "generales"; _error = _ok = null;
     }
 
@@ -647,6 +726,7 @@
         _medContratado = d.MedContratadoId?.ToString() ?? "";
         _cie10Codigo = d.Cie10Codigo;
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
+        _codPaisTel = string.IsNullOrWhiteSpace(d.CodigoPaisTelefono) ? "+57" : d.CodigoPaisTelefono!;
         _tel = d.Telefono; _email = d.Email;
         _sedeId = d.SedeAtencionId?.ToString() ?? "";
         _paisResidencia = d.PaisResidenciaId?.ToString() ?? "";
@@ -658,6 +738,29 @@
         if (Guid.TryParse(_departamento, out var did)) { _municipios = (await GeoSvc.ListMunicipiosAsync(did)).ToList(); }
         else { _municipios = new(); }
         _emerNombre = d.ContactoEmergencia; _emerParentesco = d.Parentesco; _emerTel = d.TelefonoEmergencia; _activo = d.Activo;
+        // Lista de contactos: si vino del backend la usamos; si esta vacia pero hay
+        // datos legacy (paciente viejo), creamos una fila con esos datos.
+        _contactos = d.ContactosEmergencia
+            .Select(c => new ContactoEmergenciaEdit
+            {
+                Id = c.Id,
+                Nombre = c.Nombre,
+                Parentesco = c.Parentesco,
+                CodigoPais = string.IsNullOrWhiteSpace(c.CodigoPais) ? "+57" : c.CodigoPais,
+                Telefono = c.Telefono,
+                Orden = c.Orden
+            }).ToList();
+        if (_contactos.Count == 0 && !string.IsNullOrWhiteSpace(d.ContactoEmergencia))
+        {
+            _contactos.Add(new ContactoEmergenciaEdit
+            {
+                Nombre = d.ContactoEmergencia!,
+                Parentesco = d.Parentesco,
+                CodigoPais = "+57",
+                Telefono = d.TelefonoEmergencia,
+                Orden = 1
+            });
+        }
         _showForm = true; _tab = "generales"; _error = _ok = null;
     }
 
@@ -683,9 +786,17 @@
                 _tutela, Try(_tipoTutela), Try(_medContratado),
                 Try(_paisResidencia), Try(_paisOrigen), Try(_departamento), Try(_municipio),
                 _dir, _barrio, _ciudad,
-                _tel, _email,
+                _codPaisTel, _tel, _email,
                 sede,
                 _emerNombre, _emerParentesco, _emerTel,
+                _contactos
+                    .Where(c => !string.IsNullOrWhiteSpace(c.Nombre))
+                    .Select((c, i) => new PacienteContactoEmergenciaDto(
+                        c.Id, c.Nombre.Trim(), c.Parentesco?.Trim(),
+                        string.IsNullOrWhiteSpace(c.CodigoPais) ? "+57" : c.CodigoPais.Trim(),
+                        c.Telefono?.Trim(),
+                        c.Orden > 0 ? c.Orden : i + 1))
+                    .ToList(),
                 _activo);
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }

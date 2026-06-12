@@ -90,6 +90,8 @@ public class Paciente : TenantEntity
     public string? Ciudad { get; set; }
 
     // ===== Contacto =====
+    /// <summary>Codigo de pais con prefijo "+". Default "+57" (Colombia).</summary>
+    public string? CodigoPaisTelefono { get; set; } = "+57";
     public string? Telefono { get; set; }
     public string? Email { get; set; }
 
@@ -98,10 +100,17 @@ public class Paciente : TenantEntity
     public Guid? SedeAtencionId { get; set; }
     public Sucursal? SedeAtencion { get; set; }
 
-    // ===== Contacto de emergencia =====
+    // ===== Contacto de emergencia (legacy — primer contacto) =====
+    /// <summary>Nombre del contacto principal. Se mantiene por compat: la lista
+    /// completa vive en <see cref="ContactosEmergencia"/>.</summary>
     public string? ContactoEmergencia { get; set; }
     public string? Parentesco { get; set; }
     public string? TelefonoEmergencia { get; set; }
+
+    /// <summary>Lista completa de contactos de emergencia (1..N). El primero
+    /// se sincroniza con los 3 campos legacy de arriba para no romper consumidores
+    /// que esperan un solo contacto.</summary>
+    public List<PacienteContactoEmergencia> ContactosEmergencia { get; set; } = new();
 
     // ===== Estado del registro =====
     public bool Activo { get; set; } = true;

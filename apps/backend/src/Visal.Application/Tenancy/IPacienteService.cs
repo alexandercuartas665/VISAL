@@ -1,5 +1,9 @@
 namespace Visal.Application.Tenancy;
 
+/// <summary>Un contacto de emergencia del paciente. El paciente puede tener varios.</summary>
+public sealed record PacienteContactoEmergenciaDto(
+    Guid? Id, string Nombre, string? Parentesco, string CodigoPais, string? Telefono, int Orden);
+
 public sealed record PacienteDto(
     Guid Id, string NumeroDocumento, string NombreCompleto, string? Ciudad, string? Telefono,
     string? Aseguradora, string? Sede, string? Estado, DateOnly? FechaIngresoPad);
@@ -28,11 +32,13 @@ public sealed record PacienteDetailDto(
     Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
     string? Direccion, string? Barrio, string? Ciudad,
     // Contacto
-    string? Telefono, string? Email,
+    string? CodigoPaisTelefono, string? Telefono, string? Email,
     // Sede
     Guid? SedeAtencionId,
-    // Emergencia
+    // Emergencia legacy (primer contacto, mantenido por compat)
     string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia,
+    // Lista completa de contactos de emergencia (puede tener 0..N)
+    IReadOnlyList<PacienteContactoEmergenciaDto> ContactosEmergencia,
     bool Activo);
 
 public sealed record SavePacienteRequest(
@@ -60,11 +66,13 @@ public sealed record SavePacienteRequest(
     Guid? PaisResidenciaId, Guid? PaisOrigenId, Guid? DepartamentoId, Guid? MunicipioId,
     string? Direccion, string? Barrio, string? Ciudad,
     // Contacto
-    string? Telefono, string? Email,
+    string? CodigoPaisTelefono, string? Telefono, string? Email,
     // Sede
     Guid? SedeAtencionId,
-    // Emergencia
+    // Emergencia legacy (primer contacto)
     string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia,
+    // Lista completa de contactos de emergencia (la UI envia 0..N)
+    IReadOnlyList<PacienteContactoEmergenciaDto> ContactosEmergencia,
     bool Activo);
 
 public interface IPacienteService

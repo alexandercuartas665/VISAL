@@ -302,7 +302,7 @@ app.MapPost("/auth/select-empresa", async (
     // Si el usuario tiene exactamente una sede a su alcance, entrar directo con sucursal_id.
     // Si tiene varias o ninguna, dejarlo en el selector de sede (o seguir sin sede si no hay).
     var disponibles = await sedes.GetSedesAsync(userId, resultado.TenantId);
-    string destino = "/mi-cuenta";
+    string destino = "/admision";
     if (disponibles.Count == 1)
     {
         keep.Add(new Claim("sucursal_id", disponibles[0].Id.ToString()));
@@ -509,7 +509,7 @@ app.MapGet("/signin-google", async (
     {
         claims.Add(new Claim("tenant_id", result.TenantId!.Value.ToString()));
         claims.Add(new Claim("tenant_role", result.TenantRole ?? string.Empty));
-        redirect = "/mi-cuenta";
+        redirect = "/admision";
     }
 
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);

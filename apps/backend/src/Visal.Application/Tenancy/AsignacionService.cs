@@ -19,15 +19,27 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             sedeNombre = await db.Sucursales.AsNoTracking().Where(s => s.Id == sid).Select(s => s.Nombre).FirstOrDefaultAsync(ct);
         }
 
-        // Contratos: si tiene aseguradora, sus contratos. Si no, vacio.
+        // Contratos: solo los 3 contratos configurados en el modulo Admision
+        // (Contrato1Id, Contrato2Id, Contrato3Id) en ese orden. El primero
+        // (Contrato1) es el que la UI debe auto-seleccionar; los otros 2 estan
+        // disponibles pero opcionales.
+        var idsOrdenados = new[] { p.Contrato1Id, p.Contrato2Id, p.Contrato3Id }
+            .Where(g => g is not null)
+            .Select(g => g!.Value)
+            .ToArray();
         var contratos = new List<ContratoMiniDto>();
-        if (p.AseguradoraId is Guid aid)
+        if (idsOrdenados.Length > 0)
         {
-            contratos = await db.ContratosAseguradora.AsNoTracking()
-                .Where(c => c.AseguradoraId == aid)
+            var lookup = await db.ContratosAseguradora.AsNoTracking()
+                .Where(c => idsOrdenados.Contains(c.Id))
                 .Join(db.Aseguradoras.AsNoTracking(), c => c.AseguradoraId, a => a.Id,
                     (c, a) => new ContratoMiniDto(c.Id, a.Id, a.Nombre, c.CodigoContrato, c.Estado))
-                .ToListAsync(ct);
+                .ToDictionaryAsync(c => c.ContratoId, ct);
+            // Mantener el orden Contrato1 → Contrato2 → Contrato3 que viene del paciente.
+            foreach (var cid in idsOrdenados)
+            {
+                if (lookup.TryGetValue(cid, out var dto)) { contratos.Add(dto); }
+            }
         }
 
         return new PacienteAsignacionDto(p.Id, p.NumeroDocumento, p.TipoDocumento, p.NombreCompleto,

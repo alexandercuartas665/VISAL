@@ -48,8 +48,23 @@
                 <div class="ase-f ase-f-wide">
                     <label>Contratos</label>
                     <select class="form-select form-select-sm" value="@_contratoIdSel" @onchange="OnContratoChanged" disabled="@(_paciente == null)">
-                        <option value="">Selecciona un contrato</option>
-                        @foreach (var c in _todosContratos) { <option value="@c.ContratoId">@c.CodigoContrato - @c.AseguradoraNombre</option> }
+                        @if (_paciente is null)
+                        {
+                            <option value="">Carga un paciente primero</option>
+                        }
+                        else if (_paciente.Contratos.Count == 0)
+                        {
+                            <option value="">Paciente sin contratos configurados</option>
+                        }
+                        else
+                        {
+                            <option value="">Selecciona un contrato</option>
+                            @for (var i = 0; i < _paciente.Contratos.Count; i++)
+                            {
+                                var c = _paciente.Contratos[i];
+                                <option value="@c.ContratoId">@(i + 1). @c.CodigoContrato - @c.AseguradoraNombre</option>
+                            }
+                        }
                     </select>
                 </div>
                 <div class="ase-f ase-f-wide">
@@ -552,8 +567,19 @@
     {
         _paciente = p;
         _docBusqueda = p.NumeroDocumento;
-        _contratoIdSel = "";
         _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;
+        // Auto-seleccionar Contrato1 (primer elemento de Contratos, gracias al
+        // orden Contrato1Id -> 2 -> 3 que arma el backend). Si el paciente no
+        // tiene contratos configurados en admision, el select queda vacio.
+        if (p.Contratos.Count > 0)
+        {
+            _contratoIdSel = p.Contratos[0].ContratoId.ToString();
+            await CargarServiciosDelContrato();
+        }
+        else
+        {
+            _contratoIdSel = "";
+        }
         _ultimas = (await Svc.UltimasAsignacionesAsync(p.Id, 10)).ToList();
         _modal = false;
     }

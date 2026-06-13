@@ -146,6 +146,7 @@ public interface IAsignacionService
         AsignacionEstadoFiltro estado = AsignacionEstadoFiltro.Pendientes,
         int? anio = null, int? mesVigencia = null,
         string? noOrden = null, string? documentoPaciente = null,
+        string? sucursalNombre = null,
         CancellationToken ct = default);
 
     /// <summary>

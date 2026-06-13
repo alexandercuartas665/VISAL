@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy
 @inject IAsignacionService Svc
 @inject IUsuarioAdminService UsuSvc
+@inject ISucursalService SucSvc
 
 <PageTitle>Coordinacion - Visal</PageTitle>
 
@@ -352,6 +353,11 @@ else
     // Permisos del usuario logueado (que modulos puede coordinar).
     private List<string> _modulos = new();
 
+    /// <summary>Nombre de la sucursal con la que el usuario logueo. Cuando NO es
+    /// null, el grid de "Servicios no asignados" filtra a asignaciones de esa
+    /// sede. Si el usuario entro con SEDE=GLOBAL (admin), queda null y ve todo.</summary>
+    private string? _miSucursalNombre;
+
     // Filtros.
     private string _tipoSel = "";
     private AsignacionEstadoFiltro _estado = AsignacionEstadoFiltro.Pendientes;
@@ -404,6 +410,16 @@ else
                 return;
             }
             _modulos = (await UsuSvc.GetModulosCoordinacionAsync(puId)).ToList();
+
+            // Resolver el nombre de la sucursal del claim sucursal_id. Si no hay
+            // claim (admin con SEDE=GLOBAL) o no se resuelve, dejamos null para
+            // que el usuario vea todas las sedes.
+            var sucClaim = st.User.FindFirst("sucursal_id")?.Value;
+            if (Guid.TryParse(sucClaim, out var sucId))
+            {
+                var sedes = await SucSvc.ListAsync();
+                _miSucursalNombre = sedes.FirstOrDefault(s => s.Id == sucId)?.Nombre;
+            }
         }
         catch (Exception ex) { _error = "Error inicial: " + ex.Message; }
     }
@@ -431,7 +447,8 @@ else
             int? mesFiltro = _mes >= 1 && _mes <= 12 ? _mes : null;
             _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
                 string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
-                string.IsNullOrWhiteSpace(_doc) ? null : _doc)).ToList();
+                string.IsNullOrWhiteSpace(_doc) ? null : _doc,
+                _miSucursalNombre)).ToList();
             _solicitudSel = null;
             _especialistas = new();
             if (_pendientes.Count == 0) { _ok = "Sin servicios para esta combinacion."; }

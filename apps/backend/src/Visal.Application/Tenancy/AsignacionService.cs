@@ -272,6 +272,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         AsignacionEstadoFiltro estado = AsignacionEstadoFiltro.Pendientes,
         int? anio = null, int? mesVigencia = null,
         string? noOrden = null, string? documentoPaciente = null,
+        string? sucursalNombre = null,
         CancellationToken ct = default)
     {
         // Sin modulos permitidos -> grid vacio (el usuario no es coordinador de ningun modulo).
@@ -312,6 +313,15 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         {
             var d = documentoPaciente.Trim();
             q = q.Where(a => a.Paciente != null && a.Paciente.NumeroDocumento.Contains(d));
+        }
+        if (!string.IsNullOrWhiteSpace(sucursalNombre))
+        {
+            // El coordinador solo debe ver pacientes asignados en SU sede. Las
+            // asignaciones guardan la sucursal como string (varchar 40); el caller
+            // resuelve el nombre desde el claim sucursal_id. Si pasa null, no se filtra
+            // (admin global, vista historica, etc.).
+            var s = sucursalNombre.Trim();
+            q = q.Where(a => a.Sucursal == s);
         }
 
         var asigs = await q

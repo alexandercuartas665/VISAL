@@ -1,0 +1,394 @@
+@page "/interoperabilidad/rda"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject IRdaConsoleService Svc
+@inject IRdaBuilderService Builder
+@inject AuthenticationStateProvider AuthState
+@inject Microsoft.JSInterop.IJSRuntime JS
+
+<PageTitle>Consola RDA - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Interoperabilidad</div>
+        <h1 class="ase-title">Consola RDA</h1>
+        <p class="ase-sub" style="margin:4px 0 0;color:var(--muted);font-size:13px;">
+            Registro de Bundles FHIR R4 enviados a la plataforma IHCE del MinSalud
+            (Resolucion 1888 de 2025). Cada fila es un evento inmutable de auditoria.
+        </p>
+    </div>
+    <div style="display:flex;gap:8px;">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@_cargando">
+            @if (_cargando) { <span>...</span> } else { <span>Refrescar</span> }
+        </button>
+        <button class="btn btn-primary btn-sm" @onclick="AbrirGenerar">+ Generar RDA</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@* ===================== Filtros ===================== *@
+<div class="ase-card" style="margin-bottom:14px;">
+    <div class="ase-form" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 80px;gap:10px;align-items:end;">
+        <div class="ase-f">
+            <label>Documento paciente</label>
+            <input class="form-control form-control-sm mono" @bind="_filtroDoc" placeholder="ej. 1010101010" />
+        </div>
+        <div class="ase-f">
+            <label>Estado</label>
+            <select class="form-select form-select-sm" @bind="_filtroEstado">
+                <option value="">(Todos)</option>
+                @foreach (var e in Enum.GetValues<EstadoRdaEvento>())
+                {
+                    <option value="@e">@e</option>
+                }
+            </select>
+        </div>
+        <div class="ase-f">
+            <label>Ambiente</label>
+            <select class="form-select form-select-sm" @bind="_filtroAmb">
+                <option value="">(Todos)</option>
+                <option value="Sandbox">Sandbox</option>
+                <option value="Produccion">Produccion</option>
+            </select>
+        </div>
+        <div class="ase-f">
+            <label>Desde</label>
+            <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" />
+        </div>
+        <div class="ase-f">
+            <label>Hasta</label>
+            <input type="date" class="form-control form-control-sm" @bind="_filtroHasta" />
+        </div>
+        <button class="btn btn-primary btn-sm" @onclick="CargarLista">Aplicar</button>
+    </div>
+</div>
+
+@* ===================== Grid ===================== *@
+<div class="ase-card">
+    <div class="ase-card-h">Eventos RDA <small style="color:var(--muted)">@_rows.Count fila(s)</small></div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Paciente</th>
+                    <th>Profesional</th>
+                    <th>Sede</th>
+                    <th>Modalidad</th>
+                    <th>Ambiente</th>
+                    <th>Estado</th>
+                    <th>Hash</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td class="mono"><small>@r.FechaGeneracion.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></td>
+                        <td>
+                            <div><b>@r.PacienteNombre</b></div>
+                            <small class="mono" style="color:var(--muted)">@r.PacienteDocumento</small>
+                        </td>
+                        <td><small>@r.ProfesionalNombre</small></td>
+                        <td><small>@r.SucursalNombre</small></td>
+                        <td><small>@r.Modalidad</small></td>
+                        <td>
+                            @if (r.Ambiente == AmbienteIhce.Sandbox)
+                            {
+                                <span class="badge bg-warning text-dark">Sandbox</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success">Prod</span>
+                            }
+                        </td>
+                        <td>@RenderEstado(r.Estado)</td>
+                        <td class="mono"><small>@r.BundleHash.Substring(0, 12)…</small></td>
+                        <td class="ase-row-actions" style="text-align:right;white-space:nowrap;">
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerJson(r.Id)">Ver JSON</button>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(r.Id)">Descargar</button>
+                            @if (r.Estado == EstadoRdaEvento.Borrador)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => Eliminar(r.Id)">Eliminar</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_rows.Count == 0 && !_cargando)
+        {
+            <div class="ase-empty">
+                Sin eventos RDA todavia. Usa el boton <b>+ Generar RDA</b> para construir el primero
+                a partir de una Historia Clinica.
+            </div>
+        }
+    </div>
+</div>
+
+@* ===================== Modal Generar RDA ===================== *@
+@if (_modalGenerar)
+{
+    <div class="ase-modal-bg" @onclick="CerrarGenerar">
+        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:780px;max-width:980px;">
+            <div class="ase-modal-h">Generar RDA desde Historia Clinica</div>
+            <div style="padding:16px 18px;">
+                <div class="ase-form" style="display:grid;grid-template-columns:1fr 220px;gap:12px;align-items:end;">
+                    <div class="ase-f">
+                        <label>Buscar paciente (nombre o documento)</label>
+                        <input class="form-control form-control-sm" @bind="_buscarHc" @bind:event="oninput"
+                               @bind:after="BuscarHc" placeholder="JUAN... / 1010101010" />
+                    </div>
+                    <div class="ase-f">
+                        <label>Modalidad</label>
+                        <select class="form-select form-select-sm" @bind="_modalidad">
+                            <option value="ConsultaExterna">Consulta Externa (recomendado)</option>
+                            <option value="Paciente">Paciente</option>
+                            <option value="Hospitalizacion">Hospitalizacion</option>
+                            <option value="Urgencias">Urgencias</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="max-height:380px;overflow:auto;margin-top:12px;border:1px solid #eee;border-radius:8px;">
+                    <table class="table table-sm align-middle" style="margin:0;">
+                        <thead style="position:sticky;top:0;background:#f9fafb;z-index:1;">
+                            <tr>
+                                <th>Paciente</th>
+                                <th>HC desde</th>
+                                <th>Cerrada</th>
+                                <th>Formato</th>
+                                <th>Estado HC</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var h in _hcCandidatas)
+                            {
+                                <tr>
+                                    <td>
+                                        <div>@h.PacienteNombre</div>
+                                        <small class="mono" style="color:var(--muted)">@h.PacienteDocumento</small>
+                                    </td>
+                                    <td class="mono"><small>@h.FechaApertura.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></td>
+                                    <td class="mono"><small>@(h.FechaCierre?.LocalDateTime.ToString("yyyy-MM-dd HH:mm") ?? "-")</small></td>
+                                    <td class="mono"><small>@h.FormatoCodigo</small></td>
+                                    <td><small>@h.Estado</small></td>
+                                    <td class="ase-row-actions" style="text-align:right;">
+                                        <button class="btn btn-primary btn-sm" @onclick="() => GenerarParaHc(h.Id)"
+                                                disabled="@_generando">
+                                            @if (_generando && _generandoHcId == h.Id) { <span>Generando…</span> }
+                                            else { <span>Generar</span> }
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (_hcCandidatas.Count == 0)
+                    {
+                        <div class="ase-empty" style="padding:24px;">Sin resultados. Escribe en el buscador.</div>
+                    }
+                </div>
+                @if (_advertenciasUltimo.Count > 0)
+                {
+                    <div class="ase-alert" style="margin-top:12px;background:#fff7e6;border-color:#ffd591;color:#7a4f01;">
+                        <b>Advertencias del ultimo Bundle generado:</b>
+                        <ul style="margin:8px 0 0 18px;font-size:13px;">
+                            @foreach (var a in _advertenciasUltimo)
+                            {
+                                <li>@a</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            </div>
+            <div class="ase-modal-f">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarGenerar">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===================== Modal Ver JSON ===================== *@
+@if (_detail is not null)
+{
+    <div class="ase-modal-bg" @onclick="CerrarDetalle">
+        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:880px;max-width:1180px;max-height:80vh;display:flex;flex-direction:column;">
+            <div class="ase-modal-h">
+                Bundle FHIR — @_detail.Estado
+                <span class="badge bg-secondary ms-2 mono"><small>@_detail.BundleHash.Substring(0,16)…</small></span>
+            </div>
+            <div style="padding:0 18px 12px;overflow:auto;flex:1;">
+                <pre style="background:#0d1117;color:#e6edf3;padding:14px;border-radius:8px;font-size:12px;max-height:55vh;overflow:auto;"><code>@_detail.BundleJson</code></pre>
+                @if (!string.IsNullOrWhiteSpace(_detail.ErroresJson))
+                {
+                    <details style="margin-top:10px;">
+                        <summary style="cursor:pointer;color:#c0392b;">Ver errores reportados</summary>
+                        <pre style="background:#fff5f5;color:#7a0c0c;padding:12px;border-radius:6px;font-size:12px;margin-top:6px;">@_detail.ErroresJson</pre>
+                    </details>
+                }
+            </div>
+            <div class="ase-modal-f">
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(_detail.Id)">Descargar</button>
+                <button class="btn btn-primary btn-sm" @onclick="CerrarDetalle">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .ase-modal-bg { position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000; }
+    .ase-modal { background:#fff;border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,0.2); }
+    .ase-modal-h { padding:14px 18px;font-weight:600;border-bottom:1px solid #eee;font-size:15px; }
+    .ase-modal-f { padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+
+@code {
+    private string? _error;
+    private string? _ok;
+    private bool _cargando;
+
+    private List<RdaEventoRowDto> _rows = new();
+
+    // ----- Filtros -----
+    private string? _filtroDoc;
+    private string? _filtroEstado;
+    private string? _filtroAmb;
+    private DateTime? _filtroDesde;
+    private DateTime? _filtroHasta;
+
+    // ----- Modal Generar -----
+    private bool _modalGenerar;
+    private string? _buscarHc;
+    private string _modalidad = "ConsultaExterna";
+    private List<HcCandidataRdaDto> _hcCandidatas = new();
+    private bool _generando;
+    private Guid? _generandoHcId;
+    private List<string> _advertenciasUltimo = new();
+
+    // ----- Modal Ver JSON -----
+    private RdaEventoDetailDto? _detail;
+
+    protected override async Task OnInitializedAsync() => await CargarLista();
+
+    private async Task CargarLista()
+    {
+        _error = null;
+        _cargando = true;
+        try
+        {
+            var filtro = new RdaConsoleFiltro(
+                _filtroDoc,
+                Enum.TryParse<EstadoRdaEvento>(_filtroEstado, out var e) ? e : null,
+                Enum.TryParse<AmbienteIhce>(_filtroAmb, out var a) ? a : null,
+                _filtroDesde is DateTime fd ? DateOnly.FromDateTime(fd) : null,
+                _filtroHasta is DateTime fh ? DateOnly.FromDateTime(fh) : null);
+            _rows = (await Svc.ListarAsync(filtro)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _cargando = false; }
+    }
+
+    private void AbrirGenerar()
+    {
+        _modalGenerar = true;
+        _buscarHc = null;
+        _hcCandidatas = new();
+        _advertenciasUltimo = new();
+        _ = BuscarHc();
+    }
+
+    private void CerrarGenerar() => _modalGenerar = false;
+
+    private async Task BuscarHc()
+    {
+        try
+        {
+            _hcCandidatas = (await Svc.ListarHcCandidatasAsync(_buscarHc)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task GenerarParaHc(Guid hcId)
+    {
+        _error = null; _ok = null;
+        _generando = true; _generandoHcId = hcId;
+        try
+        {
+            var actor = await ActorAsync();
+            var modalidad = Enum.Parse<ModalidadRdaIhce>(_modalidad);
+            var res = await Builder.ConstruirAsync(hcId, modalidad, actor);
+            _advertenciasUltimo = res.Advertencias.ToList();
+            _ok = res.YaExistia
+                ? $"Bundle ya existia (hash {res.BundleHash[..12]}…). No se duplico."
+                : $"RDA generado: {res.RecursosCount} recursos, hash {res.BundleHash[..12]}…";
+            await CargarLista();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _generando = false; _generandoHcId = null; }
+    }
+
+    private async Task VerJson(Guid id)
+    {
+        try
+        {
+            _detail = await Svc.ObtenerAsync(id);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void CerrarDetalle() => _detail = null;
+
+    private async Task DescargarJson(Guid id)
+    {
+        var det = await Svc.ObtenerAsync(id);
+        if (det is null) { _error = $"Evento {id} no encontrado."; return; }
+        var dataUrl = "data:application/json;charset=utf-8;base64," +
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(det.BundleJson));
+        var filename = $"rda-{id:N}.json";
+        await JS.InvokeVoidAsync("eval",
+            $"(function(){{var a=document.createElement('a');a.href='{dataUrl}';a.download='{filename}';document.body.appendChild(a);a.click();a.remove();}})();");
+    }
+
+    private async Task Eliminar(Guid id)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Eliminar este Borrador? La accion no se puede deshacer.")) { return; }
+        try
+        {
+            var actor = await ActorAsync();
+            await Svc.EliminarAsync(id, actor);
+            _ok = "Evento eliminado.";
+            await CargarLista();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private static RenderFragment RenderEstado(EstadoRdaEvento e) => __builder =>
+    {
+        var (color, text) = e switch
+        {
+            EstadoRdaEvento.Borrador => ("secondary", "Borrador"),
+            EstadoRdaEvento.Validado => ("info", "Validado"),
+            EstadoRdaEvento.Enviado => ("primary", "Enviado"),
+            EstadoRdaEvento.Aceptado => ("success", "Aceptado"),
+            EstadoRdaEvento.Rechazado => ("danger", "Rechazado"),
+            EstadoRdaEvento.Error => ("warning text-dark", "Error"),
+            _ => ("secondary", e.ToString())
+        };
+        __builder.AddMarkupContent(0, $"<span class=\"badge bg-{color}\">{text}</span>");
+    };
+
+    private async Task<Guid> ActorAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var sub = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+    }
+}

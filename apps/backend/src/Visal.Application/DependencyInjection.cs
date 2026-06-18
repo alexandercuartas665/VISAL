@@ -73,6 +73,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.ICie11Service, Tenancy.Cie11Service>();
         services.AddScoped<Tenancy.IInteroperabilidadConfigService, Tenancy.InteroperabilidadConfigService>();
         services.AddScoped<Tenancy.IRdaBuilderService, Tenancy.RdaBuilderService>();
+        services.AddScoped<Tenancy.IRdaConsoleService, Tenancy.RdaConsoleService>();
         services.AddScoped<Tenancy.IAsignacionService, Tenancy.AsignacionService>();
         services.AddScoped<Tenancy.IConfiguracionClinicaService, Tenancy.ConfiguracionClinicaService>();
         services.AddScoped<Tenancy.IAtencionProfesionalService, Tenancy.AtencionProfesionalService>();

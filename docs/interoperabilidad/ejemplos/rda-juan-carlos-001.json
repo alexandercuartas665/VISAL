@@ -1,0 +1,810 @@
+{
+  "resourceType": "Bundle",
+  "id": "rda-juan-carlos-001",
+  "meta": {
+    "profile": [
+      "https://fhir.minsalud.gov.co/rda/StructureDefinition/BundleRDA"
+    ],
+    "lastUpdated": "2026-06-18T10:30:00-05:00"
+  },
+  "identifier": {
+    "system": "urn:oid:2.16.170.1.100.10.1",
+    "value": "VISAL-RDA-2026-000001"
+  },
+  "type": "document",
+  "timestamp": "2026-06-18T10:30:00-05:00",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000001",
+      "resource": {
+        "resourceType": "Composition",
+        "id": "comp-rda-001",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/CompositionRDA"
+          ]
+        },
+        "language": "es-CO",
+        "identifier": {
+          "system": "urn:oid:2.16.170.1.100.10.1.1",
+          "value": "VISAL-COMP-2026-000001"
+        },
+        "status": "preliminary",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "34133-9",
+              "display": "Summarization of episode note"
+            }
+          ],
+          "text": "Resumen Digital de Atencion en Salud"
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSModalidadAtencionRDA",
+                "code": "ConsultaExterna",
+                "display": "Consulta Externa"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000002",
+          "display": "JUAN CARLOS PEREZ MOLINA"
+        },
+        "encounter": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000003"
+        },
+        "date": "2026-06-18T10:30:00-05:00",
+        "author": [
+          {
+            "reference": "urn:uuid:00000000-0000-0000-0000-000000000004",
+            "display": "CARLOS RAMIREZ"
+          }
+        ],
+        "title": "Resumen Digital de Atencion - Consulta Externa Fisioterapia",
+        "custodian": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000005",
+          "display": "VISAL IPS RT - Agencia Demo"
+        },
+        "section": [
+          {
+            "title": "Motivo de consulta",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "10154-3",
+                  "display": "Chief complaint Narrative - Reported"
+                }
+              ]
+            },
+            "text": {
+              "status": "additional",
+              "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>Paciente acude por dolor lumbar de 2 semanas de evolucion, sin trauma previo.</p></div>"
+            }
+          },
+          {
+            "title": "Historia de la enfermedad actual",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "10164-2",
+                  "display": "History of Present illness Narrative"
+                }
+              ]
+            },
+            "text": {
+              "status": "additional",
+              "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>Cuadro de 15 dias de dolor lumbar mecanico, EVA 6/10, sin irradiacion. Empeora con sedestacion prolongada por trabajo de oficina. Mejora parcial con AINEs OTC.</p></div>"
+            }
+          },
+          {
+            "title": "Antecedentes patologicos",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "11348-0",
+                  "display": "History of Past illness Narrative"
+                }
+              ]
+            },
+            "text": {
+              "status": "additional",
+              "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>Sin antecedentes patologicos de importancia. Niega diabetes, hipertension, cirugias previas.</p></div>"
+            }
+          },
+          {
+            "title": "Antecedentes farmacologicos",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "10160-0",
+                  "display": "History of Medication use Narrative"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:00000000-0000-0000-0000-000000000007"
+              }
+            ]
+          },
+          {
+            "title": "Alergias e intolerancias",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "48765-2",
+                  "display": "Allergies and adverse reactions Document"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:00000000-0000-0000-0000-000000000009"
+              }
+            ]
+          },
+          {
+            "title": "Examen fisico",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "29545-1",
+                  "display": "Physical findings Narrative"
+                }
+              ]
+            },
+            "text": {
+              "status": "additional",
+              "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>TA 120/80, FC 78, FR 16, Temp 36.6. Marcha conservada. Dolor a la palpacion paravertebral L4-L5. Schober 3 cm. Lasegue negativo bilateral. Fuerza 5/5 en MMII.</p></div>"
+            }
+          },
+          {
+            "title": "Diagnosticos",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "11450-4",
+                  "display": "Problem list - Reported"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:00000000-0000-0000-0000-000000000006"
+              }
+            ]
+          },
+          {
+            "title": "Plan de tratamiento",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "18776-5",
+                  "display": "Plan of care note"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "urn:uuid:00000000-0000-0000-0000-000000000008"
+              }
+            ],
+            "text": {
+              "status": "additional",
+              "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\"><p>10 sesiones de terapia fisica integral, frecuencia 3/semana. Higiene postural. Control en 4 semanas.</p></div>"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000002",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pat-juan-carlos",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/PatientRDA"
+          ]
+        },
+        "identifier": [
+          {
+            "use": "official",
+            "type": {
+              "coding": [
+                {
+                  "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSTipoDocumentoIdentidad",
+                  "code": "CC",
+                  "display": "Cedula de Ciudadania"
+                }
+              ]
+            },
+            "system": "https://fhir.minsalud.gov.co/rda/sid/cedula-ciudadania",
+            "value": "1010101010"
+          }
+        ],
+        "active": true,
+        "name": [
+          {
+            "use": "official",
+            "family": "PEREZ MOLINA",
+            "_family": {
+              "extension": [
+                {
+                  "url": "http://hl7.org/fhir/StructureDefinition/humanname-fathers-family",
+                  "valueString": "PEREZ"
+                },
+                {
+                  "url": "http://hl7.org/fhir/StructureDefinition/humanname-mothers-family",
+                  "valueString": "MOLINA"
+                }
+              ]
+            },
+            "given": [
+              "JUAN",
+              "CARLOS"
+            ]
+          }
+        ],
+        "telecom": [
+          {
+            "system": "phone",
+            "value": "+573217626882",
+            "use": "mobile"
+          },
+          {
+            "system": "email",
+            "value": "juan.perez@correo.com",
+            "use": "home"
+          }
+        ],
+        "gender": "male",
+        "birthDate": "1978-11-22",
+        "address": [
+          {
+            "use": "home",
+            "type": "physical",
+            "line": [
+              "Cra 50 # 12-08 Edif Mirador Apt 502"
+            ],
+            "city": "CALI",
+            "district": "Santiago de Cali",
+            "state": "Valle del Cauca",
+            "country": "CO",
+            "extension": [
+              {
+                "url": "https://fhir.minsalud.gov.co/rda/StructureDefinition/ExtZonaTerritorial",
+                "valueCodeableConcept": {
+                  "coding": [
+                    {
+                      "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSZonaTerritorial",
+                      "code": "01",
+                      "display": "Urbana"
+                    }
+                  ]
+                }
+              },
+              {
+                "url": "https://fhir.minsalud.gov.co/rda/StructureDefinition/ExtCodigoDivipola",
+                "valueCode": "76001"
+              }
+            ]
+          }
+        ],
+        "maritalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus",
+              "code": "M",
+              "display": "Married"
+            }
+          ]
+        },
+        "contact": [
+          {
+            "relationship": [
+              {
+                "coding": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v2-0131",
+                    "code": "C",
+                    "display": "Emergency Contact"
+                  }
+                ],
+                "text": "ESPOSA"
+              }
+            ],
+            "name": {
+              "use": "official",
+              "text": "SANDRA MOLINA"
+            },
+            "telecom": [
+              {
+                "system": "phone",
+                "value": "+573156661177",
+                "use": "mobile"
+              }
+            ]
+          }
+        ],
+        "extension": [
+          {
+            "url": "https://fhir.minsalud.gov.co/rda/StructureDefinition/ExtRegimenAfiliacion",
+            "valueCodeableConcept": {
+              "coding": [
+                {
+                  "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSRegimenAfiliacion",
+                  "code": "01",
+                  "display": "Contributivo"
+                }
+              ]
+            }
+          },
+          {
+            "url": "https://fhir.minsalud.gov.co/rda/StructureDefinition/ExtOcupacion",
+            "valueString": "INGENIERO"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000003",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-rda-001",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/EncounterRDA"
+          ]
+        },
+        "identifier": [
+          {
+            "system": "urn:oid:2.16.170.1.100.10.1.2",
+            "value": "VISAL-HC-019ea859"
+          }
+        ],
+        "status": "in-progress",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSModalidadAtencionRDA",
+                "code": "ConsultaExterna",
+                "display": "Consulta Externa"
+              }
+            ]
+          }
+        ],
+        "serviceType": {
+          "coding": [
+            {
+              "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSServicioSalud",
+              "code": "FISIOTERAPIA",
+              "display": "Fisioterapia"
+            }
+          ]
+        },
+        "subject": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000002"
+        },
+        "participant": [
+          {
+            "type": [
+              {
+                "coding": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
+                    "code": "ATND",
+                    "display": "attender"
+                  }
+                ]
+              }
+            ],
+            "individual": {
+              "reference": "urn:uuid:00000000-0000-0000-0000-000000000004",
+              "display": "CARLOS RAMIREZ"
+            }
+          }
+        ],
+        "period": {
+          "start": "2026-06-08T17:48:22-05:00"
+        },
+        "reasonCode": [
+          {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10",
+                "code": "M54.5",
+                "display": "Lumbago no especificado"
+              }
+            ]
+          }
+        ],
+        "serviceProvider": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000005"
+        }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000004",
+      "resource": {
+        "resourceType": "Practitioner",
+        "id": "prc-carlos",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/PractitionerRDA"
+          ]
+        },
+        "identifier": [
+          {
+            "use": "official",
+            "type": {
+              "coding": [
+                {
+                  "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSTipoDocumentoIdentidad",
+                  "code": "CC",
+                  "display": "Cedula de Ciudadania"
+                }
+              ]
+            },
+            "system": "https://fhir.minsalud.gov.co/rda/sid/cedula-ciudadania",
+            "value": "444444"
+          }
+        ],
+        "active": true,
+        "name": [
+          {
+            "use": "official",
+            "family": "RAMIREZ",
+            "given": [
+              "CARLOS"
+            ]
+          }
+        ],
+        "qualification": [
+          {
+            "code": {
+              "coding": [
+                {
+                  "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSTipoProfesional",
+                  "code": "FISIOTERAPEUTA",
+                  "display": "Fisioterapeuta"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000005",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "org-visal",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/OrganizationRDA"
+          ]
+        },
+        "identifier": [
+          {
+            "use": "official",
+            "type": {
+              "coding": [
+                {
+                  "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSTipoDocumentoIdentidad",
+                  "code": "NI",
+                  "display": "NIT"
+                }
+              ]
+            },
+            "system": "https://fhir.minsalud.gov.co/rda/sid/nit",
+            "value": "900123456-7"
+          },
+          {
+            "use": "secondary",
+            "type": {
+              "text": "Codigo Habilitacion REPS"
+            },
+            "system": "https://fhir.minsalud.gov.co/rda/sid/codigo-habilitacion",
+            "value": "PENDIENTE_CONFIGURAR"
+          }
+        ],
+        "active": true,
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSTipoPrestador",
+                "code": "IPS",
+                "display": "Institucion Prestadora de Servicios de Salud"
+              }
+            ]
+          }
+        ],
+        "name": "VISAL",
+        "alias": [
+          "Agencia Demo"
+        ],
+        "telecom": [
+          {
+            "system": "phone",
+            "value": "+5712345678"
+          }
+        ],
+        "address": [
+          {
+            "use": "work",
+            "type": "physical",
+            "city": "CALI",
+            "state": "Valle del Cauca",
+            "country": "CO"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000006",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-lumbago",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/ConditionRDA"
+          ]
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "active",
+              "display": "Active"
+            }
+          ]
+        },
+        "verificationStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+              "code": "confirmed",
+              "display": "Confirmed"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                "code": "encounter-diagnosis",
+                "display": "Encounter Diagnosis"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "M54.5",
+              "display": "Lumbago no especificado"
+            }
+          ],
+          "text": "Lumbago no especificado"
+        },
+        "subject": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000002"
+        },
+        "encounter": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000003"
+        },
+        "recordedDate": "2026-06-08T17:48:22-05:00",
+        "recorder": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000004"
+        }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000007",
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "med-ibuprofeno",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/MedicationStatementRDA"
+          ]
+        },
+        "status": "active",
+        "medicationCodeableConcept": {
+          "coding": [
+            {
+              "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSMedicamentoCUM",
+              "code": "19961552-1",
+              "display": "IBUPROFENO 400MG TABLETA"
+            },
+            {
+              "system": "http://www.whocc.no/atc",
+              "code": "M01AE01",
+              "display": "Ibuprofeno"
+            }
+          ],
+          "text": "IBUPROFENO 400MG TABLETA"
+        },
+        "subject": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000002"
+        },
+        "context": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000003"
+        },
+        "effectivePeriod": {
+          "start": "2026-06-08",
+          "end": "2026-06-15"
+        },
+        "dateAsserted": "2026-06-08",
+        "informationSource": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000004"
+        },
+        "dosage": [
+          {
+            "text": "1 tableta cada 8 horas por 7 dias",
+            "timing": {
+              "repeat": {
+                "frequency": 3,
+                "period": 1,
+                "periodUnit": "d",
+                "duration": 7,
+                "durationUnit": "d"
+              }
+            },
+            "route": {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "26643006",
+                  "display": "Oral"
+                }
+              ]
+            },
+            "doseAndRate": [
+              {
+                "doseQuantity": {
+                  "value": 1,
+                  "unit": "tableta",
+                  "system": "http://unitsofmeasure.org",
+                  "code": "{tablet}"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000008",
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "proc-fisio",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/ProcedureRDA"
+          ]
+        },
+        "status": "in-progress",
+        "category": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "91251008",
+              "display": "Physical therapy procedure"
+            }
+          ]
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "https://fhir.minsalud.gov.co/rda/CodeSystem/CSCUPS",
+              "code": "931002",
+              "display": "TERAPIA FISICA INTEGRAL"
+            }
+          ],
+          "text": "TERAPIA FISICA INTEGRAL"
+        },
+        "subject": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000002"
+        },
+        "encounter": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000003"
+        },
+        "performedPeriod": {
+          "start": "2026-06-10",
+          "end": "2026-07-15"
+        },
+        "performer": [
+          {
+            "actor": {
+              "reference": "urn:uuid:00000000-0000-0000-0000-000000000004"
+            },
+            "onBehalfOf": {
+              "reference": "urn:uuid:00000000-0000-0000-0000-000000000005"
+            }
+          }
+        ],
+        "reasonReference": [
+          {
+            "reference": "urn:uuid:00000000-0000-0000-0000-000000000006"
+          }
+        ],
+        "note": [
+          {
+            "text": "10 sesiones, 3 por semana. Terapia integral por lumbago mecanico."
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:00000000-0000-0000-0000-000000000009",
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "alg-nkda",
+        "meta": {
+          "profile": [
+            "https://fhir.minsalud.gov.co/rda/StructureDefinition/AllergyIntoleranceRDA"
+          ]
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active",
+              "display": "Active"
+            }
+          ]
+        },
+        "verificationStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+              "code": "confirmed",
+              "display": "Confirmed"
+            }
+          ]
+        },
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "716186003",
+              "display": "No known allergy"
+            }
+          ],
+          "text": "Sin alergias conocidas (NKDA)"
+        },
+        "patient": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000002"
+        },
+        "recordedDate": "2026-06-08T17:48:22-05:00",
+        "recorder": {
+          "reference": "urn:uuid:00000000-0000-0000-0000-000000000004"
+        }
+      }
+    }
+  ]
+}

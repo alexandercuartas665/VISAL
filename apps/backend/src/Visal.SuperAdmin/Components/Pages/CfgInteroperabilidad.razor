@@ -1,8 +1,448 @@
 @page "/cfg-interoperabilidad"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject IInteroperabilidadConfigService InterSvc
+@inject ISucursalService SucSvc
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Configuracion de Interoperabilidad - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Configuracion de la Entidad"
-                   Title="Configuracion de Interoperabilidad"
-                   Description="Parametros de interoperabilidad y reportes a entes externos." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion de la Entidad</div>
+        <h1 class="ase-title">Configuracion de Interoperabilidad</h1>
+        <p class="ase-sub" style="margin:4px 0 0;color:var(--muted);">
+            Credenciales de la plataforma IHCE / RDA (Resolucion 1888 de 2025) para conectar
+            con los servicios de interoperabilidad del Ministerio de Salud.
+        </p>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@* ===================== Parametros del API IHCE ===================== *@
+<div class="ase-card">
+    <div class="ase-card-h">Parametros del API IHCE</div>
+    <div class="ase-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div class="ase-f">
+            <label>Endpoint Sandbox</label>
+            <input class="form-control form-control-sm mono" @bind="_endSandbox"
+                   placeholder="https://sandbox.ihcecol.gov.co/ihce" />
+        </div>
+        <div class="ase-f">
+            <label>Endpoint Produccion</label>
+            <input class="form-control form-control-sm mono" @bind="_endProd"
+                   placeholder="(se entregara con credenciales productivas)" />
+        </div>
+        <div class="ase-f">
+            <label>TenantID Azure (MinSalud)</label>
+            <input class="form-control form-control-sm mono" @bind="_azureTid"
+                   placeholder="3d4b3d76-b910-426c-bd8f-bd964e3e1b53" />
+        </div>
+        <div class="ase-f">
+            <label>Scope OAuth2</label>
+            <input class="form-control form-control-sm mono" @bind="_scope"
+                   placeholder="api://...../.default" />
+        </div>
+        <div class="ase-f">
+            <label>APIMsubskey Sandbox @if (_cfg?.TieneApimSandbox == true) { <span class="badge bg-success ms-1">configurada</span> }</label>
+            <input class="form-control form-control-sm mono" type="password" autocomplete="new-password"
+                   @bind="_apimSandboxNuevo" placeholder="@(_cfg?.TieneApimSandbox == true ? "(dejar vacio para conservar)" : "ingresa la clave")" />
+        </div>
+        <div class="ase-f">
+            <label>APIMsubskey Produccion @if (_cfg?.TieneApimProduccion == true) { <span class="badge bg-success ms-1">configurada</span> }</label>
+            <input class="form-control form-control-sm mono" type="password" autocomplete="new-password"
+                   @bind="_apimProdNuevo" placeholder="@(_cfg?.TieneApimProduccion == true ? "(dejar vacio para conservar)" : "")" />
+        </div>
+        <div class="ase-f">
+            <label>Ambiente activo</label>
+            <select class="form-select form-select-sm" @bind="_ambiente">
+                <option value="Sandbox">Sandbox (pruebas)</option>
+                <option value="Produccion">Produccion</option>
+            </select>
+        </div>
+        <div class="ase-f" style="display:flex;align-items:end;">
+            <button class="btn btn-primary btn-sm" @onclick="GuardarConfig" disabled="@_savingConfig">
+                @if (_savingConfig) { <span>Guardando...</span> } else { <span>Guardar configuracion</span> }
+            </button>
+        </div>
+    </div>
+</div>
+
+@* ===================== Credenciales por sede ===================== *@
+<div class="ase-card">
+    <div class="ase-card-h">Credenciales por sede (token IHCE Manager)
+        <button class="btn btn-outline-primary btn-sm ms-2" @onclick="AbrirNueva">+ Credencial</button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Sede</th>
+                    <th>Ambiente</th>
+                    <th>Cod. Habilitacion</th>
+                    <th>Nombre llave</th>
+                    <th>Client ID</th>
+                    <th>Secret</th>
+                    <th>Vence</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _credenciales)
+                {
+                    <tr>
+                        <td>@c.SucursalNombre</td>
+                        <td>
+                            @if (c.Ambiente == AmbienteIhce.Sandbox)
+                            {
+                                <span class="badge bg-warning text-dark">Sandbox</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success">Produccion</span>
+                            }
+                        </td>
+                        <td class="mono">@c.CodigoHabilitacion</td>
+                        <td>@c.NombreLlave</td>
+                        <td class="mono"><small>@c.ClientId</small></td>
+                        <td>
+                            @if (c.TieneClientSecret)
+                            {
+                                <span class="badge bg-secondary">****</span>
+                            }
+                            else
+                            {
+                                <span class="text-danger">faltante</span>
+                            }
+                        </td>
+                        <td>@(c.FechaExpiracion?.ToString("yyyy-MM-dd") ?? "-")</td>
+                        <td class="ase-row-actions" style="text-align:right">
+                            <button class="btn btn-outline-success btn-sm" @onclick="() => Probar(c)" disabled="@(_probandoId == c.Id)">
+                                @if (_probandoId == c.Id) { <span>Probando...</span> } else { <span>Probar</span> }
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirEditar(c)">Editar</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => Eliminar(c)">Eliminar</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_credenciales.Count == 0)
+        {
+            <div class="ase-empty">
+                Sin credenciales cargadas. Cada sede del prestador recibe un token propio del IHCE Manager
+                (con codigo de habilitacion REPS) — crea una entrada por sede y por ambiente.
+            </div>
+        }
+    </div>
+</div>
+
+@* ===================== Modal resultado prueba ===================== *@
+@if (_resultadoPrueba is not null)
+{
+    <div class="ase-modal-bg" @onclick="CerrarResultado">
+        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:560px;max-width:760px;">
+            <div class="ase-modal-h">
+                @if (_resultadoPrueba.Exito)
+                {
+                    <span style="color:#0a7d3a">Conexion exitosa con Azure AD</span>
+                }
+                else
+                {
+                    <span style="color:#c0392b">Conexion fallida</span>
+                }
+            </div>
+            <div style="padding:16px 18px;">
+                <p style="margin:0 0 12px;font-size:14px;">@_resultadoPrueba.Mensaje</p>
+                <table class="table table-sm" style="margin-bottom:0;">
+                    <tbody>
+                        @if (_resultadoPrueba.Exito)
+                        {
+                            <tr><td style="width:180px"><b>Token (fragmento)</b></td><td class="mono"><small>@_resultadoPrueba.TokenFragment</small></td></tr>
+                            <tr><td><b>Tipo de token</b></td><td>@_resultadoPrueba.TokenType</td></tr>
+                            <tr><td><b>Expira en</b></td><td>@_resultadoPrueba.ExpiraEnSegundos s (@(_resultadoPrueba.ExpiraEnSegundos / 60) min)</td></tr>
+                        }
+                        else
+                        {
+                            @if (_resultadoPrueba.HttpStatus is not null)
+                            {
+                                <tr><td style="width:180px"><b>HTTP Status</b></td><td>@_resultadoPrueba.HttpStatus</td></tr>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_resultadoPrueba.AzureErrorCode))
+                            {
+                                <tr><td><b>Azure error</b></td><td class="mono">@_resultadoPrueba.AzureErrorCode</td></tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                @if (_resultadoPrueba.Exito)
+                {
+                    <p style="margin:12px 0 0;font-size:12px;color:#666">
+                        Visal pudo autenticarse contra el directorio Azure AD del MinSalud. El token
+                        Bearer queda listo para usarse en el cliente que enviara los Bundles FHIR al API IHCE.
+                    </p>
+                }
+            </div>
+            <div class="ase-modal-f">
+                <button class="btn btn-primary btn-sm" @onclick="CerrarResultado">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===================== Modal credencial ===================== *@
+@if (_modal != null)
+{
+    <div class="ase-modal-bg" @onclick="CerrarModal">
+        <div class="ase-modal" @onclick:stopPropagation="true">
+            <div class="ase-modal-h">
+                @if (_modal.Id == Guid.Empty) { <span>Nueva credencial de sede</span> }
+                else { <span>Editar credencial</span> }
+            </div>
+            <div class="ase-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px;">
+                <div class="ase-f">
+                    <label>Sede *</label>
+                    <select class="form-select form-select-sm" @bind="_modal.SucursalId">
+                        <option value="@Guid.Empty">-- elige sede --</option>
+                        @foreach (var s in _sucursales)
+                        {
+                            <option value="@s.Id">@s.Codigo - @s.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Ambiente *</label>
+                    <select class="form-select form-select-sm" @bind="_modal.Ambiente">
+                        <option value="Sandbox">Sandbox (pruebas)</option>
+                        <option value="Produccion">Produccion</option>
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Codigo Habilitacion (REPS)</label>
+                    <input class="form-control form-control-sm mono" @bind="_modal.CodigoHabilitacion"
+                           placeholder="7600112543" />
+                </div>
+                <div class="ase-f">
+                    <label>Nombre de la llave</label>
+                    <input class="form-control form-control-sm" @bind="_modal.NombreLlave"
+                           placeholder="IHCE-7600112543-SANDBOX-VISAL RT SAS" />
+                </div>
+                <div class="ase-f">
+                    <label>Client ID</label>
+                    <input class="form-control form-control-sm mono" @bind="_modal.ClientId"
+                           placeholder="51a84466-0d22-45eb-a757-3acebed77c17" />
+                </div>
+                <div class="ase-f">
+                    <label>Client Secret @if (_modal.TieneClientSecret) { <span class="badge bg-success ms-1">configurado</span> }</label>
+                    <input class="form-control form-control-sm mono" type="password" autocomplete="new-password"
+                           @bind="_modal.ClientSecretNuevo"
+                           placeholder="@(_modal.TieneClientSecret ? "(dejar vacio para conservar)" : "")" />
+                </div>
+                <div class="ase-f">
+                    <label>Fecha de expiracion</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_modal.FechaExpiracion" />
+                </div>
+                <div></div>
+            </div>
+            <div class="ase-modal-f">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModal">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="GuardarCredencial" disabled="@_savingCred">
+                    @if (_savingCred) { <span>Guardando...</span> } else { <span>Guardar</span> }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .ase-modal-bg { position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000; }
+    .ase-modal { background:#fff;border-radius:12px;min-width:720px;max-width:920px;box-shadow:0 16px 48px rgba(0,0,0,0.2); }
+    .ase-modal-h { padding:14px 18px;font-weight:600;border-bottom:1px solid #eee;font-size:16px; }
+    .ase-modal-f { padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .ase-sub { font-size:13px; }
+</style>
+
+@code {
+    private string? _error;
+    private string? _ok;
+
+    // ----- Config global -----
+    private InteroperabilidadConfigDto? _cfg;
+    private string? _endSandbox;
+    private string? _endProd;
+    private string? _azureTid;
+    private string? _scope;
+    private string? _apimSandboxNuevo;
+    private string? _apimProdNuevo;
+    private AmbienteIhce _ambiente = AmbienteIhce.Sandbox;
+    private bool _savingConfig;
+
+    // ----- Credenciales por sede -----
+    private List<InteroperabilidadCredencialSedeDto> _credenciales = new();
+    private List<SucursalDto> _sucursales = new();
+    private ModalCredencial? _modal;
+    private bool _savingCred;
+
+    // ----- Prueba de conexion -----
+    private Guid? _probandoId;
+    private ProbarConexionResultado? _resultadoPrueba;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarTodo();
+    }
+
+    private async Task CargarTodo()
+    {
+        try
+        {
+            _cfg = await InterSvc.GetConfigAsync();
+            if (_cfg is not null)
+            {
+                _endSandbox = _cfg.EndpointSandbox;
+                _endProd = _cfg.EndpointProduccion;
+                _azureTid = _cfg.AzureTenantId;
+                _scope = _cfg.Scope;
+                _ambiente = _cfg.AmbienteActivo;
+            }
+            _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
+            _sucursales = (await SucSvc.ListAsync()).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task GuardarConfig()
+    {
+        _error = null; _ok = null;
+        _savingConfig = true;
+        try
+        {
+            var actor = await ActorAsync();
+            var req = new InteroperabilidadConfigSaveRequest(
+                _endSandbox, _endProd, _azureTid, _scope,
+                _apimSandboxNuevo, _apimProdNuevo, _ambiente);
+            _cfg = await InterSvc.SaveConfigAsync(req, actor);
+            _apimSandboxNuevo = null; _apimProdNuevo = null;
+            _ok = "Configuracion guardada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _savingConfig = false; }
+    }
+
+    private void AbrirNueva()
+    {
+        _modal = new ModalCredencial
+        {
+            Id = Guid.Empty,
+            SucursalId = Guid.Empty,
+            Ambiente = AmbienteIhce.Sandbox
+        };
+    }
+
+    private void AbrirEditar(InteroperabilidadCredencialSedeDto c)
+    {
+        _modal = new ModalCredencial
+        {
+            Id = c.Id,
+            SucursalId = c.SucursalId,
+            Ambiente = c.Ambiente,
+            CodigoHabilitacion = c.CodigoHabilitacion,
+            NombreLlave = c.NombreLlave,
+            ClientId = c.ClientId,
+            TieneClientSecret = c.TieneClientSecret,
+            FechaExpiracion = c.FechaExpiracion?.LocalDateTime.Date
+        };
+    }
+
+    private void CerrarModal() => _modal = null;
+
+    private async Task GuardarCredencial()
+    {
+        if (_modal is null) { return; }
+        _error = null; _ok = null;
+        if (_modal.SucursalId == Guid.Empty) { _error = "Selecciona una sede."; return; }
+        _savingCred = true;
+        try
+        {
+            var actor = await ActorAsync();
+            DateTimeOffset? fe = _modal.FechaExpiracion is null
+                ? null
+                : new DateTimeOffset(_modal.FechaExpiracion.Value, TimeSpan.Zero);
+            var req = new InteroperabilidadCredencialSedeSaveRequest(
+                _modal.SucursalId, _modal.Ambiente,
+                _modal.CodigoHabilitacion, _modal.NombreLlave,
+                _modal.ClientId, _modal.ClientSecretNuevo, fe);
+            await InterSvc.GuardarCredencialAsync(req, actor);
+            _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
+            _modal = null;
+            _ok = "Credencial guardada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _savingCred = false; }
+    }
+
+    private async Task Eliminar(InteroperabilidadCredencialSedeDto c)
+    {
+        if (!await ConfirmarAsync($"Eliminar credencial de {c.SucursalNombre} ({c.Ambiente})?")) { return; }
+        _error = null; _ok = null;
+        try
+        {
+            var actor = await ActorAsync();
+            await InterSvc.EliminarCredencialAsync(c.Id, actor);
+            _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
+            _ok = "Credencial eliminada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task Probar(InteroperabilidadCredencialSedeDto c)
+    {
+        _error = null; _ok = null; _resultadoPrueba = null;
+        _probandoId = c.Id;
+        try
+        {
+            _resultadoPrueba = await InterSvc.ProbarConexionAsync(c.Id);
+        }
+        catch (Exception ex)
+        {
+            _resultadoPrueba = new ProbarConexionResultado(false, $"Error inesperado: {ex.Message}", null, null, null, null, null);
+        }
+        finally { _probandoId = null; }
+    }
+
+    private void CerrarResultado() => _resultadoPrueba = null;
+
+    private async Task<bool> ConfirmarAsync(string msg)
+    {
+        // En este host no esta cableado un IConfirmService; nos apoyamos en JS confirm.
+        return await JS.InvokeAsync<bool>("confirm", msg);
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var sub = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(sub, out var g) ? g : Guid.Empty;
+    }
+
+    [Inject] private Microsoft.JSInterop.IJSRuntime JS { get; set; } = default!;
+
+    private sealed class ModalCredencial
+    {
+        public Guid Id { get; set; }
+        public Guid SucursalId { get; set; }
+        public AmbienteIhce Ambiente { get; set; }
+        public string? CodigoHabilitacion { get; set; }
+        public string? NombreLlave { get; set; }
+        public string? ClientId { get; set; }
+        public string? ClientSecretNuevo { get; set; }
+        public bool TieneClientSecret { get; set; }
+        public DateTime? FechaExpiracion { get; set; }
+    }
+}

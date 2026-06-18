@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260618205447_InteroperabilidadConfigYCredencialesSede")]
+    partial class InteroperabilidadConfigYCredencialesSede
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4504,131 +4507,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("quote_templates", (string)null);
                 });
 
-            modelBuilder.Entity("Visal.Domain.Entities.RdaEvento", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Ambiente")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("ambiente");
-
-                    b.Property<string>("BundleHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("bundle_hash");
-
-                    b.Property<string>("BundleJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("bundle_json");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("created_by");
-
-                    b.Property<string>("ErroresJson")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("errores_json");
-
-                    b.Property<string>("Estado")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("estado");
-
-                    b.Property<DateTimeOffset?>("FechaEnvio")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("fecha_envio");
-
-                    b.Property<DateTimeOffset>("FechaGeneracion")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("fecha_generacion");
-
-                    b.Property<Guid>("HistoriaClinicaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("historia_clinica_id");
-
-                    b.Property<int>("Intentos")
-                        .HasColumnType("integer")
-                        .HasColumnName("intentos");
-
-                    b.Property<string>("Modalidad")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasColumnName("modalidad");
-
-                    b.Property<Guid>("PacienteId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("paciente_id");
-
-                    b.Property<Guid?>("ProfesionalId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("profesional_id");
-
-                    b.Property<string>("ReferenciaMinsalud")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("referencia_minsalud");
-
-                    b.Property<Guid>("SucursalId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("sucursal_id");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset?>("UltimoIntento")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("ultimo_intento");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<Guid?>("UpdatedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_rda_eventos");
-
-                    b.HasIndex("HistoriaClinicaId")
-                        .HasDatabaseName("ix_rda_eventos_historia_clinica_id");
-
-                    b.HasIndex("PacienteId")
-                        .HasDatabaseName("ix_rda_eventos_paciente_id");
-
-                    b.HasIndex("ProfesionalId")
-                        .HasDatabaseName("ix_rda_eventos_profesional_id");
-
-                    b.HasIndex("SucursalId")
-                        .HasDatabaseName("ix_rda_eventos_sucursal_id");
-
-                    b.HasIndex("TenantId", "BundleHash")
-                        .IsUnique()
-                        .HasDatabaseName("ix_rda_eventos_tenant_id_bundle_hash");
-
-                    b.HasIndex("TenantId", "Estado", "FechaGeneracion")
-                        .HasDatabaseName("ix_rda_eventos_tenant_id_estado_fecha_generacion");
-
-                    b.HasIndex("TenantId", "HistoriaClinicaId", "Estado")
-                        .HasDatabaseName("ix_rda_eventos_tenant_id_historia_clinica_id_estado");
-
-                    b.ToTable("rda_eventos", (string)null);
-                });
-
             modelBuilder.Entity("Visal.Domain.Entities.RelacionFormulario", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6695,44 +6573,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Navigation("Profesional");
 
                     b.Navigation("SubCategoria");
-                });
-
-            modelBuilder.Entity("Visal.Domain.Entities.RdaEvento", b =>
-                {
-                    b.HasOne("Visal.Domain.Entities.HistoriaClinica", "HistoriaClinica")
-                        .WithMany()
-                        .HasForeignKey("HistoriaClinicaId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_rda_eventos_historias_clinicas_historia_clinica_id");
-
-                    b.HasOne("Visal.Domain.Entities.Paciente", "Paciente")
-                        .WithMany()
-                        .HasForeignKey("PacienteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_rda_eventos_pacientes_paciente_id");
-
-                    b.HasOne("Visal.Domain.Entities.Profesional", "Profesional")
-                        .WithMany()
-                        .HasForeignKey("ProfesionalId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_rda_eventos_profesionales_profesional_id");
-
-                    b.HasOne("Visal.Domain.Entities.Sucursal", "Sucursal")
-                        .WithMany()
-                        .HasForeignKey("SucursalId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_rda_eventos_sucursales_sucursal_id");
-
-                    b.Navigation("HistoriaClinica");
-
-                    b.Navigation("Paciente");
-
-                    b.Navigation("Profesional");
-
-                    b.Navigation("Sucursal");
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.RelacionFormulario", b =>

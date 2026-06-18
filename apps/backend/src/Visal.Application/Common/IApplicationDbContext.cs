@@ -72,6 +72,9 @@ public interface IApplicationDbContext
     DbSet<Pais> Paises { get; }
     DbSet<Departamento> Departamentos { get; }
     DbSet<Municipio> Municipios { get; }
+    DbSet<InteroperabilidadConfig> InteroperabilidadConfigs { get; }
+    DbSet<InteroperabilidadCredencialSede> InteroperabilidadCredencialesSede { get; }
+    DbSet<RdaEvento> RdaEventos { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }
     DbSet<TenantSubscription> TenantSubscriptions { get; }

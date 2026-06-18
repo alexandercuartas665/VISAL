@@ -102,6 +102,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Pais> Paises => Set<Pais>();
     public DbSet<Departamento> Departamentos => Set<Departamento>();
     public DbSet<Municipio> Municipios => Set<Municipio>();
+    public DbSet<InteroperabilidadConfig> InteroperabilidadConfigs => Set<InteroperabilidadConfig>();
+    public DbSet<InteroperabilidadCredencialSede> InteroperabilidadCredencialesSede => Set<InteroperabilidadCredencialSede>();
+    public DbSet<RdaEvento> RdaEventos => Set<RdaEvento>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -131,6 +134,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<EvolutionIntegrationStatus>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<WebhookProcessingStatus>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<PipelineFieldType>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<AmbienteIhce>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<ModalidadRdaIhce>().HaveConversion<string>().HaveMaxLength(30);
+        configurationBuilder.Properties<EstadoRdaEvento>().HaveConversion<string>().HaveMaxLength(20);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -993,6 +999,59 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Nombre).HasMaxLength(150).IsRequired();
             b.HasOne(x => x.Departamento).WithMany().HasForeignKey(x => x.DepartamentoId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.DepartamentoId, x.Nombre }).IsUnique();
+        });
+
+        modelBuilder.Entity<InteroperabilidadConfig>(b =>
+        {
+            b.Property(x => x.EndpointSandbox).HasMaxLength(500);
+            b.Property(x => x.EndpointProduccion).HasMaxLength(500);
+            b.Property(x => x.AzureTenantId).HasMaxLength(80);
+            b.Property(x => x.Scope).HasMaxLength(400);
+            // Secretos cifrados con Data Protection: el ciphertext crece ~3-4x, dejamos margen.
+            b.Property(x => x.ApimSubskeySandboxCifrada).HasColumnType("text");
+            b.Property(x => x.ApimSubskeyProduccionCifrada).HasColumnType("text");
+            // Una sola fila de configuracion por tenant.
+            b.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        modelBuilder.Entity<InteroperabilidadCredencialSede>(b =>
+        {
+            b.Property(x => x.CodigoHabilitacion).HasMaxLength(20);
+            b.Property(x => x.NombreLlave).HasMaxLength(200);
+            b.Property(x => x.ClientId).HasMaxLength(80);
+            b.Property(x => x.ClientSecretCifrado).HasColumnType("text");
+            b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Una credencial por sucursal x ambiente.
+            b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Ambiente }).IsUnique();
+        });
+
+        modelBuilder.Entity<RdaEvento>(b =>
+        {
+            // El Bundle FHIR completo como texto. Postgres jsonb seria mas rico pero
+            // FHIR exige orden estable de propiedades y jsonb no lo respeta — text mantiene
+            // el JSON canonico identico al hash calculado.
+            b.Property(x => x.BundleJson).HasColumnType("text").IsRequired();
+            // SHA-256 hex (64 chars). Limitamos para que el indice unico sea barato.
+            b.Property(x => x.BundleHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.ReferenciaMinsalud).HasMaxLength(120);
+            b.Property(x => x.ErroresJson).HasColumnType("jsonb");
+
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(x => x.Profesional).WithMany().HasForeignKey(x => x.ProfesionalId)
+                .OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Encontrar rapido el RDA activo de una HC.
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Estado });
+            // Idempotencia: el mismo contenido no se procesa dos veces.
+            b.HasIndex(x => new { x.TenantId, x.BundleHash }).IsUnique();
+            // Feed de la lista en /interoperabilidad/rda (Ola 4): ultimos eventos por estado.
+            b.HasIndex(x => new { x.TenantId, x.Estado, x.FechaGeneracion });
         });
     }
 

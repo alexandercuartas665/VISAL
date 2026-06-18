@@ -600,8 +600,14 @@ public sealed class RdaBuilderService(
 
     // ===================== Helpers =====================
 
+    /// <summary>
+    /// Crea una <see cref="Bundle.EntryComponent"/> usando el <c>Resource.Id</c> como
+    /// fullUrl (con prefijo urn:uuid:). Es importante que el fullUrl coincida con
+    /// el destino de cualquier <see cref="ResourceReference"/> dentro del Bundle —
+    /// si se generara un UUID distinto, todas las references quedarian rotas.
+    /// </summary>
     private static Bundle.EntryComponent MakeEntry(Resource r)
-        => new() { FullUrl = $"urn:uuid:{Guid.CreateVersion7()}", Resource = r };
+        => new() { FullUrl = $"urn:uuid:{r.Id}", Resource = r };
 
     private static Composition.SectionComponent MakeSection(string title, string loincCode, string display,
         IEnumerable<ResourceReference>? entries = null)

@@ -1010,6 +1010,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Secretos cifrados con Data Protection: el ciphertext crece ~3-4x, dejamos margen.
             b.Property(x => x.ApimSubskeySandboxCifrada).HasColumnType("text");
             b.Property(x => x.ApimSubskeyProduccionCifrada).HasColumnType("text");
+            // Paths de operaciones FHIR custom del API IHCE.
+            b.Property(x => x.PathEnvioRda).HasMaxLength(200).IsRequired();
+            b.Property(x => x.PathConsultarPaciente).HasMaxLength(200).IsRequired();
             // Una sola fila de configuracion por tenant.
             b.HasIndex(x => x.TenantId).IsUnique();
         });

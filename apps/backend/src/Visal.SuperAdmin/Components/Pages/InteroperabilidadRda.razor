@@ -6,6 +6,7 @@
 @using Visal.Domain.Enums
 @inject IRdaConsoleService Svc
 @inject IRdaBuilderService Builder
+@inject IIhceSenderService Sender
 @inject AuthenticationStateProvider AuthState
 @inject Microsoft.JSInterop.IJSRuntime JS
 
@@ -113,6 +114,12 @@
                         <td class="ase-row-actions" style="text-align:right;white-space:nowrap;">
                             <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerJson(r.Id)">Ver JSON</button>
                             <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(r.Id)">Descargar</button>
+                            @if (r.Estado is EstadoRdaEvento.Borrador or EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+                            {
+                                <button class="btn btn-success btn-sm" @onclick="() => EnviarAlIhce(r.Id)" disabled="@(_enviandoId == r.Id)">
+                                    @if (_enviandoId == r.Id) { <span>Enviando…</span> } else { <span>Enviar al IHCE</span> }
+                                </button>
+                            }
                             @if (r.Estado == EstadoRdaEvento.Borrador)
                             {
                                 <button class="btn btn-outline-danger btn-sm" @onclick="() => Eliminar(r.Id)">Eliminar</button>
@@ -215,6 +222,52 @@
     </div>
 }
 
+@* ===================== Modal resultado envio IHCE ===================== *@
+@if (_envioResult is not null)
+{
+    <div class="ase-modal-bg" @onclick="CerrarEnvio">
+        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:680px;max-width:900px;max-height:80vh;display:flex;flex-direction:column;">
+            <div class="ase-modal-h">
+                @if (_envioResult.Call.Exito)
+                {
+                    <span style="color:#0a7d3a">RDA aceptado por MinSalud</span>
+                }
+                else
+                {
+                    <span style="color:#c0392b">Envio fallido (@_envioResult.Call.HttpStatus)</span>
+                }
+            </div>
+            <div style="padding:16px 18px;overflow:auto;flex:1;">
+                <table class="table table-sm" style="margin-bottom:12px;">
+                    <tbody>
+                        <tr><td style="width:180px"><b>Estado evento</b></td><td>@_envioResult.NuevoEstado</td></tr>
+                        <tr><td><b>HTTP</b></td><td>@_envioResult.Call.HttpStatus @_envioResult.Call.Mensaje</td></tr>
+                        <tr><td><b>Tiempo</b></td><td>@_envioResult.Call.ElapsedMs ms</td></tr>
+                        @if (!string.IsNullOrWhiteSpace(_envioResult.Call.ResponseContentType))
+                        {
+                            <tr><td><b>Content-Type</b></td><td class="mono"><small>@_envioResult.Call.ResponseContentType</small></td></tr>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_envioResult.ReferenciaMinsalud))
+                        {
+                            <tr><td><b>Referencia MinSalud</b></td><td class="mono">@_envioResult.ReferenciaMinsalud</td></tr>
+                        }
+                    </tbody>
+                </table>
+                @if (!string.IsNullOrWhiteSpace(_envioResult.Call.ResponseBody))
+                {
+                    <div style="font-weight:600;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;">
+                        Respuesta de MinSalud (cuerpo)
+                    </div>
+                    <pre style="background:#0d1117;color:#e6edf3;padding:14px;border-radius:8px;font-size:12px;max-height:300px;overflow:auto;"><code>@_envioResult.Call.ResponseBody</code></pre>
+                }
+            </div>
+            <div class="ase-modal-f">
+                <button class="btn btn-primary btn-sm" @onclick="CerrarEnvio">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
 @* ===================== Modal Ver JSON ===================== *@
 @if (_detail is not null)
 {
@@ -275,6 +328,10 @@
 
     // ----- Modal Ver JSON -----
     private RdaEventoDetailDto? _detail;
+
+    // ----- Envio al IHCE -----
+    private Guid? _enviandoId;
+    private EnvioRdaResultado? _envioResult;
 
     protected override async Task OnInitializedAsync() => await CargarLista();
 
@@ -356,6 +413,22 @@
         await JS.InvokeVoidAsync("eval",
             $"(function(){{var a=document.createElement('a');a.href='{dataUrl}';a.download='{filename}';document.body.appendChild(a);a.click();a.remove();}})();");
     }
+
+    private async Task EnviarAlIhce(Guid id)
+    {
+        _error = null; _ok = null; _envioResult = null;
+        _enviandoId = id;
+        try
+        {
+            var actor = await ActorAsync();
+            _envioResult = await Sender.EnviarRdaAsync(id, actor);
+            await CargarLista();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _enviandoId = null; }
+    }
+
+    private void CerrarEnvio() => _envioResult = null;
 
     private async Task Eliminar(Guid id)
     {

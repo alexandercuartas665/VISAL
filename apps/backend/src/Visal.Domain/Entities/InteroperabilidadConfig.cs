@@ -29,4 +29,12 @@ public class InteroperabilidadConfig : TenantEntity
     // -- Ambiente que se usara al enviar RDAs (Sandbox por defecto hasta que el
     //    operador confirme paso a produccion).
     public AmbienteIhce AmbienteActivo { get; set; } = AmbienteIhce.Sandbox;
+
+    // -- Paths configurables de los servicios del API IHCE.
+    // El sandbox de MinSalud expone operaciones FHIR custom usando notacion $operacion
+    // sobre el recurso base (Composition, Patient, etc.). Los defaults son los que
+    // estan en la coleccion Postman del MinSalud (junio 2026). Si MinSalud cambia el
+    // path en una version futura del API, el operador lo ajusta aqui sin recompilar.
+    public string PathEnvioRda { get; set; } = "/Composition/$enviar-rda-paciente";
+    public string PathConsultarPaciente { get; set; } = "/Patient/$consultar-paciente-exacto";
 }

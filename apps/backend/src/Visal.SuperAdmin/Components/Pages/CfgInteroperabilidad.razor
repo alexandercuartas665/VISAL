@@ -70,6 +70,21 @@
                 @if (_savingConfig) { <span>Guardando...</span> } else { <span>Guardar configuracion</span> }
             </button>
         </div>
+        <div class="ase-f" style="grid-column:1 / 3;border-top:1px dashed #ccc;padding-top:12px;margin-top:6px;">
+            <label style="font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;">
+                Paths de operaciones FHIR del API IHCE (cambiar solo si MinSalud actualiza el API)
+            </label>
+        </div>
+        <div class="ase-f">
+            <label>Path Envio RDA</label>
+            <input class="form-control form-control-sm mono" @bind="_pathEnvio"
+                   placeholder="/Composition/$enviar-rda-paciente" />
+        </div>
+        <div class="ase-f">
+            <label>Path Consultar Paciente</label>
+            <input class="form-control form-control-sm mono" @bind="_pathConsulta"
+                   placeholder="/Patient/$consultar-paciente-exacto" />
+        </div>
     </div>
 </div>
 
@@ -281,6 +296,8 @@
     private string? _apimSandboxNuevo;
     private string? _apimProdNuevo;
     private AmbienteIhce _ambiente = AmbienteIhce.Sandbox;
+    private string? _pathEnvio;
+    private string? _pathConsulta;
     private bool _savingConfig;
 
     // ----- Credenciales por sede -----
@@ -310,6 +327,8 @@
                 _azureTid = _cfg.AzureTenantId;
                 _scope = _cfg.Scope;
                 _ambiente = _cfg.AmbienteActivo;
+                _pathEnvio = _cfg.PathEnvioRda;
+                _pathConsulta = _cfg.PathConsultarPaciente;
             }
             _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
             _sucursales = (await SucSvc.ListAsync()).ToList();
@@ -326,7 +345,8 @@
             var actor = await ActorAsync();
             var req = new InteroperabilidadConfigSaveRequest(
                 _endSandbox, _endProd, _azureTid, _scope,
-                _apimSandboxNuevo, _apimProdNuevo, _ambiente);
+                _apimSandboxNuevo, _apimProdNuevo, _ambiente,
+                _pathEnvio, _pathConsulta);
             _cfg = await InterSvc.SaveConfigAsync(req, actor);
             _apimSandboxNuevo = null; _apimProdNuevo = null;
             _ok = "Configuracion guardada.";

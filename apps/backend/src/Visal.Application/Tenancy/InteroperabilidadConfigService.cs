@@ -47,6 +47,11 @@ public sealed class InteroperabilidadConfigService(
         c.AzureTenantId = NullIfEmpty(req.AzureTenantId);
         c.Scope = NullIfEmpty(req.Scope);
         c.AmbienteActivo = req.AmbienteActivo;
+        // Paths IHCE: si llegan vacios, mantenemos los defaults para no romper la config.
+        if (!string.IsNullOrWhiteSpace(req.PathEnvioRda))
+            c.PathEnvioRda = req.PathEnvioRda.Trim();
+        if (!string.IsNullOrWhiteSpace(req.PathConsultarPaciente))
+            c.PathConsultarPaciente = req.PathConsultarPaciente.Trim();
 
         // Secretos: si llega valor nuevo lo ciframos; si viene vacio se mantiene el actual.
         if (!string.IsNullOrWhiteSpace(req.ApimSubskeySandboxNueva))
@@ -245,7 +250,9 @@ public sealed class InteroperabilidadConfigService(
         c.Scope,
         !string.IsNullOrEmpty(c.ApimSubskeySandboxCifrada),
         !string.IsNullOrEmpty(c.ApimSubskeyProduccionCifrada),
-        c.AmbienteActivo);
+        c.AmbienteActivo,
+        c.PathEnvioRda,
+        c.PathConsultarPaciente);
 
     private sealed class AzureTokenOk
     {

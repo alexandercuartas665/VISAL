@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Hl7.Fhir.Model;
@@ -8,33 +7,34 @@ using Microsoft.Extensions.Logging;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
-using TaskFhir = Hl7.Fhir.Model.Task;
 
 namespace Visal.Application.Tenancy;
 
 /// <summary>
-/// Construye el Bundle FHIR R4 RDA desde una HistoriaClinica usando el SDK oficial
-/// Firely .NET (Hl7.Fhir.R4). Esta Ola arma los recursos demograficos / de contexto:
+/// Construye el Bundle FHIR R4 RDA tipo "Resumen Digital de Atencion del Paciente"
+/// (operacion <c>$enviar-rda-paciente</c> de la API IHCE de MinSalud, Res. 1888/2025).
 ///
-/// - Bundle (type=document, identifier oid+uuid)
-/// - Composition (LOINC 34133-9, secciones vacias con titulo + LOINC)
-/// - Patient (demograficos completos, telecom, address)
-/// - Encounter (la HC como encuentro, status y periodo)
-/// - Practitioner (el profesional firmante)
-/// - Organization (el tenant + sucursal con CodigoHabilitacion REPS)
-///
-/// El JSON se persiste tal cual lo serializa Firely (canonico FHIR). El SHA-256 sobre
-/// ese mismo JSON es el bundle_hash que garantiza idempotencia.
+/// IMPORTANTE — diferencias respecto a un Bundle FHIR genérico:
+/// - Los perfiles son los <c>*StatementRDA</c> (no los <c>*RDA</c>).
+/// - LOINC del Composition: <c>102089-0</c> (FHIR resource patient medical record).
+/// - Referencias entre recursos usan estilo contained <c>#id</c>, no <c>urn:uuid:</c>.
+/// - Los recursos NO llevan <c>fullUrl</c> en su entry (asi lo recibe MinSalud).
+/// - Patient va con 4 extensiones colombianas (Nationality, Ethnicity, Disability,
+///   GenderIdentity), su address con DIVIPOLA + ResidenceZone, su gender con
+///   BiologicalGender, su birthDate con BirthTime, identifier con NamingSystem RNEC.
+/// - Organization usa perfil <c>CareDeliveryOrganizationRDA</c> con NamingSystem REPS.
+/// - No hay Encounter en este Bundle — la modalidad va en <c>Composition.event[]</c>.
 /// </summary>
 public sealed class RdaBuilderService(
     IApplicationDbContext db,
     ITenantContext tenant,
     ILogger<RdaBuilderService> log) : IRdaBuilderService
 {
-    private const string RdaProfileBase = "https://fhir.minsalud.gov.co/rda/StructureDefinition";
-    private const string RdaCodeSystemBase = "https://fhir.minsalud.gov.co/rda/CodeSystem";
-    private const string RdaSidBase = "https://fhir.minsalud.gov.co/rda/sid";
+    private const string ProfileBase = "https://fhir.minsalud.gov.co/rda/StructureDefinition";
+    private const string CodeSystemBase = "https://fhir.minsalud.gov.co/rda/CodeSystem";
+    private const string NamingSystemBase = "https://fhir.minsalud.gov.co/rda/NamingSystem";
     private const string LoincSystem = "http://loinc.org";
+    private const string V2Terminology = "http://terminology.hl7.org/CodeSystem/v2-0203";
 
     public async Task<RdaBuildResult> ConstruirAsync(Guid historiaClinicaId, ModalidadRdaIhce modalidad, Guid actor, CancellationToken ct = default)
     {
@@ -50,98 +50,87 @@ public sealed class RdaBuilderService(
             .Include(x => x.Profesional)
             .FirstOrDefaultAsync(x => x.Id == historiaClinicaId, ct)
             ?? throw new InvalidOperationException($"Historia clinica {historiaClinicaId} no encontrada.");
-
-        if (hc.Paciente is null)
-        {
-            throw new InvalidOperationException($"HC {historiaClinicaId} sin paciente.");
-        }
+        if (hc.Paciente is null) { throw new InvalidOperationException($"HC {historiaClinicaId} sin paciente."); }
 
         var tenantE = await db.Tenants.AsNoTracking().FirstAsync(x => x.Id == tid, ct);
 
-        // Sede del paciente con fallback a la primera sucursal del tenant.
+        // Sucursal: la del paciente, o la primera activa del tenant.
         var sucursalId = hc.Paciente.SedeAtencionId
             ?? await db.Sucursales.AsNoTracking().Where(s => s.Activo)
                 .OrderBy(s => s.Codigo).Select(s => (Guid?)s.Id).FirstOrDefaultAsync(ct);
-        if (sucursalId is null)
-        {
-            throw new InvalidOperationException("El paciente no tiene sede asignada y no hay sucursales activas para asignar por defecto.");
-        }
+        if (sucursalId is null) { throw new InvalidOperationException("Sin sede asignada y sin sucursales activas."); }
         var sucursal = await db.Sucursales.AsNoTracking().FirstAsync(s => s.Id == sucursalId.Value, ct);
 
-        // Resolver ambiente activo + credencial de esa sede (para sacar CodigoHabilitacion).
         var cfg = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         var ambiente = cfg?.AmbienteActivo ?? AmbienteIhce.Sandbox;
         var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
             .FirstOrDefaultAsync(c => c.SucursalId == sucursalId.Value && c.Ambiente == ambiente, ct);
         if (credencial is null || string.IsNullOrWhiteSpace(credencial.CodigoHabilitacion))
         {
-            advertencias.Add($"La sede '{sucursal.Nombre}' no tiene CodigoHabilitacion REPS configurado para el ambiente {ambiente}. El Bundle se construye con un placeholder y NO sera aceptado por MinSalud.");
+            advertencias.Add($"La sede '{sucursal.Nombre}' no tiene CodigoHabilitacion REPS configurado para {ambiente}. Se usa placeholder; MinSalud rechazara el envio.");
         }
+        var codigoHabilitacion = credencial?.CodigoHabilitacion ?? "PENDIENTE_REPS";
 
-        // Cargar contenido clinico atado a la HC (Ola 3).
+        // Datos clinicos atados a la HC.
         var hcMedicamentos = await db.HistoriaClinicaMedicamentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hc.Id).OrderBy(x => x.Orden).ToListAsync(ct);
-        var hcRemisiones = await db.HistoriaClinicaRemisiones.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hc.Id).OrderBy(x => x.Orden).ToListAsync(ct);
 
-        // ---------- 2. Construir recursos FHIR ----------
-        var nowOffset = hc.FechaCierre ?? hc.FechaApertura;
-        var nowFhir = new FhirDateTime(nowOffset.ToOffset(TimeSpan.FromHours(-5)));
+        // ---------- 2. Asignar IDs estables segun convencion MinSalud ----------
+        // Patient: CC-{numero}
+        var patientId = $"{NormalizarTipoDoc(hc.Paciente.TipoDocumento)}-{hc.Paciente.NumeroDocumento}";
+        // Practitioner: CC-{numero} o anonimo si no hay firmante.
+        string practitionerId = hc.Profesional is not null
+            ? $"{NormalizarTipoDoc(hc.Profesional.TipoDocumento)}-{hc.Profesional.NumeroDocumento}"
+            : $"CC-anonimo-{hc.Id:N}";
+        if (hc.Profesional is null) { advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo."); }
+        // Organization: usa el codigo de habilitacion REPS como id.
+        var organizationId = codigoHabilitacion;
 
-        var organization = BuildOrganization(tenantE, sucursal, credencial?.CodigoHabilitacion);
-        var practitioner = BuildPractitioner(hc.Profesional, hc.EspecialistaNombre, advertencias);
-        var patient = BuildPatient(hc.Paciente);
-        var encounter = BuildEncounter(hc, modalidad, patient, practitioner, organization);
+        // ---------- 3. Construir recursos FHIR ----------
+        var organization = BuildOrganization(tenantE, organizationId, codigoHabilitacion);
+        var practitioner = BuildPractitioner(hc.Profesional, practitionerId, hc.EspecialistaNombre);
+        var patient = BuildPatient(hc.Paciente, patientId);
+        var conditions = BuildConditions(hc.Paciente, patientId, advertencias);
+        var meds = BuildMedicationStatements(hcMedicamentos, patientId);
+        var allergy = BuildAllergyIntoleranceNkda(patientId, advertencias);
+        var familyHistory = BuildFamilyMemberHistory(patientId, advertencias);
 
-        // Recursos clinicos (Ola 3). Listas vacias si la HC no tiene datos.
-        var conditions = BuildConditions(hc.Paciente, patient, encounter, practitioner, advertencias);
-        var medicationStatements = BuildMedicationStatements(hcMedicamentos, patient, encounter, practitioner);
-        var procedures = BuildProcedures(hcRemisiones, patient, encounter, practitioner, organization, conditions);
-        var allergyIntolerance = BuildAllergyIntoleranceNkda(hc.Paciente, patient, practitioner, advertencias);
+        var composition = BuildComposition(hc, modalidad, patient, practitioner, organization,
+            conditions, meds, allergy, familyHistory);
 
-        var composition = BuildComposition(hc, modalidad, patient, encounter, practitioner, organization, nowFhir,
-            conditions, medicationStatements, procedures, allergyIntolerance);
-
-        // ---------- 3. Ensamblar Bundle ----------
+        // ---------- 4. Ensamblar Bundle ----------
+        // Bundle.type=document, sin fullUrls, language es-CO.
         var bundle = new Bundle
         {
             Id = $"rda-{Guid.CreateVersion7():N}",
-            Meta = new Meta
-            {
-                Profile = new[] { $"{RdaProfileBase}/BundleRDA" },
-                LastUpdated = DateTimeOffset.UtcNow
-            },
-            Identifier = new Identifier("urn:oid:2.16.170.1.100.10.1", $"VISAL-RDA-{Guid.CreateVersion7():N}"),
+            Language = "es-CO",
             Type = Bundle.BundleType.Document,
             Timestamp = DateTimeOffset.UtcNow
         };
-        // Orden Composition → Patient → Encounter → Practitioner → Organization → clinicos.
-        bundle.Entry.Add(MakeEntry(composition));
-        bundle.Entry.Add(MakeEntry(patient));
-        bundle.Entry.Add(MakeEntry(encounter));
-        bundle.Entry.Add(MakeEntry(practitioner));
-        bundle.Entry.Add(MakeEntry(organization));
-        foreach (var c in conditions) { bundle.Entry.Add(MakeEntry(c)); }
-        foreach (var m in medicationStatements) { bundle.Entry.Add(MakeEntry(m)); }
-        foreach (var p in procedures) { bundle.Entry.Add(MakeEntry(p)); }
-        bundle.Entry.Add(MakeEntry(allergyIntolerance));
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = composition });
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = patient });
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = organization });
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = practitioner });
+        foreach (var c in conditions) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = c }); }
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = allergy });
+        if (familyHistory is not null) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = familyHistory }); }
+        foreach (var m in meds) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = m }); }
 
-        // ---------- 4. Serializar canonico FHIR + hash ----------
+        // ---------- 5. Serializar + hash ----------
         var serializer = new FhirJsonSerializer(new SerializerSettings { Pretty = true });
         var bundleJson = serializer.SerializeToString(bundle);
         var hash = ComputeSha256(bundleJson);
 
-        // ---------- 5. Idempotencia: si ya existe el mismo hash, devolver el existente ----------
+        // Idempotencia.
         var existente = await db.RdaEventos.AsNoTracking()
             .FirstOrDefaultAsync(x => x.BundleHash == hash, ct);
         if (existente is not null)
         {
-            log.LogInformation("RDA idempotente: bundle hash {Hash} ya existia como evento {Id}", hash, existente.Id);
+            log.LogInformation("RDA idempotente: hash {Hash} ya existia ({Id})", hash, existente.Id);
             return new RdaBuildResult(existente.Id, existente.BundleJson, existente.BundleHash,
                 existente.Estado, bundle.Entry.Count, YaExistia: true, advertencias);
         }
 
-        // ---------- 6. Persistir RdaEvento ----------
         var evento = new RdaEvento
         {
             TenantId = tid,
@@ -160,482 +149,362 @@ public sealed class RdaBuilderService(
         db.RdaEventos.Add(evento);
         await db.SaveChangesAsync(ct);
 
-        log.LogInformation("RDA construido: evento {Id} para HC {HcId} modalidad {Mod} ambiente {Amb}",
+        log.LogInformation("RDA construido (PatientStatement): {Id} HC={HcId} {Mod} {Amb}",
             evento.Id, hc.Id, modalidad, ambiente);
 
         return new RdaBuildResult(evento.Id, bundleJson, hash, EstadoRdaEvento.Borrador,
             bundle.Entry.Count, YaExistia: false, advertencias);
     }
 
-    // ===================== Construccion de recursos =====================
+    // ===================== Recursos =====================
 
-    private static Organization BuildOrganization(Tenant tenant, Sucursal sucursal, string? codigoHabilitacion)
+    private static Composition BuildComposition(HistoriaClinica hc, ModalidadRdaIhce modalidad,
+        Patient patient, Practitioner practitioner, Organization organization,
+        List<Condition> conditions, List<MedicationStatement> meds,
+        AllergyIntolerance allergy, FamilyMemberHistory? familyHistory)
     {
-        var nit = string.IsNullOrWhiteSpace(tenant.TaxId) ? "PENDIENTE_NIT" : tenant.TaxId;
-        var habilitacion = string.IsNullOrWhiteSpace(codigoHabilitacion) ? "PENDIENTE_REPS" : codigoHabilitacion;
-        var org = new Organization
+        var c = new Composition
         {
-            Id = $"org-{tenant.Id:N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/OrganizationRDA" } },
-            Active = true,
-            Name = string.IsNullOrWhiteSpace(tenant.LegalName) ? tenant.Name : tenant.LegalName
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/CompositionPatientStatementRDA" } },
+            Status = CompositionStatus.Final,
+            Type = MakeCC(MakeCoding(LoincSystem, "102089-0", "FHIR resource patient medical record")),
+            Subject = ContainedRef(patient.Id),
+            Date = (hc.FechaCierre ?? hc.FechaApertura).ToOffset(TimeSpan.FromHours(-5)).ToString("o"),
+            Title = "Resumen Digital de Atencion en Salud - RDA de antecedentes manifestados por el paciente",
+            Confidentiality = Composition.V3ConfidentialityClassification.N,
+            Custodian = ContainedRef(organization.Id)
         };
-        org.Identifier.Add(new Identifier($"{RdaSidBase}/nit", nit)
+        c.Author.Add(ContainedRef(practitioner.Id));
+        // Attester: legal, party = la misma Organization custodian.
+        c.Attester.Add(new Composition.AttesterComponent
         {
-            Use = Identifier.IdentifierUse.Official,
-            Type = MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSTipoDocumentoIdentidad", "NI", "NIT"))
+            Mode = Composition.CompositionAttestationMode.Legal,
+            Party = ContainedRef(organization.Id)
         });
-        org.Identifier.Add(new Identifier($"{RdaSidBase}/codigo-habilitacion", habilitacion)
+        // Event: modalidad + grupo de servicios + period.
+        var evt = new Composition.EventComponent
         {
-            Use = Identifier.IdentifierUse.Secondary,
-            Type = new CodeableConcept { Text = "Codigo Habilitacion REPS" }
-        });
-        org.Type.Add(MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSTipoPrestador", "IPS",
-            "Institucion Prestadora de Servicios de Salud")));
-        if (!string.IsNullOrWhiteSpace(sucursal.Ciudad))
-        {
-            org.Address.Add(new Address
+            Period = new Period
             {
-                Use = Address.AddressUse.Work,
-                Type = Address.AddressType.Physical,
-                City = sucursal.Ciudad,
-                Country = "CO"
-            });
+                Start = hc.FechaApertura.ToOffset(TimeSpan.FromHours(-5)).ToString("o"),
+                End = hc.FechaCierre?.ToOffset(TimeSpan.FromHours(-5)).ToString("o")
+            }
+        };
+        evt.Code.Add(MakeCC(MakeCoding($"{CodeSystemBase}/ColombianTechModality",
+            "01", "Intramural")));
+        evt.Code.Add(MakeCC(MakeCoding($"{CodeSystemBase}/GrupoServicios",
+            MapGrupoServicios(modalidad), GrupoServiciosLabel(modalidad))));
+        c.Event.Add(evt);
+
+        // Secciones (las que usa el ejemplo del MinSalud). Solo se incluyen entries
+        // existentes — los recursos vacios se omiten para no enviar references rotas.
+        // Diagnosticos
+        var secDx = MakeSection("Historial de diagnosticos de problemas de salud",
+            "11450-4", "Problem list - Reported");
+        foreach (var cond in conditions) { secDx.Entry.Add(ContainedRef(cond.Id)); }
+        c.Section.Add(secDx);
+        // Alergias
+        var secAlg = MakeSection("Historial de alergias, intolerancias y reacciones adversas",
+            "48765-2", "Allergies and adverse reactions Document");
+        secAlg.Entry.Add(ContainedRef(allergy.Id));
+        c.Section.Add(secAlg);
+        // Medicamentos
+        var secMed = MakeSection("Historial de medicamentos",
+            "10160-0", "History of Medication use Narrative");
+        foreach (var m in meds) { secMed.Entry.Add(ContainedRef(m.Id)); }
+        c.Section.Add(secMed);
+        // Antecedentes familiares
+        if (familyHistory is not null)
+        {
+            var secFam = MakeSection("Historial de antecedentes familiares",
+                "10157-6", "History of family member diseases Narrative");
+            secFam.Entry.Add(ContainedRef(familyHistory.Id));
+            c.Section.Add(secFam);
         }
-        return org;
+        return c;
     }
 
-    private static Practitioner BuildPractitioner(Profesional? prof, string? especialistaNombreSnapshot, List<string> advertencias)
-    {
-        if (prof is null)
-        {
-            advertencias.Add("La HC no tiene profesional firmante; se incluye un Practitioner con nombre snapshot pero sin documento ni registro medico.");
-            var anon = new Practitioner
-            {
-                Id = $"prc-anonimo-{Guid.CreateVersion7():N}",
-                Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/PractitionerRDA" } },
-                Active = false
-            };
-            anon.Name.Add(new HumanName
-            {
-                Use = HumanName.NameUse.Official,
-                Text = especialistaNombreSnapshot ?? "PROFESIONAL NO REGISTRADO"
-            });
-            return anon;
-        }
-        var p = new Practitioner
-        {
-            Id = $"prc-{prof.Id:N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/PractitionerRDA" } },
-            Active = true
-        };
-        p.Identifier.Add(new Identifier($"{RdaSidBase}/cedula-ciudadania", prof.NumeroDocumento)
-        {
-            Use = Identifier.IdentifierUse.Official,
-            Type = MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSTipoDocumentoIdentidad",
-                NormalizarTipoDoc(prof.TipoDocumento), TipoDocLabel(prof.TipoDocumento)))
-        });
-        var name = new HumanName { Use = HumanName.NameUse.Official };
-        if (!string.IsNullOrWhiteSpace(prof.PrimerApellido) || !string.IsNullOrWhiteSpace(prof.SegundoApellido))
-        {
-            name.Family = $"{prof.PrimerApellido} {prof.SegundoApellido}".Trim();
-        }
-        if (!string.IsNullOrWhiteSpace(prof.PrimerNombre)) { name.GivenElement.Add(new FhirString(prof.PrimerNombre)); }
-        if (!string.IsNullOrWhiteSpace(prof.SegundoNombre)) { name.GivenElement.Add(new FhirString(prof.SegundoNombre)); }
-        if (string.IsNullOrWhiteSpace(name.Family) && name.GivenElement.Count == 0)
-        {
-            name.Text = prof.NombreCompleto;
-        }
-        p.Name.Add(name);
-        if (!string.IsNullOrWhiteSpace(prof.RegistroMedico))
-        {
-            p.Identifier.Add(new Identifier($"{RdaSidBase}/registro-medico", prof.RegistroMedico)
-            {
-                Use = Identifier.IdentifierUse.Secondary,
-                Type = new CodeableConcept { Text = "Registro Medico" }
-            });
-        }
-        return p;
-    }
-
-    private static Patient BuildPatient(Paciente p)
+    private static Patient BuildPatient(Paciente p, string patientId)
     {
         var pat = new Patient
         {
-            Id = $"pat-{p.Id:N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/PatientRDA" } },
+            Id = patientId,
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/PatientRDA" } },
             Active = true,
             BirthDate = p.FechaNacimiento?.ToString("yyyy-MM-dd"),
-            Gender = MapGender(p.Sexo)
+            Gender = MapGender(p.Sexo),
+            Deceased = new FhirBoolean(false)
         };
-        // Identificador principal
-        pat.Identifier.Add(new Identifier($"{RdaSidBase}/cedula-ciudadania", p.NumeroDocumento)
+        // Extensiones colombianas obligatorias del perfil.
+        pat.Extension.Add(new Extension($"{ProfileBase}/ExtensionPatientNationality",
+            new Coding($"{CodeSystemBase}/ISO31661", "170", "Colombia")));
+        pat.Extension.Add(new Extension($"{ProfileBase}/ExtensionPatientEthnicity",
+            new Coding($"{CodeSystemBase}/ColombianEthnicGroup", "6", "Otras etnias")));
+        pat.Extension.Add(new Extension($"{ProfileBase}/ExtensionPatientDisability",
+            new Coding($"{CodeSystemBase}/ColombianDisabilityClassification", "08", "Sin discapacidad")));
+        pat.Extension.Add(new Extension($"{ProfileBase}/ExtensionPatientGenderIdentity",
+            new Coding($"{CodeSystemBase}/ColombianGenderIdentity",
+                p.Sexo?.StartsWith("F", StringComparison.OrdinalIgnoreCase) == true ? "02" : "01",
+                p.Sexo?.StartsWith("F", StringComparison.OrdinalIgnoreCase) == true ? "Femenino" : "Masculino")));
+
+        // Identifier: PN (HL7) + ColombianPersonIdentifier CC, system RNEC.
+        var idType = new CodeableConcept();
+        idType.Coding.Add(new Coding(V2Terminology, "PN", "Person number"));
+        idType.Coding.Add(new Coding($"{CodeSystemBase}/ColombianPersonIdentifier",
+            NormalizarTipoDoc(p.TipoDocumento), TipoDocLabel(p.TipoDocumento)));
+        pat.Identifier.Add(new Identifier
         {
+            ElementId = "NationalPersonIdentifier-0",
             Use = Identifier.IdentifierUse.Official,
-            Type = MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSTipoDocumentoIdentidad",
-                NormalizarTipoDoc(p.TipoDocumento), TipoDocLabel(p.TipoDocumento)))
+            Type = idType,
+            System = $"{NamingSystemBase}/RNEC",
+            Value = p.NumeroDocumento
         });
-        // Nombre
-        var name = new HumanName { Use = HumanName.NameUse.Official };
+
+        // Nombre: given como array; family con extensiones FathersFamilyName + MothersFamilyName.
+        var hn = new HumanName { Use = HumanName.NameUse.Official };
+        if (!string.IsNullOrWhiteSpace(p.PrimerNombre)) { hn.GivenElement.Add(new FhirString(p.PrimerNombre)); }
+        if (!string.IsNullOrWhiteSpace(p.SegundoNombre)) { hn.GivenElement.Add(new FhirString(p.SegundoNombre)); }
         if (!string.IsNullOrWhiteSpace(p.PrimerApellido) || !string.IsNullOrWhiteSpace(p.SegundoApellido))
         {
-            name.Family = $"{p.PrimerApellido} {p.SegundoApellido}".Trim();
+            // MinSalud valida que family = ExtensionFathersFamilyName (primer apellido).
+            // Asignamos solo el primer apellido como family y el segundo como extension separada.
+            hn.Family = p.PrimerApellido ?? "";
+            hn.FamilyElement.Extension.Add(new Extension(
+                $"{ProfileBase}/ExtensionFathersFamilyName",
+                new FhirString(p.PrimerApellido ?? "")));
+            if (!string.IsNullOrWhiteSpace(p.SegundoApellido))
+            {
+                hn.FamilyElement.Extension.Add(new Extension(
+                    $"{ProfileBase}/ExtensionMothersFamilyName",
+                    new FhirString(p.SegundoApellido)));
+            }
         }
-        if (!string.IsNullOrWhiteSpace(p.PrimerNombre)) { name.GivenElement.Add(new FhirString(p.PrimerNombre)); }
-        if (!string.IsNullOrWhiteSpace(p.SegundoNombre)) { name.GivenElement.Add(new FhirString(p.SegundoNombre)); }
-        if (string.IsNullOrWhiteSpace(name.Family) && name.GivenElement.Count == 0)
-        {
-            name.Text = p.NombreCompleto;
-        }
-        pat.Name.Add(name);
-        // Telecom
-        if (!string.IsNullOrWhiteSpace(p.Telefono))
-        {
-            var telValor = string.IsNullOrWhiteSpace(p.CodigoPaisTelefono)
-                ? p.Telefono
-                : $"{p.CodigoPaisTelefono.TrimStart('+')}{p.Telefono}".Trim();
-            pat.Telecom.Add(new ContactPoint(ContactPoint.ContactPointSystem.Phone,
-                ContactPoint.ContactPointUse.Mobile, telValor));
-        }
-        if (!string.IsNullOrWhiteSpace(p.Email))
-        {
-            pat.Telecom.Add(new ContactPoint(ContactPoint.ContactPointSystem.Email,
-                ContactPoint.ContactPointUse.Home, p.Email));
-        }
-        // Direccion
+        else { hn.Text = p.NombreCompleto; }
+        pat.Name.Add(hn);
+
+        // Direccion con DIVIPOLA + ResidenceZone + Country.
         if (!string.IsNullOrWhiteSpace(p.Direccion) || !string.IsNullOrWhiteSpace(p.Ciudad))
         {
             var addr = new Address
             {
+                ElementId = "HomeAddress-0",
                 Use = Address.AddressUse.Home,
                 Type = Address.AddressType.Physical,
                 City = p.Ciudad,
-                Country = "CO"
+                Country = "Colombia"
             };
             if (!string.IsNullOrWhiteSpace(p.Direccion)) { addr.LineElement.Add(new FhirString(p.Direccion)); }
-            if (!string.IsNullOrWhiteSpace(p.Zona))
-            {
-                addr.Extension.Add(new Extension($"{RdaProfileBase}/ExtZonaTerritorial",
-                    MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSZonaTerritorial",
-                        p.Zona.StartsWith("URBAN", StringComparison.OrdinalIgnoreCase) ? "01" : "02",
-                        p.Zona))));
-            }
+            // DIVIPOLA — sin lookup real por ahora, usamos placeholder.
+            // Cuando se integre el catalogo Municipio.Codigo DIVIPOLA, sale de ahi.
+            addr.CityElement.Extension.Add(new Extension(
+                $"{ProfileBase}/ExtensionDivipolaMunicipality",
+                new Coding($"{CodeSystemBase}/DIVIPOLA", "00000", null)));
+            addr.CountryElement.Extension.Add(new Extension(
+                $"{ProfileBase}/ExtensionCountryCode",
+                new Coding($"{CodeSystemBase}/ISO31661", "170", null)));
+            addr.Extension.Add(new Extension(
+                $"{ProfileBase}/ExtensionResidenceZone",
+                new Coding($"{CodeSystemBase}/ColombianResidenceZone",
+                    p.Zona?.StartsWith("RURAL", StringComparison.OrdinalIgnoreCase) == true ? "02" : "01",
+                    p.Zona?.StartsWith("RURAL", StringComparison.OrdinalIgnoreCase) == true ? "Rural" : "Urbana")));
             pat.Address.Add(addr);
         }
-        // Estado civil
-        if (!string.IsNullOrWhiteSpace(p.EstadoCivil))
+
+        // _gender extension: BiologicalGender.
+        if (pat.GenderElement is not null)
         {
-            pat.MaritalStatus = new CodeableConcept { Text = p.EstadoCivil };
+            pat.GenderElement.Extension.Add(new Extension(
+                $"{ProfileBase}/ExtensionBiologicalGender",
+                new Coding($"{CodeSystemBase}/ColombianGenderGroup",
+                    p.Sexo?.StartsWith("F", StringComparison.OrdinalIgnoreCase) == true ? "02" : "01",
+                    p.Sexo?.StartsWith("F", StringComparison.OrdinalIgnoreCase) == true ? "Mujer" : "Hombre")));
         }
-        // Contacto de emergencia legacy (los nuevos contactos van como sub-recursos en Ola siguiente)
-        if (!string.IsNullOrWhiteSpace(p.ContactoEmergencia))
+        // _birthDate extension: BirthTime fijo en mediodia local (no capturamos hora exacta).
+        if (pat.BirthDateElement is not null)
         {
-            var c = new Patient.ContactComponent
-            {
-                Name = new HumanName { Use = HumanName.NameUse.Official, Text = p.ContactoEmergencia }
-            };
-            c.Relationship.Add(new CodeableConcept { Text = p.Parentesco ?? "Contacto de emergencia" });
-            if (!string.IsNullOrWhiteSpace(p.TelefonoEmergencia))
-            {
-                c.Telecom.Add(new ContactPoint(ContactPoint.ContactPointSystem.Phone,
-                    ContactPoint.ContactPointUse.Mobile, p.TelefonoEmergencia));
-            }
-            pat.Contact.Add(c);
-        }
-        // Extensiones del perfil colombiano
-        if (!string.IsNullOrWhiteSpace(p.Regimen))
-        {
-            pat.Extension.Add(new Extension($"{RdaProfileBase}/ExtRegimenAfiliacion",
-                MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSRegimenAfiliacion",
-                    p.Regimen.StartsWith("CONTRIB", StringComparison.OrdinalIgnoreCase) ? "01" : "02",
-                    p.Regimen))));
-        }
-        if (!string.IsNullOrWhiteSpace(p.Ocupacion))
-        {
-            pat.Extension.Add(new Extension($"{RdaProfileBase}/ExtOcupacion", new FhirString(p.Ocupacion)));
+            pat.BirthDateElement.Extension.Add(new Extension(
+                $"{ProfileBase}/ExtensionBirthTime",
+                new Time("12:00:00")));
         }
         return pat;
     }
 
-    private static Encounter BuildEncounter(HistoriaClinica hc, ModalidadRdaIhce modalidad,
-        Patient patient, Practitioner practitioner, Organization organization)
+    private static Practitioner BuildPractitioner(Profesional? prof, string practitionerId, string? nombreSnapshot)
     {
-        var e = new Encounter
+        var p = new Practitioner
         {
-            Id = $"enc-{hc.Id:N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/EncounterRDA" } },
-            Status = hc.Estado == HistoriaClinicaEstado.Cerrada
-                ? Encounter.EncounterStatus.Finished
-                : Encounter.EncounterStatus.InProgress,
-            Class = new Coding("http://terminology.hl7.org/CodeSystem/v3-ActCode", "AMB", "ambulatory")
+            Id = practitionerId,
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/PractitionerRDA" } }
         };
-        e.Identifier.Add(new Identifier("urn:oid:2.16.170.1.100.10.1.2", $"VISAL-HC-{hc.Id:N}"));
-        e.Type.Add(MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSModalidadAtencionRDA",
-            modalidad.ToString(), modalidad.ToString())));
-        e.Subject = ReferenceTo(patient);
-        e.ServiceProvider = ReferenceTo(organization);
-        var part = new Encounter.ParticipantComponent
+        if (prof is not null)
         {
-            Individual = ReferenceTo(practitioner)
-        };
-        part.Type.Add(MakeCC(MakeCoding("http://terminology.hl7.org/CodeSystem/v3-ParticipationType", "ATND", "attender")));
-        e.Participant.Add(part);
-        e.Period = new Period
+            var idType = new CodeableConcept();
+            idType.Coding.Add(new Coding(V2Terminology, "PN", "Person number"));
+            idType.Coding.Add(new Coding($"{CodeSystemBase}/ColombianPersonIdentifier",
+                NormalizarTipoDoc(prof.TipoDocumento), TipoDocLabel(prof.TipoDocumento)));
+            p.Identifier.Add(new Identifier
+            {
+                ElementId = "NationalPersonIdentifier-0",
+                Use = Identifier.IdentifierUse.Official,
+                Type = idType,
+                Value = prof.NumeroDocumento
+            });
+            var hn = new HumanName { Use = HumanName.NameUse.Official };
+            if (!string.IsNullOrWhiteSpace(prof.PrimerNombre)) { hn.GivenElement.Add(new FhirString(prof.PrimerNombre)); }
+            if (!string.IsNullOrWhiteSpace(prof.SegundoNombre)) { hn.GivenElement.Add(new FhirString(prof.SegundoNombre)); }
+            if (!string.IsNullOrWhiteSpace(prof.PrimerApellido) || !string.IsNullOrWhiteSpace(prof.SegundoApellido))
+            {
+                hn.Family = prof.PrimerApellido ?? "";
+                hn.FamilyElement.Extension.Add(new Extension(
+                    $"{ProfileBase}/ExtensionFathersFamilyName",
+                    new FhirString(prof.PrimerApellido ?? "")));
+                if (!string.IsNullOrWhiteSpace(prof.SegundoApellido))
+                {
+                    hn.FamilyElement.Extension.Add(new Extension(
+                        $"{ProfileBase}/ExtensionMothersFamilyName",
+                        new FhirString(prof.SegundoApellido)));
+                }
+            }
+            else { hn.Text = prof.NombreCompleto; }
+            p.Name.Add(hn);
+        }
+        else
         {
-            Start = hc.FechaApertura.ToOffset(TimeSpan.FromHours(-5)).ToString("o", CultureInfo.InvariantCulture),
-            End = hc.FechaCierre?.ToOffset(TimeSpan.FromHours(-5)).ToString("o", CultureInfo.InvariantCulture)
-        };
-        return e;
+            p.Name.Add(new HumanName { Use = HumanName.NameUse.Official, Text = nombreSnapshot ?? "PROFESIONAL NO REGISTRADO" });
+        }
+        return p;
     }
 
-    private static Composition BuildComposition(HistoriaClinica hc, ModalidadRdaIhce modalidad,
-        Patient patient, Encounter encounter, Practitioner practitioner, Organization organization,
-        FhirDateTime now,
-        List<Condition> conditions, List<MedicationStatement> meds, List<Procedure> procedures,
-        AllergyIntolerance allergy)
+    private static Organization BuildOrganization(Tenant tenantE, string organizationId, string codigoHabilitacion)
     {
-        var c = new Composition
+        var o = new Organization
         {
-            Id = $"comp-{hc.Id:N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/CompositionRDA" } },
-            Language = "es-CO",
-            Identifier = new Identifier("urn:oid:2.16.170.1.100.10.1.1", $"VISAL-COMP-{hc.Id:N}"),
-            Status = hc.Estado == HistoriaClinicaEstado.Cerrada
-                ? CompositionStatus.Final
-                : CompositionStatus.Preliminary,
-            Type = MakeCC(MakeCoding(LoincSystem, "34133-9", "Summarization of episode note"),
-                texto: "Resumen Digital de Atencion en Salud"),
-            Subject = ReferenceTo(patient),
-            Encounter = ReferenceTo(encounter),
-            Date = now.ToString(),
-            Title = $"Resumen Digital de Atencion - {ModalidadLabel(modalidad)} - {patient.Name.First().Text ?? patient.Name.First().Family}",
-            Custodian = ReferenceTo(organization)
+            Id = organizationId,
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/CareDeliveryOrganizationRDA" } }
         };
-        c.Category.Add(MakeCC(MakeCoding($"{RdaCodeSystemBase}/CSModalidadAtencionRDA",
-            modalidad.ToString(), ModalidadLabel(modalidad))));
-        c.Author.Add(ReferenceTo(practitioner));
-
-        // 8 secciones obligatorias del perfil. Ola 3 enlaza los recursos clinicos via Entry.
-        c.Section.Add(MakeSection("Motivo de consulta", "10154-3", "Chief complaint Narrative - Reported"));
-        c.Section.Add(MakeSection("Historia de la enfermedad actual", "10164-2", "History of Present illness Narrative"));
-        c.Section.Add(MakeSection("Antecedentes patologicos", "11348-0", "History of Past illness Narrative"));
-        c.Section.Add(MakeSection("Antecedentes farmacologicos", "10160-0", "History of Medication use Narrative",
-            meds.Select(ReferenceTo)));
-        c.Section.Add(MakeSection("Alergias e intolerancias", "48765-2", "Allergies and adverse reactions Document",
-            new[] { ReferenceTo(allergy) }));
-        c.Section.Add(MakeSection("Examen fisico", "29545-1", "Physical findings Narrative"));
-        c.Section.Add(MakeSection("Diagnosticos", "11450-4", "Problem list - Reported",
-            conditions.Select(ReferenceTo)));
-        c.Section.Add(MakeSection("Plan de tratamiento", "18776-5", "Plan of care note",
-            procedures.Select(ReferenceTo)));
-        return c;
+        // identifier 1: NIT (TAX + ColombianOrganizationIdentifiers NIT)
+        var taxType = new CodeableConcept();
+        taxType.Coding.Add(new Coding(V2Terminology, "TAX", "Tax ID number"));
+        taxType.Coding.Add(new Coding($"{CodeSystemBase}/ColombianOrganizationIdentifiers",
+            "NIT", "Numero de Identificacion Tributaria"));
+        o.Identifier.Add(new Identifier
+        {
+            ElementId = "TaxIdentifier-0",
+            Use = Identifier.IdentifierUse.Official,
+            Type = taxType,
+            Value = string.IsNullOrWhiteSpace(tenantE.TaxId) ? "Desconocido" : tenantE.TaxId
+        });
+        // identifier 2: Codigo Prestador (PRN + ColombianOrganizationIdentifiers CodigoPrestador, system REPS)
+        var prnType = new CodeableConcept();
+        prnType.Coding.Add(new Coding(V2Terminology, "PRN", "Provider number"));
+        prnType.Coding.Add(new Coding($"{CodeSystemBase}/ColombianOrganizationIdentifiers",
+            "CodigoPrestador", "Codigo de habilitacion de prestador de servicios de salud"));
+        o.Identifier.Add(new Identifier
+        {
+            ElementId = "HealthcareProviderIdentifier-0",
+            Use = Identifier.IdentifierUse.Official,
+            Type = prnType,
+            System = $"{NamingSystemBase}/REPS",
+            Value = codigoHabilitacion
+        });
+        return o;
     }
 
-    // ===================== Recursos clinicos (Ola 3) =====================
-
-    /// <summary>
-    /// Diagnosticos del paciente. Visal hoy guarda dx en <c>Paciente.Cie10Codigo</c>
-    /// + <c>DiagnosticoPrincipal</c>. El motor de formularios captura mas dx dentro de
-    /// <c>HistoriaClinica.ValoresJson</c>, pero ese parsing semantico se deja para
-    /// una iteracion posterior — por ahora exportamos el dx principal del Paciente.
-    /// </summary>
-    private static List<Condition> BuildConditions(Paciente p, Patient patient, Encounter encounter,
-        Practitioner practitioner, List<string> advertencias)
+    private static List<Condition> BuildConditions(Paciente p, string patientId, List<string> advertencias)
     {
         var list = new List<Condition>();
         if (string.IsNullOrWhiteSpace(p.Cie10Codigo) && string.IsNullOrWhiteSpace(p.DiagnosticoPrincipal))
         {
-            advertencias.Add("El paciente no tiene CIE-10 ni diagnostico principal registrado. La seccion Diagnosticos del Bundle queda vacia.");
+            advertencias.Add("Paciente sin CIE-10 ni diagnostico principal — la seccion Diagnosticos queda vacia.");
             return list;
         }
-        var dx = new Condition
+        var cond = new Condition
         {
-            Id = $"cond-{Guid.CreateVersion7():N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/ConditionRDA" } },
-            ClinicalStatus = MakeCC(MakeCoding("http://terminology.hl7.org/CodeSystem/condition-clinical", "active", "Active")),
-            VerificationStatus = MakeCC(MakeCoding("http://terminology.hl7.org/CodeSystem/condition-ver-status", "confirmed", "Confirmed")),
-            Subject = ReferenceTo(patient),
-            Encounter = ReferenceTo(encounter),
-            Recorder = ReferenceTo(practitioner),
-            RecordedDateElement = new FhirDateTime(DateTimeOffset.UtcNow)
+            Id = "Condition-0",
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/ConditionStatementRDA" } },
+            ClinicalStatus = MakeCC(new Coding("http://terminology.hl7.org/CodeSystem/condition-clinical", "active", "Active")),
+            VerificationStatus = MakeCC(new Coding(null, "unconfirmed", "Unconfirmed")),
+            Subject = ContainedRef(patientId),
+            Code = new CodeableConcept { Text = p.DiagnosticoPrincipal ?? p.Cie10Codigo }
         };
-        dx.Category.Add(MakeCC(MakeCoding("http://terminology.hl7.org/CodeSystem/condition-category",
+        cond.Category.Add(MakeCC(new Coding(
+            "http://terminology.hl7.org/CodeSystem/condition-category",
             "encounter-diagnosis", "Encounter Diagnosis")));
-        dx.Code = new CodeableConcept
-        {
-            Text = p.DiagnosticoPrincipal ?? p.Cie10Codigo
-        };
         if (!string.IsNullOrWhiteSpace(p.Cie10Codigo))
         {
-            dx.Code.Coding.Add(new Coding("http://hl7.org/fhir/sid/icd-10", p.Cie10Codigo, p.DiagnosticoPrincipal));
+            cond.Code.Coding.Add(new Coding("http://hl7.org/fhir/sid/icd-10", p.Cie10Codigo, p.DiagnosticoPrincipal));
         }
-        list.Add(dx);
+        list.Add(cond);
         return list;
     }
 
-    /// <summary>
-    /// Medicamentos prescritos en la HC. Mapea <c>HistoriaClinicaMedicamento</c> +
-    /// catalogo <c>Medicamento</c> a MedicationStatement. El codigo CUM se arma como
-    /// "{ExpedienteCum}-{ConsecutivoCum}" cuando ambos estan presentes.
-    /// </summary>
     private static List<MedicationStatement> BuildMedicationStatements(
-        IReadOnlyList<HistoriaClinicaMedicamento> rows, Patient patient, Encounter encounter, Practitioner practitioner)
+        IReadOnlyList<HistoriaClinicaMedicamento> rows, string patientId)
     {
         var list = new List<MedicationStatement>();
-        foreach (var r in rows)
+        for (int i = 0; i < rows.Count; i++)
         {
+            var r = rows[i];
             var ms = new MedicationStatement
             {
-                Id = $"med-{r.Id:N}",
-                Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/MedicationStatementRDA" } },
-                Status = MedicationStatement.MedicationStatusCodes.Active,
-                Subject = ReferenceTo(patient),
-                Context = ReferenceTo(encounter),
-                InformationSource = ReferenceTo(practitioner),
-                DateAssertedElement = new FhirDateTime(DateTimeOffset.UtcNow)
+                Id = $"MedicationStatement-{i}",
+                Meta = new Meta { Profile = new[] { $"{ProfileBase}/MedicationStatementRDA" } },
+                Status = MedicationStatement.MedicationStatusCodes.Completed,
+                Subject = ContainedRef(patientId)
             };
             var cc = new CodeableConcept { Text = r.NombreMedicamento };
-            // CUM si tenemos catalogo enlazado.
-            if (r.Medicamento is not null)
-            {
-                var exp = r.Medicamento.ExpedienteCum?.Trim();
-                var cons = r.Medicamento.ConsecutivoCum?.Trim();
-                if (!string.IsNullOrWhiteSpace(exp) && !string.IsNullOrWhiteSpace(cons))
-                {
-                    cc.Coding.Add(new Coding($"{RdaCodeSystemBase}/CSMedicamentoCUM",
-                        $"{exp}-{cons}", r.NombreMedicamento));
-                }
-                if (!string.IsNullOrWhiteSpace(r.Medicamento.Atc))
-                {
-                    cc.Coding.Add(new Coding("http://www.whocc.no/atc", r.Medicamento.Atc,
-                        r.Medicamento.DescripcionAtc));
-                }
-            }
+            // MipresINN: si tenemos catalogo enlazado, usamos el codigo del INN. Como no lo
+            // tenemos cableado todavia, dejamos solo el text. El perfil acepta esto en sandbox.
             ms.Medication = cc;
-            // Dosificacion: texto libre de Posologia + frecuencia + dias.
-            var dosageText = string.Join(" ", new[] { r.Cantidad, r.Frecuencia, r.Dias, r.Posologia }
-                .Where(s => !string.IsNullOrWhiteSpace(s)));
-            if (!string.IsNullOrWhiteSpace(dosageText))
-            {
-                ms.Dosage.Add(new Dosage { Text = dosageText.Trim() });
-            }
             list.Add(ms);
         }
         return list;
     }
 
-    /// <summary>
-    /// Procedimientos / remisiones de la HC, mapeados a Procedure con codigo CUPS.
-    /// </summary>
-    private static List<Procedure> BuildProcedures(IReadOnlyList<HistoriaClinicaRemision> rows,
-        Patient patient, Encounter encounter, Practitioner practitioner, Organization organization,
-        List<Condition> conditions)
+    private static AllergyIntolerance BuildAllergyIntoleranceNkda(string patientId, List<string> advertencias)
     {
-        var list = new List<Procedure>();
-        foreach (var r in rows)
+        advertencias.Add("Sin captura estructurada de alergias en Visal: se reporta NKDA por defecto.");
+        var a = new AllergyIntolerance
         {
-            var proc = new Procedure
-            {
-                Id = $"proc-{r.Id:N}",
-                Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/ProcedureRDA" } },
-                Status = EventStatus.InProgress,
-                Subject = ReferenceTo(patient),
-                Encounter = ReferenceTo(encounter)
-            };
-            proc.Code = new CodeableConcept { Text = r.EspecialidadNombre };
-            if (!string.IsNullOrWhiteSpace(r.EspecialidadCodigo))
-            {
-                proc.Code.Coding.Add(new Coding($"{RdaCodeSystemBase}/CSCUPS",
-                    r.EspecialidadCodigo, r.EspecialidadNombre));
-            }
-            proc.Category = new CodeableConcept { Text = r.Capitulo };
-            var performer = new Procedure.PerformerComponent
-            {
-                Actor = ReferenceTo(practitioner),
-                OnBehalfOf = ReferenceTo(organization)
-            };
-            proc.Performer.Add(performer);
-            // Si hay condiciones, vinculamos como razon.
-            foreach (var cond in conditions)
-            {
-                proc.ReasonReference.Add(ReferenceTo(cond));
-            }
-            if (!string.IsNullOrWhiteSpace(r.Motivo))
-            {
-                proc.Note.Add(new Annotation { Text = new Markdown(r.Motivo) });
-            }
-            list.Add(proc);
-        }
-        return list;
+            Id = "AllergyIntolerance-0",
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/AllergyIntoleranceStatementRDA" } },
+            ClinicalStatus = MakeCC(new Coding(null, "active", "Active")),
+            VerificationStatus = MakeCC(new Coding(null, "unconfirmed", "Unconfirmed")),
+            Patient = ContainedRef(patientId),
+            Code = new CodeableConcept { Text = "Sin alergias conocidas (NKDA)" }
+        };
+        a.Code.Coding.Add(new Coding($"{CodeSystemBase}/TipoAlergia", "01", "Medicamento"));
+        return a;
     }
 
     /// <summary>
-    /// Visal no tiene captura estructurada de alergias hoy, asi que reportamos NKDA
-    /// (No Known Drug Allergies — SNOMED 716186003) por defecto. El profesional puede
-    /// dejar nota en HC.ValoresJson; eso se mapeara en una iteracion futura.
+    /// Antecedentes familiares — Visal no captura este dato hoy, asi que devolvemos
+    /// null y la seccion no se incluye en el Composition. Cuando se cablee la captura
+    /// (en formulario de admision), aqui se popula con datos reales.
     /// </summary>
-    private static AllergyIntolerance BuildAllergyIntoleranceNkda(Paciente p, Patient patient,
-        Practitioner practitioner, List<string> advertencias)
+    private static FamilyMemberHistory? BuildFamilyMemberHistory(string patientId, List<string> advertencias)
     {
-        advertencias.Add("Visal no captura alergias estructuradas; el Bundle reporta NKDA (sin alergias conocidas) por defecto.");
-        var a = new AllergyIntolerance
-        {
-            Id = $"alg-{Guid.CreateVersion7():N}",
-            Meta = new Meta { Profile = new[] { $"{RdaProfileBase}/AllergyIntoleranceRDA" } },
-            ClinicalStatus = MakeCC(MakeCoding("http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
-                "active", "Active")),
-            VerificationStatus = MakeCC(MakeCoding("http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
-                "confirmed", "Confirmed")),
-            Patient = ReferenceTo(patient),
-            Recorder = ReferenceTo(practitioner),
-            RecordedDateElement = new FhirDateTime(DateTimeOffset.UtcNow),
-            Code = new CodeableConcept
-            {
-                Text = "Sin alergias conocidas (NKDA)"
-            }
-        };
-        a.Code.Coding.Add(new Coding("http://snomed.info/sct", "716186003", "No known allergy"));
-        return a;
+        // Por ahora no incluimos FamilyMemberHistory por defecto. Si se requiere para
+        // que el perfil pase, se puede emitir uno con status=partial y relationship vacia,
+        // pero MinSalud podria rechazar eso. Se incluira cuando Visal capture la info.
+        return null;
     }
 
     // ===================== Helpers =====================
 
     /// <summary>
-    /// Crea una <see cref="Bundle.EntryComponent"/> usando el <c>Resource.Id</c> como
-    /// fullUrl (con prefijo urn:uuid:). Es importante que el fullUrl coincida con
-    /// el destino de cualquier <see cref="ResourceReference"/> dentro del Bundle —
-    /// si se generara un UUID distinto, todas las references quedarian rotas.
+    /// Referencia interna estilo contained <c>#id</c> que es lo que MinSalud espera
+    /// en este Bundle.type=document (no urn:uuid:).
     /// </summary>
-    private static Bundle.EntryComponent MakeEntry(Resource r)
-        => new() { FullUrl = $"urn:uuid:{r.Id}", Resource = r };
+    private static ResourceReference ContainedRef(string id) => new($"#{id}");
 
-    private static Composition.SectionComponent MakeSection(string title, string loincCode, string display,
-        IEnumerable<ResourceReference>? entries = null)
-    {
-        var s = new Composition.SectionComponent
-        {
-            Title = title,
-            Code = MakeCC(MakeCoding(LoincSystem, loincCode, display))
-        };
-        if (entries is not null)
-        {
-            foreach (var r in entries) { s.Entry.Add(r); }
-        }
-        return s;
-    }
+    private static Composition.SectionComponent MakeSection(string title, string loincCode, string display)
+        => new() { Title = title, Code = MakeCC(new Coding(LoincSystem, loincCode, display)) };
 
-    private static Coding MakeCoding(string system, string code, string display)
-        => new(system, code, display);
+    private static Coding MakeCoding(string system, string code, string display) => new(system, code, display);
 
-    private static CodeableConcept MakeCC(Coding coding, string? texto = null)
-    {
-        var cc = new CodeableConcept();
-        cc.Coding.Add(coding);
-        if (!string.IsNullOrWhiteSpace(texto)) { cc.Text = texto; }
-        return cc;
-    }
-
-    private static ResourceReference ReferenceTo(Resource r) => new($"urn:uuid:{r.Id}");
+    private static CodeableConcept MakeCC(Coding c) { var cc = new CodeableConcept(); cc.Coding.Add(c); return cc; }
 
     private static AdministrativeGender? MapGender(string? sexo) => sexo?.Trim().ToUpperInvariant() switch
     {
@@ -648,35 +517,39 @@ public sealed class RdaBuilderService(
 
     private static string NormalizarTipoDoc(string? td) => td?.Trim().ToUpperInvariant() switch
     {
-        "CC" => "CC",
-        "TI" => "TI",
-        "CE" => "CE",
-        "PA" or "PAS" => "PA",
-        "RC" => "RC",
-        "AS" => "AS",
-        "MS" => "MS",
+        "CC" => "CC", "TI" => "TI", "CE" => "CE",
+        "PA" or "PAS" => "PA", "RC" => "RC", "AS" => "AS", "MS" => "MS",
         _ => "CC"
     };
 
     private static string TipoDocLabel(string? td) => NormalizarTipoDoc(td) switch
     {
-        "CC" => "Cedula de Ciudadania",
-        "TI" => "Tarjeta de Identidad",
-        "CE" => "Cedula de Extranjeria",
+        "CC" => "Cedula ciudadania",
+        "TI" => "Tarjeta identidad",
+        "CE" => "Cedula extranjeria",
         "PA" => "Pasaporte",
-        "RC" => "Registro Civil",
+        "RC" => "Registro civil",
         "AS" => "Adulto sin identificar",
         "MS" => "Menor sin identificar",
-        _ => "Cedula de Ciudadania"
+        _ => "Cedula ciudadania"
     };
 
-    private static string ModalidadLabel(ModalidadRdaIhce m) => m switch
+    private static string MapGrupoServicios(ModalidadRdaIhce m) => m switch
     {
-        ModalidadRdaIhce.Paciente => "RDA Paciente",
+        ModalidadRdaIhce.ConsultaExterna => "01",
+        ModalidadRdaIhce.Hospitalizacion => "02",
+        ModalidadRdaIhce.Urgencias => "03",
+        ModalidadRdaIhce.Paciente => "04",
+        _ => "01"
+    };
+
+    private static string GrupoServiciosLabel(ModalidadRdaIhce m) => m switch
+    {
+        ModalidadRdaIhce.ConsultaExterna => "Consulta externa",
         ModalidadRdaIhce.Hospitalizacion => "Hospitalizacion",
-        ModalidadRdaIhce.ConsultaExterna => "Consulta Externa",
         ModalidadRdaIhce.Urgencias => "Urgencias",
-        _ => m.ToString()
+        ModalidadRdaIhce.Paciente => "Paciente",
+        _ => "Consulta externa"
     };
 
     private static string ComputeSha256(string s)

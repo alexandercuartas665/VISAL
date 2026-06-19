@@ -32,6 +32,52 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
+@* ===================== Probador de servicios IHCE ===================== *@
+<details class="ase-card" style="margin-bottom:14px;">
+    <summary style="cursor:pointer;font-weight:600;padding:6px 0;">
+        🔧 Probar servicios IHCE (consultar paciente / profesional)
+    </summary>
+    <div class="ase-form" style="display:grid;grid-template-columns:120px 1fr 180px 140px;gap:10px;align-items:end;padding-top:10px;">
+        <div class="ase-f">
+            <label>Tipo doc</label>
+            <select class="form-select form-select-sm" @bind="_probadorTipoDoc">
+                <option value="CC">CC</option>
+                <option value="TI">TI</option>
+                <option value="CE">CE</option>
+                <option value="PA">PA</option>
+                <option value="RC">RC</option>
+            </select>
+        </div>
+        <div class="ase-f">
+            <label>Número de documento</label>
+            <input class="form-control form-control-sm mono" @bind="_probadorNumDoc"
+                   placeholder="ej. 1143131723" />
+        </div>
+        <div class="ase-f">
+            <label>Servicio</label>
+            <select class="form-select form-select-sm" @bind="_probadorServicio">
+                <option value="paciente">Consultar paciente</option>
+                <option value="profesional">Consultar profesional</option>
+            </select>
+        </div>
+        <button class="btn btn-primary btn-sm" @onclick="EjecutarProbador" disabled="@_probadorBusy">
+            @if (_probadorBusy) { <span>Ejecutando…</span> } else { <span>Ejecutar</span> }
+        </button>
+    </div>
+    @if (_probadorResult is not null)
+    {
+        <div style="margin-top:12px;padding:12px;background:#0d1117;color:#e6edf3;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;">
+            <div style="margin-bottom:6px;">
+                <b style="color:@(_probadorResult.Exito ? "#7ee787" : "#ff8585");">
+                    HTTP @_probadorResult.HttpStatus
+                </b>
+                <span style="color:#8b949e;"> · @_probadorResult.ElapsedMs ms · @_probadorResult.ResponseContentType</span>
+            </div>
+            <pre style="margin:0;white-space:pre-wrap;max-height:300px;overflow:auto;"><code>@_probadorResult.ResponseBody</code></pre>
+        </div>
+    }
+</details>
+
 @* ===================== Filtros ===================== *@
 <div class="ase-card" style="margin-bottom:14px;">
     <div class="ase-form" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 80px;gap:10px;align-items:end;">
@@ -333,6 +379,13 @@
     private Guid? _enviandoId;
     private EnvioRdaResultado? _envioResult;
 
+    // ----- Probador de servicios IHCE -----
+    private string _probadorTipoDoc = "CC";
+    private string? _probadorNumDoc;
+    private string _probadorServicio = "profesional";
+    private bool _probadorBusy;
+    private IhceCallResult? _probadorResult;
+
     protected override async Task OnInitializedAsync() => await CargarLista();
 
     private async Task CargarLista()
@@ -429,6 +482,26 @@
     }
 
     private void CerrarEnvio() => _envioResult = null;
+
+    private async Task EjecutarProbador()
+    {
+        _error = null; _ok = null; _probadorResult = null;
+        if (string.IsNullOrWhiteSpace(_probadorNumDoc))
+        {
+            _error = "Ingresa un número de documento.";
+            return;
+        }
+        _probadorBusy = true;
+        try
+        {
+            var req = new ConsultaPacienteRequest(_probadorTipoDoc, _probadorNumDoc.Trim());
+            _probadorResult = _probadorServicio == "profesional"
+                ? await Sender.ConsultarProfesionalAsync(req)
+                : await Sender.ConsultarPacienteAsync(req);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _probadorBusy = false; }
+    }
 
     private async Task Eliminar(Guid id)
     {

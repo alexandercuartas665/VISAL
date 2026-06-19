@@ -37,4 +37,5 @@ public class InteroperabilidadConfig : TenantEntity
     // path en una version futura del API, el operador lo ajusta aqui sin recompilar.
     public string PathEnvioRda { get; set; } = "/Composition/$enviar-rda-paciente";
     public string PathConsultarPaciente { get; set; } = "/Patient/$consultar-paciente-exacto";
+    public string PathConsultarProfesional { get; set; } = "/Practitioner/$consultar-profesional-salud";
 }

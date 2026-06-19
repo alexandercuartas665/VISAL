@@ -85,6 +85,11 @@
             <input class="form-control form-control-sm mono" @bind="_pathConsulta"
                    placeholder="/Patient/$consultar-paciente-exacto" />
         </div>
+        <div class="ase-f">
+            <label>Path Consultar Profesional</label>
+            <input class="form-control form-control-sm mono" @bind="_pathConsultaProf"
+                   placeholder="/Practitioner/$consultar-profesional-salud" />
+        </div>
     </div>
 </div>
 
@@ -298,6 +303,7 @@
     private AmbienteIhce _ambiente = AmbienteIhce.Sandbox;
     private string? _pathEnvio;
     private string? _pathConsulta;
+    private string? _pathConsultaProf;
     private bool _savingConfig;
 
     // ----- Credenciales por sede -----
@@ -329,6 +335,7 @@
                 _ambiente = _cfg.AmbienteActivo;
                 _pathEnvio = _cfg.PathEnvioRda;
                 _pathConsulta = _cfg.PathConsultarPaciente;
+                _pathConsultaProf = _cfg.PathConsultarProfesional;
             }
             _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
             _sucursales = (await SucSvc.ListAsync()).ToList();
@@ -346,7 +353,7 @@
             var req = new InteroperabilidadConfigSaveRequest(
                 _endSandbox, _endProd, _azureTid, _scope,
                 _apimSandboxNuevo, _apimProdNuevo, _ambiente,
-                _pathEnvio, _pathConsulta);
+                _pathEnvio, _pathConsulta, _pathConsultaProf);
             _cfg = await InterSvc.SaveConfigAsync(req, actor);
             _apimSandboxNuevo = null; _apimProdNuevo = null;
             _ok = "Configuracion guardada.";

@@ -50,4 +50,12 @@ public interface IIhceSenderService
     /// Consulta paciente exacto en el IHCE (resumen consolidado de antecedentes).
     /// </summary>
     Task<IhceCallResult> ConsultarPacienteAsync(ConsultaPacienteRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Consulta profesional de salud en el directorio FHIR del IHCE (cruzado contra ReTHUS).
+    /// Devuelve 200 si el profesional esta registrado y puede firmar RDAs. Se usa como
+    /// pre-flight check antes de enviar un RDA: si el profesional no esta, MinSalud
+    /// rechazaria el envio con BUNDLE-005.
+    /// </summary>
+    Task<IhceCallResult> ConsultarProfesionalAsync(ConsultaPacienteRequest req, CancellationToken ct = default);
 }

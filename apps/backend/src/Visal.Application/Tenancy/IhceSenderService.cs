@@ -42,6 +42,43 @@ public sealed class IhceSenderService(
         // obtenido de la credencial de la sede que emite el RDA.
         var bearer = await ObtenerBearerAsync(ev.SucursalId, ev.Ambiente, cfg, ct);
 
+        // PRE-FLIGHT CHECK: consultar profesional firmante en el directorio IHCE.
+        // Si MinSalud no lo tiene (cruzado contra ReTHUS), no tiene sentido enviar el RDA
+        // porque devolveria BUNDLE-005 'Practitioner not found'. Reportamos error claro.
+        if (ev.ProfesionalId is Guid profId)
+        {
+            var prof = await db.Profesionales.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == profId, ct);
+            if (prof is not null)
+            {
+                var consultaUrl = JoinUrl(urlBase, cfg.PathConsultarProfesional);
+                var consultaPayload = ParametersPayload(prof.TipoDocumento, prof.NumeroDocumento);
+                var consultaCall = await PostJsonAsync(consultaUrl, apimSubskey, consultaPayload, bearer, ct);
+                if (!consultaCall.Exito)
+                {
+                    ev.UltimoIntento = DateTimeOffset.UtcNow;
+                    ev.Intentos += 1;
+                    ev.Estado = EstadoRdaEvento.Rechazado;
+                    ev.ErroresJson = JsonSerializer.Serialize(new
+                    {
+                        preflight = "consultar-profesional-salud",
+                        mensaje = $"El profesional CC {prof.NumeroDocumento} ({prof.NombreCompleto}) no esta registrado en el directorio IHCE. RDA no enviado.",
+                        consulta = new
+                        {
+                            httpStatus = consultaCall.HttpStatus,
+                            body = consultaCall.ResponseBody,
+                            elapsedMs = consultaCall.ElapsedMs
+                        }
+                    }, new JsonSerializerOptions { WriteIndented = true });
+                    await db.SaveChangesAsync(ct);
+                    log.LogWarning("RDA {Id} NO enviado: pre-flight fallo, profesional {Cc} no esta en IHCE (HTTP {Code})",
+                        ev.Id, prof.NumeroDocumento, consultaCall.HttpStatus);
+                    return new EnvioRdaResultado(consultaCall, ev.Id, ev.Estado, null);
+                }
+                log.LogInformation("Pre-flight OK: profesional {Cc} encontrado en IHCE", prof.NumeroDocumento);
+            }
+        }
+
         log.LogInformation("Enviando RDA {Id} ({Ambiente}) a {Url}", ev.Id, ev.Ambiente, url);
 
         var call = await PostJsonAsync(url, apimSubskey, ev.BundleJson, bearer, ct);
@@ -95,6 +132,7 @@ public sealed class IhceSenderService(
         var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
 
         // Cuerpo: Parameters resource segun la especificacion del MinSalud.
+        // Consultar paciente lleva ADEMAS un 'humanuser' (operador), que es CC del usuario que consulta.
         var payload = new
         {
             resourceType = "Parameters",
@@ -114,6 +152,49 @@ public sealed class IhceSenderService(
         };
         var json = JsonSerializer.Serialize(payload);
         return await PostJsonAsync(url, apimSubskey, json, bearer, ct);
+    }
+
+    public async Task<IhceCallResult> ConsultarProfesionalAsync(ConsultaPacienteRequest req, CancellationToken ct = default)
+    {
+        var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        var url = JoinUrl(urlBase, cfg.PathConsultarProfesional);
+
+        var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Ambiente == cfgEntity.AmbienteActivo
+                && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
+            ?? throw new InvalidOperationException(
+                $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
+        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+
+        var json = ParametersPayload(req.TipoDocumento, req.NumeroDocumento);
+        return await PostJsonAsync(url, apimSubskey, json, bearer, ct);
+    }
+
+    /// <summary>
+    /// Construye el cuerpo FHIR R4 <c>Parameters</c> que esperan las operaciones custom
+    /// <c>$consultar-paciente-exacto</c> y <c>$consultar-profesional-salud</c>.
+    /// </summary>
+    private static string ParametersPayload(string tipoDoc, string numero)
+    {
+        var payload = new
+        {
+            resourceType = "Parameters",
+            parameter = new object[]
+            {
+                new
+                {
+                    name = "identifier",
+                    part = new object[]
+                    {
+                        new { name = "type",  valueString = tipoDoc },
+                        new { name = "value", valueString = numero }
+                    }
+                }
+            }
+        };
+        return JsonSerializer.Serialize(payload);
     }
 
     /// <summary>

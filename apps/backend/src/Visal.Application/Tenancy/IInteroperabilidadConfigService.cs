@@ -16,7 +16,8 @@ public sealed record InteroperabilidadConfigDto(
     bool TieneApimProduccion,
     AmbienteIhce AmbienteActivo,
     string PathEnvioRda,
-    string PathConsultarPaciente);
+    string PathConsultarPaciente,
+    string PathConsultarProfesional);
 
 /// <summary>
 /// Payload para guardar la config general. Los secretos son opcionales: si vienen
@@ -31,7 +32,8 @@ public sealed record InteroperabilidadConfigSaveRequest(
     string? ApimSubskeyProduccionNueva,
     AmbienteIhce AmbienteActivo,
     string? PathEnvioRda,
-    string? PathConsultarPaciente);
+    string? PathConsultarPaciente,
+    string? PathConsultarProfesional);
 
 /// <summary>
 /// Fila del grid de credenciales por sede + ambiente. <c>TieneClientSecret</c> indica

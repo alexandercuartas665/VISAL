@@ -52,6 +52,8 @@ public sealed class InteroperabilidadConfigService(
             c.PathEnvioRda = req.PathEnvioRda.Trim();
         if (!string.IsNullOrWhiteSpace(req.PathConsultarPaciente))
             c.PathConsultarPaciente = req.PathConsultarPaciente.Trim();
+        if (!string.IsNullOrWhiteSpace(req.PathConsultarProfesional))
+            c.PathConsultarProfesional = req.PathConsultarProfesional.Trim();
 
         // Secretos: si llega valor nuevo lo ciframos; si viene vacio se mantiene el actual.
         if (!string.IsNullOrWhiteSpace(req.ApimSubskeySandboxNueva))
@@ -252,7 +254,8 @@ public sealed class InteroperabilidadConfigService(
         !string.IsNullOrEmpty(c.ApimSubskeyProduccionCifrada),
         c.AmbienteActivo,
         c.PathEnvioRda,
-        c.PathConsultarPaciente);
+        c.PathConsultarPaciente,
+        c.PathConsultarProfesional);
 
     private sealed class AzureTokenOk
     {

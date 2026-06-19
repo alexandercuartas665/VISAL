@@ -1013,6 +1013,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Paths de operaciones FHIR custom del API IHCE.
             b.Property(x => x.PathEnvioRda).HasMaxLength(200).IsRequired();
             b.Property(x => x.PathConsultarPaciente).HasMaxLength(200).IsRequired();
+            b.Property(x => x.PathConsultarProfesional).HasMaxLength(200).IsRequired();
             // Una sola fila de configuracion por tenant.
             b.HasIndex(x => x.TenantId).IsUnique();
         });

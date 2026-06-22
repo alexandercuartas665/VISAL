@@ -76,9 +76,14 @@
             </label>
         </div>
         <div class="ase-f">
-            <label>Path Envio RDA</label>
+            <label>Path Envio RDA Paciente</label>
             <input class="form-control form-control-sm mono" @bind="_pathEnvio"
                    placeholder="/Composition/$enviar-rda-paciente" />
+        </div>
+        <div class="ase-f">
+            <label>Path Envio RDA Consulta</label>
+            <input class="form-control form-control-sm mono" @bind="_pathEnvioConsulta"
+                   placeholder="/Composition/$enviar-rda-consulta" />
         </div>
         <div class="ase-f">
             <label>Path Consultar Paciente</label>
@@ -302,6 +307,7 @@
     private string? _apimProdNuevo;
     private AmbienteIhce _ambiente = AmbienteIhce.Sandbox;
     private string? _pathEnvio;
+    private string? _pathEnvioConsulta;
     private string? _pathConsulta;
     private string? _pathConsultaProf;
     private bool _savingConfig;
@@ -334,6 +340,7 @@
                 _scope = _cfg.Scope;
                 _ambiente = _cfg.AmbienteActivo;
                 _pathEnvio = _cfg.PathEnvioRda;
+                _pathEnvioConsulta = _cfg.PathEnvioRdaConsulta;
                 _pathConsulta = _cfg.PathConsultarPaciente;
                 _pathConsultaProf = _cfg.PathConsultarProfesional;
             }
@@ -353,7 +360,7 @@
             var req = new InteroperabilidadConfigSaveRequest(
                 _endSandbox, _endProd, _azureTid, _scope,
                 _apimSandboxNuevo, _apimProdNuevo, _ambiente,
-                _pathEnvio, _pathConsulta, _pathConsultaProf);
+                _pathEnvio, _pathEnvioConsulta, _pathConsulta, _pathConsultaProf);
             _cfg = await InterSvc.SaveConfigAsync(req, actor);
             _apimSandboxNuevo = null; _apimProdNuevo = null;
             _ok = "Configuracion guardada.";

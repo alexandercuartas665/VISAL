@@ -137,6 +137,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<AmbienteIhce>().HaveConversion<string>().HaveMaxLength(20);
         configurationBuilder.Properties<ModalidadRdaIhce>().HaveConversion<string>().HaveMaxLength(30);
         configurationBuilder.Properties<EstadoRdaEvento>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<TipoRdaIhce>().HaveConversion<string>().HaveMaxLength(20);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1012,6 +1013,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ApimSubskeyProduccionCifrada).HasColumnType("text");
             // Paths de operaciones FHIR custom del API IHCE.
             b.Property(x => x.PathEnvioRda).HasMaxLength(200).IsRequired();
+            b.Property(x => x.PathEnvioRdaConsulta).HasMaxLength(200).IsRequired();
             b.Property(x => x.PathConsultarPaciente).HasMaxLength(200).IsRequired();
             b.Property(x => x.PathConsultarProfesional).HasMaxLength(200).IsRequired();
             // Una sola fila de configuracion por tenant.

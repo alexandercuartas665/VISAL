@@ -67,6 +67,7 @@ deploy/docker/pgadmin-data/
 # Deploy de produccion - .env real y dumps de BD nunca al repo (datos sensibles)
 deploy/docker-prod/.env
 deploy/docker-prod/dumps/*.dump
+deploy/docker-prod/dumps/*.sql
 deploy/docker-prod/dumps/*.sql.gz
 deploy/docker-prod/backups/
 

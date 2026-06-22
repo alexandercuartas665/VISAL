@@ -345,6 +345,18 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Select(g => new { AsignacionId = g.Key, Total = g.Sum(t => t.Cantidad) })
             .ToDictionaryAsync(x => x.AsignacionId, x => x.Total, ct);
 
+        // Resolver Especialidad del catalogo ServicioContrato. Asignacion.ServicioId guarda
+        // el GUID del ServicioContrato (como string), asi que el lookup es por Guid -> Especialidad.
+        var servicioGuids = asigs
+            .Select(a => Guid.TryParse(a.ServicioId, out var g) ? g : Guid.Empty)
+            .Where(g => g != Guid.Empty)
+            .Distinct()
+            .ToList();
+        var espDict = await db.ServiciosContrato.AsNoTracking()
+            .Where(sc => servicioGuids.Contains(sc.Id))
+            .Select(sc => new { sc.Id, sc.Especialidad })
+            .ToDictionaryAsync(x => x.Id, x => x.Especialidad, ct);
+
         // El "Orden" visible en la grilla es un numero corrido por created_at (mas reciente primero -> 1, 2, ...).
         var orderedById = asigs
             .Select((a, idx) => new { a.Id, Orden = idx + 1 })
@@ -371,7 +383,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 a.CodigoAutorizacion,
                 a.CreatedAt,
                 a.Estado.ToString(),
-                coordinados);
+                coordinados,
+                Guid.TryParse(a.ServicioId, out var sgid) && espDict.TryGetValue(sgid, out var esp) ? esp : null);
         }).ToList();
     }
 

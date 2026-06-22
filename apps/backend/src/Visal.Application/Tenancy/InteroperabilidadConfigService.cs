@@ -54,6 +54,8 @@ public sealed class InteroperabilidadConfigService(
             c.PathConsultarPaciente = req.PathConsultarPaciente.Trim();
         if (!string.IsNullOrWhiteSpace(req.PathConsultarProfesional))
             c.PathConsultarProfesional = req.PathConsultarProfesional.Trim();
+        if (!string.IsNullOrWhiteSpace(req.PathEnvioRdaConsulta))
+            c.PathEnvioRdaConsulta = req.PathEnvioRdaConsulta.Trim();
 
         // Secretos: si llega valor nuevo lo ciframos; si viene vacio se mantiene el actual.
         if (!string.IsNullOrWhiteSpace(req.ApimSubskeySandboxNueva))
@@ -254,6 +256,7 @@ public sealed class InteroperabilidadConfigService(
         !string.IsNullOrEmpty(c.ApimSubskeyProduccionCifrada),
         c.AmbienteActivo,
         c.PathEnvioRda,
+        c.PathEnvioRdaConsulta,
         c.PathConsultarPaciente,
         c.PathConsultarProfesional);
 

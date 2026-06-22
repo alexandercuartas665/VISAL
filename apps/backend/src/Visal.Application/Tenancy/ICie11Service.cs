@@ -3,8 +3,9 @@ namespace Visal.Application.Tenancy;
 /// <summary>Configuracion del cliente WHO ICD-11 API (claves OAuth2 + endpoints).</summary>
 public sealed record Cie11ConfigDto(string? TokenUrl, string? ClientId, string? ClientSecret, string? SearchUrl, string? MmsUrlBase, bool Activo);
 
-/// <summary>Item devuelto por /entity/search del WHO ICD-11.</summary>
-public sealed record Cie11SearchItem(string EntityId, string Title);
+/// <summary>Item devuelto por /entity/search del WHO ICD-11. Code puede ser null cuando
+/// la entidad es un capitulo o agrupador sin codigo asignado en la hoja.</summary>
+public sealed record Cie11SearchItem(string EntityId, string Title, string? Code);
 
 /// <summary>Detalle de una entidad: codigo CIE-11 + titulo limpio en espanol.</summary>
 public sealed record Cie11Detail(string Code, string Title);

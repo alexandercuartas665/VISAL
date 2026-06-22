@@ -16,6 +16,7 @@ public sealed record InteroperabilidadConfigDto(
     bool TieneApimProduccion,
     AmbienteIhce AmbienteActivo,
     string PathEnvioRda,
+    string PathEnvioRdaConsulta,
     string PathConsultarPaciente,
     string PathConsultarProfesional);
 
@@ -32,6 +33,7 @@ public sealed record InteroperabilidadConfigSaveRequest(
     string? ApimSubskeyProduccionNueva,
     AmbienteIhce AmbienteActivo,
     string? PathEnvioRda,
+    string? PathEnvioRdaConsulta,
     string? PathConsultarPaciente,
     string? PathConsultarProfesional);
 

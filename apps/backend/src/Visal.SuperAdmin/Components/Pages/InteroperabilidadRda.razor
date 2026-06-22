@@ -6,6 +6,7 @@
 @using Visal.Domain.Enums
 @inject IRdaConsoleService Svc
 @inject IRdaBuilderService Builder
+@inject IRdaConsultaBuilderService BuilderConsulta
 @inject IIhceSenderService Sender
 @inject AuthenticationStateProvider AuthState
 @inject Microsoft.JSInterop.IJSRuntime JS
@@ -123,6 +124,7 @@
             <thead>
                 <tr>
                     <th>Fecha</th>
+                    <th>Tipo</th>
                     <th>Paciente</th>
                     <th>Profesional</th>
                     <th>Sede</th>
@@ -138,6 +140,16 @@
                 {
                     <tr>
                         <td class="mono"><small>@r.FechaGeneracion.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></td>
+                        <td>
+                            @if (r.TipoRda == TipoRdaIhce.Consulta)
+                            {
+                                <span class="badge bg-info text-dark">Consulta</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Paciente</span>
+                            }
+                        </td>
                         <td>
                             <div><b>@r.PacienteNombre</b></div>
                             <small class="mono" style="color:var(--muted)">@r.PacienteDocumento</small>
@@ -192,11 +204,18 @@
         <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:780px;max-width:980px;">
             <div class="ase-modal-h">Generar RDA desde Historia Clinica</div>
             <div style="padding:16px 18px;">
-                <div class="ase-form" style="display:grid;grid-template-columns:1fr 220px;gap:12px;align-items:end;">
+                <div class="ase-form" style="display:grid;grid-template-columns:1fr 180px 200px;gap:12px;align-items:end;">
                     <div class="ase-f">
                         <label>Buscar paciente (nombre o documento)</label>
                         <input class="form-control form-control-sm" @bind="_buscarHc" @bind:event="oninput"
                                @bind:after="BuscarHc" placeholder="JUAN... / 1010101010" />
+                    </div>
+                    <div class="ase-f">
+                        <label>Tipo RDA</label>
+                        <select class="form-select form-select-sm" @bind="_tipoRda">
+                            <option value="Paciente">Paciente (antecedentes)</option>
+                            <option value="Consulta">Consulta (atención)</option>
+                        </select>
                     </div>
                     <div class="ase-f">
                         <label>Modalidad</label>
@@ -367,6 +386,7 @@
     private bool _modalGenerar;
     private string? _buscarHc;
     private string _modalidad = "ConsultaExterna";
+    private string _tipoRda = "Paciente";
     private List<HcCandidataRdaDto> _hcCandidatas = new();
     private bool _generando;
     private Guid? _generandoHcId;
@@ -434,7 +454,9 @@
         {
             var actor = await ActorAsync();
             var modalidad = Enum.Parse<ModalidadRdaIhce>(_modalidad);
-            var res = await Builder.ConstruirAsync(hcId, modalidad, actor);
+            var res = _tipoRda == "Consulta"
+                ? await BuilderConsulta.ConstruirAsync(hcId, actor)
+                : await Builder.ConstruirAsync(hcId, modalidad, actor);
             _advertenciasUltimo = res.Advertencias.ToList();
             _ok = res.YaExistia
                 ? $"Bundle ya existia (hash {res.BundleHash[..12]}…). No se duplico."

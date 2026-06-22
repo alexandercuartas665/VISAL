@@ -28,6 +28,13 @@ public class RdaEvento : TenantEntity
     public ModalidadRdaIhce Modalidad { get; set; } = ModalidadRdaIhce.ConsultaExterna;
     public AmbienteIhce Ambiente { get; set; }
 
+    /// <summary>
+    /// Tipo de RDA: Paciente (antecedentes consolidados, endpoint $enviar-rda-paciente)
+    /// o Consulta (reporte de atencion individual, endpoint $enviar-rda-consulta).
+    /// El IhceSenderService usa este campo para decidir a que path POSTear.
+    /// </summary>
+    public TipoRdaIhce TipoRda { get; set; } = TipoRdaIhce.Paciente;
+
     // ---- Contenido del Bundle FHIR
     public string BundleJson { get; set; } = null!;
     public string BundleHash { get; set; } = null!;

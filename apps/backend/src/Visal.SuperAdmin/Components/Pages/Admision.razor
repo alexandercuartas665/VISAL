@@ -151,12 +151,12 @@
                         </div>
                         <div class="ase-f"><label>Estrato Social</label>
                             <select class="form-select form-select-sm" @bind="_estrato">
-                                <option value="">--</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+                                <option value="">--</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>NO REFIERE</option>
                             </select>
                         </div>
                         <div class="ase-f"><label>Sexo</label>
                             <select class="form-select form-select-sm" @bind="_sexo">
-                                <option value="">--</option><option>MASCULINO</option><option>FEMENINO</option>
+                                <option value="">--</option><option>MASCULINO</option><option>FEMENINO</option><option>INDETERMINADO</option>
                             </select>
                         </div>
                         <div class="ase-f"><label>Zona</label>
@@ -248,9 +248,15 @@
                     <div class="ase-card-h">Estado civil, ocupacion, regimen</div>
                     <div class="ase-form">
                         <div class="ase-f"><label>Estado civil</label>
-                            <select class="form-select form-select-sm" @bind="_estadoCivil"><option value="">--</option><option>SOLTERO</option><option>CASADO</option><option>UNION LIBRE</option><option>VIUDO</option><option>DIVORCIADO</option></select>
+                            <select class="form-select form-select-sm" @bind="_estadoCivil"><option value="">--</option><option>SOLTERO</option><option>CASADO</option><option>UNION LIBRE</option><option>VIUDO</option><option>DIVORCIADO</option><option>NO REFIERE</option></select>
                         </div>
-                        <div class="ase-f"><label>Ocupacion</label><input class="form-control form-control-sm" @bind="_ocupacion" /></div>
+                        <div class="ase-f"><label>Ocupacion</label>
+                            <input class="form-control form-control-sm" @bind="_ocupacion" list="ocupaciones-sug" placeholder="Escribe o selecciona..." />
+                            <datalist id="ocupaciones-sug">
+                                <option value="NO APLICA"></option>
+                                <option value="NO REFIERE"></option>
+                            </datalist>
+                        </div>
                         <div class="ase-f"><label>Regimen</label>
                             <select class="form-select form-select-sm" @bind="_regimen"><option value="">--</option><option>CONTRIBUTIVO</option><option>SUBSIDIADO</option><option>PARTICULAR</option><option>ESPECIAL</option></select>
                         </div>
@@ -403,8 +409,11 @@
                     @foreach (var r in _cieResults)
                     {
                         <button class="cie-result-item" @onclick="() => SelectCieAsync(r)">
+                            @if (!string.IsNullOrWhiteSpace(r.Code))
+                            {
+                                <span class="cie-code">@r.Code</span>
+                            }
                             <span class="cie-title">@r.Title</span>
-                            <span class="cie-id">@TrimId(r.EntityId)</span>
                         </button>
                     }
                 }
@@ -440,6 +449,7 @@
     .cie-result-item:hover { background:#eff6ff; }
     .cie-title { flex:1; font-size:13px; color:#0f172a; }
     .cie-id { font-family: monospace; font-size:10px; color:#94a3b8; }
+    .cie-code { font-family: monospace; font-size: 12px; font-weight: 700; color: #0f172a; background:#fef3c7; padding: 3px 8px; border-radius: 4px; min-width: 64px; text-align: center; }
 </style>
 
 @code {

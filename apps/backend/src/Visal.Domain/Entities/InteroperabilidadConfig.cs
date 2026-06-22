@@ -36,6 +36,7 @@ public class InteroperabilidadConfig : TenantEntity
     // estan en la coleccion Postman del MinSalud (junio 2026). Si MinSalud cambia el
     // path en una version futura del API, el operador lo ajusta aqui sin recompilar.
     public string PathEnvioRda { get; set; } = "/Composition/$enviar-rda-paciente";
+    public string PathEnvioRdaConsulta { get; set; } = "/Composition/$enviar-rda-consulta";
     public string PathConsultarPaciente { get; set; } = "/Patient/$consultar-paciente-exacto";
     public string PathConsultarProfesional { get; set; } = "/Practitioner/$consultar-profesional-salud";
 }

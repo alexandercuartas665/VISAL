@@ -35,7 +35,8 @@ public sealed class RdaConsoleService(
                     e.Intentos,
                     e.FechaEnvio,
                     e.ReferenciaMinsalud,
-                    e.BundleHash
+                    e.BundleHash,
+                    e.TipoRda
                 };
 
         if (!string.IsNullOrWhiteSpace(filtro.Documento))
@@ -60,7 +61,8 @@ public sealed class RdaConsoleService(
         return rows.Select(r => new RdaEventoRowDto(
             r.Id, r.FechaGeneracion, r.PacienteNombre, r.PacienteDocumento,
             r.ProfesionalNombre, r.SucursalNombre, r.Modalidad, r.Ambiente,
-            r.Estado, r.Intentos, r.FechaEnvio, r.ReferenciaMinsalud, r.BundleHash)).ToList();
+            r.Estado, r.Intentos, r.FechaEnvio, r.ReferenciaMinsalud, r.BundleHash,
+            r.TipoRda)).ToList();
     }
 
     public async Task<RdaEventoDetailDto?> ObtenerAsync(Guid id, CancellationToken ct = default)

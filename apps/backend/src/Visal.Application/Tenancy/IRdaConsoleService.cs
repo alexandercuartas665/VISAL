@@ -16,7 +16,8 @@ public sealed record RdaEventoRowDto(
     int Intentos,
     DateTimeOffset? FechaEnvio,
     string? ReferenciaMinsalud,
-    string BundleHash);
+    string BundleHash,
+    TipoRdaIhce TipoRda);
 
 /// <summary>Detalle expandido (incluye el JSON completo).</summary>
 public sealed record RdaEventoDetailDto(

@@ -34,9 +34,12 @@ public sealed class IhceSenderService(
         var ev = await db.RdaEventos.FirstOrDefaultAsync(x => x.Id == rdaEventoId, ct)
             ?? throw new InvalidOperationException($"RdaEvento {rdaEventoId} no existe.");
 
-        // Cargar config y armar la URL completa.
+        // Cargar config y armar la URL completa. El path depende del TipoRda:
+        //  - Paciente => /Composition/$enviar-rda-paciente
+        //  - Consulta => /Composition/$enviar-rda-consulta
         var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(ev.Ambiente, ct);
-        var url = JoinUrl(urlBase, cfg.PathEnvioRda);
+        var path = ev.TipoRda == TipoRdaIhce.Consulta ? cfg.PathEnvioRdaConsulta : cfg.PathEnvioRda;
+        var url = JoinUrl(urlBase, path);
 
         // El POST al IHCE requiere ADEMAS de la APIM key un Bearer token Azure AD
         // obtenido de la credencial de la sede que emite el RDA.

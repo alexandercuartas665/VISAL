@@ -86,28 +86,43 @@
     <!-- Body: paleta | lienzo | propiedades -->
     <div class="fb-body">
 
-        <!-- Paleta -->
+        <!-- Paleta: cada boton es click + draggable. Drag&drop al lienzo o seccion deja el campo
+             en la posicion deseada; click sigue funcionando como atajo (cae en la raiz/seccion seleccionada). -->
         <aside class="fb-palette">
             <div class="fb-palette-group">Estructura</div>
             @if (_schema.Header is null)
             {
-                <button class="fb-pal-btn" @onclick="AddHeader">+ Encabezado</button>
+                <button class="fb-pal-btn" draggable="true"
+                        @ondragstart="@(() => OnDragStart("structure:header"))" @ondragend="OnDragEnd"
+                        @onclick="AddHeader">+ Encabezado</button>
             }
-            <button class="fb-pal-btn" @onclick="AddSection">+ Seccion</button>
-            <button class="fb-pal-btn" @onclick='() => AddText("heading")'>Titulo</button>
-            <button class="fb-pal-btn" @onclick='() => AddText("subheading")'>Subtitulo</button>
-            <button class="fb-pal-btn" @onclick='() => AddText("paragraph")'>Parrafo</button>
+            <button class="fb-pal-btn" draggable="true"
+                    @ondragstart="@(() => OnDragStart("structure:section"))" @ondragend="OnDragEnd"
+                    @onclick="AddSection">+ Seccion</button>
+            <button class="fb-pal-btn" draggable="true"
+                    @ondragstart="@(() => OnDragStart("text:heading"))" @ondragend="OnDragEnd"
+                    @onclick='() => AddText("heading")'>Titulo</button>
+            <button class="fb-pal-btn" draggable="true"
+                    @ondragstart="@(() => OnDragStart("text:subheading"))" @ondragend="OnDragEnd"
+                    @onclick='() => AddText("subheading")'>Subtitulo</button>
+            <button class="fb-pal-btn" draggable="true"
+                    @ondragstart="@(() => OnDragStart("text:paragraph"))" @ondragend="OnDragEnd"
+                    @onclick='() => AddText("paragraph")'>Parrafo</button>
 
             <div class="fb-palette-group">Campos</div>
             @foreach (var ft in FieldTypes)
             {
-                <button class="fb-pal-btn" @onclick="() => AddField(ft.Key)">@ft.Value</button>
+                <button class="fb-pal-btn" draggable="true"
+                        @ondragstart="@(() => OnDragStart($"field:{ft.Key}"))" @ondragend="OnDragEnd"
+                        @onclick="() => AddField(ft.Key)">@ft.Value</button>
             }
-            <div class="fb-pal-hint">Se agrega a la seccion seleccionada (o a la raiz).</div>
+            <div class="fb-pal-hint">Arrastra al lienzo o haz click para agregar.</div>
         </aside>
 
-        <!-- Lienzo -->
-        <section class="fb-canvas">
+        <!-- Lienzo (acepta drop a la raiz) -->
+        <section class="fb-canvas @(_dragType is not null ? "fb-canvas-drag" : "")"
+                 @ondragover:preventDefault="true" @ondragover:stopPropagation="false"
+                 @ondrop="OnDropOnCanvas">
             @if (_schema.Header is not null)
             {
             <div class="fb-header @(_headerSel ? "sel" : "")" @onclick="SelectHeader">
@@ -145,7 +160,12 @@
                 {
                     if (node.IsSection)
                     {
-                        <div class="fb-section @(IsSelected(node) ? "sel" : "")" @onclick="() => Select(node)" @onclick:stopPropagation="true">
+                        <div class="fb-section @(IsSelected(node) ? "sel" : "") @(IsDragOver(node) ? "fb-section-drag" : "")"
+                             @onclick="() => Select(node)" @onclick:stopPropagation="true"
+                             @ondragenter="@(() => OnDragEnterSection(node))"
+                             @ondragleave="@(() => OnDragLeaveSection(node))"
+                             @ondragover:preventDefault="true" @ondragover:stopPropagation="true"
+                             @ondrop="@(() => OnDropOnSection(node))" @ondrop:stopPropagation="true">
                             <div class="fb-section-head">
                                 <span class="fb-section-title">@(string.IsNullOrWhiteSpace(node.Label) ? "Seccion" : node.Label)</span>
                                 <span class="fb-node-actions">
@@ -692,6 +712,108 @@
         var s = new FormNode { Type = "section", Label = "Nueva seccion", Children = new() };
         _schema.Children.Add(s);
         Select(s);
+    }
+
+    // ===================== Drag & drop desde paleta =====================
+    // Cuando el usuario arrastra un boton de la paleta, guardamos el tipo en este campo
+    // (HTML5 dataTransfer en Blazor Server no llega serializado al server). Al soltar
+    // sobre el lienzo o una seccion, leemos esta variable y creamos el nodo en el
+    // contenedor destino.
+
+    private string? _dragType;          // ej. "field:text", "field:number", "structure:section", "text:heading"
+    private FormNode? _dragOverNode;    // seccion sobre la que se esta hovering (para resaltarla)
+
+    private void OnDragStart(string dragType)
+    {
+        _dragType = dragType;
+    }
+
+    private void OnDragEnd()
+    {
+        _dragType = null;
+        _dragOverNode = null;
+    }
+
+    private void OnDragEnterSection(FormNode section)
+    {
+        if (_dragType is null) { return; }
+        _dragOverNode = section;
+    }
+
+    private void OnDragLeaveSection(FormNode section)
+    {
+        if (ReferenceEquals(_dragOverNode, section)) { _dragOverNode = null; }
+    }
+
+    private bool IsDragOver(FormNode? section) => ReferenceEquals(_dragOverNode, section);
+
+    /// <summary>Crea el nodo correspondiente al _dragType en la lista destino indicada.</summary>
+    private void HandleDrop(List<FormNode> targetList)
+    {
+        if (string.IsNullOrEmpty(_dragType)) { return; }
+        var dt = _dragType;
+        _dragType = null;
+        _dragOverNode = null;
+
+        var parts = dt.Split(':', 2);
+        var category = parts[0];
+        var subtype = parts.Length > 1 ? parts[1] : "";
+
+        switch (category)
+        {
+            case "structure" when subtype == "section":
+                // Una seccion solo cabe en la raiz, no anidamos.
+                var sec = new FormNode { Type = "section", Label = "Nueva seccion", Children = new() };
+                _schema.Children.Add(sec);
+                Select(sec);
+                break;
+            case "structure" when subtype == "header":
+                AddHeader();
+                break;
+            case "text":
+                var t = new FormNode
+                {
+                    Type = "text",
+                    TextStyle = subtype,
+                    WidthColumns = 12,
+                    Content = subtype switch
+                    {
+                        "heading" => "Titulo de seccion",
+                        "subheading" => "Subtitulo",
+                        _ => "Texto del parrafo."
+                    }
+                };
+                targetList.Add(t);
+                Select(t);
+                break;
+            case "field":
+                var f = new FormNode
+                {
+                    Type = "field",
+                    FieldType = subtype,
+                    Label = subtype == "table" ? "Nueva tabla" : "Nuevo campo",
+                    Name = "",
+                    WidthColumns = subtype is "textarea" or "table" ? 12 : 6,
+                    Catalog = subtype is "select" or "autocomplete" ? "estatico" : null,
+                    Columns = subtype == "table"
+                        ? new List<FormColumn>
+                        {
+                            new() { Label = "Codigo", Name = "codigo", FieldType = "text" },
+                            new() { Label = "Descripcion", Name = "descripcion", FieldType = "text" }
+                        }
+                        : null
+                };
+                targetList.Add(f);
+                Select(f);
+                break;
+        }
+    }
+
+    private void OnDropOnCanvas() => HandleDrop(_schema.Children);
+    private void OnDropOnSection(FormNode section)
+    {
+        section.Children ??= new();
+        HandleDrop(section.Children);
     }
 
     private void AddField(string fieldType)

@@ -176,8 +176,7 @@
                             <div class="ase-f"><label>Tip Doc</label><input class="form-control form-control-sm asg-ro mono" readonly value="@s.PacienteTipoDoc" /></div>
                             <div class="ase-f ase-f-wide"><label>Documento</label><input class="form-control form-control-sm asg-ro mono" readonly value="@s.PacienteDocumento" /></div>
                             <div class="ase-f ase-f-wide-3"><label>Nombre</label><input class="form-control form-control-sm asg-ro" readonly value="@s.PacienteNombre" /></div>
-                            <div class="ase-f ase-f-wide"><label>Descripcion orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.Observaciones" /></div>
-                            <div class="ase-f"><label>Especialidad</label><input class="form-control form-control-sm asg-ro" readonly /></div>
+                            <div class="ase-f ase-f-wide"><label>Especialidad</label><input class="form-control form-control-sm asg-ro" readonly value="@s.Especialidad" /></div>
 
                             <div class="ase-f ase-f-wide-3 cd-blue"><label>Servicio</label><input class="form-control form-control-sm" readonly value="@s.NombreServicio" /></div>
                             <div class="ase-f ase-f-wide-3 cd-blue"><label>Codigo Servicio</label><input class="form-control form-control-sm mono" readonly value="@s.CodigoServicio" /></div>
@@ -197,11 +196,17 @@
                             <div class="ase-f"><label>Tarifa</label><input type="number" min="0" step="0.01" class="form-control form-control-sm" @bind="_tarifa" placeholder="Pactada en el contrato" title="Tarifa pactada en el contrato. Puedes ajustarla manualmente." /></div>
 
                             <div class="ase-f"><label>Cantidad servicio</label><input type="number" class="form-control form-control-sm asg-ro" readonly value="@s.Cantidad" /></div>
-                            <div class="ase-f"><label>Turnos x Asignar</label>
-                                <input class="form-control form-control-sm @((_turnosFaltan == 0) ? "cd-ok" : "")"
-                                       readonly value="@_turnosFaltan" />
-                            </div>
-                            <div class="ase-f"><label>Horas x Turnos</label><input type="number" min="0" step="0.5" class="form-control form-control-sm" @bind="_horasPorTurno" /></div>
+                            @* Turnos x Asignar y Horas x Turnos solo aplican a Enfermeria (turnos
+                               por dia x N horas). Para Consulta, Equipos, Terapias, Insumos no
+                               tiene sentido — el servicio se cumple con la cantidad y ya. *@
+                            @if (string.Equals(s.TipoServicio, "ENFERMERIA", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <div class="ase-f"><label>Turnos x Asignar</label>
+                                    <input class="form-control form-control-sm @((_turnosFaltan == 0) ? "cd-ok" : "")"
+                                           readonly value="@_turnosFaltan" />
+                                </div>
+                                <div class="ase-f"><label>Horas x Turnos</label><input type="number" min="0" step="0.5" class="form-control form-control-sm" @bind="_horasPorTurno" /></div>
+                            }
 
                             @* "Seleccione Medico Especialista / Turnos" en su propia fila full width.
                                El select del profesional necesita aire para mostrar el nombre completo,

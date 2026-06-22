@@ -60,7 +60,11 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
         }
         var token = await GetTokenAsync(cfg, ct);
 
-        var url = $"{cfg.SearchUrl}?q={Uri.EscapeDataString(query)}&useFlexisearch=true";
+        // flatResults=true para que el response incluya theCode en cada entidad (no solo en
+        // el detail). propertiesToBeSearched amplia los campos buscados — incluye IndexTerm
+        // y SimpleCaption que son los que indexan codigos CIE-10/CIE-11 como sinonimos.
+        var props = "Title,SimpleCaption,FullySpecifiedName,Definition,IndexTerm";
+        var url = $"{cfg.SearchUrl}?q={Uri.EscapeDataString(query)}&useFlexisearch=true&flatResults=true&propertiesToBeSearched={props}";
         var client = http.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(20);
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -81,7 +85,7 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
         if (json?.DestinationEntities is null) { return Array.Empty<Cie11SearchItem>(); }
 
         return json.DestinationEntities
-            .Select(e => new Cie11SearchItem(e.EntityId ?? "", StripHtml(e.Title ?? "")))
+            .Select(e => new Cie11SearchItem(e.EntityId ?? "", StripHtml(e.Title ?? ""), e.TheCode))
             .Where(i => !string.IsNullOrEmpty(i.EntityId))
             .ToList();
     }
@@ -184,6 +188,7 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
     {
         [JsonPropertyName("id")] public string? EntityId { get; set; }
         [JsonPropertyName("title")] public string? Title { get; set; }
+        [JsonPropertyName("theCode")] public string? TheCode { get; set; }
     }
     private sealed class DetailRoot
     {

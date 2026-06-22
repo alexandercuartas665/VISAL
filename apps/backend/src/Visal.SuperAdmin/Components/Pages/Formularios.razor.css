@@ -46,12 +46,16 @@
 .fb-palette-group:first-child { margin-top: 0; }
 .fb-pal-btn { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; cursor: pointer; }
 .fb-pal-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.fb-pal-btn:active { cursor: grabbing; }
+.fb-pal-btn[draggable="true"] { cursor: grab; }
 .fb-pal-hint { font-size: 11px; color: var(--muted-foreground); margin-top: 8px; line-height: 1.4; }
 
 /* Lienzo */
 /* Canvas: crece naturalmente; el scroll lo hace la pagina, no el canvas (asi
    las laterales sticky se quedan visibles arriba). */
-.fb-canvas { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.fb-canvas { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; transition: background .15s, border-color .15s; }
+.fb-canvas-drag { border-color: var(--primary); background: rgba(21,101,192,.04); box-shadow: inset 0 0 0 2px var(--primary); }
+.fb-section-drag { border-color: var(--primary) !important; border-style: solid !important; background: rgba(21,101,192,.08) !important; box-shadow: 0 0 0 3px rgba(21,101,192,.18); }
 .fb-empty { text-align: center; color: var(--muted-foreground); padding: 48px 0; font-size: 14px; }
 .fb-empty-sm { color: var(--muted-foreground); font-size: 12px; padding: 8px 2px; }
 .fb-grid { display: flex; flex-wrap: wrap; gap: 10px; }

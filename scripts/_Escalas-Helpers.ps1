@@ -81,6 +81,8 @@ function Build-Header {
         institucion = "IPS VISAL RT"
         tagline = "Atencion Humana, Agil y Oportuna"
         titulo = $Titulo
+        # Logo cargado previamente desde Configuracion / Branding del tenant.
+        logoUrl = "/uploads/branding/visal-rt-logo.png"
         campos = @(
             @{ id = newId; label = "No Historia" },
             @{ id = newId; label = "Fecha" },
@@ -104,17 +106,36 @@ function Save-FormDefinition {
 
     $json = ($Schema | ConvertTo-Json -Depth 25 -Compress)
     $jsonSql = $json.Replace("'","''")
-    $id = [Guid]::NewGuid().ToString()
     $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss.fffzzz")
-
     $nameSql = $Nombre.Replace("'","''")
-    $sql = @"
-DELETE FROM form_definitions WHERE codigo = '$Codigo' AND tenant_id = '$TenantId';
+
+    # Verificar si ya existe un registro con ese codigo+tenant. Si existe,
+    # hacemos UPDATE (asi conservamos el id y no rompemos FKs de historias
+    # clinicas, relaciones_formulario, etc.). Si no, INSERT con id nuevo.
+    $existingId = docker exec $PgContainer psql -U $PgUser -d $PgDb -tA -c "SELECT id FROM form_definitions WHERE codigo = '$Codigo' AND tenant_id = '$TenantId';"
+    if ($existingId) { $existingId = $existingId.Trim() }
+
+    if ($existingId) {
+        $id = $existingId
+        $sql = @"
+UPDATE form_definitions SET
+  nombre = '$nameSql',
+  version = '$Version',
+  tipo = '$Tipo',
+  schema_json = '$jsonSql'::jsonb,
+  activo = true,
+  updated_at = '$now'
+WHERE id = '$id' AND tenant_id = '$TenantId';
+"@
+    } else {
+        $id = [Guid]::NewGuid().ToString()
+        $sql = @"
 INSERT INTO form_definitions
   (id, tenant_id, codigo, nombre, version, tipo, schema_json, prefill_routes_json, activo, created_at, updated_at)
 VALUES
   ('$id', '$TenantId', '$Codigo', '$nameSql', '$Version', '$Tipo', '$jsonSql'::jsonb, NULL, true, '$now', '$now');
 "@
+    }
     $tmp = [System.IO.Path]::GetTempFileName()
     [System.IO.File]::WriteAllText($tmp, $sql, [System.Text.UTF8Encoding]::new($false))
     try {
@@ -127,7 +148,8 @@ VALUES
     } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
     }
-    Write-Host "    OK insertado codigo=$Codigo id=$id schema=$($json.Length) bytes" -ForegroundColor Green
+    $verbo = if ($existingId) { "actualizado" } else { "insertado" }
+    Write-Host "    OK $verbo codigo=$Codigo id=$id schema=$($json.Length) bytes" -ForegroundColor Green
     return $id
 }
 

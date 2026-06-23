@@ -413,12 +413,34 @@
                                         @foreach (var s in sourceFields) { <option value="@s">@s</option> }
                                     </select>
                                     <span class="pr-arrow">&rarr;</span>
-                                    <select class="pr-sel" @bind="m.Target">
+                                    <select class="pr-sel" @bind="m.Target" @bind:after="() => OnTargetChanged(m)">
                                         <option value="">Selecciona...</option>
                                         @foreach (var t in targetFields) { <option value="@t">@t</option> }
                                     </select>
                                     <button class="pr-mini" @onclick="() => RemoveMapping(route, m)" title="Quitar">&times;</button>
                                 </div>
+                                var tableNode = GetTableNode(m.Target);
+                                if (tableNode is not null && PrefillSourceCatalog.CamposColumna.TryGetValue(m.Source ?? "", out var colSourceFields))
+                                {
+                                    <div class="pr-col-map">
+                                        <div class="pr-col-map-h">
+                                            Mapeo columna-a-columna: cada columna de la tabla destino se llena con un campo de la fuente.
+                                        </div>
+                                        @foreach (var col in tableNode.Columns ?? new())
+                                        {
+                                            <div class="pr-col-map-row">
+                                                <div class="pr-col-map-label">@col.Label <small>(@col.Name)</small></div>
+                                                <span class="pr-arrow">&larr;</span>
+                                                <select class="pr-sel pr-col-sel"
+                                                        value="@GetColumnSource(m, col.Id)"
+                                                        @onchange="e => SetColumnSource(m, col.Id, e.Value?.ToString())">
+                                                    <option value="">(auto por nombre)</option>
+                                                    @foreach (var cs in colSourceFields) { <option value="@cs">@cs</option> }
+                                                </select>
+                                            </div>
+                                        }
+                                    </div>
+                                }
                             }
                             <button class="fb-btn pr-add-map" @onclick="() => AddMapping(route)">+ Agregar mapeo</button>
                         </div>
@@ -460,6 +482,15 @@
     .pr-mini { background: none; border: none; color: #b91c1c; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
     .pr-add-map { font-size: 11.5px; margin-top: 6px; }
     .pr-add-route { width: 100%; margin-top: 4px; }
+
+    /* Mini mapeo columna-a-columna cuando el destino es una tabla. Se muestra
+       indentado bajo el row del mapeo, para dejar claro que pertenece a el. */
+    .pr-col-map { margin: 4px 0 10px 24px; background: #fefce8; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 10px; }
+    .pr-col-map-h { font-size: 11px; color: #854d0e; margin-bottom: 6px; font-style: italic; }
+    .pr-col-map-row { display: grid; grid-template-columns: 1fr 20px 1fr; gap: 6px; align-items: center; margin-bottom: 4px; }
+    .pr-col-map-label { font-size: 12px; color: #1f2937; }
+    .pr-col-map-label small { color: #6b7280; font-size: 10.5px; margin-left: 4px; }
+    .pr-col-sel { background: #fff; }
 </style>
 
 @code {
@@ -525,7 +556,52 @@
     private void AddMapping(PrefillRoute r) => r.Mappings.Add(new PrefillFieldMap());
     private void RemoveMapping(PrefillRoute r, PrefillFieldMap m) => r.Mappings.Remove(m);
 
-    /// <summary>Lista de Name de los campos del schema actual para el dropdown destino.</summary>
+    /// <summary>Cuando el usuario cambia el target, limpia el mapeo de columnas
+    /// si el nuevo target ya no es una tabla. Evita arrastrar config inutil
+    /// y reduce ruido en el JSON guardado.</summary>
+    private void OnTargetChanged(PrefillFieldMap m)
+    {
+        if (GetTableNode(m.Target) is null) { m.ColumnMappings = null; }
+    }
+
+    /// <summary>Devuelve el FormNode de tipo tabla cuyo Name = targetName, o null.</summary>
+    private FormNode? GetTableNode(string? targetName)
+    {
+        if (string.IsNullOrWhiteSpace(targetName)) { return null; }
+        FormNode? found = null;
+        void Walk(IEnumerable<FormNode> ns)
+        {
+            foreach (var n in ns)
+            {
+                if (found is not null) { return; }
+                if (n.IsSection && n.Children is not null) { Walk(n.Children); continue; }
+                if (n.IsTable && string.Equals(n.Name, targetName, StringComparison.OrdinalIgnoreCase))
+                { found = n; return; }
+            }
+        }
+        Walk(_schema.Children);
+        return found;
+    }
+
+    /// <summary>Lectura del mapeo columna -> source. Vacio cuando no hay aun.</summary>
+    private string GetColumnSource(PrefillFieldMap m, string columnId)
+    {
+        if (m.ColumnMappings is null) { return ""; }
+        return m.ColumnMappings.TryGetValue(columnId, out var v) ? v ?? "" : "";
+    }
+
+    /// <summary>Escritura. Si el valor esta vacio, quita la entrada (vuelve a heuristica).</summary>
+    private void SetColumnSource(PrefillFieldMap m, string columnId, string? value)
+    {
+        m.ColumnMappings ??= new Dictionary<string, string>();
+        if (string.IsNullOrWhiteSpace(value)) { m.ColumnMappings.Remove(columnId); }
+        else { m.ColumnMappings[columnId] = value!; }
+        if (m.ColumnMappings.Count == 0) { m.ColumnMappings = null; }
+    }
+
+    /// <summary>Lista de Name de los campos del schema actual para el dropdown destino.
+    /// Incluye tablas: las rutas de historiaMedica (medicamentos.lista_numerada, etc.)
+    /// expanden los items de la HC en filas de la tabla destino.</summary>
     private List<string> GetSchemaFieldNames()
     {
         var result = new List<string>();
@@ -534,7 +610,7 @@
             foreach (var n in nodes)
             {
                 if (n.IsSection && n.Children is not null) { Walk(n.Children); continue; }
-                if (n.IsText || n.IsTable) { continue; }
+                if (n.IsText) { continue; }
                 if (!string.IsNullOrWhiteSpace(n.Name)) { result.Add(n.Name); }
             }
         }

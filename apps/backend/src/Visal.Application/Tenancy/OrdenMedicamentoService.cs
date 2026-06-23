@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class OrdenMedicamentoService(IApplicationDbContext db, ITenantContext tenant) : IOrdenMedicamentoService
+public sealed class OrdenMedicamentoService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IHistoriaPrefillService prefill) : IOrdenMedicamentoService
 {
     public async Task<IReadOnlyList<MedicamentoSugerenciaDto>> BuscarSugerenciasAsync(
         string termino, int take = 12, CancellationToken ct = default)
@@ -82,6 +86,11 @@ public sealed class OrdenMedicamentoService(IApplicationDbContext db, ITenantCon
         };
         db.HistoriaClinicaMedicamentos.Add(entity);
         await db.SaveChangesAsync(ct);
+        // Refrescar las celdas auto-mapeadas del FormViewer (tabla medicamentos
+        // o textarea con lista_numerada) dentro del mismo scope EF Core. Asi el
+        // cambio queda persistido atomicamente sin race con el autosave del
+        // frontend. Cuando el doctor vuelva al tab Historial, vera las filas.
+        await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new OrdenMedicamentoItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.MedicamentoId,
@@ -100,6 +109,7 @@ public sealed class OrdenMedicamentoService(IApplicationDbContext db, ITenantCon
         entity.Posologia = Trim(req.Posologia);
         entity.Observacion = Trim(req.Observacion);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
     }
 
@@ -107,8 +117,10 @@ public sealed class OrdenMedicamentoService(IApplicationDbContext db, ITenantCon
     {
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        var hcId = entity.HistoriaClinicaId;
         db.HistoriaClinicaMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         return true;
     }
 

@@ -1,5 +1,6 @@
 @using System.Security.Claims
 @using System.Text.Json
+@using Microsoft.Extensions.DependencyInjection
 @using Visal.Application.Tenancy
 @using Visal.SuperAdmin.Components.Forms
 @inject IFormDefinitionService FormsSvc
@@ -10,9 +11,11 @@
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
+@inject IInsumoService InsumoSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject IServiceScopeFactory ScopeFactory
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -292,14 +295,8 @@
                     }
                     else if (_tabSel == "Insumos")
                     {
-                        @* Placeholder — el modulo de insumos se trabaja en otra iteracion. *@
-                        <div class="hc-placeholder">
-                            <div class="hc-placeholder-t">Insumos</div>
-                            <div class="hc-placeholder-d">
-                                Esta seccion permitira registrar los insumos consumidos durante la atencion.
-                                Se construira en una iteracion posterior.
-                            </div>
-                        </div>
+                        <OrdenInsumos HistoriaClinicaId="@_historiaSel?.Id"
+                                      OnCountChanged="@(c => _insCount = c)" />
                     }
                     else if (_tabSel == "Remisiones")
                     {
@@ -669,7 +666,7 @@
         "Consentimientos" => ("✅", _conCount),            // check mark
         "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
         "Ordenes servicios Propias" => ("\U0001F3E5", _servCount), // hospital
-        "Insumos" => ("\U0001F4E6", 0),                        // box
+        "Insumos" => ("\U0001F4E6", _insCount),                // box
         "Remisiones" => ("↗", _remCount),                 // arrow up-right
         "Ordenes incapacidad" => ("\U0001F4C4", _incCount),    // page facing up
         "Ordenes certificaciones" => ("\U0001F4DC", _certCount), // scroll
@@ -700,6 +697,8 @@
     private int _certCount;
     /// <summary>Conteo de remisiones para badge en la pestana "Remisiones".</summary>
     private int _remCount;
+    /// <summary>Conteo de insumos para badge en la pestana "Insumos".</summary>
+    private int _insCount;
     /// <summary>Conteo de escalas para badge en la pestana "Escalas".</summary>
     private int _escCount;
     /// <summary>Conteo de evoluciones diligenciadas para badge en la pestana "Evoluciones".</summary>
@@ -725,6 +724,9 @@
     /// vez que cambian los datos derivados (al agregar/quitar medicamentos).
     /// El FormViewer los renderiza disabled con badge "auto".</summary>
     private HashSet<string> _hcReadOnlyKeys = new();
+    // Keys del header (No Historia / Fecha / Hora) que se mantienen siempre readonly.
+    // Se reaplican como base cada vez que se refresca el prefill historia medica.
+    private HashSet<string> _hcHeaderReadOnlyKeys = new();
     private string? _formatoActualNombre;
     private string? _subtituloFormato;
     private string? _imprimirMsg;
@@ -894,6 +896,10 @@
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = DeserializeValores(detail.ValoresJson);
+        // Re-aplicar header autofill (No Historia / Fecha / Hora) por si la HC se
+        // creo antes de esta feature o el schema cambio. Mantiene el header sincronizado.
+        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura);
+        _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
         _formatoActualNombre = detail.FormatoNombre;
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.FormatoVersion)
             ? $"Codigo: {detail.FormatoCodigo}  -  Version: {detail.FormatoVersion}"
@@ -908,6 +914,7 @@
         // Refrescar el badge de la pestana de medicamentos para la nueva HC.
         _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
         _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
+        _insCount = await InsumoSvc.ContarPorHistoriaAsync(h.Id);
         _escCount = await EscSvc.ContarPorHistoriaAsync(h.Id);
         _evoCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
         _conCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
@@ -923,17 +930,66 @@
     /// _hcReadOnlyKeys para que el FormViewer marque esos campos como auto.
     /// Llamada al abrir la HC y cada vez que el doctor agrega/quita un medicamento.
     /// </summary>
+    // Serializa el acceso al VisalDbContext compartido del componente para evitar
+    // InvalidOperationException ("A second operation was started on this context
+    // instance...") entre el autosave debounced y RefrescarPrefillHistoriaMedica.
+    // Un scope nuevo via IServiceScopeFactory no resolveria ITenantContext y
+    // los Query Filters de tenant retornarian 0 filas, asi que mantenemos el
+    // DbContext del componente pero turnamos las operaciones.
+    private readonly SemaphoreSlim _dbLock = new(1, 1);
+
+    /// <summary>Reintenta una operacion EF Core hasta 3 veces si choca con otro
+    /// flujo (chat IA, WhatsApp panel) que tiene el DbContext ocupado.</summary>
+    private static async Task<T> RetryAsync<T>(Func<Task<T>> op)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            try { return await op(); }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("second operation", StringComparison.OrdinalIgnoreCase))
+            {
+                await Task.Delay(150 * (i + 1));
+            }
+        }
+        return await op();
+    }
+
     private async Task RefrescarPrefillHistoriaMedicaAsync(Guid hcId)
     {
+        await _dbLock.WaitAsync();
         try
         {
-            var meds = await OrdMedSvc.ListarPorHistoriaAsync(hcId);
-            _hcReadOnlyKeys = HistoriaMedicaPrefillHelper.Aplicar(_valores, meds, _prefillRoutesActual);
+            var meds = await RetryAsync(() => OrdMedSvc.ListarPorHistoriaAsync(hcId));
+            var rem = await RetryAsync(() => RemSvc.ListarPorHistoriaAsync(hcId));
+            var inc = await RetryAsync(() => IncSvc.ListarPorHistoriaAsync(hcId));
+            var cert = await RetryAsync(() => CertSvc.ListarPorHistoriaAsync(hcId));
+            var ord = await RetryAsync(() => OrdSrvSvc.ListarPorHistoriaAsync(hcId));
+            var ins = await RetryAsync(() => InsumoSvc.ListarPorHistoriaAsync(hcId));
+
+            var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins);
+            var medsKeys = HistoriaMedicaPrefillHelper.Aplicar(_valores, fuentes, _prefillRoutesActual, _schemaActual);
+
+            // MERGE: las del header (No Historia / Fecha / Hora) NO se pierden cuando
+            // se refresca el prefill de medicamentos. Esto era el bug que dejaba
+            // editable el encabezado tras el autosave.
+            _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
+            foreach (var k in medsKeys) { _hcReadOnlyKeys.Add(k); }
+
+            // Forzar nueva referencia del dict: Blazor compara por referencia al
+            // enviar Valores a FormViewer (SetParametersAsync). Sin esto, el
+            // FormViewer renderiza el dict viejo y la fila auto no aparece hasta
+            // que el usuario navega afuera y vuelve.
+            _valores = new Dictionary<string, string?>(_valores, StringComparer.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex)
         {
-            // No bloquear el render si fallamos cargando los medicamentos.
-            _hcReadOnlyKeys = new();
+            // Loggea pero NO oculta el error: si la rama tabla falla queremos
+            // saberlo. Mantenemos las keys del header siempre.
+            Console.WriteLine($"[RefrescarPrefillHistoriaMedica] {ex.GetType().Name}: {ex.Message}");
+            _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            _dbLock.Release();
         }
     }
 
@@ -943,20 +999,80 @@
     /// que los campos del formulario (visible o no) reflejen la nueva lista. Luego
     /// dispara un autoguardado para persistir el cambio.
     /// </summary>
+    /// <summary>
+    /// Cambio de tab en el menu lateral. Si el doctor vuelve al Historial
+    /// despues de agregar/quitar medicamentos en otro tab, refrescamos el
+    /// FormViewer SIN concurrencia (no hay autosave activo en este momento).
+    /// Esto resuelve el caso donde OnMedicamentosCountChanged en vivo choca
+    /// con el DbContext compartido por otros componentes.
+    /// </summary>
+    private async Task CambiarTab(string tab)
+    {
+        var prev = _tabSel;
+        _tabSel = tab;
+        if (tab == "Historial" && prev != "Historial" && _historiaSel is HistoriaRow h)
+        {
+            // Re-cargar los valores frescos desde BD y reaplicar el prefill.
+            // Asi las celdas auto-pobladas siempre reflejan el estado actual de
+            // los modulos (medicamentos, remisiones, etc.) sin importar lo que
+            // se haya hecho en el otro tab.
+            try
+            {
+                var detail = await HcSvc.GetAsync(h.Id);
+                if (detail is not null)
+                {
+                    _valores = DeserializeValores(detail.ValoresJson);
+                    _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura);
+                }
+                await RefrescarPrefillHistoriaMedicaAsync(h.Id);
+                // Persistir las filas auto-cargadas (no esperar al autosave debounced)
+                if (string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+                {
+                    await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CambiarTab Historial] {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
     private async Task OnMedicamentosCountChanged(int count)
     {
         _medCount = count;
         if (_historiaSel is HistoriaRow h)
         {
+            // Cancelar cualquier autosave debounced pendiente para evitar carrera
+            // entre nuestro guardado inmediato y el del debounce (ambos usan el
+            // mismo VisalDbContext del componente y se chocan).
+            _autosaveCts?.Cancel();
+
             await RefrescarPrefillHistoriaMedicaAsync(h.Id);
             // Marcar como sucio y guardar inmediatamente (sin debounce) — el doctor
             // espera que los campos auto-poblados ya esten persistidos cuando vuelva
-            // al tab Historial.
+            // al tab Historial. Usamos un scope propio para evitar choques con el
+            // DbContext del componente (autosave, chat IA, etc.).
             if (string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
                 _saveStatus = "guardando";
-                try { await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty); _saveStatus = "guardado"; _ultimoGuardado = DateTime.Now; }
-                catch { _saveStatus = "error"; }
+                await _dbLock.WaitAsync();
+                try
+                {
+                    var json = SerializeValores(_valores);
+                    await RetryAsync(async () => { await HcSvc.GuardarValoresAsync(h.Id, json, Guid.Empty); return 0; });
+                    _saveStatus = "guardado";
+                    _ultimoGuardado = DateTime.Now;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[OnMedicamentosCountChanged] {ex.GetType().Name}: {ex.Message}");
+                    _saveStatus = "error";
+                }
+                finally
+                {
+                    _dbLock.Release();
+                }
             }
             StateHasChanged();
         }
@@ -1022,6 +1138,10 @@
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = new();
+        // 1) Aplicar valores por defecto declarados en cada FormNode del schema.
+        //    Estos quedan visibles desde el primer render aunque no haya paciente.
+        DefaultValuesHelper.Aplicar(_valores, _schemaActual);
+        // 2) Prefill desde el paciente activo (paciente sobreescribe defaults si coincide).
         await PrefillFromPaciente();
         _formatoActualNombre = detail.Nombre;
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version) ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}" : $"Codigo: {detail.Codigo}";
@@ -1032,6 +1152,13 @@
         var creada = await HcSvc.CrearAsync(
             new CrearHistoriaRequest(p.Id, fid, SerializeValores(_valores), especialista, miProf),
             Guid.Empty);
+
+        // 3) Encabezado del documento (No Historia, Fecha, Hora). Se llena con el
+        //    consecutivo del HC y la fecha/hora de apertura, y quedan readonly.
+        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura);
+        _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
+        // Persistir los valores recien rellenados (incluye header autofill).
+        await HcSvc.GuardarValoresAsync(creada.Id, SerializeValores(_valores), Guid.Empty);
 
         var nueva = new HistoriaRow
         {
@@ -1246,6 +1373,9 @@
         _saveTitle = "Guardando en la base de datos...";
         StateHasChanged();
 
+        // Adquirir el _dbLock para serializar con RefrescarPrefillHistoriaMedica
+        // y otros flujos que tocan el DbContext compartido del componente.
+        await _dbLock.WaitAsync(ct);
         try
         {
             await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty, ct);
@@ -1272,6 +1402,10 @@
             _saveStatus = "error";
             _saveTitle = "Error al guardar: " + ex.Message;
             StateHasChanged();
+        }
+        finally
+        {
+            _dbLock.Release();
         }
     }
 

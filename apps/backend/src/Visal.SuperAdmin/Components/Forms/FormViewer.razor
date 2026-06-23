@@ -38,10 +38,21 @@ else
                     @foreach (var cabF in hd.Campos)
                     {
                         var hdrKey = "hdr:" + cabF.Id;
+                        var hdrReadOnly = ReadOnly || (ReadOnlyKeys is not null && ReadOnlyKeys.Contains(hdrKey));
                         <div class="fv-head-meta-row">
                             <label>@cabF.Label:</label>
-                            <input class="form-control form-control-sm" value="@GetValue(hdrKey)"
-                                   @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                            @if (hdrReadOnly)
+                            {
+                                @* readonly + tabindex=-1 evita que el cursor entre al click; el style refuerza visualmente *@
+                                <input class="form-control form-control-sm fv-auto"
+                                       value="@GetValue(hdrKey)" readonly tabindex="-1" />
+                            }
+                            else
+                            {
+                                <input class="form-control form-control-sm"
+                                       value="@GetValue(hdrKey)"
+                                       @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                            }
                         </div>
                     }
                 </div>
@@ -486,23 +497,27 @@ else
     private RenderFragment RenderTableCell(FormColumn c, string key) => __builder =>
     {
         var val = GetValue(key) ?? "";
+        // Per-cell readonly: una celda concreta (tbl:{id}:{i}:{col}) puede venir
+        // marcada como auto-rellenada desde un modulo (ej. historiaMedica). En ese
+        // caso el doctor no puede editarla a mano.
+        var ro = ReadOnly || (ReadOnlyKeys is not null && ReadOnlyKeys.Contains(key));
         switch (c.FieldType)
         {
             case "number":
-                <input type="number" class="form-control form-control-sm" disabled="@ReadOnly" value="@val"
+                <input type="number" class="form-control form-control-sm" disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "date":
-                <input type="date" class="form-control form-control-sm" disabled="@ReadOnly" value="@val"
+                <input type="date" class="form-control form-control-sm" disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "select":
                 <input class="form-control form-control-sm" placeholder="@c.Catalog"
-                       disabled="@ReadOnly" value="@val"
+                       disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             default:
-                <input type="text" class="form-control form-control-sm" disabled="@ReadOnly" value="@val"
+                <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
         }

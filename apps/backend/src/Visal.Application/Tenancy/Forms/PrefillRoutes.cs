@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Visal.SuperAdmin.Components.Forms;
+namespace Visal.Application.Tenancy.Forms;
 
 /// <summary>
 /// Conjunto de rutas de prefill asociadas a un FormDefinition. Se serializa al
@@ -63,6 +63,16 @@ public sealed class PrefillFieldMap
     /// <summary>Name del campo del FormSchema destino (FormNode.Name).</summary>
     [JsonPropertyName("target")]
     public string Target { get; set; } = "";
+
+    /// <summary>
+    /// Mapeo explicito columna-a-columna cuando el destino es una tabla. Clave =
+    /// FormColumn.Id (id de la columna de la tabla destino). Valor = nombre del
+    /// campo de la fuente (ej. "fechaDesde", "nombreMedicamento"). Si esta
+    /// presente, el helper usa este mapeo en lugar de la heuristica por nombre.
+    /// Solo aplica cuando target es una tabla repetible.
+    /// </summary>
+    [JsonPropertyName("columnMappings")]
+    public Dictionary<string, string>? ColumnMappings { get; set; }
 }
 
 /// <summary>Catalogo de campos disponibles por modulo origen para alimentar el dropdown del modal.</summary>
@@ -78,7 +88,7 @@ public static class PrefillSourceCatalog
             "telefono", "email", "direccion", "ciudad", "zona",
             "ocupacion", "regimen",
             "contactoEmergencia", "parentesco", "telefonoEmergencia",
-            "sede"
+            "sede", "eps"
         },
         ["profesional"] = new[]
         {
@@ -101,7 +111,12 @@ public static class PrefillSourceCatalog
         // marcados aqui se vuelven readonly en el FormViewer.
         ["historiaMedica"] = new[]
         {
-            "medicamentos.lista_numerada"
+            "medicamentos.lista_numerada",
+            "remisiones.lista_numerada",
+            "incapacidades.lista_numerada",
+            "certificaciones.lista_numerada",
+            "ordenes_servicio.lista_numerada",
+            "insumos.lista_numerada"
         },
         // Firma del paciente: PNG/URL del archivo mas reciente en NotaMedicaDocumento
         // con categoria "Firma del Paciente" para el paciente activo. Se resuelve en
@@ -110,6 +125,42 @@ public static class PrefillSourceCatalog
         // Firma del profesional logueado: Profesional.FirmaUrl del TenantUser que
         // esta llenando el formulario (resuelto por TenantUser.ProfesionalId).
         ["firmaProfesional"] = new[] { "url" }
+    };
+
+    /// <summary>
+    /// Campos disponibles para mapear a una COLUMNA de tabla destino, agrupados por
+    /// el "campo fuente" tal cual aparece en el dropdown principal (ej.
+    /// "medicamentos.lista_numerada"). Estos son los nombres logicos de cada
+    /// propiedad del item, no la lista_numerada agregada. Se usan en el mini
+    /// mapeo columna-a-columna del modal Rutas de prefill.
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> CamposColumna { get; } = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["medicamentos.lista_numerada"] = new[]
+        {
+            "nombreMedicamento", "cantidad", "frecuencia", "dias",
+            "posologia", "via", "observacion"
+        },
+        ["remisiones.lista_numerada"] = new[]
+        {
+            "codigoEspecialidad", "nombreEspecialidad", "capitulo", "motivo"
+        },
+        ["incapacidades.lista_numerada"] = new[]
+        {
+            "motivo", "fechaDesde", "fechaHasta", "dias", "tipo"
+        },
+        ["certificaciones.lista_numerada"] = new[]
+        {
+            "titulo", "contenido"
+        },
+        ["ordenes_servicio.lista_numerada"] = new[]
+        {
+            "codigoServicio", "descripcion", "cantidad", "observaciones"
+        },
+        ["insumos.lista_numerada"] = new[]
+        {
+            "codigo", "descripcion", "cantidad", "observaciones"
+        }
     };
 
     /// <summary>Nombre legible del sourceModule para el dropdown del modal Rutas de prefill.</summary>

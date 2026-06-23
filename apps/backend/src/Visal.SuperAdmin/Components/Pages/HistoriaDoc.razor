@@ -237,13 +237,43 @@ else
                 </tr>
             </thead>
             <tbody>
-                @* Filas vacias para tablas repetibles - se diligenciaran a mano *@
-                @for (var r = 0; r < 3; r++)
+                @{
+                    // Lee filas reales: combina SeedRows (filas semilla con texto fijo)
+                    // mas las filas extras controladas por tbl:{id}:_rows. Cada celda
+                    // viene de valores["tbl:{id}:{idx}:{colId}"]. Asi las tablas auto-
+                    // pobladas (medicamentos, remisiones, etc.) muestran su contenido
+                    // en la impresion.
+                    var tblKey = $"tbl:{n.Id}";
+                    var seedCount = n.SeedRows?.Count ?? 0;
+                    int extraRows = 0;
+                    if (!n.LockRows && _valores.TryGetValue($"{tblKey}:_rows", out var rs)
+                        && int.TryParse(rs, out var parsed) && parsed > 0)
+                    {
+                        extraRows = parsed;
+                    }
+                    // Fallback: si no hay _rows y no es LockRows, deja al menos 3 filas
+                    // vacias para que el doctor pueda escribir a mano sobre papel.
+                    var totalRows = seedCount + extraRows;
+                    if (totalRows == 0 && !n.LockRows) { totalRows = 3; extraRows = 3; }
+                }
+                @for (var r = 0; r < totalRows; r++)
                 {
+                    var idx = r;
+                    var isSeed = r < seedCount;
+                    var seedRow = isSeed ? n.SeedRows![r] : null;
                     <tr>
+                        @{ var colIdx = 0; }
                         @foreach (var c in n.Columns ?? new())
                         {
-                            <td>&nbsp;</td>
+                            var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
+                            string? cellVal;
+                            if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
+                            else
+                            {
+                                _valores.TryGetValue($"{tblKey}:{idx}:{c.Id}", out cellVal);
+                            }
+                            <td>@(string.IsNullOrWhiteSpace(cellVal) ? new MarkupString("&nbsp;") : (MarkupString)System.Net.WebUtility.HtmlEncode(cellVal))</td>
+                            colIdx++;
                         }
                     </tr>
                 }

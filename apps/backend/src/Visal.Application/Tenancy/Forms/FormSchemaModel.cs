@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Visal.SuperAdmin.Components.Forms;
+namespace Visal.Application.Tenancy.Forms;
 
 /// <summary>
 /// Modelo del esquema del disenador de formularios (se serializa a FormDefinition.SchemaJson).
@@ -188,4 +188,10 @@ public sealed class FormColumn
 
     [JsonPropertyName("catalog")]
     public string? Catalog { get; set; }
+
+    /// <summary>Valor por defecto que se aplica a las celdas editables de esta
+    /// columna cuando la HC se inicia. Se persiste en valores. El usuario lo
+    /// puede sobrescribir. Util para "NO REFIERE" / "NORMAL" / etc.</summary>
+    [JsonPropertyName("defaultValue")]
+    public string? DefaultValue { get; set; }
 }

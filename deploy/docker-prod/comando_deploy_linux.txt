@@ -1,0 +1,13 @@
+SUBIR TODOS
+.\bootstrap-linux.ps1 -RemoteHost 10.0.0.3 -RemoteUser root
+
+
+SUBIR SOLO FORMULARIOS
+
+cd C:\DesarrolloIA\Visal\deploy\docker-prod
+.\subir-formularios.ps1 -RemoteHost 10.0.0.3 -RemoteUser root -Upsert
+
+
+SUBIR SOLO EL SISTEMA SIN DATOS
+cd deploy\docker-prod
+.\actualizar-linux.ps1 -RemoteHost 10.0.0.3 -RemoteUser root 

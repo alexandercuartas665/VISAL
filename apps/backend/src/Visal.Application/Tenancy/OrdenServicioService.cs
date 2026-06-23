@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class OrdenServicioService(IApplicationDbContext db, ITenantContext tenant) : IOrdenServicioService
+public sealed class OrdenServicioService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IHistoriaPrefillService prefill) : IOrdenServicioService
 {
     public async Task<IReadOnlyList<ServicioSugerenciaDto>> BuscarSugerenciasAsync(
         string termino, int take = 12, CancellationToken ct = default)
@@ -83,6 +87,7 @@ public sealed class OrdenServicioService(IApplicationDbContext db, ITenantContex
         };
         db.HistoriaClinicaOrdenesServicio.Add(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new OrdenServicioItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.ServicioContratoId,
@@ -98,6 +103,7 @@ public sealed class OrdenServicioService(IApplicationDbContext db, ITenantContex
         entity.Cantidad = Trim(req.Cantidad);
         entity.Observaciones = Trim(req.Observaciones);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
     }
 
@@ -105,8 +111,10 @@ public sealed class OrdenServicioService(IApplicationDbContext db, ITenantContex
     {
         var entity = await db.HistoriaClinicaOrdenesServicio.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        var hcId = entity.HistoriaClinicaId;
         db.HistoriaClinicaOrdenesServicio.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         return true;
     }
 

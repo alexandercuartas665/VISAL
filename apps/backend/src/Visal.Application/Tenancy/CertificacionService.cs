@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class CertificacionService(IApplicationDbContext db, ITenantContext tenant) : ICertificacionService
+public sealed class CertificacionService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IHistoriaPrefillService prefill) : ICertificacionService
 {
     public async Task<IReadOnlyList<CertificacionItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -41,6 +45,7 @@ public sealed class CertificacionService(IApplicationDbContext db, ITenantContex
         };
         db.HistoriaClinicaCertificaciones.Add(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new CertificacionItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.Titulo, entity.Contenido, entity.Orden);
@@ -58,6 +63,7 @@ public sealed class CertificacionService(IApplicationDbContext db, ITenantContex
         entity.Titulo = req.Titulo.Trim();
         entity.Contenido = req.Contenido?.Trim() ?? "";
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
     }
 
@@ -65,8 +71,10 @@ public sealed class CertificacionService(IApplicationDbContext db, ITenantContex
     {
         var entity = await db.HistoriaClinicaCertificaciones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        var hcId = entity.HistoriaClinicaId;
         db.HistoriaClinicaCertificaciones.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         return true;
     }
 

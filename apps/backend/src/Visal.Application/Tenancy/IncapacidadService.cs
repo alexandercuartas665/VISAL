@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class IncapacidadService(IApplicationDbContext db, ITenantContext tenant) : IIncapacidadService
+public sealed class IncapacidadService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IHistoriaPrefillService prefill) : IIncapacidadService
 {
     public async Task<IReadOnlyList<IncapacidadItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -45,6 +49,7 @@ public sealed class IncapacidadService(IApplicationDbContext db, ITenantContext 
         };
         db.HistoriaClinicaIncapacidades.Add(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new IncapacidadItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.Motivo,
@@ -66,6 +71,7 @@ public sealed class IncapacidadService(IApplicationDbContext db, ITenantContext 
         entity.Dias = req.Dias;
         entity.Tipo = Trim(req.Tipo);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
     }
 
@@ -73,8 +79,10 @@ public sealed class IncapacidadService(IApplicationDbContext db, ITenantContext 
     {
         var entity = await db.HistoriaClinicaIncapacidades.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        var hcId = entity.HistoriaClinicaId;
         db.HistoriaClinicaIncapacidades.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         return true;
     }
 

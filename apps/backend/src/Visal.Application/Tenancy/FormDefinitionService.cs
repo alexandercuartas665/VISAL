@@ -184,11 +184,10 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 if (!string.IsNullOrWhiteSpace(tgt)) { targetsExistentes.Add(tgt); }
             }
 
-            // Tambien preparamos las rutas firmaPaciente y firmaProfesional para
-            // detectar campos de firma. Se crean lazy: solo si la heuristica
-            // matchea al menos un campo.
-            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null;
-            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null;
+            // Tambien preparamos las rutas firmaPaciente / firmaProfesional /
+            // historiaMedica / contrato. Lazy: solo se crean si hay al menos un match.
+            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null, rutaHm = null, rutaContrato = null;
+            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null, mappingsHm = null, mappingsContrato = null;
 
             int agregadosEnEsteForm = 0;
             foreach (var (name, label) in names)
@@ -217,6 +216,30 @@ public sealed class FormDefinitionService : IFormDefinitionService
                     continue;
                 }
 
+                // Historia medica: medicamentos / remisiones / incapacidades /
+                // certificaciones / ordenes de servicio. Se llenan en tiempo real
+                // cuando el doctor agrega items en los tabs respectivos del HC.
+                var hmSource = InferirCampoHistoriaMedica(name, label);
+                if (hmSource is not null)
+                {
+                    EnsureRuta(routes, "historiaMedica", "Historia Medica", ref rutaHm, ref mappingsHm);
+                    mappingsHm!.Add(new JsonObject { ["source"] = hmSource, ["target"] = name });
+                    targetsExistentes.Add(name);
+                    agregadosEnEsteForm++;
+                    continue;
+                }
+
+                // Contrato vigente del paciente: codigo y aseguradora.
+                var contratoSource = InferirCampoContrato(name, label);
+                if (contratoSource is not null)
+                {
+                    EnsureRuta(routes, "contrato", "Contrato", ref rutaContrato, ref mappingsContrato);
+                    mappingsContrato!.Add(new JsonObject { ["source"] = contratoSource, ["target"] = name });
+                    targetsExistentes.Add(name);
+                    agregadosEnEsteForm++;
+                    continue;
+                }
+
                 var source = InferirCampoPaciente(name, label);
                 if (source is null) { continue; }
 
@@ -235,6 +258,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
             ruta["mappings"] = mappingsArr;
             if (rutaFirmaPac is not null && mappingsFirmaPac is not null) { rutaFirmaPac["mappings"] = mappingsFirmaPac; }
             if (rutaFirmaProf is not null && mappingsFirmaProf is not null) { rutaFirmaProf["mappings"] = mappingsFirmaProf; }
+            if (rutaHm is not null && mappingsHm is not null) { rutaHm["mappings"] = mappingsHm; }
+            if (rutaContrato is not null && mappingsContrato is not null) { rutaContrato["mappings"] = mappingsContrato; }
 
             // Reconstruir PrefillRoutesJson.
             var nuevoJson = new JsonObject { ["routes"] = routes }.ToJsonString();
@@ -518,6 +543,104 @@ public sealed class FormDefinitionService : IFormDefinitionService
             {
                 return campo;
             }
+        }
+        return null;
+    }
+
+    /// <summary>Heuristica para detectar si un campo del formulario es uno de los
+    /// "agregados clinicos" de la HC: medicamentos, remisiones, incapacidades,
+    /// certificaciones, ordenes de servicio. Devuelve el source del catalogo
+    /// historiaMedica (ej. "medicamentos.lista_numerada") o null si no aplica.</summary>
+    private static string? InferirCampoHistoriaMedica(string name, string? label)
+    {
+        var n = Normalizar(name);
+        var l = Normalizar(label);
+        // Reglas de mas especifico a mas generico. El primer match gana.
+        // Orden importante: "ordendemedicamentos" antes de "medicamento" suelto.
+        var reglas = new (string fragmento, string campo)[]
+        {
+            // Ordenes de servicios. Las tablas dedicadas (laboratorios, insumos)
+            // tienen su propia entrada en el form pero NO comparten fuente con
+            // ordenes_servicio — quedan sin auto-mapeo (placeholders editables).
+            ("ordenservicios",        "ordenes_servicio.lista_numerada"),
+            ("ordensservicios",       "ordenes_servicio.lista_numerada"),
+            ("ordendeservicios",      "ordenes_servicio.lista_numerada"),
+            ("ordendeservicio",       "ordenes_servicio.lista_numerada"),
+            ("ordenesservicios",      "ordenes_servicio.lista_numerada"),
+            ("serviciossolicitados",  "ordenes_servicio.lista_numerada"),
+            ("serviciospropios",      "ordenes_servicio.lista_numerada"),
+            ("ordensolicitada",       "ordenes_servicio.lista_numerada"),
+            ("servicios",             "ordenes_servicio.lista_numerada"),
+            // Insumos: tabla dedicada con su propia fuente backend.
+            ("ordeninsumos",          "insumos.lista_numerada"),
+            ("ordendeinsumos",        "insumos.lista_numerada"),
+            ("insumos",               "insumos.lista_numerada"),
+            ("insumo",                "insumos.lista_numerada"),
+            // Remisiones / interconsultas.
+            ("ordenremisiones",       "remisiones.lista_numerada"),
+            ("ordenremision",         "remisiones.lista_numerada"),
+            ("remisiones",            "remisiones.lista_numerada"),
+            ("remision",              "remisiones.lista_numerada"),
+            ("interconsultas",        "remisiones.lista_numerada"),
+            ("interconsulta",         "remisiones.lista_numerada"),
+            // Incapacidades.
+            ("ordenincapacidad",      "incapacidades.lista_numerada"),
+            ("ordendeincapacidad",    "incapacidades.lista_numerada"),
+            ("incapacidades",         "incapacidades.lista_numerada"),
+            ("incapacidad",           "incapacidades.lista_numerada"),
+            // Certificaciones / certificados.
+            ("ordencertificacion",    "certificaciones.lista_numerada"),
+            ("certificaciones",       "certificaciones.lista_numerada"),
+            ("certificacion",         "certificaciones.lista_numerada"),
+            ("certificados",          "certificaciones.lista_numerada"),
+            ("certificado",           "certificaciones.lista_numerada"),
+            // Medicamentos / formula / tratamiento / receta. Se chequean al final
+            // porque "tratamiento" es muy generico.
+            ("ordenmedicamentos",     "medicamentos.lista_numerada"),
+            ("ordendemedicamentos",   "medicamentos.lista_numerada"),
+            ("ordenmedicamento",      "medicamentos.lista_numerada"),
+            ("medicamentos",          "medicamentos.lista_numerada"),
+            ("medicamento",           "medicamentos.lista_numerada"),
+            ("formulamedica",         "medicamentos.lista_numerada"),
+            ("formulamed",            "medicamentos.lista_numerada"),
+            ("recetario",             "medicamentos.lista_numerada"),
+            ("receta",                "medicamentos.lista_numerada"),
+            ("medicacion",            "medicamentos.lista_numerada"),
+            ("plan_de_manejo",        "medicamentos.lista_numerada"),
+            ("planmanejo",            "medicamentos.lista_numerada"),
+            ("planfarmacologico",     "medicamentos.lista_numerada"),
+            ("tratamientofarmaco",    "medicamentos.lista_numerada"),
+            ("tratamiento",           "medicamentos.lista_numerada")
+        };
+        foreach (var (frag, campo) in reglas)
+        {
+            if (n.Contains(frag) || (l is not null && l.Contains(frag))) { return campo; }
+        }
+        return null;
+    }
+
+    /// <summary>Heuristica para detectar si un campo es del contrato vigente del
+    /// paciente. Devuelve el source del catalogo contrato o null.</summary>
+    private static string? InferirCampoContrato(string name, string? label)
+    {
+        var n = Normalizar(name);
+        var l = Normalizar(label);
+        var reglas = new (string fragmento, string campo)[]
+        {
+            ("codigocontrato",        "codigoContrato"),
+            ("nrocontrato",           "codigoContrato"),
+            ("numerocontrato",        "codigoContrato"),
+            ("contratoaseguradora",   "codigoContrato"),
+            ("contrato",              "codigoContrato"),
+            // EPS / aseguradora — solo si NO ya capturado por paciente.eps
+            ("nombreaseguradora",     "aseguradoraNombre"),
+            ("aseguradora",           "aseguradoraNombre"),
+            ("nombreeps",             "aseguradoraNombre"),
+            ("eapb",                  "aseguradoraNombre")
+        };
+        foreach (var (frag, campo) in reglas)
+        {
+            if (n.Contains(frag) || (l is not null && l.Contains(frag))) { return campo; }
         }
         return null;
     }

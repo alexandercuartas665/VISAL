@@ -42,6 +42,16 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             }
         }
 
+        // EPS principal: el nombre de la aseguradora vinculada al paciente.
+        string? epsNombre = null;
+        if (p.AseguradoraId is Guid aid)
+        {
+            epsNombre = await db.Aseguradoras.AsNoTracking()
+                .Where(a => a.Id == aid)
+                .Select(a => a.Nombre)
+                .FirstOrDefaultAsync(ct);
+        }
+
         return new PacienteAsignacionDto(p.Id, p.NumeroDocumento, p.TipoDocumento, p.NombreCompleto,
             sedeNombre, p.Ciudad, contratos,
             p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
@@ -50,7 +60,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             p.Telefono, p.Email,
             p.Direccion, p.Zona,
             p.Ocupacion, p.Regimen,
-            p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia);
+            p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
+            epsNombre);
     }
 
     public async Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default)

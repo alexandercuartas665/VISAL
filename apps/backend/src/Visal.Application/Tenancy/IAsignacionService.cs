@@ -15,7 +15,10 @@ public sealed record PacienteAsignacionDto(
     string? Telefono = null, string? Email = null,
     string? Direccion = null, string? Zona = null,
     string? Ocupacion = null, string? Regimen = null,
-    string? ContactoEmergencia = null, string? Parentesco = null, string? TelefonoEmergencia = null);
+    string? ContactoEmergencia = null, string? Parentesco = null, string? TelefonoEmergencia = null,
+    // Nombre de la aseguradora/EPS principal del paciente. Disponible como ruta de
+    // prefill "paciente.eps" en cualquier formulario.
+    string? Eps = null);
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado);
 

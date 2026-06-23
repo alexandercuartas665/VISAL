@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class RemisionService(IApplicationDbContext db, ITenantContext tenant) : IRemisionService
+public sealed class RemisionService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IHistoriaPrefillService prefill) : IRemisionService
 {
     public async Task<IReadOnlyList<RemisionItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -90,6 +94,7 @@ public sealed class RemisionService(IApplicationDbContext db, ITenantContext ten
         };
         db.HistoriaClinicaRemisiones.Add(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new RemisionItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.Capitulo,
@@ -100,8 +105,10 @@ public sealed class RemisionService(IApplicationDbContext db, ITenantContext ten
     {
         var entity = await db.HistoriaClinicaRemisiones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        var hcId = entity.HistoriaClinicaId;
         db.HistoriaClinicaRemisiones.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         return true;
     }
 

@@ -1,0 +1,199 @@
+@using Visal.Application.Tenancy
+@inject IInsumoService InsumoSvc
+@inject IJSRuntime JS
+
+@*
+   Pestana "Insumos" de la HC. No depende de catalogo: el profesional escribe
+   codigo (opcional), descripcion, cantidad y observaciones. Persiste atado
+   a la HistoriaClinicaId y refresca el prefill historiaMedica.insumos.lista_numerada
+   en cada Add/Update/Delete.
+*@
+
+<div class="oi-bar">
+    <div class="oi-bar-left">
+        <label>Orden de Insumos Numero:</label>
+        <span class="oi-bar-count">@_items.Count item(s)</span>
+    </div>
+    <div class="oi-bar-right">
+        <button class="btn btn-outline-primary btn-sm" title="Imprimir insumos"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#128424; Imprimir</button>
+    </div>
+</div>
+
+@if (HistoriaClinicaId is null)
+{
+    <div class="oi-card oi-empty-hc">
+        Selecciona o inicia una historia para registrar insumos.
+    </div>
+}
+else
+{
+    <div class="oi-card">
+        <div class="oi-row">
+            <div class="oi-f oi-c-3">
+                <label>Codigo</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Opcional"
+                       @bind="_borrador.Codigo" @bind:event="oninput" />
+            </div>
+            <div class="oi-f oi-c-9">
+                <label>Descripcion del Insumo</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: Panal adulto talla M, sonda nasogastrica, gasas esteriles..."
+                       @bind="_borrador.Descripcion" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="oi-row">
+            <div class="oi-f oi-c-3">
+                <label>Cantidad</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: 30, 1 caja, 100 unidades"
+                       @bind="_borrador.Cantidad" @bind:event="oninput" />
+            </div>
+            <div class="oi-f oi-c-9">
+                <label>Observaciones</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Opcional"
+                       @bind="_borrador.Observaciones" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="oi-row oi-row-action">
+            <button class="btn btn-primary btn-sm"
+                    @onclick="AgregarAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_borrador.Descripcion) || _agregando)">
+                @(_agregando ? "Guardando..." : "+ Agregar insumo")
+            </button>
+        </div>
+
+        <div class="oi-list">
+            @if (_items.Count == 0)
+            {
+                <div class="oi-empty-row">Sin insumos agregados.</div>
+            }
+            else
+            {
+                <table class="table table-sm oi-table">
+                    <thead>
+                        <tr>
+                            <th style="width:48px;">#</th>
+                            <th style="width:110px;">Codigo</th>
+                            <th>Descripcion</th>
+                            <th style="width:120px;">Cantidad</th>
+                            <th>Observaciones</th>
+                            <th style="width:60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td>@it.Orden</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Codigo) ? "—" : it.Codigo)</td>
+                                <td>@it.Descripcion</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Cantidad) ? "—" : it.Cantidad)</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Observaciones) ? "—" : it.Observaciones)</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .oi-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .oi-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .oi-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oi-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
+    .oi-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .oi-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .oi-row-action { display:flex; justify-content:flex-end; }
+    .oi-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .oi-c-3 { grid-column: span 3; }
+    .oi-c-9 { grid-column: span 9; }
+    .oi-list { margin-top:16px; }
+    .oi-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
+    .oi-table { font-size:12.5px; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private List<InsumoItemDto> _items = new();
+    private bool _agregando;
+
+    private Borrador _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await InsumoSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Descripcion)) { return; }
+        _agregando = true;
+        try
+        {
+            var creado = await InsumoSvc.AgregarAsync(hid, new AgregarInsumoRequest(
+                _borrador.Codigo,
+                _borrador.Descripcion!,
+                _borrador.Cantidad,
+                _borrador.Observaciones), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            _borrador = new();
+        }
+        finally { _agregando = false; }
+    }
+
+    private async Task EliminarAsync(InsumoItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar el insumo \"{it.Descripcion}\"?");
+        if (!ok) { return; }
+        await InsumoSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private async Task ImprimirAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/INSUMOS", "_blank");
+    }
+
+    private sealed class Borrador
+    {
+        public string? Codigo { get; set; }
+        public string? Descripcion { get; set; }
+        public string? Cantidad { get; set; }
+        public string? Observaciones { get; set; }
+    }
+}

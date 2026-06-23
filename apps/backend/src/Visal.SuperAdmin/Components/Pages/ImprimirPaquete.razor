@@ -592,6 +592,22 @@ else
         }
         if (n.IsTable)
         {
+            // Leer filas reales: combina SeedRows (texto fijo) + filas extras
+            // controladas por tbl:{id}:_rows. Cada celda viene de vals["tbl:{id}:{idx}:{colId}"].
+            // Asi medicamentos / remisiones / etc. mapeados via historiaMedica
+            // aparecen en la impresion con su contenido real.
+            var tblKey = $"tbl:{n.Id}";
+            var seedCount = n.SeedRows?.Count ?? 0;
+            int extraRows = 0;
+            if (!n.LockRows && vals.TryGetValue($"{tblKey}:_rows", out var rs)
+                && int.TryParse(rs, out var parsed) && parsed > 0)
+            {
+                extraRows = parsed;
+            }
+            var totalRows = seedCount + extraRows;
+            // Fallback: si no hay datos y la tabla es libre, deja 1 fila para
+            // que el doctor pueda escribir a mano sobre papel.
+            if (totalRows == 0 && !n.LockRows) { totalRows = 1; }
             <div style="grid-column: span @span; border-bottom:1px solid #000;">
                 <table class="pack-table">
                     <thead>
@@ -600,11 +616,28 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        @* En el paquete impreso renderizamos 1 fila vacia por columna
-                           (las tablas repetibles se diligencian en la HC en vivo). *@
-                        <tr>
-                            @foreach (var col in n.Columns ?? new()) { <td>&nbsp;</td> }
-                        </tr>
+                        @for (var r = 0; r < totalRows; r++)
+                        {
+                            var idx = r;
+                            var isSeed = r < seedCount;
+                            var seedRow = isSeed ? n.SeedRows![r] : null;
+                            <tr>
+                                @{ var colIdx = 0; }
+                                @foreach (var col in n.Columns ?? new())
+                                {
+                                    var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
+                                    string? cellVal;
+                                    if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
+                                    else { vals.TryGetValue($"{tblKey}:{idx}:{col.Id}", out cellVal); }
+                                    // Columnas date guardan ISO (yyyy-MM-dd) para que el datepicker
+                                    // del FormViewer las pueda leer. En impresion las mostramos en
+                                    // formato local dd/MM/yyyy para que se lean como en papel.
+                                    var displayVal = FormatCellForPrint(cellVal, col.FieldType);
+                                    <td>@(string.IsNullOrWhiteSpace(displayVal) ? new MarkupString("&nbsp;") : (MarkupString)System.Net.WebUtility.HtmlEncode(displayVal))</td>
+                                    colIdx++;
+                                }
+                            </tr>
+                        }
                     </tbody>
                 </table>
             </div>
@@ -622,6 +655,22 @@ else
     {
         if (string.IsNullOrWhiteSpace(json)) { return null; }
         try { return JsonSerializer.Deserialize<FormSchema>(json); } catch { return null; }
+    }
+
+    /// <summary>
+    /// Si la celda pertenece a una columna date y el valor esta en ISO
+    /// (yyyy-MM-dd) lo reformatea a dd/MM/yyyy para impresion. Cualquier
+    /// otra cosa se devuelve tal cual.
+    /// </summary>
+    private static string? FormatCellForPrint(string? raw, string? fieldType)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return raw; }
+        if (!string.Equals(fieldType, "date", StringComparison.OrdinalIgnoreCase)) { return raw; }
+        if (DateOnly.TryParseExact(raw, "yyyy-MM-dd", out var d))
+        {
+            return d.ToString("dd/MM/yyyy");
+        }
+        return raw;
     }
 
     private static Dictionary<string, string?> TryParseValores(string? json)

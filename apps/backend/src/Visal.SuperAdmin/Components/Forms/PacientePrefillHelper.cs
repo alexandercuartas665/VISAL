@@ -1,4 +1,5 @@
 using Visal.Application.Tenancy;
+using Visal.Application.Tenancy.Forms;
 
 namespace Visal.SuperAdmin.Components.Forms;
 
@@ -46,7 +47,8 @@ public static class PacientePrefillHelper
             ["contactoEmergencia"] = p.ContactoEmergencia,
             ["parentesco"] = p.Parentesco,
             ["telefonoEmergencia"] = p.TelefonoEmergencia,
-            ["sede"] = p.Sede
+            ["sede"] = p.Sede,
+            ["eps"] = p.Eps
         };
     }
 
@@ -107,7 +109,9 @@ public static class PacientePrefillHelper
             ["nombres_apellidos"] = paciente.NombreCompleto,
             ["edad"] = CalcularEdad(paciente.FechaNacimiento),
             ["sede"] = paciente.Sede,
-            ["ciudad"] = paciente.Ciudad
+            ["ciudad"] = paciente.Ciudad,
+            ["eps"] = paciente.Eps,
+            ["aseguradora"] = paciente.Eps
         };
         Recurse(schema.Children);
 

@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddHttpClient<Visal.Application.Tenancy.IAiProviderClient, Ai.AiProviderClient>();
         services.AddHttpClient<Visal.Application.Auth.IGoogleOAuthClient, Auth.GoogleOAuthClient>();
         services.AddScoped<DatabaseSeeder>();
+        services.AddScoped<Visal.Application.Tenancy.ISqlConsoleService, Sql.SqlConsoleService>();
         services.AddHttpClient("api-colombia");
         services.AddScoped<Geo.ApiColombiaSeeder>();
 

@@ -499,6 +499,12 @@ else
 
     private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea) => __builder =>
     {
+        // El titulo del documento es el del HEADER del schema (lo que el
+        // disenador escribio en "Titulo" del editor de formularios, ej.
+        // "HISTORIA CLINICA GENERAL"). Si esta vacio se cae a `titulo`, que
+        // tipicamente es el Codigo + Nombre del FormDefinition (ej.
+        // "HC-FO-08 FORMATO HC GENERAL") — mejor algo que nada en papel.
+        var tituloFinal = !string.IsNullOrWhiteSpace(hd.Titulo) ? hd.Titulo! : titulo;
         <div class="pack-header">
             <div class="pack-hdr-top">
                 <div class="pack-hdr-brand">
@@ -521,7 +527,7 @@ else
                     HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
                 </div>
             </div>
-            <div class="pack-hdr-title">@titulo</div>
+            <div class="pack-hdr-title">@tituloFinal</div>
             <div class="pack-hdr-meta">
                 <span><b>Paciente:</b> @(_paciente?.NombreCompleto ?? "-")</span>
                 <span><b>Doc:</b> @(_paciente?.TipoDocumento) @(_paciente?.NumeroDocumento)</span>

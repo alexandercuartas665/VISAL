@@ -1,0 +1,418 @@
+@page "/admin/sql-console"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject ISqlConsoleService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Consola SQL - Visal</PageTitle>
+
+<div class="sql-head">
+    <div>
+        <div class="sql-eyebrow">Administracion del Sistema</div>
+        <h1 class="sql-title">Consola SQL</h1>
+        <small class="text-muted">Ejecuta SQL crudo contra la base de datos. Cada query queda registrada en auditoria.</small>
+    </div>
+</div>
+
+<div class="sql-warn">
+    <strong>Advertencia:</strong> esta consola ejecuta SQL directo en la BD de produccion del sistema (sin
+    filtros de tenant y sin restricciones DDL). Una sentencia mal escrita puede borrar datos o romper integridad
+    referencial. Cada instruccion queda registrada con tu usuario, tenant, query, resultado y fecha en la tabla
+    <code>sql_console_logs</code>.
+</div>
+
+@if (_error is not null) { <div class="sql-alert">@_error</div> }
+@if (_ok is not null) { <div class="sql-ok">@_ok</div> }
+
+<div class="sql-grid">
+
+    @* ---------- Columna izquierda: explorador de tablas (lista) ---------- *@
+    <aside class="sql-explorer-aside">
+        <div class="sql-explorer-h">
+            <strong>Tablas</strong>
+            <span class="sql-explorer-meta">@_tablas.Count</span>
+        </div>
+        <input class="form-control form-control-sm sql-explorer-filter"
+               placeholder="Filtrar tablas..."
+               @bind="_filtroTabla" @bind:event="oninput" />
+
+        <div class="sql-explorer-list">
+            @if (_tablas.Count == 0)
+            {
+                <div class="sql-explorer-loading">Cargando...</div>
+            }
+            else
+            {
+                @foreach (var grupo in TablasFiltradas().GroupBy(t => t.Grupo).OrderBy(g => OrdenGrupo(g.Key)))
+                {
+                    var grupoKey = grupo.Key;
+                    var abierto = !_gruposCerrados.Contains(grupoKey);
+                    <div class="sql-explorer-group">
+                        <button class="sql-explorer-group-h" @onclick="() => ToggleGrupo(grupoKey)">
+                            <span class="sql-explorer-caret">@(abierto ? "▾" : "▸")</span>
+                            <span class="sql-explorer-group-name">@grupoKey</span>
+                            <span class="sql-explorer-group-count">@grupo.Count()</span>
+                        </button>
+                        @if (abierto)
+                        {
+                            <div class="sql-explorer-items">
+                                @foreach (var t in grupo.OrderBy(x => x.Tabla))
+                                {
+                                    <button class="sql-explorer-item" @onclick="() => UsarTabla(t.Tabla)" title="@t.Descripcion">
+                                        <span class="sql-explorer-item-name">@t.Tabla</span>
+                                        <span class="sql-explorer-item-count">@FormatearFilas(t.FilasEstimadas)</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    </aside>
+
+    @* ---------- Columna central: editor + resultados ---------- *@
+    <div class="sql-left">
+        <div class="sql-editor-card">
+            <div class="sql-editor-h">
+                <label>Query SQL</label>
+                <div class="sql-editor-actions">
+                    <span class="sql-hint">Ctrl+Enter para ejecutar</span>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="Limpiar" disabled="@_ejecutando">Limpiar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="Ejecutar" disabled="@(_ejecutando || string.IsNullOrWhiteSpace(_sql))">
+                        @(_ejecutando ? "Ejecutando..." : "Ejecutar")
+                    </button>
+                </div>
+            </div>
+            <textarea class="sql-editor"
+                      placeholder="SELECT * FROM pacientes LIMIT 10;"
+                      @bind="_sql" @bind:event="oninput"
+                      @onkeydown="OnKeyDown"></textarea>
+        </div>
+
+        <div class="sql-results-card">
+            <div class="sql-results-h">
+                <strong>Resultados</strong>
+                @if (_result is not null)
+                {
+                    <div class="sql-result-meta">
+                        <span class="sql-pill sql-pill-@(_result.Success ? "ok" : "err")">@_result.QueryType</span>
+                        @if (_result.RowsReturned is int rr) { <span>@rr fila(s)</span> }
+                        @if (_result.RowsAffected is int ra) { <span>@ra fila(s) afectada(s)</span> }
+                        <span>@_result.DurationMs ms</span>
+                    </div>
+                }
+            </div>
+            @if (_result is null)
+            {
+                <div class="sql-results-empty">Ejecuta una query para ver resultados.</div>
+            }
+            else if (!_result.Success)
+            {
+                <div class="sql-results-error">
+                    <strong>Error de la BD:</strong>
+                    <pre>@_result.ErrorMessage</pre>
+                </div>
+            }
+            else if (_result.QueryType == "SELECT")
+            {
+                <div class="sql-results-table-wrap">
+                    @if (_result.Filas.Count == 0)
+                    {
+                        <div class="sql-results-empty">La query no devolvio filas.</div>
+                    }
+                    else
+                    {
+                        <table class="sql-table">
+                            <thead>
+                                <tr>
+                                    @foreach (var c in _result.Columnas) { <th>@c</th> }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var fila in _result.Filas)
+                                {
+                                    <tr>
+                                        @foreach (var celda in fila)
+                                        {
+                                            <td>@(celda is null ? new MarkupString("<em class=\"sql-null\">NULL</em>") : (MarkupString)System.Net.WebUtility.HtmlEncode(celda))</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="sql-results-ok">
+                    <strong>OK.</strong> @(_result.RowsAffected ?? 0) fila(s) afectada(s) en @_result.DurationMs ms.
+                </div>
+            }
+        </div>
+    </div>
+
+    @* ---------- Columna derecha: historial ---------- *@
+    <div class="sql-right">
+        <div class="sql-hist-card">
+            <div class="sql-hist-h">
+                <strong>Historial</strong>
+                <button class="btn btn-link btn-sm" @onclick="CargarHistorial" disabled="@_cargandoHist">Refrescar</button>
+            </div>
+            @if (_historial.Count == 0)
+            {
+                <div class="sql-hist-empty">Sin queries ejecutadas todavia.</div>
+            }
+            else
+            {
+                <div class="sql-hist-list">
+                    @foreach (var h in _historial)
+                    {
+                        <div class="sql-hist-item @(h.Success ? "ok" : "err")" @onclick="() => UsarQuery(h.Query)" title="Click para cargar esta query en el editor">
+                            <div class="sql-hist-item-top">
+                                <span class="sql-pill sql-pill-@(h.Success ? "ok" : "err")">@(h.QueryType ?? "?")</span>
+                                <span class="sql-hist-time">@h.ExecutedAt.ToLocalTime().ToString("dd/MM HH:mm:ss")</span>
+                            </div>
+                            <div class="sql-hist-item-q">@TruncateMid(h.Query, 90)</div>
+                            <div class="sql-hist-item-meta">
+                                @if (h.UserName is not null) { <span>@h.UserName</span> }
+                                @if (h.RowsReturned is int rr) { <span>· @rr filas</span> }
+                                @if (h.RowsAffected is int ra) { <span>· @ra afect.</span> }
+                                <span>· @h.DurationMs ms</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+</div>
+
+<style>
+    .sql-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:8px; }
+    .sql-eyebrow { color:#64748b; font-size:11px; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; }
+    .sql-title { margin:2px 0 0; font-size:22px; }
+    .sql-warn { background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:10px 12px; border-radius:8px; margin:12px 0 14px; font-size:12.5px; }
+    .sql-warn code { background:#fee2e2; padding:1px 6px; border-radius:4px; font-size:11.5px; }
+    .sql-alert { background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:8px 12px; border-radius:6px; margin-bottom:10px; }
+    .sql-ok { background:#dcfce7; border:1px solid #86efac; color:#166534; padding:8px 12px; border-radius:6px; margin-bottom:10px; }
+    .sql-grid { display:grid; grid-template-columns:260px 1fr 320px; gap:14px; align-items:start; }
+    @@media (max-width:1300px) { .sql-grid { grid-template-columns: 220px 1fr; } .sql-right { display:none; } }
+    @@media (max-width:900px) { .sql-grid { grid-template-columns: 1fr; } .sql-explorer-aside { display:none; } }
+
+    .sql-editor-card, .sql-results-card, .sql-hist-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:12px; }
+    .sql-editor-card { margin-bottom:14px; }
+    .sql-editor-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+    .sql-editor-h label { font-size:12px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.3px; }
+    .sql-editor-actions { display:flex; align-items:center; gap:8px; }
+    .sql-hint { font-size:11px; color:#94a3b8; }
+    .sql-editor { width:100%; min-height:220px; font-family:'JetBrains Mono','Consolas',monospace; font-size:13px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; background:#0f172a; color:#e2e8f0; line-height:1.5; }
+    .sql-editor:focus { outline:0; border-color:#1565c0; box-shadow:0 0 0 2px rgba(21,101,192,.2); }
+
+    .sql-results-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #e2e8f0; }
+    .sql-result-meta { display:flex; gap:8px; font-size:11.5px; color:#475569; align-items:center; }
+    .sql-pill { padding:2px 8px; border-radius:999px; font-size:10.5px; font-weight:700; }
+    .sql-pill-ok { background:#1565c0; color:#fff; }
+    .sql-pill-err { background:#dc2626; color:#fff; }
+    .sql-results-empty { padding:30px; text-align:center; font-style:italic; color:#94a3b8; }
+    .sql-results-error { padding:14px; background:#fef2f2; border-radius:6px; color:#7f1d1d; font-size:12.5px; }
+    .sql-results-error pre { margin:6px 0 0; white-space:pre-wrap; font-size:12px; }
+    .sql-results-ok { padding:14px; background:#dcfce7; border-radius:6px; color:#166534; font-size:12.5px; }
+    .sql-results-table-wrap { overflow:auto; max-height:50vh; max-width:100%; }
+    /* width:max-content fuerza a la tabla a tomar el ancho natural del contenido,
+       lo cual genera scroll horizontal en el wrap cuando hay muchas columnas.
+       Sin esto el browser comprime las columnas a 100% del contenedor. */
+    .sql-table { width:max-content; min-width:100%; border-collapse:collapse; font-size:12px; }
+    .sql-table thead th { position:sticky; top:0; background:#1565c0; color:#fff; padding:6px 10px; text-align:left; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap; }
+    /* white-space:nowrap mantiene cada celda en una linea y deja que el ancho
+       fluya horizontal en el scroll; max-width + ellipsis evita que un campo
+       gigantesco (jsonb/text largo) destruya el layout. */
+    .sql-table td { padding:5px 10px; border-bottom:1px solid #f1f5f9; vertical-align:top; font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; white-space:nowrap; max-width:420px; overflow:hidden; text-overflow:ellipsis; }
+    .sql-table tr:hover { background:#f8fafc; }
+    .sql-null { color:#94a3b8; font-style:italic; }
+
+    .sql-hist-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #e2e8f0; }
+    .sql-hist-empty { padding:20px; text-align:center; font-style:italic; color:#94a3b8; font-size:12px; }
+    .sql-hist-list { display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow-y:auto; }
+    .sql-hist-item { border-left:3px solid #1565c0; background:#f8fafc; border-radius:6px; padding:8px 10px; cursor:pointer; transition:background .12s; }
+    .sql-hist-item.err { border-left-color:#dc2626; background:#fef2f2; }
+    .sql-hist-item:hover { background:#e0e7ff; }
+    .sql-hist-item.err:hover { background:#fee2e2; }
+    .sql-hist-item-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+    .sql-hist-time { font-size:10.5px; color:#64748b; }
+    .sql-hist-item-q { font-family:'JetBrains Mono','Consolas',monospace; font-size:11px; color:#0f172a; word-break:break-all; line-height:1.4; margin-bottom:4px; }
+    .sql-hist-item-meta { font-size:10.5px; color:#64748b; display:flex; gap:4px; flex-wrap:wrap; }
+
+    /* Explorador de tablas — sidebar izquierdo tipo arbol */
+    .sql-explorer-aside { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px; position:sticky; top:10px; max-height:calc(100vh - 30px); display:flex; flex-direction:column; }
+    .sql-explorer-h { display:flex; align-items:center; gap:8px; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #e2e8f0; }
+    .sql-explorer-h strong { font-size:12px; color:#0f172a; text-transform:uppercase; letter-spacing:0.3px; flex:1; }
+    .sql-explorer-meta { font-size:11px; color:#fff; background:#1565c0; padding:1px 8px; border-radius:999px; font-weight:700; }
+    .sql-explorer-filter { font-size:12px; margin-bottom:8px; }
+    .sql-explorer-list { flex:1; overflow-y:auto; }
+    .sql-explorer-loading { padding:14px; text-align:center; color:#94a3b8; font-style:italic; font-size:12px; }
+    .sql-explorer-group { margin-bottom:4px; }
+    .sql-explorer-group-h { width:100%; display:flex; align-items:center; gap:6px; padding:5px 4px; background:none; border:0; cursor:pointer; text-align:left; border-radius:4px; transition:background .12s; }
+    .sql-explorer-group-h:hover { background:#f1f5f9; }
+    .sql-explorer-caret { color:#64748b; font-size:10px; width:10px; flex-shrink:0; }
+    .sql-explorer-group-name { flex:1; font-size:10.5px; font-weight:700; color:#1565c0; text-transform:uppercase; letter-spacing:0.4px; }
+    .sql-explorer-group-count { font-size:10px; color:#94a3b8; background:#f1f5f9; padding:1px 6px; border-radius:999px; font-weight:700; }
+    .sql-explorer-items { display:flex; flex-direction:column; margin-left:10px; border-left:1px solid #e2e8f0; padding-left:6px; }
+    .sql-explorer-item { width:100%; display:flex; align-items:center; gap:6px; padding:4px 6px; background:none; border:0; cursor:pointer; text-align:left; border-radius:4px; transition:background .12s; }
+    .sql-explorer-item:hover { background:#eff6ff; }
+    .sql-explorer-item:active { background:#dbeafe; }
+    .sql-explorer-item-name { flex:1; font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#334155; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sql-explorer-item-count { font-size:10px; color:#64748b; flex-shrink:0; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _sql = "";
+    private bool _ejecutando;
+    private bool _cargandoHist;
+    private SqlConsoleExecutionDto? _result;
+    private List<SqlConsoleLogDto> _historial = new();
+    private List<SqlTableInfoDto> _tablas = new();
+    private string _filtroTabla = "";
+    private HashSet<string> _gruposCerrados = new(StringComparer.OrdinalIgnoreCase);
+    private string? _error;
+    private string? _ok;
+
+    private void ToggleGrupo(string grupo)
+    {
+        if (!_gruposCerrados.Add(grupo)) { _gruposCerrados.Remove(grupo); }
+    }
+
+    /// <summary>Tablas filtradas por el textbox de filtro (nombre o descripcion).</summary>
+    private IEnumerable<SqlTableInfoDto> TablasFiltradas()
+    {
+        if (string.IsNullOrWhiteSpace(_filtroTabla)) { return _tablas; }
+        var t = _filtroTabla.Trim();
+        return _tablas.Where(x =>
+            x.Tabla.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+            x.Descripcion.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+            x.Grupo.Contains(t, StringComparison.OrdinalIgnoreCase));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarHistorial();
+        await CargarTablas();
+    }
+
+    private async Task CargarTablas()
+    {
+        try { _tablas = (await Svc.ListarTablasAsync()).ToList(); }
+        catch (Exception ex) { _error = "No se pudo cargar el explorador de tablas: " + ex.Message; }
+    }
+
+    /// <summary>Al hacer click en una card, carga SELECT * FROM tabla en el editor
+    /// con LIMIT 100 (para no traer todo accidentalmente).</summary>
+    private void UsarTabla(string tabla)
+    {
+        _sql = $"SELECT * FROM {tabla} LIMIT 100;";
+        _ok = $"Plantilla cargada para {tabla}. Ajusta y ejecuta.";
+    }
+
+    /// <summary>Formato compacto para el conteo de filas en la card. 1234 -> "1.2k".</summary>
+    private static string FormatearFilas(long n)
+    {
+        if (n <= 0) { return "vacia"; }
+        if (n < 1000) { return n.ToString(System.Globalization.CultureInfo.InvariantCulture); }
+        if (n < 1_000_000) { return $"{n / 1000.0:0.#}k"; }
+        return $"{n / 1_000_000.0:0.#}M";
+    }
+
+    /// <summary>Orden manual de los grupos para que aparezcan primero los mas
+    /// usados (clinica) y al final los de plataforma/auditoria.</summary>
+    private static int OrdenGrupo(string g) => g switch
+    {
+        "Historia Clinica" => 1,
+        "Pacientes y Catalogos" => 2,
+        "Notas Medicas" => 3,
+        "Asignacion y Turnos" => 4,
+        "Contratos" => 5,
+        "Profesionales" => 6,
+        "Roles y Permisos" => 7,
+        "Interoperabilidad" => 8,
+        "IA y Automatizacion" => 9,
+        "WhatsApp" => 10,
+        "Billing" => 11,
+        "Plataforma" => 12,
+        "Otros" => 99,
+        _ => 50
+    };
+
+    private async Task Ejecutar()
+    {
+        _error = _ok = null;
+        _ejecutando = true;
+        try
+        {
+            var (userId, userName) = await ActorAsync();
+            _result = await Svc.EjecutarAsync(_sql, userId, userName);
+            if (_result.Success)
+            {
+                _ok = $"OK ({_result.QueryType}, {_result.DurationMs} ms).";
+            }
+            await CargarHistorial();
+        }
+        catch (Exception ex)
+        {
+            _error = "Error inesperado: " + ex.Message;
+        }
+        finally { _ejecutando = false; }
+    }
+
+    private async Task CargarHistorial()
+    {
+        _cargandoHist = true;
+        try
+        {
+            _historial = (await Svc.ListarHistorialAsync(50)).ToList();
+        }
+        catch (Exception ex) { _error = "No se pudo cargar el historial: " + ex.Message; }
+        finally { _cargandoHist = false; }
+    }
+
+    private void Limpiar()
+    {
+        _sql = "";
+        _result = null;
+        _error = _ok = null;
+    }
+
+    private void UsarQuery(string q)
+    {
+        _sql = q;
+        _ok = "Query cargada en el editor.";
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey && (e.Key == "Enter" || e.Code == "Enter" || e.Code == "NumpadEnter"))
+        {
+            await Ejecutar();
+        }
+    }
+
+    private async Task<(Guid, string?)> ActorAsync()
+    {
+        if (AuthState is null) { return (Guid.Empty, null); }
+        var st = await AuthState;
+        Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id);
+        var name = st.User.Identity?.Name ?? st.User.FindFirst(ClaimTypes.Email)?.Value;
+        return (id, name);
+    }
+
+    private static string TruncateMid(string s, int maxLen)
+    {
+        if (string.IsNullOrEmpty(s) || s.Length <= maxLen) { return s ?? ""; }
+        return s[..(maxLen - 3)] + "...";
+    }
+}

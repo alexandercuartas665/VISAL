@@ -90,6 +90,7 @@ public interface IApplicationDbContext
     DbSet<TenantApiConfig> TenantApiConfigs { get; }
     DbSet<PasswordResetToken> PasswordResetTokens { get; }
     DbSet<SuperAdminAuditLog> SuperAdminAuditLogs { get; }
+    DbSet<SqlConsoleLog> SqlConsoleLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

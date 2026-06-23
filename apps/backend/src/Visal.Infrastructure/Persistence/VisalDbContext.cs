@@ -67,6 +67,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos => Set<HistoriaClinicaMedicamento>();
     public DbSet<HistoriaClinicaOrdenServicio> HistoriaClinicaOrdenesServicio => Set<HistoriaClinicaOrdenServicio>();
     public DbSet<HistoriaClinicaInsumo> HistoriaClinicaInsumos => Set<HistoriaClinicaInsumo>();
+    public DbSet<SqlConsoleLog> SqlConsoleLogs => Set<SqlConsoleLog>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
@@ -635,6 +636,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+        });
+
+        modelBuilder.Entity<SqlConsoleLog>(b =>
+        {
+            b.Property(x => x.Query).HasColumnType("text").IsRequired();
+            b.Property(x => x.QueryType).HasMaxLength(20);
+            b.Property(x => x.UserName).HasMaxLength(200);
+            b.Property(x => x.ErrorMessage).HasColumnType("text");
+            b.HasIndex(x => new { x.TenantId, x.ExecutedAt });
+            b.HasIndex(x => x.ExecutedAt);
         });
 
         modelBuilder.Entity<HistoriaClinicaCertificacion>(b =>

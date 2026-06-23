@@ -479,6 +479,8 @@ else
                     var listId = $"dl_{node.Id}";
                     <input class="form-control form-control-sm" list="@listId"
                            placeholder="@node.Placeholder" disabled="@ro" value="@val"
+                           onfocus="this.dataset.prev=this.value; this.value='';"
+                           onblur="if(!this.value && this.dataset.prev){this.value=this.dataset.prev;}"
                            @onchange="e => SetValue(key, e.Value?.ToString())" />
                     <datalist id="@listId">
                         @if (node.Options is not null)
@@ -549,9 +551,16 @@ else
                 @if (c.AllowCustom)
                 {
                     var listId = $"dlc_{c.Id}_{key.GetHashCode():X}";
+                    // Truco del datalist: en focus guardamos el valor actual y
+                    // limpiamos el input, asi al hacer click el browser muestra
+                    // TODAS las opciones (sin filtrar por el texto previo). Si
+                    // el usuario no escribe nada y sale, restauramos. Si elige
+                    // otra opcion o escribe, el onchange dispara y se actualiza.
                     <input class="form-control form-control-sm" list="@listId"
                            placeholder="@(c.Catalog ?? "Elige o escribe")"
                            disabled="@ro" value="@val"
+                           onfocus="this.dataset.prev=this.value; this.value='';"
+                           onblur="if(!this.value && this.dataset.prev){this.value=this.dataset.prev;}"
                            @onchange="e => SetValue(key, e.Value?.ToString())" />
                     <datalist id="@listId">
                         @if (opts is not null)

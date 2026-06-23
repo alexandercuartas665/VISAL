@@ -355,6 +355,16 @@ else
                                             // mostramos texto fijo. Si esta vacia (null/empty), es editable.
                                             var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
                                             var cellKey = $"{key}:{idx}:{c.Id}";
+                                            // Override de opciones por celda seed: si la tabla tiene
+                                            // SeedRowCellOptions[i][colIdx] poblado, esas son las
+                                            // opciones que se usan al renderizar el select de esta
+                                            // celda especifica (ignora c.Options del FormColumn).
+                                            List<string>? cellOptions = null;
+                                            if (isSeed && node.SeedRowCellOptions is not null
+                                                && node.SeedRowCellOptions.TryGetValue($"{i}_{colIdx}", out var co))
+                                            {
+                                                cellOptions = co;
+                                            }
                                             <td>
                                                 @if (!string.IsNullOrEmpty(seedVal))
                                                 {
@@ -362,7 +372,7 @@ else
                                                 }
                                                 else
                                                 {
-                                                    @RenderTableCell(c, cellKey)
+                                                    @RenderTableCell(c, cellKey, cellOptions)
                                                 }
                                             </td>
                                             colIdx++;
@@ -462,17 +472,35 @@ else
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "select":
-                <select class="form-select form-select-sm" disabled="@ro" value="@val"
-                        @onchange="e => SetValue(key, e.Value?.ToString())">
-                    <option value="">Seleccione...</option>
-                    @if (node.Options is not null)
-                    {
-                        @foreach (var o in node.Options)
+                @if (node.AllowCustom)
+                {
+                    // Modo libre: input con sugerencias (datalist). El usuario
+                    // puede elegir una opcion o escribir cualquier cosa.
+                    var listId = $"dl_{node.Id}";
+                    <input class="form-control form-control-sm" list="@listId"
+                           placeholder="@node.Placeholder" disabled="@ro" value="@val"
+                           @onchange="e => SetValue(key, e.Value?.ToString())" />
+                    <datalist id="@listId">
+                        @if (node.Options is not null)
                         {
-                            <option value="@o">@o</option>
+                            @foreach (var o in node.Options) { <option value="@o" /> }
                         }
-                    }
-                </select>
+                    </datalist>
+                }
+                else
+                {
+                    <select class="form-select form-select-sm" disabled="@ro" value="@val"
+                            @onchange="e => SetValue(key, e.Value?.ToString())">
+                        <option value="">Seleccione...</option>
+                        @if (node.Options is not null)
+                        {
+                            @foreach (var o in node.Options)
+                            {
+                                <option value="@o">@o</option>
+                            }
+                        }
+                    </select>
+                }
                 break;
             case "autocomplete":
                 <input class="form-control form-control-sm" placeholder="@(node.Placeholder ?? $"Buscar en {node.Catalog}...")"
@@ -494,14 +522,20 @@ else
         }
     };
 
-    private RenderFragment RenderTableCell(FormColumn c, string key) => __builder =>
+    private RenderFragment RenderTableCell(FormColumn c, string key, List<string>? overrideOptions = null) => __builder =>
     {
         var val = GetValue(key) ?? "";
-        // Per-cell readonly: una celda concreta (tbl:{id}:{i}:{col}) puede venir
-        // marcada como auto-rellenada desde un modulo (ej. historiaMedica). En ese
-        // caso el doctor no puede editarla a mano.
         var ro = ReadOnly || (ReadOnlyKeys is not null && ReadOnlyKeys.Contains(key));
-        switch (c.FieldType)
+        // Si la celda seed trae opciones especificas, esas mandan; si no, las
+        // de la columna. Asi una tabla puede tener un "default" de columna y
+        // sobre-escribir por fila para casos como Examen Fisico (Atrofia con
+        // sus propias opciones, Pupilas con las suyas).
+        var opts = overrideOptions ?? c.Options;
+        // Reglas: si la celda tiene opciones definidas, render como select aunque
+        // el fieldType de la columna sea "text". Esto facilita configurar tablas
+        // tipo Examen Fisico sin tener que cambiar el fieldType de la columna.
+        var effectiveType = (opts is not null && opts.Count > 0 && c.FieldType == "text") ? "select" : c.FieldType;
+        switch (effectiveType)
         {
             case "number":
                 <input type="number" class="form-control form-control-sm" disabled="@ro" value="@val"
@@ -512,9 +546,31 @@ else
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "select":
-                <input class="form-control form-control-sm" placeholder="@c.Catalog"
-                       disabled="@ro" value="@val"
-                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                @if (c.AllowCustom)
+                {
+                    var listId = $"dlc_{c.Id}_{key.GetHashCode():X}";
+                    <input class="form-control form-control-sm" list="@listId"
+                           placeholder="@(c.Catalog ?? "Elige o escribe")"
+                           disabled="@ro" value="@val"
+                           @onchange="e => SetValue(key, e.Value?.ToString())" />
+                    <datalist id="@listId">
+                        @if (opts is not null)
+                        {
+                            @foreach (var o in opts) { <option value="@o" /> }
+                        }
+                    </datalist>
+                }
+                else
+                {
+                    <select class="form-select form-select-sm" disabled="@ro" value="@val"
+                            @onchange="e => SetValue(key, e.Value?.ToString())">
+                        <option value="">Seleccione...</option>
+                        @if (opts is not null)
+                        {
+                            @foreach (var o in opts) { <option value="@o">@o</option> }
+                        }
+                    </select>
+                }
                 break;
             default:
                 <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"

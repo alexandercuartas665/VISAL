@@ -303,11 +303,77 @@
                                             <option value="@c.Key">@c.Value</option>
                                         }
                                     </select>
+                                    @if (col.Catalog == "estatico" || string.IsNullOrEmpty(col.Catalog))
+                                    {
+                                        // Opciones libres una por linea + toggle de modo
+                                        // estricto/libre. Si Catalog viene null se asume
+                                        // estatico (camino mas comun en HC).
+                                        <textarea class="fb-input fb-mono" rows="3"
+                                                  placeholder="Una opcion por linea"
+                                                  value="@ColumnOptionsText(col)"
+                                                  @oninput="e => SetColumnOptions(col, e.Value?.ToString())"></textarea>
+                                        <label class="fb-check">
+                                            <input type="checkbox" @bind="col.AllowCustom" />
+                                            Permitir valor libre (fuera de la lista)
+                                        </label>
+                                    }
                                 }
+                                <input class="fb-input" placeholder="Valor por defecto"
+                                       @bind="col.DefaultValue" @bind:event="oninput" />
                             </div>
                         }
                     }
                     <button class="fb-btn" @onclick="AddColumn">+ Columna</button>
+
+                    @* ---- Editor de opciones por fila seed ---- *@
+                    @if (_selected.SeedRows is { Count: > 0 } seedRows && _selected.Columns is { Count: > 0 } cols2)
+                    {
+                        <div class="fb-prop fb-seed-opts">
+                            <label>Opciones por fila (override de la columna)</label>
+                            <div class="fb-hint">
+                                Si una fila necesita opciones distintas a las generales de la columna,
+                                escribelas aqui (una por linea). Si dejas vacio, la fila usa las opciones
+                                de la columna. Si la columna no tiene opciones, escribir aqui convierte
+                                esa celda en select automaticamente.
+                            </div>
+                            <button class="fb-btn" @onclick="() => _seedOptsOpen = !_seedOptsOpen">
+                                @(_seedOptsOpen ? "Ocultar" : "Mostrar") editor de opciones por fila
+                            </button>
+                            @if (_seedOptsOpen)
+                            {
+                                @for (var r = 0; r < seedRows.Count; r++)
+                                {
+                                    var rowIdx = r;
+                                    var seedRow = seedRows[r];
+                                    var firstLabel = seedRow is { Count: > 0 } && !string.IsNullOrWhiteSpace(seedRow[0]) ? seedRow[0]! : $"Fila {r + 1}";
+                                    <div class="fb-seed-row">
+                                        <div class="fb-seed-row-h">@firstLabel</div>
+                                        @{ var colIdx2 = 0; }
+                                        @foreach (var col in cols2)
+                                        {
+                                            var c2 = col;
+                                            var ci2 = colIdx2;
+                                            var seedVal2 = (seedRow is not null && ci2 < seedRow.Count) ? seedRow[ci2] : null;
+                                            // Solo mostramos editor para columnas EDITABLES (seedVal vacio).
+                                            // Si la celda tiene texto fijo (ej. "Atrofia") no tiene sentido
+                                            // configurarle opciones porque no la rellena el doctor.
+                                            if (string.IsNullOrEmpty(seedVal2))
+                                            {
+                                                <div class="fb-seed-cell">
+                                                    <small>@(c2.Label) <code>@(c2.Name)</code></small>
+                                                    <textarea class="fb-input fb-mono" rows="2"
+                                                              placeholder="Una opcion por linea (vacio = usa opciones de la columna)"
+                                                              value="@SeedCellOptionsText(_selected, rowIdx, ci2)"
+                                                              @oninput="e => SetSeedCellOptions(_selected, rowIdx, ci2, e.Value?.ToString())"></textarea>
+                                                </div>
+                                            }
+                                            colIdx2++;
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
                 }
                 else
                 {
@@ -330,6 +396,14 @@
                             <div class="fb-prop">
                                 <label>Opciones (una por linea)</label>
                                 <textarea class="fb-input" rows="4" value="@OptionsText" @oninput="OnOptionsInput"></textarea>
+                            </div>
+                            <label class="fb-check">
+                                <input type="checkbox" @bind="_selected.AllowCustom" />
+                                Permitir valor libre (fuera de la lista)
+                            </label>
+                            <div class="fb-hint">
+                                Sin marcar: el usuario solo puede elegir una opcion (select estricto).
+                                Marcado: input con sugerencias — puede elegir o escribir lo que sea.
                             </div>
                         }
                     }
@@ -482,6 +556,14 @@
     .pr-mini { background: none; border: none; color: #b91c1c; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
     .pr-add-map { font-size: 11.5px; margin-top: 6px; }
     .pr-add-route { width: 100%; margin-top: 4px; }
+
+    /* Editor de opciones por fila seed (panel derecho cuando se selecciona tabla) */
+    .fb-seed-opts { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #cbd5e1; }
+    .fb-seed-row { margin-top: 8px; padding: 8px; background: #fefce8; border: 1px solid #fde68a; border-radius: 6px; }
+    .fb-seed-row-h { font-weight: 700; font-size: 12px; color: #854d0e; margin-bottom: 6px; }
+    .fb-seed-cell { margin-top: 6px; }
+    .fb-seed-cell small { display: block; color: #6b7280; font-size: 10.5px; margin-bottom: 3px; }
+    .fb-seed-cell code { background: #f1f5f9; padding: 0 4px; border-radius: 3px; font-size: 10px; }
 
     /* Mini mapeo columna-a-columna cuando el destino es una tabla. Se muestra
        indentado bajo el row del mapeo, para dejar claro que pertenece a el. */
@@ -1007,6 +1089,42 @@
     }
 
     private string OptionsText => _selected?.Options is null ? "" : string.Join("\n", _selected.Options);
+
+    /// <summary>Lectura del textarea de opciones de una columna de tabla.</summary>
+    private static string ColumnOptionsText(FormColumn col)
+        => col.Options is null ? "" : string.Join("\n", col.Options);
+
+    /// <summary>Escritura del textarea: parsea linea por linea y guarda en col.Options.</summary>
+    private static void SetColumnOptions(FormColumn col, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) { col.Options = null; return; }
+        col.Options = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    /// <summary>Estado de visibilidad del editor de opciones por fila seed.</summary>
+    private bool _seedOptsOpen = false;
+
+    /// <summary>Lectura del textarea de opciones por celda seed. Cae a "" si no hay nada.</summary>
+    private static string SeedCellOptionsText(FormNode table, int rowIdx, int colIdx)
+    {
+        if (table.SeedRowCellOptions is null) { return ""; }
+        return table.SeedRowCellOptions.TryGetValue($"{rowIdx}_{colIdx}", out var opts)
+            ? string.Join("\n", opts) : "";
+    }
+
+    /// <summary>Escritura. Si el texto esta vacio, quita la entrada del dict.</summary>
+    private static void SetSeedCellOptions(FormNode table, int rowIdx, int colIdx, string? text)
+    {
+        var key = $"{rowIdx}_{colIdx}";
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            table.SeedRowCellOptions?.Remove(key);
+            if (table.SeedRowCellOptions is { Count: 0 }) { table.SeedRowCellOptions = null; }
+            return;
+        }
+        table.SeedRowCellOptions ??= new Dictionary<string, List<string>>();
+        table.SeedRowCellOptions[key] = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
 
     private void OnOptionsInput(ChangeEventArgs e)
     {

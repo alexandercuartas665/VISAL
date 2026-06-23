@@ -103,6 +103,15 @@ public sealed class FormNode
     [JsonPropertyName("options")]
     public List<string>? Options { get; set; }
 
+    /// <summary>
+    /// Solo para fieldType = "select". Si true, el usuario puede escribir un
+    /// valor libre que no este en la lista (render como input + datalist).
+    /// Si false (default), el campo se renderiza como select estricto y el
+    /// usuario solo puede elegir una de las opciones.
+    /// </summary>
+    [JsonPropertyName("allowCustom")]
+    public bool AllowCustom { get; set; }
+
     // ── Tabla con filas pre-semilladas (FieldType = "table") ──
     /// <summary>
     /// Filas iniciales que ya vienen rellenadas. Cada fila es una lista paralela
@@ -112,6 +121,17 @@ public sealed class FormNode
     /// </summary>
     [JsonPropertyName("seedRows")]
     public List<List<string?>>? SeedRows { get; set; }
+
+    /// <summary>
+    /// Opciones por celda seed, indexadas por "rowIdx_colIdx". Permite que en
+    /// una tabla tipo "Examen Fisico" la fila "Atrofia" tenga opciones
+    /// distintas (NO SE OBSERVA, PRESENTE, LEVE) a la fila "Pupilas" (SI, NO).
+    /// Solo se incluyen las celdas que tienen override; el resto usa las
+    /// opciones de la columna (Options del FormColumn) o queda libre.
+    /// Estructura JSON: { "0_1": ["opt1","opt2"], "1_1": [...] }.
+    /// </summary>
+    [JsonPropertyName("seedRowCellOptions")]
+    public Dictionary<string, List<string>>? SeedRowCellOptions { get; set; }
 
     /// <summary>
     /// Si true, oculta el boton "+ Agregar fila" para que la tabla quede limitada
@@ -188,6 +208,18 @@ public sealed class FormColumn
 
     [JsonPropertyName("catalog")]
     public string? Catalog { get; set; }
+
+    /// <summary>Opciones fijas para celdas tipo "select" cuando no se usa un
+    /// catalogo dinamico. Una por linea en el editor (estilo del campo
+    /// top-level Options).</summary>
+    [JsonPropertyName("options")]
+    public List<string>? Options { get; set; }
+
+    /// <summary>Si fieldType = "select" y allowCustom = true, la celda se
+    /// renderiza como input + datalist (sugerencias pero permite escribir lo
+    /// que sea). Si false, se renderiza como select estricto.</summary>
+    [JsonPropertyName("allowCustom")]
+    public bool AllowCustom { get; set; }
 
     /// <summary>Valor por defecto que se aplica a las celdas editables de esta
     /// columna cuando la HC se inicia. Se persiste en valores. El usuario lo

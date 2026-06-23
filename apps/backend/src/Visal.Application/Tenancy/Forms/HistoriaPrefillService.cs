@@ -40,7 +40,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .Where(m => m.HistoriaClinicaId == historiaId)
             .OrderBy(m => m.Orden)
             .Select(m => new OrdenMedicamentoItemDto(
-                m.Id, m.HistoriaClinicaId, m.MedicamentoId, m.NombreMedicamento,
+                m.Id, m.HistoriaClinicaId, m.MedicamentoId, m.CodigoMedicamento, m.NombreMedicamento,
                 m.Cantidad, m.Frecuencia, m.Dias, m.Posologia, m.Observacion, m.Orden))
             .ToListAsync(ct);
 

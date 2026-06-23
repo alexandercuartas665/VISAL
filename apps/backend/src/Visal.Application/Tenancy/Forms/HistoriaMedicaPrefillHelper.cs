@@ -322,14 +322,24 @@ public static class HistoriaMedicaPrefillHelper
         var posologia = !string.IsNullOrWhiteSpace(m.Posologia)
             ? m.Posologia!
             : string.Join(" - ", new[] { m.Cantidad, m.Frecuencia, m.Dias }.Where(x => !string.IsNullOrWhiteSpace(x))!);
+        // Cantidad total = cantidad por toma * frecuencia/dia * dias, cuando los
+        // tres son numericos. Es lo que el doctor pone en "Cantidad Total" de
+        // la orden impresa para autorizar despacho en farmacia.
+        var total = CalcularTotalUnidades(m.Cantidad, m.Frecuencia, m.Dias);
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["descripcion"] = m.NombreMedicamento,
             ["nombre"] = m.NombreMedicamento,
             ["medicamento"] = m.NombreMedicamento,
             ["nombremedicamento"] = m.NombreMedicamento,
+            ["codigo"] = m.CodigoMedicamento,
+            ["codigomedicamento"] = m.CodigoMedicamento,
+            ["registrosanitario"] = m.CodigoMedicamento,
+            // Cantidad por toma (texto literal del doctor).
             ["cantidad"] = m.Cantidad,
-            ["cantidadtotal"] = m.Cantidad,
+            // Cantidad total despachable = c * f * d cuando se puede calcular,
+            // si no, cae al texto literal de cantidad por toma.
+            ["cantidadtotal"] = total ?? m.Cantidad,
             ["frecuencia"] = m.Frecuencia,
             ["dias"] = m.Dias,
             ["posologia"] = posologia,
@@ -343,6 +353,26 @@ public static class HistoriaMedicaPrefillHelper
             ["obs"] = m.Observacion,
             ["observaciones"] = m.Observacion
         };
+    }
+
+    /// <summary>Calcula cantidad total = cantidad por toma * frecuencia/dia * dias.
+    /// Devuelve null si alguno de los tres no es un numero positivo (caso libre,
+    /// ej. "cada 8h" o "indefinido").</summary>
+    public static string? CalcularTotalUnidades(string? cantidad, string? frecuencia, string? dias)
+    {
+        if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var c)
+            && decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var f)
+            && int.TryParse(dias?.Trim(), out var d)
+            && c > 0 && f > 0 && d > 0)
+        {
+            var total = c * f * d;
+            return total == Math.Truncate(total)
+                ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return null;
     }
 
     private static Dictionary<string, string?> RemisionToFields(RemisionItemDto r)

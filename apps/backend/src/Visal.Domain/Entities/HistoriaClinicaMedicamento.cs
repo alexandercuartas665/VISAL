@@ -23,6 +23,11 @@ public class HistoriaClinicaMedicamento : TenantEntity
     /// Sobrevive a cambios del catalogo posteriores.</summary>
     public string NombreMedicamento { get; set; } = null!;
 
+    /// <summary>Snapshot del codigo del medicamento al momento de agregarlo.
+    /// Tipicamente el RegistroSanitario INVIMA o el IUM. Visible en la orden
+    /// impresa.</summary>
+    public string? CodigoMedicamento { get; set; }
+
     /// <summary>Cantidad por toma (texto libre, ej "1", "0.5", "2 tabletas").</summary>
     public string? Cantidad { get; set; }
 

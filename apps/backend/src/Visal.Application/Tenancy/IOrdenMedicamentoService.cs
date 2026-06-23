@@ -15,6 +15,7 @@ public sealed record OrdenMedicamentoItemDto(
     Guid Id,
     Guid HistoriaClinicaId,
     Guid? MedicamentoId,
+    string? CodigoMedicamento,
     string NombreMedicamento,
     string? Cantidad,
     string? Frecuencia,
@@ -25,6 +26,7 @@ public sealed record OrdenMedicamentoItemDto(
 
 public sealed record AgregarMedicamentoRequest(
     Guid? MedicamentoId,
+    string? CodigoMedicamento,
     string NombreMedicamento,
     string? Cantidad,
     string? Frecuencia,

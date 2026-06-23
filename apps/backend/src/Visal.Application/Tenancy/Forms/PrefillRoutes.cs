@@ -138,8 +138,8 @@ public static class PrefillSourceCatalog
     {
         ["medicamentos.lista_numerada"] = new[]
         {
-            "nombreMedicamento", "cantidad", "frecuencia", "dias",
-            "posologia", "via", "observacion"
+            "nombreMedicamento", "codigo", "cantidad", "cantidadTotal",
+            "frecuencia", "dias", "posologia", "via", "observacion"
         },
         ["remisiones.lista_numerada"] = new[]
         {

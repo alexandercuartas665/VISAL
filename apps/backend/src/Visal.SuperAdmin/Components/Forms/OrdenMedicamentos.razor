@@ -43,7 +43,8 @@ else
                     <div class="od-suggest">
                         @foreach (var s in _sugerencias)
                         {
-                            <button class="od-suggest-item" @onclick="() => SeleccionarSugerencia(s)">
+                            var sCopy = s;
+                            <button class="od-suggest-item" @onclick="() => SeleccionarSugerencia(sCopy)">
                                 <div class="od-suggest-nm">@s.Producto</div>
                                 <div class="od-suggest-meta">
                                     @if (!string.IsNullOrWhiteSpace(s.PrincipioActivo)) { <span>@s.PrincipioActivo</span> }
@@ -107,8 +108,10 @@ else
                 <thead>
                     <tr>
                         <th style="width:40px">#</th>
+                        <th style="width:130px">Codigo</th>
                         <th>Nombre del Medicamento</th>
                         <th>Posologia</th>
+                        <th class="text-center" style="width:80px">Total</th>
                         <th>Observacion</th>
                         <th class="text-center" style="width:50px"></th>
                     </tr>
@@ -116,14 +119,16 @@ else
                 <tbody>
                     @if (_items.Count == 0)
                     {
-                        <tr><td colspan="5" class="text-center text-muted od-empty-row">Sin medicamentos agregados.</td></tr>
+                        <tr><td colspan="7" class="text-center text-muted od-empty-row">Sin medicamentos agregados.</td></tr>
                     }
                     else
                     {
                         @foreach (var it in _items)
                         {
+                            var total = CalcularTotal(it.Cantidad, it.Frecuencia, it.Dias);
                             <tr>
                                 <td class="text-center">@it.Orden</td>
+                                <td class="od-codigo">@(string.IsNullOrWhiteSpace(it.CodigoMedicamento) ? "—" : it.CodigoMedicamento)</td>
                                 <td>
                                     <strong>@it.NombreMedicamento</strong>
                                 </td>
@@ -132,6 +137,7 @@ else
                                            value="@it.Posologia"
                                            @onchange="@(e => GuardarPosologia(it, e.Value?.ToString()))" />
                                 </td>
+                                <td class="text-center od-total">@(total ?? "—")</td>
                                 <td>
                                     <input class="form-control form-control-sm od-inline-input"
                                            placeholder="Observacion clinica..."
@@ -188,6 +194,8 @@ else
     .od-tbl td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
     .od-empty-row { padding:30px !important; font-style:italic; }
     .od-inline-input { font-size:12px; }
+    .od-codigo { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#475569; }
+    .od-total { font-weight:700; color:#0f172a; background:#fef9c3; }
 </style>
 
 @code {
@@ -251,6 +259,10 @@ else
     private void SeleccionarSugerencia(MedicamentoSugerenciaDto s)
     {
         _borrador.MedicamentoId = s.Id;
+        // El "codigo" mostrado al doctor es el RegistroSanitario INVIMA (lo
+        // que ya se ve como tag en la lista de sugerencias). Cae al IUM si no
+        // hay registro sanitario.
+        _borrador.Codigo = !string.IsNullOrWhiteSpace(s.RegistroSanitario) ? s.RegistroSanitario : s.Ium;
         _borrador.NombreMedicamento = ArmarNombreCompleto(s);
         _sugerencias.Clear();
         _terminoBusqueda = "";
@@ -273,15 +285,47 @@ else
         {
             return "Define cantidad, frecuencia y dias para armar la posologia.";
         }
-        var s = "";
-        if (!string.IsNullOrWhiteSpace(c)) { s += c + " "; }
-        if (!string.IsNullOrWhiteSpace(f)) { s += f + " "; }
+        // Reconstruye la frase clinica: "Tomar X cada Y h durante Z dias".
+        // - Si la frecuencia es un numero suelto se interpreta como "veces/dia"
+        //   (1 = 1 vez/dia, 3 = 3 veces/dia). Si trae texto ("cada 8h") lo deja.
+        // - Si los dias son numericos agrega "durante X dias".
+        var partes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(c)) { partes.Add(c!); }
+        if (!string.IsNullOrWhiteSpace(f))
+        {
+            partes.Add(int.TryParse(f, out var fn) && fn > 0
+                ? (fn == 1 ? "1 vez al dia" : $"{fn} veces al dia")
+                : f!);
+        }
         if (!string.IsNullOrWhiteSpace(d))
         {
-            // si parece un numero pelado, agregamos "durante X dias"
-            s += int.TryParse(d, out _) ? $"durante {d} dias" : d;
+            partes.Add(int.TryParse(d, out _) ? $"durante {d} dias" : d!);
         }
-        return s.Trim() + ".";
+        var preview = string.Join(", ", partes);
+        var total = CalcularTotal(c, f, d);
+        if (total is not null) { preview += $" — Total: {total}"; }
+        return preview + ".";
+    }
+
+    /// <summary>Cantidad total = cantidad por toma * frecuencia/dia * dias.
+    /// Devuelve null si alguno no se puede parsear como numero positivo.
+    /// Misma logica que HistoriaMedicaPrefillHelper.CalcularTotalUnidades
+    /// pero replicada aqui para evitar acoplar el componente al Application.</summary>
+    private static string? CalcularTotal(string? cantidad, string? frecuencia, string? dias)
+    {
+        if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var c)
+            && decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var f)
+            && int.TryParse(dias?.Trim(), out var d)
+            && c > 0 && f > 0 && d > 0)
+        {
+            var total = c * f * d;
+            return total == Math.Truncate(total)
+                ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return null;
     }
 
     private async Task AgregarAsync()
@@ -294,6 +338,7 @@ else
             var preview = PosologiaPreview();
             var creado = await OrdSvc.AgregarAsync(hid, new AgregarMedicamentoRequest(
                 _borrador.MedicamentoId,
+                _borrador.Codigo,
                 _borrador.NombreMedicamento!,
                 _borrador.Cantidad,
                 _borrador.Frecuencia,
@@ -349,6 +394,7 @@ else
     private sealed class BorradorMed
     {
         public Guid? MedicamentoId { get; set; }
+        public string? Codigo { get; set; }
         public string? NombreMedicamento { get; set; }
         public string? Cantidad { get; set; }
         public string? Frecuencia { get; set; }

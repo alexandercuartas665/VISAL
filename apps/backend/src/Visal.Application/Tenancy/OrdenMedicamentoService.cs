@@ -51,7 +51,7 @@ public sealed class OrdenMedicamentoService(
             .OrderBy(x => x.Orden)
             .ThenBy(x => x.CreatedAt)
             .Select(x => new OrdenMedicamentoItemDto(
-                x.Id, x.HistoriaClinicaId, x.MedicamentoId,
+                x.Id, x.HistoriaClinicaId, x.MedicamentoId, x.CodigoMedicamento,
                 x.NombreMedicamento, x.Cantidad, x.Frecuencia, x.Dias,
                 x.Posologia, x.Observacion, x.Orden))
             .ToListAsync(ct);
@@ -76,6 +76,7 @@ public sealed class OrdenMedicamentoService(
             TenantId = tid,
             HistoriaClinicaId = historiaId,
             MedicamentoId = req.MedicamentoId,
+            CodigoMedicamento = Trim(req.CodigoMedicamento),
             NombreMedicamento = req.NombreMedicamento.Trim(),
             Cantidad = Trim(req.Cantidad),
             Frecuencia = Trim(req.Frecuencia),
@@ -93,7 +94,7 @@ public sealed class OrdenMedicamentoService(
         await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new OrdenMedicamentoItemDto(
-            entity.Id, entity.HistoriaClinicaId, entity.MedicamentoId,
+            entity.Id, entity.HistoriaClinicaId, entity.MedicamentoId, entity.CodigoMedicamento,
             entity.NombreMedicamento, entity.Cantidad, entity.Frecuencia, entity.Dias,
             entity.Posologia, entity.Observacion, entity.Orden);
     }

@@ -19,6 +19,8 @@
     <div class="med-toolbar">
         <InputFile id="med-file" OnChange="OnImportExcel" style="display:none;" accept=".xlsx,.xls" />
         <label for="med-file" class="btn btn-outline-primary @(_busy ? "disabled" : "")">&#128190; Importar Excel</label>
+        <button class="btn btn-outline-secondary" @onclick="DescargarPlantilla" disabled="@_busy"
+                title="Descarga un Excel con las columnas esperadas por el importador y una fila de ejemplo.">&#11015; Plantilla</button>
         <button class="btn btn-outline-danger" @onclick="OnClearAll" disabled="@(_busy || _total == 0)">&#128465; Vaciar todo</button>
         <button class="btn btn-primary" @onclick="OnNuevo" disabled="@_busy">+ Nuevo registro</button>
     </div>
@@ -487,6 +489,97 @@
         if (AuthState is null) { return Guid.Empty; }
         var st = await AuthState;
         return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    /// <summary>Genera y descarga un Excel con las 29 columnas que el importer
+    /// busca en la fila 1 (mismas keys que OnImportExcel) + una fila de ejemplo
+    /// + una hoja "Instrucciones" describiendo cada campo. El usuario lo llena
+    /// y lo sube tal cual con "Importar Excel".</summary>
+    private async Task DescargarPlantilla()
+    {
+        _error = _ok = null;
+        _busy = true;
+        try
+        {
+            // Cabeceras EXACTAS que espera OnImportExcel (linea ~448). El match
+            // es case-insensitive y por nombre normalizado, asi que respetar este
+            // orden y la grafia es lo que garantiza que el Excel se importe sin
+            // tocar nada.
+            var columnas = new (string Cabecera, string Significado, string Ejemplo)[]
+            {
+                ("expediente",          "Numero de expediente del registro sanitario INVIMA.", "20012345"),
+                ("producto",            "Nombre comercial del medicamento (obligatorio para identificar).", "ACETAMINOFEN 500 MG TABLETAS"),
+                ("titular",             "Empresa titular del registro.", "GENFAR S.A."),
+                ("registrosanitario",   "Codigo del registro sanitario INVIMA. Codigo visible al recetar.", "INVIMA 2018M-001234-R1"),
+                ("fechaexpedicion",     "Fecha de expedicion del registro (yyyy-MM-dd o dd/MM/yyyy).", "2018-05-15"),
+                ("fechavencimiento",    "Fecha de vencimiento del registro.", "2028-05-15"),
+                ("estadoregistro",      "Estado del registro: Vigente, Vencido, Cancelado.", "Vigente"),
+                ("expedientecum",       "Expediente CUM.", "20012345-1"),
+                ("consecutivocum",      "Consecutivo CUM (presentacion comercial).", "001"),
+                ("cantidadcum",         "Cantidad CUM (presentacion).", "10"),
+                ("descripcioncomercial","Descripcion comercial larga.", "ACETAMINOFEN 500 MG TABLETAS x 10"),
+                ("estadocum",           "Estado del CUM: Activo, Inactivo.", "Activo"),
+                ("fechaactivo",         "Fecha de activacion del CUM.", "2018-05-15"),
+                ("fechainactivo",       "Fecha de inactivacion (vacia si sigue activo).", ""),
+                ("muestramedica",       "Indica si es muestra medica (SI/NO).", "NO"),
+                ("unidad",              "Unidad de presentacion (tableta, ml, mg).", "TABLETA"),
+                ("atc",                 "Codigo ATC OMS.", "N02BE01"),
+                ("descripcionatc",      "Descripcion del codigo ATC.", "ACETAMINOFEN"),
+                ("viaadministracion",   "Via de administracion (ORAL, IV, IM, etc).", "ORAL"),
+                ("concentracion",       "Concentracion del principio activo.", "500 MG"),
+                ("principioactivo",     "Principio activo (DCI).", "ACETAMINOFEN"),
+                ("unidadmedida",        "Unidad de medida de la concentracion.", "MG"),
+                ("cantidad",            "Cantidad numerica.", "500"),
+                ("unidadreferencia",    "Unidad de referencia.", "TABLETA"),
+                ("formafarmaceutica",   "Forma farmaceutica (TABLETA, JARABE, AMPOLLA).", "TABLETA"),
+                ("nombrerol",           "Nombre del rol (titular, fabricante).", "TITULAR"),
+                ("tiporol",             "Tipo de rol.", "TITULAR"),
+                ("modalidad",           "Modalidad (Importar y Vender, Fabricar y Vender).", "Importar y Vender"),
+                ("IUM",                 "Identificador Unico de Medicamento (IUM/CUM completo).", "19900342-1")
+            };
+
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Medicamentos");
+            for (var i = 0; i < columnas.Length; i++)
+            {
+                ws.Cell(1, i + 1).Value = columnas[i].Cabecera;
+                ws.Cell(2, i + 1).Value = columnas[i].Ejemplo;
+            }
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            ws.Columns().AdjustToContents();
+            ws.SheetView.FreezeRows(1);
+
+            var wsHelp = wb.Worksheets.Add("Instrucciones");
+            wsHelp.Cell(1, 1).Value = "Columna";
+            wsHelp.Cell(1, 2).Value = "Significado";
+            wsHelp.Row(1).Style.Font.Bold = true;
+            wsHelp.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            for (var i = 0; i < columnas.Length; i++)
+            {
+                wsHelp.Cell(i + 2, 1).Value = columnas[i].Cabecera;
+                wsHelp.Cell(i + 2, 2).Value = columnas[i].Significado;
+            }
+            wsHelp.Column(1).Width = 22;
+            wsHelp.Column(2).Width = 90;
+            wsHelp.Cell(columnas.Length + 4, 1).Value = "NOTA:";
+            wsHelp.Cell(columnas.Length + 4, 1).Style.Font.Bold = true;
+            wsHelp.Cell(columnas.Length + 4, 2).Value =
+                "Borra la fila de ejemplo de la hoja 'Medicamentos' antes de importar. "
+                + "El nombre exacto de la cabecera es lo que conecta cada columna del Excel con el campo correspondiente; "
+                + "no la traduzcas, no le agregues acentos ni espacios. "
+                + "Las columnas opcionales se pueden dejar vacias.";
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var b64 = Convert.ToBase64String(ms.ToArray());
+            var dataUrl = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + b64;
+            await JS.InvokeVoidAsync("eval",
+                $"(()=>{{const a=document.createElement('a');a.href='{dataUrl}';a.download='plantilla-medicamentos.xlsx';document.body.appendChild(a);a.click();a.remove();}})()");
+            _ok = "Plantilla descargada.";
+        }
+        catch (Exception ex) { _error = "No se pudo generar la plantilla: " + ex.Message; }
+        finally { _busy = false; }
     }
 
     private sealed class MedEdit

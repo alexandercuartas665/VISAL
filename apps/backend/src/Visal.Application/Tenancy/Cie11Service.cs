@@ -60,10 +60,13 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
         }
         var token = await GetTokenAsync(cfg, ct);
 
-        // flatResults=true para que el response incluya theCode en cada entidad (no solo en
-        // el detail). propertiesToBeSearched amplia los campos buscados — incluye IndexTerm
-        // y SimpleCaption que son los que indexan codigos CIE-10/CIE-11 como sinonimos.
-        var props = "Title,SimpleCaption,FullySpecifiedName,Definition,IndexTerm";
+        // flatResults=true para que el response incluya theCode en cada entidad (no solo
+        // en el detail). El endpoint MMS de WHO acepta un set propio de propiedades
+        // distinto al de Foundation: Title, FullySpecifiedName, Definition, Exclusion,
+        // IndexTerm, RelatedImpairment, CodingNote. IndexTerm es donde viven los sinonimos
+        // y terminos comunes (ej. "cancer" indexa a las neoplasias). Title+FullySpecified
+        // +Definition+IndexTerm cubre la busqueda clinica tipica.
+        var props = "Title,FullySpecifiedName,Definition,IndexTerm";
         var url = $"{cfg.SearchUrl}?q={Uri.EscapeDataString(query)}&useFlexisearch=true&flatResults=true&propertiesToBeSearched={props}";
         var client = http.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(20);

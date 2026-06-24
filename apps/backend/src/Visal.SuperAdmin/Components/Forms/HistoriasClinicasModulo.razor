@@ -1197,6 +1197,33 @@
         // que HC, Escalas, Evoluciones y Consentimientos compartan el mismo prefill).
         PacientePrefillHelper.Aplicar(_valores, p, _schemaActual, _prefillRoutesActual);
 
+        // Sistema: fecha/hora del momento + datos del usuario logueado. Los
+        // datos del tenant (agencia) y de la sede se quedan en null en este
+        // caller — el caller que sepa estos datos puede pasarlos. La sede
+        // tipica viene en el claim "sede_nombre"; si no esta, queda vacio.
+        try
+        {
+            string? usuarioNombre = null, usuarioEmail = null, sedeNombre = null;
+            if (AuthState is not null)
+            {
+                var state = await AuthState;
+                usuarioNombre = state.User.Identity?.Name
+                    ?? state.User.FindFirst("display_name")?.Value;
+                usuarioEmail = state.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                sedeNombre = state.User.FindFirst("sede_nombre")?.Value;
+            }
+            var sistemaCtx = new SistemaPrefillHelper.SistemaCtx(
+                Ahora: DateTimeOffset.Now,
+                AgenciaNombre: null,
+                AgenciaSlogan: null,
+                SedeNombre: sedeNombre ?? p.Sede,
+                SedeCiudad: p.Ciudad,
+                UsuarioNombre: usuarioNombre,
+                UsuarioEmail: usuarioEmail);
+            SistemaPrefillHelper.Aplicar(_valores, sistemaCtx, _prefillRoutesActual);
+        }
+        catch { /* el prefill de sistema es best-effort */ }
+
         // Firmas: paciente (mas reciente capturada) + profesional logueado.
         try
         {

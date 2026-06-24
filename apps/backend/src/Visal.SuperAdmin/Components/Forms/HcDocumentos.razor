@@ -285,6 +285,26 @@ else
                     var valores = new Dictionary<string, string?>();
                     PacientePrefillHelper.Aplicar(valores, Paciente, schema, rutas);
 
+                    // Sistema: fecha y hora del momento + usuario / sede.
+                    try
+                    {
+                        string? uName = null, uEmail = null, uSede = null;
+                        if (AuthState is not null)
+                        {
+                            var st = await AuthState;
+                            uName = st.User.Identity?.Name ?? st.User.FindFirst("display_name")?.Value;
+                            uEmail = st.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                            uSede = st.User.FindFirst("sede_nombre")?.Value;
+                        }
+                        SistemaPrefillHelper.Aplicar(valores, new SistemaPrefillHelper.SistemaCtx(
+                            Ahora: DateTimeOffset.Now,
+                            AgenciaNombre: null, AgenciaSlogan: null,
+                            SedeNombre: uSede ?? Paciente.Sede,
+                            SedeCiudad: Paciente.Ciudad,
+                            UsuarioNombre: uName, UsuarioEmail: uEmail), rutas);
+                    }
+                    catch { }
+
                     // Resolver firmas (rutas firmaPaciente / firmaProfesional)
                     // y aplicarlas si el formato las tiene configuradas.
                     // Errores aqui no deben tumbar el inicio del documento.

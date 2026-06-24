@@ -124,7 +124,21 @@ public static class PrefillSourceCatalog
         ["firmaPaciente"] = new[] { "url" },
         // Firma del profesional logueado: Profesional.FirmaUrl del TenantUser que
         // esta llenando el formulario (resuelto por TenantUser.ProfesionalId).
-        ["firmaProfesional"] = new[] { "url" }
+        ["firmaProfesional"] = new[] { "url" },
+        // Contexto del sistema al momento de iniciar el formulario: fecha y
+        // hora actuales en distintos formatos, agencia (tenant), sede activa
+        // del usuario y datos del usuario logueado. Util sobre todo para
+        // escalas / evoluciones / consentimientos donde se pide la fecha y
+        // la hora de aplicacion sin que el doctor las teclee.
+        ["sistema"] = new[]
+        {
+            "fechaActual", "fechaCorta", "fechaLarga",
+            "horaActual", "horaActualLarga",
+            "fechaHoraActual",
+            "agencia", "agenciaNombre", "agenciaSlogan",
+            "sede", "sedeNombre", "sedeCiudad",
+            "usuario", "usuarioNombre", "usuarioEmail"
+        }
     };
 
     /// <summary>
@@ -173,6 +187,7 @@ public static class PrefillSourceCatalog
         "historiaMedica" => "Historia Medica",
         "firmaPaciente" => "Firma del Paciente",
         "firmaProfesional" => "Firma del Profesional",
+        "sistema" => "Sistema (fecha, hora, sede, agencia)",
         _ => sourceModule
     };
 }

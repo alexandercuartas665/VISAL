@@ -186,8 +186,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
             // Tambien preparamos las rutas firmaPaciente / firmaProfesional /
             // historiaMedica / contrato. Lazy: solo se crean si hay al menos un match.
-            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null, rutaHm = null, rutaContrato = null;
-            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null, mappingsHm = null, mappingsContrato = null;
+            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null, rutaHm = null, rutaContrato = null, rutaSistema = null;
+            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null, mappingsHm = null, mappingsContrato = null, mappingsSistema = null;
 
             int agregadosEnEsteForm = 0;
             foreach (var (name, label) in names)
@@ -229,6 +229,18 @@ public sealed class FormDefinitionService : IFormDefinitionService
                     continue;
                 }
 
+                // Sistema: fecha, hora, sede y agencia del momento de iniciar
+                // el formulario. Util sobre todo en escalas/evoluciones.
+                var sistemaSource = InferirCampoSistema(name, label);
+                if (sistemaSource is not null)
+                {
+                    EnsureRuta(routes, "sistema", "Sistema", ref rutaSistema, ref mappingsSistema);
+                    mappingsSistema!.Add(new JsonObject { ["source"] = sistemaSource, ["target"] = name });
+                    targetsExistentes.Add(name);
+                    agregadosEnEsteForm++;
+                    continue;
+                }
+
                 // Contrato vigente del paciente: codigo y aseguradora.
                 var contratoSource = InferirCampoContrato(name, label);
                 if (contratoSource is not null)
@@ -260,6 +272,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             if (rutaFirmaProf is not null && mappingsFirmaProf is not null) { rutaFirmaProf["mappings"] = mappingsFirmaProf; }
             if (rutaHm is not null && mappingsHm is not null) { rutaHm["mappings"] = mappingsHm; }
             if (rutaContrato is not null && mappingsContrato is not null) { rutaContrato["mappings"] = mappingsContrato; }
+            if (rutaSistema is not null && mappingsSistema is not null) { rutaSistema["mappings"] = mappingsSistema; }
 
             // Reconstruir PrefillRoutesJson.
             var nuevoJson = new JsonObject { ["routes"] = routes }.ToJsonString();
@@ -615,6 +628,77 @@ public sealed class FormDefinitionService : IFormDefinitionService
         foreach (var (frag, campo) in reglas)
         {
             if (n.Contains(frag) || (l is not null && l.Contains(frag))) { return campo; }
+        }
+        return null;
+    }
+
+    /// <summary>Heuristica para detectar si un campo es del contexto del sistema
+    /// (fecha, hora, sede, agencia, usuario). Devuelve el source o null. Es
+    /// agresiva con "fecha" y "hora" porque casi siempre que aparecen sueltos
+    /// en formularios clinicos se refieren al momento de aplicacion.</summary>
+    private static string? InferirCampoSistema(string name, string? label)
+    {
+        var n = Normalizar(name);
+        var l = Normalizar(label);
+        var reglas = new (string fragmento, string campo)[]
+        {
+            // Fecha + hora combinadas — chequear antes de "fecha" y "hora"
+            // sueltas para no quedarse con la primera variante.
+            ("fechahora",            "fechaHoraActual"),
+            ("fechaaplicacion",      "fechaActual"),
+            ("fechadeaplicacion",    "fechaActual"),
+            ("fechadediligenciamiento", "fechaActual"),
+            ("fechadelvaloracion",   "fechaActual"),
+            ("fechavaloracion",      "fechaActual"),
+            ("fechaescala",          "fechaActual"),
+            ("fechaevolucion",       "fechaActual"),
+            ("fechaconsentimiento",  "fechaActual"),
+            ("fechadenacimiento",    null!),   // se descarta — la maneja PacientePrefillHelper
+            ("fechanacimiento",      null!),
+            ("fec_nac",              null!),
+            ("fecnac",               null!),
+            ("fechaapertura",        null!),   // la pone HeaderAutoFillHelper
+            ("fechacierre",          null!),
+            ("fechaexpedicion",      null!),
+            ("fechavencimiento",     null!),
+            ("fechadesde",           null!),   // incapacidades
+            ("fechahasta",           null!),
+            ("fec_eve",              null!),
+            ("fecev",                null!),
+            ("feccita",              null!),
+            ("feccons",              null!),
+            ("fecprog",              null!),
+            ("fecasig",              null!),
+            // Quedan los "fecha"/"hora" genericos para el sistema.
+            ("horaaplicacion",       "horaActual"),
+            ("horavaloracion",       "horaActual"),
+            ("horainicio",           "horaActual"),
+            ("horadeaplicacion",     "horaActual"),
+            ("horaescala",           "horaActual"),
+            ("hora",                 "horaActual"),
+            ("fecha",                "fechaActual"),
+            // Sede / agencia / usuario.
+            ("agenciaslogan",        "agenciaSlogan"),
+            ("agencia",              "agenciaNombre"),
+            ("nombreagencia",        "agenciaNombre"),
+            ("sedeatencion",         "sedeNombre"),
+            ("sedeciudad",           "sedeCiudad"),
+            ("sede",                 "sedeNombre"),
+            ("nombresede",           "sedeNombre"),
+            ("usuarioemail",         "usuarioEmail"),
+            ("emailusuario",         "usuarioEmail"),
+            ("nombreusuario",        "usuarioNombre"),
+            ("usuario",              "usuarioNombre")
+        };
+        foreach (var (frag, campo) in reglas)
+        {
+            if (n.Contains(frag) || (l is not null && l.Contains(frag)))
+            {
+                // null como campo es una marca de "ignorar esta regla y no
+                // mapear a sistema" — para no robar campos que ya manejan
+                // PacientePrefillHelper / HeaderAutoFillHelper.
+                return campo;
+            }
         }
         return null;
     }

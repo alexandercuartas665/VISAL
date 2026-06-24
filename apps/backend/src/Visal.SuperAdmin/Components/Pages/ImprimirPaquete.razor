@@ -288,8 +288,12 @@ else
             {
                 var schEsc = TryParseSchema(esc.SchemaJson);
                 var valEsc = TryParseValores(esc.ValoresJson);
+                // Usar el Header del schema de la escala — asi sale el logo
+                // del tenant y el Titulo configurado (ej. "ESCALA BARTHEL")
+                // en vez del Codigo+Nombre del FormDefinition.
+                var hdrEsc = schEsc?.Header ?? FormHeader.Default();
                 <div class="pack-doc">
-                    @RenderHeader(FormHeader.Default(), esc.FormatoNombre, "ESC",
+                    @RenderHeader(hdrEsc, esc.FormatoNombre, "ESC",
                         esc.Id.ToString().Substring(0,8).ToUpperInvariant(),
                         $"Aplicada: {esc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
                     <div class="pack-band">Resultado</div>
@@ -309,8 +313,9 @@ else
             {
                 var schDoc = TryParseSchema(doc.SchemaJson);
                 var valDoc = TryParseValores(doc.ValoresJson);
+                var hdrEvo = schDoc?.Header ?? FormHeader.Default();
                 <div class="pack-doc">
-                    @RenderHeader(FormHeader.Default(), doc.FormatoNombre, "EVO",
+                    @RenderHeader(hdrEvo, doc.FormatoNombre, "EVO",
                         doc.Id.ToString().Substring(0,8).ToUpperInvariant(),
                         $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
                     <div class="pack-band">Evolucion</div>
@@ -330,8 +335,9 @@ else
             {
                 var schDoc = TryParseSchema(doc.SchemaJson);
                 var valDoc = TryParseValores(doc.ValoresJson);
+                var hdrCon = schDoc?.Header ?? FormHeader.Default();
                 <div class="pack-doc">
-                    @RenderHeader(FormHeader.Default(), doc.FormatoNombre, "CON",
+                    @RenderHeader(hdrCon, doc.FormatoNombre, "CON",
                         doc.Id.ToString().Substring(0,8).ToUpperInvariant(),
                         $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
                     <div class="pack-band">Consentimiento informado</div>

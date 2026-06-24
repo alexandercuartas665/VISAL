@@ -226,4 +226,18 @@ public sealed class FormColumn
     /// puede sobrescribir. Util para "NO REFIERE" / "NORMAL" / etc.</summary>
     [JsonPropertyName("defaultValue")]
     public string? DefaultValue { get; set; }
+
+    /// <summary>Nombre (Name) de OTRA columna de la misma tabla que actua como
+    /// disparador. Si esta seteado, las celdas de esta columna solo se habilitan
+    /// cuando la celda hermana (mismo rowIdx) tenga el valor <see cref="EnabledByValue"/>.
+    /// Ejemplo: en actividad_fisica, las columnas cantidad/frecuencia tienen
+    /// EnabledByColumn="refiere" y EnabledByValue="SI", asi se desactivan si
+    /// el paciente reporta NO. Vacio = sin condicion (comportamiento normal).</summary>
+    [JsonPropertyName("enabledByColumn")]
+    public string? EnabledByColumn { get; set; }
+
+    /// <summary>Valor que debe tener la celda disparadora para habilitar esta
+    /// columna. Compara case-insensitive con trim. Vacio = sin condicion.</summary>
+    [JsonPropertyName("enabledByValue")]
+    public string? EnabledByValue { get; set; }
 }

@@ -87,6 +87,31 @@ else
     </div>
 }
 
+@* Picker CIE-11 unico, compartido por todas las celdas autocomplete con catalog=cie11
+   de esta instancia del viewer. El AbrirCie11Picker(cellKey) setea el target y abre. *@
+<Cie11Picker @bind-Visible="_cie11PickerOpen" OnSelected="OnCie11Selected" />
+
+<style>
+    /* Celdas deshabilitadas por condicional EnabledByColumn. Se ven grises claras
+       para que el doctor entienda que no aplica en esa fila. El cursor pasa a
+       not-allowed al sobrevolar. Solo aplica a inputs/selects con la clase
+       explicita en la celda; no toca otros disabled del resto del formulario
+       (prefill, readonly de columna, etc.). */
+    .fv-tbl-cell-off input,
+    .fv-tbl-cell-off select {
+        background-color: #f1f5f9 !important;
+        color: #94a3b8 !important;
+        cursor: not-allowed;
+        border-color: #e2e8f0 !important;
+    }
+    .fv-tbl-cell-off { background-color: #fafbfc; }
+
+    /* Input + lupita para celdas autocomplete tipo CIE-11 */
+    .fv-tbl-autocomp { display: flex; gap: 4px; align-items: stretch; }
+    .fv-tbl-autocomp input { flex: 1; min-width: 0; }
+    .fv-tbl-lupa { padding: 2px 8px; font-size: 13px; line-height: 1; flex-shrink: 0; }
+</style>
+
 @code {
     [Parameter] public FormSchema? Schema { get; set; }
     [Parameter] public Dictionary<string, string?> Valores { get; set; } = new();
@@ -365,14 +390,25 @@ else
                                             {
                                                 cellOptions = co;
                                             }
-                                            <td>
-                                                @if (!string.IsNullOrEmpty(seedVal))
+                                            // Solo tratamos seedVal como ETIQUETA FIJA cuando la columna
+                                            // es texto puro sin opciones (primera columna tipo "Atrofia",
+                                            // "Cabeza"). Para columnas select/autocomplete o cualquier
+                                            // columna con opciones (incluyendo override por fila), seedVal
+                                            // se interpreta como VALOR INICIAL editable.
+                                            var hasOptionsHere = cellOptions is not null
+                                                || (c.Options is { Count: > 0 });
+                                            var esEtiquetaFija = !string.IsNullOrEmpty(seedVal)
+                                                && c.FieldType == "text" && !hasOptionsHere;
+                                            var habilitada = esEtiquetaFija || IsCellEnabled(node, idx, c);
+                                            var tdClass = !habilitada ? "fv-tbl-cell-off" : "";
+                                            <td class="@tdClass">
+                                                @if (esEtiquetaFija)
                                                 {
                                                     <span class="fv-tbl-seed-cell">@seedVal</span>
                                                 }
                                                 else
                                                 {
-                                                    @RenderTableCell(c, cellKey, cellOptions)
+                                                    @RenderTableCell(c, cellKey, cellOptions, seedVal, !habilitada, node, idx)
                                                 }
                                             </td>
                                             colIdx++;
@@ -524,10 +560,20 @@ else
         }
     };
 
-    private RenderFragment RenderTableCell(FormColumn c, string key, List<string>? overrideOptions = null) => __builder =>
+    private RenderFragment RenderTableCell(FormColumn c, string key, List<string>? overrideOptions = null, string? initialValue = null, bool forceDisabled = false, FormNode? tableNode = null, int rowIdx = 0) => __builder =>
     {
-        var val = GetValue(key) ?? "";
-        var ro = ReadOnly || (ReadOnlyKeys is not null && ReadOnlyKeys.Contains(key));
+        // Orden de precedencia: valor del doctor > seedVal (default editable) > "".
+        // Esto permite que filas pre-semilladas arranquen con un valor preseleccionado
+        // (ej. "NO REFIERE" en columnas tipo lista) y al mismo tiempo el doctor pueda
+        // sobreescribirlo. Si el doctor lo borra, el SetValue persiste el string vacio.
+        var val = GetValue(key) ?? initialValue ?? "";
+        // forceDisabled = la condicional de habilitacion por trigger no se satisface.
+        // Lo combinamos con el ReadOnly normal para que el <input>/select salga gris.
+        var ro = ReadOnly || forceDisabled || (ReadOnlyKeys is not null && ReadOnlyKeys.Contains(key));
+        // Si esta forzada deshabilitada, no mostramos valor (invariante "deshabilitada = vacia").
+        // El cleanup en el dict ya se hizo en OnTableCellChanged cuando se cambio el trigger;
+        // este branch cubre el render inicial donde DefaultValuesHelper ya filtro.
+        if (forceDisabled) { val = ""; }
         // Si la celda seed trae opciones especificas, esas mandan; si no, las
         // de la columna. Asi una tabla puede tener un "default" de columna y
         // sobre-escribir por fila para casos como Examen Fisico (Atrofia con
@@ -537,15 +583,29 @@ else
         // el fieldType de la columna sea "text". Esto facilita configurar tablas
         // tipo Examen Fisico sin tener que cambiar el fieldType de la columna.
         var effectiveType = (opts is not null && opts.Count > 0 && c.FieldType == "text") ? "select" : c.FieldType;
+        // Render-time fallback: si la celda quedo sin valor (ni del doctor ni seed)
+        // y es un select/autocomplete con opciones, mostramos la primera como default
+        // visual. No aplica si la celda esta forzadamente deshabilitada (debe quedar vacia).
+        if (!forceDisabled
+            && string.IsNullOrEmpty(val)
+            && opts is { Count: > 0 }
+            && (effectiveType == "select" || effectiveType == "autocomplete"))
+        {
+            val = opts[0];
+        }
+        // Wrapper que enruta el SetValue para reaccionar a cambios en columnas trigger.
+        // Si la columna actual es disparador de otras, al cambiar su valor las
+        // dependientes se re-evaluan y se limpian las que ya no satisfacen.
+        Func<string?, Task> setCell = v => OnTableCellChangedAsync(tableNode, rowIdx, c, key, v);
         switch (effectiveType)
         {
             case "number":
                 <input type="number" class="form-control form-control-sm" disabled="@ro" value="@val"
-                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                       @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "date":
                 <input type="date" class="form-control form-control-sm" disabled="@ro" value="@val"
-                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                       @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "select":
                 @if (c.AllowCustom)
@@ -561,7 +621,7 @@ else
                            disabled="@ro" value="@val"
                            onfocus="this.dataset.prev=this.value; this.value='';"
                            onblur="if(!this.value && this.dataset.prev){this.value=this.dataset.prev;}"
-                           @onchange="e => SetValue(key, e.Value?.ToString())" />
+                           @onchange="e => setCell(e.Value?.ToString())" />
                     <datalist id="@listId">
                         @if (opts is not null)
                         {
@@ -572,7 +632,7 @@ else
                 else
                 {
                     <select class="form-select form-select-sm" disabled="@ro" value="@val"
-                            @onchange="e => SetValue(key, e.Value?.ToString())">
+                            @onchange="e => setCell(e.Value?.ToString())">
                         <option value="">Seleccione...</option>
                         @if (opts is not null)
                         {
@@ -581,12 +641,97 @@ else
                     </select>
                 }
                 break;
+            case "autocomplete":
+                // Por ahora solo CIE-11 esta cableado para celdas de tabla. Otros
+                // catalogos (medicamentos, cups...) caerian al else con un input
+                // de texto plano hasta que se les agregue su picker propio.
+                @if (string.Equals(c.Catalog, "cie11", StringComparison.OrdinalIgnoreCase))
+                {
+                    <div class="fv-tbl-autocomp">
+                        <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
+                               placeholder="Codigo CIE-11 o usa la lupa"
+                               @onchange="e => setCell(e.Value?.ToString())" />
+                        <button type="button" class="btn btn-sm btn-outline-primary fv-tbl-lupa"
+                                disabled="@ro" title="Buscar diagnostico CIE-11"
+                                @onclick="() => AbrirCie11Picker(key)">
+                            &#128269;
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
+                           @onchange="e => setCell(e.Value?.ToString())" />
+                }
+                break;
             default:
                 <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
-                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                       @onchange="e => setCell(e.Value?.ToString())" />
                 break;
         }
     };
+
+    /// <summary>Estado para el picker CIE-11 compartido por todas las celdas
+    /// autocomplete de tipo cie11 dentro de esta instancia del viewer.
+    /// _cie11TargetKey nos dice a que celda escribir el resultado.</summary>
+    private bool _cie11PickerOpen;
+    private string? _cie11TargetKey;
+
+    private void AbrirCie11Picker(string cellKey)
+    {
+        _cie11TargetKey = cellKey;
+        _cie11PickerOpen = true;
+    }
+
+    private async Task OnCie11Selected((string Code, string Title) item)
+    {
+        if (string.IsNullOrEmpty(_cie11TargetKey)) { return; }
+        // Formato "CODIGO - Titulo". Asi la impresion y el RDA leen un campo
+        // unico legible; parsear el codigo aparte despues es trivial (split en
+        // el primer guion). Si el titulo viene vacio, guardamos solo el codigo.
+        var texto = string.IsNullOrWhiteSpace(item.Title) ? item.Code : $"{item.Code} - {item.Title}";
+        await SetValue(_cie11TargetKey, texto);
+        _cie11TargetKey = null;
+    }
+
+    /// <summary>True si la celda esta habilitada segun su condicional. Si la columna
+    /// no tiene EnabledByColumn configurado, siempre devuelve true (comportamiento
+    /// normal). Si tiene, busca la celda hermana en la misma fila y compara
+    /// case-insensitive con trim. Si la columna trigger no existe en el schema,
+    /// devolvemos true (no rompe el formulario, asumimos config invalida).</summary>
+    private bool IsCellEnabled(FormNode? tableNode, int rowIdx, FormColumn col)
+    {
+        if (tableNode is null || string.IsNullOrEmpty(col.EnabledByColumn)) { return true; }
+        var triggerCol = tableNode.Columns?.FirstOrDefault(c =>
+            string.Equals(c.Name, col.EnabledByColumn, StringComparison.OrdinalIgnoreCase));
+        if (triggerCol is null) { return true; }
+        var triggerKey = $"tbl:{tableNode.Id}:{rowIdx}:{triggerCol.Id}";
+        var triggerVal = GetValue(triggerKey);
+        if (string.IsNullOrEmpty(col.EnabledByValue) || string.IsNullOrEmpty(triggerVal)) { return false; }
+        return string.Equals(triggerVal.Trim(), col.EnabledByValue.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>SetValue para celdas de tabla con cascade: tras guardar el nuevo
+    /// valor, si la columna actual es disparadora de otras columnas de la misma
+    /// fila, recorre las dependientes y limpia las que dejaron de cumplir su
+    /// condicion. Asi el invariante "celda deshabilitada = vacia" se mantiene.</summary>
+    private async Task OnTableCellChangedAsync(FormNode? tableNode, int rowIdx, FormColumn col, string key, string? newVal)
+    {
+        await SetValue(key, newVal);
+        if (tableNode?.Columns is null || string.IsNullOrWhiteSpace(col.Name)) { return; }
+        foreach (var depCol in tableNode.Columns)
+        {
+            if (string.IsNullOrEmpty(depCol.EnabledByColumn)) { continue; }
+            if (!string.Equals(depCol.EnabledByColumn, col.Name, StringComparison.OrdinalIgnoreCase)) { continue; }
+            // depCol depende de la columna que acabamos de cambiar. Re-evaluar.
+            if (IsCellEnabled(tableNode, rowIdx, depCol)) { continue; }
+            var depKey = $"tbl:{tableNode.Id}:{rowIdx}:{depCol.Id}";
+            if (!string.IsNullOrEmpty(GetValue(depKey)))
+            {
+                await SetValue(depKey, "");
+            }
+        }
+    }
 
     private int GetRowCount(string key)
     {

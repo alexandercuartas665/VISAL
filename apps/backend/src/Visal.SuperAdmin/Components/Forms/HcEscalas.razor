@@ -264,6 +264,29 @@ else
                     var valores = new Dictionary<string, string?>();
                     PacientePrefillHelper.Aplicar(valores, Paciente, schema, rutas);
 
+                    // Sistema: fecha y hora del momento de aplicar la escala +
+                    // datos del usuario que la inicia. Especialmente util en
+                    // escalas tipo Barthel/Morse/Norton donde el formato pide
+                    // "fecha de valoracion" sin que el doctor la digite.
+                    try
+                    {
+                        string? uName = null, uEmail = null, uSede = null;
+                        if (AuthState is not null)
+                        {
+                            var st = await AuthState;
+                            uName = st.User.Identity?.Name ?? st.User.FindFirst("display_name")?.Value;
+                            uEmail = st.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                            uSede = st.User.FindFirst("sede_nombre")?.Value;
+                        }
+                        SistemaPrefillHelper.Aplicar(valores, new SistemaPrefillHelper.SistemaCtx(
+                            Ahora: DateTimeOffset.Now,
+                            AgenciaNombre: null, AgenciaSlogan: null,
+                            SedeNombre: uSede ?? Paciente.Sede,
+                            SedeCiudad: Paciente.Ciudad,
+                            UsuarioNombre: uName, UsuarioEmail: uEmail), rutas);
+                    }
+                    catch { }
+
                     // Firmas (paciente + profesional logueado). Si la escala
                     // tiene rutas firmaPaciente / firmaProfesional configuradas
                     // y existe URL para cada una, se cablean al iniciar. Si

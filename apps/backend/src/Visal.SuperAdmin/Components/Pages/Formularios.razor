@@ -320,53 +320,99 @@
                                 }
                                 <input class="fb-input" placeholder="Valor por defecto"
                                        @bind="col.DefaultValue" @bind:event="oninput" />
+
+                                @{
+                                    // Otras columnas con valores discretos que pueden actuar como disparadoras.
+                                    // Aceptamos cualquier select/autocomplete (asi sea AllowCustom o con
+                                    // opciones por fila) y tambien columnas text con Options a nivel columna
+                                    // que el viewer promueve a select. Excluye la columna actual.
+                                    var triggerCandidates = (_selected!.Columns ?? new())
+                                        .Where(o => !ReferenceEquals(o, col)
+                                            && !string.IsNullOrWhiteSpace(o.Name)
+                                            && (o.FieldType == "select" || o.FieldType == "autocomplete"
+                                                || (o.Options is { Count: > 0 })))
+                                        .ToList();
+                                }
+                                @if (triggerCandidates.Count > 0)
+                                {
+                                    <div class="fb-col-cond">
+                                        <small>Habilitar solo si...</small>
+                                        <div class="fb-col-row">
+                                            <select class="fb-input" @bind="col.EnabledByColumn">
+                                                <option value="">(siempre habilitada)</option>
+                                                @foreach (var t in triggerCandidates)
+                                                {
+                                                    <option value="@t.Name">@t.Label</option>
+                                                }
+                                            </select>
+                                            <input class="fb-input" placeholder="= valor"
+                                                   @bind="col.EnabledByValue" @bind:event="oninput"
+                                                   disabled="@string.IsNullOrEmpty(col.EnabledByColumn)" />
+                                        </div>
+                                    </div>
+                                }
                             </div>
                         }
                     }
                     <button class="fb-btn" @onclick="AddColumn">+ Columna</button>
 
-                    @* ---- Editor de opciones por fila seed ---- *@
-                    @if (_selected.SeedRows is { Count: > 0 } seedRows && _selected.Columns is { Count: > 0 } cols2)
+                    @* ---- Editor de filas pre-semilladas + opciones por celda ---- *@
+                    @if (_selected.Columns is { Count: > 0 } cols2)
                     {
+                        var seedRows = _selected.SeedRows ?? new List<List<string?>>();
                         <div class="fb-prop fb-seed-opts">
-                            <label>Opciones por fila (override de la columna)</label>
+                            <label>Filas pre-semilladas (@seedRows.Count)</label>
                             <div class="fb-hint">
-                                Si una fila necesita opciones distintas a las generales de la columna,
-                                escribelas aqui (una por linea). Si dejas vacio, la fila usa las opciones
-                                de la columna. Si la columna no tiene opciones, escribir aqui convierte
-                                esa celda en select automaticamente.
+                                Cada celda con valor = texto fijo (no editable por el usuario).
+                                Vacia = el usuario la rellena. Las opciones por fila solo aplican a
+                                celdas editables; sirven para sobreescribir las opciones generales
+                                de la columna en filas concretas (ej. "Atrofia" usa NO SE OBSERVA /
+                                LEVE; "Pupilas" usa SI / NO).
                             </div>
-                            <button class="fb-btn" @onclick="() => _seedOptsOpen = !_seedOptsOpen">
-                                @(_seedOptsOpen ? "Ocultar" : "Mostrar") editor de opciones por fila
-                            </button>
+                            <div class="fb-seed-actions">
+                                <button class="fb-btn" @onclick="() => _seedOptsOpen = !_seedOptsOpen">
+                                    @(_seedOptsOpen ? "Ocultar" : "Mostrar") editor de filas
+                                </button>
+                                <button class="fb-btn fb-btn-primary" @onclick="() => AddSeedRow(_selected)">+ Agregar fila</button>
+                            </div>
                             @if (_seedOptsOpen)
                             {
+                                @if (seedRows.Count == 0)
+                                {
+                                    <div class="fb-hint" style="margin-top:8px;">Aun no hay filas. Usa "+ Agregar fila" para empezar.</div>
+                                }
                                 @for (var r = 0; r < seedRows.Count; r++)
                                 {
                                     var rowIdx = r;
                                     var seedRow = seedRows[r];
-                                    var firstLabel = seedRow is { Count: > 0 } && !string.IsNullOrWhiteSpace(seedRow[0]) ? seedRow[0]! : $"Fila {r + 1}";
+                                    while (seedRow.Count < cols2.Count) { seedRow.Add(null); }
+                                    var firstLabel = !string.IsNullOrWhiteSpace(seedRow[0]) ? seedRow[0]! : $"(fila {r + 1})";
                                     <div class="fb-seed-row">
-                                        <div class="fb-seed-row-h">@firstLabel</div>
+                                        <div class="fb-seed-row-h">
+                                            <span>@firstLabel</span>
+                                            <button class="fb-mini fb-mini-danger" title="Eliminar fila"
+                                                    @onclick="() => RemoveSeedRow(_selected, rowIdx)">×</button>
+                                        </div>
                                         @{ var colIdx2 = 0; }
                                         @foreach (var col in cols2)
                                         {
                                             var c2 = col;
                                             var ci2 = colIdx2;
-                                            var seedVal2 = (seedRow is not null && ci2 < seedRow.Count) ? seedRow[ci2] : null;
-                                            // Solo mostramos editor para columnas EDITABLES (seedVal vacio).
-                                            // Si la celda tiene texto fijo (ej. "Atrofia") no tiene sentido
-                                            // configurarle opciones porque no la rellena el doctor.
-                                            if (string.IsNullOrEmpty(seedVal2))
-                                            {
-                                                <div class="fb-seed-cell">
-                                                    <small>@(c2.Label) <code>@(c2.Name)</code></small>
+                                            var seedVal2 = ci2 < seedRow.Count ? seedRow[ci2] : null;
+                                            <div class="fb-seed-cell">
+                                                <small>@(c2.Label) <code>@(c2.Name)</code></small>
+                                                <input class="fb-input fb-mono"
+                                                       placeholder="Texto fijo (vacio = editable por usuario)"
+                                                       value="@seedVal2"
+                                                       @oninput="e => SetSeedCellValue(_selected, rowIdx, ci2, e.Value?.ToString())" />
+                                                @if (string.IsNullOrEmpty(seedVal2))
+                                                {
                                                     <textarea class="fb-input fb-mono" rows="2"
-                                                              placeholder="Una opcion por linea (vacio = usa opciones de la columna)"
+                                                              placeholder="Opciones por fila (una por linea) — vacio = usa opciones de la columna"
                                                               value="@SeedCellOptionsText(_selected, rowIdx, ci2)"
                                                               @oninput="e => SetSeedCellOptions(_selected, rowIdx, ci2, e.Value?.ToString())"></textarea>
-                                                </div>
-                                            }
+                                                }
+                                            </div>
                                             colIdx2++;
                                         }
                                     </div>
@@ -557,10 +603,16 @@
     .pr-add-map { font-size: 11.5px; margin-top: 6px; }
     .pr-add-route { width: 100%; margin-top: 4px; }
 
+    /* Bloque de condicional de habilitacion por columna (FormBuilder) */
+    .fb-col-cond { margin-top: 4px; padding: 6px 8px; background: #eff6ff; border: 1px dashed #93c5fd; border-radius: 4px; }
+    .fb-col-cond small { color: #1e40af; font-weight: 700; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.3px; display: block; margin-bottom: 4px; }
+    .fb-col-cond .fb-col-row { gap: 6px; }
+
     /* Editor de opciones por fila seed (panel derecho cuando se selecciona tabla) */
     .fb-seed-opts { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #cbd5e1; }
+    .fb-seed-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
     .fb-seed-row { margin-top: 8px; padding: 8px; background: #fefce8; border: 1px solid #fde68a; border-radius: 6px; }
-    .fb-seed-row-h { font-weight: 700; font-size: 12px; color: #854d0e; margin-bottom: 6px; }
+    .fb-seed-row-h { font-weight: 700; font-size: 12px; color: #854d0e; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .fb-seed-cell { margin-top: 6px; }
     .fb-seed-cell small { display: block; color: #6b7280; font-size: 10.5px; margin-bottom: 3px; }
     .fb-seed-cell code { background: #f1f5f9; padding: 0 4px; border-radius: 3px; font-size: 10px; }
@@ -1124,6 +1176,75 @@
         }
         table.SeedRowCellOptions ??= new Dictionary<string, List<string>>();
         table.SeedRowCellOptions[key] = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    /// <summary>Agrega una fila al final de SeedRows. Para columnas tipo select
+    /// estricto se pre-rellena con col.DefaultValue (si esta) o la primera opcion
+    /// de la lista, para que el doctor abra la HC con un valor sensato y solo
+    /// tenga que cambiar las celdas que no aplican. Las columnas tipo text/date/
+    /// number/autocomplete quedan en null (sin valor inicial agresivo).</summary>
+    private void AddSeedRow(FormNode table)
+    {
+        if (!table.IsTable || table.Columns is null || table.Columns.Count == 0) { return; }
+        table.SeedRows ??= new List<List<string?>>();
+        var nuevaFila = new List<string?>();
+        foreach (var c in table.Columns)
+        {
+            nuevaFila.Add(ValorInicialCelda(c));
+        }
+        table.SeedRows.Add(nuevaFila);
+        _seedOptsOpen = true;
+    }
+
+    /// <summary>Default para una celda recien creada en + Agregar fila.
+    /// Solo aplica a select estricto (no datalist) para no forzar texto en
+    /// campos de entrada libre. Devuelve null si no hay default razonable.</summary>
+    private static string? ValorInicialCelda(FormColumn c)
+    {
+        if (c.FieldType == "select" && !c.AllowCustom)
+        {
+            if (!string.IsNullOrWhiteSpace(c.DefaultValue)) { return c.DefaultValue; }
+            if (c.Options is { Count: > 0 }) { return c.Options[0]; }
+        }
+        return null;
+    }
+
+    /// <summary>Elimina la fila rowIdx de SeedRows y re-numera las llaves de
+    /// SeedRowCellOptions para que las filas posteriores conserven sus opciones.
+    /// Si la fila tenia overrides, esos overrides se descartan.</summary>
+    private void RemoveSeedRow(FormNode table, int rowIdx)
+    {
+        if (table.SeedRows is null || rowIdx < 0 || rowIdx >= table.SeedRows.Count) { return; }
+        table.SeedRows.RemoveAt(rowIdx);
+        if (table.SeedRows.Count == 0) { table.SeedRows = null; }
+
+        if (table.SeedRowCellOptions is { Count: > 0 } opts)
+        {
+            var nuevo = new Dictionary<string, List<string>>();
+            foreach (var kv in opts)
+            {
+                var parts = kv.Key.Split('_', 2);
+                if (parts.Length != 2 || !int.TryParse(parts[0], out var r))
+                {
+                    nuevo[kv.Key] = kv.Value;
+                    continue;
+                }
+                if (r == rowIdx) { continue; }
+                var nuevaR = r > rowIdx ? r - 1 : r;
+                nuevo[$"{nuevaR}_{parts[1]}"] = kv.Value;
+            }
+            table.SeedRowCellOptions = nuevo.Count == 0 ? null : nuevo;
+        }
+    }
+
+    /// <summary>Escribe el valor fijo de una celda seed. Vacio => null (celda
+    /// editable por el usuario en el formulario final).</summary>
+    private static void SetSeedCellValue(FormNode table, int rowIdx, int colIdx, string? text)
+    {
+        if (table.SeedRows is null || rowIdx < 0 || rowIdx >= table.SeedRows.Count) { return; }
+        var fila = table.SeedRows[rowIdx];
+        while (fila.Count <= colIdx) { fila.Add(null); }
+        fila[colIdx] = string.IsNullOrEmpty(text) ? null : text;
     }
 
     private void OnOptionsInput(ChangeEventArgs e)

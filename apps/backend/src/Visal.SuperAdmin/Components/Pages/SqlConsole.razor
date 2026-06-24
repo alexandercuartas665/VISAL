@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
+@using System.Text
 @using Visal.Application.Tenancy
 @inject ISqlConsoleService Svc
 @inject IJSRuntime JS
@@ -102,6 +103,12 @@
                         @if (_result.RowsReturned is int rr) { <span>@rr fila(s)</span> }
                         @if (_result.RowsAffected is int ra) { <span>@ra fila(s) afectada(s)</span> }
                         <span>@_result.DurationMs ms</span>
+                        @if (_result.Success && _result.QueryType == "SELECT" && _result.Filas.Count > 0)
+                        {
+                            <button class="btn btn-outline-secondary btn-sm sql-csv-btn" @onclick="DescargarCsv" title="Descargar resultado como CSV (UTF-8)">
+                                Exportar CSV
+                            </button>
+                        }
                     </div>
                 }
             </div>
@@ -200,11 +207,16 @@
     .sql-warn code { background:#fee2e2; padding:1px 6px; border-radius:4px; font-size:11.5px; }
     .sql-alert { background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:8px 12px; border-radius:6px; margin-bottom:10px; }
     .sql-ok { background:#dcfce7; border:1px solid #86efac; color:#166534; padding:8px 12px; border-radius:6px; margin-bottom:10px; }
-    .sql-grid { display:grid; grid-template-columns:260px 1fr 320px; gap:14px; align-items:start; }
-    @@media (max-width:1300px) { .sql-grid { grid-template-columns: 220px 1fr; } .sql-right { display:none; } }
-    @@media (max-width:900px) { .sql-grid { grid-template-columns: 1fr; } .sql-explorer-aside { display:none; } }
+    .sql-grid { display:grid; grid-template-columns:260px minmax(0,1fr) 320px; gap:14px; align-items:start; }
+    @@media (max-width:1300px) { .sql-grid { grid-template-columns: 220px minmax(0,1fr); } .sql-right { display:none; } }
+    @@media (max-width:900px) { .sql-grid { grid-template-columns: minmax(0,1fr); } .sql-explorer-aside { display:none; } }
+    /* minmax(0,1fr) bloquea la regla "min-width:auto" del grid: sin esto el contenido
+       interno (tabla con width:max-content) hace crecer la columna y se pierde el scroll. */
+    .sql-left { min-width:0; }
+    .sql-right { min-width:0; }
 
     .sql-editor-card, .sql-results-card, .sql-hist-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:12px; }
+    .sql-results-card { min-width:0; max-width:100%; overflow:hidden; }
     .sql-editor-card { margin-bottom:14px; }
     .sql-editor-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
     .sql-editor-h label { font-size:12px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.3px; }
@@ -267,7 +279,24 @@
     .sql-explorer-item:active { background:#dbeafe; }
     .sql-explorer-item-name { flex:1; font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#334155; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .sql-explorer-item-count { font-size:10px; color:#64748b; flex-shrink:0; }
+    .sql-csv-btn { margin-left:8px; font-size:11px; padding:2px 10px; }
 </style>
+
+<script>
+    // Genera un Blob CSV (con BOM UTF-8 para que Excel respete tildes y enies) y
+    // dispara la descarga via un <a download> sintetico.
+    window.visalDescargarCsv = function (filename, content) {
+        var blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), content], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    };
+</script>
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
@@ -414,5 +443,32 @@
     {
         if (string.IsNullOrEmpty(s) || s.Length <= maxLen) { return s ?? ""; }
         return s[..(maxLen - 3)] + "...";
+    }
+
+    private async Task DescargarCsv()
+    {
+        if (_result is null || _result.Columnas.Count == 0) { return; }
+        var sb = new StringBuilder();
+        sb.AppendLine(string.Join(",", _result.Columnas.Select(EscapeCsv)));
+        foreach (var fila in _result.Filas)
+        {
+            sb.AppendLine(string.Join(",", fila.Select(c => EscapeCsv(c ?? ""))));
+        }
+        var nombre = $"consulta-sql-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+        try
+        {
+            await JS.InvokeVoidAsync("visalDescargarCsv", nombre, sb.ToString());
+            _ok = $"CSV generado: {nombre} ({_result.Filas.Count} filas).";
+        }
+        catch (Exception ex) { _error = "No se pudo descargar el CSV: " + ex.Message; }
+    }
+
+    private static string EscapeCsv(string s)
+    {
+        if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0)
+        {
+            return "\"" + s.Replace("\"", "\"\"") + "\"";
+        }
+        return s;
     }
 }

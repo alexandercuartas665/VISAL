@@ -93,12 +93,8 @@
             <div class="ase-form">
                 <div class="ase-f ase-f-full">
                     <label>Busqueda por servicio</label>
-                    <div class="asg-input-row asg-search-svc">
-                        <button class="btn btn-outline-secondary btn-sm asg-search-ico" title="Buscar" tabindex="-1" type="button">&#128269;</button>
-                        <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..."
-                               value="@_filtroSvc" @oninput="e => _filtroSvc = e.Value?.ToString() ?? string.Empty" />
-                        <button class="btn btn-outline-secondary btn-sm" title="Filtros avanzados">&#9776;</button>
-                    </div>
+                    <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..."
+                           value="@_filtroSvc" @oninput="e => _filtroSvc = e.Value?.ToString() ?? string.Empty" />
                 </div>
             </div>
             <div class="asg-grid-wrap asg-grid-svc">
@@ -379,8 +375,6 @@
     .asg-input-row { display:flex; gap:6px; min-width:0; }
     .asg-input-row > input, .asg-input-row > select { flex:1; min-width:0; }
     /* Busqueda de servicio (card 2): lupa antes del input, separacion contra la tabla. */
-    .asg-search-svc { align-items:center; }
-    .asg-search-ico { background:#f1f5f9; color:#475569; pointer-events:none; }
     .asg-grid-svc { margin-top:12px; }
     /* Mensaje "Servicio preseleccionado/agregado" mostrado dentro de la columna 3,
        justo encima de "Datos del servicio a agregar". */

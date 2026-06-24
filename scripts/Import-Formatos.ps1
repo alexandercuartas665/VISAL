@@ -503,7 +503,6 @@ function Insert-FormDefinition {
         [string]$Tipo,
         [string]$SchemaJson
     )
-    $id = [Guid]::NewGuid().ToString()
     $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss.fffzzz")
 
     # Escapamos comillas simples doblando.
@@ -512,12 +511,32 @@ function Insert-FormDefinition {
     $tipoSql    = if ($Tipo)    { "'" + $Tipo.Replace("'","''")    + "'" } else { "NULL" }
     $schemaSql  = $SchemaJson.Replace("'","''")
 
-    $sql = @"
+    # UPSERT: si el codigo ya existe en este tenant, UPDATE (conserva id y FKs
+    # de HCs creadas previamente). Si no existe, INSERT con id nuevo.
+    $existingId = docker exec $PgContainer psql -U $PgUser -d $PgDb -tA -c "SELECT id FROM form_definitions WHERE codigo = '$Codigo' AND tenant_id = '$TenantId';"
+    if ($existingId) { $existingId = $existingId.Trim() }
+
+    if ($existingId) {
+        $id = $existingId
+        $sql = @"
+UPDATE form_definitions SET
+  nombre = '$nameSql',
+  version = $verSql,
+  tipo = $tipoSql,
+  schema_json = '$schemaSql'::jsonb,
+  activo = true,
+  updated_at = '$now'
+WHERE id = '$id' AND tenant_id = '$TenantId';
+"@
+    } else {
+        $id = [Guid]::NewGuid().ToString()
+        $sql = @"
 INSERT INTO form_definitions
   (id, tenant_id, codigo, nombre, version, tipo, schema_json, prefill_routes_json, activo, created_at, updated_at)
 VALUES
   ('$id', '$TenantId', '$Codigo', '$nameSql', $verSql, $tipoSql, '$schemaSql'::jsonb, NULL, true, '$now', '$now');
 "@
+    }
 
     # Pasamos por stdin para evitar limites de cmdline.
     $tmp = [System.IO.Path]::GetTempFileName()

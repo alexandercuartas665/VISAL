@@ -220,7 +220,14 @@ if (-not (Test-Path $sqlFile)) {
 # Quitar los meta-comandos \restrict y \unrestrict que pg_dump 16.7+ agrega.
 # Son defense-in-depth (anti-injection) pero rompen psql en versiones anteriores
 # a 16.7. Sin ellos el dump funciona igual; los quitamos para portabilidad.
-$lineas = (Get-Content $sqlFile) | Where-Object { $_ -notmatch '^\\(un)?restrict\s' }
+#
+# IMPORTANTE: leemos con encoding UTF-8 explicito. Get-Content sin -Encoding
+# en PowerShell 5.1 usa el codepage del sistema (Windows-1252 en ES) y rompe
+# las tildes/eñes que pg_dump emite en UTF-8. Usamos [System.IO.File] para
+# que el comportamiento sea identico en PS 5.1 y PS 7+.
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$lineasRaw = [System.IO.File]::ReadAllLines($sqlFile, [System.Text.Encoding]::UTF8)
+$lineas = $lineasRaw | Where-Object { $_ -notmatch '^\\(un)?restrict\s' }
 
 # Modo UPSERT: reemplazar "ON CONFLICT DO NOTHING" por
 # "ON CONFLICT (id) DO UPDATE SET col1=EXCLUDED.col1, col2=EXCLUDED.col2, ..."
@@ -253,16 +260,19 @@ if ($Upsert) {
     }
 }
 
-Set-Content -Path $sqlFile -Value $lineas -Encoding UTF8
+# Escribir UTF-8 SIN BOM. psql tolera BOM pero algunos clientes / encadenamientos
+# se confunden; sin BOM es lo mas portable.
+[System.IO.File]::WriteAllLines($sqlFile, [string[]]$lineas, $utf8NoBom)
 
 $sqlSize = [math]::Round((Get-Item $sqlFile).Length / 1KB, 2)
 $sqlLines = (Get-Content $sqlFile | Measure-Object -Line).Lines
 Ok "SQL generado: $sqlFile ($sqlSize KB, $sqlLines lineas)"
 Info "Meta-comandos \restrict/\unrestrict removidos (compatibilidad pg_dump < 16.7)"
+Info "Encoding del archivo: UTF-8 sin BOM (preserva tildes y eñes)"
 
 # Si es modo Replace, anteponer un TRUNCATE para limpiar la tabla en prod
 if ($Replace) {
-    $contenido = Get-Content $sqlFile -Raw
+    $contenido = [System.IO.File]::ReadAllText($sqlFile, [System.Text.Encoding]::UTF8)
     $prefijo = @"
 -- Generado por subir-formularios.ps1 en modo REPLACE el $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 -- Borra todos los form_definitions de prod antes de cargar los de dev.
@@ -273,13 +283,13 @@ DELETE FROM form_definitions;
 
 COMMIT;
 "@
-    Set-Content -Path $sqlFile -Value ($prefijo + "`n" + $contenido + $sufijo) -Encoding UTF8
+    [System.IO.File]::WriteAllText($sqlFile, ($prefijo + "`n" + $contenido + $sufijo), $utf8NoBom)
     Info "Modo REPLACE: prefijado DELETE + envuelto en transaccion"
 }
 
-# Vista previa (primeras 3 lineas INSERT)
+# Vista previa (primeras 30 lineas) - leer con UTF-8 para que se muestre correctamente
 Info "Preview del SQL:"
-Get-Content $sqlFile | Select-Object -First 30 | ForEach-Object {
+[System.IO.File]::ReadAllLines($sqlFile, [System.Text.Encoding]::UTF8) | Select-Object -First 30 | ForEach-Object {
     Write-Host "      $_" -ForegroundColor DarkGray
 }
 

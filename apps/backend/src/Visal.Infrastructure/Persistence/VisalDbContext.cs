@@ -63,6 +63,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
+    public DbSet<FormDefinitionSnapshot> FormDefinitionSnapshots => Set<FormDefinitionSnapshot>();
     public DbSet<HistoriaClinica> HistoriasClinicas => Set<HistoriaClinica>();
     public DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos => Set<HistoriaClinicaMedicamento>();
     public DbSet<HistoriaClinicaOrdenServicio> HistoriaClinicaOrdenesServicio => Set<HistoriaClinicaOrdenServicio>();
@@ -517,6 +518,27 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             // CodigoSecundario NO es unico - es un id alternativo libre.
             b.HasIndex(x => new { x.TenantId, x.CodigoSecundario });
+        });
+
+        modelBuilder.Entity<FormDefinitionSnapshot>(b =>
+        {
+            // Misma forma que FormDefinition para que el snapshot pueda contener
+            // cualquier valor que aceptaba la fila viva. MaxLength espejado.
+            b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Version).HasMaxLength(20);
+            b.Property(x => x.Tipo).HasMaxLength(40);
+            b.Property(x => x.SchemaJson).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.PrefillRoutesJson).HasColumnType("jsonb");
+            b.Property(x => x.Motivo).HasMaxLength(80);
+            b.HasOne(x => x.FormDefinition)
+                .WithMany()
+                .HasForeignKey(x => x.FormDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Index compuesto para el listado descendente por FormDefinition
+            // (la consulta dominante: "ultimas 20 versiones de este formulario").
+            b.HasIndex(x => new { x.FormDefinitionId, x.SnapshotAt })
+                .IsDescending(false, true);
         });
 
         modelBuilder.Entity<Medicamento>(b =>

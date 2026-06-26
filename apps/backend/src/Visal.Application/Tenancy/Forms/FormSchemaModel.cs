@@ -240,4 +240,11 @@ public sealed class FormColumn
     /// columna. Compara case-insensitive con trim. Vacio = sin condicion.</summary>
     [JsonPropertyName("enabledByValue")]
     public string? EnabledByValue { get; set; }
+
+    /// <summary>Texto de ayuda que aparece como placeholder de las celdas de esta
+    /// columna (paralelo a FormNode.Placeholder en campos top-level). Vacio =
+    /// sin placeholder. Antes el viewer caia a "Elige o escribe" / c.Catalog
+    /// como hint hardcodeado; ahora cada formulario decide explicitamente.</summary>
+    [JsonPropertyName("placeholder")]
+    public string? Placeholder { get; set; }
 }

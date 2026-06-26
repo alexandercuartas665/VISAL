@@ -314,6 +314,117 @@ else
             return "";
         }
 
+        // ── Calculadores clinicos (IMC + clasificacion, tension, perimetro abdominal) ──
+        // Helper local que lee el valor de un field y extrae el primer numero
+        // (mismo fallback que sum/sumprod/cases: parse directo, sino primer match
+        // de numero embebido en strings tipo "120 - Normal"). Devuelve null si
+        // no hay valor o no contiene numero valido.
+        double? LeerNum(string fieldName)
+        {
+            if (!values.TryGetValue(fieldName, out var v) || string.IsNullOrWhiteSpace(v)) { return null; }
+            if (double.TryParse(v, System.Globalization.NumberStyles.Any, ci, out var nDirect)) { return nDirect; }
+            var mNum = System.Text.RegularExpressions.Regex.Match(v, @"-?\d+(?:[.,]\d+)?");
+            if (mNum.Success &&
+                double.TryParse(mNum.Value.Replace(',', '.'), System.Globalization.NumberStyles.Any, ci, out var nExtract))
+            {
+                return nExtract;
+            }
+            return null;
+        }
+
+        // imc(pesoName, tallaName) -> peso (kg) / talla (m)^2, un decimal.
+        // Heuristica de unidades: si talla > 3 asumimos cm y dividimos por 100;
+        // si <= 3 asumimos que ya viene en metros (ej "1.70").
+        var mImc = System.Text.RegularExpressions.Regex.Match(
+            f, @"^imc\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mImc.Success)
+        {
+            var peso = LeerNum(mImc.Groups[1].Value);
+            var talla = LeerNum(mImc.Groups[2].Value);
+            if (peso is null || talla is null || peso.Value <= 0 || talla.Value <= 0) { return ""; }
+            var tallaM = talla.Value > 3 ? talla.Value / 100.0 : talla.Value;
+            if (tallaM <= 0) { return ""; }
+            var imc = peso.Value / (tallaM * tallaM);
+            return imc.ToString("0.0", ci);
+        }
+
+        // imcClass(imcRefName) -> clasificacion OMS sobre el campo IMC calculado.
+        var mImcClass = System.Text.RegularExpressions.Regex.Match(
+            f, @"^imcClass\s*\(\s*([A-Za-z0-9_]+)\s*\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mImcClass.Success)
+        {
+            var imcVal = LeerNum(mImcClass.Groups[1].Value);
+            if (imcVal is null) { return ""; }
+            var v = imcVal.Value;
+            if (v < 18.5) { return "Bajo peso"; }
+            if (v < 25.0) { return "Normal"; }
+            if (v < 30.0) { return "Sobrepeso"; }
+            if (v < 35.0) { return "Obesidad grado I"; }
+            if (v < 40.0) { return "Obesidad grado II"; }
+            return "Obesidad grado III";
+        }
+
+        // tensionClass(sisName, diaName) -> clasificacion ESH/ESC 2018.
+        // Regla: "la categoria mas alta gana" => evaluamos sis y dia por separado,
+        // tomamos el peor de los dos. Sufijo "(sistolica aislada)" cuando sis>=140
+        // y dia<90 (hipertension sistolica aislada del adulto mayor).
+        var mTen = System.Text.RegularExpressions.Regex.Match(
+            f, @"^tensionClass\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mTen.Success)
+        {
+            var sis = LeerNum(mTen.Groups[1].Value);
+            var dia = LeerNum(mTen.Groups[2].Value);
+            if (sis is null || dia is null) { return ""; }
+            var s = sis.Value;
+            var d = dia.Value;
+            int GradoSis(double x) => x >= 180 ? 5 : x >= 160 ? 4 : x >= 140 ? 3 : x >= 130 ? 2 : x >= 120 ? 1 : 0;
+            int GradoDia(double x) => x >= 110 ? 5 : x >= 100 ? 4 : x >=  90 ? 3 : x >=  85 ? 2 : x >=  80 ? 1 : 0;
+            var peor = Math.Max(GradoSis(s), GradoDia(d));
+            var clase = peor switch
+            {
+                5 => "HTA grado 3",
+                4 => "HTA grado 2",
+                3 => "HTA grado 1",
+                2 => "Normal alta",
+                1 => "Normal",
+                _ => "Optima"
+            };
+            if (s >= 140 && d < 90) { clase += " (sistolica aislada)"; }
+            return clase;
+        }
+
+        // perimetroRiesgo(perimetroName, sexoName) -> riesgo cardiometabolico
+        // segun perimetro abdominal (cm) y sexo. Sin sexo legible -> "".
+        var mPer = System.Text.RegularExpressions.Regex.Match(
+            f, @"^perimetroRiesgo\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mPer.Success)
+        {
+            var per = LeerNum(mPer.Groups[1].Value);
+            if (per is null) { return ""; }
+            if (!values.TryGetValue(mPer.Groups[2].Value, out var sexoVal) || string.IsNullOrWhiteSpace(sexoVal)) { return ""; }
+            var sexo = sexoVal.Trim().ToUpperInvariant();
+            var p = per.Value;
+            var esHombre = sexo == "MASCULINO" || sexo == "HOMBRE" || sexo == "M";
+            var esMujer  = sexo == "FEMENINO"  || sexo == "MUJER"  || sexo == "F";
+            if (esHombre)
+            {
+                if (p < 94) { return "Bajo riesgo"; }
+                if (p <= 102) { return "Riesgo aumentado"; }
+                return "Riesgo alto";
+            }
+            if (esMujer)
+            {
+                if (p < 80) { return "Bajo riesgo"; }
+                if (p <= 88) { return "Riesgo aumentado"; }
+                return "Riesgo alto";
+            }
+            return "";
+        }
+
         return ""; // formula no reconocida -> dejamos vacio
     }
 
@@ -597,14 +708,20 @@ else
         // Si la columna actual es disparador de otras, al cambiar su valor las
         // dependientes se re-evaluan y se limpian las que ya no satisfacen.
         Func<string?, Task> setCell = v => OnTableCellChangedAsync(tableNode, rowIdx, c, key, v);
+        // Placeholder explicito de la columna: si esta vacio NO mostramos hint
+        // (antes caia a c.Catalog o "Elige o escribe" hardcodeado). El builder
+        // expone un input para escribirlo por columna.
+        var ph = c.Placeholder ?? "";
         switch (effectiveType)
         {
             case "number":
                 <input type="number" class="form-control form-control-sm" disabled="@ro" value="@val"
+                       placeholder="@ph"
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "date":
                 <input type="date" class="form-control form-control-sm" disabled="@ro" value="@val"
+                       placeholder="@ph"
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "select":
@@ -617,7 +734,7 @@ else
                     // el usuario no escribe nada y sale, restauramos. Si elige
                     // otra opcion o escribe, el onchange dispara y se actualiza.
                     <input class="form-control form-control-sm" list="@listId"
-                           placeholder="@(c.Catalog ?? "Elige o escribe")"
+                           placeholder="@ph"
                            disabled="@ro" value="@val"
                            onfocus="this.dataset.prev=this.value; this.value='';"
                            onblur="if(!this.value && this.dataset.prev){this.value=this.dataset.prev;}"
@@ -633,7 +750,7 @@ else
                 {
                     <select class="form-select form-select-sm" disabled="@ro" value="@val"
                             @onchange="e => setCell(e.Value?.ToString())">
-                        <option value="">Seleccione...</option>
+                        <option value="">@(string.IsNullOrEmpty(ph) ? "Seleccione..." : ph)</option>
                         @if (opts is not null)
                         {
                             @foreach (var o in opts) { <option value="@o">@o</option> }
@@ -649,7 +766,7 @@ else
                 {
                     <div class="fv-tbl-autocomp">
                         <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
-                               placeholder="Codigo CIE-11 o usa la lupa"
+                               placeholder="@ph"
                                @onchange="e => setCell(e.Value?.ToString())" />
                         <button type="button" class="btn btn-sm btn-outline-primary fv-tbl-lupa"
                                 disabled="@ro" title="Buscar diagnostico CIE-11"
@@ -661,11 +778,13 @@ else
                 else
                 {
                     <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
+                           placeholder="@ph"
                            @onchange="e => setCell(e.Value?.ToString())" />
                 }
                 break;
             default:
                 <input type="text" class="form-control form-control-sm" disabled="@ro" value="@val"
+                       placeholder="@ph"
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;
         }

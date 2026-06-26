@@ -6,6 +6,7 @@
 @using Visal.Application.Tenancy
 @using Visal.SuperAdmin.Components.Forms
 @inject IFormDefinitionService FormsSvc
+@inject IFormDefinitionVersionService VersionSvc
 @inject IJSRuntime JS
 @inject IWebHostEnvironment Env
 
@@ -36,6 +37,7 @@
                 {
                     <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
                     <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
+                    <button class="fb-btn" @onclick="OpenVersionHistoryAsync" title="Ver versiones anteriores y restaurar">&#128344; Historial</button>
                     <button class="fb-btn fb-btn-danger" @onclick="DeleteFormAsync" disabled="@_busy"
                             title="Eliminar definitivamente este formulario">&#128465; Eliminar</button>
                 }
@@ -283,6 +285,8 @@
                             <div class="fb-col-edit">
                                 <div class="fb-col-row">
                                     <input class="fb-input" placeholder="Etiqueta" @bind="col.Label" @bind:event="oninput" />
+                                    <button class="fb-mini" title="Subir columna" @onclick="() => MoveColumnUp(col)">↑</button>
+                                    <button class="fb-mini" title="Bajar columna" @onclick="() => MoveColumnDown(col)">↓</button>
                                     <button class="fb-mini fb-mini-danger" title="Quitar columna" @onclick="() => RemoveColumn(col)">×</button>
                                 </div>
                                 <div class="fb-col-row">
@@ -320,6 +324,8 @@
                                 }
                                 <input class="fb-input" placeholder="Valor por defecto"
                                        @bind="col.DefaultValue" @bind:event="oninput" />
+                                <input class="fb-input" placeholder="Texto de ayuda (placeholder) — opcional"
+                                       @bind="col.Placeholder" @bind:event="oninput" />
 
                                 @{
                                     // Otras columnas con valores discretos que pueden actuar como disparadoras.
@@ -579,6 +585,110 @@
     </div>
 }
 
+@* ===== Modal: Historial de versiones ===== *@
+@if (_showVersionModal)
+{
+    <div class="pr-backdrop" @onclick="CloseVersionModal"></div>
+    <div class="pr-modal">
+        <div class="pr-h">
+            <div>
+                <h3>Historial de versiones</h3>
+                <small>Formulario: <strong>@_codigo - @_nombre</strong> &middot;
+                       @_versions.Count de 20 maximo &middot;
+                       <em>cada cambio guarda un snapshot del estado anterior.</em></small>
+            </div>
+            <button class="pr-close" @onclick="CloseVersionModal">&times;</button>
+        </div>
+        <div class="pr-body">
+            @if (_versionError is not null) { <div class="fb-alert">@_versionError</div> }
+            @if (_versionOk is not null) { <div class="fb-ok">@_versionOk</div> }
+
+            @if (_versionBusy)
+            {
+                <div class="pr-empty">Cargando historial...</div>
+            }
+            else if (_versions.Count == 0)
+            {
+                <div class="pr-empty">No hay versiones previas guardadas para este formulario.</div>
+            }
+            else if (_versionPreview is not null)
+            {
+                <div class="vh-preview-h">
+                    <button class="fb-btn" @onclick="() => _versionPreview = null">&larr; Volver a la lista</button>
+                    <strong>Snapshot del @(_versionPreview.SnapshotAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm:ss"))</strong>
+                </div>
+                <div class="vh-preview-meta">
+                    <div><label>Codigo:</label> @_versionPreview.Codigo</div>
+                    <div><label>Nombre:</label> @_versionPreview.Nombre</div>
+                    <div><label>Version:</label> @(_versionPreview.Version ?? "—")</div>
+                    <div><label>Tipo:</label> @(_versionPreview.Tipo ?? "—")</div>
+                    <div><label>Activo:</label> @(_versionPreview.Activo ? "Si" : "No")</div>
+                </div>
+                <details>
+                    <summary>schema_json (@_versionPreview.SchemaJson.Length chars)</summary>
+                    <pre class="vh-json">@_versionPreview.SchemaJson</pre>
+                </details>
+                @if (!string.IsNullOrEmpty(_versionPreview.PrefillRoutesJson))
+                {
+                    <details>
+                        <summary>prefill_routes_json</summary>
+                        <pre class="vh-json">@_versionPreview.PrefillRoutesJson</pre>
+                    </details>
+                }
+            }
+            else
+            {
+                <table class="vh-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th><th>Nombre</th><th>Codigo</th>
+                            <th>Version</th><th>Tipo</th><th>Activo</th><th>Motivo</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var v in _versions)
+                        {
+                            <tr>
+                                <td>@v.SnapshotAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm:ss")</td>
+                                <td>@v.Nombre</td>
+                                <td><code>@v.Codigo</code></td>
+                                <td>@(v.Version ?? "—")</td>
+                                <td>@(v.Tipo ?? "—")</td>
+                                <td>@(v.Activo ? "Si" : "No")</td>
+                                <td>@(v.Motivo ?? "auto")</td>
+                                <td class="vh-acts">
+                                    <button class="fb-btn fb-btn-sm" @onclick="() => VerSnapshotAsync(v.Id)">Ver</button>
+                                    <button class="fb-btn fb-btn-sm fb-btn-primary"
+                                            disabled="@_versionBusy"
+                                            @onclick="() => RestaurarSnapshotAsync(v.Id, v.SnapshotAt)">
+                                        Restaurar
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+        <div class="pr-f">
+            <button class="fb-btn" @onclick="CloseVersionModal">Cerrar</button>
+        </div>
+    </div>
+}
+
+<style>
+    .vh-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .vh-table th { text-align: left; padding: 8px 10px; background: #f1f5f9; color: #334155; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid #cbd5e1; }
+    .vh-table td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    .vh-table code { font-family: 'JetBrains Mono','Consolas',monospace; font-size: 11px; background: #f8fafc; padding: 1px 6px; border-radius: 4px; }
+    .vh-acts { white-space: nowrap; text-align: right; }
+    .vh-acts .fb-btn { padding: 4px 10px; font-size: 11.5px; }
+    .vh-preview-h { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; border-bottom: 1px dashed #cbd5e1; margin-bottom: 12px; }
+    .vh-preview-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px 14px; margin-bottom: 12px; font-size: 12px; color: #0f172a; }
+    .vh-preview-meta label { color: #64748b; font-weight: 700; margin-right: 4px; }
+    .vh-json { background: #0f172a; color: #e2e8f0; padding: 10px 12px; border-radius: 6px; font-family: 'JetBrains Mono','Consolas',monospace; font-size: 11px; max-height: 320px; overflow: auto; }
+</style>
+
 <style>
     .pr-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000; }
     .pr-modal { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); width: 920px; max-width: 95vw; max-height: calc(100vh - 80px); background: #fff; border-radius: 12px; box-shadow: 0 30px 80px rgba(15,23,42,.35); z-index: 1001; display: flex; flex-direction: column; overflow: hidden; }
@@ -668,6 +778,82 @@
     private bool _busy;
     private string? _error;
     private string? _ok;
+
+    // ── Modal Historial de versiones ──
+    private bool _showVersionModal;
+    private bool _versionBusy;
+    private string? _versionError;
+    private string? _versionOk;
+    private List<FormDefinitionSnapshotDto> _versions = new();
+    private FormDefinitionSnapshotDetailDto? _versionPreview;
+
+    private async Task OpenVersionHistoryAsync()
+    {
+        if (_currentId is null) { return; }
+        _versionError = null; _versionOk = null;
+        _versionPreview = null;
+        _showVersionModal = true;
+        await RecargarVersionesAsync();
+    }
+
+    private void CloseVersionModal()
+    {
+        _showVersionModal = false;
+        _versionPreview = null;
+        _versionError = null; _versionOk = null;
+    }
+
+    private async Task RecargarVersionesAsync()
+    {
+        if (_currentId is null) { return; }
+        _versionBusy = true;
+        try { _versions = (await VersionSvc.ListarAsync(_currentId.Value)).ToList(); }
+        catch (Exception ex) { _versionError = "No se pudo cargar el historial: " + ex.Message; }
+        finally { _versionBusy = false; }
+    }
+
+    private async Task VerSnapshotAsync(Guid snapshotId)
+    {
+        _versionError = null;
+        try { _versionPreview = await VersionSvc.ObtenerAsync(snapshotId); }
+        catch (Exception ex) { _versionError = "No se pudo cargar el detalle: " + ex.Message; }
+    }
+
+    private async Task RestaurarSnapshotAsync(Guid snapshotId, DateTimeOffset snapshotAt)
+    {
+        var fecha = snapshotAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm:ss");
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Reemplazar la version actual por el snapshot del {fecha}? Esto generara un nuevo snapshot del estado actual, asi que la restauracion tambien es reversible.");
+        if (!confirmed) { return; }
+
+        _versionError = null; _versionOk = null;
+        _versionBusy = true;
+        try
+        {
+            var userId = await ActorAsync();
+            var ok = await VersionSvc.RestaurarAsync(snapshotId, userId);
+            if (!ok) { _versionError = "El snapshot no existe o no pertenece al formulario actual."; return; }
+
+            _versionOk = $"Restauracion aplicada (snapshot del {fecha}).";
+            // Recargar el formulario activo para que la UI refleje el estado restaurado.
+            // Mismo procedimiento que OnPickForm (FromJson + reset de seleccion).
+            if (_currentId is Guid id)
+            {
+                var d = await FormsSvc.GetAsync(id);
+                if (d is not null)
+                {
+                    _codigo = d.Codigo; _codigoSecundario = d.CodigoSecundario;
+                    _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
+                    _schema = FormSchema.FromJson(d.SchemaJson);
+                    _prefillRoutes = PrefillRouteSet.FromJson(d.PrefillRoutesJson);
+                    _selected = null; _headerSel = false;
+                }
+            }
+            await RecargarVersionesAsync();
+        }
+        catch (Exception ex) { _versionError = "No se pudo restaurar: " + ex.Message; }
+        finally { _versionBusy = false; }
+    }
 
     // Modal rutas de prefill
     private bool _showPrefillModal;
@@ -1078,6 +1264,57 @@
     private void RemoveColumn(FormColumn col)
     {
         _selected?.Columns?.Remove(col);
+    }
+
+    private void MoveColumnUp(FormColumn col) => MoveColumn(col, delta: -1);
+    private void MoveColumnDown(FormColumn col) => MoveColumn(col, delta: +1);
+
+    /// <summary>Reordena una columna de la tabla seleccionada. Mueve la columna en
+    /// Columns Y reordena en paralelo cada SeedRows[i] (los valores fijos por
+    /// celda) y los keys de SeedRowCellOptions (que indexan opciones por
+    /// "rowIdx_colIdx"). Sin esto los overrides apuntarian a la columna
+    /// equivocada despues del swap.</summary>
+    private void MoveColumn(FormColumn col, int delta)
+    {
+        if (_selected?.Columns is not { } cols) { return; }
+        var i = cols.IndexOf(col);
+        if (i < 0) { return; }
+        var j = i + delta;
+        if (j < 0 || j >= cols.Count) { return; }
+
+        // 1) Swap en Columns.
+        (cols[i], cols[j]) = (cols[j], cols[i]);
+
+        // 2) Swap del valor en cada SeedRows[r] (cada fila tiene una List<string?>
+        //    paralela a Columns). while-padding cubre filas mas cortas que el array.
+        if (_selected.SeedRows is { } rows)
+        {
+            foreach (var row in rows)
+            {
+                while (row.Count <= Math.Max(i, j)) { row.Add(null); }
+                (row[i], row[j]) = (row[j], row[i]);
+            }
+        }
+
+        // 3) Reindexar SeedRowCellOptions: los keys "r_i" pasan a "r_j" y viceversa.
+        //    Construyo un dict nuevo para no chocar con keys colisionando durante
+        //    el rename in-place.
+        if (_selected.SeedRowCellOptions is { Count: > 0 } opts)
+        {
+            var renombrado = new Dictionary<string, List<string>>();
+            foreach (var kv in opts)
+            {
+                var parts = kv.Key.Split('_', 2);
+                if (parts.Length != 2 || !int.TryParse(parts[1], out var colIdx))
+                {
+                    renombrado[kv.Key] = kv.Value;
+                    continue;
+                }
+                var nuevoCol = colIdx == i ? j : (colIdx == j ? i : colIdx);
+                renombrado[$"{parts[0]}_{nuevoCol}"] = kv.Value;
+            }
+            _selected.SeedRowCellOptions = renombrado;
+        }
     }
 
     // Donde cae un campo nuevo: en la seccion seleccionada, o en la seccion del campo

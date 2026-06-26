@@ -1,7 +1,17 @@
 .fb-shell { display: flex; flex-direction: column; gap: 12px; }
 
-/* Toolbar */
-.fb-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* Toolbar — sticky en el viewport para no perder Guardar al hacer scroll en
+   formularios largos. El padding/borde le dan presencia visual cuando "flota"
+   sobre el contenido que pasa por debajo. z-index 50 es suficiente para
+   quedar arriba del editor, sin tapar modales (los cuales usan >=1000). */
+.fb-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 50;
+    background: var(--card); padding: 10px 12px;
+    border-radius: 10px; border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
 .fb-tb-left { display: flex; flex-direction: column; }
 .fb-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; color: var(--primary); }
 .fb-tb-title { font-size: 20px; color: var(--foreground); }

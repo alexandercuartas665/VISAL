@@ -17,6 +17,7 @@ public static class ModuloCatalogo
         new("ordenes", "Ordenes Clinicas", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),
         new("formularios", "Motor de Formularios", "Operacion Clinica"),
+        new("formularios.versionado", "Formularios - Historial y restaurar versiones", "Operacion Clinica"),
         new("lineas", "Lineas WhatsApp", "Infraestructura & IA"),
         new("agentes", "Agentes IA", "Infraestructura & IA"),
         new("automatizaciones", "Automatizaciones", "Infraestructura & IA"),

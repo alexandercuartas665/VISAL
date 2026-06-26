@@ -1,4 +1,5 @@
 @using Visal.SuperAdmin.Components.Forms
+@inject IJSRuntime JS
 
 @* ============================================================
    FormViewer: renderiza un FormSchema como una vista
@@ -12,7 +13,32 @@
 }
 else
 {
-    <div class="fv-doc">
+    // Top-level sections para el TOC. Solo se muestra el indice si hay 3+
+    // secciones (formularios chicos no lo necesitan y queda mas limpio).
+    var topSections = Schema.Children.Where(c => c.IsSection).ToList();
+    var showToc = topSections.Count >= 3;
+    <div class="fv-shell @(showToc ? "fv-shell-toc" : "")">
+
+        @if (showToc)
+        {
+            <aside class="fv-toc" data-toc-root>
+                <div class="fv-toc-h">SECCIONES</div>
+                <ul class="fv-toc-list">
+                    @foreach (var sec in topSections)
+                    {
+                        <li>
+                            <a href="#sec-@sec.Id" data-toc-link="@sec.Id" class="fv-toc-link">
+                                @sec.Label
+                            </a>
+                        </li>
+                    }
+                </ul>
+            </aside>
+            @* FAB solo visible en pantallas chicas via CSS — abre el panel TOC superpuesto. *@
+            <button type="button" class="fv-toc-fab" data-toc-fab title="Saltar a seccion">&#9776;</button>
+        }
+
+        <div class="fv-doc">
 
         @* ----- Cabecera ----- *@
         @if (Schema.Header is not null || !string.IsNullOrEmpty(Titulo))
@@ -64,7 +90,7 @@ else
         {
             if (node.IsSection)
             {
-                <div class="fv-section">
+                <div class="fv-section" id="sec-@node.Id" data-toc-section="@node.Id">
                     <div class="fv-section-h">@node.Label</div>
                     <div class="fv-grid">
                         @if (node.Children is not null)
@@ -84,7 +110,8 @@ else
                 </div>
             }
         }
-    </div>
+        </div>@* /fv-doc *@
+    </div>@* /fv-shell *@
 }
 
 @* Picker CIE-11 unico, compartido por todas las celdas autocomplete con catalog=cie11
@@ -110,6 +137,96 @@ else
     .fv-tbl-autocomp { display: flex; gap: 4px; align-items: stretch; }
     .fv-tbl-autocomp input { flex: 1; min-width: 0; }
     .fv-tbl-lupa { padding: 2px 8px; font-size: 13px; line-height: 1; flex-shrink: 0; }
+
+    /* ==================== TOC: navegacion lateral por secciones ====================
+       Aplica cuando el FormViewer tiene 3+ secciones top-level (clase
+       fv-shell-toc). Sidebar sticky a la izquierda + form a la derecha en grid.
+       En pantallas menores a 1100px se colapsa: el sidebar se vuelve un panel
+       flotante que abre/cierra el FAB. */
+    .fv-shell.fv-shell-toc {
+        display: grid;
+        grid-template-columns: 200px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+    }
+    .fv-toc {
+        position: sticky;
+        top: 8px;
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 10px 0;
+    }
+    .fv-toc-h {
+        padding: 0 14px 8px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 10.5px;
+        font-weight: 700;
+        color: #64748b;
+        letter-spacing: 0.6px;
+    }
+    .fv-toc-list { list-style: none; padding: 0; margin: 0; }
+    .fv-toc-list li { margin: 0; }
+    .fv-toc-link {
+        display: block;
+        padding: 7px 14px;
+        font-size: 12.5px;
+        color: #475569;
+        text-decoration: none;
+        border-left: 3px solid transparent;
+        line-height: 1.35;
+        transition: background-color .12s, color .12s, border-color .12s;
+    }
+    .fv-toc-link:hover {
+        background: #eff6ff;
+        color: #1565c0;
+        text-decoration: none;
+    }
+    .fv-toc-link.active {
+        background: #eff6ff;
+        color: #1565c0;
+        border-left-color: #1565c0;
+        font-weight: 700;
+    }
+
+    /* Las secciones de destino necesitan un scroll-margin para que el header
+       del modal no las tape cuando se hace scrollIntoView. */
+    .fv-section { scroll-margin-top: 12px; }
+
+    /* FAB para movil/pantallas chicas - oculto por defecto, visible en menores a 1100px. */
+    .fv-toc-fab {
+        display: none;
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        z-index: 200;
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        border: none;
+        background: #1565c0;
+        color: #fff;
+        font-size: 18px;
+        cursor: pointer;
+        box-shadow: 0 6px 16px rgba(15,23,42,.25);
+    }
+
+    @@media (max-width: 1100px) {
+        .fv-shell.fv-shell-toc { grid-template-columns: minmax(0, 1fr); }
+        .fv-toc {
+            position: fixed;
+            top: 60px; right: -260px;
+            width: 240px;
+            max-height: calc(100vh - 80px);
+            z-index: 199;
+            box-shadow: 0 12px 32px rgba(15,23,42,.2);
+            transition: right .2s ease;
+        }
+        .fv-toc.fv-toc-open { right: 16px; }
+        .fv-toc-fab { display: block; }
+    }
 </style>
 
 @code {
@@ -151,6 +268,17 @@ else
         // Calcular valores iniciales al abrir/cambiar de schema.
         RecalculateAll();
         RecalculateAll();
+    }
+
+    /// <summary>Re-arma el observer del TOC despues de cada render. El JS hace
+    /// limpieza idempotente — desconecta el observer anterior antes de crear
+    /// uno nuevo, asi cambiar de documento (de Barthel a Norton, p.ej.) refresca
+    /// los anclajes sin acumular listeners zombies.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await JS.InvokeVoidAsync("visalFormToc.setup"); }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { /* circuito cerrado */ }
+        catch (TaskCanceledException) { /* navegacion en curso */ }
     }
 
     private void RecalculateAll()

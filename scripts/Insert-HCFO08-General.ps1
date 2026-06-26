@@ -200,16 +200,35 @@ $secHT = @{
 $secSV = @{
     id = newId; type = "section"; label = "SIGNOS VITALES"
     children = @(
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Tension Arterial";            name = "ta";                 widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Frecuencia Cardiaca (xMin)";  name = "fc";                 widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Frecuencia Respiratoria (xMin)"; name = "fr";              widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Temperatura";                 name = "temperatura";        widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Peso (Kg)";                   name = "peso";               widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Talla (Cm)";                  name = "talla";              widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Perimetro Abdominal (Cm)";    name = "perimetro";          widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "IMC";                         name = "imc";                widthColumns = 3; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Interpretacion";              name = "interpretacion_imc"; widthColumns = 6; defaultValue = "NO REFIERE" },
-        @{ id = newId; type = "field"; fieldType = "text"; label = "Lateralidad Dominante";       name = "lateralidad";        widthColumns = 6; defaultValue = "NO REFIERE" }
+        # --- Tension arterial (sistolica + diastolica + clasificacion auto) ---
+        @{ id = newId; type = "text"; textStyle = "subheading"; content = "Tension Arterial (mm Hg)" },
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Sistolica";  name = "ta_sistolica";  widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Diastolica"; name = "ta_diastolica"; widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "calculated"; label = "Clasificacion TA (auto)"; name = "ta_clasificacion"; widthColumns = 6;
+           formula = "tensionClass(ta_sistolica, ta_diastolica)" },
+
+        # --- Otros vitales ---
+        @{ id = newId; type = "field"; fieldType = "number"; label = "F. Cardiaca (x min)";       name = "fc";                 widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "number"; label = "F. Respiratoria (x min)";   name = "fr";                 widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Pulsioximetria (%)";        name = "pulsioximetria";     widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Temperatura (C)";           name = "temperatura";        widthColumns = 3 },
+
+        # --- Peso, talla e IMC con clasificacion automatica ---
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Peso (Kg)";                 name = "peso";               widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Talla (cm)";                name = "talla";              widthColumns = 3 },
+        @{ id = newId; type = "field"; fieldType = "calculated"; label = "IMC (auto)";            name = "imc";                widthColumns = 3;
+           formula = "imc(peso, talla)" },
+        @{ id = newId; type = "field"; fieldType = "calculated"; label = "Clasificacion IMC (auto)"; name = "imc_clasificacion"; widthColumns = 3;
+           formula = "imcClass(imc)" },
+
+        # --- Perimetro abdominal con interpretacion segun sexo ---
+        @{ id = newId; type = "field"; fieldType = "number"; label = "Perimetro Abdominal (cm)";   name = "perimetro";          widthColumns = 4 },
+        @{ id = newId; type = "field"; fieldType = "calculated"; label = "Interpretacion (auto, segun sexo)"; name = "perimetro_riesgo"; widthColumns = 4;
+           formula = "perimetroRiesgo(perimetro, sexo)" },
+
+        # --- Lateralidad como select estatico ---
+        @{ id = newId; type = "field"; fieldType = "select"; label = "Lateralidad Dominante";     name = "lateralidad";        widthColumns = 4;
+           catalog = "estatico"; options = @("DIESTRO","ZURDO","AMBIDIESTRO") }
     )
 }
 

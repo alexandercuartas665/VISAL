@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.IO
 @using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Web
 @using Visal.Application.Tenancy
 @inject IProfesionalConfigService Svc
 @inject IUsuarioAdminService UsuSvc
@@ -15,7 +16,10 @@
         <div class="ase-eyebrow">Configuracion del Sistema</div>
         <h1 class="ase-title">Profesionales</h1>
     </div>
-    <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo profesional</button>
+    <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline-primary btn-sm" @onclick="OpenImport" title="Importar desde Excel con plantilla Visal">&#128229; Importar Excel</button>
+        <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo profesional</button>
+    </div>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
@@ -89,7 +93,19 @@
                     @if (_id is not null)
                     {
                         <button class="btn btn-outline-success btn-sm" @onclick="OpenCrearUsuario" title="Crear usuario de login para este profesional">&#128100; Crear usuario</button>
-                        <button class="btn btn-outline-danger btn-sm" @onclick="Delete">Eliminar</button>
+                        @if (!_confirmingDelete)
+                        {
+                            <button class="btn btn-outline-danger btn-sm" @onclick="StartConfirmDelete">Eliminar</button>
+                        }
+                        else
+                        {
+                            <div class="cfg-prof-confirm">
+                                <span>Escribe <strong>ELIMINAR</strong> para confirmar:</span>
+                                <input class="form-control form-control-sm" style="width: 130px;" @bind="_confirmText" @bind:event="oninput" @onkeyup="OnConfirmKey" placeholder="ELIMINAR" autocomplete="off" />
+                                <button class="btn btn-danger btn-sm" @onclick="Delete" disabled="@(_confirmText != "ELIMINAR" || _busy)">Confirmar</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="CancelConfirmDelete">Cancelar</button>
+                            </div>
+                        }
                     }
                 </div>
             </div>
@@ -131,6 +147,61 @@
         }
     </div>
 </div>
+
+@* ===== Modal Importar desde Excel ===== *@
+@if (_showImportModal)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseImport"></div>
+    <div class="usu-modal usu-modal-wide">
+        <div class="usu-modal-h">
+            <h3>Importar profesionales desde Excel</h3>
+            <button class="usu-modal-close" @onclick="CloseImport">&times;</button>
+        </div>
+        <div class="usu-modal-body">
+            @if (_importError is not null) { <div class="ase-alert">@_importError</div> }
+            <div class="imp-grid">
+                <div class="ase-f">
+                    <label>Archivo Excel (.xlsx)</label>
+                    <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
+                    <div class="ase-hint">Columnas esperadas (fila 1): Nº documento, Tipo doc, Primer/Segundo Nombre, Primer/Segundo Apellido, Tipo Profesional, Registro, Ciudad, Celular, SubCategoria, Firma (imagen embebida col 12).</div>
+                </div>
+                <div class="ase-f">
+                    <label>Sede a asignar (Agencias activas)</label>
+                    <input class="form-control form-control-sm" @bind="_importSede" placeholder="CALI" disabled="@_importing" />
+                </div>
+                <div class="ase-f">
+                    <label class="form-check-label" style="display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" class="form-check-input" @bind="_importCrearUsuario" disabled="@_importing" />
+                        Crear usuario de acceso por cada profesional
+                    </label>
+                    <div class="ase-hint">Email: <code>{documento}@@visal.travels</code>, clave temporal: <code>Visal{documento}*</code></div>
+                </div>
+            </div>
+
+            @if (_importing || _importTotal > 0)
+            {
+                <div style="margin-top:14px;">
+                    <div class="imp-progress">
+                        <div class="imp-progress-bar" style="width:@($"{_importProgress:0}%");"></div>
+                    </div>
+                    <div class="ase-hint" style="margin-top:6px;">
+                        @if (_importing) { <span>Procesando fila @_importCurrent de @_importTotal&hellip;</span> }
+                        else { <span>Listo: @_importOk OK, @_importErr errores.</span> }
+                    </div>
+                </div>
+                <div class="imp-log">
+                    @foreach (var line in _importLog.TakeLast(40))
+                    {
+                        <div class="imp-log-line @(line.StartsWith("[OK]") ? "ok" : line.StartsWith("[ERR]") ? "err" : "info")">@line</div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="usu-modal-footer">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseImport" disabled="@_importing">Cerrar</button>
+        </div>
+    </div>
+}
 
 @* ===== Modal Crear usuario para profesional ===== *@
 @if (_showCrearUsuModal)
@@ -291,11 +362,233 @@
         finally { _busy = false; }
     }
 
+    // Estado del flujo de doble confirmacion: para evitar borrados accidentales
+    // el boton Eliminar revela un input que pide escribir literalmente "ELIMINAR".
+    private bool _confirmingDelete;
+    private string _confirmText = string.Empty;
+
+    // Import Excel
+    private bool _showImportModal;
+    private bool _importing;
+    private string? _importError;
+    private string _importSede = "CALI";
+    private bool _importCrearUsuario = true;
+    private int _importTotal, _importCurrent, _importOk, _importErr;
+    private double _importProgress;
+    private readonly List<string> _importLog = new();
+
+    private void OpenImport()
+    {
+        _showImportModal = true;
+        _importError = null;
+        _importLog.Clear();
+        _importTotal = _importCurrent = _importOk = _importErr = 0;
+        _importProgress = 0;
+    }
+
+    private void CloseImport()
+    {
+        if (_importing) { return; }
+        _showImportModal = false;
+    }
+
+    private async Task OnExcelSelected(InputFileChangeEventArgs e)
+    {
+        _importError = null;
+        _importLog.Clear();
+        _importTotal = _importCurrent = _importOk = _importErr = 0;
+        _importProgress = 0;
+        _importing = true;
+        try
+        {
+            // Volcar el upload a memoria. 50 MB tope (los Excel con muchas firmas
+            // pesan ~7 MB en TERAPIAS, dejamos margen amplio).
+            const long max = 50L * 1024 * 1024;
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(max).CopyToAsync(ms);
+            ms.Position = 0;
+
+            using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+            var ws = wb.Worksheets.First();
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+            _importTotal = Math.Max(0, lastRow - 1);
+
+            // Catalogos (resueltos una vez para no hacer 200 lookups).
+            var tipos = await Svc.ListTiposAsync(false);
+            var subs = await Svc.ListSubcategoriasAsync(false);
+            // Listado actual de profesionales para detectar upserts por documento.
+            var existentes = await Svc.ListProfesionalesAsync(null);
+            var byDoc = new Dictionary<string, ProfesionalDto>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in existentes) { byDoc[p.NumeroDocumento.Trim()] = p; }
+
+            // Indice de pictures por fila. ClosedXML resuelve TopLeftCell incluso
+            // para imagenes ancladas con OneCellAnchor / TwoCellAnchor.
+            var picsByRow = new Dictionary<int, ClosedXML.Excel.Drawings.IXLPicture>();
+            foreach (var pic in ws.Pictures)
+            {
+                try
+                {
+                    var row = pic.TopLeftCell.Address.RowNumber;
+                    if (!picsByRow.ContainsKey(row)) { picsByRow[row] = pic; }
+                }
+                catch { /* picture mal anclada — skip */ }
+            }
+            _importLog.Add($"Detectadas {picsByRow.Count} firmas en {ws.Pictures.Count()} imagenes del archivo.");
+
+            var actor = await Actor();
+            var firmaDir = Path.Combine(Env.WebRootPath, "uploads", "firmas");
+            Directory.CreateDirectory(firmaDir);
+
+            for (var r = 2; r <= lastRow; r++)
+            {
+                _importCurrent = r - 1;
+                _importProgress = (double)_importCurrent / Math.Max(1, _importTotal) * 100;
+                try
+                {
+                    var doc = ws.Cell(r, 1).GetString().Trim();
+                    if (string.IsNullOrWhiteSpace(doc)) { continue; }
+                    var tipoDoc = (ws.Cell(r, 2).GetString().Trim() is { Length: > 0 } td) ? td.ToUpperInvariant() : "CC";
+                    var pn = ws.Cell(r, 3).GetString().Trim();
+                    var sn = ws.Cell(r, 4).GetString().Trim();
+                    var pa = ws.Cell(r, 5).GetString().Trim();
+                    var sa = ws.Cell(r, 6).GetString().Trim();
+                    var tipoProfNombre = ws.Cell(r, 7).GetString().Trim();
+                    var registro = ws.Cell(r, 8).GetString().Trim();
+                    var ciudad = ws.Cell(r, 9).GetString().Trim();
+                    var celular = ws.Cell(r, 10).GetString().Trim();
+                    var subcatNombre = ws.Cell(r, 11).GetString().Trim();
+
+                    var tipo = tipos.FirstOrDefault(t => string.Equals(t.Nombre.Trim(), tipoProfNombre, StringComparison.OrdinalIgnoreCase));
+                    if (tipo is null)
+                    {
+                        _importErr++;
+                        _importLog.Add($"[ERR] Fila {r} ({doc}): tipo profesional '{tipoProfNombre}' no existe en catalogo. Salta.");
+                        continue;
+                    }
+
+                    var subcatIds = new List<Guid>();
+                    if (!string.IsNullOrWhiteSpace(subcatNombre))
+                    {
+                        var sc = subs.FirstOrDefault(s => string.Equals(s.Nombre.Trim(), subcatNombre, StringComparison.OrdinalIgnoreCase));
+                        if (sc is not null) { subcatIds.Add(sc.Id); }
+                    }
+
+                    // Firma: si hay picture en esta fila la persistimos a
+                    // /uploads/firmas. Si la fila es upsert y no trae firma,
+                    // mantenemos la existente.
+                    string? firmaUrl = null;
+                    if (picsByRow.TryGetValue(r, out var pic))
+                    {
+                        var ext = pic.Format switch
+                        {
+                            ClosedXML.Excel.Drawings.XLPictureFormat.Jpeg => ".jpg",
+                            ClosedXML.Excel.Drawings.XLPictureFormat.Gif => ".gif",
+                            ClosedXML.Excel.Drawings.XLPictureFormat.Bmp => ".bmp",
+                            _ => ".png"
+                        };
+                        var name = $"firma-{Guid.NewGuid():N}{ext}";
+                        var path = Path.Combine(firmaDir, name);
+                        await using (var fs = File.Create(path))
+                        {
+                            pic.ImageStream.Position = 0;
+                            await pic.ImageStream.CopyToAsync(fs);
+                        }
+                        firmaUrl = $"/uploads/firmas/{name}";
+                    }
+
+                    Guid? id = null;
+                    if (byDoc.TryGetValue(doc, out var existing))
+                    {
+                        id = existing.Id;
+                        if (firmaUrl is null)
+                        {
+                            // upsert sin firma nueva: preserve la actual
+                            var det = await Svc.GetProfesionalAsync(existing.Id);
+                            firmaUrl = det?.FirmaUrl;
+                        }
+                    }
+
+                    var nombreCompleto = string.Join(' ', new[] { pn, sn, pa, sa }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                    var agencias = new List<string> { string.IsNullOrWhiteSpace(_importSede) ? "CALI" : _importSede.Trim() };
+
+                    var req = new SaveProfesionalRequest(id, doc, tipoDoc,
+                        pn, sn, pa, sa, nombreCompleto, tipo.Id, registro, ciudad, celular, firmaUrl,
+                        subcatIds, agencias);
+                    var saved = await Svc.SaveProfesionalAsync(req, actor);
+                    if (saved is null)
+                    {
+                        _importErr++;
+                        _importLog.Add($"[ERR] Fila {r} ({doc}): SaveProfesional retorno null.");
+                        continue;
+                    }
+
+                    if (_importCrearUsuario)
+                    {
+                        var email = $"{doc}@visal.travels";
+                        var pwd = $"Visal{doc}*";
+                        try
+                        {
+                            await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, actor);
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            // Usuario ya existe o falta dato — no es fatal para el import.
+                            _importLog.Add($"[..]  Fila {r}: usuario no creado ({ex.Message}).");
+                        }
+                    }
+
+                    _importOk++;
+                    _importLog.Add($"[OK]  Fila {r} ({doc}): {nombreCompleto}{(firmaUrl is null ? " (sin firma)" : "")}{(id is not null ? " [upsert]" : " [nuevo]")}.");
+                }
+                catch (Exception ex)
+                {
+                    _importErr++;
+                    _importLog.Add($"[ERR] Fila {r}: {ex.Message}");
+                }
+
+                // Cada 10 filas refrescamos la UI para que el usuario vea avance.
+                if (r % 5 == 0) { StateHasChanged(); await Task.Yield(); }
+            }
+            _importProgress = 100;
+            await LoadLista();
+            _ok = $"Import terminado: {_importOk} OK, {_importErr} errores.";
+        }
+        catch (Exception ex)
+        {
+            _importError = $"Error fatal: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartConfirmDelete()
+    {
+        _confirmingDelete = true;
+        _confirmText = string.Empty;
+    }
+
+    private void CancelConfirmDelete()
+    {
+        _confirmingDelete = false;
+        _confirmText = string.Empty;
+    }
+
+    private async Task OnConfirmKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && _confirmText == "ELIMINAR") { await Delete(); }
+        if (e.Key == "Escape") { CancelConfirmDelete(); }
+    }
+
     private async Task Delete()
     {
         if (_id is not Guid id) { return; }
+        if (_confirmText != "ELIMINAR") { return; }
         await Svc.DeleteProfesionalAsync(id, await Actor());
         _showForm = false; _id = null;
+        _confirmingDelete = false; _confirmText = string.Empty;
         await LoadLista();
         _ok = "Profesional eliminado.";
     }

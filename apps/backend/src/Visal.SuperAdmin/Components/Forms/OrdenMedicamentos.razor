@@ -285,26 +285,43 @@ else
         {
             return "Define cantidad, frecuencia y dias para armar la posologia.";
         }
-        // Reconstruye la frase clinica: "Tomar X cada Y h durante Z dias".
-        // - Si la frecuencia es un numero suelto se interpreta como "veces/dia"
-        //   (1 = 1 vez/dia, 3 = 3 veces/dia). Si trae texto ("cada 8h") lo deja.
-        // - Si los dias son numericos agrega "durante X dias".
-        var partes = new List<string>();
-        if (!string.IsNullOrWhiteSpace(c)) { partes.Add(c!); }
+        // Reconstruye la frase clinica:
+        //   "1 cada 6 horas durante 30 dias - Total: 120."
+        // - La frecuencia, si es un entero N>0 que divide 24, se expresa como
+        //   "cada (24/N) horas" (mas natural para medicos que "N veces al dia").
+        //   - N=1 -> "cada 24 horas"
+        //   - N=2 -> "cada 12 horas"
+        //   - N=3 -> "cada 8 horas"
+        //   - N=4 -> "cada 6 horas"
+        //   - Si 24/N no es entero (ej. N=5), cae a "N veces al dia".
+        // - Si frecuencia trae texto custom (ej. "cada 8h", "PRN") se respeta.
+        var sb = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(c)) { sb.Append(c); }
         if (!string.IsNullOrWhiteSpace(f))
         {
-            partes.Add(int.TryParse(f, out var fn) && fn > 0
-                ? (fn == 1 ? "1 vez al dia" : $"{fn} veces al dia")
-                : f!);
+            if (sb.Length > 0) { sb.Append(' '); }
+            sb.Append(FrecuenciaTexto(f!));
         }
         if (!string.IsNullOrWhiteSpace(d))
         {
-            partes.Add(int.TryParse(d, out _) ? $"durante {d} dias" : d!);
+            if (sb.Length > 0) { sb.Append(' '); }
+            sb.Append(int.TryParse(d, out _) ? $"durante {d} dias" : d!);
         }
-        var preview = string.Join(", ", partes);
+        var preview = sb.ToString();
         var total = CalcularTotal(c, f, d);
-        if (total is not null) { preview += $" — Total: {total}"; }
+        if (total is not null) { preview += $" - Total: {total}"; }
         return preview + ".";
+    }
+
+    private static string FrecuenciaTexto(string f)
+    {
+        if (!int.TryParse(f, out var fn) || fn <= 0) { return f; }
+        if (24 % fn == 0)
+        {
+            var h = 24 / fn;
+            return h == 1 ? "cada hora" : $"cada {h} horas";
+        }
+        return $"{fn} veces al dia";
     }
 
     /// <summary>Cantidad total = cantidad por toma * frecuencia/dia * dias.

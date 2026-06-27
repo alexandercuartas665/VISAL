@@ -93,10 +93,12 @@ CREATE TRIGGER trg_form_definition_snapshot
 -- ============================================================================
 -- 5) Registrar la migracion en __EFMigrationsHistory para que el proximo
 --    `dotnet ef database update` no intente re-aplicarla.
+--    OJO: Visal usa UseSnakeCaseNamingConvention, asi que las columnas son
+--    migration_id / product_version (NO MigrationId / ProductVersion).
 -- ============================================================================
-INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+INSERT INTO "__EFMigrationsHistory" (migration_id, product_version)
 VALUES ('20260626134310_AddFormDefinitionSnapshots', '9.0.4')
-ON CONFLICT ("MigrationId") DO NOTHING;
+ON CONFLICT (migration_id) DO NOTHING;
 
 COMMIT;
 

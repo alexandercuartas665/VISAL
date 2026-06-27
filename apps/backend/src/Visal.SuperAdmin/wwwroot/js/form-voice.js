@@ -1,22 +1,22 @@
 // form-voice.js -- Dictado por voz para textareas con data-voice-target.
 //
-// Flujo:
-//   1) Click en boton -> pedir microfono y abrir el popover.
-//   2) MediaRecorder graba chunks de 5s en audio/webm.
-//   3) Cada 5s: stop -> blob -> fetch POST /api/transcribe -> restart.
-//   4) Texto que devuelve Whisper se appendea al textarea (en la posicion del
-//      caret si es accesible, sino al final). Disparamos un evento 'change'
-//      para que el binding @onchange de Blazor capture y dispare el autosave.
-//   5) Cada 10 palabras finalizadas, fuerza un dispatch extra (para que el
-//      autosave del FormViewer corra antes del tope de debounce).
-//
-// El popover es un singleton sobre <body>; lo crea perezosamente la primera
-// vez que alguien dicta.
+// Implementacion via Web Speech API nativa del navegador (Chrome, Edge).
+//   - Sin servidor de transcripcion (no se envia audio a tu backend).
+//   - Interim results en gris en el popover (mientras el reconocedor "piensa").
+//   - Cada resultado FINAL se appendea al textarea y dispara 'change' para que
+//     el autosave del FormViewer corra.
+//   - La sesion se corta cada ~30-60s; auto-restart silencioso si no esta pausada.
+//   - Cada 10 palabras finales se dispara un 'input' adicional para forzar el
+//     autosave del FormViewer aunque su debounce sea largo.
 
 window.visalVoice = (function () {
-  const ATTACHED = new WeakSet(); // botones ya enganchados (evita doble-click handler)
+  const ATTACHED = new WeakSet();
   let popover = null;
-  let session = null; // { mediaRecorder, stream, chunks, textarea, timer, paused, wordsSinceFlush }
+  let session = null; // { recognition, textarea, btn, paused, wordsSinceFlush, interimText, finalSoFar }
+
+  function getSR() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  }
 
   function setup() {
     document.querySelectorAll('button[data-voice-target]').forEach(btn => {
@@ -26,140 +26,121 @@ window.visalVoice = (function () {
     });
   }
 
-  async function onButtonClick(e) {
+  function onButtonClick(e) {
     e.preventDefault();
     const btn = e.currentTarget;
     const targetId = btn.dataset.voiceTarget;
     const textarea = document.getElementById(targetId);
-    if (!textarea) {
-      alert('No se encontro el campo destino para el dictado.');
+    if (!textarea) { return; }
+
+    if (session && session.textarea === textarea) { stopSession(); return; }
+    if (session) { stopSession(); }
+
+    const SR = getSR();
+    if (!SR) {
+      alert('Tu navegador no soporta dictado por voz. Usa Chrome o Edge.');
       return;
     }
-    // Si ya hay sesion activa apuntando a este textarea, detener.
-    if (session && session.textarea === textarea) {
-      await stopSession();
-      return;
-    }
-    // Si hay sesion en otro textarea, detenerla primero.
-    if (session) { await stopSession(); }
-    await startSession(textarea, btn);
+    startSession(textarea, btn, SR);
   }
 
-  async function startSession(textarea, btn) {
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      alert('No se pudo acceder al microfono: ' + (err?.message || err));
-      return;
-    }
-    const supportsWebm = MediaRecorder.isTypeSupported('audio/webm');
-    const mime = supportsWebm ? 'audio/webm' : 'audio/ogg';
-    const recorder = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
+  function startSession(textarea, btn, SR) {
+    const r = new SR();
+    r.lang = 'es-CO';
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
     session = {
-      stream, recorder,
-      chunks: [],
+      recognition: r,
       textarea,
       btn,
-      timer: null,
       paused: false,
+      stopping: false,
       wordsSinceFlush: 0,
-      mime,
-      ext: mime.includes('webm') ? 'webm' : 'ogg',
-      lastSendAt: Date.now()
+      interimText: ''
     };
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) { session.chunks.push(e.data); }
-    };
-    recorder.onstop = handleRecorderStop;
-    recorder.start();
+
+    r.onresult = onResult;
+    r.onerror = onError;
+    r.onend = onEnd;
+    r.onstart = () => setStatus('Escuchando...');
+    r.onspeechstart = () => setStatus('Escuchando...');
+
+    try { r.start(); }
+    catch (err) { alert('No se pudo iniciar el dictado: ' + (err?.message || err)); session = null; return; }
+
     btn.classList.add('recording');
     openPopover();
-    setStatus('Escuchando...');
-    // Cada 5 segundos cerramos el chunk: stop -> ondataavailable -> onstop ->
-    // restart. El upload del blob lo dispara handleRecorderStop.
-    session.timer = setInterval(() => {
-      if (!session || session.paused) { return; }
-      if (session.recorder.state === 'recording') {
-        session.recorder.stop(); // dispara onstop con los chunks acumulados
-      }
-    }, 5000);
   }
 
-  function handleRecorderStop() {
+  function onResult(e) {
     if (!session) { return; }
-    const chunks = session.chunks;
-    session.chunks = [];
-    if (chunks.length === 0) {
-      maybeRestart();
+    // En cada evento puede llegar varios resultados; los nuevos finales se
+    // appendean al textarea, los interim se acumulan para mostrar en el
+    // popover (en gris cursiva) hasta que se conviertan en finales.
+    let newFinal = '';
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      const txt = res[0].transcript;
+      if (res.isFinal) { newFinal += txt; }
+      else { interim += txt; }
+    }
+    session.interimText = interim.trim();
+    if (newFinal.trim()) { appendFinal(newFinal.trim()); }
+    updateInterim();
+    updateWordCount();
+  }
+
+  function onError(e) {
+    if (!session) { return; }
+    // Errores recuperables: dejamos que onend reinicie si no estamos pausados.
+    if (e.error === 'no-speech' || e.error === 'aborted') { return; }
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      setStatus('Microfono denegado.', 'err');
+      stopSession();
       return;
     }
-    const blob = new Blob(chunks, { type: session.mime });
-    // Reiniciamos el recorder antes de subir el blob viejo, asi no perdemos
-    // segundos de audio mientras Whisper procesa.
-    maybeRestart();
-    uploadChunk(blob).catch(err => {
-      setStatus('Error: ' + (err?.message || err), 'err');
-    });
+    if (e.error === 'network') {
+      setStatus('Red interrumpida, reintentando...', 'err');
+      return;
+    }
+    setStatus('Error: ' + e.error, 'err');
   }
 
-  function maybeRestart() {
-    if (!session || session.paused) { return; }
-    try { session.recorder.start(); }
-    catch (_) { /* recorder ya cerrado */ }
+  function onEnd() {
+    if (!session) { return; }
+    // La API corta cada ~30-60s sin importar si seguimos hablando. Re-arrancamos
+    // silenciosamente si no estamos pausados ni cerrando explicitamente.
+    if (session.stopping || session.paused) { return; }
+    try { session.recognition.start(); }
+    catch (_) { /* ya inicio o se cerro */ }
   }
 
-  async function uploadChunk(blob) {
-    setStatus('Procesando...');
-    const fd = new FormData();
-    fd.append('file', blob, `chunk.${session.ext}`);
-    fd.append('lang', 'es');
-    let resp;
-    try { resp = await fetch('/api/transcribe', { method: 'POST', body: fd, credentials: 'same-origin' }); }
-    catch (err) { setStatus('Red: ' + err.message, 'err'); return; }
-    if (!resp.ok) { setStatus(`HTTP ${resp.status}`, 'err'); return; }
-    const j = await resp.json();
-    if (!j.ok) { setStatus('Whisper: ' + (j.error || 'fallo'), 'err'); return; }
-    appendText(j.text || '');
-    setStatus(session?.paused ? 'Pausado.' : 'Escuchando...');
-  }
-
-  function appendText(text) {
-    if (!session || !text) { return; }
+  function appendFinal(text) {
+    if (!session) { return; }
     const t = session.textarea;
-    const trimmed = text.trim();
-    if (!trimmed) { return; }
-    // Append al final con espacio cuando ya hay contenido. (No tocamos el
-    // caret porque el textarea puede no tener focus durante el dictado.)
     const cur = t.value || '';
     const sep = cur.length > 0 && !cur.endsWith(' ') && !cur.endsWith('\n') ? ' ' : '';
-    t.value = cur + sep + trimmed;
-    // Dispatch 'change' para que el binding de Blazor capture (autosave).
+    t.value = cur + sep + text;
+    // El binding @onchange del FormViewer captura este evento.
     t.dispatchEvent(new Event('change', { bubbles: true }));
 
-    // Conteo de palabras para forzar un dispatch extra cada 10 (en caso de
-    // que el autosave del FormViewer tenga un debounce largo).
-    const newWords = trimmed.split(/\s+/).filter(Boolean).length;
+    const newWords = text.split(/\s+/).filter(Boolean).length;
     session.wordsSinceFlush += newWords;
-    updateWordCount();
     if (session.wordsSinceFlush >= 10) {
       session.wordsSinceFlush = 0;
       t.dispatchEvent(new Event('input', { bubbles: true }));
     }
   }
 
-  async function stopSession() {
+  function stopSession() {
     if (!session) { return; }
     const s = session;
+    s.stopping = true;
+    try { s.recognition.stop(); } catch (_) {}
     session = null;
-    if (s.timer) { clearInterval(s.timer); }
-    try {
-      if (s.recorder.state === 'recording') { s.recorder.stop(); }
-    } catch (_) { /* ya cerrado */ }
-    // Esperar un tick para que el ultimo chunk se procese.
-    setTimeout(() => {
-      try { s.stream.getTracks().forEach(tr => tr.stop()); } catch (_) {}
-    }, 300);
     s.btn.classList.remove('recording');
     closePopover();
   }
@@ -168,11 +149,11 @@ window.visalVoice = (function () {
     if (!session) { return; }
     session.paused = !session.paused;
     if (session.paused) {
-      try { if (session.recorder.state === 'recording') { session.recorder.stop(); } } catch (_) {}
+      try { session.recognition.stop(); } catch (_) {}
       setStatus('Pausado.', 'paused');
       session.btn.classList.remove('recording');
     } else {
-      maybeRestart();
+      try { session.recognition.start(); } catch (_) {}
       setStatus('Escuchando...');
       session.btn.classList.add('recording');
     }
@@ -190,6 +171,7 @@ window.visalVoice = (function () {
         <span class="fv-voice-mic">&#127908;</span>
         <span id="fv-voice-status">Iniciando...</span>
       </div>
+      <div class="fv-voice-interim" id="fv-voice-interim"></div>
       <div class="fv-voice-pop-count" id="fv-voice-count">0 palabras dictadas</div>
       <div class="fv-voice-pop-actions">
         <button type="button" class="fv-voice-pop-btn" id="fv-voice-pause">Pausar</button>
@@ -206,6 +188,7 @@ window.visalVoice = (function () {
     ensurePopover();
     popover.classList.add('open');
     document.getElementById('fv-voice-pause').textContent = 'Pausar';
+    updateInterim();
     updateWordCount();
   }
   function closePopover() {
@@ -221,6 +204,11 @@ window.visalVoice = (function () {
                      'fv-voice-status-ok';
     }
   }
+  function updateInterim() {
+    if (!popover) { return; }
+    const el = document.getElementById('fv-voice-interim');
+    if (el) { el.textContent = session?.interimText || ''; }
+  }
   function updateWordCount() {
     if (!popover || !session) { return; }
     const c = document.getElementById('fv-voice-count');
@@ -230,7 +218,6 @@ window.visalVoice = (function () {
     }
   }
 
-  // ===== Estilos del popover (inyectados una sola vez) =====
   function injectStyles() {
     if (document.getElementById('fv-voice-styles')) { return; }
     const s = document.createElement('style');
@@ -240,7 +227,7 @@ window.visalVoice = (function () {
   position: fixed; right: 24px; bottom: 24px; z-index: 9000;
   background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px;
   box-shadow: 0 12px 32px rgba(15,23,42,.25);
-  width: 280px; padding: 14px; display: none; font-family: inherit;
+  width: 300px; padding: 14px; display: none; font-family: inherit;
 }
 .fv-voice-pop.open { display: block; }
 .fv-voice-pop-h {
@@ -251,6 +238,13 @@ window.visalVoice = (function () {
 #fv-voice-status.fv-voice-status-ok { color: #1565c0; }
 #fv-voice-status.fv-voice-status-err { color: #b91c1c; }
 #fv-voice-status.fv-voice-status-paused { color: #64748b; }
+.fv-voice-interim {
+  min-height: 28px; max-height: 56px; overflow-y: auto;
+  background: #f8fafc; border-radius: 6px; padding: 6px 8px;
+  font-size: 12px; font-style: italic; color: #64748b; line-height: 1.4;
+  margin-bottom: 6px;
+}
+.fv-voice-interim:empty::before { content: 'Aqui aparece lo que se va escuchando...'; opacity: .55; }
 .fv-voice-pop-count {
   font-size: 11px; color: #64748b; padding: 4px 0 12px;
   border-bottom: 1px solid #e2e8f0; margin-bottom: 12px;

@@ -640,40 +640,6 @@ app.MapPost("/api/firma/{token}/submit", async (
     return ok ? Results.Ok(new { ok = true }) : Results.BadRequest(new { ok = false, error = "Solicitud invalida, ya cerrada o expirada." });
 }).AllowAnonymous().DisableAntiforgery();
 
-// Recibe un chunk de audio (multipart/form-data, campo "file") y devuelve la
-// transcripcion via Whisper. Pensado para el dictado por voz en textareas del
-// FormViewer: el JS captura ~5s de audio, lo manda aqui y appendea el texto al
-// campo. El audio NO se persiste (se manda en streaming a OpenAI y se descarta).
-app.MapPost("/api/transcribe", async (
-    HttpRequest request,
-    Visal.Application.Tenancy.ITranscriptionService svc,
-    CancellationToken ct) =>
-{
-    if (!request.HasFormContentType)
-    {
-        return Results.BadRequest(new { ok = false, error = "Se esperaba multipart/form-data." });
-    }
-    var form = await request.ReadFormAsync(ct);
-    var file = form.Files["file"] ?? form.Files.FirstOrDefault();
-    if (file is null || file.Length == 0)
-    {
-        return Results.BadRequest(new { ok = false, error = "No se recibio archivo de audio." });
-    }
-    // Tope sano del chunk: 5 segundos a 32kbps opus ~20KB. Dejamos 4 MB para
-    // tolerar codecs ineficientes; arriba de eso es probable un abuso.
-    if (file.Length > 4L * 1024 * 1024)
-    {
-        return Results.BadRequest(new { ok = false, error = "El audio supera el tope (4 MB por chunk)." });
-    }
-    var lang = (form["lang"].ToString()?.Trim()) is { Length: > 0 } l ? l : "es";
-
-    await using var stream = file.OpenReadStream();
-    var result = await svc.TranscribirAsync(stream, file.FileName, lang, ct);
-    return result.Ok
-        ? Results.Ok(new { ok = true, text = result.Text ?? string.Empty })
-        : Results.Ok(new { ok = false, error = result.Error ?? "No se pudo transcribir." });
-}).RequireAuthorization().DisableAntiforgery();
-
 app.Run();
 
 // Payload del POST publico de firma (queda al fondo del file porque Program.cs es top-level).

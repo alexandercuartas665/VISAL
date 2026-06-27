@@ -432,6 +432,13 @@
                     <div class="fb-prop"><label>Placeholder</label><input class="fb-input" @bind="_selected.Placeholder" @bind:event="oninput" /></div>
                     <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
 
+                    @* Dictado por voz: solo tiene sentido en areas de texto largas.
+                       El visor mostrara un boton flotante para iniciar la transcripcion. *@
+                    @if (_selected.FieldType == "textarea")
+                    {
+                        <label class="fb-check"><input type="checkbox" @bind="_selected.EnableVoice" /> &#127908; Permitir dictado por voz (Whisper)</label>
+                    }
+
                     @if (_selected.FieldType is "select" or "autocomplete")
                     {
                         <div class="fb-prop">

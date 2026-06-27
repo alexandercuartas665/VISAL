@@ -230,6 +230,37 @@ else
     /* Las secciones de destino necesitan un scroll-margin para que el header
        del modal no las tape cuando se hace scrollIntoView. */
     .fv-section { scroll-margin-top: 12px; }
+
+    /* ==================== Dictado por voz (Whisper) ====================
+       Wrapper relative para que el boton se ancle dentro del textarea.
+       El popover de estado lo crea el JS sobre el body (singleton). */
+    .fv-voice-wrap { position: relative; }
+    .fv-voice-wrap > textarea { padding-right: 38px; }
+    .fv-voice-btn {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 30px; height: 30px;
+        border-radius: 50%;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        color: #475569;
+        font-size: 14px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 1px 4px rgba(15,23,42,.08);
+        transition: background-color .12s, color .12s, border-color .12s;
+        z-index: 5;
+    }
+    .fv-voice-btn:hover { background: #eff6ff; color: #1565c0; border-color: #93c5fd; }
+    .fv-voice-btn.recording { background: #dc2626; color: #fff; border-color: #b91c1c; animation: fv-voice-pulse 1.2s infinite; }
+    @@keyframes fv-voice-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.6); }
+        70% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+    }
 </style>
 
 @code {
@@ -279,7 +310,11 @@ else
     /// los anclajes sin acumular listeners zombies.</summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        try { await JS.InvokeVoidAsync("visalFormToc.setup"); }
+        try
+        {
+            await JS.InvokeVoidAsync("visalFormToc.setup");
+            await JS.InvokeVoidAsync("visalVoice.setup");
+        }
         catch (Microsoft.JSInterop.JSDisconnectedException) { /* circuito cerrado */ }
         catch (TaskCanceledException) { /* navegacion en curso */ }
     }
@@ -730,9 +765,22 @@ else
         switch (node.FieldType)
         {
             case "textarea":
-                <textarea class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
-                          disabled="@ro" value="@val"
-                          @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
+                if (node.EnableVoice && !ro)
+                {
+                    var voiceId = $"voice-{Math.Abs(key.GetHashCode())}-{node.Id}";
+                    <div class="fv-voice-wrap">
+                        <textarea id="@voiceId" class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
+                                  disabled="@ro" value="@val"
+                                  @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
+                        <button type="button" class="fv-voice-btn" data-voice-target="@voiceId" title="Dictar por voz (Whisper)">&#127908;</button>
+                    </div>
+                }
+                else
+                {
+                    <textarea class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
+                              disabled="@ro" value="@val"
+                              @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
+                }
                 break;
             case "number":
                 <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"

@@ -57,6 +57,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IAiAgentService, Tenancy.AiAgentService>();
         services.AddScoped<Tenancy.IAiUsageService, Tenancy.AiUsageService>();
         services.AddScoped<Tenancy.IAiInferenceService, Tenancy.AiInferenceService>();
+        services.AddScoped<Tenancy.ITranscriptionService, Tenancy.WhisperTranscriptionService>();
         services.AddScoped<Tenancy.IAutomationService, Tenancy.AutomationService>();
         services.AddScoped<Tenancy.IFormDefinitionService, Tenancy.FormDefinitionService>();
         services.AddScoped<Tenancy.IFormDefinitionVersionService, Tenancy.FormDefinitionVersionService>();

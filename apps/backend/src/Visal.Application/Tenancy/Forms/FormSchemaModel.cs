@@ -140,6 +140,15 @@ public sealed class FormNode
     [JsonPropertyName("lockRows")]
     public bool LockRows { get; set; }
 
+    /// <summary>
+    /// Habilita dictado por voz (Whisper) en este campo. Solo aplica a campos
+    /// fieldType="textarea". El FormViewer muestra un boton flotante junto al
+    /// area de texto; el JS captura audio en chunks de ~5s y lo manda a
+    /// /api/transcribe. Default false: opt-in por campo del designer.
+    /// </summary>
+    [JsonPropertyName("enableVoice")]
+    public bool EnableVoice { get; set; }
+
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";

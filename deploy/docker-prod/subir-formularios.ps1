@@ -313,6 +313,50 @@ $prodUser = ($envContent -split "`n" | Select-String '^POSTGRES_USER=').ToString
 $prodPass = ($envContent -split "`n" | Select-String '^POSTGRES_PASSWORD=').ToString().Split('=',2)[1].Trim()
 Info "BD destino: $prodDb / $prodUser"
 
+# ---------- 4.b) Pre-DDL: asegurar tablas de soporte que el dump necesita ---
+# El UPDATE/INSERT de form_definitions dispara el trigger
+# trg_form_definition_snapshot, que escribe en form_definition_snapshots. Si
+# prod aun no tiene esa tabla (migracion no aplicada), el dump revienta. Lo
+# creamos aqui de forma idempotente: IF NOT EXISTS, no toca nada si ya esta.
+Step "Asegurando tabla de soporte form_definition_snapshots en prod"
+$preDdl = @"
+CREATE TABLE IF NOT EXISTS form_definition_snapshots (
+    id                   uuid                     NOT NULL,
+    form_definition_id   uuid                     NOT NULL,
+    codigo               character varying(40)    NOT NULL,
+    nombre               character varying(200)   NOT NULL,
+    version              character varying(20),
+    tipo                 character varying(40),
+    schema_json          jsonb                    NOT NULL,
+    prefill_routes_json  jsonb,
+    activo               boolean                  NOT NULL,
+    snapshot_at          timestamp with time zone NOT NULL,
+    snapshot_by          uuid,
+    motivo               character varying(80),
+    created_at           timestamp with time zone NOT NULL,
+    created_by           uuid,
+    updated_at           timestamp with time zone,
+    updated_by           uuid,
+    tenant_id            uuid                     NOT NULL,
+    CONSTRAINT pk_form_definition_snapshots PRIMARY KEY (id),
+    CONSTRAINT fk_form_definition_snapshots_form_definitions
+        FOREIGN KEY (form_definition_id) REFERENCES form_definitions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_form_definition_snapshots_form_definition_id_snapshot_at
+    ON form_definition_snapshots (form_definition_id, snapshot_at DESC);
+"@
+$preDdlFile = Join-Path $dumpsDir "preddl_$fecha.sql"
+[System.IO.File]::WriteAllText($preDdlFile, $preDdl, $utf8NoBom)
+Invoke-Scp -Source $preDdlFile -Dest "$RemoteDir/dumps/preddl_$fecha.sql"
+$preDdlCmd = "docker cp $RemoteDir/dumps/preddl_$fecha.sql visal-postgres-prod:/tmp/preddl.sql && docker exec -e PGPASSWORD='$prodPass' visal-postgres-prod psql -U $prodUser -d $prodDb -v ON_ERROR_STOP=1 -f /tmp/preddl.sql && docker exec visal-postgres-prod rm -f /tmp/preddl.sql"
+$preDdlOut = Invoke-SshKey -Command $preDdlCmd -AllowFailure
+if ($LASTEXITCODE -ne 0) {
+    Err "Fallo el pre-DDL. Salida:"
+    Write-Host $preDdlOut -ForegroundColor Red
+    exit 1
+}
+Ok "form_definition_snapshots lista (CREATE TABLE IF NOT EXISTS)"
+
 # Conteo antes
 $countProdAntesRaw = Invoke-SshKey -Command "docker exec -e PGPASSWORD='$prodPass' visal-postgres-prod psql -U $prodUser -d $prodDb -At -c 'SELECT COUNT(*) FROM form_definitions;'"
 $countProdAntes = [int]$countProdAntesRaw.Trim()

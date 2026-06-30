@@ -213,7 +213,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         }
         if (line.Status != WhatsAppLineStatus.Connected)
         {
-            return new LineSendResult(false, "La linea no esta conectada.");
+            return new LineSendResult(false, FormatLineNotConnected(line));
         }
         var server = await ResolveServerAsync(cancellationToken);
         if (server is null)
@@ -228,14 +228,19 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         _audit.Write(actorUserId, "whatsapp-line.test-send", nameof(WhatsAppLine), line.Id,
             previousValue: null, newValue: new { to = digits, ok = result.Ok }, tenantId: line.TenantId);
 
-        return new LineSendResult(result.Ok, result.Error);
+        if (!result.Ok)
+        {
+            await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
+            return new LineSendResult(false, HumanizeEvolutionError(result.Error, line));
+        }
+        return new LineSendResult(true, null);
     }
 
     public async Task<LineSendResult> SendMediaAsync(Guid lineId, string phone, MessageMediaType mediaType, string base64, string? mimeType, string? fileName, string? caption, Guid actorUserId, CancellationToken cancellationToken = default)
     {
         var ready = await ReadyLineAsync(lineId, phone, cancellationToken);
         if (ready.Error is not null) { return new LineSendResult(false, ready.Error); }
-        var (baseUrl, apiKey, instance, digits) = ready.Value;
+        var (line, baseUrl, apiKey, instance, digits) = ready.Value;
 
         var result = mediaType switch
         {
@@ -245,30 +250,92 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
             MessageMediaType.Document => await _client.SendMediaAsync(baseUrl, apiKey, instance, digits, "document", base64, mimeType, fileName, caption, cancellationToken),
             _ => new EvolutionSendResult(false, "Tipo de adjunto no soportado.")
         };
-        return new LineSendResult(result.Ok, result.Error);
+        if (!result.Ok)
+        {
+            await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
+            return new LineSendResult(false, HumanizeEvolutionError(result.Error, line));
+        }
+        return new LineSendResult(true, null);
     }
 
     public async Task<LineSendResult> SendLocationAsync(Guid lineId, string phone, double latitude, double longitude, string? name, Guid actorUserId, CancellationToken cancellationToken = default)
     {
         var ready = await ReadyLineAsync(lineId, phone, cancellationToken);
         if (ready.Error is not null) { return new LineSendResult(false, ready.Error); }
-        var (baseUrl, apiKey, instance, digits) = ready.Value;
+        var (line, baseUrl, apiKey, instance, digits) = ready.Value;
         var result = await _client.SendLocationAsync(baseUrl, apiKey, instance, digits, latitude, longitude, name, null, cancellationToken);
-        return new LineSendResult(result.Ok, result.Error);
+        if (!result.Ok)
+        {
+            await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
+            return new LineSendResult(false, HumanizeEvolutionError(result.Error, line));
+        }
+        return new LineSendResult(true, null);
     }
 
     // Resuelve linea conectada + servidor + numero normalizado. Error no nulo si algo falta.
-    private async Task<(string Error, (string baseUrl, string apiKey, string instance, string digits) Value)> ReadyLineAsync(Guid lineId, string phone, CancellationToken ct)
+    private async Task<(string Error, (WhatsAppLine line, string baseUrl, string apiKey, string instance, string digits) Value)> ReadyLineAsync(Guid lineId, string phone, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(phone)) { return ("Indica el numero.", default); }
         var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, ct);
         if (line is null) { return ("La linea no existe.", default); }
-        if (line.Status != WhatsAppLineStatus.Connected) { return ("La linea no esta conectada.", default); }
+        if (line.Status != WhatsAppLineStatus.Connected) { return (FormatLineNotConnected(line), default); }
         var server = await ResolveServerAsync(ct);
         if (server is null) { return ("No hay servidor Evolution configurado.", default); }
         var (baseUrl, apiKey) = server.Value;
         var digits = new string(phone.Where(char.IsDigit).ToArray());
-        return (null!, (baseUrl, apiKey, EvoInstance(line), digits));
+        return (null!, (line, baseUrl, apiKey, EvoInstance(line), digits));
+    }
+
+    // Convierte el error crudo del cliente Evolution (HTTP 500 + JSON) en un mensaje
+    // legible para el operador. Reconoce las causas mas comunes que vimos en
+    // produccion: instancia caida ("Connection Closed"), instancia inexistente,
+    // numero no valido, no autorizado. Cualquier otra cosa pasa intacta pero
+    // recortada para no inundar el toast.
+    private static string HumanizeEvolutionError(string? raw, WhatsAppLine line)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return "No se pudo enviar el mensaje. Intenta de nuevo."; }
+        var alias = !string.IsNullOrWhiteSpace(line.PhoneNumber) ? $"la linea {line.PhoneNumber}" : (!string.IsNullOrWhiteSpace(line.InstanceName) ? $"la linea '{line.InstanceName}'" : "la linea");
+        var s = raw;
+        if (s.Contains("Connection Closed", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"La sesion de WhatsApp de {alias} se cerro. Ve a 'Lineas WhatsApp' y vuelve a escanear el QR para reconectar.";
+        }
+        if (s.Contains("does not exist", StringComparison.OrdinalIgnoreCase) || s.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"La instancia WhatsApp de {alias} no existe en el servidor Evolution. Recrea la linea o contacta soporte.";
+        }
+        if (s.Contains("not a valid", StringComparison.OrdinalIgnoreCase) || s.Contains("invalid number", StringComparison.OrdinalIgnoreCase) || s.Contains("number is not a valid WhatsApp number", StringComparison.OrdinalIgnoreCase))
+        {
+            return "El numero del destinatario no esta registrado en WhatsApp. Verifica el numero del paciente.";
+        }
+        if (s.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) || s.StartsWith("HTTP 401") || s.StartsWith("HTTP 403"))
+        {
+            return "Las credenciales del servidor Evolution no son validas. Avisa al administrador.";
+        }
+        // Fallback: recortar a 180 chars para no mostrar el JSON entero.
+        return s.Length > 180 ? s[..180] + "..." : s;
+    }
+
+    // Cuando Evolution responde "Connection Closed" la instancia ya no esta
+    // operativa: marcamos la linea como Disconnected para que los siguientes
+    // envios fallen rapido con el mensaje claro arriba en vez de seguir
+    // golpeando al servidor remoto.
+    private async Task MaybeMarkLineDisconnectedAsync(WhatsAppLine line, string? error, CancellationToken ct)
+    {
+        if (error is null) { return; }
+        if (!error.Contains("Connection Closed", StringComparison.OrdinalIgnoreCase)) { return; }
+        if (line.Status == WhatsAppLineStatus.Disconnected) { return; }
+        line.Status = WhatsAppLineStatus.Disconnected;
+        line.UpdatedAt = _timeProvider.GetUtcNow();
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static string FormatLineNotConnected(WhatsAppLine line)
+    {
+        var nombre = !string.IsNullOrWhiteSpace(line.PhoneNumber)
+            ? $"La linea {line.PhoneNumber}"
+            : (!string.IsNullOrWhiteSpace(line.InstanceName) ? $"La linea '{line.InstanceName}'" : "La linea");
+        return $"{nombre} no esta conectada. Ve a 'Lineas WhatsApp' y escanea el QR para activarla.";
     }
 
     public async Task<int> ApplyWebhookToConnectedLinesAsync(Guid actorUserId, CancellationToken cancellationToken = default)

@@ -630,6 +630,49 @@ app.MapPost("/webhooks/evolution", async (
 // La pagina /firma/{token} la sirve la propia app Blazor (componente FirmaPacienteRemota).
 // La submission usa este POST API porque persistir desde el Blazor anonimo sin tenant
 // scope era enredado: con un POST plano es trivial.
+// Genera al vuelo un .xlsx con la plantilla esperada por el import de
+// profesionales (mismas 12 columnas que CfgProfesionales.OnExcelSelected
+// consume). Es minimal: header + una fila de ejemplo + comentario explicativo.
+app.MapGet("/api/profesionales/plantilla.xlsx", () =>
+{
+    using var wb = new ClosedXML.Excel.XLWorkbook();
+    var ws = wb.AddWorksheet("Profesionales");
+
+    var headers = new[]
+    {
+        "No documento", "Tipo documento", "Primer Nombre", "Segundo Nombre",
+        "Primer apellido", "Segundo apellido", "Tipo profesional", "Registro medico",
+        "Ciudad", "Celular", "SubCategoria", "Firma"
+    };
+    for (var i = 0; i < headers.Length; i++)
+    {
+        ws.Cell(1, i + 1).Value = headers[i];
+        ws.Cell(1, i + 1).Style.Font.Bold = true;
+        ws.Cell(1, i + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#1565C0");
+        ws.Cell(1, i + 1).Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+    }
+    var ejemplo = new object[] {
+        "1010101010", "CC", "JUAN", "CARLOS", "PEREZ", "MOLINA",
+        "ENFERMERIA", "RM-12345", "CALI", "300 1234567", "AUX ENFERMERIA", ""
+    };
+    for (var i = 0; i < ejemplo.Length; i++) { ws.Cell(2, i + 1).Value = ejemplo[i]?.ToString(); }
+
+    ws.Cell(4, 1).Value = "Instrucciones:";
+    ws.Cell(4, 1).Style.Font.Bold = true;
+    ws.Cell(5, 1).Value = "1. Una fila por profesional (la fila 2 es solo un ejemplo, puedes borrarla).";
+    ws.Cell(6, 1).Value = "2. 'Tipo profesional' y 'SubCategoria' deben existir en los catalogos del sistema.";
+    ws.Cell(7, 1).Value = "3. 'Firma' (col 12): pega la imagen DENTRO de la celda. El importador la extrae como PNG.";
+    ws.Cell(8, 1).Value = "4. Documentos repetidos hacen upsert; si la firma viene vacia se preserva la actual.";
+
+    ws.Columns().AdjustToContents();
+
+    using var ms = new MemoryStream();
+    wb.SaveAs(ms);
+    return Results.File(ms.ToArray(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "plantilla-profesionales.xlsx");
+}).RequireAuthorization();
+
 app.MapPost("/api/firma/{token}/submit", async (
     string token,
     SubmitFirmaPayload payload,

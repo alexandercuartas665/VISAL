@@ -162,7 +162,10 @@
             <div class="imp-grid">
                 <div class="ase-f">
                     <label>Archivo Excel (.xlsx)</label>
-                    <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
+                    <div style="display:flex; gap:8px; align-items:flex-start;">
+                        <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
+                        <a class="btn btn-outline-secondary btn-sm" href="/api/profesionales/plantilla.xlsx" download="plantilla-profesionales.xlsx" title="Descargar plantilla en blanco">&#128229; Plantilla</a>
+                    </div>
                     <div class="ase-hint">Columnas esperadas (fila 1): Nº documento, Tipo doc, Primer/Segundo Nombre, Primer/Segundo Apellido, Tipo Profesional, Registro, Ciudad, Celular, SubCategoria, Firma (imagen embebida col 12).</div>
                 </div>
                 <div class="ase-f">
@@ -174,7 +177,7 @@
                         <input type="checkbox" class="form-check-input" @bind="_importCrearUsuario" disabled="@_importing" />
                         Crear usuario de acceso por cada profesional
                     </label>
-                    <div class="ase-hint">Email: <code>{documento}@@visal.travels</code>, clave temporal: <code>Visal{documento}*</code></div>
+                    <div class="ase-hint">Usuario de login: el <strong>documento</strong> del profesional (o el email <code>{documento}@@visal.travels</code>). Clave: <strong>igual al documento</strong>.</div>
                 </div>
             </div>
 
@@ -524,8 +527,13 @@
 
                     if (_importCrearUsuario)
                     {
+                        // El login acepta documento o email; igual creamos un email
+                        // sintetico {doc}@visal.travels porque PlatformUser lo
+                        // requiere unico. La clave se iguala al documento (lo que
+                        // el profesional ya memoriza). El backend exige >= 6
+                        // chars; documentos cortos se rellenan con ceros.
                         var email = $"{doc}@visal.travels";
-                        var pwd = $"Visal{doc}*";
+                        var pwd = doc.Length >= 6 ? doc : doc.PadLeft(6, '0');
                         try
                         {
                             await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, actor);

@@ -1,24 +1,26 @@
-# Export-FormDefinitions.ps1
-# Exporta el listado de form_definitions a un .xlsx con la misma estructura
-# que el archivo "formularios-historias" que el usuario me paso. Usa la DLL
-# ClosedXML que ya esta en stable-bin (no requiere instalar nada).
+# Export-FormDefinitions-Simple.ps1
+# Exporta a .xlsx un listado SIMPLE de form_definitions con 4 columnas:
+# Id, Codigo, Nombre, Tipo. Sirve para hojas de control / planillas de
+# trabajo donde no se necesita el resto de metadatos.
 #
 # Uso:
-#   .\Export-FormDefinitions.ps1
-#   .\Export-FormDefinitions.ps1 -OutputPath "C:\Users\acuartas\Downloads\formularios.xlsx"
+#   .\Export-FormDefinitions-Simple.ps1
+#   .\Export-FormDefinitions-Simple.ps1 -OutputPath "C:\Users\acuartas\Downloads\mi-archivo.xlsx"
 
 [CmdletBinding()]
 param(
-    [string]$OutputPath = "C:\Users\acuartas\Downloads\formularios-historias-actualizado.xlsx",
-    [string]$TenantId = "019e6b0a-a4d8-70d6-a343-d307ebd24b15",
+    [string]$OutputPath = "C:\Users\acuartas\Downloads\formularios-listado.xlsx",
+    [string]$TenantId   = "019e6b0a-a4d8-70d6-a343-d307ebd24b15",
     [string]$PgContainer = "visal-postgres",
-    [string]$PgUser = "visal",
-    [string]$PgDb = "visal_dev"
+    [string]$PgUser      = "visal",
+    [string]$PgDb        = "visal_dev"
 )
 $ErrorActionPreference = "Stop"
 
-# ClosedXML esta compilado para .NET 9: Windows PowerShell 5.1 no lo carga.
-# Si estamos en esa edicion, relanzamos con pwsh.exe (PowerShell 7+).
+# Las DLLs de ClosedXML estan compiladas para .NET 9, asi que Windows PowerShell
+# 5.1 (.NET Framework 4.x) no las puede cargar. Si detectamos esa version
+# relanzamos automaticamente con pwsh.exe (PowerShell 7+) preservando los
+# parametros que recibimos.
 if ($PSVersionTable.PSEdition -eq "Desktop") {
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
     if (-not $pwsh) {
@@ -35,7 +37,7 @@ if ($PSVersionTable.PSEdition -eq "Desktop") {
     return
 }
 
-# 1) Cargar DLLs
+# 1) Cargar DLLs (mismas que el export ampliado)
 $stableBin = "C:\DesarrolloIA\Visal\stable-bin"
 foreach ($dll in @(
     "DocumentFormat.OpenXml.dll",
@@ -48,49 +50,40 @@ foreach ($dll in @(
     if (Test-Path $p) { Add-Type -Path $p -ErrorAction SilentlyContinue }
 }
 
-# 2) Consultar BD - query consistente con el formato del xlsx anterior
+# 2) Consultar BD - solo 4 columnas, ordenadas por tipo + codigo
 $query = @"
 SELECT id,
        coalesce(codigo,'') AS codigo,
        nombre,
-       coalesce(tipo,'') AS tipo,
-       coalesce(version,'') AS version,
-       activo,
-       to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') AS creado,
-       coalesce(to_char(updated_at, 'YYYY-MM-DD HH24:MI:SS'), '') AS actualizado
+       coalesce(tipo,'') AS tipo
 FROM form_definitions
 WHERE tenant_id = '$TenantId'
 ORDER BY tipo NULLS LAST, codigo NULLS LAST, nombre
 "@
 
-$out = docker exec $PgContainer psql -U $PgUser -d $PgDb -tA -F "`t" -c $query
+$out  = docker exec $PgContainer psql -U $PgUser -d $PgDb -tA -F "`t" -c $query
 $rows = @()
 foreach ($line in ($out -split "`r?`n")) {
     $line = $line.Trim("`r")
     if (-not $line) { continue }
     $cols = $line -split "`t"
-    if ($cols.Count -ge 8) {
+    if ($cols.Count -ge 4) {
         $rows += [pscustomobject]@{
-            Id          = $cols[0]
-            Codigo      = $cols[1]
-            Nombre      = $cols[2]
-            Tipo        = $cols[3]
-            Version     = $cols[4]
-            Activo      = $cols[5]
-            Creado      = $cols[6]
-            Actualizado = $cols[7]
+            Id     = $cols[0]
+            Codigo = $cols[1]
+            Nombre = $cols[2]
+            Tipo   = $cols[3]
         }
     }
 }
 
 Write-Host "Filas leidas de BD: $($rows.Count)" -ForegroundColor Cyan
 
-# 3) Crear el .xlsx
+# 3) Generar .xlsx
 $wb = New-Object ClosedXML.Excel.XLWorkbook
-$ws = $wb.AddWorksheet("FormDefinitions")
+$ws = $wb.AddWorksheet("Formularios")
 
-# Header - misma estructura que el xlsx anterior + columna EVOLUCION QUE ACTIVA vacia
-$headers = @("Id Interno","Codigo Principal","EVOLUCION QUE ACTIVA","Nombre","Tipo","Version","Activo","Creado","Actualizado")
+$headers = @("Id", "Codigo", "Nombre", "Tipo")
 for ($i = 0; $i -lt $headers.Count; $i++) {
     $cell = $ws.Cell(1, $i + 1)
     $cell.Value = $headers[$i]
@@ -98,28 +91,21 @@ for ($i = 0; $i -lt $headers.Count; $i++) {
     $cell.Style.Fill.BackgroundColor = [ClosedXML.Excel.XLColor]::LightGray
 }
 
-# Datos
 for ($r = 0; $r -lt $rows.Count; $r++) {
     $row = $rows[$r]
     $excelRow = $r + 2
     $ws.Cell($excelRow, 1).Value = $row.Id
     $ws.Cell($excelRow, 2).Value = $row.Codigo
-    # Columna 3 (EVOLUCION QUE ACTIVA) la dejamos vacia - el usuario la llena a mano
-    $ws.Cell($excelRow, 4).Value = $row.Nombre
-    $ws.Cell($excelRow, 5).Value = $row.Tipo
-    $ws.Cell($excelRow, 6).Value = $row.Version
-    $ws.Cell($excelRow, 7).Value = $row.Activo
-    $ws.Cell($excelRow, 8).Value = $row.Creado
-    $ws.Cell($excelRow, 9).Value = $row.Actualizado
+    $ws.Cell($excelRow, 3).Value = $row.Nombre
+    $ws.Cell($excelRow, 4).Value = $row.Tipo
 }
 
-# Ajustar anchos
 $ws.Columns().AdjustToContents() | Out-Null
-$ws.Column(1).Width = 38   # Id (UUID)
-$ws.Column(3).Width = 25   # EVOLUCION QUE ACTIVA
-$ws.Column(4).Width = 55   # Nombre
+$ws.Column(1).Width = 38   # UUID
+$ws.Column(2).Width = 22
+$ws.Column(3).Width = 60
+$ws.Column(4).Width = 24
 
-# Auto-filtro y vista congelada en fila 1
 $ws.RangeUsed().SetAutoFilter() | Out-Null
 $ws.SheetView.FreezeRows(1)
 
@@ -130,7 +116,7 @@ $wb.SaveAs($OutputPath)
 $wb.Dispose()
 
 Write-Host "OK Excel generado: $OutputPath" -ForegroundColor Green
-Write-Host "    Total formatos: $($rows.Count)" -ForegroundColor Green
+Write-Host "    Total formularios: $($rows.Count)" -ForegroundColor Green
 
 # Resumen por tipo
 $byTipo = $rows | Group-Object Tipo | Sort-Object Count -Descending

@@ -25,13 +25,27 @@
            condicionales (Vista documento, Rutas de prefill, Eliminar), asi
            Nuevo/Guardar no saltan de lugar al abrir un formulario. *@
         <div class="fb-tb-right">
-            <select class="fb-input fb-input-sm fb-tb-select" @onchange="OnPickForm">
-                <option value="">— Abrir formulario —</option>
-                @foreach (var f in _forms)
-                {
-                    <option value="@f.Id" selected="@(f.Id == _currentId)">@f.Nombre (@f.Codigo)</option>
-                }
-            </select>
+            @* Filtro por tipo + selector. El filtro de tipo es solo de UI: no
+               cambia el formulario abierto actualmente, solo restringe lo que
+               se ve en el desplegable de abajo. *@
+            <div class="fb-tb-pick">
+                <select class="fb-input fb-input-sm fb-tb-tipo"
+                        title="Filtrar por tipo"
+                        @bind="_filterTipo">
+                    <option value="">Todos los tipos</option>
+                    @foreach (var t in TiposDisponibles)
+                    {
+                        <option value="@t">@t</option>
+                    }
+                </select>
+                <select class="fb-input fb-input-sm fb-tb-select" @onchange="OnPickForm">
+                    <option value="">— Abrir formulario —</option>
+                    @foreach (var f in FormsFiltrados)
+                    {
+                        <option value="@f.Id" selected="@(f.Id == _currentId)">@f.Nombre (@f.Codigo)</option>
+                    }
+                </select>
+            </div>
             <div class="fb-tb-actions">
                 @if (_currentId is not null)
                 {
@@ -778,6 +792,23 @@
     private Guid? _currentId;
     private string _codigo = "";
     private string? _codigoSecundario = null;
+
+    // Filtro por tipo en el toolbar (solo afecta el desplegable, no el form abierto).
+    private string _filterTipo = "";
+
+    /// <summary>Lista ordenada y unica de tipos presentes en los formularios.</summary>
+    private IEnumerable<string> TiposDisponibles =>
+        _forms
+            .Select(f => (f.Tipo ?? "").Trim())
+            .Where(t => !string.IsNullOrEmpty(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>_forms filtrado por <see cref="_filterTipo"/>. Si esta vacio se muestran todos.</summary>
+    private IEnumerable<FormDefinitionDto> FormsFiltrados =>
+        string.IsNullOrEmpty(_filterTipo)
+            ? _forms
+            : _forms.Where(f => string.Equals((f.Tipo ?? "").Trim(), _filterTipo, StringComparison.OrdinalIgnoreCase));
     private string _nombre = "";
     private string? _tipo;
     private string? _version;

@@ -7,6 +7,7 @@
 @using Visal.Application.Tenancy
 @inject IProfesionalConfigService Svc
 @inject IUsuarioAdminService UsuSvc
+@inject ISucursalService SucSvc
 @inject IWebHostEnvironment Env
 
 <PageTitle>Profesionales - Visal</PageTitle>
@@ -110,18 +111,39 @@
                 </div>
             </div>
 
-            <!-- Agencias activas -->
+            <!-- Sedes / agencias activas: select con sedes del tenant -->
             <div class="ase-card">
-                <div class="ase-card-h">Agencias activas <button class="btn btn-outline-primary btn-sm ms-2" @onclick="AddAgencia">+ Agencia</button></div>
-                @for (var i = 0; i < _agencias.Count; i++)
+                <div class="ase-card-h">Sedes de atencion <button class="btn btn-outline-primary btn-sm ms-2" @onclick="AddAgencia" disabled="@(_sedes.Count == 0)">+ Sede</button></div>
+                @if (_sedes.Count == 0)
                 {
-                    var idx = i;
-                    <div class="ase-ag-row">
-                        <input class="form-control form-control-sm" @bind="_agencias[idx]" placeholder="Ciudad / sede" />
-                        <button class="btn btn-outline-danger btn-sm" @onclick="() => _agencias.RemoveAt(idx)">&times;</button>
-                    </div>
+                    <div class="ase-empty">No hay sedes activas en el tenant. Crea sedes en Configuracion de Empresa primero.</div>
                 }
-                @if (_agencias.Count == 0) { <div class="ase-empty">Sin agencias. Agrega una y guarda el profesional.</div> }
+                else
+                {
+                    @for (var i = 0; i < _agencias.Count; i++)
+                    {
+                        var idx = i;
+                        var val = _agencias[idx] ?? "";
+                        <div class="ase-ag-row">
+                            <select class="form-select form-select-sm" value="@val"
+                                    @onchange="e => _agencias[idx] = e.Value?.ToString() ?? string.Empty">
+                                <option value="">Seleccione sede...</option>
+                                @* Si el valor actual NO esta en la lista de sedes activas (legado),
+                                   lo mostramos arriba para preservarlo y que el usuario lo cambie. *@
+                                @if (!string.IsNullOrWhiteSpace(val) && !_sedes.Any(s => string.Equals(s.Nombre, val, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    <option value="@val">@val (legado)</option>
+                                }
+                                @foreach (var s in _sedes)
+                                {
+                                    <option value="@s.Nombre">@s.Nombre@(string.IsNullOrWhiteSpace(s.Ciudad) ? "" : " - " + s.Ciudad)</option>
+                                }
+                            </select>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _agencias.RemoveAt(idx)">&times;</button>
+                        </div>
+                    }
+                    @if (_agencias.Count == 0) { <div class="ase-empty">Sin sedes asignadas. Agrega una y guarda el profesional.</div> }
+                }
             </div>
 
             <!-- Firma + usuario -->
@@ -169,8 +191,21 @@
                     <div class="ase-hint">Columnas esperadas (fila 1): Nº documento, Tipo doc, Primer/Segundo Nombre, Primer/Segundo Apellido, Tipo Profesional, Registro, Ciudad, Celular, SubCategoria, Firma (imagen embebida col 12).</div>
                 </div>
                 <div class="ase-f">
-                    <label>Sede a asignar (Agencias activas)</label>
-                    <input class="form-control form-control-sm" @bind="_importSede" placeholder="CALI" disabled="@_importing" />
+                    <label>Sede a asignar</label>
+                    <select class="form-select form-select-sm" @bind="_importSede" disabled="@_importing">
+                        @if (_sedes.Count == 0)
+                        {
+                            <option value="">No hay sedes activas</option>
+                        }
+                        else
+                        {
+                            <option value="">Seleccione...</option>
+                            @foreach (var s in _sedes)
+                            {
+                                <option value="@s.Nombre">@s.Nombre@(string.IsNullOrWhiteSpace(s.Ciudad) ? "" : " - " + s.Ciudad)</option>
+                            }
+                        }
+                    </select>
                 </div>
                 <div class="ase-f">
                     <label class="form-check-label" style="display:flex; align-items:center; gap:8px;">
@@ -272,6 +307,7 @@
     private string? _registro, _ciudad, _celular, _firmaUrl;
     private HashSet<Guid> _subSel = new();
     private List<string> _agencias = new();
+    private List<SucursalDto> _sedes = new();
 
     private bool _busy;
     private string? _error, _ok;
@@ -311,6 +347,7 @@
     {
         _tipos = (await Svc.ListTiposAsync(soloActivos: true)).ToList();
         _subcats = (await Svc.ListSubcategoriasAsync(soloActivos: true)).ToList();
+        _sedes = (await SucSvc.ListAsync(soloActivas: true)).ToList();
         await LoadLista();
     }
 
@@ -374,7 +411,7 @@
     private bool _showImportModal;
     private bool _importing;
     private string? _importError;
-    private string _importSede = "CALI";
+    private string _importSede = "";
     private bool _importCrearUsuario = true;
     private int _importTotal, _importCurrent, _importOk, _importErr;
     private double _importProgress;
@@ -512,7 +549,9 @@
                     }
 
                     var nombreCompleto = string.Join(' ', new[] { pn, sn, pa, sa }.Where(s => !string.IsNullOrWhiteSpace(s)));
-                    var agencias = new List<string> { string.IsNullOrWhiteSpace(_importSede) ? "CALI" : _importSede.Trim() };
+                    var agencias = string.IsNullOrWhiteSpace(_importSede)
+                        ? new List<string>()
+                        : new List<string> { _importSede.Trim() };
 
                     var req = new SaveProfesionalRequest(id, doc, tipoDoc,
                         pn, sn, pa, sa, nombreCompleto, tipo.Id, registro, ciudad, celular, firmaUrl,

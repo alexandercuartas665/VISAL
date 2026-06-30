@@ -116,6 +116,50 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         return req is null ? null : Map(req);
     }
 
+    public async Task<FirmaRequestDto?> CrearLibreParaPacienteAsync(Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tenantId) { return null; }
+        var digits = Digits(telefono);
+        if (digits.Length == 0) { return null; }
+
+        // Reutiliza la solicitud "libre" (NotaMedicaId == null) si todavia esta vigente.
+        var ahora = _time.GetUtcNow();
+        var existente = await _db.FirmaPacienteRequests
+            .FirstOrDefaultAsync(r => r.PacienteId == pacienteId
+                                      && r.NotaMedicaId == null
+                                      && r.Status == FirmaRequestStatus.Pendiente
+                                      && r.ExpiresAt > ahora, ct);
+        if (existente is not null) { return Map(existente); }
+
+        var req = new FirmaPacienteRequest
+        {
+            TenantId = tenantId,
+            Token = NewToken(),
+            PacienteId = pacienteId,
+            NotaMedicaId = null,
+            Telefono = digits,
+            NombreContacto = nombreContacto,
+            SolicitadaPorTenantUserId = actorTenantUserId == Guid.Empty ? null : actorTenantUserId,
+            CreatedAt = ahora,
+            ExpiresAt = ahora + _vigencia,
+            Status = FirmaRequestStatus.Pendiente
+        };
+        _db.FirmaPacienteRequests.Add(req);
+        await _db.SaveChangesAsync(ct);
+        return Map(req);
+    }
+
+    public async Task<FirmaRequestDto?> ObtenerActivaLibrePorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
+    {
+        var req = await _db.FirmaPacienteRequests.AsNoTracking()
+            .Where(r => r.PacienteId == pacienteId
+                        && r.NotaMedicaId == null
+                        && (r.Status == FirmaRequestStatus.Pendiente || r.Status == FirmaRequestStatus.Completada))
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        return req is null ? null : Map(req);
+    }
+
     public async Task<FirmaRequestPublicDto?> ObtenerPorTokenPublicoAsync(string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token)) { return null; }
@@ -193,20 +237,29 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         req.Status = FirmaRequestStatus.Completada;
         req.CompletedAt = _time.GetUtcNow();
 
-        var nota = await _db.NotasMedicas.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(n => n.Id == req.NotaMedicaId, ct);
-        if (nota is not null)
+        // Si la solicitud esta atada a una nota, replicamos la firma en el campo
+        // oficial de la nota y dejamos el doc adjunto. Las solicitudes "libres"
+        // (pedidas desde el panel WhatsApp del paciente sin nota especifica)
+        // solo dejan la imagen en FirmaPacienteRequest.ImageDataUrl + el
+        // NotaMedicaDocumento queda atado al paciente sin NotaMedica.
+        var notaIdParaDoc = req.NotaMedicaId;
+        if (req.NotaMedicaId is Guid notaId)
         {
-            nota.FirmaPacienteDataUrl = imageDataUrl;
+            var nota = await _db.NotasMedicas.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(n => n.Id == notaId, ct);
+            if (nota is not null)
+            {
+                nota.FirmaPacienteDataUrl = imageDataUrl;
+            }
         }
 
-        // Adicional: guardar la firma como PNG fisico + crear un NotaMedicaDocumento
-        // en la categoria "Firma del Paciente" para traceabilidad permanente desde
-        // el tab "Documentos Externos" del modulo de Notas.
+        // Adicional: guardar la firma como PNG fisico. Si hay nota, queda como
+        // NotaMedicaDocumento de esa nota (visible desde "Documentos Externos");
+        // si no hay nota, queda como adjunto del paciente sin asociar a nota.
         try
         {
             var bytes = DecodeDataUrl(imageDataUrl);
-            if (bytes is not null && bytes.Length > 0)
+            if (bytes is not null && bytes.Length > 0 && notaIdParaDoc is Guid notaDocId)
             {
                 var nombre = $"firma-paciente-{req.Id:N}.png";
                 var rutaWeb = await _storage.GuardarAsync("notas", nombre, bytes, ct);
@@ -214,7 +267,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 _db.NotaMedicaDocumentos.Add(new NotaMedicaDocumento
                 {
                     TenantId = req.TenantId,
-                    NotaMedicaId = req.NotaMedicaId,
+                    NotaMedicaId = notaDocId,
                     PacienteId = req.PacienteId,
                     NombreOriginal = $"Firma remota del paciente ({_time.GetUtcNow().LocalDateTime:dd-MM-yyyy HH:mm}).png",
                     RutaArchivo = rutaWeb,

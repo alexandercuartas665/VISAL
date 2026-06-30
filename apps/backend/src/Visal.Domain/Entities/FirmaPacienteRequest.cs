@@ -16,7 +16,12 @@ public class FirmaPacienteRequest : TenantEntity
     public string Token { get; set; } = null!;
 
     public Guid PacienteId { get; set; }
-    public Guid NotaMedicaId { get; set; }
+
+    /// <summary>Nota a la que pertenece la firma. NULL para firmas "libres" pedidas
+    /// desde el panel de WhatsApp del paciente (HC, /pacientes, etc.) — esas firmas
+    /// quedan archivadas en ImageDataUrl como prueba documental pero no actualizan
+    /// NotaMedica.FirmaPacienteDataUrl.</summary>
+    public Guid? NotaMedicaId { get; set; }
 
     /// <summary>Telefono al que se envio la solicitud (solo digitos). Lo guardamos para auditoria
     /// porque el paciente podria cambiar de numero entre la solicitud y la firma.</summary>

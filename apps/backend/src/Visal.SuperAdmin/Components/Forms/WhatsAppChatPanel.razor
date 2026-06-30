@@ -6,6 +6,8 @@
 @inject IWhatsAppLineService LineasSvc
 @inject IMessageTemplateService TplSvc
 @inject IPacienteService PacientesSvc
+@inject IFirmaRemotaService FirmaSvc
+@inject NavigationManager Nav
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
 @inject NavigationManager Nav
@@ -169,8 +171,27 @@
                             <button class="wac-qr-tab @(cat.Key == _qrCategory ? "active" : "")" @onclick="() => _qrCategory = cat.Key">@cat.Label</button>
                         }
                         <button class="wac-qr-tab wac-qr-tab-manage" @onclick="OpenTemplateManager" title="Crear/editar pregrabados">+ Gestionar</button>
+                        @if (PacienteId is not null)
+                        {
+                            <button class="wac-qr-tab wac-qr-tab-firma" @onclick="SolicitarFirmaLibreAsync" disabled="@_firmaBusy" title="Enviar link de firma al paciente por WhatsApp">
+                                @if (_firmaSolicitudActiva?.Status == FirmaRequestStatus.Pendiente)
+                                {
+                                    <text>&#8987; Firma pendiente</text>
+                                }
+                                else if (_firmaSolicitudActiva?.Status == FirmaRequestStatus.Completada)
+                                {
+                                    <text>&#10003; Firma OK - reenviar</text>
+                                }
+                                else
+                                {
+                                    <text>&#9997; Solicitar firma</text>
+                                }
+                            </button>
+                        }
                     </div>
                 </div>
+                @if (_firmaMsg is not null) { <div class="wac-firma-info text-muted">@_firmaMsg</div> }
+                @if (_firmaError is not null) { <div class="wac-firma-info text-danger">@_firmaError</div> }
                 <div class="wac-quick-list">
                     @foreach (var tpl in CurrentTemplates())
                     {
@@ -430,6 +451,10 @@
     .wac-qr-tab:hover { color: #0f172a; }
     .wac-qr-tab.active { background: #128c7e; color: #fff; }
     .wac-qr-tab-manage { border: 1px solid #cbd5e1; }
+    .wac-qr-tab-firma { border: 1px solid #16a34a; color: #166534; }
+    .wac-qr-tab-firma:hover:not(:disabled) { background: #ecfdf5; color: #166534; }
+    .wac-qr-tab-firma:disabled { opacity: .6; cursor: not-allowed; }
+    .wac-firma-info { font-size: 10.5px; padding: 4px 8px; }
     .wac-quick-list { display: flex; gap: 4px; flex-wrap: wrap; max-height: 64px; overflow-y: auto; }
     .wac-chip { font-size: 10.5px; padding: 4px 8px; border-radius: 999px; border: 1px solid #cbd5e1; background: white; color: #0f172a; cursor: pointer; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wac-chip:hover { border-color: #25d366; color: #128c7e; background: #f0fff4; }
@@ -580,6 +605,14 @@
     private string _telCodigoPais = "57"; // Colombia por defecto.
     private string? _telNumero;
     private string? _telError;
+
+    // Solicitud "libre" de firma del paciente: crea un FirmaPacienteRequest sin
+    // nota asociada y envia el link al WhatsApp del paciente por la linea
+    // seleccionada. La firma queda archivada en FirmaPacienteRequest.ImageDataUrl.
+    private FirmaRequestDto? _firmaSolicitudActiva;
+    private bool _firmaBusy;
+    private string? _firmaMsg;
+    private string? _firmaError;
 
     /// <summary>Lista corta de paises (Latam + comunes) con codigo internacional.</summary>
     private static readonly (string Codigo, string Nombre, string Bandera)[] PaisesCodigos = new[]
@@ -1102,5 +1135,43 @@
         {
             await OnTelefonoActualizado.InvokeAsync(_telefonoDigits);
         }
+    }
+
+    // ===================== Solicitar firma libre del paciente =====================
+    // Crea una solicitud de firma sin asociar a nota especifica y envia el link al
+    // WhatsApp del paciente. Reusa la solicitud activa si todavia esta pendiente.
+    // El link es publico (token unico) y vence en 2 horas.
+    private async Task SolicitarFirmaLibreAsync()
+    {
+        if (PacienteId is not Guid pacId) { _firmaError = "Sin paciente seleccionado."; return; }
+        if (string.IsNullOrWhiteSpace(_telefonoDigits)) { _firmaError = "Configura el telefono del paciente primero."; return; }
+        if (!Guid.TryParse(_lineaSelIdStr, out var lineId)) { _firmaError = "Selecciona una linea WhatsApp."; return; }
+
+        _firmaBusy = true; _firmaError = null; _firmaMsg = null;
+        try
+        {
+            // 1) Crea o reutiliza la solicitud libre del paciente.
+            var solicitud = await FirmaSvc.CrearLibreParaPacienteAsync(pacId, _telefonoDigits!, NombreContacto, Guid.Empty);
+            if (solicitud is null) { _firmaError = "No se pudo crear la solicitud de firma."; return; }
+
+            // 2) Construir URL absoluta y enviar por WhatsApp.
+            var baseUri = Nav.BaseUri.TrimEnd('/');
+            var urlAbsoluta = $"{baseUri}{solicitud.PublicPath}";
+            var send = await FirmaSvc.EnviarPorWhatsAppAsync(solicitud.Id, lineId, urlAbsoluta, Guid.Empty);
+            if (!send.Ok)
+            {
+                _firmaError = send.Error ?? "No se pudo enviar el link por WhatsApp.";
+                return;
+            }
+
+            _firmaSolicitudActiva = solicitud;
+            _firmaMsg = $"Link enviado a +{solicitud.Telefono}. Vence en 2 horas.";
+
+            // 3) Refrescar los mensajes para que el operador vea el outbound.
+            try { var lst = await Chat.ListMessagesAsync(_conv!.Id); _mensajes = lst.ToList(); }
+            catch { }
+        }
+        catch (Exception ex) { _firmaError = ex.Message; }
+        finally { _firmaBusy = false; }
     }
 }

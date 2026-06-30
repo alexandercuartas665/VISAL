@@ -6,7 +6,9 @@ namespace Visal.Application.Tenancy;
 public sealed record FirmaRequestDto(
     Guid Id,
     Guid PacienteId,
-    Guid NotaMedicaId,
+    /// <summary>Nota a la que pertenece la firma. NULL para firmas "libres" pedidas desde
+    /// el panel WhatsApp del paciente (HC, /pacientes) sin nota especifica.</summary>
+    Guid? NotaMedicaId,
     string Token,
     string Telefono,
     string? NombreContacto,
@@ -48,6 +50,17 @@ public interface IFirmaRemotaService
     /// <summary>Crea (o reutiliza) la solicitud activa de la nota. Si ya hay una
     /// pendiente sin expirar, la devuelve tal cual; si no, crea una nueva.</summary>
     Task<FirmaRequestDto?> CrearOReutilizarAsync(Guid notaMedicaId, Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default);
+
+    /// <summary>Crea (o reutiliza) la solicitud activa "libre" para un paciente,
+    /// sin asociar a una nota especifica. Usado por el boton "Solicitar firma"
+    /// del panel WhatsApp en HC, Notas o Pacientes. La firma capturada se
+    /// archiva en FirmaPacienteRequest.ImageDataUrl pero NO actualiza ninguna
+    /// nota; el operador puede consultarla luego desde el historial del paciente.</summary>
+    Task<FirmaRequestDto?> CrearLibreParaPacienteAsync(Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default);
+
+    /// <summary>Devuelve la solicitud activa "libre" del paciente (sin nota asociada),
+    /// para refrescar el estado del boton en el panel WhatsApp.</summary>
+    Task<FirmaRequestDto?> ObtenerActivaLibrePorPacienteAsync(Guid pacienteId, CancellationToken ct = default);
 
     /// <summary>Envia el link de la solicitud al paciente por WhatsApp via la
     /// linea elegida. Devuelve el resultado del envio (Ok/Error + texto del mensaje).</summary>

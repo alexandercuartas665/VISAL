@@ -630,6 +630,62 @@ app.MapPost("/webhooks/evolution", async (
 // La pagina /firma/{token} la sirve la propia app Blazor (componente FirmaPacienteRemota).
 // La submission usa este POST API porque persistir desde el Blazor anonimo sin tenant
 // scope era enredado: con un POST plano es trivial.
+// Plantilla del import de pacientes en /admision. Mismas 17 columnas que
+// Admision.OnExcelSelected consume. Sin imagenes embebidas.
+app.MapGet("/api/pacientes/plantilla.xlsx", () =>
+{
+    using var wb = new ClosedXML.Excel.XLWorkbook();
+    var ws = wb.AddWorksheet("Pacientes");
+
+    var headers = new[]
+    {
+        "No documento", "Tipo doc", "Primer Nombre", "Segundo Nombre",
+        "Primer Apellido", "Segundo Apellido", "Fecha nacimiento", "Sexo",
+        "Estado civil", "Grupo Rh", "Telefono", "Email",
+        "Direccion", "Ciudad", "Zona", "Regimen", "Estrato"
+    };
+    for (var i = 0; i < headers.Length; i++)
+    {
+        ws.Cell(1, i + 1).Value = headers[i];
+        ws.Cell(1, i + 1).Style.Font.Bold = true;
+        ws.Cell(1, i + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#1565C0");
+        ws.Cell(1, i + 1).Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+    }
+
+    // 3 filas de ejemplo
+    var ejemplos = new object[][]
+    {
+        new object[] { "1010101010", "CC", "JUAN", "CARLOS", "PEREZ", "MOLINA", "22/11/1978", "MASCULINO", "CASADO", "O+", "3001234567", "juan.perez@ejemplo.com", "Cra 50 # 12-08 Apt 502", "CALI", "URBANA", "CONTRIBUTIVO", "3" },
+        new object[] { "38945877", "CC", "GRACIELA", "", "GOMEZ", "GOMEZ", "15/03/1965", "FEMENINO", "VIUDA", "A+", "3119876543", "g.gomez@ejemplo.com", "Calle 5 # 23-15", "CALI", "URBANA", "SUBSIDIADO", "2" },
+        new object[] { "1144099887", "CC", "MARIA", "FERNANDA", "GOMEZ", "", "08/07/1992", "FEMENINO", "SOLTERA", "B+", "3155551122", "maria.gomez@ejemplo.com", "Av 6N # 45-12", "SANTIAGO DE CALI", "URBANA", "CONTRIBUTIVO", "4" }
+    };
+    for (var r = 0; r < ejemplos.Length; r++)
+    {
+        for (var c = 0; c < ejemplos[r].Length; c++)
+        {
+            ws.Cell(r + 2, c + 1).Value = ejemplos[r][c]?.ToString();
+        }
+    }
+
+    var info = 2 + ejemplos.Length + 1;
+    ws.Cell(info, 1).Value = "Instrucciones:";
+    ws.Cell(info, 1).Style.Font.Bold = true;
+    ws.Cell(info + 1, 1).Value = "1. Una fila por paciente. Las filas de ejemplo pueden borrarse antes de importar.";
+    ws.Cell(info + 2, 1).Value = "2. Tipo doc: CC / CE / TI / PA / RC / NIT.";
+    ws.Cell(info + 3, 1).Value = "3. Fecha nacimiento: formato dd/mm/aaaa o celda tipo fecha de Excel.";
+    ws.Cell(info + 4, 1).Value = "4. Sexo: MASCULINO / FEMENINO / OTRO. Zona: URBANA / RURAL.";
+    ws.Cell(info + 5, 1).Value = "5. Documento duplicado => upsert (se actualiza el paciente existente).";
+    ws.Cell(info + 6, 1).Value = "6. Aseguradora, contratos, IPS y sede se completan en la UI tras el import.";
+
+    ws.Columns().AdjustToContents();
+
+    using var ms = new MemoryStream();
+    wb.SaveAs(ms);
+    return Results.File(ms.ToArray(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "plantilla-pacientes.xlsx");
+}).RequireAuthorization();
+
 // Genera al vuelo un .xlsx con la plantilla esperada por el import de
 // profesionales (mismas 12 columnas que CfgProfesionales.OnExcelSelected
 // consume). Es minimal: header + una fila de ejemplo + comentario explicativo.

@@ -19,7 +19,10 @@
         <div class="ase-eyebrow">Operacion Clinica</div>
         <h1 class="ase-title">Admision de Pacientes</h1>
     </div>
-    <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo paciente</button>
+    <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline-primary btn-sm" @onclick="OpenImport" title="Importar pacientes desde Excel">&#128229; Importar Excel</button>
+        <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo paciente</button>
+    </div>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
@@ -452,6 +455,52 @@
     .cie-code { font-family: monospace; font-size: 12px; font-weight: 700; color: #0f172a; background:#fef3c7; padding: 3px 8px; border-radius: 4px; min-width: 64px; text-align: center; }
 </style>
 
+@* ===== Modal Importar pacientes desde Excel ===== *@
+@if (_showImportModal)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseImport"></div>
+    <div class="usu-modal usu-modal-wide">
+        <div class="usu-modal-h">
+            <h3>Importar pacientes desde Excel</h3>
+            <button class="usu-modal-close" @onclick="CloseImport">&times;</button>
+        </div>
+        <div class="usu-modal-body">
+            @if (_importError is not null) { <div class="ase-alert">@_importError</div> }
+            <div class="ase-f">
+                <label>Archivo Excel (.xlsx)</label>
+                <div style="display:flex; gap:8px; align-items:flex-start;">
+                    <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
+                    <a class="btn btn-outline-secondary btn-sm" href="/api/pacientes/plantilla.xlsx" download="plantilla-pacientes.xlsx" title="Descargar plantilla en blanco">&#128229; Plantilla</a>
+                </div>
+                <div class="ase-hint">Columnas (fila 1): No documento, Tipo doc (CC/CE/TI/PA/RC), P/S Nombre, P/S Apellido, Fecha nac (dd/mm/aaaa), Sexo (MASCULINO/FEMENINO/OTRO), Estado civil, Grupo Rh, Telefono, Email, Direccion, Ciudad, Zona (URBANA/RURAL), Regimen, Estrato. Duplicados por documento hacen upsert.</div>
+            </div>
+
+            @if (_importing || _importTotal > 0)
+            {
+                <div style="margin-top:14px;">
+                    <div class="imp-progress" style="width:100%; height:10px; background:#e2e8f0; border-radius:6px; overflow:hidden;">
+                        <div style="width:@($"{_importProgress:0}%"); height:100%; background:linear-gradient(90deg,#2563eb,#1d4ed8); transition:width .15s linear;"></div>
+                    </div>
+                    <div class="ase-hint" style="margin-top:6px;">
+                        @if (_importing) { <span>Procesando fila @_importCurrent de @_importTotal&hellip;</span> }
+                        else { <span>Listo: @_importOk OK, @_importErr errores.</span> }
+                    </div>
+                </div>
+                <div style="margin-top:10px; max-height:220px; overflow-y:auto; background:#0f172a; color:#cbd5e1; border-radius:6px; padding:8px 10px; font-family:ui-monospace,Consolas,monospace; font-size:11.5px; line-height:1.5;">
+                    @foreach (var line in _importLog.TakeLast(40))
+                    {
+                        var color = line.StartsWith("[OK]") ? "#86efac" : line.StartsWith("[ERR]") ? "#fca5a5" : "#93c5fd";
+                        <div style="color:@color;">@line</div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="usu-modal-footer">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseImport" disabled="@_importing">Cerrar</button>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -865,5 +914,169 @@
         if (AuthState is null) { return Guid.Empty; }
         var st = await AuthState;
         return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    // ===== Import desde Excel =====
+
+    private bool _showImportModal;
+    private bool _importing;
+    private string? _importError;
+    private int _importTotal, _importCurrent, _importOk, _importErr;
+    private double _importProgress;
+    private readonly List<string> _importLog = new();
+
+    private void OpenImport()
+    {
+        _showImportModal = true;
+        _importError = null;
+        _importLog.Clear();
+        _importTotal = _importCurrent = _importOk = _importErr = 0;
+        _importProgress = 0;
+    }
+
+    private void CloseImport()
+    {
+        if (_importing) { return; }
+        _showImportModal = false;
+    }
+
+    private async Task OnExcelSelected(InputFileChangeEventArgs e)
+    {
+        _importError = null;
+        _importLog.Clear();
+        _importTotal = _importCurrent = _importOk = _importErr = 0;
+        _importProgress = 0;
+        _importing = true;
+        try
+        {
+            const long max = 25L * 1024 * 1024;
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(max).CopyToAsync(ms);
+            ms.Position = 0;
+
+            using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+            var ws = wb.Worksheets.First();
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+            _importTotal = Math.Max(0, lastRow - 1);
+
+            // Lookup de pacientes existentes para upsert por documento.
+            var existentes = await Svc.ListAsync(null);
+            var byDoc = new Dictionary<string, PacienteDto>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in existentes) { byDoc[p.NumeroDocumento.Trim()] = p; }
+
+            var actor = await Actor();
+
+            for (var r = 2; r <= lastRow; r++)
+            {
+                _importCurrent = r - 1;
+                _importProgress = (double)_importCurrent / Math.Max(1, _importTotal) * 100;
+                try
+                {
+                    var doc = ws.Cell(r, 1).GetString().Trim();
+                    if (string.IsNullOrWhiteSpace(doc)) { continue; }
+                    var tipoDoc = (ws.Cell(r, 2).GetString().Trim() is { Length: > 0 } td) ? td.ToUpperInvariant() : "CC";
+                    var pn = ws.Cell(r, 3).GetString().Trim();
+                    var sn = ws.Cell(r, 4).GetString().Trim();
+                    var pa = ws.Cell(r, 5).GetString().Trim();
+                    var sa = ws.Cell(r, 6).GetString().Trim();
+                    var fechaStr = ws.Cell(r, 7).GetString().Trim();
+                    var sexo = ws.Cell(r, 8).GetString().Trim();
+                    var estadoCivil = ws.Cell(r, 9).GetString().Trim();
+                    var grupoRh = ws.Cell(r, 10).GetString().Trim();
+                    var telefono = ws.Cell(r, 11).GetString().Trim();
+                    var email = ws.Cell(r, 12).GetString().Trim();
+                    var direccion = ws.Cell(r, 13).GetString().Trim();
+                    var ciudad = ws.Cell(r, 14).GetString().Trim();
+                    var zona = ws.Cell(r, 15).GetString().Trim();
+                    var regimen = ws.Cell(r, 16).GetString().Trim();
+                    var estrato = ws.Cell(r, 17).GetString().Trim();
+
+                    // Fecha: aceptamos celda tipo DateTime (Excel) o texto dd/mm/aaaa.
+                    DateOnly? fechaNac = null;
+                    if (ws.Cell(r, 7).TryGetValue<DateTime>(out var dt))
+                    {
+                        fechaNac = DateOnly.FromDateTime(dt);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(fechaStr) &&
+                        DateTime.TryParseExact(fechaStr, new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var dt2))
+                    {
+                        fechaNac = DateOnly.FromDateTime(dt2);
+                    }
+
+                    var nombreCompleto = string.Join(' ', new[] { pn, sn, pa, sa }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+                    Guid? id = null;
+                    if (byDoc.TryGetValue(doc, out var existing)) { id = existing.Id; }
+
+                    var req = new SavePacienteRequest(
+                        Id: id,
+                        NumeroDocumento: doc,
+                        TipoDocumento: tipoDoc,
+                        PrimerNombre: pn,
+                        SegundoNombre: sn,
+                        PrimerApellido: pa,
+                        SegundoApellido: sa,
+                        NombreCompleto: nombreCompleto,
+                        FechaNacimiento: fechaNac,
+                        Edad: null,
+                        IpsComentaId: null, CodigoAceptacion: null, FechaComentan: null,
+                        AseguradoraId: null, FechaIngresoPad: null, FechaEgresoPad: null,
+                        DiasEstancia: null, OpIngresoDias: null,
+                        Incapacidad: null, GrupoRh: string.IsNullOrWhiteSpace(grupoRh) ? null : grupoRh,
+                        TipoUsuarioId: null, Estado: null,
+                        ClasificacionPacienteId: null, ClasificacionGrupoPatologiaId: null,
+                        EstratoSocial: string.IsNullOrWhiteSpace(estrato) ? null : estrato,
+                        Sexo: string.IsNullOrWhiteSpace(sexo) ? null : sexo,
+                        EstadoCivil: string.IsNullOrWhiteSpace(estadoCivil) ? null : estadoCivil,
+                        Zona: string.IsNullOrWhiteSpace(zona) ? null : zona,
+                        Ocupacion: null,
+                        Regimen: string.IsNullOrWhiteSpace(regimen) ? null : regimen,
+                        Contrato1Id: null, Contrato2Id: null, Contrato3Id: null,
+                        Cie10Id: null, Cie10Codigo: null, DiagnosticoPrincipal: null,
+                        Tutela: null, TipoTutelaId: null, MedContratadoId: null,
+                        PaisResidenciaId: null, PaisOrigenId: null, DepartamentoId: null, MunicipioId: null,
+                        Direccion: string.IsNullOrWhiteSpace(direccion) ? null : direccion,
+                        Barrio: null,
+                        Ciudad: string.IsNullOrWhiteSpace(ciudad) ? null : ciudad,
+                        CodigoPaisTelefono: "+57",
+                        Telefono: string.IsNullOrWhiteSpace(telefono) ? null : telefono,
+                        Email: string.IsNullOrWhiteSpace(email) ? null : email,
+                        SedeAtencionId: null,
+                        ContactoEmergencia: null, Parentesco: null, TelefonoEmergencia: null,
+                        ContactosEmergencia: Array.Empty<PacienteContactoEmergenciaDto>(),
+                        Activo: true);
+
+                    var saved = await Svc.SaveAsync(req, actor);
+                    if (saved is null)
+                    {
+                        _importErr++;
+                        _importLog.Add($"[ERR] Fila {r} ({doc}): SaveAsync retorno null.");
+                        continue;
+                    }
+                    _importOk++;
+                    _importLog.Add($"[OK]  Fila {r} ({doc}): {nombreCompleto}{(id is not null ? " [upsert]" : " [nuevo]")}.");
+                }
+                catch (Exception ex)
+                {
+                    _importErr++;
+                    _importLog.Add($"[ERR] Fila {r}: {ex.Message}");
+                }
+                if (r % 5 == 0) { StateHasChanged(); await Task.Yield(); }
+            }
+            _importProgress = 100;
+            await LoadLista();
+            _ok = $"Import terminado: {_importOk} OK, {_importErr} errores.";
+        }
+        catch (Exception ex)
+        {
+            _importError = $"Error fatal: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+            StateHasChanged();
+        }
     }
 }

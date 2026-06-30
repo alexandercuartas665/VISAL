@@ -229,6 +229,19 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $lineasRaw = [System.IO.File]::ReadAllLines($sqlFile, [System.Text.Encoding]::UTF8)
 $lineas = $lineasRaw | Where-Object { $_ -notmatch '^\\(un)?restrict\s' }
 
+# Reemplazar el "search_path vacio" que pg_dump emite por defecto por
+# "search_path = public". Sin esto, los TRIGGERS que la tabla form_definitions
+# tiene (ej. trg_form_definition_snapshot) fallan al intentar INSERT en
+# form_definition_snapshots sin prefijo de schema (porque su funcion no
+# tiene un SET search_path propio).
+$lineas = $lineas | ForEach-Object {
+    if ($_ -match "set_config\('search_path',\s*'',\s*false\)") {
+        "SELECT pg_catalog.set_config('search_path', 'public', false);"
+    } else {
+        $_
+    }
+}
+
 # Modo UPSERT: reemplazar "ON CONFLICT DO NOTHING" por
 # "ON CONFLICT (id) DO UPDATE SET col1=EXCLUDED.col1, col2=EXCLUDED.col2, ..."
 # de modo que los formularios con campos cambiados se actualicen.

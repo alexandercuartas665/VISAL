@@ -1032,18 +1032,57 @@
                 _importProgress = (double)_importCurrent / Math.Max(1, _importTotal) * 100;
                 try
                 {
-                    // Helper local: leer celda como texto trim (vacio si no hay).
-                    string T(int col) => ws.Cell(r, col).GetString().Trim();
+                    // Helpers de lectura tolerantes a celdas raras: si la celda tiene
+                    // un error #N/A, formato inesperado, o tipo no convertible, NO
+                    // tira excepcion — devuelve "" o null. Asi una sola celda mala
+                    // no rompe la fila entera ni el import completo.
+                    string T(int col)
+                    {
+                        try { return (ws.Cell(r, col).GetString() ?? string.Empty).Trim(); }
+                        catch { return string.Empty; }
+                    }
                     string? TN(int col) { var v = T(col); return string.IsNullOrWhiteSpace(v) ? null : v; }
-                    int? TI(int col) { var v = T(col); return int.TryParse(v, out var n) ? n : (int?)null; }
+                    // Truncado defensivo: si el Excel tiene un valor mas largo que el
+                    // limite de la columna en BD (varchar(40), varchar(120), etc.),
+                    // recortamos en vez de fallar la fila entera. La perdida visible
+                    // es minima (un telefono o codigo recortado) frente a perder al
+                    // paciente completo.
+                    static string? Trunc(string? s, int max)
+                        => s is null ? null : (s.Length <= max ? s : s.Substring(0, max));
+                    int? TI(int col)
+                    {
+                        var v = T(col);
+                        if (string.IsNullOrWhiteSpace(v)) { return null; }
+                        if (int.TryParse(v, out var n)) { return n; }
+                        // "3.0" o "3,0" => 3 (toleramos celdas exportadas como decimal).
+                        if (double.TryParse(v, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out var d)) { return (int)d; }
+                        if (double.TryParse(v.Replace(',', '.'), System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out var d2)) { return (int)d2; }
+                        return null;
+                    }
                     DateOnly? TFecha(int col)
                     {
-                        if (ws.Cell(r, col).TryGetValue<DateTime>(out var dtv)) { return DateOnly.FromDateTime(dtv); }
+                        try
+                        {
+                            if (ws.Cell(r, col).TryGetValue<DateTime>(out var dtv)) { return DateOnly.FromDateTime(dtv); }
+                        }
+                        catch { /* sigue con texto */ }
                         var s = T(col);
                         if (string.IsNullOrWhiteSpace(s)) { return null; }
-                        if (DateTime.TryParseExact(s, new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
+                        // Aceptamos los formatos mas comunes que vimos en archivos
+                        // exportados desde Excel/Sheets en Colombia + ISO.
+                        var fmts = new[] {
+                            "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy", "d-M-yyyy",
+                            "yyyy-MM-dd", "yyyy/MM/dd", "yyyyMMdd",
+                            "MM/dd/yyyy", "M/d/yyyy", "dd/MM/yy"
+                        };
+                        if (DateTime.TryParseExact(s, fmts,
                                 System.Globalization.CultureInfo.InvariantCulture,
                                 System.Globalization.DateTimeStyles.None, out var dt)) { return DateOnly.FromDateTime(dt); }
+                        // Como ultimo recurso, intentamos parse flexible.
+                        if (DateTime.TryParse(s, new System.Globalization.CultureInfo("es-CO"),
+                                System.Globalization.DateTimeStyles.None, out var dt2)) { return DateOnly.FromDateTime(dt2); }
                         return null;
                     }
                     Guid? Lookup(Dictionary<string, Guid> dic, int col, string nombre)
@@ -1172,51 +1211,94 @@
                             Parentesco: emPar, CodigoPais: "+57", Telefono: emTel, Orden: 1));
                     }
 
+                    // Activo: si el Excel no trae nada, asumimos que el usuario quiere
+                    // mantener el estado actual (true para nuevos, el existente para upsert).
                     var activoCell = T(51);
-                    var activo = string.IsNullOrWhiteSpace(activoCell) || string.Equals(activoCell, "SI", StringComparison.OrdinalIgnoreCase);
+                    bool activo;
+                    bool activoExplicito = !string.IsNullOrWhiteSpace(activoCell);
 
                     var nombreCompleto = string.Join(' ', new[] { pn, sn, pa, sa }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
                     Guid? id = null;
                     if (byDoc.TryGetValue(doc, out var existing)) { id = existing.Id; }
 
+                    // MERGE: si el paciente ya existe, traemos el detalle actual y
+                    // usamos sus valores como fallback cuando una celda del Excel viene
+                    // vacia. Asi al recargar el archivo solo se ACTUALIZAN los campos
+                    // nuevos, sin borrar los que ya estaban llenos en la BD.
+                    PacienteDetailDto? prev = null;
+                    if (id is Guid pid)
+                    {
+                        try { prev = await Svc.GetAsync(pid); } catch { prev = null; }
+                    }
+                    // string | actualExcel | (prev?.X)  -> aplica.
+                    string? Pick(string? excel, string? actual) => string.IsNullOrWhiteSpace(excel) ? actual : excel;
+                    int? PickI(int? excel, int? actual) => excel ?? actual;
+                    DateOnly? PickD(DateOnly? excel, DateOnly? actual) => excel ?? actual;
+                    Guid? PickG(Guid? excel, Guid? actual) => excel ?? actual;
+
+                    activo = activoExplicito
+                        ? string.Equals(activoCell, "SI", StringComparison.OrdinalIgnoreCase)
+                        : (prev?.Activo ?? true);
+
                     var req = new SavePacienteRequest(
                         Id: id,
-                        NumeroDocumento: doc,
-                        TipoDocumento: tipoDoc,
-                        PrimerNombre: pn,
-                        SegundoNombre: sn,
-                        PrimerApellido: pa,
-                        SegundoApellido: sa,
-                        NombreCompleto: nombreCompleto,
-                        FechaNacimiento: fechaNac,
-                        Edad: edad,
-                        IpsComentaId: ipsId, CodigoAceptacion: codAcept, FechaComentan: fComenta,
-                        AseguradoraId: aseId, FechaIngresoPad: fIngreso, FechaEgresoPad: fEgreso,
-                        DiasEstancia: diasEst, OpIngresoDias: opIngreso,
-                        Incapacidad: incapacidad, GrupoRh: grupoRh,
-                        TipoUsuarioId: tipoUsuarioId, Estado: estado,
-                        ClasificacionPacienteId: clasifPacId, ClasificacionGrupoPatologiaId: clasifGrpId,
-                        EstratoSocial: estrato,
-                        Sexo: sexo,
-                        EstadoCivil: estadoCivil,
-                        Zona: zona,
-                        Ocupacion: ocupacion,
-                        Regimen: regimen,
-                        Contrato1Id: c1, Contrato2Id: c2, Contrato3Id: c3,
-                        Cie10Id: null, Cie10Codigo: cieCodigo, DiagnosticoPrincipal: diag,
-                        Tutela: tutela, TipoTutelaId: tipoTutelaId, MedContratadoId: medContId,
-                        PaisResidenciaId: paisResId, PaisOrigenId: paisOrigenId,
-                        DepartamentoId: deptoId, MunicipioId: mpioId,
-                        Direccion: direccion,
-                        Barrio: barrio,
-                        Ciudad: ciudad,
-                        CodigoPaisTelefono: codPais,
-                        Telefono: telefono,
-                        Email: email,
-                        SedeAtencionId: sedeId,
-                        ContactoEmergencia: emNombre, Parentesco: emPar, TelefonoEmergencia: emTel,
-                        ContactosEmergencia: contactosEm,
+                        NumeroDocumento: Trunc(doc, 30) ?? doc,
+                        TipoDocumento: Trunc(!string.IsNullOrWhiteSpace(tipoDoc) ? tipoDoc : (prev?.TipoDocumento ?? "CC"), 10) ?? "CC",
+                        PrimerNombre: Trunc(Pick(pn, prev?.PrimerNombre), 80),
+                        SegundoNombre: Trunc(Pick(sn, prev?.SegundoNombre), 80),
+                        PrimerApellido: Trunc(Pick(pa, prev?.PrimerApellido), 80),
+                        SegundoApellido: Trunc(Pick(sa, prev?.SegundoApellido), 80),
+                        NombreCompleto: Trunc(string.IsNullOrWhiteSpace(nombreCompleto) ? (prev?.NombreCompleto ?? doc) : nombreCompleto, 250) ?? doc,
+                        FechaNacimiento: PickD(fechaNac, prev?.FechaNacimiento),
+                        Edad: PickI(edad, prev?.Edad),
+                        IpsComentaId: PickG(ipsId, prev?.IpsComentaId),
+                        CodigoAceptacion: Trunc(Pick(codAcept, prev?.CodigoAceptacion), 120),
+                        FechaComentan: PickD(fComenta, prev?.FechaComentan),
+                        AseguradoraId: PickG(aseId, prev?.AseguradoraId),
+                        FechaIngresoPad: PickD(fIngreso, prev?.FechaIngresoPad),
+                        FechaEgresoPad: PickD(fEgreso, prev?.FechaEgresoPad),
+                        DiasEstancia: PickI(diasEst, prev?.DiasEstancia),
+                        OpIngresoDias: PickI(opIngreso, prev?.OpIngresoDias),
+                        Incapacidad: Trunc(Pick(incapacidad, prev?.Incapacidad), 60),
+                        GrupoRh: Trunc(Pick(grupoRh, prev?.GrupoRh), 10),
+                        TipoUsuarioId: PickG(tipoUsuarioId, prev?.TipoUsuarioId),
+                        Estado: Trunc(Pick(estado, prev?.Estado), 120),
+                        ClasificacionPacienteId: PickG(clasifPacId, prev?.ClasificacionPacienteId),
+                        ClasificacionGrupoPatologiaId: PickG(clasifGrpId, prev?.ClasificacionGrupoPatologiaId),
+                        EstratoSocial: Trunc(Pick(estrato, prev?.EstratoSocial), 20),
+                        Sexo: Trunc(Pick(sexo, prev?.Sexo), 20),
+                        EstadoCivil: Trunc(Pick(estadoCivil, prev?.EstadoCivil), 120),
+                        Zona: Trunc(Pick(zona, prev?.Zona), 120),
+                        Ocupacion: Trunc(Pick(ocupacion, prev?.Ocupacion), 120),
+                        Regimen: Trunc(Pick(regimen, prev?.Regimen), 120),
+                        Contrato1Id: PickG(c1, prev?.Contrato1Id),
+                        Contrato2Id: PickG(c2, prev?.Contrato2Id),
+                        Contrato3Id: PickG(c3, prev?.Contrato3Id),
+                        Cie10Id: prev?.Cie10Id,
+                        Cie10Codigo: Trunc(Pick(cieCodigo, prev?.Cie10Codigo), 30),
+                        DiagnosticoPrincipal: Trunc(Pick(diag, prev?.DiagnosticoPrincipal), 500),
+                        Tutela: Trunc(Pick(tutela, prev?.Tutela), 120),
+                        TipoTutelaId: PickG(tipoTutelaId, prev?.TipoTutelaId),
+                        MedContratadoId: PickG(medContId, prev?.MedContratadoId),
+                        PaisResidenciaId: PickG(paisResId, prev?.PaisResidenciaId),
+                        PaisOrigenId: PickG(paisOrigenId, prev?.PaisOrigenId),
+                        DepartamentoId: PickG(deptoId, prev?.DepartamentoId),
+                        MunicipioId: PickG(mpioId, prev?.MunicipioId),
+                        Direccion: Trunc(Pick(direccion, prev?.Direccion), 300),
+                        Barrio: Trunc(Pick(barrio, prev?.Barrio), 120),
+                        Ciudad: Trunc(Pick(ciudad, prev?.Ciudad), 120),
+                        CodigoPaisTelefono: Trunc(Pick(codPais, prev?.CodigoPaisTelefono) ?? "+57", 5) ?? "+57",
+                        Telefono: Trunc(Pick(telefono, prev?.Telefono), 120),
+                        Email: Trunc(Pick(email, prev?.Email), 160),
+                        SedeAtencionId: PickG(sedeId, prev?.SedeAtencionId),
+                        ContactoEmergencia: Trunc(Pick(emNombre, prev?.ContactoEmergencia), 200),
+                        Parentesco: Trunc(Pick(emPar, prev?.Parentesco), 80),
+                        TelefonoEmergencia: Trunc(Pick(emTel, prev?.TelefonoEmergencia), 120),
+                        // Contactos: si el Excel no trae uno nuevo, conservamos los existentes.
+                        ContactosEmergencia: contactosEm.Count > 0
+                            ? contactosEm
+                            : (prev?.ContactosEmergencia ?? Array.Empty<PacienteContactoEmergenciaDto>()),
                         Activo: activo);
 
                     var saved = await Svc.SaveAsync(req, actor);

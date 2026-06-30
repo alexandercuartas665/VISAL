@@ -918,18 +918,18 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.SegundoApellido).HasMaxLength(80);
             b.Property(x => x.NombreCompleto).HasMaxLength(250).IsRequired();
             // Admin PAD
-            b.Property(x => x.CodigoAceptacion).HasMaxLength(40);
+            b.Property(x => x.CodigoAceptacion).HasMaxLength(120);
             // Clasificaciones (texto libre por ahora)
             b.Property(x => x.Incapacidad).HasMaxLength(60);
             b.Property(x => x.GrupoRh).HasMaxLength(10);
-            b.Property(x => x.Estado).HasMaxLength(40);
+            b.Property(x => x.Estado).HasMaxLength(120);
             b.Property(x => x.EstratoSocial).HasMaxLength(20);
             b.Property(x => x.Sexo).HasMaxLength(20);
-            b.Property(x => x.EstadoCivil).HasMaxLength(40);
-            b.Property(x => x.Zona).HasMaxLength(40);
+            b.Property(x => x.EstadoCivil).HasMaxLength(120);
+            b.Property(x => x.Zona).HasMaxLength(120);
             b.Property(x => x.Ocupacion).HasMaxLength(120);
-            b.Property(x => x.Regimen).HasMaxLength(40);
-            b.Property(x => x.Tutela).HasMaxLength(40);
+            b.Property(x => x.Regimen).HasMaxLength(120);
+            b.Property(x => x.Tutela).HasMaxLength(120);
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
             b.Property(x => x.Cie10Codigo).HasMaxLength(30);
@@ -939,12 +939,12 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Ciudad).HasMaxLength(120);
             // Contacto
             b.Property(x => x.CodigoPaisTelefono).HasMaxLength(5);
-            b.Property(x => x.Telefono).HasMaxLength(40);
+            b.Property(x => x.Telefono).HasMaxLength(120);
             b.Property(x => x.Email).HasMaxLength(160);
             // Emergencia (legacy: primer contacto duplicado en columnas planas)
             b.Property(x => x.ContactoEmergencia).HasMaxLength(200);
             b.Property(x => x.Parentesco).HasMaxLength(80);
-            b.Property(x => x.TelefonoEmergencia).HasMaxLength(40);
+            b.Property(x => x.TelefonoEmergencia).HasMaxLength(120);
             // FKs concretas (las catalogo se haran luego)
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.SedeAtencion).WithMany().HasForeignKey(x => x.SedeAtencionId).OnDelete(DeleteBehavior.SetNull);

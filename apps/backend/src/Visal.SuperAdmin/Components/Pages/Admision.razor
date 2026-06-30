@@ -458,13 +458,13 @@
 @* ===== Modal Importar pacientes desde Excel ===== *@
 @if (_showImportModal)
 {
-    <div class="usu-modal-backdrop" @onclick="CloseImport"></div>
-    <div class="usu-modal usu-modal-wide">
-        <div class="usu-modal-h">
+    <div class="cie-backdrop" @onclick="CloseImport"></div>
+    <div class="cie-modal">
+        <div class="cie-modal-h">
             <h3>Importar pacientes desde Excel</h3>
-            <button class="usu-modal-close" @onclick="CloseImport">&times;</button>
+            <button class="cie-modal-close" @onclick="CloseImport">&times;</button>
         </div>
-        <div class="usu-modal-body">
+        <div class="cie-modal-body">
             @if (_importError is not null) { <div class="ase-alert">@_importError</div> }
             <div class="ase-f">
                 <label>Archivo Excel (.xlsx)</label>
@@ -472,13 +472,13 @@
                     <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
                     <a class="btn btn-outline-secondary btn-sm" href="/api/pacientes/plantilla.xlsx" download="plantilla-pacientes.xlsx" title="Descargar plantilla en blanco">&#128229; Plantilla</a>
                 </div>
-                <div class="ase-hint">Columnas (fila 1): No documento, Tipo doc (CC/CE/TI/PA/RC), P/S Nombre, P/S Apellido, Fecha nac (dd/mm/aaaa), Sexo (MASCULINO/FEMENINO/OTRO), Estado civil, Grupo Rh, Telefono, Email, Direccion, Ciudad, Zona (URBANA/RURAL), Regimen, Estrato. Duplicados por documento hacen upsert.</div>
+                <div class="ase-hint" style="margin-top:6px;">Columnas (fila 1): No documento, Tipo doc (CC/CE/TI/PA/RC), P/S Nombre, P/S Apellido, Fecha nac (dd/mm/aaaa), Sexo (MASCULINO/FEMENINO/OTRO), Estado civil, Grupo Rh, Telefono, Email, Direccion, Ciudad, Zona (URBANA/RURAL), Regimen, Estrato. Duplicados por documento hacen upsert.</div>
             </div>
 
             @if (_importing || _importTotal > 0)
             {
                 <div style="margin-top:14px;">
-                    <div class="imp-progress" style="width:100%; height:10px; background:#e2e8f0; border-radius:6px; overflow:hidden;">
+                    <div style="width:100%; height:10px; background:#e2e8f0; border-radius:6px; overflow:hidden;">
                         <div style="width:@($"{_importProgress:0}%"); height:100%; background:linear-gradient(90deg,#2563eb,#1d4ed8); transition:width .15s linear;"></div>
                     </div>
                     <div class="ase-hint" style="margin-top:6px;">
@@ -495,7 +495,7 @@
                 </div>
             }
         </div>
-        <div class="usu-modal-footer">
+        <div style="display:flex; justify-content:flex-end; padding:12px 18px; border-top:1px solid #e2e8f0;">
             <button class="btn btn-secondary btn-sm" @onclick="CloseImport" disabled="@_importing">Cerrar</button>
         </div>
     </div>

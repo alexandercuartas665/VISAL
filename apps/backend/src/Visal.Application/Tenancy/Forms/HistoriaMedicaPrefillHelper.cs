@@ -355,9 +355,11 @@ public static class HistoriaMedicaPrefillHelper
         };
     }
 
-    /// <summary>Calcula cantidad total = cantidad por toma * frecuencia/dia * dias.
-    /// Devuelve null si alguno de los tres no es un numero positivo (caso libre,
-    /// ej. "cada 8h" o "indefinido").</summary>
+    /// <summary>Calcula cantidad total = cantidad por toma * (24/intervalo_horas) * dias.
+    /// La "frecuencia" es el INTERVALO en horas entre tomas (cada N horas), no
+    /// las veces por dia. Asi: frec=24 -> 1 dosis/dia, frec=8 -> 3 dosis/dia,
+    /// frec=6 -> 4 dosis/dia. Devuelve null si alguno de los tres no es un
+    /// numero positivo (caso libre, ej. "PRN" o "indefinido").</summary>
     public static string? CalcularTotalUnidades(string? cantidad, string? frecuencia, string? dias)
     {
         if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
@@ -367,7 +369,7 @@ public static class HistoriaMedicaPrefillHelper
             && int.TryParse(dias?.Trim(), out var d)
             && c > 0 && f > 0 && d > 0)
         {
-            var total = c * f * d;
+            var total = c * (24m / f) * d;
             return total == Math.Truncate(total)
                 ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);

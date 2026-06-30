@@ -70,10 +70,10 @@ else
                                    @bind="_borrador.Cantidad" @bind:event="oninput" />
                         </div>
                         <div>
-                            <label class="od-mini">Frecuencia</label>
+                            <label class="od-mini" title="Intervalo entre dosis en horas (8 = cada 8 horas, 24 = una vez al dia)">Cada (h)</label>
                             <input class="form-control form-control-sm text-center"
                                    @bind="_borrador.Frecuencia" @bind:event="oninput"
-                                   placeholder="cada 8h" />
+                                   placeholder="8" />
                         </div>
                         <div>
                             <label class="od-mini">Dias</label>
@@ -287,14 +287,14 @@ else
         }
         // Reconstruye la frase clinica:
         //   "1 cada 6 horas durante 30 dias - Total: 120."
-        // - La frecuencia, si es un entero N>0 que divide 24, se expresa como
-        //   "cada (24/N) horas" (mas natural para medicos que "N veces al dia").
-        //   - N=1 -> "cada 24 horas"
-        //   - N=2 -> "cada 12 horas"
-        //   - N=3 -> "cada 8 horas"
-        //   - N=4 -> "cada 6 horas"
-        //   - Si 24/N no es entero (ej. N=5), cae a "N veces al dia".
-        // - Si frecuencia trae texto custom (ej. "cada 8h", "PRN") se respeta.
+        // - La frecuencia es el INTERVALO EN HORAS entre dosis (lo que el medico
+        //   pone directo). Asi:
+        //     N=24 -> "cada 24 horas" (1 dosis/dia) -> total = c * 1 * d
+        //     N=12 -> "cada 12 horas" (2 dosis/dia) -> total = c * 2 * d
+        //     N=8  -> "cada 8 horas"  (3 dosis/dia) -> total = c * 3 * d
+        //     N=6  -> "cada 6 horas"  (4 dosis/dia) -> total = c * 4 * d
+        //     N=1  -> "cada hora"    (24 dosis/dia) -> total = c * 24 * d
+        // - Si frecuencia trae texto custom (ej. "PRN", "cada 8h") se respeta.
         var sb = new System.Text.StringBuilder();
         if (!string.IsNullOrWhiteSpace(c)) { sb.Append(c); }
         if (!string.IsNullOrWhiteSpace(f))
@@ -316,18 +316,16 @@ else
     private static string FrecuenciaTexto(string f)
     {
         if (!int.TryParse(f, out var fn) || fn <= 0) { return f; }
-        if (24 % fn == 0)
-        {
-            var h = 24 / fn;
-            return h == 1 ? "cada hora" : $"cada {h} horas";
-        }
-        return $"{fn} veces al dia";
+        if (fn == 1) { return "cada hora"; }
+        return $"cada {fn} horas";
     }
 
-    /// <summary>Cantidad total = cantidad por toma * frecuencia/dia * dias.
-    /// Devuelve null si alguno no se puede parsear como numero positivo.
-    /// Misma logica que HistoriaMedicaPrefillHelper.CalcularTotalUnidades
-    /// pero replicada aqui para evitar acoplar el componente al Application.</summary>
+    /// <summary>Cantidad total = cantidad por toma * (24/intervalo_horas) * dias.
+    /// La "frecuencia" que entra es el INTERVALO en horas (cada N horas), no
+    /// las veces por dia. Devuelve null si alguno no se puede parsear como
+    /// numero positivo. Misma logica que
+    /// HistoriaMedicaPrefillHelper.CalcularTotalUnidades pero replicada aqui
+    /// para evitar acoplar el componente al Application.</summary>
     private static string? CalcularTotal(string? cantidad, string? frecuencia, string? dias)
     {
         if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
@@ -337,7 +335,8 @@ else
             && int.TryParse(dias?.Trim(), out var d)
             && c > 0 && f > 0 && d > 0)
         {
-            var total = c * f * d;
+            // dosis por dia = 24 / intervalo
+            var total = c * (24m / f) * d;
             return total == Math.Truncate(total)
                 ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);

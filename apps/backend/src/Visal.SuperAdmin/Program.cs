@@ -630,19 +630,54 @@ app.MapPost("/webhooks/evolution", async (
 // La pagina /firma/{token} la sirve la propia app Blazor (componente FirmaPacienteRemota).
 // La submission usa este POST API porque persistir desde el Blazor anonimo sin tenant
 // scope era enredado: con un POST plano es trivial.
-// Plantilla del import de pacientes en /admision. Mismas 17 columnas que
-// Admision.OnExcelSelected consume. Sin imagenes embebidas.
-app.MapGet("/api/pacientes/plantilla.xlsx", () =>
+// Plantilla del import de pacientes en /admision. 51 columnas que cubren
+// TODOS los campos del SavePacienteRequest. Donde tiene sentido, hay tabs
+// auxiliares con dropdowns (Sedes, Aseguradoras, Catalogos por tipo, Pais)
+// para evitar errores tipograficos. El parser en Admision.razor resuelve
+// nombres a IDs via lookups y deja warnings en el log para los que no
+// matchean.
+app.MapGet("/api/pacientes/plantilla.xlsx", async (
+    Visal.Application.Tenancy.ISucursalService sucSvc,
+    Visal.Application.Tenancy.IAseguradoraService aseSvc,
+    Visal.Application.Tenancy.ICatalogoPacienteService catSvc,
+    Visal.Application.Tenancy.IGeografiaService geoSvc,
+    CancellationToken ct) =>
 {
     using var wb = new ClosedXML.Excel.XLWorkbook();
     var ws = wb.AddWorksheet("Pacientes");
 
+    // 51 columnas. Agrupadas por seccion: Identificacion, Caracteristicas,
+    // Contacto, Geografia, Admin PAD, Clasificacion, Diagnostico, Tutela,
+    // Contratos, Sede, Emergencia, Activo.
     var headers = new[]
     {
+        // A-H Identificacion (1-8)
         "No documento", "Tipo doc", "Primer Nombre", "Segundo Nombre",
-        "Primer Apellido", "Segundo Apellido", "Fecha nacimiento", "Sexo",
-        "Estado civil", "Grupo Rh", "Telefono", "Email",
-        "Direccion", "Ciudad", "Zona", "Regimen", "Estrato"
+        "Primer Apellido", "Segundo Apellido", "Fecha nacimiento", "Edad",
+        // I-O Caracteristicas (9-15)
+        "Sexo", "Estado civil", "Grupo Rh", "Zona", "Regimen", "Estrato", "Ocupacion",
+        // P-T Contacto (16-20)
+        "Cod pais tel", "Telefono", "Email", "Direccion", "Barrio",
+        // U-Y Geografia (21-25)
+        "Pais residencia", "Pais origen", "Departamento", "Municipio", "Ciudad",
+        // Z-AG Admin PAD (26-33)
+        "Aseguradora", "IPS Que Comenta", "Codigo aceptacion", "Fecha comentan",
+        "Fecha ingreso PAD", "Fecha egreso PAD", "Dias estancia", "Op ingreso dias",
+        // AH-AM Clasificacion (34-39)
+        "Incapacidad", "Tipo usuario", "Estado", "Clasificacion paciente",
+        "Clasificacion grupo patologia", "Med contratado",
+        // AN-AO Diagnostico (40-41)
+        "CIE codigo", "Diagnostico principal",
+        // AP-AQ Tutela (42-43)
+        "Tutela", "Tipo tutela",
+        // AR-AT Contratos (44-46)
+        "Contrato 1", "Contrato 2", "Contrato 3",
+        // AU Sede (47)
+        "Sede atencion",
+        // AV-AX Emergencia (48-50)
+        "Emergencia nombre", "Emergencia parentesco", "Emergencia telefono",
+        // AY Activo (51)
+        "Activo"
     };
     for (var i = 0; i < headers.Length; i++)
     {
@@ -650,14 +685,74 @@ app.MapGet("/api/pacientes/plantilla.xlsx", () =>
         ws.Cell(1, i + 1).Style.Font.Bold = true;
         ws.Cell(1, i + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#1565C0");
         ws.Cell(1, i + 1).Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+        ws.Cell(1, i + 1).Style.Alignment.WrapText = true;
     }
+    ws.Row(1).Height = 30;
 
-    // 3 filas de ejemplo
-    var ejemplos = new object[][]
+    // Cargar catalogos en paralelo (cada uno es una query independiente).
+    var sedes = await sucSvc.ListAsync(soloActivas: true, ct);
+    var aseguradoras = await aseSvc.ListAseguradorasAsync(ct);
+    var tiposUsuario = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, ct);
+    var clasifPac = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionPaciente, ct);
+    var clasifGrp = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, ct);
+    var tiposTutela = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.TipoTutela, ct);
+    var medsContratados = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.MedContratado, ct);
+    var paises = await geoSvc.ListPaisesAsync(ct);
+
+    var primeraSede = sedes.FirstOrDefault()?.Nombre ?? "";
+    var primeraAse = aseguradoras.FirstOrDefault()?.Nombre ?? "";
+    var primerPais = paises.FirstOrDefault(p => p.Codigo?.Equals("CO", StringComparison.OrdinalIgnoreCase) == true)?.Nombre
+                     ?? paises.FirstOrDefault()?.Nombre ?? "COLOMBIA";
+
+    // 3 filas de ejemplo. Solo identificacion + caracteristicas + contacto
+    // basico. El resto se deja vacio para que el usuario ponga sus datos.
+    var ejemplos = new object?[][]
     {
-        new object[] { "1010101010", "CC", "JUAN", "CARLOS", "PEREZ", "MOLINA", "22/11/1978", "MASCULINO", "CASADO", "O+", "3001234567", "juan.perez@ejemplo.com", "Cra 50 # 12-08 Apt 502", "CALI", "URBANA", "CONTRIBUTIVO", "3" },
-        new object[] { "38945877", "CC", "GRACIELA", "", "GOMEZ", "GOMEZ", "15/03/1965", "FEMENINO", "VIUDA", "A+", "3119876543", "g.gomez@ejemplo.com", "Calle 5 # 23-15", "CALI", "URBANA", "SUBSIDIADO", "2" },
-        new object[] { "1144099887", "CC", "MARIA", "FERNANDA", "GOMEZ", "", "08/07/1992", "FEMENINO", "SOLTERA", "B+", "3155551122", "maria.gomez@ejemplo.com", "Av 6N # 45-12", "SANTIAGO DE CALI", "URBANA", "CONTRIBUTIVO", "4" }
+        new object?[] {
+            "1010101010", "CC", "JUAN", "CARLOS", "PEREZ", "MOLINA", "22/11/1978", null,
+            "MASCULINO", "CASADO", "O+", "URBANA", "CONTRIBUTIVO", "3", "OPERARIO",
+            "+57", "3001234567", "juan.perez@ejemplo.com", "Cra 50 # 12-08 Apt 502", "EL POBLADO",
+            primerPais, primerPais, "", "", "CALI",
+            primeraAse, primeraAse, "ACE-12345", "10/06/2026",
+            "12/06/2026", "", "30", "0",
+            "NO", "", "", "", "", "",
+            "I50.0", "Insuficiencia cardiaca congestiva",
+            "NO", "",
+            "", "", "",
+            primeraSede,
+            "MARIA PEREZ", "ESPOSA", "3001234999",
+            "SI"
+        },
+        new object?[] {
+            "38945877", "CC", "GRACIELA", "", "GOMEZ", "GOMEZ", "15/03/1965", null,
+            "FEMENINO", "VIUDA", "A+", "URBANA", "SUBSIDIADO", "2", "AMA DE CASA",
+            "+57", "3119876543", "g.gomez@ejemplo.com", "Calle 5 # 23-15", "EL PRADO",
+            primerPais, primerPais, "", "", "CALI",
+            "", "", "", "",
+            "", "", "", "",
+            "NO", "", "", "", "", "",
+            "", "",
+            "NO", "",
+            "", "", "",
+            primeraSede,
+            "PEDRO GOMEZ", "HIJO", "3119876544",
+            "SI"
+        },
+        new object?[] {
+            "1144099887", "CC", "MARIA", "FERNANDA", "GOMEZ", "", "08/07/1992", null,
+            "FEMENINO", "SOLTERA", "B+", "URBANA", "CONTRIBUTIVO", "4", "INGENIERA",
+            "+57", "3155551122", "maria.gomez@ejemplo.com", "Av 6N # 45-12", "GRANADA",
+            primerPais, primerPais, "", "", "SANTIAGO DE CALI",
+            "", "", "", "",
+            "", "", "", "",
+            "NO", "", "", "", "", "",
+            "", "",
+            "NO", "",
+            "", "", "",
+            primeraSede,
+            "ANA GOMEZ", "MADRE", "3155551133",
+            "SI"
+        }
     };
     for (var r = 0; r < ejemplos.Length; r++)
     {
@@ -667,17 +762,69 @@ app.MapGet("/api/pacientes/plantilla.xlsx", () =>
         }
     }
 
+    // Tabs auxiliares + data validations. Solo se crean si el catalogo tiene
+    // contenido para no contaminar el archivo con hojas vacias.
+    static void AgregarLookupSheet(ClosedXML.Excel.XLWorkbook workbook,
+        ClosedXML.Excel.IXLWorksheet hoja, string nombre, string titulo,
+        IReadOnlyList<string> valores, string colLetra)
+    {
+        if (valores.Count == 0) { return; }
+        var aux = workbook.AddWorksheet(nombre);
+        aux.Cell(1, 1).Value = titulo;
+        aux.Cell(1, 1).Style.Font.Bold = true;
+        for (var i = 0; i < valores.Count; i++) { aux.Cell(i + 2, 1).Value = valores[i]; }
+        aux.Columns().AdjustToContents();
+
+        var rango = $"{nombre}!$A$2:$A${valores.Count + 1}";
+        var val = hoja.Range($"{colLetra}2:{colLetra}500").CreateDataValidation();
+        val.List(rango);
+        val.IgnoreBlanks = true;
+        val.InCellDropdown = true;
+        val.ErrorStyle = ClosedXML.Excel.XLErrorStyle.Warning;
+        val.ErrorTitle = $"{titulo} no esta en la lista";
+        val.ErrorMessage = $"Selecciona un valor de la lista (tab '{nombre}') o ignora si quieres dejarlo vacio.";
+    }
+
+    AgregarLookupSheet(wb, ws, "Sedes", "Sedes activas del tenant",
+        sedes.Select(s => s.Nombre).ToList(), "AU");
+    AgregarLookupSheet(wb, ws, "Aseguradoras", "Aseguradoras del tenant",
+        aseguradoras.Select(a => a.Nombre).ToList(), "Z");
+    AgregarLookupSheet(wb, ws, "IPS_Comenta", "IPS Que Comenta (mismo catalogo que Aseguradoras)",
+        aseguradoras.Select(a => a.Nombre).ToList(), "AA");
+    AgregarLookupSheet(wb, ws, "TiposUsuario", "Tipos de usuario",
+        tiposUsuario.Select(c => c.Nombre).ToList(), "AI");
+    AgregarLookupSheet(wb, ws, "ClasifPaciente", "Clasificacion paciente",
+        clasifPac.Select(c => c.Nombre).ToList(), "AK");
+    AgregarLookupSheet(wb, ws, "ClasifGrupo", "Clasificacion grupo patologia",
+        clasifGrp.Select(c => c.Nombre).ToList(), "AL");
+    AgregarLookupSheet(wb, ws, "TiposTutela", "Tipos de tutela",
+        tiposTutela.Select(c => c.Nombre).ToList(), "AQ");
+    AgregarLookupSheet(wb, ws, "MedContratado", "Medicamentos contratados",
+        medsContratados.Select(c => c.Nombre).ToList(), "AM");
+    AgregarLookupSheet(wb, ws, "Paises", "Paises",
+        paises.Select(p => p.Nombre).ToList(), "U");
+    AgregarLookupSheet(wb, ws, "Paises2", "Paises (origen)",
+        paises.Select(p => p.Nombre).ToList(), "V");
+
+    // Instrucciones al final de la hoja, debajo de las filas de ejemplo.
     var info = 2 + ejemplos.Length + 1;
     ws.Cell(info, 1).Value = "Instrucciones:";
     ws.Cell(info, 1).Style.Font.Bold = true;
     ws.Cell(info + 1, 1).Value = "1. Una fila por paciente. Las filas de ejemplo pueden borrarse antes de importar.";
     ws.Cell(info + 2, 1).Value = "2. Tipo doc: CC / CE / TI / PA / RC / NIT.";
-    ws.Cell(info + 3, 1).Value = "3. Fecha nacimiento: formato dd/mm/aaaa o celda tipo fecha de Excel.";
-    ws.Cell(info + 4, 1).Value = "4. Sexo: MASCULINO / FEMENINO / OTRO. Zona: URBANA / RURAL.";
-    ws.Cell(info + 5, 1).Value = "5. Documento duplicado => upsert (se actualiza el paciente existente).";
-    ws.Cell(info + 6, 1).Value = "6. Aseguradora, contratos, IPS y sede se completan en la UI tras el import.";
+    ws.Cell(info + 3, 1).Value = "3. Fechas: formato dd/mm/aaaa o celda tipo fecha de Excel.";
+    ws.Cell(info + 4, 1).Value = "4. Sexo: MASCULINO / FEMENINO / OTRO. Zona: URBANA / RURAL. Incapacidad/Tutela/Activo: SI / NO.";
+    ws.Cell(info + 5, 1).Value = "5. Columnas con dropdown (tabs auxiliares): Aseguradora (Z), IPS Que Comenta (AA), Tipo usuario (AI), Clasif paciente (AK), Clasif grupo (AL), Med contratado (AM), Tipo tutela (AQ), Sede (AU), Paises (U y V).";
+    ws.Cell(info + 6, 1).Value = "6. Departamento (W), Municipio (X), Ciudad (Y), Contratos (AR-AT) y CIE codigo (AN): texto libre. Se resuelven por nombre/codigo; los que no matcheen quedan vacios y aparecen en el log.";
+    ws.Cell(info + 7, 1).Value = "7. Documento duplicado => upsert (se actualiza el paciente existente).";
+    ws.Cell(info + 8, 1).Value = "8. Edad (H): si la dejas vacia se calcula desde la fecha de nacimiento.";
 
     ws.Columns().AdjustToContents();
+    // Forzar ancho minimo a las columnas para que se vea el header en wrap.
+    for (var i = 1; i <= headers.Length; i++)
+    {
+        if (ws.Column(i).Width < 12) { ws.Column(i).Width = 14; }
+    }
 
     using var ms = new MemoryStream();
     wb.SaveAs(ms);

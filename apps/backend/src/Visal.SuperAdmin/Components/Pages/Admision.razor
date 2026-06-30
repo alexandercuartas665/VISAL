@@ -472,7 +472,16 @@
                     <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
                     <a class="btn btn-outline-secondary btn-sm" href="/api/pacientes/plantilla.xlsx" download="plantilla-pacientes.xlsx" title="Descargar plantilla en blanco">&#128229; Plantilla</a>
                 </div>
-                <div class="ase-hint" style="margin-top:6px;">Columnas (fila 1): No documento, Tipo doc (CC/CE/TI/PA/RC), P/S Nombre, P/S Apellido, Fecha nac (dd/mm/aaaa), Sexo (MASCULINO/FEMENINO/OTRO), Estado civil, Grupo Rh, Telefono, Email, Direccion, Ciudad, Zona (URBANA/RURAL), Regimen, Estrato. Duplicados por documento hacen upsert.</div>
+                <div class="ase-hint" style="margin-top:6px;">
+                    <strong>51 columnas</strong> alineadas con la ficha del paciente.
+                    Bloques: Identificacion (A-H), Caracteristicas (I-O), Contacto (P-T),
+                    Geografia (U-Y), <strong>Admin PAD</strong> incl. Aseguradora, IPS Que Comenta,
+                    Codigo aceptacion, Fechas comentan/ingreso/egreso (Z-AG), Clasificacion (AH-AM),
+                    Diagnostico CIE (AN-AO), Tutela (AP-AQ), Contratos 1/2/3 (AR-AT),
+                    Sede atencion (AU), Emergencia (AV-AX), Activo (AY).
+                    La plantilla trae <strong>10 dropdowns</strong> (tabs auxiliares) para evitar
+                    errores tipograficos. Duplicados por documento hacen upsert.
+                </div>
             </div>
 
             @if (_importing || _importTotal > 0)
@@ -964,6 +973,57 @@
             var byDoc = new Dictionary<string, PacienteDto>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in existentes) { byDoc[p.NumeroDocumento.Trim()] = p; }
 
+            // Cargar TODOS los catalogos una vez para resolver los nombres del
+            // Excel a IDs sin hacer queries por fila.
+            var sedesAll = await SucSvc.ListAsync(soloActivas: true);
+            var sedesByNombre = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in sedesAll)
+            {
+                if (!string.IsNullOrWhiteSpace(s.Nombre)) { sedesByNombre[s.Nombre.Trim()] = s.Id; }
+                if (!string.IsNullOrWhiteSpace(s.Codigo) && !sedesByNombre.ContainsKey(s.Codigo!.Trim())) { sedesByNombre[s.Codigo.Trim()] = s.Id; }
+            }
+
+            var aseguradorasAll = await AseSvc.ListAseguradorasAsync();
+            var aseByNombre = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in aseguradorasAll)
+            {
+                if (!string.IsNullOrWhiteSpace(a.Nombre)) { aseByNombre[a.Nombre.Trim()] = a.Id; }
+                if (!string.IsNullOrWhiteSpace(a.Codigo) && !aseByNombre.ContainsKey(a.Codigo!.Trim())) { aseByNombre[a.Codigo.Trim()] = a.Id; }
+            }
+
+            Dictionary<string, Guid> CatPorTipo(IReadOnlyList<CatalogoPacienteDto> items)
+            {
+                var d = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+                foreach (var c in items)
+                {
+                    if (!string.IsNullOrWhiteSpace(c.Nombre)) { d[c.Nombre.Trim()] = c.Id; }
+                    if (!string.IsNullOrWhiteSpace(c.Codigo) && !d.ContainsKey(c.Codigo!.Trim())) { d[c.Codigo.Trim()] = c.Id; }
+                }
+                return d;
+            }
+            var tiposUsuario = CatPorTipo(await CatSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario));
+            var clasifPaciente = CatPorTipo(await CatSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionPaciente));
+            var clasifGrupo = CatPorTipo(await CatSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia));
+            var tiposTutela = CatPorTipo(await CatSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.TipoTutela));
+            var medContratado = CatPorTipo(await CatSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.MedContratado));
+
+            // Geografia. Solo paises arriba; departamentos/municipios se
+            // resuelven on-demand por fila (cascada).
+            var paisesAll = await GeoSvc.ListPaisesAsync();
+            var paisByNombre = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in paisesAll)
+            {
+                if (!string.IsNullOrWhiteSpace(p.Nombre)) { paisByNombre[p.Nombre.Trim()] = p.Id; }
+                if (!string.IsNullOrWhiteSpace(p.Codigo) && !paisByNombre.ContainsKey(p.Codigo!.Trim())) { paisByNombre[p.Codigo.Trim()] = p.Id; }
+            }
+
+            // Cache departamentos/municipios por pais para no traerlos N veces.
+            var deptosCache = new Dictionary<Guid, Dictionary<string, Guid>>();
+            var mpiosCache = new Dictionary<Guid, Dictionary<string, Guid>>();
+
+            // Cache contratos por aseguradora.
+            var contratosCache = new Dictionary<Guid, Dictionary<string, Guid>>();
+
             var actor = await Actor();
 
             for (var r = 2; r <= lastRow; r++)
@@ -972,38 +1032,148 @@
                 _importProgress = (double)_importCurrent / Math.Max(1, _importTotal) * 100;
                 try
                 {
-                    var doc = ws.Cell(r, 1).GetString().Trim();
-                    if (string.IsNullOrWhiteSpace(doc)) { continue; }
-                    var tipoDoc = (ws.Cell(r, 2).GetString().Trim() is { Length: > 0 } td) ? td.ToUpperInvariant() : "CC";
-                    var pn = ws.Cell(r, 3).GetString().Trim();
-                    var sn = ws.Cell(r, 4).GetString().Trim();
-                    var pa = ws.Cell(r, 5).GetString().Trim();
-                    var sa = ws.Cell(r, 6).GetString().Trim();
-                    var fechaStr = ws.Cell(r, 7).GetString().Trim();
-                    var sexo = ws.Cell(r, 8).GetString().Trim();
-                    var estadoCivil = ws.Cell(r, 9).GetString().Trim();
-                    var grupoRh = ws.Cell(r, 10).GetString().Trim();
-                    var telefono = ws.Cell(r, 11).GetString().Trim();
-                    var email = ws.Cell(r, 12).GetString().Trim();
-                    var direccion = ws.Cell(r, 13).GetString().Trim();
-                    var ciudad = ws.Cell(r, 14).GetString().Trim();
-                    var zona = ws.Cell(r, 15).GetString().Trim();
-                    var regimen = ws.Cell(r, 16).GetString().Trim();
-                    var estrato = ws.Cell(r, 17).GetString().Trim();
+                    // Helper local: leer celda como texto trim (vacio si no hay).
+                    string T(int col) => ws.Cell(r, col).GetString().Trim();
+                    string? TN(int col) { var v = T(col); return string.IsNullOrWhiteSpace(v) ? null : v; }
+                    int? TI(int col) { var v = T(col); return int.TryParse(v, out var n) ? n : (int?)null; }
+                    DateOnly? TFecha(int col)
+                    {
+                        if (ws.Cell(r, col).TryGetValue<DateTime>(out var dtv)) { return DateOnly.FromDateTime(dtv); }
+                        var s = T(col);
+                        if (string.IsNullOrWhiteSpace(s)) { return null; }
+                        if (DateTime.TryParseExact(s, new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out var dt)) { return DateOnly.FromDateTime(dt); }
+                        return null;
+                    }
+                    Guid? Lookup(Dictionary<string, Guid> dic, int col, string nombre)
+                    {
+                        var v = T(col);
+                        if (string.IsNullOrWhiteSpace(v)) { return null; }
+                        if (dic.TryGetValue(v, out var id)) { return id; }
+                        _importLog.Add($"[..]  Fila {r}: {nombre} '{v}' no existe en el tenant — se deja vacio.");
+                        return null;
+                    }
+                    bool SiNo(int col) => string.Equals(T(col), "SI", StringComparison.OrdinalIgnoreCase);
 
-                    // Fecha: aceptamos celda tipo DateTime (Excel) o texto dd/mm/aaaa.
-                    DateOnly? fechaNac = null;
-                    if (ws.Cell(r, 7).TryGetValue<DateTime>(out var dt))
+                    var doc = T(1);
+                    if (string.IsNullOrWhiteSpace(doc)) { continue; }
+
+                    var tipoDoc = (T(2) is { Length: > 0 } td) ? td.ToUpperInvariant() : "CC";
+                    var pn = T(3); var sn = T(4); var pa = T(5); var sa = T(6);
+                    var fechaNac = TFecha(7);
+                    var edad = TI(8);
+
+                    var sexo = TN(9); var estadoCivil = TN(10); var grupoRh = TN(11);
+                    var zona = TN(12); var regimen = TN(13); var estrato = TN(14); var ocupacion = TN(15);
+
+                    var codPais = TN(16) ?? "+57";
+                    var telefono = TN(17); var email = TN(18); var direccion = TN(19); var barrio = TN(20);
+
+                    var paisResId = Lookup(paisByNombre, 21, "Pais residencia");
+                    var paisOrigenId = Lookup(paisByNombre, 22, "Pais origen");
+
+                    // Departamento + Municipio: cascada desde pais residencia.
+                    Guid? deptoId = null;
+                    Guid? mpioId = null;
+                    var deptoNombre = T(23);
+                    var mpioNombre = T(24);
+                    if (paisResId is Guid prid && !string.IsNullOrWhiteSpace(deptoNombre))
                     {
-                        fechaNac = DateOnly.FromDateTime(dt);
+                        if (!deptosCache.TryGetValue(prid, out var dDic))
+                        {
+                            dDic = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var d in await GeoSvc.ListDepartamentosAsync(prid))
+                            {
+                                if (!string.IsNullOrWhiteSpace(d.Nombre)) { dDic[d.Nombre.Trim()] = d.Id; }
+                            }
+                            deptosCache[prid] = dDic;
+                        }
+                        if (dDic.TryGetValue(deptoNombre, out var did)) { deptoId = did; }
+                        else { _importLog.Add($"[..]  Fila {r}: Departamento '{deptoNombre}' no existe en el pais elegido — se deja vacio."); }
+
+                        if (deptoId is Guid didOk && !string.IsNullOrWhiteSpace(mpioNombre))
+                        {
+                            if (!mpiosCache.TryGetValue(didOk, out var mDic))
+                            {
+                                mDic = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+                                foreach (var m in await GeoSvc.ListMunicipiosAsync(didOk))
+                                {
+                                    if (!string.IsNullOrWhiteSpace(m.Nombre)) { mDic[m.Nombre.Trim()] = m.Id; }
+                                }
+                                mpiosCache[didOk] = mDic;
+                            }
+                            if (mDic.TryGetValue(mpioNombre, out var mid)) { mpioId = mid; }
+                            else { _importLog.Add($"[..]  Fila {r}: Municipio '{mpioNombre}' no existe en el departamento — se deja vacio."); }
+                        }
                     }
-                    else if (!string.IsNullOrWhiteSpace(fechaStr) &&
-                        DateTime.TryParseExact(fechaStr, new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.None, out var dt2))
+                    var ciudad = TN(25);
+
+                    var aseId = Lookup(aseByNombre, 26, "Aseguradora");
+                    // IPS Que Comenta apunta tambien a aseguradoras.
+                    var ipsId = Lookup(aseByNombre, 27, "IPS Que Comenta");
+                    var codAcept = TN(28);
+                    var fComenta = TFecha(29);
+                    var fIngreso = TFecha(30);
+                    var fEgreso = TFecha(31);
+                    var diasEst = TI(32);
+                    var opIngreso = TI(33);
+
+                    var incapacidad = SiNo(34) ? "SI" : (string.IsNullOrWhiteSpace(T(34)) ? null : "NO");
+                    var tipoUsuarioId = Lookup(tiposUsuario, 35, "Tipo usuario");
+                    var estado = TN(36);
+                    var clasifPacId = Lookup(clasifPaciente, 37, "Clasificacion paciente");
+                    var clasifGrpId = Lookup(clasifGrupo, 38, "Clasificacion grupo patologia");
+                    var medContId = Lookup(medContratado, 39, "Med contratado");
+
+                    var cieCodigo = TN(40);
+                    var diag = TN(41);
+
+                    var tutela = SiNo(42) ? "SI" : (string.IsNullOrWhiteSpace(T(42)) ? null : "NO");
+                    var tipoTutelaId = Lookup(tiposTutela, 43, "Tipo tutela");
+
+                    // Contratos: cascada desde aseId.
+                    Guid? c1 = null; Guid? c2 = null; Guid? c3 = null;
+                    if (aseId is Guid aseGid)
                     {
-                        fechaNac = DateOnly.FromDateTime(dt2);
+                        if (!contratosCache.TryGetValue(aseGid, out var cDic))
+                        {
+                            cDic = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var c in await AseSvc.ListContratosAsync(aseGid))
+                            {
+                                if (!string.IsNullOrWhiteSpace(c.CodigoContrato)) { cDic[c.CodigoContrato.Trim()] = c.Id; }
+                            }
+                            contratosCache[aseGid] = cDic;
+                        }
+                        Guid? ResolveContrato(int col, int idx)
+                        {
+                            var v = T(col);
+                            if (string.IsNullOrWhiteSpace(v)) { return null; }
+                            if (cDic.TryGetValue(v, out var cid)) { return cid; }
+                            _importLog.Add($"[..]  Fila {r}: Contrato {idx} '{v}' no existe en la aseguradora — se deja vacio.");
+                            return null;
+                        }
+                        c1 = ResolveContrato(44, 1);
+                        c2 = ResolveContrato(45, 2);
+                        c3 = ResolveContrato(46, 3);
                     }
+
+                    Guid? sedeId = null;
+                    var sedeNombre = T(47);
+                    if (!string.IsNullOrWhiteSpace(sedeNombre) && sedesByNombre.TryGetValue(sedeNombre, out var sid)) { sedeId = sid; }
+                    else if (!string.IsNullOrWhiteSpace(sedeNombre)) { _importLog.Add($"[..]  Fila {r}: sede '{sedeNombre}' no existe en el tenant — se deja vacia."); }
+
+                    var emNombre = TN(48); var emPar = TN(49); var emTel = TN(50);
+                    var contactosEm = new List<PacienteContactoEmergenciaDto>();
+                    if (!string.IsNullOrWhiteSpace(emNombre))
+                    {
+                        contactosEm.Add(new PacienteContactoEmergenciaDto(
+                            Id: null, Nombre: emNombre,
+                            Parentesco: emPar, CodigoPais: "+57", Telefono: emTel, Orden: 1));
+                    }
+
+                    var activoCell = T(51);
+                    var activo = string.IsNullOrWhiteSpace(activoCell) || string.Equals(activoCell, "SI", StringComparison.OrdinalIgnoreCase);
 
                     var nombreCompleto = string.Join(' ', new[] { pn, sn, pa, sa }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
@@ -1020,33 +1190,34 @@
                         SegundoApellido: sa,
                         NombreCompleto: nombreCompleto,
                         FechaNacimiento: fechaNac,
-                        Edad: null,
-                        IpsComentaId: null, CodigoAceptacion: null, FechaComentan: null,
-                        AseguradoraId: null, FechaIngresoPad: null, FechaEgresoPad: null,
-                        DiasEstancia: null, OpIngresoDias: null,
-                        Incapacidad: null, GrupoRh: string.IsNullOrWhiteSpace(grupoRh) ? null : grupoRh,
-                        TipoUsuarioId: null, Estado: null,
-                        ClasificacionPacienteId: null, ClasificacionGrupoPatologiaId: null,
-                        EstratoSocial: string.IsNullOrWhiteSpace(estrato) ? null : estrato,
-                        Sexo: string.IsNullOrWhiteSpace(sexo) ? null : sexo,
-                        EstadoCivil: string.IsNullOrWhiteSpace(estadoCivil) ? null : estadoCivil,
-                        Zona: string.IsNullOrWhiteSpace(zona) ? null : zona,
-                        Ocupacion: null,
-                        Regimen: string.IsNullOrWhiteSpace(regimen) ? null : regimen,
-                        Contrato1Id: null, Contrato2Id: null, Contrato3Id: null,
-                        Cie10Id: null, Cie10Codigo: null, DiagnosticoPrincipal: null,
-                        Tutela: null, TipoTutelaId: null, MedContratadoId: null,
-                        PaisResidenciaId: null, PaisOrigenId: null, DepartamentoId: null, MunicipioId: null,
-                        Direccion: string.IsNullOrWhiteSpace(direccion) ? null : direccion,
-                        Barrio: null,
-                        Ciudad: string.IsNullOrWhiteSpace(ciudad) ? null : ciudad,
-                        CodigoPaisTelefono: "+57",
-                        Telefono: string.IsNullOrWhiteSpace(telefono) ? null : telefono,
-                        Email: string.IsNullOrWhiteSpace(email) ? null : email,
-                        SedeAtencionId: null,
-                        ContactoEmergencia: null, Parentesco: null, TelefonoEmergencia: null,
-                        ContactosEmergencia: Array.Empty<PacienteContactoEmergenciaDto>(),
-                        Activo: true);
+                        Edad: edad,
+                        IpsComentaId: ipsId, CodigoAceptacion: codAcept, FechaComentan: fComenta,
+                        AseguradoraId: aseId, FechaIngresoPad: fIngreso, FechaEgresoPad: fEgreso,
+                        DiasEstancia: diasEst, OpIngresoDias: opIngreso,
+                        Incapacidad: incapacidad, GrupoRh: grupoRh,
+                        TipoUsuarioId: tipoUsuarioId, Estado: estado,
+                        ClasificacionPacienteId: clasifPacId, ClasificacionGrupoPatologiaId: clasifGrpId,
+                        EstratoSocial: estrato,
+                        Sexo: sexo,
+                        EstadoCivil: estadoCivil,
+                        Zona: zona,
+                        Ocupacion: ocupacion,
+                        Regimen: regimen,
+                        Contrato1Id: c1, Contrato2Id: c2, Contrato3Id: c3,
+                        Cie10Id: null, Cie10Codigo: cieCodigo, DiagnosticoPrincipal: diag,
+                        Tutela: tutela, TipoTutelaId: tipoTutelaId, MedContratadoId: medContId,
+                        PaisResidenciaId: paisResId, PaisOrigenId: paisOrigenId,
+                        DepartamentoId: deptoId, MunicipioId: mpioId,
+                        Direccion: direccion,
+                        Barrio: barrio,
+                        Ciudad: ciudad,
+                        CodigoPaisTelefono: codPais,
+                        Telefono: telefono,
+                        Email: email,
+                        SedeAtencionId: sedeId,
+                        ContactoEmergencia: emNombre, Parentesco: emPar, TelefonoEmergencia: emTel,
+                        ContactosEmergencia: contactosEm,
+                        Activo: activo);
 
                     var saved = await Svc.SaveAsync(req, actor);
                     if (saved is null)

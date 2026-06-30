@@ -1,10 +1,17 @@
 @inherits LayoutComponentBase
 
 <div class="visal-shell">
-    <!-- Toggle solo-CSS del menu (off-canvas en movil). Funciona en cualquier render mode. -->
+    <!-- Toggles solo-CSS. Funcionan en cualquier render mode. -->
+    <!--   visal-nav-toggle:    abre/cierra el menu en movil (off-canvas). -->
+    <!--   visal-nav-collapse:  colapsa el menu en escritorio (deja la pagina full width). -->
     <input type="checkbox" id="visal-nav-toggle" class="visal-nav-toggle" autocomplete="off" />
+    <input type="checkbox" id="visal-nav-collapse" class="visal-nav-collapse" autocomplete="off" />
 
     <aside class="visal-sidebar">
+        <!-- Boton para colapsar desde dentro del sidebar (anclado a la esquina sup. der.). -->
+        <label for="visal-nav-collapse" class="visal-nav-collapse-btn" aria-label="Ocultar menu" title="Ocultar menu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </label>
         <NavMenu />
     </aside>
 
@@ -13,7 +20,11 @@
 
     <div class="visal-main">
         <div class="visal-topbar">
-            <label for="visal-nav-toggle" class="visal-hamburger" aria-label="Abrir menu">
+            <!-- Hamburguesa: en movil abre el menu off-canvas; en escritorio reaparece el menu colapsado. -->
+            <label for="visal-nav-toggle" class="visal-hamburger visal-hamburger-mobile" aria-label="Abrir menu">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+            </label>
+            <label for="visal-nav-collapse" class="visal-hamburger visal-hamburger-desktop" aria-label="Mostrar menu" title="Mostrar menu">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
             </label>
             <span class="visal-topbar-brand">Visal</span>

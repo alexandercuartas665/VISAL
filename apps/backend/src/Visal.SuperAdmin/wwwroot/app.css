@@ -53,7 +53,10 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .ase-alert { padding: 10px 14px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; margin-bottom: 12px; }
 .ase-ok { padding: 10px 14px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; font-size: 13px; margin-bottom: 12px; }
 .ase-grid { display: flex; gap: 14px; align-items: flex-start; }
-.ase-list { width: 300px; flex-shrink: 0; }
+/* Lista de items: scroll interno propio para que cuando crezca a cientos de
+   items la pagina no se ponga larguisima y el detalle siga visible al lado.
+   Maximo 75% del viewport menos el topbar. */
+.ase-list { width: 300px; flex-shrink: 0; max-height: calc(100vh - 160px); overflow-y: auto; position: sticky; top: 12px; }
 .ase-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .ase-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
 .ase-card-h { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -78,7 +81,9 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .rol-table td:first-child { text-align: left; }
 @media (max-width: 1100px) {
   .ase-grid { flex-direction: column; }
-  .ase-list { width: 100%; }
+  /* En pantallas chicas la lista vuelve a su altura natural y el scroll lo
+     maneja la pagina; sticky tampoco aplica con la columna apilada. */
+  .ase-list { width: 100%; max-height: none; position: static; overflow: visible; }
   .ase-form { grid-template-columns: repeat(2, 1fr); }
   .ase-f-wide, .ase-f-full { grid-column: span 2; }
 }
@@ -119,9 +124,48 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 
 /* Piezas del menu movil: ocultas en escritorio. */
 .visal-nav-toggle { display: none; }
+.visal-nav-collapse { display: none; }
 .visal-nav-overlay { display: none; }
 .visal-hamburger { display: none; }
+.visal-hamburger-mobile { display: none; }
 .visal-topbar-brand { display: none; }
+
+/* Boton "Mostrar menu" en escritorio: solo visible cuando el sidebar esta colapsado.
+   El boton vive en el topbar; al inicio (sidebar abierto) esta oculto. */
+.visal-hamburger-desktop {
+  display: none;
+  align-items: center; justify-content: center;
+  width: 38px; height: 38px;
+  border-radius: 10px; cursor: pointer; color: var(--foreground);
+  margin-right: auto; /* lo empuja a la izquierda del topbar */
+}
+.visal-hamburger-desktop:hover { background: var(--muted); }
+.visal-hamburger-desktop svg { width: 22px; height: 22px; }
+
+/* Boton interno del sidebar para colapsarlo (chevron izquierdo). */
+.visal-nav-collapse-btn {
+  position: absolute; top: 10px; right: 8px; z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: 8px; cursor: pointer; color: var(--muted-foreground, #64748b);
+  background: transparent; transition: background .15s ease, color .15s ease;
+}
+.visal-nav-collapse-btn:hover { background: var(--muted); color: var(--foreground); }
+.visal-nav-collapse-btn svg { width: 18px; height: 18px; }
+
+/* Asegura que el sidebar tenga contexto de posicion para el boton interno. */
+.visal-sidebar { position: sticky; }
+
+/* === Colapsado en escritorio === */
+.visal-nav-collapse:checked ~ .visal-sidebar {
+  width: 0;
+  min-width: 0;
+  border-right: 0;
+  overflow: hidden;
+}
+.visal-nav-collapse:checked ~ .visal-main .visal-hamburger-desktop {
+  display: inline-flex;
+}
 
 /* ===== Sidebar header / brand ===== */
 .visal-brand {
@@ -975,13 +1019,17 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 
   /* Topbar: hamburguesa a la izquierda + marca, usuario a la derecha. */
   .visal-topbar { justify-content: flex-start; gap: 10px; padding: 0 14px; }
-  .visal-hamburger {
+  .visal-hamburger-mobile {
     display: inline-flex; align-items: center; justify-content: center;
     width: 40px; height: 40px; margin-left: -6px;
     border-radius: 10px; cursor: pointer; color: var(--foreground);
   }
-  .visal-hamburger:hover { background: var(--muted); }
-  .visal-hamburger svg { width: 22px; height: 22px; }
+  .visal-hamburger-mobile:hover { background: var(--muted); }
+  .visal-hamburger-mobile svg { width: 22px; height: 22px; }
+  /* El boton "Mostrar menu" de escritorio no aplica en movil. */
+  .visal-hamburger-desktop { display: none !important; }
+  /* El boton "Ocultar menu" interno del sidebar tampoco en movil (ya hay overlay para cerrar). */
+  .visal-nav-collapse-btn { display: none; }
   .visal-topbar-brand { display: inline-block; font-weight: 800; font-size: 15px; letter-spacing: -0.02em; }
   .visal-topbar-brand span { color: var(--primary); }
   .visal-topbar form { margin-left: auto; }            /* empuja "Salir" a la derecha */

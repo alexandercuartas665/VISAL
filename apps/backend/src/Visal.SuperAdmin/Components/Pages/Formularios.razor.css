@@ -55,8 +55,15 @@
 .fb-check { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding-bottom: 8px; }
 
 /* Body 3 columnas: laterales pegadas (sticky) y centro hace el scroll de la pagina. */
-.fb-body { display: flex; gap: 12px; align-items: flex-start; min-height: 62vh; }
-.fb-palette { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+/* Layout principal con scroll INDEPENDIENTE por columna: el lienzo central
+   tiene su propia barra de scroll, mientras que la paleta y el panel de
+   propiedades se quedan visibles en pantalla aunque el usuario baje mucho
+   en el formulario. Antes usabamos position:sticky pero al estar dentro de
+   un contenedor con muchos hijos el sticky se rompia y el panel de
+   propiedades se iba con el scroll de la pagina. */
+.fb-body { display: flex; gap: 12px; align-items: stretch;
+           height: calc(100vh - 260px); min-height: 520px; }
+.fb-palette { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; height: 100%; overflow-y: auto; }
 .fb-palette-group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted-foreground); margin-top: 8px; }
 .fb-palette-group:first-child { margin-top: 0; }
 .fb-pal-btn { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; cursor: pointer; }
@@ -68,7 +75,7 @@
 /* Lienzo */
 /* Canvas: crece naturalmente; el scroll lo hace la pagina, no el canvas (asi
    las laterales sticky se quedan visibles arriba). */
-.fb-canvas { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; transition: background .15s, border-color .15s; }
+.fb-canvas { flex: 1; min-width: 0; height: 100%; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; transition: background .15s, border-color .15s; }
 .fb-canvas-drag { border-color: var(--primary); background: rgba(21,101,192,.04); box-shadow: inset 0 0 0 2px var(--primary); }
 .fb-section-drag { border-color: var(--primary) !important; border-style: solid !important; background: rgba(21,101,192,.08) !important; box-shadow: 0 0 0 3px rgba(21,101,192,.18); }
 .fb-empty { text-align: center; color: var(--muted-foreground); padding: 48px 0; font-size: 14px; }
@@ -94,7 +101,7 @@
 .fb-mini-danger:hover { border-color: #fca5a5; color: #dc2626; background: #fef2f2; }
 
 /* Propiedades */
-.fb-props { width: 300px; flex-shrink: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.fb-props { width: 300px; flex-shrink: 0; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; height: 100%; overflow-y: auto; }
 .fb-props-empty { color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
 .fb-props-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; color: var(--primary); }
 .fb-prop { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
@@ -134,6 +141,8 @@
 .fb-col-row .fb-input { flex: 1; }
 
 @media (max-width: 1100px) {
-  .fb-body { flex-direction: column; }
-  .fb-palette, .fb-props { width: 100%; position: static; max-height: none; }
+  /* En pantallas medias/chicas dejamos que la pagina scrollee como un todo,
+     porque las 3 columnas se apilan en flujo vertical. */
+  .fb-body { flex-direction: column; height: auto; min-height: 0; }
+  .fb-palette, .fb-canvas, .fb-props { width: 100%; height: auto; max-height: none; overflow: visible; }
 }

@@ -590,7 +590,7 @@
                 catch (Exception ex)
                 {
                     _importErr++;
-                    _importLog.Add($"[ERR] Fila {r}: {ex.Message}");
+                    _importLog.Add($"[ERR] Fila {r}: {DetalleError(ex)}");
                 }
 
                 // Cada 10 filas refrescamos la UI para que el usuario vea avance.
@@ -665,5 +665,58 @@
         if (AuthState is null) { return Guid.Empty; }
         var st = await AuthState;
         return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    /// <summary>
+    /// Camina la cadena de InnerException hasta la raiz y, cuando encuentra un
+    /// PostgresException (Npgsql), extrae MessageText + Detail + ConstraintName +
+    /// ColumnName. Asi el log de importacion muestra el motivo real
+    /// ("valor demasiado largo para columna X", "violacion de UNIQUE en Y",
+    /// "valor NULL en columna NOT NULL Z") en vez del envoltorio EF Core
+    /// generico "An error occurred while saving the entity changes".
+    /// </summary>
+    private static string DetalleError(Exception ex)
+    {
+        // Recorremos la cadena hasta la raiz para no perder ningun eslabon con info util.
+        var partes = new List<string>();
+        Exception? cur = ex;
+        while (cur is not null)
+        {
+            // PostgresException tiene los campos ricos — si aparece, es lo que queremos mostrar.
+            if (cur.GetType().FullName == "Npgsql.PostgresException")
+            {
+                var t = cur.GetType();
+                string? Prop(string name) => t.GetProperty(name)?.GetValue(cur) as string;
+                var msg = Prop("MessageText");
+                var det = Prop("Detail");
+                var con = Prop("ConstraintName");
+                var col = Prop("ColumnName");
+                var tbl = Prop("TableName");
+                var sql = Prop("SqlState");
+                var sb = new System.Text.StringBuilder();
+                if (!string.IsNullOrWhiteSpace(msg)) { sb.Append(msg); }
+                if (!string.IsNullOrWhiteSpace(det)) { sb.Append(" | ").Append(det); }
+                if (!string.IsNullOrWhiteSpace(con)) { sb.Append(" | constraint=").Append(con); }
+                if (!string.IsNullOrWhiteSpace(col)) { sb.Append(" | columna=").Append(col); }
+                if (!string.IsNullOrWhiteSpace(tbl)) { sb.Append(" | tabla=").Append(tbl); }
+                if (!string.IsNullOrWhiteSpace(sql)) { sb.Append(" [SQLSTATE ").Append(sql).Append(']'); }
+                var s = sb.ToString().Trim();
+                if (!string.IsNullOrEmpty(s)) { partes.Add(s); }
+            }
+            else
+            {
+                // Otros niveles: incluimos solo el mensaje si no es el envoltorio
+                // generico de EF Core (redundante y poco util).
+                if (!string.IsNullOrWhiteSpace(cur.Message)
+                    && !cur.Message.Contains("See the inner exception for details", StringComparison.OrdinalIgnoreCase))
+                {
+                    partes.Add(cur.Message);
+                }
+            }
+            cur = cur.InnerException;
+        }
+        var final = partes.Count > 0 ? string.Join(" -> ", partes) : ex.Message;
+        // Truncar por si el detalle trae la fila completa (comun en varchar overflow).
+        return final.Length > 500 ? final[..500] + "..." : final;
     }
 }

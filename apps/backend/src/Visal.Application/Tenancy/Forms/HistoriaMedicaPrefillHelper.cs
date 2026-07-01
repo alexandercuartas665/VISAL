@@ -21,7 +21,10 @@ public static class HistoriaMedicaPrefillHelper
         "incapacidades.lista_numerada",
         "certificaciones.lista_numerada",
         "ordenes_servicio.lista_numerada",
-        "insumos.lista_numerada"
+        "insumos.lista_numerada",
+        "rx_imagenologia.lista_numerada",
+        "laboratorios.lista_numerada",
+        "insumos_externos.lista_numerada"
     };
 
     /// <summary>Contenedor con todas las listas derivadas de la HC actual.</summary>
@@ -31,7 +34,10 @@ public static class HistoriaMedicaPrefillHelper
         IReadOnlyList<IncapacidadItemDto> Incapacidades,
         IReadOnlyList<CertificacionItemDto> Certificaciones,
         IReadOnlyList<OrdenServicioItemDto> OrdenesServicio,
-        IReadOnlyList<InsumoItemDto> Insumos)
+        IReadOnlyList<InsumoItemDto> Insumos,
+        IReadOnlyList<OrdenExternaItemDto> RxImagenologia,
+        IReadOnlyList<OrdenExternaItemDto> Laboratorios,
+        IReadOnlyList<OrdenExternaItemDto> InsumosExternos)
     {
         public static HmFuentes Empty => new(
             Array.Empty<OrdenMedicamentoItemDto>(),
@@ -39,7 +45,10 @@ public static class HistoriaMedicaPrefillHelper
             Array.Empty<IncapacidadItemDto>(),
             Array.Empty<CertificacionItemDto>(),
             Array.Empty<OrdenServicioItemDto>(),
-            Array.Empty<InsumoItemDto>());
+            Array.Empty<InsumoItemDto>(),
+            Array.Empty<OrdenExternaItemDto>(),
+            Array.Empty<OrdenExternaItemDto>(),
+            Array.Empty<OrdenExternaItemDto>());
     }
 
     /// <summary>
@@ -56,7 +65,10 @@ public static class HistoriaMedicaPrefillHelper
             ["incapacidades.lista_numerada"] = ListaNumeradaIncapacidades(fuentes.Incapacidades),
             ["certificaciones.lista_numerada"] = ListaNumeradaCertificaciones(fuentes.Certificaciones),
             ["ordenes_servicio.lista_numerada"] = ListaNumeradaOrdenesServicio(fuentes.OrdenesServicio),
-            ["insumos.lista_numerada"] = ListaNumeradaInsumos(fuentes.Insumos)
+            ["insumos.lista_numerada"] = ListaNumeradaInsumos(fuentes.Insumos),
+            ["rx_imagenologia.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.RxImagenologia),
+            ["laboratorios.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.Laboratorios),
+            ["insumos_externos.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.InsumosExternos)
         };
     }
 
@@ -239,6 +251,9 @@ public static class HistoriaMedicaPrefillHelper
             "certificaciones.lista_numerada" => fuentes.Certificaciones.OrderBy(m => m.Orden).Select(CertificacionToFields).ToList<Dictionary<string, string?>>(),
             "ordenes_servicio.lista_numerada" => fuentes.OrdenesServicio.OrderBy(m => m.Orden).Select(OrdenServicioToFields).ToList<Dictionary<string, string?>>(),
             "insumos.lista_numerada" => fuentes.Insumos.OrderBy(m => m.Orden).Select(InsumoToFields).ToList<Dictionary<string, string?>>(),
+            "rx_imagenologia.lista_numerada" => fuentes.RxImagenologia.OrderBy(m => m.Orden).Select(OrdenExternaToFields).ToList<Dictionary<string, string?>>(),
+            "laboratorios.lista_numerada" => fuentes.Laboratorios.OrderBy(m => m.Orden).Select(OrdenExternaToFields).ToList<Dictionary<string, string?>>(),
+            "insumos_externos.lista_numerada" => fuentes.InsumosExternos.OrderBy(m => m.Orden).Select(OrdenExternaToFields).ToList<Dictionary<string, string?>>(),
             _ => null
         };
 
@@ -460,6 +475,39 @@ public static class HistoriaMedicaPrefillHelper
             ["nombre"] = s.Descripcion,
             ["insumo"] = s.Descripcion,
             ["codigo"] = s.Codigo,
+            ["cantidad"] = s.Cantidad,
+            ["observacion"] = s.Observaciones,
+            ["obs"] = s.Observaciones,
+            ["observaciones"] = s.Observaciones
+        };
+    }
+
+    /// <summary>Formato: "1. codigo — descripcion — cantidad — obs" para las
+    /// 3 pestanas de ordenes externas (RX imagenologia, laboratorios, insumos).</summary>
+    public static string ListaNumeradaOrdenExterna(IReadOnlyList<OrdenExternaItemDto> items)
+    {
+        if (items is null || items.Count == 0) { return ""; }
+        var sb = new System.Text.StringBuilder();
+        var i = 1;
+        foreach (var x in items.OrderBy(y => y.Orden))
+        {
+            sb.Append(i++).Append(". ");
+            if (!string.IsNullOrWhiteSpace(x.Codigo)) { sb.Append(x.Codigo).Append(" — "); }
+            sb.Append(x.Descripcion);
+            if (!string.IsNullOrWhiteSpace(x.Cantidad)) { sb.Append(" — ").Append(x.Cantidad); }
+            if (!string.IsNullOrWhiteSpace(x.Observaciones)) { sb.Append(" — ").Append(x.Observaciones); }
+            sb.Append('\n');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private static Dictionary<string, string?> OrdenExternaToFields(OrdenExternaItemDto s)
+    {
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["codigo"] = s.Codigo,
+            ["descripcion"] = s.Descripcion,
+            ["nombre"] = s.Descripcion,
             ["cantidad"] = s.Cantidad,
             ["observacion"] = s.Observaciones,
             ["obs"] = s.Observaciones,

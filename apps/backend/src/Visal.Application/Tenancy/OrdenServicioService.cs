@@ -44,7 +44,22 @@ public sealed class OrdenServicioService(
                     c != null ? c.CodigoContrato : null,
                     a != null ? a.Nombre : null);
 
-        return await q.Take(take).ToListAsync(ct);
+        var propios = await q.Take(take).ToListAsync(ct);
+
+        // Sugerencias del catalogo EXTERNO (CUPS 890xxx cargados desde el Excel).
+        // Aparecen tras los propios y se distinguen con Aseguradora="Externo (CUPS)".
+        // Al agregarlos, ServicioContratoId queda null y CodigoServicio guarda el CUPS.
+        var externos = await db.CatalogosServicioReferencia.AsNoTracking()
+            .Where(c => c.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral
+                        && (c.Codigo.ToLower().Contains(t) || c.Nombre.ToLower().Contains(t))
+                        && c.Activo)
+            .OrderBy(c => c.Codigo)
+            .Take(Math.Max(1, take - propios.Count))
+            .Select(c => new ServicioSugerenciaDto(
+                Guid.Empty, c.Codigo, c.Nombre,
+                "EXTERNO", null, null, "Externo (CUPS)"))
+            .ToListAsync(ct);
+        return propios.Concat(externos).ToList();
     }
 
     public async Task<IReadOnlyList<OrdenServicioItemDto>> ListarPorHistoriaAsync(
@@ -78,7 +93,10 @@ public sealed class OrdenServicioService(
         {
             TenantId = tid,
             HistoriaClinicaId = historiaId,
-            ServicioContratoId = req.ServicioContratoId,
+            // Servicios que vienen del catalogo EXTERNO (CUPS) llegan con
+            // ServicioContratoId == Guid.Empty desde el frontend. Los normalizamos
+            // a null para que no violen el FK a servicios_contrato.
+            ServicioContratoId = (req.ServicioContratoId == Guid.Empty) ? null : req.ServicioContratoId,
             CodigoServicio = Trim(req.CodigoServicio),
             Descripcion = req.Descripcion.Trim(),
             Cantidad = Trim(req.Cantidad),

@@ -1,0 +1,230 @@
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject IOrdenExternaService Svc
+@inject ICatalogoServicioService CatSvc
+@inject IJSRuntime JS
+
+@*
+   Tab generico para ordenes EXTERNAS de la HC. Un componente reusado por
+   los 4 tipos (RX Imagenologia, Laboratorio, Servicio Externo, Insumo). El
+   codigo trae autocomplete desde CatalogoServicioReferencia del mismo tipo.
+*@
+
+<div class="oi-bar">
+    <div class="oi-bar-left">
+        <label>@Titulo:</label>
+        <span class="oi-bar-count">@_items.Count item(s)</span>
+    </div>
+</div>
+
+@if (HistoriaClinicaId is null)
+{
+    <div class="oi-card oi-empty-hc">
+        Selecciona o inicia una historia para registrar @Titulo.
+    </div>
+}
+else
+{
+    <div class="oi-card">
+        <div class="oi-row">
+            <div class="oi-f oi-c-3" style="position:relative;">
+                <label>Codigo</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Escribe para buscar..."
+                       @bind="_borrador.Codigo" @bind:event="oninput"
+                       @onkeyup="BuscarCatalogoAsync" />
+                @if (_sugerencias.Count > 0)
+                {
+                    <div class="oi-sug">
+                        @foreach (var s in _sugerencias)
+                        {
+                            <button type="button" class="oi-sug-item"
+                                    @onclick="() => AplicarSugerencia(s)">
+                                <strong>@s.Codigo</strong> — @s.Nombre
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="oi-f oi-c-9">
+                <label>Descripcion</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Se autocompleta al elegir el codigo, o escribe libre."
+                       @bind="_borrador.Descripcion" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="oi-row">
+            <div class="oi-f oi-c-3">
+                <label>Cantidad</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: 1, 3 sesiones"
+                       @bind="_borrador.Cantidad" @bind:event="oninput" />
+            </div>
+            <div class="oi-f oi-c-9">
+                <label>Observaciones</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Opcional"
+                       @bind="_borrador.Observaciones" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="oi-row oi-row-action">
+            <button class="btn btn-primary btn-sm"
+                    @onclick="AgregarAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_borrador.Descripcion) || _agregando)">
+                @(_agregando ? "Guardando..." : "+ Agregar")
+            </button>
+        </div>
+
+        <div class="oi-list">
+            @if (_items.Count == 0)
+            {
+                <div class="oi-empty-row">Sin items agregados.</div>
+            }
+            else
+            {
+                <table class="table table-sm oi-table">
+                    <thead>
+                        <tr>
+                            <th style="width:48px;">#</th>
+                            <th style="width:110px;">Codigo</th>
+                            <th>Descripcion</th>
+                            <th style="width:120px;">Cantidad</th>
+                            <th>Observaciones</th>
+                            <th style="width:60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td>@it.Orden</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Codigo) ? "—" : it.Codigo)</td>
+                                <td>@it.Descripcion</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Cantidad) ? "—" : it.Cantidad)</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Observaciones) ? "—" : it.Observaciones)</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .oi-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .oi-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .oi-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oi-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
+    .oi-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .oi-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .oi-row-action { display:flex; justify-content:flex-end; }
+    .oi-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .oi-c-3 { grid-column: span 3; }
+    .oi-c-9 { grid-column: span 9; }
+    .oi-list { margin-top:16px; }
+    .oi-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
+    .oi-table { font-size:12.5px; }
+    .oi-sug { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; max-height:220px; overflow-y:auto; z-index:20; box-shadow:0 4px 12px rgba(0,0,0,.08); }
+    .oi-sug-item { display:block; width:100%; text-align:left; padding:6px 10px; border:0; background:transparent; font-size:12px; cursor:pointer; }
+    .oi-sug-item:hover { background:#eff6ff; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public TipoCatalogoServicio Tipo { get; set; }
+    [Parameter] public string Titulo { get; set; } = "Items";
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private TipoCatalogoServicio? _ultimoTipo;
+    private List<OrdenExternaItemDto> _items = new();
+    private List<CatalogoServicioDto> _sugerencias = new();
+    private bool _agregando;
+    private Borrador _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado || _ultimoTipo != Tipo)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _ultimoTipo = Tipo;
+            _borrador = new();
+            _sugerencias.Clear();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await Svc.ListarPorHistoriaAsync(hid, Tipo)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    private async Task BuscarCatalogoAsync()
+    {
+        var q = _borrador.Codigo;
+        if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+        {
+            _sugerencias.Clear();
+            return;
+        }
+        var (rows, _) = await CatSvc.SearchAsync(Tipo, q, 0, 8);
+        _sugerencias = rows.ToList();
+    }
+
+    private void AplicarSugerencia(CatalogoServicioDto s)
+    {
+        _borrador.Codigo = s.Codigo;
+        _borrador.Descripcion = s.Nombre;
+        _sugerencias.Clear();
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Descripcion)) { return; }
+        _agregando = true;
+        try
+        {
+            var creado = await Svc.AgregarAsync(hid, Tipo, new AgregarOrdenExternaRequest(
+                _borrador.Codigo,
+                _borrador.Descripcion!,
+                _borrador.Cantidad,
+                _borrador.Observaciones), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            _borrador = new();
+            _sugerencias.Clear();
+        }
+        finally { _agregando = false; }
+    }
+
+    private async Task EliminarAsync(OrdenExternaItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar \"{it.Descripcion}\"?");
+        if (!ok) { return; }
+        await Svc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private sealed class Borrador
+    {
+        public string? Codigo { get; set; }
+        public string? Descripcion { get; set; }
+        public string? Cantidad { get; set; }
+        public string? Observaciones { get; set; }
+    }
+}

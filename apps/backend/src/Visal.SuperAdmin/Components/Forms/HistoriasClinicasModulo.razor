@@ -288,7 +288,7 @@
                         <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
                                            OnCountChanged="OnMedicamentosCountChanged" />
                     }
-                    else if (_tabSel == "Ordenes servicios Propias")
+                    else if (_tabSel == "Ordenes servicios")
                     {
                         <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
                                         OnCountChanged="@(c => _servCount = c)" />
@@ -312,6 +312,27 @@
                     {
                         <OrdenCertificaciones HistoriaClinicaId="@_historiaSel?.Id"
                                               OnCountChanged="@(c => _certCount = c)" />
+                    }
+                    else if (_tabSel == "RX Imagenologia")
+                    {
+                        <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
+                                        Tipo="Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia"
+                                        Titulo="RX / Imagenologia"
+                                        OnCountChanged="@(c => _rxExtCount = c)" />
+                    }
+                    else if (_tabSel == "Laboratorios")
+                    {
+                        <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
+                                        Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio"
+                                        Titulo="Laboratorios"
+                                        OnCountChanged="@(c => _labExtCount = c)" />
+                    }
+                    else if (_tabSel == "Insumos Externos")
+                    {
+                        <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
+                                        Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Insumo"
+                                        Titulo="Insumos Externos"
+                                        OnCountChanged="@(c => _insExtCount = c)" />
                     }
                 }
             </div>
@@ -627,9 +648,15 @@
 
     private readonly string[] _tabs = new[] {
         "Historial", "Escalas", "Evoluciones", "Consentimientos",
-        "Ordenes medicamento", "Ordenes servicios Propias",
-        "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones"
+        "Ordenes medicamento", "Ordenes servicios",
+        "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
+        // Ordenes externas por tipo. "Ordenes servicios" arriba ya incluye tanto
+        // los servicios propios (de contratos) como los del catalogo externo CUPS
+        // — se unifican en la misma tabla. Solo mantenemos separados: RX, Lab e Insumos.
+        "RX Imagenologia", "Laboratorios", "Insumos Externos"
     };
+    // Badges de conteo para las 3 pestanas externas restantes.
+    private int _rxExtCount, _labExtCount, _insExtCount;
     /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
     private bool _menuColapsado;
     /// <summary>Estado de colapso de la columna del chat WhatsApp (lateral derecha).
@@ -665,11 +692,14 @@
         "Evoluciones" => ("\U0001F4C8", _evoCount),            // chart up
         "Consentimientos" => ("✅", _conCount),            // check mark
         "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
-        "Ordenes servicios Propias" => ("\U0001F3E5", _servCount), // hospital
+        "Ordenes servicios" => ("\U0001F3E5", _servCount), // hospital
         "Insumos" => ("\U0001F4E6", _insCount),                // box
         "Remisiones" => ("↗", _remCount),                 // arrow up-right
         "Ordenes incapacidad" => ("\U0001F4C4", _incCount),    // page facing up
         "Ordenes certificaciones" => ("\U0001F4DC", _certCount), // scroll
+        "RX Imagenologia" => ("\U0001F9BF", _rxExtCount),      // bone (radiografia)
+        "Laboratorios" => ("\U0001F9EA", _labExtCount),        // test tube
+        "Insumos Externos" => ("\U0001F4E6", _insExtCount),    // box
         _ => ("•", 0)
     };
     private string _tabSel = "Historial";
@@ -689,7 +719,7 @@
     /// <summary>Conteo de medicamentos para badge en la pestana. Se mantiene
     /// sincronizado via OnCountChanged del componente OrdenMedicamentos.</summary>
     private int _medCount;
-    /// <summary>Conteo de servicios para badge en la pestana "Ordenes servicios Propias".</summary>
+    /// <summary>Conteo de servicios para badge en la pestana "Ordenes servicios".</summary>
     private int _servCount;
     /// <summary>Conteo de incapacidades para badge en la pestana "Ordenes incapacidad".</summary>
     private int _incCount;
@@ -965,7 +995,13 @@
             var ord = await RetryAsync(() => OrdSrvSvc.ListarPorHistoriaAsync(hcId));
             var ins = await RetryAsync(() => InsumoSvc.ListarPorHistoriaAsync(hcId));
 
-            var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins);
+            // Las 3 listas externas no las traemos aqui — el helper solo las usa
+            // cuando el destino es una ruta rx_imagenologia/laboratorios/insumos_externos,
+            // que por ahora en el HistorialModulo no se escribe. Pasamos vacias.
+            var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins,
+                Array.Empty<OrdenExternaItemDto>(),
+                Array.Empty<OrdenExternaItemDto>(),
+                Array.Empty<OrdenExternaItemDto>());
             var medsKeys = HistoriaMedicaPrefillHelper.Aplicar(_valores, fuentes, _prefillRoutesActual, _schemaActual);
 
             // MERGE: las del header (No Historia / Fecha / Hora) NO se pierden cuando

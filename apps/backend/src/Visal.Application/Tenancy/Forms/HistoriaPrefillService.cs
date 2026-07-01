@@ -83,7 +83,25 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
                 o.Cantidad, o.Observaciones, o.Orden))
             .ToListAsync(ct);
 
-        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins);
+        // Ordenes externas por tipo (RX imagenologia, laboratorios, insumos externos).
+        // Los "servicios externos" ya se unificaron en historia_clinica_ordenes_servicio
+        // (arriba, `ord`), asi que no necesitan traerse aparte.
+        var externas = await db.HistoriaClinicaOrdenesExternas
+            .Where(o => o.HistoriaClinicaId == historiaId)
+            .OrderBy(o => o.Orden)
+            .Select(o => new { o.Id, o.Orden, o.Tipo, o.Codigo, o.Descripcion, o.Cantidad, o.Observaciones })
+            .ToListAsync(ct);
+        var rxExt  = externas.Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia)
+                             .Select(x => new OrdenExternaItemDto(x.Id, x.Orden, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones))
+                             .ToList();
+        var labExt = externas.Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio)
+                             .Select(x => new OrdenExternaItemDto(x.Id, x.Orden, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones))
+                             .ToList();
+        var insExt = externas.Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.Insumo)
+                             .Select(x => new OrdenExternaItemDto(x.Id, x.Orden, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones))
+                             .ToList();
+
+        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins, rxExt, labExt, insExt);
 
         // Deserializar el ValoresJson actual, aplicar el helper, re-serializar.
         var valores = DeserializarValores(hc.ValoresJson);

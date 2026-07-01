@@ -49,6 +49,18 @@ public sealed class FormDefinitionService : IFormDefinitionService
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<FormDefinitionDetailDto?> GetActivoByCodigoSecundarioAsync(string codigoSecundario, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(codigoSecundario)) { return null; }
+        var c = codigoSecundario.Trim();
+        return await _db.FormDefinitions
+            .AsNoTracking()
+            .Where(f => f.Activo && f.CodigoSecundario == c)
+            .OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt)
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<FormDefinitionDetailDto?> SaveAsync(SaveFormDefinitionRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
         var codigo = request.Codigo.Trim();
@@ -843,5 +855,153 @@ public sealed class FormDefinitionService : IFormDefinitionService
             previousValue: new { existing.Codigo, existing.Nombre }, newValue: null, tenantId: existing.TenantId);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    // ============================================================================
+    // Exportar / Importar JSON. Formato portable {codigo,tipo,schema,prefill}.
+    // El objetivo es que un formulario exportado en un tenant pueda importarse en
+    // otro sin perder NADA: campos, tablas, seedRows, formulas del schema, rutas
+    // de prefill. Todo lo que hoy vive en FormDefinition (jsonb columns) viaja.
+    // ============================================================================
+
+    private static readonly JsonSerializerOptions _exportJsonOpts = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    public async Task<byte[]?> ExportarJsonAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var e = await _db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (e is null) { return null; }
+
+        // Deserializamos schema y prefill a JsonNode para que se re-serialicen
+        // como objetos anidados (no como strings escapados) — asi el JSON de
+        // exportacion se lee legible y en la importacion no hay que doble-parsear.
+        JsonNode? schemaNode = null;
+        try { schemaNode = string.IsNullOrWhiteSpace(e.SchemaJson) ? null : JsonNode.Parse(e.SchemaJson); }
+        catch { schemaNode = null; }
+        JsonNode? prefillNode = null;
+        try { prefillNode = string.IsNullOrWhiteSpace(e.PrefillRoutesJson) ? null : JsonNode.Parse(e.PrefillRoutesJson); }
+        catch { prefillNode = null; }
+
+        var payload = new JsonObject
+        {
+            ["$schema"] = "visal-form-export/v1",
+            ["exportedAt"] = DateTimeOffset.UtcNow.ToString("o"),
+            ["codigo"] = e.Codigo,
+            ["codigoSecundario"] = e.CodigoSecundario,
+            ["nombre"] = e.Nombre,
+            ["version"] = e.Version,
+            ["tipo"] = e.Tipo,
+            ["activo"] = e.Activo,
+            ["schema"] = schemaNode,
+            ["prefillRoutes"] = prefillNode
+        };
+
+        var json = payload.ToJsonString(_exportJsonOpts);
+        return System.Text.Encoding.UTF8.GetBytes(json);
+    }
+
+    public async Task<string?> GetExportFileNameAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var codigo = await _db.FormDefinitions.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => x.Codigo)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (codigo is null) { return null; }
+        // Sanitiza para nombre de archivo (evita / \ : etc.)
+        var safe = new string(codigo.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.').ToArray());
+        if (string.IsNullOrWhiteSpace(safe)) { safe = id.ToString("N"); }
+        return $"form-{safe}.json";
+    }
+
+    public async Task<FormDefinitionDetailDto?> ImportarJsonAsync(byte[] jsonBytes, bool sobrescribir, Guid actorUserId, CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.TenantId is not Guid tenantId) { return null; }
+        if (jsonBytes is null || jsonBytes.Length == 0) { throw new InvalidOperationException("Archivo vacio."); }
+
+        JsonObject root;
+        try
+        {
+            var parsed = JsonNode.Parse(jsonBytes) as JsonObject;
+            root = parsed ?? throw new InvalidOperationException("El JSON debe ser un objeto raiz.");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new InvalidOperationException("JSON invalido: " + ex.Message);
+        }
+
+        var codigo = root["codigo"]?.GetValue<string>()?.Trim();
+        var nombre = root["nombre"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrWhiteSpace(codigo) || string.IsNullOrWhiteSpace(nombre))
+        {
+            throw new InvalidOperationException("El JSON debe traer 'codigo' y 'nombre'.");
+        }
+        var codigoSecundario = root["codigoSecundario"]?.GetValue<string>();
+        var version = root["version"]?.GetValue<string>();
+        var tipo = root["tipo"]?.GetValue<string>();
+        var activo = root["activo"]?.GetValue<bool>() ?? true;
+
+        // schema y prefillRoutes pueden venir como objeto anidado (formato preferido)
+        // o como string escapado (compatibilidad); re-serializamos siempre a string
+        // porque la BD guarda jsonb como texto.
+        static string? NodeToJsonString(JsonNode? n)
+        {
+            if (n is null) { return null; }
+            if (n is JsonValue v && v.TryGetValue<string>(out var s)) { return s; }
+            return n.ToJsonString();
+        }
+        var schemaJson = NodeToJsonString(root["schema"]) ?? "{\"children\":[]}";
+        var prefillRoutesJson = NodeToJsonString(root["prefillRoutes"]);
+
+        // Sufijo para evitar colision cuando no se pide sobrescribir.
+        var codigoFinal = codigo;
+        var existente = await _db.FormDefinitions
+            .FirstOrDefaultAsync(x => x.Codigo == codigo, cancellationToken);
+        if (existente is not null)
+        {
+            if (sobrescribir)
+            {
+                existente.CodigoSecundario = codigoSecundario;
+                existente.Nombre = nombre;
+                existente.Version = version;
+                existente.Tipo = tipo;
+                existente.Activo = activo;
+                existente.SchemaJson = schemaJson;
+                existente.PrefillRoutesJson = prefillRoutesJson;
+                await _db.SaveChangesAsync(cancellationToken);
+                _audit.Write(actorUserId, "form-definition.import.overwrite", nameof(FormDefinition), existente.Id,
+                    previousValue: new { codigo = existente.Codigo }, newValue: new { codigo, tipo }, tenantId: tenantId);
+                return await GetAsync(existente.Id, cancellationToken);
+            }
+            // Encuentra un codigo libre agregando -import, -import-2, etc.
+            var i = 1;
+            do
+            {
+                codigoFinal = i == 1 ? $"{codigo}-import" : $"{codigo}-import-{i}";
+                i++;
+            } while (await _db.FormDefinitions.AnyAsync(x => x.Codigo == codigoFinal, cancellationToken));
+        }
+
+        var nuevo = new FormDefinition
+        {
+            TenantId = tenantId,
+            Codigo = codigoFinal!,
+            CodigoSecundario = codigoSecundario,
+            Nombre = nombre!,
+            Version = version,
+            Tipo = tipo,
+            Activo = activo,
+            SchemaJson = schemaJson,
+            PrefillRoutesJson = prefillRoutesJson
+        };
+        _db.FormDefinitions.Add(nuevo);
+        await _db.SaveChangesAsync(cancellationToken);
+        _audit.Write(actorUserId, "form-definition.import.new", nameof(FormDefinition), nuevo.Id,
+            previousValue: null,
+            newValue: new { codigo = codigoFinal, codigoOriginal = codigo, tipo, colision = existente is not null && !sobrescribir },
+            tenantId: tenantId);
+        return await GetAsync(nuevo.Id, cancellationToken);
     }
 }

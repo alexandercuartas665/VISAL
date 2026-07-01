@@ -55,12 +55,36 @@ public interface IFormDefinitionService
     Task<FormDefinitionDetailDto?> GetActivoByTipoAsync(string tipo, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Busca un formulario activo del tenant cuyo <see cref="FormDefinition.CodigoSecundario"/>
+    /// coincida exactamente con el parametro. Se usa como clave estable en la impresion
+    /// del paquete: por convencion cada orden clasica (medicamentos, servicios, etc.)
+    /// guarda ahi un valor como "ORDEN_MEDICAMENTOS" independientemente de su Tipo
+    /// (que puede quedar en "FORMATO" para agruparlas en el listado).
+    /// </summary>
+    Task<FormDefinitionDetailDto?> GetActivoByCodigoSecundarioAsync(string codigoSecundario, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Recorre todos los formularios del tenant y, por cada uno, infiere mapeos de
     /// prefill desde el modulo "paciente" basado en el Name/Label de los campos.
     /// Preserva los mapeos manuales que ya existen (no los sobrescribe). Devuelve
     /// estadisticas del proceso.
     /// </summary>
     Task<AutoEnlazarPacienteResultDto> AutoEnlazarPacienteEnTodosAsync(Guid actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Bytes UTF-8 con el JSON de exportacion del formulario. Incluye
+    /// codigo, tipo, schema deserializado, rutas de prefill deserializadas — todo
+    /// lo necesario para recrearlo en otro tenant. Devuelve null si el formulario
+    /// no existe. El nombre sugerido del archivo va aparte via GetExportFileNameAsync.</summary>
+    Task<byte[]?> ExportarJsonAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Nombre de archivo sugerido para la descarga (codigo o Id + .json).</summary>
+    Task<string?> GetExportFileNameAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Crea (o actualiza por codigo) un formulario a partir del JSON exportado.
+    /// Si el codigo ya existe en el tenant y <paramref name="sobrescribir"/> es true,
+    /// actualiza el existente; si es false, agrega sufijo "-import" al codigo para
+    /// no colisionar. Devuelve el detalle del formulario resultante.</summary>
+    Task<FormDefinitionDetailDto?> ImportarJsonAsync(byte[] jsonBytes, bool sobrescribir, Guid actorUserId, CancellationToken cancellationToken = default);
 }
 
 public sealed record AutoEnlazarPacienteResultDto(

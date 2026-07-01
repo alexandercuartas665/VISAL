@@ -12,6 +12,7 @@
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
 @inject IInsumoService InsumoSvc
+@inject IOrdenExternaService OrdExtSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject IFirmaResolverService FirmaResolverSvc
@@ -381,6 +382,51 @@
                     </label>
                 </div>
             }
+            @if (_imprInsCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirIns" />
+                        <span><b>Orden de Insumos</b> <em>(@_imprInsCount item@(_imprInsCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_imprRemCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirRem" />
+                        <span><b>Remisiones</b> <em>(@_imprRemCount item@(_imprRemCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_imprRxExtCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirRxExt" />
+                        <span><b>Orden RX Imagenologia</b> <em>(@_imprRxExtCount item@(_imprRxExtCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_imprLabExtCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirLabExt" />
+                        <span><b>Orden Laboratorios</b> <em>(@_imprLabExtCount item@(_imprLabExtCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_imprInsExtCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirInsExt" />
+                        <span><b>Orden Insumos Externos</b> <em>(@_imprInsExtCount item@(_imprInsExtCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
             @if (_imprIncCount > 0)
             {
                 <div class="hc-impr-opt">
@@ -426,7 +472,10 @@
                     </label>
                 </div>
             }
-            @if (_imprMedCount == 0 && _imprSrvCount == 0 && _imprIncCount == 0 && _imprCertCount == 0 && _imprEscCount == 0 && _imprEvoCount == 0 && _imprConCount == 0)
+            @if (_imprMedCount == 0 && _imprSrvCount == 0 && _imprInsCount == 0 && _imprRemCount == 0
+                 && _imprRxExtCount == 0 && _imprLabExtCount == 0 && _imprInsExtCount == 0
+                 && _imprIncCount == 0 && _imprCertCount == 0
+                 && _imprEscCount == 0 && _imprEvoCount == 0 && _imprConCount == 0)
             {
                 <div style="font-size:12px; color:#94a3b8; font-style:italic; padding:10px 0;">
                     Esta historia no tiene ordenes, escalas, evoluciones ni consentimientos registrados.
@@ -773,7 +822,9 @@
     private bool _imprIncluirEsc;
     private bool _imprIncluirEvo;
     private bool _imprIncluirCon;
+    private bool _imprIncluirIns, _imprIncluirRem, _imprIncluirRxExt, _imprIncluirLabExt, _imprIncluirInsExt;
     private int _imprMedCount, _imprSrvCount, _imprIncCount, _imprCertCount, _imprEscCount, _imprEvoCount, _imprConCount;
+    private int _imprInsCount, _imprRemCount, _imprRxExtCount, _imprLabExtCount, _imprInsExtCount;
 
     private PacienteAsignacionDto? _paciente;
 
@@ -912,6 +963,15 @@
         _saveStatus = "limpio";
         _ultimoGuardado = null;
         _saveTitle = null;
+        // IMPORTANTE: forzar el tab a "Historial" ANTES de asignar _historiaSel.
+        // Si el usuario estaba parado en otra pestana (Remisiones / Insumos / etc.)
+        // y le damos primero un HistoriaClinicaId real, el sub-componente hijo
+        // dispara su OnParametersSet -> query a BD sobre el DbContext compartido
+        // mientras nosotros aca abajo tambien lo usamos con HcSvc.GetAsync(h.Id).
+        // Eso produce "A second operation was started on this context instance..."
+        // y tira el circuito Blazor -> pantalla se queda congelada. Cambiar el
+        // tab primero desmonta el hijo y evita la carrera.
+        _tabSel = "Historial";
         _historiaSel = h;
         // Decidir si el FormViewer debe ir en lectura: la HC pertenece a otro
         // profesional Y el usuario logueado SI es un profesional (admin sin
@@ -934,7 +994,7 @@
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.FormatoVersion)
             ? $"Codigo: {detail.FormatoCodigo}  -  Version: {detail.FormatoVersion}"
             : $"Codigo: {detail.FormatoCodigo}";
-        _tabSel = "Historial";
+        // _tabSel ya se fijo en "Historial" al inicio para prevenir la carrera de DbContext.
         _imprimirMsg = null;
         // Reset autoguardado para la nueva HC.
         _autosaveCts?.Cancel();
@@ -943,11 +1003,20 @@
         _saveTitle = "Los cambios se guardan automaticamente cada 2 segundos.";
         // Refrescar el badge de la pestana de medicamentos para la nueva HC.
         _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
-        _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
+        _servCount = await OrdSrvSvc.ContarPorHistoriaAsync(h.Id);
         _insCount = await InsumoSvc.ContarPorHistoriaAsync(h.Id);
+        _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
+        _incCount = await IncSvc.ContarPorHistoriaAsync(h.Id);
+        _certCount = await CertSvc.ContarPorHistoriaAsync(h.Id);
         _escCount = await EscSvc.ContarPorHistoriaAsync(h.Id);
         _evoCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
         _conCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
+        // Ordenes externas (RX / Lab / Insumos externos): el servicio no tiene
+        // ContarPorHistoria por tipo, listamos y contamos — es una sola query
+        // COUNT por cada tipo, mismo costo.
+        _rxExtCount  = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia)).Count;
+        _labExtCount = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio)).Count;
+        _insExtCount = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Insumo)).Count;
         // Aplicar fuente derivada "historiaMedica" (medicamentos.lista_numerada, etc.)
         // ANTES de pintar. Asi al abrir una HC vieja el contenido refleja la orden
         // actual aunque haya cambiado entre sesiones, no el ValoresJson historico.
@@ -1348,20 +1417,32 @@
             // Cargar conteos para decidir que checkboxes mostrar en el modal.
             _imprMedCount  = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
             _imprSrvCount  = await OrdSrvSvc.ContarPorHistoriaAsync(h.Id);
+            _imprInsCount  = await InsumoSvc.ContarPorHistoriaAsync(h.Id);
+            _imprRemCount  = await RemSvc.ContarPorHistoriaAsync(h.Id);
             _imprIncCount  = await IncSvc.ContarPorHistoriaAsync(h.Id);
             _imprCertCount = await CertSvc.ContarPorHistoriaAsync(h.Id);
             _imprEscCount  = await EscSvc.ContarPorHistoriaAsync(h.Id);
             _imprEvoCount  = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
             _imprConCount  = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
+            // Ordenes externas por tipo (RxImagenologia / Laboratorio / Insumo). El
+            // servicio no expone Contar por tipo, asi que listamos y contamos.
+            _imprRxExtCount  = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia)).Count;
+            _imprLabExtCount = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio)).Count;
+            _imprInsExtCount = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Insumo)).Count;
             // Sleccion por defecto: todo lo que tiene datos.
-            _imprIncluirHc   = true;
-            _imprIncluirMed  = _imprMedCount  > 0;
-            _imprIncluirSrv  = _imprSrvCount  > 0;
-            _imprIncluirInc  = _imprIncCount  > 0;
-            _imprIncluirCert = _imprCertCount > 0;
-            _imprIncluirEsc  = _imprEscCount  > 0;
-            _imprIncluirEvo  = _imprEvoCount  > 0;
-            _imprIncluirCon  = _imprConCount  > 0;
+            _imprIncluirHc     = true;
+            _imprIncluirMed    = _imprMedCount    > 0;
+            _imprIncluirSrv    = _imprSrvCount    > 0;
+            _imprIncluirIns    = _imprInsCount    > 0;
+            _imprIncluirRem    = _imprRemCount    > 0;
+            _imprIncluirInc    = _imprIncCount    > 0;
+            _imprIncluirCert   = _imprCertCount   > 0;
+            _imprIncluirEsc    = _imprEscCount    > 0;
+            _imprIncluirEvo    = _imprEvoCount    > 0;
+            _imprIncluirCon    = _imprConCount    > 0;
+            _imprIncluirRxExt  = _imprRxExtCount  > 0;
+            _imprIncluirLabExt = _imprLabExtCount > 0;
+            _imprIncluirInsExt = _imprInsExtCount > 0;
             _showImprimirModal = true;
             _imprimirMsg = null;
         }
@@ -1376,14 +1457,19 @@
     {
         if (_historiaSel is not HistoriaRow h) { _showImprimirModal = false; return; }
         var docs = new List<string>();
-        if (_imprIncluirHc)   { docs.Add("HC");   }
-        if (_imprIncluirMed)  { docs.Add("MED");  }
-        if (_imprIncluirSrv)  { docs.Add("SRV");  }
-        if (_imprIncluirInc)  { docs.Add("INC");  }
-        if (_imprIncluirCert) { docs.Add("CERT"); }
-        if (_imprIncluirEsc)  { docs.Add("ESC");  }
-        if (_imprIncluirEvo)  { docs.Add("EVO");  }
-        if (_imprIncluirCon)  { docs.Add("CON");  }
+        if (_imprIncluirHc)     { docs.Add("HC");     }
+        if (_imprIncluirMed)    { docs.Add("MED");    }
+        if (_imprIncluirSrv)    { docs.Add("SRV");    }
+        if (_imprIncluirIns)    { docs.Add("INS");    }
+        if (_imprIncluirRem)    { docs.Add("REM");    }
+        if (_imprIncluirRxExt)  { docs.Add("RXEXT");  }
+        if (_imprIncluirLabExt) { docs.Add("LABEXT"); }
+        if (_imprIncluirInsExt) { docs.Add("INSEXT"); }
+        if (_imprIncluirInc)    { docs.Add("INC");    }
+        if (_imprIncluirCert)   { docs.Add("CERT");   }
+        if (_imprIncluirEsc)    { docs.Add("ESC");    }
+        if (_imprIncluirEvo)    { docs.Add("EVO");    }
+        if (_imprIncluirCon)    { docs.Add("CON");    }
         if (docs.Count == 0) { _imprimirMsg = "Selecciona al menos un documento."; return; }
         _showImprimirModal = false;
         await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{h.Id}?docs={string.Join(",", docs)}", "_blank");

@@ -13,6 +13,8 @@
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
+@inject IInsumoService InsumoSvc
+@inject IOrdenExternaService OrdExtSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject IJSRuntime JS
@@ -124,7 +126,7 @@ else
         @if (_incluirMed && _meds.Count > 0)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrMed, "Orden de Medicamentos", "MED",
+                @RenderHeader(BestHdr(HdrMed, "Orden de Medicamentos"), "Orden de Medicamentos", "MED",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
                 <div class="pack-band">Detalle de la orden</div>
@@ -159,7 +161,7 @@ else
         @if (_incluirSrv && _srv.Count > 0)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrSrv, "Orden a Servicios", "SRV",
+                @RenderHeader(BestHdr(HdrSrv, "Orden a Servicios"), "Orden a Servicios", "SRV",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRV",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
                 <div class="pack-band">Detalle de la orden</div>
@@ -194,7 +196,7 @@ else
         @if (_incluirRem && _rem.Count > 0)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrRem, "Ordenes de Remision", "REM",
+                @RenderHeader(BestHdr(HdrRem, "Ordenes de Remision"), "Ordenes de Remision", "REM",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-REM",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
                 <div class="pack-band">Detalle de las remisiones</div>
@@ -225,11 +227,151 @@ else
             </div>
         }
 
+        @* ============ INSUMOS (internos, texto libre) ============ *@
+        @if (_incluirIns && _insumos.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrTenant("Orden de Insumos"), "Orden de Insumos", "INS",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INS",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:120px">Codigo</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var i in _insumos)
+                        {
+                            <tr>
+                                <td class="num">@i.Orden</td>
+                                <td class="mono">@(i.Codigo ?? "-")</td>
+                                <td><b>@i.Descripcion</b></td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(i.Cantidad) ? "-" : i.Cantidad)</td>
+                                <td>@(i.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ RX IMAGENOLOGIA (catalogo externo) ============ *@
+        @if (_incluirRxExt && _rxExt.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrTenant("Orden RX Imagenologia"), "Orden RX Imagenologia", "RXEXT",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-RX",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:120px">Codigo CUPS</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rxExt)
+                        {
+                            <tr>
+                                <td class="num">@r.Orden</td>
+                                <td class="mono">@(r.Codigo ?? "-")</td>
+                                <td><b>@r.Descripcion</b></td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(r.Cantidad) ? "-" : r.Cantidad)</td>
+                                <td>@(r.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ LABORATORIOS (catalogo externo) ============ *@
+        @if (_incluirLabExt && _labExt.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrTenant("Orden de Laboratorios"), "Orden de Laboratorios", "LABEXT",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-LAB",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:120px">Codigo CUPS</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in _labExt)
+                        {
+                            <tr>
+                                <td class="num">@l.Orden</td>
+                                <td class="mono">@(l.Codigo ?? "-")</td>
+                                <td><b>@l.Descripcion</b></td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(l.Cantidad) ? "-" : l.Cantidad)</td>
+                                <td>@(l.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
+        @* ============ INSUMOS EXTERNOS (catalogo externo) ============ *@
+        @if (_incluirInsExt && _insExt.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrTenant("Orden de Insumos Externos"), "Orden de Insumos Externos", "INSEXT",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INSX",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:120px">Codigo</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var x in _insExt)
+                        {
+                            <tr>
+                                <td class="num">@x.Orden</td>
+                                <td class="mono">@(x.Codigo ?? "-")</td>
+                                <td><b>@x.Descripcion</b></td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(x.Cantidad) ? "-" : x.Cantidad)</td>
+                                <td>@(x.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
         @* ============ INCAPACIDADES ============ *@
         @if (_incluirInc && _inc.Count > 0)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrInc, "Orden de Incapacidad", "INC",
+                @RenderHeader(BestHdr(HdrInc, "Orden de Incapacidad"), "Orden de Incapacidad", "INC",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INC",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
                 <div class="pack-band">Detalle de la orden</div>
@@ -266,7 +408,7 @@ else
         @if (_incluirCert && _cert.Count > 0)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrCert, "Certificacion Medica", "CERT",
+                @RenderHeader(BestHdr(HdrCert, "Certificacion Medica"), "Certificacion Medica", "CERT",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-CERT",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
                 <div class="pack-band">Detalle</div>
@@ -362,6 +504,7 @@ else
     // Que docs incluir, calculados desde ?docs=
     private List<string> _docs = new();
     private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc, _incluirEvo, _incluirCon;
+    private bool _incluirIns, _incluirRxExt, _incluirLabExt, _incluirInsExt;
     private List<EscalaDetailDto> _escalasDetails = new();
     private List<DocumentoHcDetailDto> _evoDetails = new();
     private List<DocumentoHcDetailDto> _conDetails = new();
@@ -386,6 +529,8 @@ else
     private List<IncapacidadItemDto> _inc = new();
     private List<CertificacionItemDto> _cert = new();
     private List<RemisionItemDto> _rem = new();
+    private List<InsumoItemDto> _insumos = new();
+    private List<OrdenExternaItemDto> _rxExt = new(), _labExt = new(), _insExt = new();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -404,6 +549,10 @@ else
         _incluirEsc  = _docs.Contains("ESC");
         _incluirEvo  = _docs.Contains("EVO");
         _incluirCon  = _docs.Contains("CON");
+        _incluirIns    = _docs.Contains("INS");
+        _incluirRxExt  = _docs.Contains("RXEXT");
+        _incluirLabExt = _docs.Contains("LABEXT");
+        _incluirInsExt = _docs.Contains("INSEXT");
 
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { _loading = false; return; }
@@ -426,35 +575,55 @@ else
             }
         }
 
+        // Cada orden clasica se ubica en form_definitions por su "Codigo formulario"
+        // (CodigoSecundario), NO por Tipo — asi los 5 formatos semilla pueden
+        // seguir con Tipo="FORMATO" para agruparse en el listado, y el usuario
+        // los distingue por CodigoSecundario ("ORDEN_MEDICAMENTOS", etc.).
         if (_incluirMed)
         {
-            _fdMed = await FormsSvc.GetActivoByTipoAsync("ORDEN_MEDICAMENTOS");
+            _fdMed = await FormsSvc.GetActivoByCodigoSecundarioAsync("ORDEN_MEDICAMENTOS");
             if (_fdMed is not null) { try { _schMed = JsonSerializer.Deserialize<FormSchema>(_fdMed.SchemaJson) ?? new(); } catch { } }
             _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
         }
         if (_incluirSrv)
         {
-            _fdSrv = await FormsSvc.GetActivoByTipoAsync("ORDEN_SERVICIOS");
+            _fdSrv = await FormsSvc.GetActivoByCodigoSecundarioAsync("ORDEN_SERVICIOS");
             if (_fdSrv is not null) { try { _schSrv = JsonSerializer.Deserialize<FormSchema>(_fdSrv.SchemaJson) ?? new(); } catch { } }
             _srv = (await SrvSvc.ListarPorHistoriaAsync(HcId)).ToList();
         }
         if (_incluirInc)
         {
-            _fdInc = await FormsSvc.GetActivoByTipoAsync("INCAPACIDADES");
+            _fdInc = await FormsSvc.GetActivoByCodigoSecundarioAsync("INCAPACIDADES");
             if (_fdInc is not null) { try { _schInc = JsonSerializer.Deserialize<FormSchema>(_fdInc.SchemaJson) ?? new(); } catch { } }
             _inc = (await IncSvc.ListarPorHistoriaAsync(HcId)).ToList();
         }
         if (_incluirCert)
         {
-            _fdCert = await FormsSvc.GetActivoByTipoAsync("CERTIFICADOS");
+            _fdCert = await FormsSvc.GetActivoByCodigoSecundarioAsync("CERTIFICADOS");
             if (_fdCert is not null) { try { _schCert = JsonSerializer.Deserialize<FormSchema>(_fdCert.SchemaJson) ?? new(); } catch { } }
             _cert = (await CertSvc.ListarPorHistoriaAsync(HcId)).ToList();
         }
         if (_incluirRem)
         {
-            _fdRem = await FormsSvc.GetActivoByTipoAsync("REMISIONES");
+            _fdRem = await FormsSvc.GetActivoByCodigoSecundarioAsync("REMISIONES");
             if (_fdRem is not null) { try { _schRem = JsonSerializer.Deserialize<FormSchema>(_fdRem.SchemaJson) ?? new(); } catch { } }
             _rem = (await RemSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+        if (_incluirIns)
+        {
+            _insumos = (await InsumoSvc.ListarPorHistoriaAsync(HcId)).ToList();
+        }
+        if (_incluirRxExt)
+        {
+            _rxExt = (await OrdExtSvc.ListarPorHistoriaAsync(HcId, Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia)).ToList();
+        }
+        if (_incluirLabExt)
+        {
+            _labExt = (await OrdExtSvc.ListarPorHistoriaAsync(HcId, Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio)).ToList();
+        }
+        if (_incluirInsExt)
+        {
+            _insExt = (await OrdExtSvc.ListarPorHistoriaAsync(HcId, Visal.Domain.Enums.TipoCatalogoServicio.Insumo)).ToList();
         }
         if (_incluirEsc)
         {
@@ -502,6 +671,38 @@ else
     private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
 
     // ---- helpers de render ----
+
+    // Header para las nuevas secciones (INS, RxExt, LabExt, InsExt) que no tienen
+    // FormDefinition propio: heredamos institucion / tagline / logo del schema del
+    // HC pero forzamos el Titulo del documento al parametro para que no salga
+    // "Formato HC Fisioterapia" en la orden de insumos.
+    private FormHeader HdrTenant(string titulo) => new()
+    {
+        Institucion = HdrHc.Institucion,
+        Tagline = HdrHc.Tagline,
+        LogoUrl = HdrHc.LogoUrl,
+        Titulo = titulo
+    };
+
+    // Para las ordenes clasicas (Med / Srv / Rem / Inc / Cert) el paquete usa el
+    // FormDefinition especifico de cada orden si esta configurado. Si el formulario
+    // aun no tiene logo del tenant (headers recien seedeados o el usuario no lo
+    // configuro), heredamos del HC para no caer al placeholder generico.
+    private FormHeader BestHdr(FormHeader specific, string tituloFallback)
+    {
+        // Si el form-specific ya trae logo del tenant, respetarlo tal cual — el
+        // usuario lo configuro a proposito.
+        if (!string.IsNullOrWhiteSpace(specific.LogoUrl)) { return specific; }
+        // Sin logo propio: usar el del HC pero conservar el Titulo si lo puso el
+        // disenador; si tampoco esta, usar el fallback pasado por parametro.
+        return new FormHeader
+        {
+            Institucion = !string.IsNullOrWhiteSpace(HdrHc.Institucion) ? HdrHc.Institucion : specific.Institucion,
+            Tagline = !string.IsNullOrWhiteSpace(HdrHc.Tagline) ? HdrHc.Tagline : specific.Tagline,
+            LogoUrl = HdrHc.LogoUrl,
+            Titulo = !string.IsNullOrWhiteSpace(specific.Titulo) ? specific.Titulo : tituloFallback
+        };
+    }
 
     private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea) => __builder =>
     {

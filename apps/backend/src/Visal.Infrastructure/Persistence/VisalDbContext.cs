@@ -77,6 +77,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaEscala> HistoriaClinicaEscalas => Set<HistoriaClinicaEscala>();
     public DbSet<HistoriaClinicaDocumento> HistoriaClinicaDocumentos => Set<HistoriaClinicaDocumento>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
+    public DbSet<CatalogoServicioReferencia> CatalogosServicioReferencia => Set<CatalogoServicioReferencia>();
+    public DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas => Set<HistoriaClinicaOrdenExterna>();
     public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
@@ -578,6 +580,27 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.RegistroSanitario });
             b.HasIndex(x => new { x.TenantId, x.Ium });
             b.HasIndex(x => new { x.TenantId, x.Atc });
+        });
+
+        modelBuilder.Entity<CatalogoServicioReferencia>(b =>
+        {
+            // Catalogos "de referencia" (RxImag, Lab, Servicios, Insumos). Un codigo
+            // unico por (tenant, tipo) — el usuario puede recargar el Excel y
+            // hacemos upsert por codigo. Nombre en text por si el Excel del
+            // proveedor trae descripciones largas o con caracteres especiales.
+            b.Property(x => x.Codigo).HasMaxLength(60).IsRequired();
+            b.Property(x => x.Nombre).HasColumnType("text").IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Tipo, x.Codigo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Tipo, x.Activo });
+        });
+
+        modelBuilder.Entity<HistoriaClinicaOrdenExterna>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(60);
+            b.Property(x => x.Descripcion).HasColumnType("text").IsRequired();
+            b.Property(x => x.Cantidad).HasMaxLength(60);
+            b.Property(x => x.Observaciones).HasColumnType("text");
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Tipo });
         });
 
         modelBuilder.Entity<Cup>(b =>

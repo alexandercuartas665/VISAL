@@ -1,0 +1,340 @@
+@page "/catalogo/{TipoSlug}"
+@rendermode InteractiveServer
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@using Microsoft.AspNetCore.Components.Forms
+@inject ICatalogoServicioService Svc
+@inject NavigationManager Nav
+@inject IHttpContextAccessor HttpCtx
+
+<PageTitle>@_titulo - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h2 class="ase-title">@_titulo</h2>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-primary btn-sm" @onclick="AbrirNuevo" disabled="@_busy">+ Nuevo registro</button>
+        <a class="btn btn-outline-secondary btn-sm" href="@($"/api/catalogo-servicios/plantilla.xlsx?tipo={_tipo}")" target="_blank">Plantilla</a>
+        <label class="btn btn-primary btn-sm mb-0" style="cursor:pointer;">
+            @(_busy ? "Importando..." : "Importar Excel")
+            <InputFile OnChange="OnExcelSelected" accept=".xlsx" disabled="@_busy" style="display:none;" />
+        </label>
+        <button class="btn btn-outline-danger btn-sm" @onclick="ConfirmarVaciar" disabled="@(_busy || _total == 0)">Vaciar todo</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@if (_busy)
+{
+    <div class="ase-card mb-3">
+        <div class="d-flex align-items-center gap-2">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <div>@_fase — @_procesados / @_totalImport</div>
+        </div>
+        <div class="progress mt-2" style="height:6px;">
+            <div class="progress-bar bg-primary" role="progressbar"
+                 style="@($"width: {(_totalImport == 0 ? 0 : (int)(_procesados * 100.0 / _totalImport))}%")"></div>
+        </div>
+    </div>
+}
+
+<div class="ase-card">
+    <div class="d-flex gap-2 align-items-center mb-2 flex-wrap">
+        <input class="form-control form-control-sm" style="max-width:320px;"
+               placeholder="Buscar por codigo o nombre..."
+               value="@_termino" @onchange="OnFiltroChanged" />
+        <span class="text-muted small">Total: <strong>@_total</strong></span>
+        <span class="ms-auto text-muted small">Mostrando @_rows.Count</span>
+    </div>
+
+    @if (_rows.Count == 0)
+    {
+        <div class="ase-empty">No hay registros. Importa el Excel del proveedor o crea uno manual.</div>
+    }
+    else
+    {
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th style="width:130px;">Codigo</th>
+                    <th>Nombre</th>
+                    <th style="width:80px;">Activo</th>
+                    <th style="width:110px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td class="mono">@r.Codigo</td>
+                        <td>@r.Nombre</td>
+                        <td>@(r.Activo ? "SI" : "NO")</td>
+                        <td>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => Editar(r.Id)" disabled="@_busy" title="Editar">&#9998;</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => Eliminar(r)" disabled="@_busy" title="Eliminar">&times;</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Anterior" disabled="@(_skip == 0)">« Anterior</button>
+            <span class="small">@(_skip + 1) - @(_skip + _rows.Count) de @_total</span>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Siguiente" disabled="@(_skip + _rows.Count >= _total)">Siguiente »</button>
+        </div>
+    }
+</div>
+
+@* ===== Modal edicion/nuevo ===== *@
+@if (_editingOpen)
+{
+    <div class="cie-backdrop" @onclick="Cerrar"></div>
+    <div class="cie-modal">
+        <h3>@(_form.Id is null ? "Nuevo registro" : "Editar registro")</h3>
+        <div class="ase-form" style="grid-template-columns: 1fr 1fr;">
+            <div class="ase-f">
+                <label>Codigo *</label>
+                <input class="form-control form-control-sm" @bind="_form.Codigo" />
+            </div>
+            <div class="ase-f">
+                <label>Activo</label>
+                <select class="form-select form-select-sm" @bind="_form.Activo">
+                    <option value="true">SI</option>
+                    <option value="false">NO</option>
+                </select>
+            </div>
+            <div class="ase-f" style="grid-column: span 2;">
+                <label>Nombre *</label>
+                <input class="form-control form-control-sm" @bind="_form.Nombre" />
+            </div>
+        </div>
+        @if (_formError is not null) { <div class="ase-alert mt-2">@_formError</div> }
+        <div class="ase-actions">
+            <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">Guardar</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Cerrar" disabled="@_busy">Cerrar</button>
+        </div>
+    </div>
+}
+
+@* ===== Modal confirmar vaciar ===== *@
+@if (_confirmVaciar)
+{
+    <div class="cie-backdrop" @onclick="() => _confirmVaciar = false"></div>
+    <div class="cie-modal">
+        <h3>Vaciar todo</h3>
+        <p>Estas por borrar <strong>@_total</strong> registros de <strong>@_titulo</strong>. Esta accion NO se puede deshacer.</p>
+        <p>Escribe <strong>VACIAR</strong> para confirmar:</p>
+        <input class="form-control form-control-sm" @bind="_confirmText" />
+        <div class="ase-actions">
+            <button class="btn btn-danger btn-sm" @onclick="VaciarAsync"
+                    disabled="@(_busy || _confirmText != "VACIAR")">Si, borrar todo</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => { _confirmVaciar = false; _confirmText = string.Empty; }">Cancelar</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? TipoSlug { get; set; }
+
+    private TipoCatalogoServicio _tipo;
+    private string _titulo = "";
+
+    private List<CatalogoServicioDto> _rows = new();
+    private int _total;
+    private int _skip;
+    private int _take = 50;
+    private string? _termino;
+    private string? _error;
+    private string? _ok;
+    private bool _busy;
+
+    // Import progress
+    private string _fase = "";
+    private int _procesados;
+    private int _totalImport;
+
+    // Form
+    private class Form { public Guid? Id; public string Codigo = ""; public string Nombre = ""; public bool Activo = true; }
+    private Form _form = new();
+    private bool _editingOpen;
+    private string? _formError;
+
+    // Confirm vaciar
+    private bool _confirmVaciar;
+    private string _confirmText = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var (t, titulo) = ResolveTipo(TipoSlug);
+        _tipo = t;
+        _titulo = titulo;
+        _skip = 0;
+        await LoadAsync();
+    }
+
+    private static (TipoCatalogoServicio, string) ResolveTipo(string? slug) => (slug ?? "").ToLowerInvariant() switch
+    {
+        "rx-imagenologia"  => (TipoCatalogoServicio.RxImagenologia,  "RX / Imagenologia"),
+        "laboratorios"     => (TipoCatalogoServicio.Laboratorio,     "Laboratorios"),
+        "servicios"        => (TipoCatalogoServicio.ServicioGeneral, "Servicios"),
+        "insumos"          => (TipoCatalogoServicio.Insumo,          "Insumos"),
+        _                  => (TipoCatalogoServicio.ServicioGeneral, "Servicios"),
+    };
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        try
+        {
+            var (rows, total) = await Svc.SearchAsync(_tipo, _termino, _skip, _take);
+            _rows = rows.ToList();
+            _total = total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnFiltroChanged(ChangeEventArgs e)
+    {
+        _termino = e.Value?.ToString();
+        _skip = 0;
+        await LoadAsync();
+    }
+
+    private async Task Anterior()
+    {
+        _skip = Math.Max(0, _skip - _take);
+        await LoadAsync();
+    }
+    private async Task Siguiente()
+    {
+        _skip += _take;
+        await LoadAsync();
+    }
+
+    private void AbrirNuevo()
+    {
+        _form = new Form();
+        _formError = null;
+        _editingOpen = true;
+    }
+
+    private async Task Editar(Guid id)
+    {
+        var d = await Svc.GetAsync(id);
+        if (d is null) return;
+        _form = new Form { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Activo = d.Activo };
+        _formError = null;
+        _editingOpen = true;
+    }
+
+    private void Cerrar() { _editingOpen = false; _formError = null; }
+
+    private async Task Guardar()
+    {
+        _formError = null;
+        if (string.IsNullOrWhiteSpace(_form.Codigo)) { _formError = "El codigo es obligatorio."; return; }
+        if (string.IsNullOrWhiteSpace(_form.Nombre)) { _formError = "El nombre es obligatorio."; return; }
+        _busy = true;
+        try
+        {
+            var req = new SaveCatalogoServicioRequest(_form.Id, _tipo, _form.Codigo, _form.Nombre, _form.Activo);
+            var saved = await Svc.SaveAsync(req, Guid.Empty);
+            if (saved is null) { _formError = "No se pudo guardar."; return; }
+            _editingOpen = false;
+            _ok = "Registro guardado.";
+            await LoadAsync();
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task Eliminar(CatalogoServicioDto r)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await Svc.DeleteAsync(r.Id, Guid.Empty);
+            _ok = $"Registro '{r.Codigo}' eliminado.";
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void ConfirmarVaciar() { _confirmVaciar = true; _confirmText = ""; }
+
+    private async Task VaciarAsync()
+    {
+        if (_confirmText != "VACIAR") return;
+        _busy = true;
+        try
+        {
+            var n = await Svc.ClearAllAsync(_tipo, Guid.Empty);
+            _ok = $"{n} registros eliminados.";
+            _confirmVaciar = false; _confirmText = "";
+            _skip = 0;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnExcelSelected(InputFileChangeEventArgs e)
+    {
+        _error = null; _ok = null;
+        _busy = true; _procesados = 0; _totalImport = 0; _fase = "Leyendo Excel";
+        try
+        {
+            const long max = 25L * 1024 * 1024;
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(max).CopyToAsync(ms);
+            ms.Position = 0;
+
+            var rows = new List<CatalogoServicioImportRow>();
+            using (var wb = new ClosedXML.Excel.XLWorkbook(ms))
+            {
+                // Si el archivo trae varias hojas (una por tipo), intentamos
+                // encontrar la que coincide con este modulo por nombre. Si no
+                // matchea, caemos a la primera hoja (usuario con plantilla
+                // simple de 1 sola hoja).
+                var hints = _tipo switch
+                {
+                    TipoCatalogoServicio.RxImagenologia  => new[] { "RX", "IMAGEN" },
+                    TipoCatalogoServicio.Laboratorio     => new[] { "LABORATOR", "LAB" },
+                    TipoCatalogoServicio.ServicioGeneral => new[] { "SERVICIO" },
+                    TipoCatalogoServicio.Insumo          => new[] { "INSUMO" },
+                    _ => new[] { "" }
+                };
+                var ws = wb.Worksheets
+                    .FirstOrDefault(w => hints.Any(h => w.Name.ToUpperInvariant().Contains(h)))
+                    ?? wb.Worksheets.First();
+                var last = ws.LastRowUsed()?.RowNumber() ?? 1;
+                for (var r = 2; r <= last; r++)
+                {
+                    var cod = ws.Cell(r, 1).GetString().Trim();
+                    var nom = ws.Cell(r, 2).GetString().Trim();
+                    if (string.IsNullOrWhiteSpace(cod) && string.IsNullOrWhiteSpace(nom)) continue;
+                    rows.Add(new CatalogoServicioImportRow(cod, nom));
+                }
+            }
+            _totalImport = rows.Count;
+            _fase = "Insertando";
+            var progress = new Progress<CatalogoServicioImportProgress>(p =>
+            {
+                _fase = p.Fase; _procesados = p.Procesados; _totalImport = p.Total;
+                InvokeAsync(StateHasChanged);
+            });
+            var n = await Svc.ImportAsync(_tipo, rows, Guid.Empty, progress);
+            _ok = $"Import terminado: {n} filas procesadas.";
+            _skip = 0;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = "Error importando: " + ex.Message; }
+        finally { _busy = false; }
+    }
+}

@@ -876,6 +876,52 @@ app.MapGet("/api/profesionales/plantilla.xlsx", () =>
         "plantilla-profesionales.xlsx");
 }).RequireAuthorization();
 
+// Plantilla del import de catalogos de servicios (Codigo, Nombre). Un solo
+// endpoint sirve las 4 (RxImagenologia, Laboratorio, ServicioGeneral, Insumo);
+// el header del Excel cambia levemente segun el tipo, pero el parser en la
+// pagina solo lee columnas 1 y 2.
+app.MapGet("/api/catalogo-servicios/plantilla.xlsx", (Visal.Domain.Enums.TipoCatalogoServicio tipo) =>
+{
+    using var wb = new ClosedXML.Excel.XLWorkbook();
+    var (nombreHoja, titulo) = tipo switch
+    {
+        Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia  => ("RX Imagenologia",  "Codigo/Nombre CUPS de imagenologia"),
+        Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio     => ("Laboratorios",     "Codigo/Nombre CUPS de laboratorios"),
+        Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral => ("Servicios",        "Codigo/Nombre CUPS de servicios"),
+        Visal.Domain.Enums.TipoCatalogoServicio.Insumo          => ("Insumos",          "Codigo/Nombre del insumo"),
+        _ => ("Catalogo", "Codigo/Nombre")
+    };
+    var ws = wb.AddWorksheet(nombreHoja);
+    ws.Cell(1, 1).Value = "Codigo";
+    ws.Cell(1, 2).Value = "Nombre";
+    ws.Row(1).Style.Font.Bold = true;
+    ws.Row(1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#1565C0");
+    ws.Row(1).Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+
+    ws.Cell(2, 1).Value = "870001";
+    ws.Cell(2, 2).Value = "EJEMPLO — reemplaza con tus filas reales";
+    ws.Cell(4, 1).Value = "Instrucciones:";
+    ws.Cell(4, 1).Style.Font.Bold = true;
+    ws.Cell(5, 1).Value = "1. Columna A: codigo unico. Columna B: nombre.";
+    ws.Cell(6, 1).Value = "2. La primera fila es el header (no la borres).";
+    ws.Cell(7, 1).Value = "3. Codigo duplicado => upsert (actualiza el nombre).";
+    ws.Cell(8, 1).Value = $"4. Contenido esperado: {titulo}.";
+    ws.Columns().AdjustToContents();
+    using var ms = new MemoryStream();
+    wb.SaveAs(ms);
+    var fileName = tipo switch
+    {
+        Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia  => "plantilla-rx-imagenologia.xlsx",
+        Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio     => "plantilla-laboratorios.xlsx",
+        Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral => "plantilla-servicios.xlsx",
+        Visal.Domain.Enums.TipoCatalogoServicio.Insumo          => "plantilla-insumos.xlsx",
+        _ => "plantilla-catalogo.xlsx"
+    };
+    return Results.File(ms.ToArray(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        fileName);
+}).RequireAuthorization();
+
 app.MapPost("/api/firma/{token}/submit", async (
     string token,
     SubmitFirmaPayload payload,

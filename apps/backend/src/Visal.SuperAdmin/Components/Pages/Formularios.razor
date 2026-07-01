@@ -52,9 +52,14 @@
                     <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
                     <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
                     <button class="fb-btn" @onclick="OpenVersionHistoryAsync" title="Ver versiones anteriores y restaurar">&#128344; Historial</button>
+                    <button class="fb-btn" @onclick="ExportarJsonAsync" disabled="@_busy"
+                            title="Descarga un JSON con TODO el formulario (codigo, tipo, schema, rutas de prefill, formulas, seedRows) para portarlo a otro tenant.">&#128190; Exportar JSON</button>
                     <button class="fb-btn fb-btn-danger" @onclick="DeleteFormAsync" disabled="@_busy"
                             title="Eliminar definitivamente este formulario">&#128465; Eliminar</button>
                 }
+                <button class="fb-btn" @onclick="ImportarJsonClickAsync" disabled="@_busy"
+                        title="Crea un formulario a partir de un JSON exportado. Si el codigo ya existe puedes elegir sobrescribir o crear una copia con sufijo.">&#128228; Importar JSON</button>
+                <InputFile id="fbImportJsonInput" OnChange="OnImportJsonFileAsync" accept=".json,application/json" style="display:none" />
                 <button class="fb-btn" @onclick="AutoEnlazarPacienteAsync" disabled="@_busy"
                         title="Recorre todos los formularios e infiere mapeos prefill desde el modulo Paciente segun el nombre/etiqueta de cada campo. No sobrescribe mapeos existentes.">&#128279; Auto-enlazar Paciente</button>
                 <button class="fb-btn" @onclick="NewForm">Nuevo</button>
@@ -758,6 +763,27 @@
     .pr-col-sel { background: #fff; }
 </style>
 
+<script>
+    // Recibe el JSON exportado como string y dispara la descarga como archivo.
+    // El bloque BOM no es necesario para JSON (los parsers estandar no lo esperan).
+    window.visalDescargarJson = function (filename, content) {
+        var blob = new Blob([content], { type: 'application/json;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    };
+    // Abre el file picker escondido del boton Importar JSON.
+    window.visalAbrirImportJsonForm = function () {
+        var el = document.getElementById('fbImportJsonInput');
+        if (el) { el.click(); }
+    };
+</script>
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -1066,6 +1092,91 @@
             _ok = $"Formulario \"{label}\" eliminado.";
         }
         catch (Exception ex) { _error = "No se pudo eliminar: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ===================== Exportar / Importar JSON =====================
+    // Objetivo: mover un formulario entre tenants o hacer respaldo puntual.
+    // El JSON exportado incluye codigo, tipo, schema completo (con seedRows y
+    // formulas), rutas de prefill y flag activo. Al importar, si el codigo ya
+    // existe en el tenant preguntamos si sobrescribir o crear copia con sufijo.
+
+    private async Task ExportarJsonAsync()
+    {
+        if (_currentId is not Guid id) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var bytes = await FormsSvc.ExportarJsonAsync(id);
+            if (bytes is null) { _error = "No se pudo exportar: el formulario no existe."; return; }
+            var name = await FormsSvc.GetExportFileNameAsync(id) ?? $"form-{id:N}.json";
+            var content = System.Text.Encoding.UTF8.GetString(bytes);
+            await JS.InvokeVoidAsync("visalDescargarJson", name, content);
+            _ok = $"Formulario exportado como {name}.";
+        }
+        catch (Exception ex) { _error = "No se pudo exportar: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ImportarJsonClickAsync()
+    {
+        _error = _ok = null;
+        await JS.InvokeVoidAsync("visalAbrirImportJsonForm");
+    }
+
+    private async Task OnImportJsonFileAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || file.Size <= 0) { return; }
+        const long max = 8L * 1024 * 1024;
+        if (file.Size > max) { _error = "El JSON debe pesar menos de 8 MB."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(max).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+
+            // Peek al codigo para preguntar si sobrescribir cuando ya existe.
+            string? codigo = null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(bytes);
+                if (doc.RootElement.TryGetProperty("codigo", out var codProp))
+                {
+                    codigo = codProp.GetString();
+                }
+            }
+            catch { /* si el peek falla, dejamos que el servicio devuelva el error real */ }
+
+            var sobrescribir = false;
+            if (!string.IsNullOrWhiteSpace(codigo))
+            {
+                var existente = _forms.FirstOrDefault(f => string.Equals(f.Codigo, codigo, StringComparison.OrdinalIgnoreCase));
+                if (existente is not null)
+                {
+                    sobrescribir = await JS.InvokeAsync<bool>("confirm",
+                        $"Ya existe un formulario con codigo \"{codigo}\" ({existente.Nombre}).\n\n" +
+                        "OK  = SOBRESCRIBIR el existente con el JSON importado.\n" +
+                        "Cancelar = crear una copia con sufijo (-import).");
+                }
+            }
+
+            var det = await FormsSvc.ImportarJsonAsync(bytes, sobrescribir, await ActorAsync());
+            if (det is null) { _error = "No se pudo importar el JSON."; return; }
+            await LoadListAsync();
+            // Abrir el formulario recien importado.
+            _currentId = det.Id;
+            _codigo = det.Codigo; _codigoSecundario = det.CodigoSecundario; _nombre = det.Nombre;
+            _tipo = det.Tipo; _version = det.Version; _activo = det.Activo;
+            _schema = FormSchema.FromJson(det.SchemaJson);
+            _prefillRoutes = PrefillRouteSet.FromJson(det.PrefillRoutesJson);
+            _selected = null; _headerSel = false;
+            _ok = sobrescribir
+                ? $"Formulario \"{det.Codigo}\" sobrescrito desde JSON."
+                : $"Formulario importado como \"{det.Codigo}\".";
+        }
+        catch (Exception ex) { _error = "No se pudo importar: " + ex.Message; }
         finally { _busy = false; }
     }
 

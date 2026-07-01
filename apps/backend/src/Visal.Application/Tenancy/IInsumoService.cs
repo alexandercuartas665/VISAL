@@ -7,17 +7,20 @@ public sealed record InsumoItemDto(
     string Descripcion,
     string? Cantidad,
     string? Observaciones,
+    string? MipresUrl,
     int Orden);
 
 public sealed record AgregarInsumoRequest(
     string? Codigo,
     string Descripcion,
     string? Cantidad,
-    string? Observaciones);
+    string? Observaciones,
+    string? MipresUrl = null);
 
 public sealed record ActualizarInsumoRequest(
     string? Cantidad,
-    string? Observaciones);
+    string? Observaciones,
+    string? MipresUrl = null);
 
 public interface IInsumoService
 {

@@ -21,5 +21,13 @@ public class HistoriaClinicaInsumo : TenantEntity
 
     public string? Observaciones { get; set; }
 
+    /// <summary>
+    /// URL del formato MIPRES generado en la plataforma de MinSalud. Es un
+    /// enlace opcional que el profesional pega despues de radicar el insumo
+    /// no cubierto por el plan de beneficios. Sirve para trazabilidad — al
+    /// abrir la orden impresa el auditor puede ver de donde viene.
+    /// </summary>
+    public string? MipresUrl { get; set; }
+
     public int Orden { get; set; }
 }

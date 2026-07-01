@@ -19,7 +19,7 @@ public sealed class InsumoService(
             .ThenBy(x => x.CreatedAt)
             .Select(x => new InsumoItemDto(
                 x.Id, x.HistoriaClinicaId, x.Codigo, x.Descripcion,
-                x.Cantidad, x.Observaciones, x.Orden))
+                x.Cantidad, x.Observaciones, x.MipresUrl, x.Orden))
             .ToListAsync(ct);
     }
 
@@ -44,6 +44,7 @@ public sealed class InsumoService(
             Descripcion = req.Descripcion.Trim(),
             Cantidad = Trim(req.Cantidad),
             Observaciones = Trim(req.Observaciones),
+            MipresUrl = Trim(req.MipresUrl),
             Orden = siguiente
         };
         db.HistoriaClinicaInsumos.Add(entity);
@@ -52,7 +53,7 @@ public sealed class InsumoService(
 
         return new InsumoItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.Codigo, entity.Descripcion,
-            entity.Cantidad, entity.Observaciones, entity.Orden);
+            entity.Cantidad, entity.Observaciones, entity.MipresUrl, entity.Orden);
     }
 
     public async Task<bool> ActualizarAsync(
@@ -62,6 +63,7 @@ public sealed class InsumoService(
         if (entity is null) { return false; }
         entity.Cantidad = Trim(req.Cantidad);
         entity.Observaciones = Trim(req.Observaciones);
+        entity.MipresUrl = Trim(req.MipresUrl);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;

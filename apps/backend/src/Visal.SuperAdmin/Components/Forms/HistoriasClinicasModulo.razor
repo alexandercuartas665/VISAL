@@ -16,6 +16,7 @@
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject ITenantAdminService TenantsSvc
 @inject IServiceScopeFactory ScopeFactory
 @inject IJSRuntime JS
 @inject NavigationManager Nav
@@ -209,11 +210,12 @@
                     @foreach (var t in _tabs)
                     {
                         var (icono, badge) = IconoYBadge(t);
+                        var etiqueta = EtiquetaTab(t);
                         <button class="hc-side-item @(t == _tabSel ? "sel" : "")"
-                                title="@t"
+                                title="@etiqueta"
                                 @onclick="() => _tabSel = t">
                             <span class="hc-side-icon">@icono</span>
-                            <span class="hc-side-lbl">@t</span>
+                            <span class="hc-side-lbl">@etiqueta</span>
                             @if (badge > 0) { <span class="hc-side-badge">@badge</span> }
                         </button>
                     }
@@ -327,13 +329,6 @@
                                         Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio"
                                         Titulo="Laboratorios"
                                         OnCountChanged="@(c => _labExtCount = c)" />
-                    }
-                    else if (_tabSel == "Insumos Externos")
-                    {
-                        <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
-                                        Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Insumo"
-                                        Titulo="Insumos Externos"
-                                        OnCountChanged="@(c => _insExtCount = c)" />
                     }
                 }
             </div>
@@ -701,10 +696,14 @@
         "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
         // Ordenes externas por tipo. "Ordenes servicios" arriba ya incluye tanto
         // los servicios propios (de contratos) como los del catalogo externo CUPS
-        // — se unifican en la misma tabla. Solo mantenemos separados: RX, Lab e Insumos.
-        "RX Imagenologia", "Laboratorios", "Insumos Externos"
+        // — se unifican en la misma tabla. La pestana "Insumos Externos" se
+        // eliminaria — el tab "Insumos" ya cubre ese caso con autocomplete
+        // contra el catalogo de insumos. Solo separamos: RX, Lab.
+        "RX Imagenologia", "Laboratorios"
     };
-    // Badges de conteo para las 3 pestanas externas restantes.
+    // Badges de conteo para las 2 pestanas externas restantes (RX y Lab).
+    // _insExtCount se conserva por si el paquete de impresion tiene items
+    // heredados del anterior tab "Insumos Externos" — no crece mas.
     private int _rxExtCount, _labExtCount, _insExtCount;
     /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
     private bool _menuColapsado;
@@ -748,9 +747,31 @@
         "Ordenes certificaciones" => ("\U0001F4DC", _certCount), // scroll
         "RX Imagenologia" => ("\U0001F9BF", _rxExtCount),      // bone (radiografia)
         "Laboratorios" => ("\U0001F9EA", _labExtCount),        // test tube
-        "Insumos Externos" => ("\U0001F4E6", _insExtCount),    // box
         _ => ("•", 0)
     };
+
+    /// <summary>
+    /// Etiqueta VISIBLE de cada tab. Los identificadores internos (_tabSel,
+    /// switch de IconoYBadge, etc.) siguen siendo los mismos — este metodo
+    /// solo cambia lo que ve el usuario. Para "Ordenes servicios" agregamos
+    /// el nombre de la agencia del tenant ("Servicios Agencia Demo") para
+    /// diferenciarlo visualmente de las ordenes externas de otras IPS.
+    /// Si aun no cargo el nombre del tenant (o el usuario es super admin)
+    /// se muestra simplemente "Servicios".
+    /// </summary>
+    private string EtiquetaTab(string tab) => tab switch
+    {
+        "Ordenes servicios" => string.IsNullOrWhiteSpace(_tenantName)
+            ? "Servicios"
+            : $"Servicios {_tenantName}",
+        _ => tab
+    };
+
+    /// <summary>Nombre de la agencia/tenant del usuario logueado. Se carga en
+    /// OnInitializedAsync desde el mismo servicio que usa el NavMenu. Null si
+    /// el usuario es super admin o no tiene tenant asignado.</summary>
+    private string? _tenantName;
+
     private string _tabSel = "Historial";
 
     private List<HistoriaRow> _historias = new();
@@ -851,7 +872,33 @@
             _formatoForzadoId = match?.Id;
             _formatoForzadoNombre = match?.Nombre;
         }
+        await CargarNombreTenantAsync();
         await AutoCargarHcEnCursoSiCorrespondeAsync();
+    }
+
+    /// <summary>
+    /// Lee el claim 'tenant_id' del usuario logueado y trae el nombre de la
+    /// agencia via ITenantAdminService (mismo patron que NavMenu). Se usa para
+    /// componer la etiqueta "Servicios &lt;nombre_agencia&gt;" en el menu lateral.
+    /// Es tolerante: si el usuario no tiene claim de tenant, o el servicio
+    /// falla, _tenantName queda null y la etiqueta cae a "Servicios" pelado.
+    /// </summary>
+    private async Task CargarNombreTenantAsync()
+    {
+        if (AuthState is null) { return; }
+        try
+        {
+            var state = await AuthState;
+            var tenantClaim = state.User.FindFirst("tenant_id")?.Value;
+            if (!Guid.TryParse(tenantClaim, out var tenantId)) { return; }
+            var tenant = await TenantsSvc.GetAsync(tenantId);
+            _tenantName = tenant?.Name;
+        }
+        catch
+        {
+            // No debe romper la carga del modulo si falla la lectura del tenant.
+            _tenantName = null;
+        }
     }
 
     protected override async Task OnParametersSetAsync()

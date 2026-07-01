@@ -80,7 +80,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .OrderBy(o => o.Orden)
             .Select(o => new InsumoItemDto(
                 o.Id, o.HistoriaClinicaId, o.Codigo, o.Descripcion,
-                o.Cantidad, o.Observaciones, o.Orden))
+                o.Cantidad, o.Observaciones, o.MipresUrl, o.Orden))
             .ToListAsync(ct);
 
         // Ordenes externas por tipo (RX imagenologia, laboratorios, insumos externos).

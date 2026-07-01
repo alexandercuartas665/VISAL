@@ -1,12 +1,18 @@
 @using Visal.Application.Tenancy
+@using Visal.Domain.Enums
 @inject IInsumoService InsumoSvc
+@inject ICatalogoServicioService CatSvc
 @inject IJSRuntime JS
 
 @*
-   Pestana "Insumos" de la HC. No depende de catalogo: el profesional escribe
-   codigo (opcional), descripcion, cantidad y observaciones. Persiste atado
-   a la HistoriaClinicaId y refresca el prefill historiaMedica.insumos.lista_numerada
-   en cada Add/Update/Delete.
+   Pestana "Insumos" de la HC. Autocompleta la descripcion contra el
+   Catalogo de Insumos (CatalogoServicioReferencia con Tipo=Insumo). El
+   profesional escribe 2+ letras en Descripcion y elige de la lista — al
+   seleccionar se copia codigo y descripcion. Puede escribir libre si
+   el insumo no esta en catalogo. Persiste atado a HistoriaClinicaId y
+   refresca el prefill historiaMedica.insumos.lista_numerada en cada
+   Add/Delete. Guarda tambien la URL de MIPRES (opcional) para
+   trazabilidad de radicaciones ante la EPS.
 *@
 
 <div class="oi-bar">
@@ -37,11 +43,27 @@ else
                        placeholder="Opcional"
                        @bind="_borrador.Codigo" @bind:event="oninput" />
             </div>
-            <div class="oi-f oi-c-9">
+            <div class="oi-f oi-c-9 oi-autocomplete">
                 <label>Descripcion del Insumo</label>
                 <input class="form-control form-control-sm"
-                       placeholder="Ej: Panal adulto talla M, sonda nasogastrica, gasas esteriles..."
-                       @bind="_borrador.Descripcion" @bind:event="oninput" />
+                       placeholder="Escribe para buscar en el catalogo (min 2 caracteres)..."
+                       @bind="_borrador.Descripcion"
+                       @bind:event="oninput"
+                       @onkeyup="BuscarSugerenciasAsync"
+                       @onblur="() => _mostrarSugerencias = false" />
+                @if (_mostrarSugerencias && _sugerencias.Count > 0)
+                {
+                    <div class="oi-sug-list">
+                        @foreach (var s in _sugerencias)
+                        {
+                            @* onmousedown en vez de onclick para que dispare antes que el blur del input *@
+                            <div class="oi-sug-item" @onmousedown="() => SeleccionarSugerencia(s)">
+                                <span class="oi-sug-cod">@s.Codigo</span>
+                                <span class="oi-sug-nom">@s.Nombre</span>
+                            </div>
+                        }
+                    </div>
+                }
             </div>
         </div>
         <div class="oi-row">
@@ -56,6 +78,15 @@ else
                 <input class="form-control form-control-sm"
                        placeholder="Opcional"
                        @bind="_borrador.Observaciones" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="oi-row">
+            <div class="oi-f oi-c-12">
+                <label>URL MIPRES <small class="text-muted">(opcional, pega el link del formato radicado)</small></label>
+                <input class="form-control form-control-sm oi-mipres-input"
+                       type="url"
+                       placeholder="https://mipres.sispro.gov.co/..."
+                       @bind="_borrador.MipresUrl" @bind:event="oninput" />
             </div>
         </div>
         <div class="oi-row oi-row-action">
@@ -81,6 +112,7 @@ else
                             <th>Descripcion</th>
                             <th style="width:120px;">Cantidad</th>
                             <th>Observaciones</th>
+                            <th style="width:100px;">MIPRES</th>
                             <th style="width:60px;"></th>
                         </tr>
                     </thead>
@@ -93,6 +125,14 @@ else
                                 <td>@it.Descripcion</td>
                                 <td>@(string.IsNullOrWhiteSpace(it.Cantidad) ? "—" : it.Cantidad)</td>
                                 <td>@(string.IsNullOrWhiteSpace(it.Observaciones) ? "—" : it.Observaciones)</td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(it.MipresUrl))
+                                    {
+                                        <a href="@it.MipresUrl" target="_blank" rel="noopener"
+                                           title="@it.MipresUrl">&#128279; Abrir</a>
+                                    }
+                                    else { <span class="text-muted">—</span> }
+                                </td>
                                 <td class="text-end">
                                     <button class="btn btn-sm btn-link text-danger"
                                             @onclick="() => EliminarAsync(it)"
@@ -118,9 +158,19 @@ else
     .oi-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
     .oi-c-3 { grid-column: span 3; }
     .oi-c-9 { grid-column: span 9; }
+    .oi-c-12 { grid-column: span 12; }
     .oi-list { margin-top:16px; }
     .oi-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
     .oi-table { font-size:12.5px; }
+    /* Autocomplete: contenedor relativo para posicionar el dropdown. */
+    .oi-autocomplete { position: relative; }
+    .oi-sug-list { position: absolute; top: 100%; left: 0; right: 0; background:#fff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12); max-height: 240px; overflow-y:auto; z-index: 30; margin-top: 2px; }
+    .oi-sug-item { padding: 6px 10px; cursor: pointer; display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: baseline; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+    .oi-sug-item:last-child { border-bottom: none; }
+    .oi-sug-item:hover { background: #eff6ff; }
+    .oi-sug-cod { font-family: 'JetBrains Mono','Consolas',monospace; color:#1565c0; font-weight: 600; }
+    .oi-sug-nom { color:#0f172a; }
+    .oi-mipres-input { font-family: 'JetBrains Mono','Consolas',monospace; font-size: 11.5px; }
 </style>
 
 @code {
@@ -133,12 +183,24 @@ else
 
     private Borrador _borrador = new();
 
+    // Autocomplete contra el catalogo de Insumos.
+    private List<CatalogoServicioDto> _sugerencias = new();
+    private bool _mostrarSugerencias;
+    // Serializa las queries al DbContext scoped — en Blazor Server dos
+    // busquedas concurrentes rompen EF Core con "second operation started".
+    private readonly SemaphoreSlim _busquedaLock = new(1, 1);
+    // Contador monotono: cada tecla lo incrementa. Si al terminar la query
+    // el contador cambio, descartamos el resultado (llego uno mas nuevo).
+    private int _busquedaSeq;
+
     protected override async Task OnParametersSetAsync()
     {
         if (HistoriaClinicaId != _ultimoIdCargado)
         {
             _ultimoIdCargado = HistoriaClinicaId;
             _borrador = new();
+            _sugerencias.Clear();
+            _mostrarSugerencias = false;
             await CargarItemsAsync();
         }
     }
@@ -155,6 +217,49 @@ else
         if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
     }
 
+    /// <summary>
+    /// Busca contra el catalogo de Insumos (CatalogoServicioReferencia con
+    /// Tipo=Insumo) en cuanto el usuario escribe 2 o mas caracteres. Debounce
+    /// de 220ms + semaforo + secuencia: si el usuario sigue escribiendo,
+    /// las busquedas viejas se descartan antes de tocar el DbContext.
+    /// </summary>
+    private async Task BuscarSugerenciasAsync()
+    {
+        var q = _borrador.Descripcion;
+        if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+        {
+            _sugerencias.Clear();
+            _mostrarSugerencias = false;
+            return;
+        }
+        var mySeq = ++_busquedaSeq;
+        try
+        {
+            await Task.Delay(220);
+            if (mySeq != _busquedaSeq) { return; }
+            await _busquedaLock.WaitAsync();
+            try
+            {
+                if (mySeq != _busquedaSeq) { return; }
+                var (rows, _) = await CatSvc.SearchAsync(TipoCatalogoServicio.Insumo, q, 0, 15);
+                if (mySeq != _busquedaSeq) { return; }
+                _sugerencias = rows.Where(r => r.Activo).ToList();
+                _mostrarSugerencias = _sugerencias.Count > 0;
+                StateHasChanged();
+            }
+            finally { _busquedaLock.Release(); }
+        }
+        catch (Exception) { /* silenciar: proxima tecla lo reintenta */ }
+    }
+
+    private void SeleccionarSugerencia(CatalogoServicioDto sug)
+    {
+        _borrador.Codigo = sug.Codigo;
+        _borrador.Descripcion = sug.Nombre;
+        _sugerencias.Clear();
+        _mostrarSugerencias = false;
+    }
+
     private async Task AgregarAsync()
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
@@ -166,10 +271,13 @@ else
                 _borrador.Codigo,
                 _borrador.Descripcion!,
                 _borrador.Cantidad,
-                _borrador.Observaciones), Guid.Empty);
+                _borrador.Observaciones,
+                _borrador.MipresUrl), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
             _borrador = new();
+            _sugerencias.Clear();
+            _mostrarSugerencias = false;
         }
         finally { _agregando = false; }
     }
@@ -195,5 +303,6 @@ else
         public string? Descripcion { get; set; }
         public string? Cantidad { get; set; }
         public string? Observaciones { get; set; }
+        public string? MipresUrl { get; set; }
     }
 }

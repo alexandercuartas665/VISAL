@@ -204,9 +204,9 @@ else
                     <thead>
                         <tr>
                             <th style="width:40px">#</th>
-                            <th style="width:230px">Capitulo</th>
                             <th style="width:100px">Codigo</th>
-                            <th>Especialidad</th>
+                            <th>Descripcion</th>
+                            <th style="width:100px">Cantidad</th>
                             <th>Motivo / Observaciones</th>
                         </tr>
                     </thead>
@@ -215,9 +215,9 @@ else
                         {
                             <tr>
                                 <td class="num">@r.Orden</td>
-                                <td>@r.Capitulo</td>
                                 <td class="mono">@(r.EspecialidadCodigo ?? "-")</td>
                                 <td><b>@r.EspecialidadNombre</b></td>
+                                <td>@(r.Cantidad ?? "-")</td>
                                 <td>@(r.Motivo ?? "")</td>
                             </tr>
                         }

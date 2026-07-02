@@ -345,7 +345,7 @@
         <div class="wac-field">
             <label>Numero local (sin codigo de pais)</label>
             <input class="form-control wac-tel-input" @bind="_telNumero" placeholder="Ej: 3001234567" inputmode="numeric" maxlength="15" />
-            <div class="wac-tel-preview">Se guardara: <strong>+@_telCodigoPais @(_telNumero ?? "")</strong></div>
+            <div class="wac-tel-preview">Se guardara: <strong>+@_telCodigoPais @PreviewNumeroLocal()</strong></div>
         </div>
         @if (_telError is not null) { <div class="wac-error">@_telError</div> }
         <div class="wac-modal-actions">
@@ -1060,6 +1060,18 @@
         return day.ToString("dd 'DE' MMMM yyyy", new System.Globalization.CultureInfo("es-CO")).ToUpperInvariant();
     }
 
+    // Preview del numero local que se guardara — quita duplicaciones del
+    // codigo pais para que el usuario vea el resultado real antes de aceptar.
+    private string PreviewNumeroLocal()
+    {
+        var local = new string((_telNumero ?? "").Where(char.IsDigit).ToArray());
+        while (local.Length > _telCodigoPais.Length && local.StartsWith(_telCodigoPais))
+        {
+            local = local.Substring(_telCodigoPais.Length);
+        }
+        return local;
+    }
+
     // ===== Edicion de telefono del paciente =====
     private async Task OpenEditTelefono()
     {
@@ -1072,7 +1084,15 @@
         if (!string.IsNullOrEmpty(match.Codigo))
         {
             _telCodigoPais = match.Codigo;
-            _telNumero = actual.Substring(match.Codigo.Length);
+            var local = actual.Substring(match.Codigo.Length);
+            // Defensa contra registros con el codigo pais duplicado (import viejo,
+            // guardados previos rotos, etc). Si el numero local aun arranca con el
+            // mismo prefijo, lo quitamos hasta que no lo repita.
+            while (local.Length > match.Codigo.Length && local.StartsWith(match.Codigo))
+            {
+                local = local.Substring(match.Codigo.Length);
+            }
+            _telNumero = local;
         }
         else
         {
@@ -1113,7 +1133,15 @@
         _telBusy = true;
         try
         {
-            var completo = _telCodigoPais + numero;
+            // Si el usuario ya escribio el codigo pais en el numero local (por
+            // costumbre o por copy-paste), no lo doblamos. Loop para tolerar el
+            // caso raro de haberlo pegado dos veces.
+            var local = numero;
+            while (local.Length > _telCodigoPais.Length && local.StartsWith(_telCodigoPais))
+            {
+                local = local.Substring(_telCodigoPais.Length);
+            }
+            var completo = _telCodigoPais + local;
             var guardado = await PacientesSvc.UpdateTelefonoAsync(pid, completo, Guid.Empty);
             if (string.IsNullOrEmpty(guardado))
             {

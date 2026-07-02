@@ -73,8 +73,8 @@
                         <div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="_sNombre" /></div>
                         <div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="_pApellido" /></div>
                         <div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="_sApellido" /></div>
-                        <div class="ase-f"><label>Fecha Nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" /></div>
-                        <div class="ase-f"><label>Edad</label><input type="number" class="form-control form-control-sm" @bind="_edad" /></div>
+                        <div class="ase-f"><label>Fecha Nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" @bind:after="RecalcularEdad" /></div>
+                        <div class="ase-f"><label>Edad <small class="text-muted">(auto)</small></label><input type="number" class="form-control form-control-sm" @bind="_edad" readonly /></div>
                     </div>
 
                     <div class="ase-card-h" style="margin-top:14px;">Datos administrativos PAD</div>
@@ -737,6 +737,39 @@
     private async Task LoadLista() => _lista = (await Svc.ListAsync(string.IsNullOrWhiteSpace(_filtro) ? null : _filtro)).ToList();
     private async Task OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; await LoadLista(); }
 
+    // Se dispara cuando el usuario elige una fecha de nacimiento (input type=date).
+    // Calcula la edad y la asigna al campo readonly. Si la fecha es invalida
+    // (futuro, mayor a 130 anios, o null) deja la edad en null.
+    private void RecalcularEdad()
+    {
+        _edad = CalcularEdad(_fnac);
+    }
+
+    /// <summary>
+    /// Calcula edad en anios cumplidos entre fechaNacimiento y hoy. Retorna null
+    /// si la fecha es nula, futura, o el resultado esta fuera de rango (0..130).
+    /// </summary>
+    /// <remarks>
+    /// Casos verificados:
+    /// - fn=1964-05-21, hoy=2026-07-02 -> 62 (cumpleanos ya paso)
+    /// - fn=1964-08-21, hoy=2026-07-02 -> 61 (aun no cumple este anio)
+    /// - fn=hoy -> 0
+    /// - fn=hoy+1 dia -> null (futuro)
+    /// - fn=hoy-1 anio exacto -> 1
+    /// - fn=hoy-1 anio+1 dia -> 0 (aun no cumple 1)
+    /// - fn=1890-01-01 -> null (>130 anios)
+    /// - fn=null -> null
+    /// </remarks>
+    private static int? CalcularEdad(DateOnly? fechaNacimiento)
+    {
+        if (fechaNacimiento is not DateOnly fn) { return null; }
+        var hoy = DateOnly.FromDateTime(DateTime.Today);
+        if (fn > hoy) { return null; }
+        var edad = hoy.Year - fn.Year;
+        if (fn > hoy.AddYears(-edad)) { edad--; }
+        return edad < 0 || edad > 130 ? null : edad;
+    }
+
     private void New()
     {
         _id = null;
@@ -771,7 +804,11 @@
         _id = d.Id;
         _doc = d.NumeroDocumento; _tipoDoc = d.TipoDocumento;
         _pNombre = d.PrimerNombre; _sNombre = d.SegundoNombre; _pApellido = d.PrimerApellido; _sApellido = d.SegundoApellido;
-        _fnac = d.FechaNacimiento; _edad = d.Edad;
+        _fnac = d.FechaNacimiento;
+        // Recalculamos siempre: la edad guardada en BD puede haber quedado
+        // vieja (cumpleanos pasado sin re-guardado). Fallback al valor de BD
+        // si la fecha no permite calcular.
+        _edad = CalcularEdad(_fnac) ?? d.Edad;
         _codAcept = d.CodigoAceptacion; _fComenta = d.FechaComentan;
         _fIngreso = d.FechaIngresoPad; _fEgreso = d.FechaEgresoPad;
         _aseId = d.AseguradoraId?.ToString() ?? "";

@@ -99,7 +99,7 @@ public static class HistoriaMedicaPrefillHelper
         {
             sb.Append(i++).Append(". ").Append(r.EspecialidadNombre);
             if (!string.IsNullOrWhiteSpace(r.EspecialidadCodigo)) { sb.Append(" (").Append(r.EspecialidadCodigo).Append(')'); }
-            if (!string.IsNullOrWhiteSpace(r.Capitulo)) { sb.Append(" - ").Append(r.Capitulo); }
+            if (!string.IsNullOrWhiteSpace(r.Cantidad)) { sb.Append(" x ").Append(r.Cantidad); }
             if (!string.IsNullOrWhiteSpace(r.Motivo)) { sb.Append(" - ").Append(r.Motivo); }
             sb.Append('\n');
         }
@@ -406,7 +406,7 @@ public static class HistoriaMedicaPrefillHelper
             ["nombre"] = r.EspecialidadNombre,
             ["codigo"] = r.EspecialidadCodigo,
             ["codigoespecialidad"] = r.EspecialidadCodigo,
-            ["capitulo"] = r.Capitulo,
+            ["cantidad"] = r.Cantidad,
             ["motivo"] = r.Motivo,
             ["observacion"] = r.Motivo,
             ["obs"] = r.Motivo,

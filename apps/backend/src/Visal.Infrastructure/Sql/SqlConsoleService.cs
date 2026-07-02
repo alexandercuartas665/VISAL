@@ -192,7 +192,6 @@ public sealed class SqlConsoleService(VisalDbContext db, ITenantContext tenant) 
             "departamentos" => ("Departamentos de Colombia.", "Pacientes y Catalogos"),
             "municipios" => ("Municipios de Colombia.", "Pacientes y Catalogos"),
             "medicamentos" => ("Base CUM/INVIMA — catalogo maestro de medicamentos comerciales.", "Pacientes y Catalogos"),
-            "cups" => ("Codigos Unicos de Procedimientos en Salud (CUPS).", "Pacientes y Catalogos"),
             "cie11_configs" => ("Configuracion de la API CIE-11 (WHO).", "Pacientes y Catalogos"),
             "tipologia_archivos" => ("Categorias de archivos adjuntos (firma, RX, etc.).", "Pacientes y Catalogos"),
 

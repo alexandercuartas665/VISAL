@@ -79,7 +79,6 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
     public DbSet<CatalogoServicioReferencia> CatalogosServicioReferencia => Set<CatalogoServicioReferencia>();
     public DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas => Set<HistoriaClinicaOrdenExterna>();
-    public DbSet<Cup> Cups => Set<Cup>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -601,38 +600,6 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Cantidad).HasMaxLength(60);
             b.Property(x => x.Observaciones).HasColumnType("text");
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Tipo });
-        });
-
-        modelBuilder.Entity<Cup>(b =>
-        {
-            // Catalogo CUPS (MSPS Colombia). Misma logica que Medicamentos:
-            // todos los strings como `text` para tolerar cualquier ancho del Excel
-            // oficial sin romper la carga. Indices en codigo/nombre/extras usados
-            // en la busqueda libre.
-            b.Property(x => x.Tabla).HasColumnType("text");
-            b.Property(x => x.Codigo).HasColumnType("text");
-            b.Property(x => x.Nombre).HasColumnType("text");
-            b.Property(x => x.Descripcion).HasColumnType("text");
-            b.Property(x => x.Habilitado).HasColumnType("text");
-            b.Property(x => x.Aplicacion).HasColumnType("text");
-            b.Property(x => x.IsStandardGEL).HasColumnType("text");
-            b.Property(x => x.IsStandardMSPS).HasColumnType("text");
-            b.Property(x => x.ExtraI).HasColumnType("text");
-            b.Property(x => x.ExtraII).HasColumnType("text");
-            b.Property(x => x.ExtraIII).HasColumnType("text");
-            b.Property(x => x.ExtraIV).HasColumnType("text");
-            b.Property(x => x.ExtraV).HasColumnType("text");
-            b.Property(x => x.ExtraVI).HasColumnType("text");
-            b.Property(x => x.ExtraVII).HasColumnType("text");
-            b.Property(x => x.ExtraVIII).HasColumnType("text");
-            b.Property(x => x.ExtraIX).HasColumnType("text");
-            b.Property(x => x.ExtraX).HasColumnType("text");
-            b.Property(x => x.ValorRegistro).HasColumnType("text");
-            b.Property(x => x.UsuarioResponsable).HasColumnType("text");
-            b.Property(x => x.IsPublicPrivate).HasColumnType("text");
-            b.HasIndex(x => new { x.TenantId, x.Codigo });
-            b.HasIndex(x => new { x.TenantId, x.Nombre });
-            b.HasIndex(x => new { x.TenantId, x.ExtraIV });
         });
 
         modelBuilder.Entity<HistoriaClinicaMedicamento>(b =>

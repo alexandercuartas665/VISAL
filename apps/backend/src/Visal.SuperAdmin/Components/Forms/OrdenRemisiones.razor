@@ -1,13 +1,14 @@
 @using Visal.Application.Tenancy
+@using Visal.Domain.Enums
 @inject IRemisionService RemSvc
+@inject ICatalogoServicioService CatSvc
 @inject IJSRuntime JS
 
 @*
-   Pestana "Remisiones" de la HC. Captura en cascada:
-   1) Capitulo  -> dropdown con los capitulos CUPS (cup.Descripcion distinto)
-   2) Especialidad -> autocomplete sobre cup.Nombre filtrado por capitulo
-   3) Motivo -> texto libre
-   Persiste atado a HistoriaClinicaId.
+   Pestana "Remisiones" de la HC. Autocomplete unico sobre
+   CatalogoServicioReferencia con Tipo=ServicioGeneral. El profesional
+   escribe 2+ letras en Descripcion, elige del catalogo (codigo + nombre)
+   y define Cantidad + Motivo. Persiste atado a HistoriaClinicaId.
 *@
 
 <div class="or-bar">
@@ -31,77 +32,65 @@
 else
 {
     <div class="or-card">
-        @* ---- Fila 1: Capitulo ---- *@
         <div class="or-row">
-            <div class="or-f or-c-12">
-                <label>Capitulo</label>
-                <select class="form-select form-select-sm"
-                        @bind="_borrador.Capitulo" @bind:after="OnCambioCapitulo">
-                    <option value="">SELECCIONE UN CAPITULO</option>
-                    @foreach (var cap in _capitulos)
-                    {
-                        <option value="@cap.Nombre">@cap.Nombre (@cap.Total)</option>
-                    }
-                </select>
-            </div>
-        </div>
-
-        @* ---- Fila 2: Especialidad (autocomplete) ---- *@
-        <div class="or-row">
-            <div class="or-f or-c-12 or-ac-host">
-                <label>Especialidad</label>
+            <div class="or-f or-c-3">
+                <label>Codigo</label>
                 <input class="form-control form-control-sm"
-                       placeholder="@(_borrador.Capitulo is null or "" ? "Primero selecciona un capitulo" : "Buscar especialidad por nombre o codigo...")"
-                       disabled="@(string.IsNullOrWhiteSpace(_borrador.Capitulo))"
-                       value="@_acTexto"
-                       @oninput="OnEspInput"
-                       @onfocus="OnEspFocus"
-                       @onblur="OnEspBlur" />
-                @if (_acAbierto && _acRows.Count > 0)
+                       placeholder="Opcional"
+                       @bind="_borrador.Codigo" @bind:event="oninput" />
+            </div>
+            <div class="or-f or-c-9 or-autocomplete">
+                <label>Descripcion</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Escribe para buscar en el catalogo de servicios (min 2 caracteres)..."
+                       @bind="_borrador.Descripcion"
+                       @bind:event="oninput"
+                       @onkeyup="BuscarSugerenciasAsync"
+                       @onblur="() => _mostrarSugerencias = false" />
+                @if (_mostrarSugerencias && _sugerencias.Count > 0)
                 {
-                    <div class="or-ac-pop">
-                        @foreach (var e in _acRows)
+                    <div class="or-sug-list">
+                        @foreach (var s in _sugerencias)
                         {
-                            <div class="or-ac-row" @onmousedown="() => SeleccionarEspecialidad(e)">
-                                <span class="or-ac-codigo">@(e.Codigo ?? "-")</span>
-                                <span class="or-ac-nombre">@e.Nombre</span>
+                            <div class="or-sug-item" @onmousedown="() => SeleccionarSugerencia(s)">
+                                <span class="or-sug-cod">@s.Codigo</span>
+                                <span class="or-sug-nom">@s.Nombre</span>
                             </div>
                         }
                     </div>
                 }
-                else if (_acAbierto && !_acBuscando && !string.IsNullOrWhiteSpace(_acQuery))
-                {
-                    <div class="or-ac-pop or-ac-empty">Sin resultados.</div>
-                }
             </div>
         </div>
-
-        @* ---- Fila 3: Motivo + boton agregar ---- *@
         <div class="or-row">
-            <div class="or-f or-c-11">
+            <div class="or-f or-c-3">
+                <label>Cantidad</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: 1, 3 sesiones, 10 unidades"
+                       @bind="_borrador.Cantidad" @bind:event="oninput" />
+            </div>
+            <div class="or-f or-c-9">
                 <label>Motivo / Observaciones</label>
                 <textarea class="form-control form-control-sm" rows="2"
                           placeholder="Motivo clinico de la remision..."
                           @bind="_borrador.Motivo" @bind:event="oninput"></textarea>
             </div>
-            <div class="or-f or-c-1 or-action-col">
-                <button class="btn btn-primary btn-sm or-action-add" title="Guardar"
-                        @onclick="AgregarAsync"
-                        disabled="@(NoPuedeAgregar() || _agregando)">
-                    @(_agregando ? "..." : "💾")
-                </button>
-            </div>
+        </div>
+        <div class="or-row or-row-action">
+            <button class="btn btn-primary btn-sm"
+                    @onclick="AgregarAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_borrador.Descripcion) || _agregando)">
+                @(_agregando ? "Guardando..." : "+ Agregar remision")
+            </button>
         </div>
 
-        @* ---- Grilla ---- *@
         <div class="or-grid-wrap">
             <table class="table table-sm or-tbl">
                 <thead>
                     <tr>
                         <th style="width:40px">#</th>
-                        <th>Capitulo</th>
-                        <th style="width:100px">Codigo</th>
-                        <th>Especialidad</th>
+                        <th style="width:110px">Codigo</th>
+                        <th>Descripcion</th>
+                        <th style="width:120px">Cantidad</th>
                         <th>Motivo</th>
                         <th class="text-center" style="width:50px"></th>
                     </tr>
@@ -117,9 +106,9 @@ else
                         {
                             <tr>
                                 <td class="text-center">@it.Orden</td>
-                                <td><span class="or-cap-pill">@CortoCapitulo(it.Capitulo)</span></td>
                                 <td class="mono">@(it.EspecialidadCodigo ?? "-")</td>
                                 <td>@it.EspecialidadNombre</td>
+                                <td>@(it.Cantidad ?? "-")</td>
                                 <td>@(it.Motivo ?? "-")</td>
                                 <td class="text-center">
                                     <button class="btn btn-sm btn-link text-danger"
@@ -142,25 +131,22 @@ else
     .or-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
     .or-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
     .or-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .or-row-action { display:flex; justify-content:flex-end; }
     .or-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
-    .or-c-1  { grid-column: span 1; }
-    .or-c-11 { grid-column: span 11; }
-    .or-c-12 { grid-column: span 12; }
-    .or-ac-host { position:relative; }
-    .or-ac-pop { position:absolute; left:0; right:0; top:100%; z-index:50; background:#fff; border:1px solid #cbd5e1; border-top:none; border-radius:0 0 6px 6px; max-height:260px; overflow:auto; box-shadow:0 8px 20px rgba(0,0,0,0.08); }
-    .or-ac-row { display:flex; gap:10px; padding:8px 12px; cursor:pointer; border-bottom:1px solid #f1f5f9; font-size:12.5px; }
-    .or-ac-row:hover { background:#eef6ff; }
-    .or-ac-codigo { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color:#1565c0; font-weight:700; min-width:80px; }
-    .or-ac-nombre { color:#0f172a; }
-    .or-ac-empty { padding:12px; text-align:center; color:#64748b; font-style:italic; }
-    .or-action-col { display:flex; align-items:stretch; }
-    .or-action-add { width:100%; align-self:stretch; height:100%; min-height:32px; }
+    .or-c-3 { grid-column: span 3; }
+    .or-c-9 { grid-column: span 9; }
+    .or-autocomplete { position: relative; }
+    .or-sug-list { position: absolute; top: 100%; left: 0; right: 0; background:#fff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12); max-height: 240px; overflow-y:auto; z-index: 30; margin-top: 2px; }
+    .or-sug-item { padding: 6px 10px; cursor: pointer; display: grid; grid-template-columns: 100px 1fr; gap: 8px; align-items: baseline; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+    .or-sug-item:last-child { border-bottom: none; }
+    .or-sug-item:hover { background: #eff6ff; }
+    .or-sug-cod { font-family: 'JetBrains Mono','Consolas',monospace; color:#1565c0; font-weight: 600; }
+    .or-sug-nom { color:#0f172a; }
     .or-grid-wrap { margin-top:14px; border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
     .or-tbl { margin:0; font-size:12.5px; }
     .or-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
     .or-tbl td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
     .or-empty-row { padding:30px !important; font-style:italic; }
-    .or-cap-pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; background:#dbeafe; color:#1e40af; }
     .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
 </style>
 
@@ -170,23 +156,19 @@ else
 
     private Guid? _ultimoIdCargado;
     private List<RemisionItemDto> _items = new();
-    private List<CapituloCupDto> _capitulos = new();
     private bool _agregando;
 
-    // Autocomplete state
-    private string _acQuery = "";
-    private string _acTexto = "";       // lo que el usuario tipea en el input (o el nombre elegido)
-    private bool _acAbierto;
-    private bool _acBuscando;
-    private List<EspecialidadCupDto> _acRows = new();
-    private System.Threading.CancellationTokenSource? _acCts;
+    private Borrador _borrador = new();
 
-    private BorradorRem _borrador = new();
-
-    protected override async Task OnInitializedAsync()
-    {
-        await CargarCapitulosAsync();
-    }
+    // Autocomplete contra el catalogo de Servicios Generales.
+    private List<CatalogoServicioDto> _sugerencias = new();
+    private bool _mostrarSugerencias;
+    // Serializa las queries al DbContext scoped — en Blazor Server dos
+    // busquedas concurrentes rompen EF Core con "second operation started".
+    private readonly SemaphoreSlim _busquedaLock = new(1, 1);
+    // Contador monotono: cada tecla lo incrementa. Si al terminar la query
+    // el contador cambio, descartamos el resultado (llego uno mas nuevo).
+    private int _busquedaSeq;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -194,16 +176,10 @@ else
         {
             _ultimoIdCargado = HistoriaClinicaId;
             _borrador = new();
-            _acTexto = "";
-            _acRows.Clear();
-            _acAbierto = false;
+            _sugerencias.Clear();
+            _mostrarSugerencias = false;
             await CargarItemsAsync();
         }
-    }
-
-    private async Task CargarCapitulosAsync()
-    {
-        _capitulos = (await RemSvc.ListarCapitulosAsync()).ToList();
     }
 
     private async Task CargarItemsAsync()
@@ -218,107 +194,73 @@ else
         if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
     }
 
-    private async Task OnCambioCapitulo()
+    /// <summary>
+    /// Busca contra el catalogo de servicios generales
+    /// (CatalogoServicioReferencia con Tipo=ServicioGeneral) en cuanto el
+    /// usuario escribe 2 o mas caracteres. Debounce 220ms + semaforo + secuencia
+    /// para evitar "second operation started" con teclas rapidas.
+    /// </summary>
+    private async Task BuscarSugerenciasAsync()
     {
-        // Al cambiar capitulo, reseteamos la especialidad elegida y recargamos
-        // sugerencias sin termino (top N del capitulo).
-        _borrador.EspecialidadCodigo = null;
-        _borrador.EspecialidadNombre = null;
-        _borrador.CupId = null;
-        _acTexto = "";
-        _acQuery = "";
-        await BuscarEspecialidadesAsync();
-    }
-
-    private async Task OnEspFocus()
-    {
-        _acAbierto = true;
-        if (_acRows.Count == 0) { await BuscarEspecialidadesAsync(); }
-    }
-
-    private void OnEspBlur()
-    {
-        // Damos un margen para que el click sobre la fila dispare seleccion antes de cerrar.
-        _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() => { _acAbierto = false; StateHasChanged(); }));
-    }
-
-    private async Task OnEspInput(ChangeEventArgs e)
-    {
-        _acTexto = e.Value?.ToString() ?? "";
-        _acQuery = _acTexto;
-        // Si el usuario tipea diferente al item ya seleccionado, lo invalidamos.
-        if (_borrador.EspecialidadNombre != null && _acTexto != _borrador.EspecialidadNombre)
+        var q = _borrador.Descripcion;
+        if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
         {
-            _borrador.EspecialidadCodigo = null;
-            _borrador.EspecialidadNombre = null;
-            _borrador.CupId = null;
+            _sugerencias.Clear();
+            _mostrarSugerencias = false;
+            return;
         }
-        _acAbierto = true;
-        await BuscarEspecialidadesAsync();
-    }
-
-    private async Task BuscarEspecialidadesAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_borrador.Capitulo)) { _acRows.Clear(); return; }
-        _acCts?.Cancel();
-        _acCts = new System.Threading.CancellationTokenSource();
-        var token = _acCts.Token;
-        _acBuscando = true;
+        var mySeq = ++_busquedaSeq;
         try
         {
-            var rows = await RemSvc.BuscarEspecialidadesAsync(_borrador.Capitulo, _acQuery, 30, token);
-            if (!token.IsCancellationRequested)
+            await Task.Delay(220);
+            if (mySeq != _busquedaSeq) { return; }
+            await _busquedaLock.WaitAsync();
+            try
             {
-                _acRows = rows.ToList();
+                if (mySeq != _busquedaSeq) { return; }
+                var (rows, _) = await CatSvc.SearchAsync(TipoCatalogoServicio.ServicioGeneral, q, 0, 15);
+                if (mySeq != _busquedaSeq) { return; }
+                _sugerencias = rows.Where(r => r.Activo).ToList();
+                _mostrarSugerencias = _sugerencias.Count > 0;
+                StateHasChanged();
             }
+            finally { _busquedaLock.Release(); }
         }
-        catch (TaskCanceledException) { }
-        finally { _acBuscando = false; }
+        catch (Exception) { /* silenciar: proxima tecla lo reintenta */ }
     }
 
-    private void SeleccionarEspecialidad(EspecialidadCupDto e)
+    private void SeleccionarSugerencia(CatalogoServicioDto sug)
     {
-        _borrador.CupId = e.CupId;
-        _borrador.EspecialidadCodigo = e.Codigo;
-        _borrador.EspecialidadNombre = e.Nombre;
-        _acTexto = e.Nombre;
-        _acAbierto = false;
-    }
-
-    private bool NoPuedeAgregar()
-    {
-        return string.IsNullOrWhiteSpace(_borrador.Capitulo)
-            || string.IsNullOrWhiteSpace(_borrador.EspecialidadNombre);
+        _borrador.Codigo = sug.Codigo;
+        _borrador.Descripcion = sug.Nombre;
+        _sugerencias.Clear();
+        _mostrarSugerencias = false;
     }
 
     private async Task AgregarAsync()
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
-        if (NoPuedeAgregar()) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Descripcion)) { return; }
         _agregando = true;
         try
         {
             var creado = await RemSvc.AgregarAsync(hid, new AgregarRemisionRequest(
-                _borrador.Capitulo!,
-                _borrador.EspecialidadCodigo,
-                _borrador.EspecialidadNombre!,
+                _borrador.Codigo,
+                _borrador.Descripcion!,
+                _borrador.Cantidad,
                 _borrador.Motivo), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
-            // Reset solo la especialidad y motivo — el capitulo se conserva
-            // para registrar varias del mismo capitulo en rafaga.
-            var capActual = _borrador.Capitulo;
-            _borrador = new BorradorRem { Capitulo = capActual };
-            _acTexto = "";
-            _acQuery = "";
-            _acRows.Clear();
+            _borrador = new();
+            _sugerencias.Clear();
+            _mostrarSugerencias = false;
         }
         finally { _agregando = false; }
     }
 
     private async Task EliminarAsync(RemisionItemDto it)
     {
-        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar la remision a \"{Truncate(it.EspecialidadNombre, 40)}\"?");
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar la remision \"{Truncate(it.EspecialidadNombre, 40)}\"?");
         if (!ok) { return; }
         await RemSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
@@ -331,22 +273,14 @@ else
         await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/REMISIONES", "_blank");
     }
 
-    private static string CortoCapitulo(string c)
-    {
-        // "CapItulo 03 SISTEMA VISUAL" -> "Cap 03 SISTEMA VISUAL"
-        if (string.IsNullOrEmpty(c)) { return ""; }
-        return c.Replace("CapItulo", "Cap").Replace("Capitulo", "Cap");
-    }
-
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s.Substring(0, max) + "...";
 
-    private sealed class BorradorRem
+    private sealed class Borrador
     {
-        public string? Capitulo { get; set; }
-        public Guid? CupId { get; set; }
-        public string? EspecialidadCodigo { get; set; }
-        public string? EspecialidadNombre { get; set; }
+        public string? Codigo { get; set; }
+        public string? Descripcion { get; set; }
+        public string? Cantidad { get; set; }
         public string? Motivo { get; set; }
     }
 }

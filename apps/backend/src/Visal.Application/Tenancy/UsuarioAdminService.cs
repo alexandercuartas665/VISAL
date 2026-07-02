@@ -240,8 +240,16 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         if (email.Length == 0) { throw new InvalidOperationException("El correo es obligatorio."); }
         if (string.IsNullOrWhiteSpace(password) || password.Length < 6) { throw new InvalidOperationException("La clave debe tener al menos 6 caracteres."); }
 
-        // Reutilizar PlatformUser si ya existe el correo; si no, crear uno tomando datos del profesional.
+        // Reutilizar PlatformUser si ya existe por email o por documento. Sin
+        // el segundo lookup, un documento preexistente con OTRO email (fila
+        // creada por otro flujo, o re-import parcial) viola el indice unico
+        // ix_platform_users_documento cuando el INSERT llega a Postgres.
         var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Email == email, ct);
+        if (pu is null && !string.IsNullOrWhiteSpace(prof.NumeroDocumento))
+        {
+            pu = await _db.PlatformUsers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(p => p.Documento == prof.NumeroDocumento, ct);
+        }
         if (pu is null)
         {
             pu = new PlatformUser

@@ -582,6 +582,13 @@
                             // Usuario ya existe o falta dato — no es fatal para el import.
                             _importLog.Add($"[..]  Fila {r}: usuario no creado ({ex.Message}).");
                         }
+                        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+                        {
+                            // Choque de indice unico (email/documento ya en uso por
+                            // otro flujo). No es fatal: el profesional YA quedo
+                            // guardado en la fila 559; solo no se creo el user.
+                            _importLog.Add($"[..]  Fila {r}: usuario no creado ({DetalleError(ex)}).");
+                        }
                     }
 
                     _importOk++;

@@ -239,6 +239,22 @@ app.MapPost("/auth/login", async (
         {
             claims.Add(new Claim("profesional_id", pidSede.ToString()));
         }
+        // Rol + permisos: cargamos los modulos con Ver=true del rol asignado y
+        // los inyectamos como claim "perms" (coma-separado). NavMenu filtra las
+        // entradas leyendo este claim. Si el usuario no tiene rol (RolId=null),
+        // no agregamos "perms" — el menu asume permisos completos por compat.
+        if (membership?.RolId is Guid rolId)
+        {
+            claims.Add(new Claim("rol_id", rolId.ToString()));
+            var permisos = await db.RolPermisos.IgnoreQueryFilters()
+                .Where(p => p.RolId == rolId && p.Ver)
+                .Select(p => p.Modulo)
+                .ToListAsync();
+            if (permisos.Count > 0)
+            {
+                claims.Add(new Claim("perms", string.Join(',', permisos)));
+            }
+        }
         var idSede = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(idSede));
         // Profesionales van directo a Atencion; el resto (admin/coordinador), a Admision
@@ -845,7 +861,8 @@ app.MapGet("/api/profesionales/plantilla.xlsx", () =>
     {
         "No documento", "Tipo documento", "Primer Nombre", "Segundo Nombre",
         "Primer apellido", "Segundo apellido", "Tipo profesional", "Registro medico",
-        "Ciudad", "Celular", "SubCategoria", "Firma"
+        "Ciudad", "Celular", "SubCategoria", "Firma",
+        "Rol"
     };
     for (var i = 0; i < headers.Length; i++)
     {
@@ -856,7 +873,8 @@ app.MapGet("/api/profesionales/plantilla.xlsx", () =>
     }
     var ejemplo = new object[] {
         "1010101010", "CC", "JUAN", "CARLOS", "PEREZ", "MOLINA",
-        "ENFERMERIA", "RM-12345", "CALI", "300 1234567", "AUX ENFERMERIA", ""
+        "ENFERMERIA", "RM-12345", "CALI", "300 1234567", "AUX ENFERMERIA", "",
+        "Coordinador"
     };
     for (var i = 0; i < ejemplo.Length; i++) { ws.Cell(2, i + 1).Value = ejemplo[i]?.ToString(); }
 
@@ -866,6 +884,7 @@ app.MapGet("/api/profesionales/plantilla.xlsx", () =>
     ws.Cell(6, 1).Value = "2. 'Tipo profesional' y 'SubCategoria' deben existir en los catalogos del sistema.";
     ws.Cell(7, 1).Value = "3. 'Firma' (col 12): pega la imagen DENTRO de la celda. El importador la extrae como PNG.";
     ws.Cell(8, 1).Value = "4. Documentos repetidos hacen upsert; si la firma viene vacia se preserva la actual.";
+    ws.Cell(9, 1).Value = "5. 'Rol' (col 13): nombre EXACTO de un rol existente. Si el rol NO existe, el profesional se importa pero NO se crea usuario de login.";
 
     ws.Columns().AdjustToContents();
 

@@ -55,5 +55,5 @@ public interface IUsuarioAdminService
     /// Toma documento, nombre completo y celular del profesional. El correo y la clave los pasa el caller.
     /// El TenantUser queda vinculado al profesional via ProfesionalId.
     /// </summary>
-    Task<UsuarioDto?> CrearUsuarioDesdeProfesionalAsync(Guid profesionalId, string email, string password, Guid actor, CancellationToken ct = default);
+    Task<UsuarioDto?> CrearUsuarioDesdeProfesionalAsync(Guid profesionalId, string email, string password, Guid? rolId, Guid actor, CancellationToken ct = default);
 }

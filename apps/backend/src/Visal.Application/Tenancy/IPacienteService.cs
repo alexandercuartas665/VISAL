@@ -2,7 +2,10 @@ namespace Visal.Application.Tenancy;
 
 /// <summary>Un contacto de emergencia del paciente. El paciente puede tener varios.</summary>
 public sealed record PacienteContactoEmergenciaDto(
-    Guid? Id, string Nombre, string? Parentesco, string CodigoPais, string? Telefono, int Orden);
+    Guid? Id, string Nombre, string? Parentesco, string CodigoPais, string? Telefono, int Orden,
+    // Firma del acompañante — data URL (image/png base64) capturada con canvas.
+    // Opcional; null si el contacto no firmo.
+    string? FirmaUrl);
 
 public sealed record PacienteDto(
     Guid Id, string NumeroDocumento, string NombreCompleto, string? Ciudad, string? Telefono,

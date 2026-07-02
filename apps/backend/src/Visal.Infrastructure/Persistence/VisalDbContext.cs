@@ -949,6 +949,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Parentesco).HasMaxLength(80);
             b.Property(x => x.CodigoPais).HasMaxLength(5).IsRequired();
             b.Property(x => x.Telefono).HasMaxLength(40);
+            // Firma como data URL (image/png base64) — puede pesar decenas de
+            // KB, asi que usamos text sin cota para tolerar canvases grandes.
+            b.Property(x => x.FirmaUrl).HasColumnType("text");
             b.HasIndex(x => x.PacienteId);
         });
 

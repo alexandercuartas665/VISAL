@@ -25,4 +25,9 @@ public class PacienteContactoEmergencia : TenantEntity
     /// <summary>Orden de presentacion (1 = principal). Se usa para mantener el
     /// orden que el usuario escribio en la UI.</summary>
     public int Orden { get; set; }
+
+    /// <summary>Firma del acompañante como data URL (image/png base64) o URL a
+    /// archivo subido. Se captura con canvas al registrar el contacto.
+    /// Opcional — si el contacto no firmo, queda null.</summary>
+    public string? FirmaUrl { get; set; }
 }

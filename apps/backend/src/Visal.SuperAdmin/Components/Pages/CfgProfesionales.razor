@@ -7,8 +7,10 @@
 @using Visal.Application.Tenancy
 @inject IProfesionalConfigService Svc
 @inject IUsuarioAdminService UsuSvc
+@inject IRolService RolesSvc
 @inject ISucursalService SucSvc
 @inject IWebHostEnvironment Env
+@inject IJSRuntime JS
 
 <PageTitle>Profesionales - Visal</PageTitle>
 
@@ -161,10 +163,25 @@
                 }
 
                 <div class="ase-card-h" style="margin-top:16px;">Usuario de acceso</div>
-                <div class="usu-info">
-                    Si este profesional necesita acceder al modulo de atencion para ver sus turnos asignados,
-                    presiona "Crear usuario" arriba. El usuario heredara los datos personales del profesional.
-                </div>
+                @if (_usuarioVinculado is not null)
+                {
+                    <div class="usu-info">
+                        <div><strong>Correo:</strong> @_usuarioVinculado.Email</div>
+                        <div><strong>Rol:</strong> @(_usuarioVinculado.RolNombre ?? "(sin rol)")</div>
+                        <div><strong>Estado:</strong> @_usuarioVinculado.Estado</div>
+                    </div>
+                    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-outline-warning btn-sm" @onclick="ReiniciarClaveUsuario" disabled="@_busy">&#128274; Reiniciar clave</button>
+                        <a class="btn btn-outline-secondary btn-sm" href="/cfg-usuarios">Editar rol y sedes en /cfg-usuarios</a>
+                    </div>
+                }
+                else
+                {
+                    <div class="usu-info">
+                        Si este profesional necesita acceder al modulo de atencion para ver sus turnos asignados,
+                        presiona "Crear usuario" arriba. El usuario heredara los datos personales del profesional.
+                    </div>
+                }
             </div>
         }
     </div>
@@ -263,6 +280,17 @@
                     <small class="text-muted">El profesional la cambiara en su primer ingreso.</small>
                 </div>
                 <div class="ase-f ase-f-wide">
+                    <label>Rol *</label>
+                    <select class="form-select form-select-sm" @bind="_nuevoRolId">
+                        <option value="">Selecciona un rol...</option>
+                        @foreach (var r in _roles)
+                        {
+                            <option value="@r.Id">@r.Nombre</option>
+                        }
+                    </select>
+                    <small class="text-muted">Los permisos del rol determinan que modulos vera el usuario en el menu.</small>
+                </div>
+                <div class="ase-f ase-f-wide">
                     <small class="usu-info">
                         Se creara un usuario heredando documento, nombre, apellidos, celular y ciudad
                         de <strong>@_nombreCompleto</strong>. Quedara vinculado a este profesional para
@@ -315,13 +343,20 @@
     // Modal crear usuario para profesional.
     private bool _showCrearUsuModal;
     private string _nuevoEmail = "", _nuevoPwd = "";
+    private string _nuevoRolId = "";
     private string? _modalError;
     private bool _busyCrearUsu;
+
+    // Cache de roles del tenant (poblado en OnInitializedAsync).
+    private List<RolDto> _roles = new();
+
+    // Usuario ya creado para el profesional seleccionado (para reset clave / info).
+    private UsuarioDto? _usuarioVinculado;
 
     private void OpenCrearUsuario()
     {
         if (_id is null) { _error = "Guarda el profesional antes de crear su usuario."; return; }
-        _nuevoEmail = ""; _nuevoPwd = ""; _modalError = null;
+        _nuevoEmail = ""; _nuevoPwd = ""; _nuevoRolId = ""; _modalError = null;
         _showCrearUsuModal = true;
     }
 
@@ -330,17 +365,36 @@
     private async Task CrearUsuario()
     {
         if (_id is not Guid pid) { return; }
+        if (!Guid.TryParse(_nuevoRolId, out var rolId))
+        {
+            _modalError = "Selecciona un rol antes de crear el usuario.";
+            return;
+        }
         _modalError = null; _busyCrearUsu = true;
         try
         {
-            var u = await UsuSvc.CrearUsuarioDesdeProfesionalAsync(pid, _nuevoEmail, _nuevoPwd, await Actor());
+            var u = await UsuSvc.CrearUsuarioDesdeProfesionalAsync(pid, _nuevoEmail, _nuevoPwd, rolId, await Actor());
             if (u is null) { _modalError = "No se pudo crear (sin tenant activo)."; return; }
-            _ok = $"Usuario '{u.Email}' creado para {_nombreCompleto}.";
+            _ok = $"Usuario '{u.Email}' creado para {_nombreCompleto} con rol '{u.RolNombre}'.";
             _showCrearUsuModal = false;
+            _usuarioVinculado = u; // refrescar UI
         }
         catch (InvalidOperationException ex) { _modalError = ex.Message; }
         catch (Exception ex) { _modalError = "Error: " + ex.Message; }
         finally { _busyCrearUsu = false; }
+    }
+
+    private async Task ReiniciarClaveUsuario()
+    {
+        if (_usuarioVinculado is null) { return; }
+        var nueva = await JS.InvokeAsync<string?>("prompt", $"Nueva clave para {_usuarioVinculado.Email} (minimo 6 caracteres):", "");
+        if (string.IsNullOrWhiteSpace(nueva)) { return; }
+        try
+        {
+            var ok = await UsuSvc.ResetPasswordAsync(_usuarioVinculado.Id, nueva, await Actor());
+            _ok = ok ? "Clave reiniciada." : "No se pudo reiniciar la clave.";
+        }
+        catch (Exception ex) { _error = "Error: " + ex.Message; }
     }
 
     protected override async Task OnInitializedAsync()
@@ -348,6 +402,7 @@
         _tipos = (await Svc.ListTiposAsync(soloActivos: true)).ToList();
         _subcats = (await Svc.ListSubcategoriasAsync(soloActivos: true)).ToList();
         _sedes = (await SucSvc.ListAsync(soloActivas: true)).ToList();
+        _roles = (await RolesSvc.ListAsync()).Where(r => r.Activo).ToList();
         await LoadLista();
     }
 
@@ -373,6 +428,13 @@
         _registro = d.RegistroMedico; _ciudad = d.Ciudad; _celular = d.Celular; _firmaUrl = d.FirmaUrl;
         _subSel = new(d.SubCategoriaIds);
         _agencias = d.Agencias.ToList();
+        // Usuario vinculado al profesional: lo detectamos por documento (el
+        // PlatformUser hereda el documento del profesional al crearse desde
+        // este modulo). Si no existe, _usuarioVinculado queda null y la UI
+        // muestra el CTA "Crear usuario".
+        _usuarioVinculado = string.IsNullOrWhiteSpace(_doc)
+            ? null
+            : (await UsuSvc.ListAsync()).FirstOrDefault(u => u.Documento == _doc);
         _showForm = true; _error = _ok = null;
     }
 
@@ -497,6 +559,10 @@
                     var ciudad = ws.Cell(r, 9).GetString().Trim();
                     var celular = ws.Cell(r, 10).GetString().Trim();
                     var subcatNombre = ws.Cell(r, 11).GetString().Trim();
+                    // Columna 12 = Firma (imagen embebida). Columna 13 = Rol (nombre).
+                    // Si el rol no existe entre los roles definidos, NO se crea usuario
+                    // pero el profesional si se guarda — asi el import no aborta la fila.
+                    var rolNombre = ws.Cell(r, 13).GetString().Trim();
 
                     var tipo = tipos.FirstOrDefault(t => string.Equals(t.Nombre.Trim(), tipoProfNombre, StringComparison.OrdinalIgnoreCase));
                     if (tipo is null)
@@ -566,28 +632,44 @@
 
                     if (_importCrearUsuario)
                     {
-                        // El login acepta documento o email; igual creamos un email
-                        // sintetico {doc}@visal.travels porque PlatformUser lo
-                        // requiere unico. La clave se iguala al documento (lo que
-                        // el profesional ya memoriza). El backend exige >= 6
-                        // chars; documentos cortos se rellenan con ceros.
-                        var email = $"{doc}@visal.travels";
-                        var pwd = doc.Length >= 6 ? doc : doc.PadLeft(6, '0');
-                        try
+                        // Validacion del rol: si el Excel no trae rol, o el nombre no
+                        // existe entre los roles definidos, NO creamos usuario. El
+                        // profesional ya quedo guardado; solo saltamos la creacion.
+                        Guid? rolIdImport = null;
+                        if (string.IsNullOrWhiteSpace(rolNombre))
                         {
-                            await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, actor);
+                            _importLog.Add($"[..]  Fila {r}: usuario NO creado (falta columna Rol).");
                         }
-                        catch (InvalidOperationException ex)
+                        else
                         {
-                            // Usuario ya existe o falta dato — no es fatal para el import.
-                            _importLog.Add($"[..]  Fila {r}: usuario no creado ({ex.Message}).");
+                            var rolMatch = _roles.FirstOrDefault(x => string.Equals(x.Nombre.Trim(), rolNombre, StringComparison.OrdinalIgnoreCase));
+                            if (rolMatch is null)
+                            {
+                                _importLog.Add($"[..]  Fila {r}: usuario NO creado (rol '{rolNombre}' no existe en catalogo).");
+                            }
+                            else
+                            {
+                                rolIdImport = rolMatch.Id;
+                            }
                         }
-                        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+
+                        if (rolIdImport is Guid rolIdOk)
                         {
-                            // Choque de indice unico (email/documento ya en uso por
-                            // otro flujo). No es fatal: el profesional YA quedo
-                            // guardado en la fila 559; solo no se creo el user.
-                            _importLog.Add($"[..]  Fila {r}: usuario no creado ({DetalleError(ex)}).");
+                            // Email sintetico + clave = documento (con padding si < 6 chars).
+                            var email = $"{doc}@visal.travels";
+                            var pwd = doc.Length >= 6 ? doc : doc.PadLeft(6, '0');
+                            try
+                            {
+                                await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, rolIdOk, actor);
+                            }
+                            catch (InvalidOperationException ex)
+                            {
+                                _importLog.Add($"[..]  Fila {r}: usuario no creado ({ex.Message}).");
+                            }
+                            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+                            {
+                                _importLog.Add($"[..]  Fila {r}: usuario no creado ({DetalleError(ex)}).");
+                            }
                         }
                     }
 

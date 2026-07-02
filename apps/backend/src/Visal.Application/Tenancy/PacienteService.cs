@@ -39,7 +39,7 @@ public sealed class PacienteService : IPacienteService
         var contactos = await _db.PacienteContactosEmergencia.AsNoTracking()
             .Where(c => c.PacienteId == id)
             .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
-            .Select(c => new PacienteContactoEmergenciaDto(c.Id, c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden))
+            .Select(c => new PacienteContactoEmergenciaDto(c.Id, c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden, c.FirmaUrl))
             .ToListAsync(ct);
         return new PacienteDetailDto(
             p.Id, p.NumeroDocumento, p.TipoDocumento,
@@ -193,7 +193,8 @@ public sealed class PacienteService : IPacienteService
                     Parentesco = c.Parentesco?.Trim(),
                     CodigoPais = string.IsNullOrWhiteSpace(c.CodigoPais) ? "+57" : c.CodigoPais.Trim(),
                     Telefono = c.Telefono?.Trim(),
-                    Orden = c.Orden > 0 ? c.Orden : i + 1
+                    Orden = c.Orden > 0 ? c.Orden : i + 1,
+                    FirmaUrl = string.IsNullOrWhiteSpace(c.FirmaUrl) ? null : c.FirmaUrl
                 })
                 .ToList();
             if (nuevos.Count > 0) { _db.PacienteContactosEmergencia.AddRange(nuevos); }

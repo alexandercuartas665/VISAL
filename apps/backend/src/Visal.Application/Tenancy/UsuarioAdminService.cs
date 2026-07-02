@@ -226,7 +226,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         return true;
     }
 
-    public async Task<UsuarioDto?> CrearUsuarioDesdeProfesionalAsync(Guid profesionalId, string email, string password, Guid actor, CancellationToken ct = default)
+    public async Task<UsuarioDto?> CrearUsuarioDesdeProfesionalAsync(Guid profesionalId, string email, string password, Guid? rolId, Guid actor, CancellationToken ct = default)
     {
         if (_tenant.TenantId is not Guid tid) { return null; }
         var prof = await _db.Profesionales.AsNoTracking().FirstOrDefaultAsync(p => p.Id == profesionalId, ct)
@@ -291,7 +291,8 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             Email = email,
             TenantRole = TenantRole.Advisor,
             Status = PlatformUserStatus.Active,
-            ProfesionalId = profesionalId
+            ProfesionalId = profesionalId,
+            RolId = rolId
         };
         _db.TenantUsers.Add(tu);
         await _db.SaveChangesAsync(ct);

@@ -277,6 +277,7 @@
                     {
                         var idx = i;
                         var c = _contactos[idx];
+                        var canvasId = $"ase-firma-canvas-{idx}";
                         <div class="ase-form" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;">
                             <div class="ase-f ase-f-wide"><label>Nombre (#@(idx + 1))</label>
                                 <input class="form-control form-control-sm" @bind="c.Nombre" />
@@ -293,6 +294,45 @@
                                 </div>
                             </div>
                             <button type="button" class="btn btn-link text-danger btn-sm" style="align-self:end;" @onclick="() => QuitarContactoEmergencia(idx)" title="Quitar contacto">&#128465; Quitar</button>
+
+                            @* ===== Firma del acompañante ===== *@
+                            <div style="grid-column:1/-1; margin-top:6px; padding-top:8px; border-top:1px dashed #e2e8f0;">
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <strong style="font-size:12px; color:#334155;">Firma del acompañante</strong>
+                                    @if (!string.IsNullOrEmpty(c.FirmaUrl))
+                                    {
+                                        <span style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;">&#10003; Firmada</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;">Sin firma</span>
+                                    }
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ToggleFirma(idx)">
+                                        @(c.FirmaAbierta ? "Cerrar panel" : (string.IsNullOrEmpty(c.FirmaUrl) ? "Capturar firma" : "Recapturar firma"))
+                                    </button>
+                                    @if (!string.IsNullOrEmpty(c.FirmaUrl))
+                                    {
+                                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => LimpiarFirmaGuardada(idx)">Quitar firma</button>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrEmpty(c.FirmaUrl) && !c.FirmaAbierta)
+                                {
+                                    <div style="margin-top:8px;">
+                                        <img src="@c.FirmaUrl" alt="Firma acompañante" style="max-height:80px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; padding:2px;" />
+                                    </div>
+                                }
+                                @if (c.FirmaAbierta)
+                                {
+                                    <div style="margin-top:8px;">
+                                        <div style="font-size:11px; color:#64748b; margin-bottom:4px;">Firma con el dedo (movil) o el mouse (escritorio).</div>
+                                        <canvas id="@canvasId" style="width:100%; max-width:420px; height:130px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; touch-action:none;"></canvas>
+                                        <div style="display:flex; gap:8px; margin-top:6px;">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => LimpiarCanvasAsync(canvasId)">&#129529; Limpiar</button>
+                                            <button type="button" class="btn btn-primary btn-sm" @onclick="() => GuardarFirmaCanvasAsync(idx, canvasId)">&#128190; Guardar firma</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
                         </div>
                     }
 
@@ -678,6 +718,67 @@
         for (var i = 0; i < _contactos.Count; i++) { _contactos[i].Orden = i + 1; }
     }
 
+    /// <summary>
+    /// Muestra/oculta el panel de firma para el contacto en <paramref name="idx"/>.
+    /// Al abrir, deferimos la inicializacion del canvas hasta despues del render
+    /// via OnAfterRenderAsync (visalFirma.init busca el elemento por id).
+    /// </summary>
+    private async Task ToggleFirma(int idx)
+    {
+        if (idx < 0 || idx >= _contactos.Count) { return; }
+        var abriendo = !_contactos[idx].FirmaAbierta;
+        _contactos[idx].FirmaAbierta = abriendo;
+        _canvasesPorInicializar.Clear();
+        if (abriendo)
+        {
+            _canvasesPorInicializar.Add($"ase-firma-canvas-{idx}");
+        }
+    }
+
+    private async Task LimpiarCanvasAsync(string canvasId)
+    {
+        try { await JS.InvokeVoidAsync("visalFirma.clear", canvasId); } catch { }
+    }
+
+    /// <summary>
+    /// Extrae el trazo del canvas como data URL y lo asigna al contacto. El
+    /// dataURL viaja despues en el SavePacienteRequest cuando el usuario pulse
+    /// "Guardar paciente" — no persiste solo.
+    /// </summary>
+    private async Task GuardarFirmaCanvasAsync(int idx, string canvasId)
+    {
+        if (idx < 0 || idx >= _contactos.Count) { return; }
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string?>("visalFirma.getDataUrl", canvasId);
+            if (string.IsNullOrWhiteSpace(dataUrl)) { return; }
+            _contactos[idx].FirmaUrl = dataUrl;
+            _contactos[idx].FirmaAbierta = false;
+        }
+        catch { /* firma vacia o canvas no init — silencio */ }
+    }
+
+    private void LimpiarFirmaGuardada(int idx)
+    {
+        if (idx < 0 || idx >= _contactos.Count) { return; }
+        _contactos[idx].FirmaUrl = null;
+    }
+
+    /// <summary>Ids de canvas que abrimos en el ciclo actual y aun no
+    /// inicializamos. Se procesan en OnAfterRenderAsync (el DOM ya existe).</summary>
+    private readonly List<string> _canvasesPorInicializar = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_canvasesPorInicializar.Count == 0) { return; }
+        var pendientes = _canvasesPorInicializar.ToArray();
+        _canvasesPorInicializar.Clear();
+        foreach (var canvasId in pendientes)
+        {
+            try { await JS.InvokeVoidAsync("visalFirma.init", canvasId); } catch { }
+        }
+    }
+
     /// <summary>Modelo editable de UI para un contacto de emergencia. No persiste
     /// directo: en Save se convierte a PacienteContactoEmergenciaDto.</summary>
     private sealed class ContactoEmergenciaEdit
@@ -688,6 +789,12 @@
         public string CodigoPais { get; set; } = "+57";
         public string? Telefono { get; set; }
         public int Orden { get; set; }
+        /// <summary>Firma como data URL (image/png base64). Se llena al pulsar
+        /// "Guardar firma" del canvas. Null si no firmo.</summary>
+        public string? FirmaUrl { get; set; }
+        /// <summary>Solo UI: marca si el bloque de firma esta abierto para
+        /// mostrar el canvas. No persiste.</summary>
+        public bool FirmaAbierta { get; set; }
     }
 
     private bool _busy; private string? _error, _ok;
@@ -853,7 +960,8 @@
                 Parentesco = c.Parentesco,
                 CodigoPais = string.IsNullOrWhiteSpace(c.CodigoPais) ? "+57" : c.CodigoPais,
                 Telefono = c.Telefono,
-                Orden = c.Orden
+                Orden = c.Orden,
+                FirmaUrl = c.FirmaUrl
             }).ToList();
         if (_contactos.Count == 0 && !string.IsNullOrWhiteSpace(d.ContactoEmergencia))
         {
@@ -900,7 +1008,8 @@
                         c.Id, c.Nombre.Trim(), c.Parentesco?.Trim(),
                         string.IsNullOrWhiteSpace(c.CodigoPais) ? "+57" : c.CodigoPais.Trim(),
                         c.Telefono?.Trim(),
-                        c.Orden > 0 ? c.Orden : i + 1))
+                        c.Orden > 0 ? c.Orden : i + 1,
+                        c.FirmaUrl))
                     .ToList(),
                 _activo);
             var saved = await Svc.SaveAsync(req, await Actor());
@@ -1245,7 +1354,8 @@
                     {
                         contactosEm.Add(new PacienteContactoEmergenciaDto(
                             Id: null, Nombre: emNombre,
-                            Parentesco: emPar, CodigoPais: "+57", Telefono: emTel, Orden: 1));
+                            Parentesco: emPar, CodigoPais: "+57", Telefono: emTel, Orden: 1,
+                            FirmaUrl: null));
                     }
 
                     // Activo: si el Excel no trae nada, asumimos que el usuario quiere

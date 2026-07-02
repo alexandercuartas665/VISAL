@@ -53,43 +53,64 @@
     {
         <div class="visal-nav-label">Operacion Clinica</div>
 
-        <NavLink class="visal-nav-link" href="admision">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>
-            <span>Admision</span>
-        </NavLink>
+        @if (Puede("pacientes"))
+        {
+            <NavLink class="visal-nav-link" href="admision">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>
+                <span>Admision</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="asignacion">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
-            <span>Asignacion</span>
-        </NavLink>
+        @if (Puede("asignacion"))
+        {
+            <NavLink class="visal-nav-link" href="asignacion">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
+                <span>Asignacion</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="coordinacion">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-            <span>Coordinacion</span>
-        </NavLink>
+        @if (Puede("coordinacion"))
+        {
+            <NavLink class="visal-nav-link" href="coordinacion">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+                <span>Coordinacion</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="atencion">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
-            <span>Atencion</span>
-        </NavLink>
+        @if (Puede("profesionales"))
+        {
+            <NavLink class="visal-nav-link" href="atencion">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+                <span>Atencion</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="turnos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><circle cx="18" cy="18" r="4"/><path d="M18 16.5V18l1 1"/></svg>
-            <span>Turnos</span>
-        </NavLink>
+        @if (Puede("turnos"))
+        {
+            <NavLink class="visal-nav-link" href="turnos">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><circle cx="18" cy="18" r="4"/><path d="M18 16.5V18l1 1"/></svg>
+                <span>Turnos</span>
+            </NavLink>
+        }
 
         @* Historias Clinicas y Notas Medicas no aparecen como modulos independientes.
            Se acceden como submodulos modales desde /atencion (boton Historia Medica y Notas). *@
 
-        <NavLink class="visal-nav-link" href="ordenes">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>
-            <span>Ordenes Clinicas</span>
-        </NavLink>
+        @if (Puede("ordenes"))
+        {
+            <NavLink class="visal-nav-link" href="ordenes">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>
+                <span>Ordenes Clinicas</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="formularios">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
-            <span>Formularios</span>
-        </NavLink>
+        @if (Puede("formularios"))
+        {
+            <NavLink class="visal-nav-link" href="formularios">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
+                <span>Formularios</span>
+            </NavLink>
+        }
 
         <div class="visal-nav-label">Interoperabilidad</div>
 
@@ -201,25 +222,37 @@
 
         <div class="visal-nav-label">Configuracion de la Entidad</div>
 
-        <NavLink class="visal-nav-link" href="cfg-empresa">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/></svg>
-            <span>Configuracion de Empresa</span>
-        </NavLink>
+        @if (Puede("cfg-empresa"))
+        {
+            <NavLink class="visal-nav-link" href="cfg-empresa">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/></svg>
+                <span>Configuracion de Empresa</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="cfg-interoperabilidad">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-            <span>Configuracion de Interoperabilidad</span>
-        </NavLink>
+        @if (Puede("cfg-interoperabilidad"))
+        {
+            <NavLink class="visal-nav-link" href="cfg-interoperabilidad">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+                <span>Configuracion de Interoperabilidad</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="cfg-roles">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>
-            <span>Roles y Permisos</span>
-        </NavLink>
+        @if (Puede("cfg-roles"))
+        {
+            <NavLink class="visal-nav-link" href="cfg-roles">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+                <span>Roles y Permisos</span>
+            </NavLink>
+        }
 
-        <NavLink class="visal-nav-link" href="cfg-usuarios">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21a8 8 0 0 0-16 0"/><circle cx="10" cy="8" r="5"/><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/></svg>
-            <span>Administracion de Usuarios</span>
-        </NavLink>
+        @if (Puede("cfg-usuarios"))
+        {
+            <NavLink class="visal-nav-link" href="cfg-usuarios">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21a8 8 0 0 0-16 0"/><circle cx="10" cy="8" r="5"/><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/></svg>
+                <span>Administracion de Usuarios</span>
+            </NavLink>
+        }
 
         @* MI AGENCIA: ultimo grupo del sidebar, contiene plantillas y mi cuenta. *@
         <div class="visal-nav-label">Mi agencia</div>
@@ -227,6 +260,13 @@
         <NavLink class="visal-nav-link" href="plantillas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>
             <span>Plantillas</span>
+        </NavLink>
+
+        @* Mi perfil: autogestion de datos personales. Visible para todos los usuarios
+           logueados (admin, coordinador, profesional). *@
+        <NavLink class="visal-nav-link" href="mi-perfil">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></svg>
+            <span>Mi perfil</span>
         </NavLink>
 
         @if (_esAdminAgencia)
@@ -325,6 +365,19 @@
     private string? _tenantSlogan;
     private string _roleLabel = "Operador de plataforma";
     private string _avatar = "SA";
+    /// <summary>Lista de modulos con permiso Ver que trae el claim "perms".
+    /// null = usuario sin rol/permisos → damos acceso total (compat legacy).</summary>
+    private HashSet<string>? _perms;
+
+    /// <summary>True si el usuario puede ver el modulo indicado. Los admins de
+    /// agencia (Owner/Admin) y el super admin de plataforma ven todo — no se
+    /// filtran por permisos porque necesitan acceso operacional completo.</summary>
+    private bool Puede(string modulo)
+    {
+        if (_showAdmin || _esAdminAgencia) { return true; }
+        if (_perms is null) { return true; } // compat: sin claim = sin restriccion
+        return _perms.Contains(modulo);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -348,6 +401,14 @@
 
         _userName = state.User.Identity?.Name;
         _avatar = Initials(_userName);
+
+        // Cargamos el claim "perms" (lista de modulos separada por coma) para
+        // filtrar los NavLinks. Si no viene, dejamos _perms=null → Puede()
+        // retorna true (compat con usuarios sin rol/permisos configurados).
+        var permsClaim = state.User.FindFirst("perms")?.Value;
+        _perms = string.IsNullOrWhiteSpace(permsClaim)
+            ? null
+            : new HashSet<string>(permsClaim.Split(',', StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase);
 
         if (isPlatformOperator)
         {

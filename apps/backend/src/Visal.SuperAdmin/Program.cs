@@ -642,6 +642,37 @@ app.MapPost("/webhooks/evolution", async (
         : Results.Accepted();
 }).AllowAnonymous().DisableAntiforgery();
 
+// Webhook Gupshup por linea. A diferencia del Evolution (que trae el nombre
+// de instancia y valida contra un token global), Gupshup no manda
+// identificacion en el payload -- por eso identificamos + autenticamos con
+// un token opaco unico por linea en el path: /webhooks/gupshup/{token}.
+// Si coincide con WhatsAppLine.InboundToken, la linea nos da el TenantId y
+// pasamos a IngestTrustedAsync. Regenerable desde /lineas si se filtra
+// (rota sin tocar la App de Gupshup). Ningun error 5xx: acusamos 200/401
+// rapido para que Gupshup no reintente ni llene el log.
+app.MapPost("/webhooks/gupshup/{token}", async (
+    string token,
+    HttpRequest request,
+    IApplicationDbContext db,
+    Visal.Application.Tenancy.IChatIngestService ingest,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(token) || token.Length > 128) { return Results.Unauthorized(); }
+    var line = await db.WhatsAppLines
+        .IgnoreQueryFilters()
+        .FirstOrDefaultAsync(l => l.InboundToken == token, ct);
+    if (line is null) { return Results.Unauthorized(); }
+
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+    var payload = Visal.SuperAdmin.RealTime.GupshupWebhookParser.Parse(doc.RootElement);
+    if (payload is null) { return Results.Ok(new { status = "ignored" }); }
+
+    var result = await ingest.IngestTrustedAsync(line.TenantId, payload, ct);
+    return result == Visal.Application.Tenancy.ChatIngestResult.Duplicate
+        ? Results.Ok(new { status = "duplicate" })
+        : Results.Accepted();
+}).AllowAnonymous().DisableAntiforgery();
+
 // Endpoint publico que recibe la firma capturada en el celular del paciente.
 // La pagina /firma/{token} la sirve la propia app Blazor (componente FirmaPacienteRemota).
 // La submission usa este POST API porque persistir desde el Blazor anonimo sin tenant

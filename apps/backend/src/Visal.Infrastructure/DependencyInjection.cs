@@ -51,6 +51,12 @@ public static class DependencyInjection
         services.AddScoped<Application.Common.IEmailSender, Email.SmtpEmailSender>();
         services.AddHttpClient<Visal.Application.Admin.IWompiApiClient, Wompi.WompiApiClient>();
         services.AddHttpClient<Visal.Application.Admin.IEvolutionApiClient, Evolution.EvolutionApiClient>();
+        services.AddHttpClient<Visal.Application.Admin.IGupshupApiClient, Gupshup.GupshupApiClient>();
+        // Providers WhatsApp: resolver + implementaciones concretas (Evolution y
+        // Gupshup). Scoped porque comparten DbContext scoped.
+        services.AddScoped<WhatsApp.EvolutionWhatsAppProvider>();
+        services.AddScoped<WhatsApp.GupshupWhatsAppProvider>();
+        services.AddScoped<Application.Tenancy.WhatsApp.IWhatsAppProviderResolver, WhatsApp.WhatsAppProviderResolver>();
         services.AddHttpClient<Visal.Application.Tenancy.IAiProviderClient, Ai.AiProviderClient>();
         services.AddHttpClient<Visal.Application.Auth.IGoogleOAuthClient, Auth.GoogleOAuthClient>();
         services.AddScoped<DatabaseSeeder>();

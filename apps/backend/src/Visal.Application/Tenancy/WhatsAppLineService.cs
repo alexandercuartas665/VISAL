@@ -25,7 +25,7 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
         return await _db.WhatsAppLines
             .AsNoTracking()
             .OrderBy(l => l.InstanceName)
-            .Select(l => new WhatsAppLineDto(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt))
+            .Select(l => new WhatsAppLineDto(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt, l.Provider, l.GupshupAppId, l.InboundToken))
             .ToListAsync(cancellationToken);
     }
 
@@ -42,17 +42,32 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
             InstanceName = request.InstanceName.Trim(),
             PhoneNumber = request.PhoneNumber?.Trim(),
             Status = WhatsAppLineStatus.Created,
-            LastStatusAt = _timeProvider.GetUtcNow()
+            LastStatusAt = _timeProvider.GetUtcNow(),
+            Provider = request.Provider,
+            GupshupAppId = request.Provider == WhatsAppProvider.Gupshup ? request.GupshupAppId : null,
+            // Lineas Gupshup nacen con un token de webhook opaco. Se genera
+            // aca (base64url 32 bytes ~ 43 chars) para que la UI pueda mostrar
+            // ya la URL a copiar sin viajes extra. Regenerable si se filtra.
+            InboundToken = request.Provider == WhatsAppProvider.Gupshup ? GenerateInboundToken() : null,
         };
         _db.WhatsAppLines.Add(line);
 
         _audit.Write(actorUserId, "whatsapp-line.create", nameof(WhatsAppLine), line.Id,
             previousValue: null,
-            newValue: new { line.InstanceName, line.PhoneNumber },
+            newValue: new { line.InstanceName, line.PhoneNumber, provider = line.Provider.ToString() },
             tenantId: tenantId);
 
         await _db.SaveChangesAsync(cancellationToken);
         return Map(line);
+    }
+
+    /// <summary>Token opaco base64url ~43 chars, criptograficamente aleatorio.
+    /// Sirve para el path del webhook Gupshup: /webhooks/gupshup/{token}.</summary>
+    private static string GenerateInboundToken()
+    {
+        Span<byte> bytes = stackalloc byte[32];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     public async Task<WhatsAppLineDto?> ChangeStatusAsync(Guid lineId, WhatsAppLineStatus status, Guid actorUserId, CancellationToken cancellationToken = default)
@@ -114,5 +129,5 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
     }
 
     private static WhatsAppLineDto Map(WhatsAppLine l) =>
-        new(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt);
+        new(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt, l.Provider, l.GupshupAppId, l.InboundToken);
 }

@@ -2,10 +2,15 @@
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.WhatsApp
+@using Visal.Domain.Enums
 @implements IDisposable
 @inject IWhatsAppLineService LinesSvc
 @inject IWhatsAppConnectorService ConnectorSvc
 @inject IWebhookAdminService WebhookSvc
+@inject IGupshupConfigService GupshupSvc
+@inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>Lineas WhatsApp - Visal</PageTitle>
 
@@ -175,30 +180,53 @@ else
     }
     else
     {
-        <div class="card" style="max-width:1040px;padding:6px 16px;">
+        <div class="card" style="max-width:1180px;padding:6px 16px;">
             <table class="table table-hover align-middle" style="margin-bottom:0;">
                 <thead>
-                    <tr><th>Linea</th><th>Telefono</th><th>Estado</th><th>Ultima conexion</th><th class="text-end">Acciones</th></tr>
+                    <tr><th>Linea</th><th>Proveedor</th><th>Telefono</th><th>Estado</th><th>Ultima conexion</th><th class="text-end">Acciones</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var l in _lines)
                     {
                         <tr>
                             <td style="font-weight:600;">@l.InstanceName</td>
+                            <td>
+                                @if (l.Provider == WhatsAppProvider.Gupshup)
+                                {
+                                    <span class="badge" style="background:#7c3aed;color:#fff;">Gupshup</span>
+                                }
+                                else
+                                {
+                                    <span class="badge" style="background:#0ea5e9;color:#fff;">Evolution</span>
+                                }
+                            </td>
                             <td style="font-size:12px;color:var(--muted-foreground);">@(string.IsNullOrWhiteSpace(l.PhoneNumber) ? "—" : l.PhoneNumber)</td>
                             <td><span class="badge bg-@StatusColor(l.Status)">@StatusText(l.Status)</span></td>
                             <td style="font-size:12px;color:var(--muted-foreground);">@(l.LastConnectedAt is { } c ? c.LocalDateTime.ToString("dd MMM HH:mm") : "Nunca")</td>
                             <td class="text-end" style="white-space:nowrap;">
+                                @if (l.Provider == WhatsAppProvider.Gupshup)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenWebhookAsync(l)" disabled="@_busy" title="Ver URL del webhook para pegar en Gupshup">Webhook</button>
+                                }
                                 @if (l.Status == WhatsAppLineStatus.Connected)
                                 {
                                     <button class="btn btn-sm btn-primary" @onclick="() => OpenTest(l)" disabled="@_busy">Probar envio</button>
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => RefreshAsync(l.Id)" disabled="@_busy">Actualizar</button>
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectAsync(l.Id)" disabled="@_busy">Desconectar</button>
+                                    @if (l.Provider == WhatsAppProvider.Evolution)
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => RefreshAsync(l.Id)" disabled="@_busy">Actualizar</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectAsync(l.Id)" disabled="@_busy">Desconectar</button>
+                                    }
                                 }
-                                else
+                                else if (l.Provider == WhatsAppProvider.Evolution)
                                 {
                                     <button class="btn btn-sm btn-primary" @onclick="() => ConnectAsync(l)" disabled="@_busy">Conectar / QR</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => RefreshAsync(l.Id)" disabled="@_busy">Actualizar</button>
+                                }
+                                else
+                                {
+                                    @* Gupshup no requiere QR: el estado lo maneja Meta. Un boton para
+                                       marcar como Connected una vez validado; en G6.2 lo cablearemos. *@
+                                    <button class="btn btn-sm btn-primary" @onclick="() => MarkGupshupConnectedAsync(l.Id)" disabled="@_busy" title="Marcar linea Gupshup como Conectada">Activar</button>
                                 }
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => AskDeleteLine(l)" disabled="@_busy" title="Eliminar linea">Eliminar</button>
                             </td>
@@ -210,20 +238,55 @@ else
     }
 }
 
-@* ===== Modal: nueva linea ===== *@
+@* ===== Modal: nueva linea (multi-provider) ===== *@
 @if (_newOpen)
 {
     <div class="modal-overlay">
-        <div class="modal-dialog">
+        <div class="modal-dialog" style="max-width:560px;">
             <div class="modal-head">
                 <h3>Conectar nueva linea</h3>
                 <button class="modal-close" @onclick="() => _newOpen = false">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="field">
-                    <label class="form-label">Nombre de la linea *</label>
+                    <label class="form-label">Proveedor *</label>
+                    <div style="display:flex; gap:16px;">
+                        <label style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+                            <input type="radio" name="prov" value="Evolution" checked="@(_newProvider == WhatsAppProvider.Evolution)"
+                                   @onchange="() => _newProvider = WhatsAppProvider.Evolution" />
+                            <span><strong>Evolution API</strong><br /><small>Baileys / QR / servidor propio o maestro.</small></span>
+                        </label>
+                        <label style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+                            <input type="radio" name="prov" value="Gupshup" checked="@(_newProvider == WhatsAppProvider.Gupshup)"
+                                   @onchange="OnPickGupshupProviderAsync" />
+                            <span><strong>Gupshup</strong><br /><small>BSP oficial Meta / WABA verificada.</small></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="form-label">Nombre visible de la linea *</label>
                     <input class="form-control" @bind="_newName" autocomplete="off" placeholder="Ventas, Soporte, etc." />
                 </div>
+
+                @if (_newProvider == WhatsAppProvider.Gupshup)
+                {
+                    <div class="field">
+                        <label class="form-label">App Gupshup *</label>
+                        <select class="form-control" @bind="_newGupshupAppId">
+                            <option value="">— Selecciona una App configurada —</option>
+                            @foreach (var app in _gupshupApps)
+                            {
+                                <option value="@app.Id">@app.AppName @(string.IsNullOrEmpty(app.PhoneNumber) ? "" : $"({app.PhoneNumber})")</option>
+                            }
+                        </select>
+                        <div style="display:flex; gap:8px; margin-top:6px;">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OpenNewGupshupAppFromLine">+ Nueva App Gupshup</button>
+                        </div>
+                        <small class="text-muted">Cada App vive en tu dashboard Gupshup y trae su propio numero WABA + apikey.</small>
+                    </div>
+                }
+
                 @if (_newError is not null)
                 {
                     <div class="text-danger small">@_newError</div>
@@ -231,7 +294,102 @@ else
             </div>
             <div class="modal-foot">
                 <button class="btn btn-outline-secondary" @onclick="() => _newOpen = false">Cancelar</button>
-                <button class="btn btn-primary" @onclick="CreateAndConnectAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))">Crear y conectar</button>
+                <button class="btn btn-primary" @onclick="CreateAndConnectAsync"
+                        disabled="@(_busy || string.IsNullOrWhiteSpace(_newName) || (_newProvider == WhatsAppProvider.Gupshup && string.IsNullOrEmpty(_newGupshupAppId)))">
+                    @(_newProvider == WhatsAppProvider.Gupshup ? "Crear linea Gupshup" : "Crear y conectar")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===== Modal: Webhook URL de una linea Gupshup ===== *@
+@if (_webhookOpen && _webhookLine is { } wl)
+{
+    <div class="modal-overlay">
+        <div class="modal-dialog" style="max-width:640px;">
+            <div class="modal-head">
+                <h3>Webhook de "@wl.InstanceName"</h3>
+                <button class="modal-close" @onclick="() => _webhookOpen = false">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted" style="margin-top:0;">
+                    Pega esta URL en el dashboard Gupshup: <strong>Callback URL</strong> de la App.
+                    Cada linea tiene su propio token opaco: si se filtra, regeneralo aca sin tocar Gupshup.
+                </p>
+                <div class="field">
+                    <label class="form-label">URL del webhook</label>
+                    <div style="display:flex; gap:6px;">
+                        <input class="form-control" readonly value="@WebhookUrlFor(wl.InboundToken)" />
+                        <button class="btn btn-outline-secondary" @onclick="() => CopyWebhookAsync(wl.InboundToken)" title="Copiar al portapapeles">Copiar</button>
+                    </div>
+                    @if (_webhookCopied)
+                    {
+                        <div class="text-success small" style="margin-top:4px;">Copiado.</div>
+                    }
+                </div>
+                <div class="field">
+                    <button class="btn btn-outline-danger btn-sm" @onclick="() => RegenerateTokenAsync(wl.Id)" disabled="@_busy">
+                        Regenerar token
+                    </button>
+                    <small class="text-muted" style="margin-left:8px;">La URL vieja deja de funcionar al instante.</small>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-outline-secondary" @onclick="() => _webhookOpen = false">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===== Modal: alta/edicion de App Gupshup ===== *@
+@if (_gupshupAppOpen)
+{
+    <div class="modal-overlay">
+        <div class="modal-dialog" style="max-width:560px;">
+            <div class="modal-head">
+                <h3>@(_gupshupApp.Id == Guid.Empty ? "Nueva App Gupshup" : "Editar App Gupshup")</h3>
+                <button class="modal-close" @onclick="() => _gupshupAppOpen = false">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="field">
+                    <label class="form-label">App ID (GUID) *</label>
+                    <input class="form-control" @bind="_gupshupApp.AppIdText" placeholder="7bdba1f4-d014-48da-b6a8-6a5c7a5030d4" />
+                </div>
+                <div class="field">
+                    <label class="form-label">App Name *</label>
+                    <input class="form-control" @bind="_gupshupApp.AppName" placeholder="Nombre exacto de la app en Gupshup" />
+                </div>
+                <div class="field">
+                    <label class="form-label">WABA ID</label>
+                    <input class="form-control" @bind="_gupshupApp.WabaId" placeholder="1845528306425202" />
+                </div>
+                <div class="field">
+                    <label class="form-label">Numero WhatsApp (E.164) *</label>
+                    <input class="form-control" @bind="_gupshupApp.PhoneNumber" placeholder="15559799304 (sin +)" />
+                </div>
+                <div class="field">
+                    <label class="form-label">Nombre de visualizacion (Meta)</label>
+                    <input class="form-control" @bind="_gupshupApp.DisplayName" placeholder="VisalRT SAS" />
+                </div>
+                <div class="field">
+                    <label class="form-label">apikey @(_gupshupApp.Id == Guid.Empty ? "*" : "(dejar vacio para no cambiar)")</label>
+                    <input class="form-control" type="password" @bind="_gupshupApp.ApiKey"
+                           placeholder="@(_gupshupApp.Id == Guid.Empty ? "sk_..." : _gupshupApp.ApiKeyMasked ?? "sk_...")" />
+                    <small class="text-muted">Se cifra con Data Protection y NUNCA se muestra en pantalla ni en logs.</small>
+                </div>
+                <div class="field">
+                    <label class="form-label">Partner token (opcional, para dashboards)</label>
+                    <input class="form-control" type="password" @bind="_gupshupApp.PartnerToken" placeholder="Solo si vas a gestionar plantillas via Partner API" />
+                </div>
+                @if (_gupshupAppError is not null)
+                {
+                    <div class="text-danger small">@_gupshupAppError</div>
+                }
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-outline-secondary" @onclick="() => _gupshupAppOpen = false">Cancelar</button>
+                <button class="btn btn-primary" @onclick="SaveGupshupAppAsync" disabled="@_busy">Guardar</button>
             </div>
         </div>
     </div>
@@ -339,6 +497,34 @@ else
     private bool _newOpen;
     private string? _newName;
     private string? _newError;
+    private WhatsAppProvider _newProvider = WhatsAppProvider.Evolution;
+    // El select devuelve string; solo lo casteamos a Guid al submit.
+    private string _newGupshupAppId = string.Empty;
+    private List<GupshupConfigDto> _gupshupApps = new();
+
+    private bool _gupshupAppOpen;
+    private GupshupAppForm _gupshupApp = new();
+    private string? _gupshupAppError;
+
+    private bool _webhookOpen;
+    private WhatsAppLineDto? _webhookLine;
+    private bool _webhookCopied;
+
+    /// <summary>Formulario simple para el modal de App Gupshup. AppIdText es
+    /// string para tolerar guiones y validar al submit; el resto son strings
+    /// planos que se copian al SaveRequest.</summary>
+    private sealed class GupshupAppForm
+    {
+        public Guid Id { get; set; }
+        public string AppIdText { get; set; } = string.Empty;
+        public string AppName { get; set; } = string.Empty;
+        public string? WabaId { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? DisplayName { get; set; }
+        public string? ApiKey { get; set; }
+        public string? PartnerToken { get; set; }
+        public string? ApiKeyMasked { get; set; }
+    }
 
     private bool _qrOpen;
     private string? _qr;
@@ -456,28 +642,158 @@ else
         finally { _busy = false; }
     }
 
-    private void OpenNewLine()
+    private async void OpenNewLine()
     {
         _newError = null;
         _newName = null;
+        _newProvider = WhatsAppProvider.Evolution;
+        _newGupshupAppId = string.Empty;
+        // Pre-cargamos la lista para que el select este listo si el usuario elige Gupshup.
+        _gupshupApps = (await GupshupSvc.ListAsync()).ToList();
         _newOpen = true;
+        StateHasChanged();
+    }
+
+    private async Task OnPickGupshupProviderAsync()
+    {
+        _newProvider = WhatsAppProvider.Gupshup;
+        _gupshupApps = (await GupshupSvc.ListAsync()).ToList();
     }
 
     private async Task CreateAndConnectAsync()
     {
         _newError = null;
         if (string.IsNullOrWhiteSpace(_newName)) { _newError = "Escribe un nombre."; return; }
+        Guid? gupshupAppId = null;
+        if (_newProvider == WhatsAppProvider.Gupshup)
+        {
+            if (!Guid.TryParse(_newGupshupAppId, out var gid)) { _newError = "Selecciona una App Gupshup."; return; }
+            gupshupAppId = gid;
+        }
         _busy = true;
         try
         {
             var actor = await ActorAsync();
-            var line = await LinesSvc.CreateAsync(new CreateWhatsAppLineRequest(_newName!.Trim()), actor);
+            var line = await LinesSvc.CreateAsync(
+                new CreateWhatsAppLineRequest(_newName!.Trim(), Provider: _newProvider, GupshupAppId: gupshupAppId),
+                actor);
             if (line is null) { _newError = "No se pudo crear la linea."; return; }
             _newOpen = false;
             await ReloadAsync();
-            await ConnectAsync(line);
+            // Solo Evolution tiene flujo QR: para Gupshup mostramos el modal
+            // Webhook para que el usuario copie la URL a Gupshup.
+            if (line.Provider == WhatsAppProvider.Evolution)
+            {
+                await ConnectAsync(line);
+            }
+            else
+            {
+                _webhookLine = line;
+                _webhookCopied = false;
+                _webhookOpen = true;
+            }
         }
         finally { _busy = false; }
+    }
+
+    private void OpenNewGupshupAppFromLine()
+    {
+        // Precarga vacio para creacion.
+        _gupshupAppError = null;
+        _gupshupApp = new GupshupAppForm();
+        _gupshupAppOpen = true;
+    }
+
+    private async Task SaveGupshupAppAsync()
+    {
+        _gupshupAppError = null;
+        if (!Guid.TryParse(_gupshupApp.AppIdText, out var appGuid))
+        {
+            _gupshupAppError = "AppId invalido: debe ser un GUID.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_gupshupApp.AppName)) { _gupshupAppError = "Falta el AppName."; return; }
+        if (string.IsNullOrWhiteSpace(_gupshupApp.PhoneNumber)) { _gupshupAppError = "Falta el numero."; return; }
+        if (_gupshupApp.Id == Guid.Empty && string.IsNullOrWhiteSpace(_gupshupApp.ApiKey))
+        {
+            _gupshupAppError = "La apikey es obligatoria para crear.";
+            return;
+        }
+        _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            var req = new SaveGupshupConfigRequest(
+                AppId: appGuid,
+                AppName: _gupshupApp.AppName.Trim(),
+                WabaId: _gupshupApp.WabaId,
+                PhoneNumber: _gupshupApp.PhoneNumber,
+                DisplayName: _gupshupApp.DisplayName,
+                ApiKey: _gupshupApp.ApiKey,
+                PartnerToken: _gupshupApp.PartnerToken);
+            var saved = await GupshupSvc.UpsertAsync(_gupshupApp.Id == Guid.Empty ? null : _gupshupApp.Id, req, actor);
+            if (saved is null) { _gupshupAppError = "No se pudo guardar."; return; }
+            _gupshupApps = (await GupshupSvc.ListAsync()).ToList();
+            // Auto-selecciona la recien creada si estamos en el modal de linea nueva.
+            _newGupshupAppId = saved.Id.ToString();
+            _gupshupAppOpen = false;
+        }
+        finally { _busy = false; }
+    }
+
+    private void OpenWebhookAsync(WhatsAppLineDto line)
+    {
+        _webhookLine = line;
+        _webhookCopied = false;
+        _webhookOpen = true;
+    }
+
+    private async Task CopyWebhookAsync(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) { return; }
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", WebhookUrlFor(token));
+            _webhookCopied = true;
+        }
+        catch (TaskCanceledException) { _webhookCopied = true; }
+        catch { /* algunos navegadores bloquean clipboard sin HTTPS; el usuario puede copiar a mano */ }
+    }
+
+    private async Task RegenerateTokenAsync(Guid lineId)
+    {
+        _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            var newToken = await GupshupSvc.RegenerateInboundTokenAsync(lineId, actor);
+            if (newToken is null) { return; }
+            await ReloadAsync();
+            _webhookLine = _lines.FirstOrDefault(l => l.Id == lineId);
+            _webhookCopied = false;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task MarkGupshupConnectedAsync(Guid lineId)
+    {
+        _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            await LinesSvc.ChangeStatusAsync(lineId, WhatsAppLineStatus.Connected, actor);
+            await ReloadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    /// <summary>URL absoluta a copiar en el dashboard Gupshup. Detecta host
+    /// dinamicamente para funcionar en dev/staging/prod sin config.</summary>
+    private string WebhookUrlFor(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) { return "(sin token)"; }
+        var baseUri = new Uri(Nav.BaseUri).GetLeftPart(UriPartial.Authority);
+        return $"{baseUri}/webhooks/gupshup/{token}";
     }
 
     private async Task ConnectAsync(WhatsAppLineDto line)

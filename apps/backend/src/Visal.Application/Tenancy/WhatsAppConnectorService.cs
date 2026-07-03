@@ -1,5 +1,6 @@
 using Visal.Application.Admin;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.WhatsApp;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     private readonly ITenantContext _tenantContext;
     private readonly ISecretProtector _secretProtector;
     private readonly IEvolutionApiClient _client;
+    private readonly IWhatsAppProviderResolver _providers;
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _timeProvider;
 
@@ -20,6 +22,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         ITenantContext tenantContext,
         ISecretProtector secretProtector,
         IEvolutionApiClient client,
+        IWhatsAppProviderResolver providers,
         IAuditWriter audit,
         TimeProvider timeProvider)
     {
@@ -27,6 +30,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         _tenantContext = tenantContext;
         _secretProtector = secretProtector;
         _client = client;
+        _providers = providers;
         _audit = audit;
         _timeProvider = timeProvider;
     }
@@ -215,18 +219,13 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         {
             return new LineSendResult(false, FormatLineNotConnected(line));
         }
-        var server = await ResolveServerAsync(cancellationToken);
-        if (server is null)
-        {
-            return new LineSendResult(false, "No hay servidor Evolution configurado.");
-        }
 
         var digits = new string(phone.Where(char.IsDigit).ToArray());
-        var (baseUrl, apiKey) = server.Value;
-        var result = await _client.SendTextAsync(baseUrl, apiKey, EvoInstance(line), digits, text.Trim(), cancellationToken);
+        var provider = _providers.ForLine(line);
+        var result = await provider.SendTextAsync(line, digits, text.Trim(), cancellationToken);
 
         _audit.Write(actorUserId, "whatsapp-line.test-send", nameof(WhatsAppLine), line.Id,
-            previousValue: null, newValue: new { to = digits, ok = result.Ok }, tenantId: line.TenantId);
+            previousValue: null, newValue: new { to = digits, ok = result.Ok, provider = provider.Kind.ToString() }, tenantId: line.TenantId);
 
         if (!result.Ok)
         {
@@ -240,16 +239,11 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     {
         var ready = await ReadyLineAsync(lineId, phone, cancellationToken);
         if (ready.Error is not null) { return new LineSendResult(false, ready.Error); }
-        var (line, baseUrl, apiKey, instance, digits) = ready.Value;
+        var (line, digits) = ready.Value;
 
-        var result = mediaType switch
-        {
-            MessageMediaType.Audio => await _client.SendAudioAsync(baseUrl, apiKey, instance, digits, base64, cancellationToken),
-            MessageMediaType.Image => await _client.SendMediaAsync(baseUrl, apiKey, instance, digits, "image", base64, mimeType, fileName, caption, cancellationToken),
-            MessageMediaType.Video => await _client.SendMediaAsync(baseUrl, apiKey, instance, digits, "video", base64, mimeType, fileName, caption, cancellationToken),
-            MessageMediaType.Document => await _client.SendMediaAsync(baseUrl, apiKey, instance, digits, "document", base64, mimeType, fileName, caption, cancellationToken),
-            _ => new EvolutionSendResult(false, "Tipo de adjunto no soportado.")
-        };
+        var provider = _providers.ForLine(line);
+        var media = new MediaPayload(base64, PublicUrl: null, mimeType, fileName);
+        var result = await provider.SendMediaAsync(line, digits, mediaType, media, caption, cancellationToken);
         if (!result.Ok)
         {
             await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
@@ -262,8 +256,9 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     {
         var ready = await ReadyLineAsync(lineId, phone, cancellationToken);
         if (ready.Error is not null) { return new LineSendResult(false, ready.Error); }
-        var (line, baseUrl, apiKey, instance, digits) = ready.Value;
-        var result = await _client.SendLocationAsync(baseUrl, apiKey, instance, digits, latitude, longitude, name, null, cancellationToken);
+        var (line, digits) = ready.Value;
+        var provider = _providers.ForLine(line);
+        var result = await provider.SendLocationAsync(line, digits, latitude, longitude, name, address: null, cancellationToken);
         if (!result.Ok)
         {
             await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
@@ -272,18 +267,17 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         return new LineSendResult(true, null);
     }
 
-    // Resuelve linea conectada + servidor + numero normalizado. Error no nulo si algo falta.
-    private async Task<(string Error, (WhatsAppLine line, string baseUrl, string apiKey, string instance, string digits) Value)> ReadyLineAsync(Guid lineId, string phone, CancellationToken ct)
+    // Resuelve linea conectada + numero normalizado. Error no nulo si algo falta.
+    // El resolver de servidor ya no vive aca: cada IWhatsAppProvider sabe como
+    // levantar sus propias credenciales.
+    private async Task<(string Error, (WhatsAppLine line, string digits) Value)> ReadyLineAsync(Guid lineId, string phone, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(phone)) { return ("Indica el numero.", default); }
         var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, ct);
         if (line is null) { return ("La linea no existe.", default); }
         if (line.Status != WhatsAppLineStatus.Connected) { return (FormatLineNotConnected(line), default); }
-        var server = await ResolveServerAsync(ct);
-        if (server is null) { return ("No hay servidor Evolution configurado.", default); }
-        var (baseUrl, apiKey) = server.Value;
         var digits = new string(phone.Where(char.IsDigit).ToArray());
-        return (null!, (line, baseUrl, apiKey, EvoInstance(line), digits));
+        return (null!, (line, digits));
     }
 
     // Convierte el error crudo del cliente Evolution (HTTP 500 + JSON) en un mensaje
@@ -402,5 +396,5 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     }
 
     private static WhatsAppLineDto Map(WhatsAppLine l) =>
-        new(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt);
+        new(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt, l.Provider, l.GupshupAppId, l.InboundToken);
 }

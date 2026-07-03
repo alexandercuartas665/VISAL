@@ -9,9 +9,17 @@ public sealed record WhatsAppLineDto(
     WhatsAppLineStatus Status,
     Guid? AssignedToTenantUserId,
     DateTimeOffset? LastConnectedAt,
-    DateTimeOffset? LastStatusAt);
+    DateTimeOffset? LastStatusAt,
+    // Multi-proveedor: la UI muestra badge y decide que panel de config abrir.
+    WhatsAppProvider Provider = WhatsAppProvider.Evolution,
+    Guid? GupshupAppId = null,
+    string? InboundToken = null);
 
-public sealed record CreateWhatsAppLineRequest(string InstanceName, string? PhoneNumber = null);
+public sealed record CreateWhatsAppLineRequest(
+    string InstanceName,
+    string? PhoneNumber = null,
+    WhatsAppProvider Provider = WhatsAppProvider.Evolution,
+    Guid? GupshupAppId = null);
 
 public sealed record ChangeLineStatusRequest(WhatsAppLineStatus Status);
 

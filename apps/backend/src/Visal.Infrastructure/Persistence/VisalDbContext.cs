@@ -44,6 +44,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantUser> TenantUsers => Set<TenantUser>();
     public DbSet<TenantConfiguration> TenantConfigurations => Set<TenantConfiguration>();
     public DbSet<TenantEvolutionConfig> TenantEvolutionConfigs => Set<TenantEvolutionConfig>();
+    public DbSet<TenantGupshupConfig> TenantGupshupConfigs => Set<TenantGupshupConfig>();
     public DbSet<WhatsAppLine> WhatsAppLines => Set<WhatsAppLine>();
     public DbSet<PipelineStage> PipelineStages => Set<PipelineStage>();
     public DbSet<PipelineFieldDefinition> PipelineFieldDefinitions => Set<PipelineFieldDefinition>();
@@ -127,6 +128,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<PlatformUserStatus>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<LeadVisibility>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<WhatsAppLineStatus>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<WhatsAppProvider>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<LeadStatus>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<FollowUpTaskStatus>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<MessageDirection>().HaveConversion<string>().HaveMaxLength(40);
@@ -338,8 +340,29 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.InstanceName).HasMaxLength(200).IsRequired();
             b.Property(x => x.PhoneNumber).HasMaxLength(40);
+            // Token opaco del webhook entrante; formato base64url ~32-64 chars.
+            // Buscamos por este valor en el endpoint anonimo, por eso unique
+            // globalmente (no scoped a tenant): dos lineas de tenants distintos
+            // no pueden colisionar.
+            b.Property(x => x.InboundToken).HasMaxLength(128);
             b.HasIndex(x => new { x.TenantId, x.InstanceName }).IsUnique();
             b.HasIndex(x => x.AssignedToTenantUserId);
+            b.HasIndex(x => x.InboundToken).IsUnique().HasFilter("inbound_token IS NOT NULL");
+            b.HasIndex(x => new { x.TenantId, x.Provider });
+        });
+
+        modelBuilder.Entity<TenantGupshupConfig>(b =>
+        {
+            b.Property(x => x.AppName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.WabaId).HasMaxLength(80);
+            b.Property(x => x.PhoneNumber).HasMaxLength(40);
+            b.Property(x => x.DisplayName).HasMaxLength(200);
+            // Blobs cifrados (Data Protection): dejamos text sin cota; el
+            // ciphertext base64 supera los ~500 chars con facilidad.
+            b.Property(x => x.ApiKeyEncrypted).HasColumnType("text").IsRequired();
+            b.Property(x => x.PartnerTokenEncrypted).HasColumnType("text");
+            // Multiples Apps por tenant permitidas; unica por (tenant, appId).
+            b.HasIndex(x => new { x.TenantId, x.AppId }).IsUnique();
         });
 
         modelBuilder.Entity<PipelineStage>(b =>

@@ -36,6 +36,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IEvolutionConfigService, Tenancy.EvolutionConfigService>();
         services.AddScoped<Tenancy.IWhatsAppLineService, Tenancy.WhatsAppLineService>();
         services.AddScoped<Tenancy.IWhatsAppConnectorService, Tenancy.WhatsAppConnectorService>();
+        services.AddScoped<Tenancy.WhatsApp.IHsmTemplateService, Tenancy.WhatsApp.HsmTemplateService>();
+        services.AddScoped<Tenancy.WhatsApp.IGupshupConfigService, Tenancy.WhatsApp.GupshupConfigService>();
         services.AddScoped<Tenancy.IPipelineService, Tenancy.PipelineService>();
         services.AddScoped<Tenancy.ILeadService, Tenancy.LeadService>();
         services.AddScoped<Tenancy.ITenantApiService, Tenancy.TenantApiService>();

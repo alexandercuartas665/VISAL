@@ -6,6 +6,9 @@ namespace Visal.Api.Endpoints;
 /// <summary>
 /// Chat: webhook de ingesta de Evolution (anonimo, token por tenant; ver ADR-0006) y
 /// lectura/envio autenticado para asesores del tenant (politica TenantMember).
+///
+/// El webhook Gupshup vive en Visal.SuperAdmin/Program.cs (junto al de
+/// Evolution) porque ese es el proceso que corre en 5080 y tiene el parser.
 /// </summary>
 public static class ChatEndpoints
 {

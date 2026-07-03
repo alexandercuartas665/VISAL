@@ -82,38 +82,77 @@ def prompt_construccion(codigo: str, nombre_archivo: str, subfolder: str, npag: 
     {subfolder}
   ({npag} pagina(s) exportadas). Miralas ANTES de escribir cualquier codigo — te ayudan a distinguir tablas reales de campos sueltos.
 
-## Reglas de diseno
-1. **Cada tabla del docx debe ser una tabla del schema** (fieldType="table") con seedRows locked (lockRows=true) — NO campos sueltos. Si ves una tabla con celdas etiquetadas (Item / Observacion / etc), es una tabla seed.
-2. **Datos prellenados**: cuando en el docx aparece "NO REFIERE" o valores similares como default, usa la columna Observacion como select con options=["NO REFIERE","REFIERE"] + allowCustom=true + defaultValue="NO REFIERE" para que el operador pueda escribir libre encima.
-3. **Datos del paciente**: NO los reescribas. Usa la seccion estandar "Datos del Paciente (auto-llenado)" (id="auto-datos-paciente") con los 5 campos:
+## Reglas OBLIGATORIAS de interpretacion del docx
+
+### R1. Header y firma profesional — NO SE TOCAN
+- La seccion de datos del paciente (header) YA esta correcta en el sistema como "Datos del Paciente (auto-llenado)" (id="auto-datos-paciente"). NO la reescribas, NO la muevas, NO cambies sus 5 campos:
     nombre_paciente_consent (text), tipo_documento_consent (text),
     numero_documento_consent (text), edad_consent (number), fecha_atencion_consent (date).
-   Y setea el prefill_routes_json con las rutas Paciente (nombreCompleto/tipoDocumento/numeroDocumento/edad -> los targets *_consent) y Sistema (fechaActual -> fecha_atencion_consent).
-4. **HUELLA**: si el docx tiene cajas rectangulares para la huella dactilar, usa un `field/textarea` con label="HUELLA", widthColumns=3, rows=4, placeholder="Espacio para huella" — NO texto plano "HUELLAHUELLA" dentro de un parrafo.
-5. **Firmas**: usa la seccion estandar "Firmas (auto-llenadas)" con campos firma_paciente_consent y firma_profesional_consent y ruta prefill firmaProfesional.url -> firma_profesional_consent.
-6. **Textareas evaluables**: para conceptos, observaciones, planes, analisis y campos de texto largo, usa fieldType="textarea" con enableVoice=true habilitado (dictado por voz).
-7. **Campos SI/NO**: los que en el docx son "SI___O NO___" u opciones binarias, usalos como field/select con options=["Si","No"].
-8. Preserva declaracion del paciente, del responsable y del profesional COMO ESTAN en el docx. Solo elimina los prefijos residuales HUELLAHUELLA.
+- La seccion de firma profesional YA esta correcta como "Firmas (auto-llenadas)" con firma_paciente_consent y firma_profesional_consent. NO la reescribas.
+- PERO respeta el NUMERAL/orden del docx: si en el docx la firma profesional es el punto 5 o 6, ubicala como ultima seccion (antes de "Cierre" y "MEDICO" que van al final por convencion del sistema).
+
+### R2. Tablas con ultima columna VACIA sin titulo = casilla para marcar con X
+Cuando veas una tabla del docx con una ultima columna en blanco (sin encabezado), es una casilla para marcar. NO la ignores. Modelala asi:
+  - Agrega una columna extra al final llamada "Marca" con name="marca", fieldType="text", defaultValue=""
+  - Ejemplo tipico: tabla PROCEDIMIENTOS con columnas [Procedimiento, Descripcion, <vacia>] => 3 columnas donde la 3era es "Marca" (text libre para X o vacio)
+  - Ejemplo tipico: tabla BENEFICIOS con [Beneficio, <vacia>] => 2 columnas donde la 2da es "Marca"
+
+### R3. Guiones bajos (____________) = campo de entrada del usuario
+Cualquier campo del docx con formato "Etiqueta: ______________" o "Etiqueta ___________" es una entrada que el operador va a llenar en el sistema. NO lo dejes como texto plano dentro de un parrafo. Conviertelo a un field:
+  - Etiqueta con espacio corto => field/text con widthColumns segun tamano visual
+  - Textos largos multilinea (parrafos con muchos guiones) => field/textarea con enableVoice=true
+  - Fechas => field/date
+  - "Nombre: ________, CC: ______" => 2 fields separados en linea
+  - "SI___ O NO___" o "Si o No" => field/select con options=["Si","No"]
+
+### R4. Tablas del docx = tablas del schema (nunca campos sueltos)
+Cada tabla visual del docx se convierte en fieldType="table" con seedRows locked (lockRows=true), NUNCA en campos individuales sueltos. Si ves una tabla con celdas etiquetadas (Item / Observacion / etc), es una tabla seed. Confirma con las capturas de {subfolder}.
+
+### R5. Datos prellenados "NO REFIERE" u otros defaults
+Cuando en el docx aparece "NO REFIERE" o valores similares como default en la columna Observacion, usala como:
+    fieldType="select"
+    options=["NO REFIERE","REFIERE"] (u opciones apropiadas segun contexto)
+    allowCustom=true
+    defaultValue="NO REFIERE"
+Asi el operador ve la lista pero puede escribir libre encima.
+
+### R6. HUELLA dactilar
+Si el docx tiene cajas rectangulares para huella dactilar, usa `field/textarea` con label="HUELLA", widthColumns=3, rows=4, placeholder="Espacio para huella". NUNCA texto plano "HUELLAHUELLA" en un parrafo.
+
+### R7. Textareas evaluables
+Para conceptos, observaciones, planes, analisis y textos largos usa fieldType="textarea" con enableVoice=true (dictado por voz) para todos los formularios del sistema.
+
+### R8. Declaraciones del paciente / responsable / profesional
+Preserva las declaraciones textuales COMO ESTAN en el docx (mismo texto, respetando comas, saltos de linea). Solo elimina prefijos residuales tipo "HUELLAHUELLA" que pudieran quedar del parser.
+
+### R9. Numerales del docx en subheadings
+Si el docx numera secciones (1. DATOS, 2. INFORMACION SOBRE EL PROCEDIMIENTO, 3. DECLARACION DEL PACIENTE...), respetar el numero en los subheadings del schema (content="2. INFORMACION SOBRE EL PROCEDIMIENTO"). Ayuda al operador a ubicarse.
 
 ## Como escribir el rework
 Sigue el patron de los scripts ya probados en:
     C:\\DesarrolloIA\\Visal\\scripts\\Rework-HCFO*-*.ps1 y Add-PPFO113-Consentimiento.ps1
 Un solo script PowerShell que:
     - carga el schema actual (docker exec psql)
+    - **preserva las secciones "Datos del Paciente (auto-llenado)" y "Firmas (auto-llenadas)" si existen** (o las agrega si el consentimiento no las tiene aun)
     - construye el schema nuevo con hashtables
     - hace UPDATE sobre form_definitions.schema_json via docker exec psql
     - imprime el diff resultante
 
 Guarda backup previo en C:\\Users\\acuartas\\AppData\\Local\\Temp\\* antes del UPDATE.
 
+**IMPORTANTE — bug conocido de PowerShell**: al construir seedRows con UNA sola fila, PowerShell aplana el eje externo. Usa el helper `Tabla` con `[System.Collections.ArrayList]` como en los scripts existentes, o corrige con UPDATE SQL posterior (mira patrones en fix14.sql / fix19.sql en scratchpad).
+
 ## Verificacion
 1. HC-FO-08 debe quedar intacto (diff verificado).
-2. Abrir /formularios en /localhost:5080 y confirmar que el consentimiento carga sin errores (usar MCP Chrome).
-3. Verificar que TABLA REPETIBLE aparece por cada tabla seed esperada.
-4. Verificar que la seccion Datos del Paciente aparece PRIMERA y con los 5 campos.
+2. Abrir /formularios en localhost:5080 y confirmar que el consentimiento carga sin errores (usar MCP Chrome).
+3. Verificar que "TABLA REPETIBLE" aparece por cada tabla seed esperada.
+4. Verificar que la seccion "Datos del Paciente (auto-llenado)" aparece PRIMERA y con los 5 campos.
+5. Verificar que las columnas de MARCA X estan presentes en las tablas donde el docx muestra la ultima columna vacia.
+6. Verificar que los guiones bajos se convirtieron en fields de entrada (no quedaron como texto).
+7. Verificar que "Firmas (auto-llenadas)" esta al final antes de Cierre y MEDICO.
 
 ## Al terminar
-Commit con: feat(consentimientos): rework {codigo} con tablas seed y prefill estandar
+Commit con: feat(consentimientos): rework {codigo} con tablas seed, marca X y campos de entrada
 """.strip()
 
 

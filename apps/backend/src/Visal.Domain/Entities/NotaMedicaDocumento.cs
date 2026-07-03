@@ -9,7 +9,12 @@ namespace Visal.Domain.Entities;
 /// </summary>
 public class NotaMedicaDocumento : TenantEntity
 {
-    public Guid NotaMedicaId { get; set; }
+    /// <summary>Nota a la que pertenece el documento. Nullable para permitir
+    /// documentos "libres" del paciente que no vienen de una nota especifica
+    /// (ej. firma remota capturada desde el WhatsApp panel del paciente sin
+    /// haber creado una nota). En esos casos, el documento se lista igual bajo
+    /// "Documentos adjuntos" del paciente en /admision usando PacienteId.</summary>
+    public Guid? NotaMedicaId { get; set; }
     public NotaMedica? NotaMedica { get; set; }
 
     /// <summary>Paciente al que pertenece este documento. Se copia desde la nota al adjuntar

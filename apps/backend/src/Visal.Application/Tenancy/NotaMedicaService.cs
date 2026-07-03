@@ -241,18 +241,25 @@ public sealed class NotaMedicaService(
         // EF Core 9 NO traduce .ToString() sobre un enum dentro de la proyeccion
         // (igual que el caso de Escalas en task #135). Materializamos primero los
         // datos primitivos + el enum tal cual, despues proyectamos al DTO en memoria.
+        // LEFT JOIN via SelectMany + DefaultIfEmpty para incluir documentos "libres"
+        // que no tienen NotaMedicaId (ej. firmas remotas capturadas desde el chat
+        // WhatsApp del paciente sin nota especifica).
         var raw = await db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId)
-            .Join(db.NotasMedicas.AsNoTracking(),
+            .GroupJoin(db.NotasMedicas.AsNoTracking(),
                   d => d.NotaMedicaId,
                   n => n.Id,
-                  (d, n) => new
-                  {
-                      d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
-                      d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
-                      d.Anotaciones, d.CreatedAt,
-                      n.FechaNota, n.CodigoUnico, n.Estado
-                  })
+                  (d, ns) => new { d, ns })
+            .SelectMany(x => x.ns.DefaultIfEmpty(),
+                        (x, n) => new
+                        {
+                            x.d.Id, x.d.NotaMedicaId, x.d.NombreOriginal, x.d.RutaArchivo,
+                            x.d.TipoMime, x.d.Tamano, x.d.Categoria, x.d.TipoTerapia, x.d.Mes,
+                            x.d.Anotaciones, x.d.CreatedAt,
+                            FechaNota = (DateOnly?)(n != null ? n.FechaNota : null),
+                            CodigoUnico = n != null ? n.CodigoUnico : null,
+                            EstadoNota = n != null ? (int?)n.Estado : null
+                        })
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
 
@@ -261,7 +268,8 @@ public sealed class NotaMedicaService(
                 x.Id, x.NotaMedicaId, x.NombreOriginal, x.RutaArchivo,
                 x.TipoMime, x.Tamano, x.Categoria, x.TipoTerapia, x.Mes,
                 x.Anotaciones, x.CreatedAt,
-                x.FechaNota, x.CodigoUnico, x.Estado.ToString()))
+                x.FechaNota, x.CodigoUnico,
+                x.EstadoNota.HasValue ? ((Visal.Domain.Entities.NotaMedicaEstado)x.EstadoNota.Value).ToString() : null))
             .ToList();
     }
 

@@ -48,7 +48,7 @@ public sealed record GuardarNotaRequest(
 
 public sealed record NotaDocumentoDto(
     Guid Id,
-    Guid NotaMedicaId,
+    Guid? NotaMedicaId,
     string NombreOriginal,
     string RutaArchivo,
     string? TipoMime,
@@ -64,7 +64,7 @@ public sealed record NotaDocumentoDto(
 /// codigo de la nota origen).</summary>
 public sealed record DocumentoPacienteDto(
     Guid Id,
-    Guid NotaMedicaId,
+    Guid? NotaMedicaId,
     string NombreOriginal,
     string RutaArchivo,
     string? TipoMime,

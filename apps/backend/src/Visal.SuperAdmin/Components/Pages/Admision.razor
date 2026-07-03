@@ -398,7 +398,20 @@
                                                 else { <span class="text-muted">-</span> }
                                             </td>
                                             <td title="@d.Anotaciones">@d.NombreOriginal</td>
-                                            <td><span class="text-muted">@(d.CodigoNota ?? d.NotaMedicaId.ToString()[..8])</span></td>
+                                            <td>
+                                                @if (!string.IsNullOrWhiteSpace(d.CodigoNota))
+                                                {
+                                                    <span class="text-muted">@d.CodigoNota</span>
+                                                }
+                                                else if (d.NotaMedicaId is Guid nid)
+                                                {
+                                                    <span class="text-muted">@nid.ToString("N")[..8]</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-info">Firma libre</span>
+                                                }
+                                            </td>
                                             <td>@(d.FechaNota?.ToString("dd/MM/yyyy") ?? "-")</td>
                                             <td>@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
                                             <td>@FormatTam(d.Tamano)</td>

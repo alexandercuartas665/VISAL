@@ -88,6 +88,13 @@ public interface IFirmaRemotaService
     /// para refrescar el estado del boton en el panel WhatsApp.</summary>
     Task<FirmaRequestDto?> ObtenerActivaLibrePorPacienteAsync(Guid pacienteId, CancellationToken ct = default);
 
+    /// <summary>Devuelve TODAS las solicitudes activas (libres, sin nota) del paciente:
+    /// las del paciente mismo Y las de sus contactos de emergencia. Sirve para
+    /// pintar en el modal "Solicitar firmas" un badge por destinatario indicando
+    /// si ya firmo, esta pendiente o esta expirada — el doctor entonces no reenvia
+    /// solicitudes innecesarias.</summary>
+    Task<IReadOnlyList<FirmaRequestDto>> ListarActivasLibresPorPacienteAsync(Guid pacienteId, CancellationToken ct = default);
+
     /// <summary>Envia el link de la solicitud al paciente por WhatsApp via la
     /// linea elegida. Devuelve el resultado del envio (Ok/Error + texto del mensaje).</summary>
     Task<ChatSendResult> EnviarPorWhatsAppAsync(Guid solicitudId, Guid lineaId, string urlAbsoluta, Guid actorTenantUserId, CancellationToken ct = default);

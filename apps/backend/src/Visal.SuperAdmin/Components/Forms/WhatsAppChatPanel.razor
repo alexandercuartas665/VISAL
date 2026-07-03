@@ -384,12 +384,23 @@
             </div>
             <div class="wac-fmodal-cards">
                 @* Tarjeta del paciente. ContactoEmergenciaId = null. *@
-                <label class="wac-fmodal-card @(_firmaDestSel.Contains(Guid.Empty) ? "sel" : "") @(string.IsNullOrWhiteSpace(_telefonoDigits) ? "disabled" : "")">
+                <label class="wac-fmodal-card @(_firmaDestSel.Contains(Guid.Empty) ? "sel" : "") @(string.IsNullOrWhiteSpace(_telefonoDigits) ? "disabled" : "") @(EstaFirmado(Guid.Empty) ? "firmado" : "")">
                     <input type="checkbox" checked="@_firmaDestSel.Contains(Guid.Empty)"
                            disabled="@string.IsNullOrWhiteSpace(_telefonoDigits)"
                            @onchange="() => ToggleDestinatario(Guid.Empty)" />
                     <div class="wac-fmodal-card-body">
-                        <div class="wac-fmodal-card-name">&#128118; @(NombreContacto ?? "Paciente") <span class="wac-fmodal-card-tag">PACIENTE</span></div>
+                        <div class="wac-fmodal-card-name">
+                            &#128118; @(NombreContacto ?? "Paciente")
+                            <span class="wac-fmodal-card-tag">PACIENTE</span>
+                            @if (EstaFirmado(Guid.Empty))
+                            {
+                                <span class="wac-fmodal-card-badge wac-fmodal-card-badge-ok" title="Firma ya capturada por el sistema">&#10003; Firmado</span>
+                            }
+                            else if (EstaPendiente(Guid.Empty))
+                            {
+                                <span class="wac-fmodal-card-badge wac-fmodal-card-badge-pend" title="Link enviado, esperando firma">&#8987; Pendiente</span>
+                            }
+                        </div>
                         <div class="wac-fmodal-card-sub">@(string.IsNullOrWhiteSpace(_telefonoDigits) ? "Sin telefono - actualiza arriba" : $"+{_telefonoDigits}")</div>
                     </div>
                 </label>
@@ -399,7 +410,7 @@
                     var cid = c.Id ?? Guid.Empty;
                     var telFull = (c.CodigoPais ?? "+57").TrimStart('+') + (c.Telefono ?? "");
                     var telValido = new string(telFull.Where(char.IsDigit).ToArray()).Length >= 6;
-                    <label class="wac-fmodal-card @(_firmaDestSel.Contains(cid) ? "sel" : "") @(telValido ? "" : "disabled")">
+                    <label class="wac-fmodal-card @(_firmaDestSel.Contains(cid) ? "sel" : "") @(telValido ? "" : "disabled") @(EstaFirmado(cid) ? "firmado" : "")">
                         <input type="checkbox" checked="@_firmaDestSel.Contains(cid)"
                                disabled="@(!telValido)"
                                @onchange="() => ToggleDestinatario(cid)" />
@@ -407,9 +418,18 @@
                             <div class="wac-fmodal-card-name">
                                 &#128100; @c.Nombre
                                 <span class="wac-fmodal-card-tag">@((c.Parentesco ?? "ACOMPANANTE").ToUpperInvariant())</span>
-                                @if (!string.IsNullOrWhiteSpace(c.FirmaUrl))
+                                @if (EstaFirmado(cid))
                                 {
-                                    <span class="wac-fmodal-card-badge">&#10003; firma</span>
+                                    <span class="wac-fmodal-card-badge wac-fmodal-card-badge-ok" title="Firma remota ya capturada">&#10003; Firmado</span>
+                                }
+                                else if (EstaPendiente(cid))
+                                {
+                                    <span class="wac-fmodal-card-badge wac-fmodal-card-badge-pend" title="Link enviado, esperando firma">&#8987; Pendiente</span>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(c.FirmaUrl))
+                                {
+                                    @* Firma manual en /admision - no viene de remoto, pero igual sirve. *@
+                                    <span class="wac-fmodal-card-badge wac-fmodal-card-badge-ok" title="Firma cargada manualmente">&#10003; Firma cargada</span>
                                 }
                             </div>
                             <div class="wac-fmodal-card-sub">
@@ -702,7 +722,11 @@
     .wac-fmodal-card-sub { font-size: 11.5px; color: #475569; margin-top: 2px; font-family: ui-monospace, "Cascadia Code", monospace; }
     .wac-fmodal-card-tag { font-size: 9.5px; font-weight: 700; letter-spacing: .3px; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 999px; }
     .wac-fmodal-card.sel .wac-fmodal-card-tag { color: #0f766e; background: #ccfbf1; }
-    .wac-fmodal-card-badge { font-size: 10px; color: #059669; background: #d1fae5; padding: 1px 6px; border-radius: 999px; font-weight: 600; }
+    .wac-fmodal-card-badge { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; }
+    .wac-fmodal-card-badge-ok { color: #059669; background: #d1fae5; }
+    .wac-fmodal-card-badge-pend { color: #b45309; background: #fef3c7; }
+    .wac-fmodal-card.firmado { background: linear-gradient(90deg, #f0fdfa 0%, #ffffff 30%); border-color: #a7f3d0; }
+    .wac-fmodal-card.firmado .wac-fmodal-card-name { color: #065f46; }
     .wac-fmodal-add { padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1; }
     .wac-fmodal-add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .wac-fmodal-actions { justify-content: flex-end; padding-top: 12px; border-top: 1px solid #e2e8f0; margin-top: 10px; }
@@ -835,6 +859,11 @@
     /// enviar los links manualmente (linea caida, reenvio, etc).</summary>
     private List<(FirmaRequestDto Dto, string Url, string Nombre)> _firmaLinksGenerados = new();
     private Guid? _firmaLinkCopiado;
+
+    /// <summary>Estado de firma por destinatario: Key = Guid.Empty (paciente) o
+    /// ContactoEmergenciaId. Value = estado de la solicitud mas reciente. Se llena
+    /// al abrir el modal y se refresca cuando el modal genera nuevas solicitudes.</summary>
+    private Dictionary<Guid, FirmaRequestStatus> _firmaEstadoPorDest = new();
 
     /// <summary>Lista corta de paises (Latam + comunes) con codigo internacional.</summary>
     private static readonly (string Codigo, string Nombre, string Bandera)[] PaisesCodigos = new[]
@@ -1343,9 +1372,19 @@
         try { _firmaParientes = (await PacientesSvc.ListContactosEmergenciaAsync(pid)).ToList(); }
         catch { _firmaParientes = new(); }
 
-        // Preseleccion: paciente si tiene telefono valido.
+        // Cargar estado de firmas activas del paciente (paciente + parientes) para
+        // pintar badges en las tarjetas y evitar reenvios innecesarios.
+        await RefrescarEstadoFirmasAsync(pid);
+
+        // Preseleccion: solo destinatarios SIN firma completa. Si el paciente ya
+        // firmo no lo marcamos por defecto para que el doctor no reenvie por
+        // accidente; puede marcarlo manualmente si quiere una nueva firma.
         _firmaDestSel.Clear();
-        if (!string.IsNullOrWhiteSpace(_telefonoDigits)) { _firmaDestSel.Add(Guid.Empty); }
+        if (!string.IsNullOrWhiteSpace(_telefonoDigits)
+            && !EstaFirmado(Guid.Empty))
+        {
+            _firmaDestSel.Add(Guid.Empty);
+        }
 
         _telOpen = true;
         try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-firma-dialog'); if (d && !d.open) d.showModal();"); }
@@ -1487,6 +1526,7 @@
             {
                 _firmaError = $"WhatsApp fallo en todas ({string.Join("; ", erroresDet)}). Los links igual quedaron creados — copialos abajo.";
             }
+            await RefrescarEstadoFirmasAsync(pid);
         }
         catch (Exception ex) { _firmaError = ex.Message; }
         finally { _firmaBusy = false; }
@@ -1513,10 +1553,38 @@
                 .ToList();
             _firmaMsg = $"Generados {_firmaLinksGenerados.Count} link(s). Copialos y envialos manualmente.";
             _firmaSolicitudActiva = solicitudes.FirstOrDefault(s => s.ContactoEmergenciaId is null) ?? solicitudes[0];
+            await RefrescarEstadoFirmasAsync(pid);
         }
         catch (Exception ex) { _firmaError = ex.Message; }
         finally { _firmaBusy = false; }
     }
+
+    /// <summary>Lee el estado de firmas activas del paciente y refresca el
+    /// diccionario _firmaEstadoPorDest. Se llama al abrir el modal y tras
+    /// generar / enviar solicitudes para mantener las tarjetas actualizadas.</summary>
+    private async Task RefrescarEstadoFirmasAsync(Guid pacienteId)
+    {
+        _firmaEstadoPorDest = new();
+        try
+        {
+            var activas = await FirmaSvc.ListarActivasLibresPorPacienteAsync(pacienteId);
+            foreach (var s in activas)
+            {
+                var key = s.ContactoEmergenciaId ?? Guid.Empty;
+                _firmaEstadoPorDest[key] = s.Status;
+            }
+        }
+        catch { /* estado es opcional para el badge, no romper el modal */ }
+    }
+
+    /// <summary>Retorna true si el destinatario (paciente o contacto) tiene una
+    /// firma remota completada activa (no expirada). Guid.Empty = paciente.</summary>
+    private bool EstaFirmado(Guid destinatarioKey)
+        => _firmaEstadoPorDest.TryGetValue(destinatarioKey, out var st) && st == FirmaRequestStatus.Completada;
+
+    /// <summary>True si tiene solicitud pendiente (link enviado pero sin firmar).</summary>
+    private bool EstaPendiente(Guid destinatarioKey)
+        => _firmaEstadoPorDest.TryGetValue(destinatarioKey, out var st) && st == FirmaRequestStatus.Pendiente;
 
     /// <summary>Copia una URL al portapapeles con la API navigator.clipboard.
     /// Marca visualmente el link copiado. Usa un helper JS asincrono para no

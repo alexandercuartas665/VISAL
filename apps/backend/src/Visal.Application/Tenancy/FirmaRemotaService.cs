@@ -154,10 +154,28 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         var req = await _db.FirmaPacienteRequests.AsNoTracking()
             .Where(r => r.PacienteId == pacienteId
                         && r.NotaMedicaId == null
+                        && r.ContactoEmergenciaId == null
                         && (r.Status == FirmaRequestStatus.Pendiente || r.Status == FirmaRequestStatus.Completada))
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync(ct);
         return req is null ? null : Map(req);
+    }
+
+    public async Task<IReadOnlyList<FirmaRequestDto>> ListarActivasLibresPorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
+    {
+        // Traemos la MAS RECIENTE por destinatario (paciente o cada pariente).
+        // Asi el modal muestra estado unico por tarjeta aunque el doctor haya
+        // pedido firma multiples veces al mismo destinatario.
+        var todas = await _db.FirmaPacienteRequests.AsNoTracking()
+            .Where(r => r.PacienteId == pacienteId
+                        && r.NotaMedicaId == null
+                        && (r.Status == FirmaRequestStatus.Pendiente || r.Status == FirmaRequestStatus.Completada))
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(ct);
+        return todas
+            .GroupBy(r => r.ContactoEmergenciaId ?? Guid.Empty)
+            .Select(g => Map(g.First()))
+            .ToList();
     }
 
     public async Task<FirmaRequestPublicDto?> ObtenerPorTokenPublicoAsync(string token, CancellationToken ct = default)
@@ -291,28 +309,49 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             }
         }
 
-        // Adicional: guardar la firma como PNG fisico. Si hay nota, queda como
-        // NotaMedicaDocumento de esa nota (visible desde "Documentos Externos");
-        // si no hay nota, queda como adjunto del paciente sin asociar a nota.
+        // Adicional: guardar la firma como PNG fisico y crear un NotaMedicaDocumento
+        // aunque no haya nota asociada — asi el operador ve la firma en el tab
+        // "Documentos" del paciente en /admision sin depender de que exista nota.
+        // Ademas la categoria y anotaciones cambian segun sea firma del paciente
+        // o firma de un pariente (con parentesco + nombre).
         try
         {
             var bytes = DecodeDataUrl(imageDataUrl);
-            if (bytes is not null && bytes.Length > 0 && notaIdParaDoc is Guid notaDocId)
+            if (bytes is not null && bytes.Length > 0)
             {
-                var nombre = $"firma-paciente-{req.Id:N}.png";
+                var nombre = $"firma-{(req.ContactoEmergenciaId is null ? "paciente" : "acompanante")}-{req.Id:N}.png";
                 var rutaWeb = await _storage.GuardarAsync("notas", nombre, bytes, ct);
+
+                string categoria, nombreOriginal, anotaciones;
+                if (req.ContactoEmergenciaId is Guid cid2)
+                {
+                    var info = await _db.PacienteContactosEmergencia.IgnoreQueryFilters()
+                        .Where(c => c.Id == cid2)
+                        .Select(c => new { c.Nombre, c.Parentesco })
+                        .FirstOrDefaultAsync(ct);
+                    var rolLbl = string.IsNullOrWhiteSpace(info?.Parentesco) ? "Acompanante" : info!.Parentesco;
+                    categoria = "Firma del Acompanante";
+                    nombreOriginal = $"Firma remota de {info?.Nombre ?? "acompanante"} ({rolLbl}) - {_time.GetUtcNow().LocalDateTime:dd-MM-yyyy HH:mm}.png";
+                    anotaciones = $"Firma capturada remotamente por WhatsApp. Signatario: {rolLbl} - {info?.Nombre}.";
+                }
+                else
+                {
+                    categoria = "Firma del Paciente";
+                    nombreOriginal = $"Firma remota del paciente - {_time.GetUtcNow().LocalDateTime:dd-MM-yyyy HH:mm}.png";
+                    anotaciones = "Firma capturada remotamente por WhatsApp.";
+                }
 
                 _db.NotaMedicaDocumentos.Add(new NotaMedicaDocumento
                 {
                     TenantId = req.TenantId,
-                    NotaMedicaId = notaDocId,
+                    NotaMedicaId = notaIdParaDoc, // nullable ahora — null cuando la firma no viene de una nota
                     PacienteId = req.PacienteId,
-                    NombreOriginal = $"Firma remota del paciente ({_time.GetUtcNow().LocalDateTime:dd-MM-yyyy HH:mm}).png",
+                    NombreOriginal = nombreOriginal,
                     RutaArchivo = rutaWeb,
                     TipoMime = "image/png",
                     Tamano = bytes.Length,
-                    Categoria = "Firma del Paciente",
-                    Anotaciones = "Firma capturada remotamente por WhatsApp."
+                    Categoria = categoria,
+                    Anotaciones = anotaciones
                 });
             }
         }

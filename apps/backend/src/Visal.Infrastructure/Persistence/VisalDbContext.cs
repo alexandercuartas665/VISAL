@@ -755,7 +755,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Mes).HasMaxLength(20);
             b.Property(x => x.Anotaciones).HasColumnType("text");
             b.HasOne(x => x.NotaMedica).WithMany().HasForeignKey(x => x.NotaMedicaId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.NotaMedicaId });
             // Indice por paciente para que el tab "Documentos" de Admision liste rapido.
             b.HasIndex(x => new { x.TenantId, x.PacienteId });

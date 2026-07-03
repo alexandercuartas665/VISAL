@@ -1,0 +1,126 @@
+@page "/cfg-paquetes"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IPaqueteService Svc
+
+<PageTitle>Paquetes - Visal</PageTitle>
+
+<div class="cat-head">
+    <div>
+        <div class="cat-eyebrow">Configuracion del Sistema</div>
+        <h1 class="cat-title">Paquetes</h1>
+        <p class="cat-sub">Paquetes comerciales (ej. <em>ATENCION INTEGRAL DE PACIENTE AGUDO BAJA COMPLEJIDAD PROGRAMA EXTENSION HOSPITALARIA (POR DIA)</em> con codigo <code>E890167</code>).
+            Se pueden asociar (opcionalmente) a los servicios de un contrato en Entidades Aseguradoras y se usan para filtrar la parrilla de Asignacion.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <input type="text" class="form-control form-control-sm" placeholder="Buscar codigo o nombre..." @bind="_filtro" @bind:event="oninput" @bind:after="ReloadAsync" style="min-width:220px;" />
+        <button class="btn btn-primary btn-sm" @onclick="Add">+ Agregar</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="cat-alert">@_error</div> }
+@if (_ok is not null) { <div class="cat-ok">@_ok</div> }
+
+<div class="cat-card">
+    @if (_items.Count == 0)
+    {
+        <div class="text-center text-muted" style="padding:28px;">
+            <p style="margin:0 0 10px;">Aun no hay paquetes.</p>
+            <p class="text-muted" style="font-size:12px;margin:0;">Agrega el primero con el boton "Agregar" o sembralos en bloque desde un Excel de referencia usando el endpoint <code>/api/paquetes/sembrar</code>.</p>
+        </div>
+    }
+    else
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width:180px">Codigo</th>
+                    <th>Nombre</th>
+                    <th style="width:80px">Activo</th>
+                    <th style="width:140px"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var it in _items)
+                {
+                    <tr>
+                        <td><input class="form-control form-control-sm fb-mono" @bind="it.Codigo" maxlength="40" placeholder="E890167" /></td>
+                        <td><input class="form-control form-control-sm" @bind="it.Nombre" maxlength="500" placeholder="Nombre del paquete" /></td>
+                        <td class="text-center"><input type="checkbox" class="form-check-input" @bind="it.Activo" /></td>
+                        <td class="cat-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="() => SaveAsync(it)" title="Guardar">&#10003;</button>
+                            @if (it.Id is not null)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(it)" title="Borrar">&times;</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div class="text-muted" style="font-size:11px; padding:8px 0 0;">
+            <strong>@_items.Count</strong> paquete(s) mostrado(s).
+        </div>
+    }
+</div>
+
+@code {
+    private List<Item> _items = new();
+    private string? _error, _ok;
+    private string _filtro = "";
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _items = (await Svc.ListarAsync(_filtro, soloActivos: false))
+            .Select(p => new Item { Id = p.Id, Codigo = p.Codigo, Nombre = p.Nombre, Activo = p.Activo })
+            .ToList();
+    }
+
+    private void Add()
+    {
+        _items.Insert(0, new Item { Codigo = "", Nombre = "", Activo = true });
+    }
+
+    private async Task SaveAsync(Item it)
+    {
+        _error = _ok = null;
+        if (string.IsNullOrWhiteSpace(it.Codigo) || string.IsNullOrWhiteSpace(it.Nombre))
+        {
+            _error = "Codigo y nombre son obligatorios.";
+            return;
+        }
+        try
+        {
+            var saved = await Svc.SaveAsync(new SavePaqueteRequest(it.Id, it.Codigo.Trim(), it.Nombre.Trim(), it.Activo), Guid.Empty);
+            if (saved is null) { _error = "No se pudo guardar."; return; }
+            it.Id = saved.Id;
+            _ok = $"Paquete '{saved.Codigo}' guardado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task DeleteAsync(Item it)
+    {
+        _error = _ok = null;
+        if (it.Id is not Guid id) { _items.Remove(it); return; }
+        try
+        {
+            await Svc.DeleteAsync(id, Guid.Empty);
+            _items.Remove(it);
+            _ok = "Paquete eliminado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private sealed class Item
+    {
+        public Guid? Id { get; set; }
+        public string Codigo { get; set; } = "";
+        public string Nombre { get; set; } = "";
+        public bool Activo { get; set; } = true;
+    }
+}

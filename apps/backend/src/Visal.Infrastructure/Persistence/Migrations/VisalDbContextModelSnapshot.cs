@@ -486,6 +486,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("cantidad");
 
+                    b.Property<string>("CategoriaCopago")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("categoria_copago");
+
                     b.Property<string>("CodigoAutorizacion")
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)")
@@ -554,6 +559,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("paciente_id");
 
+                    b.Property<string>("PdfAutorizacionUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("pdf_autorizacion_url");
+
                     b.Property<string>("ServicioId")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -570,6 +580,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
+                    b.Property<string>("TipoPago")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("tipo_pago");
+
                     b.Property<string>("TipoServicio")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -583,6 +598,16 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("updated_by");
+
+                    b.Property<decimal?>("ValorPagoReal")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)")
+                        .HasColumnName("valor_pago_real");
+
+                    b.Property<decimal?>("ValorPagoSugerido")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)")
+                        .HasColumnName("valor_pago_sugerido");
 
                     b.HasKey("Id")
                         .HasName("pk_asignaciones");
@@ -1203,6 +1228,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("prorroga");
 
+                    b.Property<bool>("RequierePdfAutorizacion")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requiere_pdf_autorizacion");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -1288,6 +1317,69 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_conversations_tenant_id_contact_phone");
 
                     b.ToTable("conversations", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CuotaCopago", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<string>("Categoria")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("categoria");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Descripcion")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("descripcion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("tipo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<decimal>("ValorSugerido")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)")
+                        .HasColumnName("valor_sugerido");
+
+                    b.HasKey("Id")
+                        .HasName("pk_cuotas_copagos");
+
+                    b.HasIndex("TenantId", "Tipo", "Categoria")
+                        .IsUnique()
+                        .HasDatabaseName("ix_cuotas_copagos_tenant_id_tipo_categoria");
+
+                    b.ToTable("cuotas_copagos", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.Departamento", b =>
@@ -1906,6 +1998,36 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("ProfesionalId")
                         .HasColumnType("uuid")
                         .HasColumnName("profesional_id");
+
+                    b.Property<string>("RipsCausaExternaCodigo")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("rips_causa_externa_codigo");
+
+                    b.Property<string>("RipsCausaExternaNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("rips_causa_externa_nombre");
+
+                    b.Property<string>("RipsFinalidadCodigo")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("rips_finalidad_codigo");
+
+                    b.Property<string>("RipsFinalidadNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("rips_finalidad_nombre");
+
+                    b.Property<string>("RipsViaIngresoCodigo")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("rips_via_ingreso_codigo");
+
+                    b.Property<string>("RipsViaIngresoNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("rips_via_ingreso_nombre");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -4023,6 +4145,59 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("paises", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.Paquete", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<string>("Codigo")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("codigo");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("nombre");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_paquetes");
+
+                    b.HasIndex("TenantId", "Codigo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_paquetes_tenant_id_codigo");
+
+                    b.ToTable("paquetes", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.PasswordResetToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5184,6 +5359,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("observaciones");
 
+                    b.Property<Guid?>("PaqueteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("paquete_id");
+
                     b.Property<string>("Sede")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
@@ -5212,8 +5391,14 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.HasIndex("ContratoId")
                         .HasDatabaseName("ix_servicios_contrato_contrato_id");
 
+                    b.HasIndex("PaqueteId")
+                        .HasDatabaseName("ix_servicios_contrato_paquete_id");
+
                     b.HasIndex("TenantId", "ContratoId")
                         .HasDatabaseName("ix_servicios_contrato_tenant_id_contrato_id");
+
+                    b.HasIndex("TenantId", "PaqueteId")
+                        .HasDatabaseName("ix_servicios_contrato_tenant_id_paquete_id");
 
                     b.ToTable("servicios_contrato", (string)null);
                 });
@@ -7074,7 +7259,15 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_servicios_contrato_contratos_aseguradora_contrato_id");
 
+                    b.HasOne("Visal.Domain.Entities.Paquete", "Paquete")
+                        .WithMany()
+                        .HasForeignKey("PaqueteId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_servicios_contrato_paquetes_paquete_id");
+
                     b.Navigation("Contrato");
+
+                    b.Navigation("Paquete");
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.TenantPayment", b =>

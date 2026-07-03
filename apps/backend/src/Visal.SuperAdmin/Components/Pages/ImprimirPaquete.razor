@@ -4,6 +4,7 @@
 @using System.Text.Json
 @using Microsoft.AspNetCore.WebUtilities
 @using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Forms
 @using Visal.SuperAdmin.Components.Forms
 @inject IHistoriaClinicaService HcSvc
 @inject IAsignacionService AsigSvc
@@ -768,6 +769,10 @@ else
     //   que tambien respete su WidthColumns.
     private RenderFragment RenderTopNode(FormNode n, Dictionary<string, string?> vals) => __builder =>
     {
+        // Visibilidad condicional: si el nodo tiene VisibleWhen y no se cumple,
+        // no se imprime (equivalente al FormViewer).
+        if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, vals)) { return; }
+
         if (n.IsText)
         {
             <div class="pack-para">@(n.Content ?? "")</div>
@@ -780,7 +785,11 @@ else
                 <div class="pack-sub">@n.Label</div>
             }
             <div class="pack-grid">
-                @foreach (var ch in n.Children ?? new()) { @RenderDocNode(ch, vals) }
+                @foreach (var ch in n.Children ?? new())
+                {
+                    if (!VisibleWhenEvaluator.ShouldShow(ch.VisibleWhen, vals)) { continue; }
+                    @RenderDocNode(ch, vals)
+                }
             </div>
             return;
         }

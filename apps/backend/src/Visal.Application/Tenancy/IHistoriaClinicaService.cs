@@ -29,14 +29,27 @@ public sealed record HistoriaClinicaDetailDto(
     DateTimeOffset? FechaCierre,
     string? EspecialistaNombre,
     string? MotivoInactivacion,
-    Guid? ProfesionalId);
+    Guid? ProfesionalId,
+    string? RipsViaIngresoCodigo = null,
+    string? RipsViaIngresoNombre = null,
+    string? RipsFinalidadCodigo = null,
+    string? RipsFinalidadNombre = null,
+    string? RipsCausaExternaCodigo = null,
+    string? RipsCausaExternaNombre = null);
 
 public sealed record CrearHistoriaRequest(
     Guid PacienteId,
     Guid FormDefinitionId,
     string ValoresJson,
     string? EspecialistaNombre,
-    Guid? ProfesionalId = null);
+    Guid? ProfesionalId = null,
+    // Datos RIPS obligatorios (Res. 202/2021 MinSalud):
+    string? RipsViaIngresoCodigo = null,
+    string? RipsViaIngresoNombre = null,
+    string? RipsFinalidadCodigo = null,
+    string? RipsFinalidadNombre = null,
+    string? RipsCausaExternaCodigo = null,
+    string? RipsCausaExternaNombre = null);
 
 public interface IHistoriaClinicaService
 {

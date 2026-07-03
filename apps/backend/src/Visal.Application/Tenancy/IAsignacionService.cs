@@ -20,7 +20,7 @@ public sealed record PacienteAsignacionDto(
     // prefill "paciente.eps" en cualquier formulario.
     string? Eps = null);
 
-public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado);
+public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado, bool RequierePdfAutorizacion);
 
 /// <summary>Filtro tipado para la busqueda avanzada de pacientes (modal BUSCAR PACIENTES).</summary>
 public sealed record BusquedaPacienteFiltro(
@@ -38,7 +38,8 @@ public sealed record PacienteFiltroResultadoDto(
 /// <summary>Item del catalogo de servicios filtrado por contrato + tipo de servicio.</summary>
 public sealed record ServicioCatalogoDto(
     Guid Id, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, decimal? Tarifa,
-    string? CodigoInterno, string? Historia, string? Clasificacion, string? Modalidad);
+    string? CodigoInterno, string? Historia, string? Clasificacion, string? Modalidad,
+    Guid? PaqueteId, string? PaqueteCodigo);
 
 /// <summary>Fila del historico (ultimos N) del paciente. Incluye todos los datos
 /// de la programacion (autorizacion, periodo y observaciones) para que el menu
@@ -106,7 +107,45 @@ public sealed record AsignacionItemRequest(
 
 public sealed record CrearLoteRequest(
     Guid PacienteId, string ContratoCodigo, string Sucursal,
-    IReadOnlyList<AsignacionItemRequest> Items);
+    IReadOnlyList<AsignacionItemRequest> Items,
+    string? PdfAutorizacionUrl = null,
+    string? TipoPago = null,
+    string? CategoriaCopago = null,
+    decimal? ValorPagoSugerido = null,
+    decimal? ValorPagoReal = null);
+
+/// <summary>Filtros del tab "Listado" en /asignacion. Todos opcionales; los null/vacios
+/// simplemente no aplican. Fecha_inicial y fecha_final aplican sobre FechaInicio de la
+/// asignacion (rango inclusivo). El filtro NombreServicio es contains case-insensitive.</summary>
+public sealed record AsignacionListadoFiltro(
+    DateOnly? FechaInicial, DateOnly? FechaFinal,
+    Guid? AseguradoraId, Guid? PacienteId,
+    string? ContratoCodigo, string? Modulo, string? NombreServicio);
+
+/// <summary>Fila del listado tabular de asignaciones. Incluye todos los datos
+/// relacionados (paciente + aseguradora + contrato + programacion) para que el
+/// tab "Listado" pueda mostrarlos sin joins extra en la UI.</summary>
+public sealed record AsignacionListadoDto(
+    Guid Id, DateTimeOffset CreadoEn,
+    string PacienteDocumento, string PacienteNombre,
+    string ContratoCodigo, string? AseguradoraNombre,
+    string NombreServicio, string TipoServicio, string? Modulo,
+    int Cantidad, string Estado,
+    DateOnly FechaInicio, DateOnly? FechaFinal,
+    short? AnioServicio, short? MesVigencia, short? MesFinal,
+    string? CodigoAutorizacion, string? Observaciones,
+    string? Sucursal);
+
+/// <summary>Payload para actualizar una asignacion existente (solo si esta Pendiente).
+/// Se persiste sobre el mismo registro sin tocar el lote. Los campos vienen de la
+/// misma forma que un AsignacionItemRequest + el codigo del contrato.</summary>
+public sealed record ActualizarAsignacionRequest(
+    Guid AsignacionId, string ContratoCodigo,
+    string ServicioId, string NombreServicio, string TipoServicio, string? Modulo,
+    int Cantidad, string? CodigoAutorizacion,
+    short? AnioServicio, short MesVigencia, short? MesFinal,
+    DateOnly FechaInicio, DateOnly? FechaFinal,
+    string? Observaciones, string? FormatoHistoria);
 
 public sealed record LoteCreadoDto(Guid LoteId, int CantidadServicios);
 
@@ -138,6 +177,14 @@ public interface IAsignacionService
 
     /// <summary>Elimina una asignacion del lote (caso "eliminar item" de la grilla).</summary>
     Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Actualiza una asignacion existente. Solo se permite si esta Pendiente y
+    /// no tiene turnos coordinados. Lanza InvalidOperationException si no se cumple.</summary>
+    Task<bool> ActualizarAsignacionAsync(ActualizarAsignacionRequest req, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Lista tabular de asignaciones para el tab "Listado" con filtros compuestos.
+    /// Ordena por CreadoEn desc. Sin limite implicito; la UI puede paginar/scrollear.</summary>
+    Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default);
 
     /// <summary>
     /// Lista las asignaciones cuyo modulo coincida con uno de los permitidos, filtradas

@@ -93,6 +93,10 @@ else
         @* ----- Cuerpo: secciones + campos ----- *@
         @foreach (var node in Schema.Children)
         {
+            @* Guard de visibilidad a nivel raiz: si la seccion/campo no cumple
+               su VisibleWhen, no la renderizamos ni evaluamos sus hijos. *@
+            if (!ShouldShow(node)) { continue; }
+
             if (node.IsSection)
             {
                 <div class="fv-section" id="sec-@node.Id" data-toc-section="@node.Id">
@@ -623,8 +627,22 @@ else
         return ""; // formula no reconocida -> dejamos vacio
     }
 
+    /// <summary>
+    /// True si el nodo debe renderizarse considerando su VisibleWhen. Los
+    /// contenedores heredan la ocultacion (si una seccion no es visible, sus
+    /// hijos no se evaluan). El evaluador es puro; usa el diccionario Valores
+    /// del propio viewer, asi cualquier SetValue re-renderiza y este metodo
+    /// vuelve a correr.
+    /// </summary>
+    private bool ShouldShow(FormNode node)
+        => VisibleWhenEvaluator.ShouldShow(node.VisibleWhen, Valores);
+
     private RenderFragment RenderField(FormNode node) => __builder =>
     {
+        // Guard de visibilidad: si el nodo tiene VisibleWhen que no se cumple,
+        // no lo renderizamos. Los valores previos NO se borran del diccionario
+        // (asi si el usuario vuelve a la condicion original, el dato reaparece).
+        if (!ShouldShow(node)) { return; }
         var span = Math.Clamp(node.WidthColumns <= 0 ? 12 : node.WidthColumns, 1, 12);
         <div class="@($"fv-col fv-col-{span}")">
             @if (node.IsText)

@@ -1,0 +1,139 @@
+@page "/cfg-cuotas-copagos"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@inject ICuotaCopagoService Svc
+
+<PageTitle>Cuotas moderadoras / Copagos - Visal</PageTitle>
+
+<div class="cat-head">
+    <div>
+        <div class="cat-eyebrow">Configuracion del Sistema</div>
+        <h1 class="cat-title">Cuotas moderadoras y Copagos</h1>
+        <p class="cat-sub">Valor sugerido para cada rango salarial. El modal de asignacion carga estos valores y permite ajustar el valor real que paga el paciente.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="SembrarAsync">Sembrar defaults</button>
+        <button class="btn btn-primary btn-sm" @onclick="AddCuota">+ Cuota moderadora</button>
+        <button class="btn btn-primary btn-sm" @onclick="AddCopago">+ Copago</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="cat-alert">@_error</div> }
+@if (_ok is not null) { <div class="cat-ok">@_ok</div> }
+
+<div class="cat-card">
+    @if (_items.Count == 0)
+    {
+        <div class="text-center text-muted" style="padding:28px;">
+            <p style="margin:0 0 10px;">Aun no hay valores configurados.</p>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SembrarAsync">Sembrar rangos por defecto</button>
+        </div>
+    }
+    else
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width:130px">Tipo</th>
+                    <th style="width:180px">Categoria</th>
+                    <th style="width:150px" class="text-end">Valor sugerido (COP)</th>
+                    <th>Descripcion</th>
+                    <th style="width:80px" class="text-center">Activo</th>
+                    <th style="width:140px"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var it in _items)
+                {
+                    <tr>
+                        <td>
+                            <select class="form-select form-select-sm" @bind="it.Tipo">
+                                <option value="CUOTA">CUOTA</option>
+                                <option value="COPAGO">COPAGO</option>
+                            </select>
+                        </td>
+                        <td><input class="form-control form-control-sm mono" @bind="it.Categoria" placeholder="SMLDV 2 A 5" /></td>
+                        <td><input type="number" step="100" min="0" class="form-control form-control-sm text-end" @bind="it.ValorSugerido" /></td>
+                        <td><input class="form-control form-control-sm" @bind="it.Descripcion" /></td>
+                        <td class="text-center"><input type="checkbox" class="form-check-input" @bind="it.Activo" /></td>
+                        <td class="cat-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="() => SaveAsync(it)">&#10003;</button>
+                            @if (it.Id is not null)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteAsync(it)">&times;</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private List<Item> _items = new();
+    private string? _error, _ok;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _items = (await Svc.ListarAsync()).Select(x => new Item
+        {
+            Id = x.Id, Tipo = x.Tipo, Categoria = x.Categoria,
+            ValorSugerido = x.ValorSugerido, Descripcion = x.Descripcion, Activo = x.Activo
+        }).ToList();
+    }
+
+    private void AddCuota() => _items.Insert(0, new Item { Tipo = "CUOTA", Activo = true });
+    private void AddCopago() => _items.Insert(0, new Item { Tipo = "COPAGO", Activo = true });
+
+    private async Task SaveAsync(Item it)
+    {
+        _error = _ok = null;
+        try
+        {
+            var saved = await Svc.SaveAsync(new SaveCuotaCopagoRequest(it.Id, it.Tipo, it.Categoria, it.ValorSugerido, it.Descripcion, it.Activo), Guid.Empty);
+            if (saved is null) { _error = "No se pudo guardar."; return; }
+            it.Id = saved.Id;
+            _ok = $"{saved.Tipo} / {saved.Categoria} guardado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task DeleteAsync(Item it)
+    {
+        _error = _ok = null;
+        if (it.Id is not Guid id) { _items.Remove(it); return; }
+        try
+        {
+            await Svc.DeleteAsync(id, Guid.Empty);
+            _items.Remove(it);
+            _ok = "Eliminado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task SembrarAsync()
+    {
+        _error = _ok = null;
+        try
+        {
+            var n = await Svc.SeedDefaultsAsync(Guid.Empty);
+            _ok = n == 0 ? "Ya hay valores cargados." : $"Se sembraron {n} rangos por defecto.";
+            await ReloadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private sealed class Item
+    {
+        public Guid? Id { get; set; }
+        public string Tipo { get; set; } = "CUOTA";
+        public string Categoria { get; set; } = "";
+        public decimal ValorSugerido { get; set; }
+        public string? Descripcion { get; set; }
+        public bool Activo { get; set; } = true;
+    }
+}

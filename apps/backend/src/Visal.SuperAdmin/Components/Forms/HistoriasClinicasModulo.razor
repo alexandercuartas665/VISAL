@@ -2,6 +2,7 @@
 @using System.Text.Json
 @using Microsoft.Extensions.DependencyInjection
 @using Visal.Application.Tenancy
+@using Visal.Domain.Enums
 @using Visal.SuperAdmin.Components.Forms
 @inject IFormDefinitionService FormsSvc
 @inject IAsignacionService AsigSvc
@@ -16,6 +17,7 @@
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject ICatalogoPacienteService CatPacSvc
 @inject ITenantAdminService TenantsSvc
 @inject IServiceScopeFactory ScopeFactory
 @inject IJSRuntime JS
@@ -189,6 +191,35 @@
                 }
             </div>
             @if (_imprimirMsg is not null) { <div class="hc-info-msg">@_imprimirMsg</div> }
+
+            @* Datos RIPS de la HC seleccionada (Res. 202/2021). Se muestran como
+               chips debajo de la barra de acciones cuando la HC ya se creo. *@
+            @if (_historiaSel is not null &&
+                 (!string.IsNullOrWhiteSpace(_historiaSel.RipsViaNombre)
+                  || !string.IsNullOrWhiteSpace(_historiaSel.RipsFinalidadNombre)
+                  || !string.IsNullOrWhiteSpace(_historiaSel.RipsCausaNombre)))
+            {
+                <div class="hc-rips-tags">
+                    @if (!string.IsNullOrWhiteSpace(_historiaSel.RipsViaNombre))
+                    {
+                        <span class="hc-rips-tag" title="RIPS - Via de ingreso al servicio de salud">
+                            <span class="hc-rips-tag-lbl">Via:</span> @_historiaSel.RipsViaNombre
+                        </span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_historiaSel.RipsFinalidadNombre))
+                    {
+                        <span class="hc-rips-tag" title="RIPS - Finalidad de la consulta">
+                            <span class="hc-rips-tag-lbl">Finalidad:</span> @_historiaSel.RipsFinalidadNombre
+                        </span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_historiaSel.RipsCausaNombre))
+                    {
+                        <span class="hc-rips-tag" title="RIPS - Causa externa que motiva la atencion">
+                            <span class="hc-rips-tag-lbl">Causa:</span> @_historiaSel.RipsCausaNombre
+                        </span>
+                    }
+                </div>
+            }
 
             <div class="hc-buscar">
                 <label class="hc-buscar-lbl">BUSCAR DATOS DE HISTORIA:</label>
@@ -530,6 +561,69 @@
     </div>
 }
 
+@* =============================================================================
+   Modal RIPS: aparece al pulsar "Iniciar historia medica". Captura los 3 datos
+   obligatorios de la Res. 202/2021 de MinSalud (via + finalidad + causa externa)
+   antes de crear la HC. Sin estos tres campos la HC no se persiste.
+   ============================================================================= *@
+@if (_showRipsModal)
+{
+    <div class="ase-modal-backdrop" @onclick="CerrarModalRips"></div>
+    <div class="ase-modal rips-modal" @onclick:stopPropagation="true">
+        <div class="ase-modal-h">
+            <span>Datos RIPS obligatorios</span>
+            <button class="ase-modal-x" @onclick="CerrarModalRips" title="Cerrar">&times;</button>
+        </div>
+        <div class="ase-modal-b">
+            <div class="rips-intro">
+                Selecciona los tres datos obligatorios de la Resolucion 202/2021 de MinSalud.
+                Estos datos quedan atados a la Historia Clinica y no pueden cambiar despues.
+            </div>
+
+            @if (_ripsError is not null) { <div class="ase-alert">@_ripsError</div> }
+
+            <div class="rips-row">
+                <label class="rips-lbl">Via de ingreso al servicio de salud <span class="rips-req">*</span></label>
+                <select class="form-select" @bind="_ripsViaCod">
+                    <option value="">-- Selecciona --</option>
+                    @foreach (var v in _ripsVias)
+                    {
+                        <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
+                    }
+                </select>
+            </div>
+
+            <div class="rips-row">
+                <label class="rips-lbl">Finalidad de la consulta <span class="rips-req">*</span></label>
+                <select class="form-select" @bind="_ripsFinCod">
+                    <option value="">-- Selecciona --</option>
+                    @foreach (var v in _ripsFinalidades)
+                    {
+                        <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
+                    }
+                </select>
+            </div>
+
+            <div class="rips-row">
+                <label class="rips-lbl">Causa externa que motiva la atencion <span class="rips-req">*</span></label>
+                <select class="form-select" @bind="_ripsCausaCod">
+                    <option value="">-- Selecciona --</option>
+                    @foreach (var v in _ripsCausas)
+                    {
+                        <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
+                    }
+                </select>
+            </div>
+        </div>
+        <div class="ase-modal-f">
+            <button class="btn btn-outline-secondary" @onclick="CerrarModalRips">Cancelar</button>
+            <button class="btn btn-primary" @onclick="ConfirmarRipsYCrearAsync">
+                &#128221; Iniciar historia
+            </button>
+        </div>
+    </div>
+}
+
 <style>
     /* Grid externo de 3 columnas: paciente (320px) | chat WhatsApp (320px) | modulo
        de historias (1fr). Cada columna puede colapsar a 50px (paciente/chat) para
@@ -662,6 +756,18 @@
     .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
     .cie-modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; }
     .cie-modal-body { padding: 18px; overflow: auto; }
+
+    /* Tags RIPS debajo de la barra de acciones de la HC. */
+    .hc-rips-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; padding: 6px 0 0; border-top: 1px dashed #e2e8f0; }
+    .hc-rips-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; border-radius: 999px; font-size: 11.5px; font-weight: 500; }
+    .hc-rips-tag-lbl { color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
+
+    /* Modal RIPS. Reutiliza estilos .ase-modal* si existen; caemos con reglas propias por si no. */
+    .rips-modal { width: 560px; max-width: 95vw; }
+    .rips-intro { font-size: 12.5px; color: #475569; margin-bottom: 14px; padding: 10px 12px; background: #f8fafc; border-left: 3px solid #1565c0; border-radius: 4px; }
+    .rips-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+    .rips-lbl { font-size: 12px; font-weight: 600; color: #334155; }
+    .rips-req { color: #dc2626; margin-left: 2px; }
 </style>
 
 @code {
@@ -847,6 +953,20 @@
     private int _imprMedCount, _imprSrvCount, _imprIncCount, _imprCertCount, _imprEscCount, _imprEvoCount, _imprConCount;
     private int _imprInsCount, _imprRemCount, _imprRxExtCount, _imprLabExtCount, _imprInsExtCount;
 
+    // ---- Modal RIPS obligatorio al iniciar HC ----
+    // Res. 202/2021 de MinSalud exige capturar VIA + FINALIDAD + CAUSA EXTERNA
+    // para poder reportar la atencion. Los cargamos de los catalogos de paciente
+    // (tipos 6, 7 y 8) y forzamos seleccion antes de crear la HC.
+    private bool _showRipsModal;
+    private Guid _ripsFormatoPendiente;
+    private List<CatalogoPacienteDto> _ripsVias = new();
+    private List<CatalogoPacienteDto> _ripsFinalidades = new();
+    private List<CatalogoPacienteDto> _ripsCausas = new();
+    private string _ripsViaCod = "";
+    private string _ripsFinCod = "";
+    private string _ripsCausaCod = "";
+    private string? _ripsError;
+
     private PacienteAsignacionDto? _paciente;
 
     private bool _showPacModal;
@@ -1030,6 +1150,10 @@
         // Cargar la historia completa desde BD para mostrar sus valores en el FormViewer.
         var detail = await HcSvc.GetAsync(h.Id);
         if (detail is null) { return; }
+        // Propagar datos RIPS a la fila seleccionada para el resumen de tags.
+        h.RipsViaNombre = detail.RipsViaIngresoNombre;
+        h.RipsFinalidadNombre = detail.RipsFinalidadNombre;
+        h.RipsCausaNombre = detail.RipsCausaExternaNombre;
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = DeserializeValores(detail.ValoresJson);
@@ -1285,31 +1409,84 @@
             }
         }
 
+        // Antes de crear la HC exigimos los 3 datos RIPS (Res. 202/2021). Cargamos
+        // catalogos (si no estan ya) y abrimos el modal. La creacion real ocurre
+        // en ConfirmarRipsYCrearAsync cuando el usuario confirma.
+        await AbrirModalRipsAsync(fid);
+    }
+
+    private async Task AbrirModalRipsAsync(Guid fid)
+    {
+        _ripsFormatoPendiente = fid;
+        _ripsError = null;
+        if (_ripsVias.Count == 0)
+        {
+            _ripsVias = (await CatPacSvc.ListAsync(CatalogoPacienteTipo.RipsViaIngreso))
+                .Where(c => c.Activo).OrderBy(c => c.Codigo).ToList();
+        }
+        if (_ripsFinalidades.Count == 0)
+        {
+            _ripsFinalidades = (await CatPacSvc.ListAsync(CatalogoPacienteTipo.RipsFinalidadConsulta))
+                .Where(c => c.Activo).OrderBy(c => c.Codigo).ToList();
+        }
+        if (_ripsCausas.Count == 0)
+        {
+            _ripsCausas = (await CatPacSvc.ListAsync(CatalogoPacienteTipo.RipsCausaExterna))
+                .Where(c => c.Activo).OrderBy(c => c.Codigo).ToList();
+        }
+        // Sugerimos defaults comunes: consulta externa + tratamiento + enfermedad general.
+        _ripsViaCod = _ripsVias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? "";
+        _ripsFinCod = _ripsFinalidades.FirstOrDefault(v => v.Codigo == "16")?.Codigo ?? "";
+        _ripsCausaCod = _ripsCausas.FirstOrDefault(v => v.Codigo == "13")?.Codigo ?? "";
+        _showRipsModal = true;
+    }
+
+    private void CerrarModalRips() => _showRipsModal = false;
+
+    private async Task ConfirmarRipsYCrearAsync()
+    {
+        _ripsError = null;
+        if (string.IsNullOrWhiteSpace(_ripsViaCod) || string.IsNullOrWhiteSpace(_ripsFinCod) || string.IsNullOrWhiteSpace(_ripsCausaCod))
+        {
+            _ripsError = "Selecciona Via, Finalidad y Causa externa para continuar.";
+            return;
+        }
+        if (PacienteActivo is not PacienteAsignacionDto p) { _showRipsModal = false; return; }
+        var fid = _ripsFormatoPendiente;
+        if (fid == Guid.Empty) { _showRipsModal = false; return; }
+
+        var via = _ripsVias.FirstOrDefault(v => v.Codigo == _ripsViaCod);
+        var fin = _ripsFinalidades.FirstOrDefault(v => v.Codigo == _ripsFinCod);
+        var cau = _ripsCausas.FirstOrDefault(v => v.Codigo == _ripsCausaCod);
+        if (via is null || fin is null || cau is null)
+        {
+            _ripsError = "Alguna de las opciones seleccionadas ya no esta activa. Recarga la pagina.";
+            return;
+        }
+
         var detail = await FormsSvc.GetAsync(fid);
-        if (detail is null) { return; }
+        if (detail is null) { _ripsError = "El formato ya no existe."; return; }
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = new();
-        // 1) Aplicar valores por defecto declarados en cada FormNode del schema.
-        //    Estos quedan visibles desde el primer render aunque no haya paciente.
         DefaultValuesHelper.Aplicar(_valores, _schemaActual);
-        // 2) Prefill desde el paciente activo (paciente sobreescribe defaults si coincide).
         await PrefillFromPaciente();
         _formatoActualNombre = detail.Nombre;
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version) ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}" : $"Codigo: {detail.Codigo}";
         _tabSel = "Historial";
 
-        // Persistir la historia recien creada con los valores de prefill.
         var especialista = await GetEspecialistaNombreAsync();
+        var miProf = await ResolverMiProfesionalIdAsync();
         var creada = await HcSvc.CrearAsync(
-            new CrearHistoriaRequest(p.Id, fid, SerializeValores(_valores), especialista, miProf),
+            new CrearHistoriaRequest(
+                p.Id, fid, SerializeValores(_valores), especialista, miProf,
+                via.Codigo, via.Nombre,
+                fin.Codigo, fin.Nombre,
+                cau.Codigo, cau.Nombre),
             Guid.Empty);
 
-        // 3) Encabezado del documento (No Historia, Fecha, Hora). Se llena con el
-        //    consecutivo del HC y la fecha/hora de apertura, y quedan readonly.
         _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura);
         _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
-        // Persistir los valores recien rellenados (incluye header autofill).
         await HcSvc.GuardarValoresAsync(creada.Id, SerializeValores(_valores), Guid.Empty);
 
         var nueva = new HistoriaRow
@@ -1319,13 +1496,17 @@
             Fecha = DateOnly.FromDateTime(creada.FechaApertura.LocalDateTime),
             Estado = creada.Estado,
             Observaciones = $"Iniciada con formato {detail.Codigo} para {p.NombreCompleto}",
-            ProfesionalId = creada.ProfesionalId
+            ProfesionalId = creada.ProfesionalId,
+            RipsViaNombre = creada.RipsViaIngresoNombre,
+            RipsFinalidadNombre = creada.RipsFinalidadNombre,
+            RipsCausaNombre = creada.RipsCausaExternaNombre
         };
         _historias.Insert(0, nueva);
         _historiaSel = nueva;
-        _hcEsDeOtroDoctor = false; // la acabamos de crear nosotros
+        _hcEsDeOtroDoctor = false;
         _imprimirMsg = null;
-        _medCount = 0; // HC recien creada no tiene medicamentos aun
+        _medCount = 0;
+        _showRipsModal = false;
     }
 
     private async Task<string?> GetEspecialistaNombreAsync()
@@ -1616,5 +1797,8 @@
         /// <summary>Dueno de la HC. Permite distinguir cuando el usuario logueado
         /// la abre como editor (es el mismo profesional) o solo en lectura.</summary>
         public Guid? ProfesionalId { get; set; }
+        public string? RipsViaNombre { get; set; }
+        public string? RipsFinalidadNombre { get; set; }
+        public string? RipsCausaNombre { get; set; }
     }
 }

@@ -52,7 +52,10 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
                 x.h.Id, x.h.PacienteId, x.f.Id, x.f.Codigo, x.f.Nombre, x.f.Version,
                 x.f.SchemaJson, x.f.PrefillRoutesJson, x.h.ValoresJson,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
-                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId))
+                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
+                x.h.RipsViaIngresoCodigo, x.h.RipsViaIngresoNombre,
+                x.h.RipsFinalidadCodigo, x.h.RipsFinalidadNombre,
+                x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre))
             .FirstOrDefaultAsync(ct);
         return row;
     }
@@ -69,6 +72,17 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
             .FirstOrDefaultAsync(p => p.Id == req.PacienteId, ct)
             ?? throw new InvalidOperationException("Paciente no encontrado.");
 
+        // Validacion de RIPS: la Res. 202/2021 exige via + finalidad + causa externa
+        // como datos obligatorios para reportar. Bloqueamos aqui para que ninguna HC
+        // se persista sin ellos.
+        if (string.IsNullOrWhiteSpace(req.RipsViaIngresoCodigo)
+            || string.IsNullOrWhiteSpace(req.RipsFinalidadCodigo)
+            || string.IsNullOrWhiteSpace(req.RipsCausaExternaCodigo))
+        {
+            throw new InvalidOperationException(
+                "Debes indicar Via de ingreso, Finalidad de la consulta y Causa externa (datos RIPS obligatorios).");
+        }
+
         var entity = new HistoriaClinica
         {
             TenantId = tid,
@@ -78,7 +92,13 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
             Estado = HistoriaClinicaEstado.Abierta,
             FechaApertura = DateTimeOffset.UtcNow,
             EspecialistaNombre = req.EspecialistaNombre,
-            ProfesionalId = req.ProfesionalId
+            ProfesionalId = req.ProfesionalId,
+            RipsViaIngresoCodigo = req.RipsViaIngresoCodigo,
+            RipsViaIngresoNombre = req.RipsViaIngresoNombre,
+            RipsFinalidadCodigo = req.RipsFinalidadCodigo,
+            RipsFinalidadNombre = req.RipsFinalidadNombre,
+            RipsCausaExternaCodigo = req.RipsCausaExternaCodigo,
+            RipsCausaExternaNombre = req.RipsCausaExternaNombre
         };
         db.HistoriasClinicas.Add(entity);
         await db.SaveChangesAsync(ct);

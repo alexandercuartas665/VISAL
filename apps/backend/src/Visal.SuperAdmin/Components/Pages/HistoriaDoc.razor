@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
 @using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Forms
 @using Visal.SuperAdmin.Components.Forms
 @inject IHistoriaClinicaService HcSvc
 @inject IAsignacionService AsigSvc
@@ -130,11 +131,13 @@ else
         @* ============ CUERPO: secciones + campos diligenciados ============ *@
         @foreach (var node in _schema.Children)
         {
+            if (!ShouldShow(node)) { continue; }
             <div class="doc-grid">
                 @if (node.IsSection)
                 {
                     @foreach (var ch in node.Children ?? new())
                     {
+                        if (!ShouldShow(ch)) { continue; }
                         @RenderDocNode(ch)
                     }
                 }
@@ -205,6 +208,11 @@ else
 
     private string? GetValor(FormNode n) =>
         _valores.TryGetValue(KeyOf(n), out var v) ? v : null;
+
+    /// <summary>Filtro de visibilidad condicional (mismo evaluador que el FormViewer).
+    /// Un nodo con VisibleWhen que no cumple la regla no debe aparecer impreso.</summary>
+    private bool ShouldShow(FormNode n) =>
+        VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, _valores);
 
     private RenderFragment RenderDocNode(FormNode n) =>
         n.IsText ? RenderDocText(n) : (n.IsTable ? RenderDocTable(n) : RenderDocField(n));

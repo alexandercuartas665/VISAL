@@ -82,7 +82,13 @@ else
         </div>
         <div class="oi-row">
             <div class="oi-f oi-c-12">
-                <label>URL MIPRES <small class="text-muted">(opcional, pega el link del formato radicado)</small></label>
+                <label>
+                    URL MIPRES <small class="text-muted">(opcional, pega el link del formato radicado)</small>
+                    <a class="btn btn-outline-primary btn-sm oi-mipres-link" href="https://mipres.sispro.gov.co/" target="_blank" rel="noopener noreferrer"
+                       title="Abrir MIPRES en una nueva pestana">
+                        &#128279; Abrir MIPRES
+                    </a>
+                </label>
                 <input class="form-control form-control-sm oi-mipres-input"
                        type="url"
                        placeholder="https://mipres.sispro.gov.co/..."
@@ -171,6 +177,7 @@ else
     .oi-sug-cod { font-family: 'JetBrains Mono','Consolas',monospace; color:#1565c0; font-weight: 600; }
     .oi-sug-nom { color:#0f172a; }
     .oi-mipres-input { font-family: 'JetBrains Mono','Consolas',monospace; font-size: 11.5px; }
+    .oi-mipres-link { margin-left:10px; padding:2px 10px; font-size:11px; font-weight:600; vertical-align:baseline; text-decoration:none; }
 </style>
 
 @code {

@@ -259,6 +259,7 @@
             {
                 <div class="fb-props-title">Seccion</div>
                 <div class="fb-prop"><label>Titulo</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" /></div>
+                @RenderVisibleWhenPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar seccion</button>
             }
             else if (_selected.IsText)
@@ -273,6 +274,7 @@
                     </select>
                 </div>
                 <div class="fb-prop"><label>Contenido</label><textarea class="fb-input" rows="3" @bind="_selected.Content" @bind:event="oninput"></textarea></div>
+                @RenderVisibleWhenPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar texto</button>
             }
             else
@@ -499,6 +501,7 @@
                     }
                 }
 
+                @RenderVisibleWhenPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">@(_selected.IsTable ? "Eliminar tabla" : "Eliminar campo")</button>
             }
         </aside>
@@ -1684,6 +1687,102 @@
 
     private RenderFragment RenderNode(FormNode n, List<FormNode> list) =>
         n.IsText ? RenderText(n, list) : (n.IsTable ? RenderTable(n, list) : RenderField(n, list));
+
+    // ────────────────────────────────────────────────────────────────────
+    // Panel "Mostrar solo cuando..." — visibilidad condicional del nodo.
+    // Se aplica igual a secciones, bloques de texto y campos. La regla vive
+    // en node.VisibleWhen; si es null, el panel muestra "+ Agregar condicion".
+    // Los operadores se muestran en espanol pero se guardan en el codigo
+    // que espera VisibleWhenEvaluator (equals, notEquals, in, notIn,
+    // isEmpty, isNotEmpty).
+    // ────────────────────────────────────────────────────────────────────
+    private static readonly Dictionary<string, string> VisibleWhenOperators = new()
+    {
+        ["equals"] = "es igual a",
+        ["notEquals"] = "es distinto de",
+        ["in"] = "esta en la lista",
+        ["notIn"] = "no esta en la lista",
+        ["isEmpty"] = "esta vacio",
+        ["isNotEmpty"] = "tiene valor"
+    };
+
+    /// <summary>Nombres extra que se sugieren en el dropdown de campo condicionante
+    /// aunque no vengan del schema — corresponden a prefills tipicos del paciente.</summary>
+    private static readonly string[] VisibleWhenPrefillFields = new[]
+    {
+        "sexo", "edad", "estado_civil", "grupo_sanguineo", "escolaridad"
+    };
+
+    private static bool OperatorTakesValue(string? op) =>
+        op is "equals" or "notEquals" or "in" or "notIn";
+
+    private void EnsureVisibleWhen(FormNode node)
+    {
+        node.VisibleWhen ??= new VisibleWhenRule { Field = "", Operator = "equals", Value = "" };
+    }
+
+    private void ClearVisibleWhen(FormNode node)
+    {
+        node.VisibleWhen = null;
+    }
+
+    private RenderFragment RenderVisibleWhenPanel(FormNode node) => @<div class="fb-vw-panel">
+        <div class="fb-props-subtitle">Mostrar solo cuando...</div>
+        @if (node.VisibleWhen is null)
+        {
+            <button class="fb-btn" @onclick="() => EnsureVisibleWhen(node)">+ Agregar condicion</button>
+            <div class="fb-hint">
+                Si defines una condicion, este @NodeKindLabel(node) solo aparecera en la HC
+                cuando el campo referenciado cumpla la regla. Ideal para secciones tipo
+                <em>GINECO OBSTETRICOS</em> que solo aplican si <code>sexo = FEMENINO</code>.
+            </div>
+        }
+        else
+        {
+            var rule = node.VisibleWhen;
+            var schemaFields = GetSchemaFieldNames();
+            var allFields = VisibleWhenPrefillFields.Concat(schemaFields).Distinct().OrderBy(s => s).ToList();
+            <div class="fb-prop">
+                <label>Campo condicionante</label>
+                <select class="fb-input" @bind="rule.Field">
+                    <option value="">(elige un campo)</option>
+                    @foreach (var f in allFields)
+                    {
+                        <option value="@f">@f</option>
+                    }
+                </select>
+                <div class="fb-hint">
+                    Puede ser el <code>nombre</code> de un campo del schema o una clave de prefill
+                    (ej. <code>sexo</code>, <code>edad</code>).
+                </div>
+            </div>
+            <div class="fb-prop">
+                <label>Operador</label>
+                <select class="fb-input" @bind="rule.Operator">
+                    @foreach (var op in VisibleWhenOperators)
+                    {
+                        <option value="@op.Key">@op.Value</option>
+                    }
+                </select>
+            </div>
+            @if (OperatorTakesValue(rule.Operator))
+            {
+                <div class="fb-prop">
+                    <label>Valor</label>
+                    <input class="fb-input" @bind="rule.Value" @bind:event="oninput"
+                           placeholder="@(rule.Operator is "in" or "notIn" ? "MASCULINO,OTRO" : "FEMENINO")" />
+                    @if (rule.Operator is "in" or "notIn")
+                    {
+                        <div class="fb-hint">Lista separada por comas: <code>MASCULINO,OTRO</code>.</div>
+                    }
+                </div>
+            }
+            <button class="fb-btn fb-btn-danger" @onclick="() => ClearVisibleWhen(node)">Quitar condicion</button>
+        }
+    </div>;
+
+    private static string NodeKindLabel(FormNode n) =>
+        n.IsSection ? "seccion" : (n.IsText ? "bloque de texto" : (n.IsTable ? "tabla" : "campo"));
 
     private RenderFragment RenderText(FormNode n, List<FormNode> list) => @<div class="fb-textblock fb-ts-@n.TextStyle @(IsSelected(n) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(n)}")" @onclick="() => Select(n)" @onclick:stopPropagation="true">
         <div class="fb-field-top">

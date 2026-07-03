@@ -14,6 +14,9 @@ public class ServicioContrato : TenantEntity
     public string? Sede { get; set; }
     /// <summary>Codigo de la historia/formato que maneja el servicio (ej. 00018).</summary>
     public string? Historia { get; set; }
+    /// <summary>Paquete comercial opcional al que pertenece el servicio (FK a Paquete).</summary>
+    public Guid? PaqueteId { get; set; }
+    public Paquete? Paquete { get; set; }
     public string? CodigoServicio { get; set; }
     public string? CodigoInterno { get; set; }
     public string? Descripcion { get; set; }

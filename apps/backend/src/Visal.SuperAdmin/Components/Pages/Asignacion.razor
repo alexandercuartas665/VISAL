@@ -5,6 +5,10 @@
 @using Visal.Application.Tenancy
 @inject IAsignacionService Svc
 @inject IPacienteService PacSvc
+@inject IPaqueteService PaqSvc
+@inject IAseguradoraService AseSvc
+@inject ICuotaCopagoService CuotaSvc
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
 
 <PageTitle>Asignacion de Servicios - Visal</PageTitle>
@@ -14,13 +18,25 @@
         <div class="ase-eyebrow">Operacion Clinica</div>
         <h1 class="ase-title">Asignacion de Servicios</h1>
     </div>
-    <button class="btn btn-warning btn-sm" @onclick="Reset">Nuevo</button>
+    @if (_tab == "wizard")
+    {
+        <button class="btn btn-warning btn-sm" @onclick="Reset">Nuevo</button>
+    }
+</div>
+
+<div class="asg-tabs">
+    <button class="asg-tab @(_tab == "wizard" ? "asg-tab-active" : "")"
+            @onclick='() => SwitchTab("wizard")'>Registrar</button>
+    <button class="asg-tab @(_tab == "listado" ? "asg-tab-active" : "")"
+            @onclick='() => SwitchTab("listado")'>Listado</button>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @* _ok se renderiza dentro de la columna 3, antes de "Datos del servicio a agregar",
    para dar feedback contextual al lado de la accion. *@
 
+@if (_tab == "wizard")
+{
 <div class="asg-grid">
 
     @* ============ COLUMNA 1: Paciente + servicios disponibles ============ *@
@@ -91,6 +107,16 @@
         <div class="ase-card">
             <div class="ase-card-h">2. Seleccione el Servicio</div>
             <div class="ase-form">
+                <div class="ase-f">
+                    <label>Paquete</label>
+                    <select class="form-select form-select-sm mono" @bind="_paqueteSel" @bind:after="StateHasChanged">
+                        <option value="">(todos)</option>
+                        @foreach (var p in _paquetesDisponibles)
+                        {
+                            <option value="@p.Codigo">@p.Codigo</option>
+                        }
+                    </select>
+                </div>
                 <div class="ase-f ase-f-full">
                     <label>Busqueda por servicio</label>
                     <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..."
@@ -115,6 +141,7 @@
                                 <th>CodServicio</th>
                                 <th>CodInterno</th>
                                 <th>Historia</th>
+                                <th>Paquete</th>
                                 <th>Descripcion</th>
                                 <th>Clasificacion</th>
                                 <th>Modulo</th>
@@ -130,6 +157,7 @@
                                     <td class="mono">@s.Codigo</td>
                                     <td class="mono">@s.CodigoInterno</td>
                                     <td class="mono">@s.Historia</td>
+                                    <td class="mono">@s.PaqueteCodigo</td>
                                     <td>@s.Descripcion</td>
                                     <td>@s.Clasificacion</td>
                                     <td>@s.Modulo</td>
@@ -152,9 +180,10 @@
                 @if (_ultimas.Count == 0) { <div class="ase-empty">@(_paciente == null ? "Selecciona un paciente." : "Sin asignaciones previas.")</div> }
                 @foreach (var u in _ultimas)
                 {
-                    var puedeBorrar = !string.Equals(u.Estado, "Asignado", StringComparison.OrdinalIgnoreCase)
+                    var puedeEditar = !string.Equals(u.Estado, "Asignado", StringComparison.OrdinalIgnoreCase)
                                     && !string.Equals(u.Estado, "Cerrado", StringComparison.OrdinalIgnoreCase);
-                    <div class="asg-hist">
+                    var puedeBorrar = puedeEditar;
+                    <div class="asg-hist @(u.Id == _editandoId ? "asg-hist-editing" : "")">
                         <div class="asg-hist-h">
                             <div class="asg-hist-nm">@u.NombreServicio</div>
                             <div class="dropdown asg-hist-menu-wrap">
@@ -163,6 +192,11 @@
                                 @if (_menuHistAbierto == u.Id)
                                 {
                                     <div class="asg-hist-menu" @onclick:stopPropagation="true">
+                                        <button class="asg-hist-menu-item" disabled="@(!puedeEditar)"
+                                                title="@(puedeEditar ? "Editar esta asignacion" : "Ya esta tomada por Coordinacion - no se puede editar")"
+                                                @onclick="() => EditarAsignacion(u)">
+                                            <span>&#9998;</span> Editar
+                                        </button>
                                         <button class="asg-hist-menu-item" @onclick="() => CopiarProgramacion(u)">
                                             <span>&#128203;</span> Copiar programacion
                                         </button>
@@ -237,6 +271,44 @@
                la preseleccion de servicio, porque sin servicio no hay nada que agregar. *@
             <div class="ase-form asg-form-col3">
                 <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_paciente == null)" /></div>
+                @if (_contratoSel is not null && _contratoSel.RequierePdfAutorizacion)
+                {
+                    <div class="ase-f ase-f-wide">
+                        <label>
+                            PDF de autorizacion <span class="asg-req-badge" title="El contrato exige adjuntar el PDF de autorizacion">obligatorio</span>
+                        </label>
+                        <div class="asg-input-row">
+                            <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" disabled="@(_paciente == null)" />
+                            @if (!string.IsNullOrWhiteSpace(_pdfAutorizacionUrl))
+                            {
+                                <a class="btn btn-outline-secondary btn-sm" href="@_pdfAutorizacionUrl" target="_blank" title="Ver PDF cargado">Ver</a>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="LimpiarPdf" type="button" title="Quitar PDF">&times;</button>
+                            }
+                        </div>
+                        @if (_pdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
+                        else if (!string.IsNullOrWhiteSpace(_pdfNombre))
+                        {
+                            <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div>
+                        }
+                    </div>
+                }
+                @* ── Panel Cuota moderadora / Copago ──────────────────────── *@
+                <div class="ase-f ase-f-wide">
+                    <div class="asg-pago-head">
+                        <span>Cuota moderadora / Copago</span>
+                        @if (!string.IsNullOrWhiteSpace(_tipoPago))
+                        {
+                            <span class="asg-pago-badge">@_tipoPago @(_valorPagoReal is decimal r ? $"· ${r:N0}" : "")</span>
+                        }
+                        <button class="btn btn-outline-primary btn-sm ms-auto" type="button" @onclick="AbrirModalPago" disabled="@(_paciente == null)">
+                            @(string.IsNullOrWhiteSpace(_tipoPago) ? "Registrar pago" : "Editar pago")
+                        </button>
+                        @if (!string.IsNullOrWhiteSpace(_tipoPago))
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" type="button" @onclick="LimpiarPago" title="Quitar informacion de pago">&times;</button>
+                        }
+                    </div>
+                </div>
                 <div class="ase-f"><label>INICIO</label><input type="date" class="form-control form-control-sm" @bind="_fechaInicio" disabled="@(_paciente == null)" /></div>
                 <div class="ase-f"><label>FINAL</label><input type="date" class="form-control form-control-sm" @bind="_fechaFinal" disabled="@(_paciente == null)" /></div>
                 <div class="ase-f"><label>Periodo (Año)</label>
@@ -265,14 +337,224 @@
                     <label>Cantidad</label>
                     <div class="asg-input-row asg-final-row">
                         <input type="number" min="1" class="form-control form-control-sm asg-cant-inp" @bind="_cantidad" disabled="@(_paciente == null)" />
-                        <button class="btn btn-primary btn-sm" @onclick="Agregar" disabled="@(_servicioSel == null)" title="@(_servicioSel == null ? "Selecciona primero un servicio en la grilla" : "Agregar al lote")">Agregar</button>
-                        <button class="btn btn-primary btn-sm asg-guardar-btn" @onclick="Guardar" disabled="@(_busy || _carrito.Count == 0 || _paciente == null)">@(_busy ? "Guardando..." : "Guardar registro")</button>
+                        @if (_editandoId is null)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="Agregar" disabled="@(_servicioSel == null)" title="@(_servicioSel == null ? "Selecciona primero un servicio en la grilla" : "Agregar al lote")">Agregar</button>
+                            <button class="btn btn-primary btn-sm asg-guardar-btn" @onclick="Guardar" disabled="@(_busy || _carrito.Count == 0 || _paciente == null)">@(_busy ? "Guardando..." : "Guardar registro")</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarEdicion" disabled="@_busy">Cancelar</button>
+                            <button class="btn btn-primary btn-sm asg-guardar-btn" @onclick="GuardarEdicion" disabled="@(_busy || _servicioSel == null)">@(_busy ? "Guardando..." : "Guardar cambios")</button>
+                        }
                     </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
+}
+else
+{
+    <div class="asg-listado">
+        <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-form asg-list-filtros">
+                <div class="ase-f"><label>Fecha inicial</label>
+                    <input type="date" class="form-control form-control-sm"
+                           value="@_fFechaIni?.ToString("yyyy-MM-dd")"
+                           @onchange="e => { _fFechaIni = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null; }" />
+                </div>
+                <div class="ase-f"><label>Fecha final</label>
+                    <input type="date" class="form-control form-control-sm"
+                           value="@_fFechaFin?.ToString("yyyy-MM-dd")"
+                           @onchange="e => { _fFechaFin = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null; }" />
+                </div>
+                <div class="ase-f"><label>Aseguradora / EPS</label>
+                    <select class="form-select form-select-sm" @bind="_fAseId">
+                        <option value="">(todas)</option>
+                        @foreach (var a in _aseguradorasFiltro)
+                        {
+                            <option value="@a.Id">@a.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f"><label>Contrato</label>
+                    <select class="form-select form-select-sm" @bind="_fContratoCod">
+                        <option value="">(todos)</option>
+                        @foreach (var c in _todosContratos)
+                        {
+                            <option value="@c.CodigoContrato">@c.CodigoContrato - @c.AseguradoraNombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="ase-f"><label>Tipo servicio (modulo)</label>
+                    <select class="form-select form-select-sm" @bind="_fModulo">
+                        <option value="">(todos)</option>
+                        <option value="CONSULTAS">CONSULTAS</option>
+                        <option value="ENFERMERIA">ENFERMERIA</option>
+                        <option value="EQUIPOS">EQUIPOS</option>
+                        <option value="INSUMOS">INSUMOS</option>
+                        <option value="TERAPIAS">TERAPIAS</option>
+                    </select>
+                </div>
+                <div class="ase-f"><label>Paciente (documento)</label>
+                    <input class="form-control form-control-sm mono" placeholder="Cedula del paciente..."
+                           @bind="_fDocumento" @bind:event="oninput" />
+                </div>
+                <div class="ase-f ase-f-wide"><label>Nombre servicio</label>
+                    <input class="form-control form-control-sm" placeholder="Busca por descripcion del servicio..."
+                           @bind="_fNombreServ" @bind:event="oninput" />
+                </div>
+                <div class="ase-f ase-f-wide">
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="AplicarFiltrosListado" disabled="@_listBusy">
+                            @(_listBusy ? "Buscando..." : "Aplicar filtros")
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosListado">Limpiar</button>
+                        <div class="ms-auto text-muted small">
+                            @_listado.Count resultado(s)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ase-card">
+            <div class="ase-card-h">Asignaciones</div>
+            <div class="table-responsive asg-list-wrap">
+                <table class="table table-sm table-striped asg-list-tbl">
+                    <thead>
+                        <tr>
+                            <th>Fecha creado</th>
+                            <th>Documento</th>
+                            <th>Paciente</th>
+                            <th>Aseguradora</th>
+                            <th>Contrato</th>
+                            <th>Servicio</th>
+                            <th>Modulo</th>
+                            <th class="text-end">Cant</th>
+                            <th>Estado</th>
+                            <th>Vigencia</th>
+                            <th>Fecha inicio</th>
+                            <th>Autorizacion</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_listado.Count == 0)
+                        {
+                            <tr><td colspan="13" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
+                        }
+                        @foreach (var a in _listado)
+                        {
+                            <tr>
+                                <td class="mono">@a.CreadoEn.LocalDateTime.ToString("dd/MM/yy HH:mm")</td>
+                                <td class="mono">@a.PacienteDocumento</td>
+                                <td>@a.PacienteNombre</td>
+                                <td>@(a.AseguradoraNombre ?? "-")</td>
+                                <td class="mono">@a.ContratoCodigo</td>
+                                <td>@a.NombreServicio</td>
+                                <td>@(a.Modulo ?? a.TipoServicio)</td>
+                                <td class="text-end">@a.Cantidad</td>
+                                <td><span class="asg-state asg-st-@a.Estado.ToLower()">@a.Estado</span></td>
+                                <td>@FormatVigencia(a.AnioServicio, a.MesVigencia, a.MesFinal)</td>
+                                <td class="mono">@a.FechaInicio.ToString("dd/MM/yyyy")</td>
+                                <td class="mono">@(a.CodigoAutorizacion ?? "")</td>
+                                <td class="text-muted small">@(a.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@* ============ Modal CUOTA / COPAGO (botones grandes tipo tarjeta) ============ *@
+@if (_modalPago)
+{
+    <div class="cie-backdrop" @onclick="CerrarModalPago"></div>
+    <div class="cie-modal asg-pago-modal">
+        <div class="cie-modal-h">
+            <h3>Cuota moderadora / Copago</h3>
+            <button class="cie-modal-close" @onclick="CerrarModalPago">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+
+            @* ── PASO 1: Tipo (3 botones grandes) ── *@
+            <div class="asg-pago-step-label">1. Tipo de pago</div>
+            <div class="asg-pago-tipo-grid">
+                <button type="button"
+                        class="asg-pago-tile asg-tile-neutral @(string.IsNullOrEmpty(_modalPagoTipo) ? "sel" : "")"
+                        @onclick='() => SetPagoTipo("")'>
+                    <div class="asg-tile-ico">&times;</div>
+                    <div class="asg-tile-title">Sin cargo</div>
+                    <div class="asg-tile-sub">El paciente no paga</div>
+                </button>
+                <button type="button"
+                        class="asg-pago-tile asg-tile-cuota @(_modalPagoTipo == "CUOTA" ? "sel" : "")"
+                        @onclick='() => SetPagoTipo("CUOTA")'>
+                    <div class="asg-tile-ico">$</div>
+                    <div class="asg-tile-title">Cuota moderadora</div>
+                    <div class="asg-tile-sub">Regimen contributivo</div>
+                </button>
+                <button type="button"
+                        class="asg-pago-tile asg-tile-copago @(_modalPagoTipo == "COPAGO" ? "sel" : "")"
+                        @onclick='() => SetPagoTipo("COPAGO")'>
+                    <div class="asg-tile-ico">&#128176;</div>
+                    <div class="asg-tile-title">Copago</div>
+                    <div class="asg-tile-sub">Regimen subsidiado</div>
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_modalPagoTipo))
+            {
+                @* ── PASO 2: Rango (una tarjeta por rango del catalogo) ── *@
+                <div class="asg-pago-step-label">2. Rango salarial</div>
+                <div class="asg-pago-rango-grid">
+                    @foreach (var c in _catalogoPago.Where(x => x.Tipo == _modalPagoTipo))
+                    {
+                        var isSel = _modalPagoCategoria == c.Categoria;
+                        <button type="button"
+                                class="asg-pago-rango @(isSel ? "sel" : "")"
+                                @onclick="() => SetPagoCategoria(c)">
+                            <div class="asg-rango-cat">@c.Categoria</div>
+                            <div class="asg-rango-val">$ @c.ValorSugerido.ToString("N0")</div>
+                            @if (!string.IsNullOrWhiteSpace(c.Descripcion))
+                            {
+                                <div class="asg-rango-desc">@c.Descripcion</div>
+                            }
+                        </button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_modalPagoCategoria))
+                {
+                    @* ── PASO 3: Valores editables ── *@
+                    <div class="asg-pago-step-label">3. Valor a pagar</div>
+                    <div class="asg-pago-valores">
+                        <div class="asg-pago-val-box">
+                            <label>Valor sugerido</label>
+                            <input type="number" class="form-control asg-pago-input" @bind="_modalPagoSugerido" step="100" min="0" />
+                        </div>
+                        <div class="asg-pago-val-box asg-pago-val-real">
+                            <label>Valor real pagado</label>
+                            <input type="number" class="form-control asg-pago-input" @bind="_modalPagoReal" step="100" min="0" />
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+        <div class="asg-pago-footer">
+            <button class="btn btn-outline-secondary btn-lg" @onclick="CerrarModalPago">Cancelar</button>
+            <button class="btn btn-primary btn-lg asg-pago-confirmar" @onclick="ConfirmarPago"
+                    disabled="@(!string.IsNullOrEmpty(_modalPagoTipo) && string.IsNullOrEmpty(_modalPagoCategoria))">
+                Confirmar
+            </button>
+        </div>
+    </div>
+}
 
 @* ============ Modal BUSCAR PACIENTES (filtros + grid) ============ *@
 @if (_modal)
@@ -366,6 +648,67 @@
 }
 
 <style>
+    /* Tabs primarias de /asignacion (Registrar | Listado). Estilo minimal alineado con la HC. */
+    .asg-tabs { display:flex; gap:2px; border-bottom:2px solid #e2e8f0; margin: 0 0 14px; }
+    .asg-tab { background:transparent; border:0; padding:8px 18px; font-size:13px; font-weight:600; color:#64748b; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; }
+    .asg-tab:hover { color:#1565c0; }
+    .asg-tab-active { color:#1565c0; border-bottom-color:#1565c0; }
+    /* Tab Listado */
+    .asg-listado { display:flex; flex-direction:column; gap:14px; }
+    .asg-list-filtros { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .asg-list-filtros .ase-f-wide { grid-column: span 4; }
+    .asg-list-wrap { max-height: calc(100vh - 380px); overflow:auto; }
+    .asg-list-tbl { font-size:12px; }
+    .asg-list-tbl th { position:sticky; top:0; background:#f8fafc; z-index:1; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.03em; color:#475569; }
+    .asg-list-tbl td { vertical-align:top; padding:6px 8px; }
+    .asg-list-tbl .mono { font-family: ui-monospace, "Cascadia Code", monospace; font-size:11px; }
+    .asg-hist-editing { outline:2px solid #1565c0; outline-offset:2px; }
+    .asg-req-badge { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; background:#fef3c7; color:#92400e; font-size:10px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; }
+    .asg-pago-head { display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; font-size:12px; font-weight:600; color:#334155; }
+    .asg-pago-badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#dbeafe; color:#1e40af; font-size:11px; font-weight:600; }
+    /* ── Modal de pago con botones grandes ────────────────────────────── */
+    .asg-pago-modal { max-width: 760px; }
+    .asg-pago-step-label { font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#64748b; margin:14px 4px 8px; }
+    .asg-pago-step-label:first-child { margin-top: 4px; }
+    .asg-pago-tipo-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+    .asg-pago-tile { display:flex; flex-direction:column; align-items:center; justify-content:center;
+                     min-height: 130px; padding:16px 12px; gap:6px; border-radius:14px;
+                     border:2px solid #e2e8f0; background:#fff; cursor:pointer; transition:all .15s ease;
+                     text-align:center; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+    .asg-pago-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,.10); }
+    .asg-pago-tile.sel { border-width:3px; box-shadow: 0 8px 24px rgba(21,101,192,.20); transform: translateY(-2px); }
+    .asg-tile-ico { font-size:34px; line-height:1; margin-bottom:2px; }
+    .asg-tile-title { font-size:15px; font-weight:700; color:#0f172a; }
+    .asg-tile-sub { font-size:11px; color:#64748b; }
+    /* Colores por tipo */
+    .asg-tile-neutral .asg-tile-ico { color:#94a3b8; }
+    .asg-tile-neutral.sel { border-color:#94a3b8; background:#f8fafc; }
+    .asg-tile-cuota .asg-tile-ico { color:#1565c0; }
+    .asg-tile-cuota.sel { border-color:#1565c0; background:#eff6ff; }
+    .asg-tile-cuota.sel .asg-tile-title { color:#1565c0; }
+    .asg-tile-copago .asg-tile-ico { color:#059669; }
+    .asg-tile-copago.sel { border-color:#059669; background:#ecfdf5; }
+    .asg-tile-copago.sel .asg-tile-title { color:#059669; }
+    /* Rangos */
+    .asg-pago-rango-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+    .asg-pago-rango { display:flex; flex-direction:column; gap:4px; padding:14px; border-radius:12px;
+                      border:2px solid #e2e8f0; background:#fff; cursor:pointer; transition:all .15s ease; text-align:center; }
+    .asg-pago-rango:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(15,23,42,.08); border-color:#cbd5e1; }
+    .asg-pago-rango.sel { border-color:#1565c0; background:#eff6ff; box-shadow: 0 6px 20px rgba(21,101,192,.18); }
+    .asg-rango-cat { font-size:12px; font-weight:700; color:#475569; letter-spacing:0.03em; }
+    .asg-rango-val { font-size:22px; font-weight:800; color:#1565c0; font-variant-numeric: tabular-nums; }
+    .asg-pago-rango.sel .asg-rango-val { color:#0d47a1; }
+    .asg-rango-desc { font-size:11px; color:#64748b; }
+    /* Valores editables */
+    .asg-pago-valores { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .asg-pago-val-box { display:flex; flex-direction:column; gap:6px; padding:12px 14px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; }
+    .asg-pago-val-box label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin:0; }
+    .asg-pago-val-real { background:#eff6ff; border-color:#bfdbfe; }
+    .asg-pago-input { font-size:22px; font-weight:700; text-align:right; padding:8px 12px; height:auto; font-variant-numeric: tabular-nums; }
+    .asg-pago-footer { display:flex; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #e2e8f0; }
+    .asg-pago-confirmar { min-width: 160px; }
+    .asg-hint { font-size:11px; color:#64748b; margin-top:4px; }
+    .asg-hint-ok { color:#059669; }
     .asg-grid { display: grid; grid-template-columns: 1.55fr 0.85fr 1.15fr; gap: 14px; align-items: stretch; }
     /* min-width:0 impide que las tablas internas (asg-grid-wrap) empujen el ancho del track. */
     .asg-col { display: flex; flex-direction: column; gap: 14px; min-height: 760px; min-width: 0; }
@@ -489,7 +832,11 @@
     private List<string> _modulos = new();
     private string _moduloSel = "";
     private string _filtroSvc = "";
-    // Lista visible en el grid: filtrada por modulo elegido y luego por texto libre (descripcion o codigo).
+    // Codigo de paquete seleccionado en el filtro (vacio = todos los paquetes).
+    private string _paqueteSel = "";
+    // Paquetes disponibles en el contrato actual (derivados de los servicios cargados).
+    private List<PaqueteDto> _paquetesDisponibles = new();
+    // Lista visible en el grid: filtrada por modulo elegido, por paquete y luego por texto libre.
     private List<ServicioCatalogoDto> _serviciosVisibles
     {
         get
@@ -498,6 +845,7 @@
             var f = _filtroSvc?.Trim().ToLower() ?? "";
             return _servicios
                 .Where(s => s.Modulo == _moduloSel)
+                .Where(s => string.IsNullOrEmpty(_paqueteSel) || s.PaqueteCodigo == _paqueteSel)
                 .Where(s => f.Length == 0
                     || (s.Descripcion ?? "").ToLower().Contains(f)
                     || (s.Codigo ?? "").ToLower().Contains(f)
@@ -511,6 +859,113 @@
     private List<AsignacionMiniDto> _ultimas = new();
     // Id de la tarjeta del historico con su menu (⋮) abierto. Null = ninguno.
     private Guid? _menuHistAbierto;
+    // Id de la asignacion en edicion (null = modo INSERT normal). Cuando esta seteado,
+    // el form de columna 3 aplica UPDATE contra ActualizarAsignacionAsync en vez de
+    // agregar al carrito. Se limpia con CancelarEdicion o al guardar con exito.
+    private Guid? _editandoId;
+
+    // PDF de autorizacion adjunto (solo aplica si _contratoSel.RequierePdfAutorizacion).
+    // Se guarda en wwwroot/uploads/autorizaciones/ y la URL relativa va al backend.
+    private string? _pdfAutorizacionUrl;
+    private string? _pdfNombre;
+    private bool _pdfBusy;
+
+    private async Task OnPdfUploaded(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        _pdfBusy = true;
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10L * 1024 * 1024)
+            {
+                _error = "El PDF supera 10 MB. Reduce el tamano antes de cargarlo.";
+                return;
+            }
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
+            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
+            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
+            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
+            var full = Path.Combine(dir, nombre);
+            await using (var fs = File.Create(full))
+            await using (var src = file.OpenReadStream(10L * 1024 * 1024))
+            {
+                await src.CopyToAsync(fs);
+            }
+            _pdfAutorizacionUrl = $"/uploads/autorizaciones/{nombre}";
+            _pdfNombre = file.Name;
+            _ok = $"PDF '{file.Name}' cargado.";
+        }
+        catch (Exception ex) { _error = "No se pudo subir el PDF: " + ex.Message; }
+        finally { _pdfBusy = false; }
+    }
+
+    private void LimpiarPdf()
+    {
+        _pdfAutorizacionUrl = null;
+        _pdfNombre = null;
+    }
+
+    // ── Panel Cuota moderadora / Copago ─────────────────────────────────
+    private string? _tipoPago;
+    private string? _categoriaPago;
+    private decimal? _valorPagoSugerido;
+    private decimal? _valorPagoReal;
+    private bool _modalPago;
+    private string _modalPagoTipo = "";
+    private string _modalPagoCategoria = "";
+    private decimal? _modalPagoSugerido;
+    private decimal? _modalPagoReal;
+    private List<CuotaCopagoDto> _catalogoPago = new();
+
+    private async Task AbrirModalPago()
+    {
+        _modalPago = true;
+        _modalPagoTipo = _tipoPago ?? "";
+        _modalPagoCategoria = _categoriaPago ?? "";
+        _modalPagoSugerido = _valorPagoSugerido;
+        _modalPagoReal = _valorPagoReal ?? _valorPagoSugerido;
+        if (_catalogoPago.Count == 0)
+        {
+            _catalogoPago = (await CuotaSvc.ListarAsync(soloActivos: true)).ToList();
+        }
+    }
+
+    private void CerrarModalPago() => _modalPago = false;
+
+    // Handlers de los botones grandes del modal. Cada click resetea el paso
+    // siguiente para no dejar valores incoherentes (cambiar de CUOTA a COPAGO
+    // limpia el rango; cambiar de rango limpia el valor real editado a mano).
+    private void SetPagoTipo(string tipo)
+    {
+        _modalPagoTipo = tipo;
+        _modalPagoCategoria = "";
+        _modalPagoSugerido = null;
+        _modalPagoReal = null;
+    }
+
+    private void SetPagoCategoria(CuotaCopagoDto c)
+    {
+        _modalPagoCategoria = c.Categoria;
+        _modalPagoSugerido = c.ValorSugerido;
+        _modalPagoReal = c.ValorSugerido;
+    }
+
+    private void ConfirmarPago()
+    {
+        _tipoPago = string.IsNullOrEmpty(_modalPagoTipo) ? null : _modalPagoTipo;
+        _categoriaPago = string.IsNullOrEmpty(_modalPagoCategoria) ? null : _modalPagoCategoria;
+        _valorPagoSugerido = _modalPagoSugerido;
+        _valorPagoReal = _modalPagoReal;
+        _modalPago = false;
+        _ok = _tipoPago is null ? "Pago limpiado." : $"{_tipoPago} registrado: ${_valorPagoReal:N0}";
+    }
+
+    private void LimpiarPago()
+    {
+        _tipoPago = _categoriaPago = null;
+        _valorPagoSugerido = _valorPagoReal = null;
+    }
 
     // Carrito.
     private List<CartItem> _carrito = new();
@@ -536,6 +991,93 @@
     private string _modalCorreo = "";
     private List<PacienteFiltroResultadoDto> _modalGrid = new();
     private bool _modalBusy;
+
+    // ── Tab "Listado": filtros + resultados ─────────────────────────────
+    // El tab "listado" muestra una tabla plana con todas las asignaciones filtradas.
+    // Se prefiltra por mes actual al entrar por primera vez para acotar la lista.
+    private string _tab = "wizard";
+    private DateOnly? _fFechaIni;
+    private DateOnly? _fFechaFin;
+    private string _fAseId = "";
+    private string _fContratoCod = "";
+    private string _fModulo = "";
+    private string _fDocumento = "";
+    private string _fNombreServ = "";
+    private List<AsignacionListadoDto> _listado = new();
+    private List<AseguradoraDto> _aseguradorasFiltro = new();
+    private bool _listBusy;
+    // Flag para no reejecutar aplicar-filtros cada vez que se entra al tab.
+    private bool _listadoInicializado;
+
+    private async Task SwitchTab(string t)
+    {
+        _tab = t;
+        _error = null;
+        if (t == "listado" && !_listadoInicializado)
+        {
+            // Prefiltro: primer dia del mes actual → hoy. Como no tenemos Date.Now
+            // fiable en Blazor Server pura, usamos DateTime.Now (server-side).
+            var hoy = DateTime.Now;
+            _fFechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
+            _fFechaFin = DateOnly.FromDateTime(hoy);
+            // Cargar lista de aseguradoras para el dropdown si no las tenemos.
+            if (_aseguradorasFiltro.Count == 0)
+            {
+                _aseguradorasFiltro = (await AseSvc.ListAseguradorasAsync()).ToList();
+            }
+            await AplicarFiltrosListado();
+            _listadoInicializado = true;
+        }
+    }
+
+    private async Task AplicarFiltrosListado()
+    {
+        _listBusy = true;
+        try
+        {
+            Guid? aseId = Guid.TryParse(_fAseId, out var g) ? g : null;
+            var filtro = new AsignacionListadoFiltro(
+                _fFechaIni, _fFechaFin,
+                aseId, null,
+                string.IsNullOrWhiteSpace(_fContratoCod) ? null : _fContratoCod,
+                string.IsNullOrWhiteSpace(_fModulo) ? null : _fModulo,
+                string.IsNullOrWhiteSpace(_fNombreServ) ? null : _fNombreServ);
+            var lista = await Svc.ListarAsignacionesAsync(filtro);
+            // Filtro por documento en memoria (evita joinar en el backend por texto libre).
+            if (!string.IsNullOrWhiteSpace(_fDocumento))
+            {
+                var doc = _fDocumento.Trim();
+                lista = lista.Where(x => x.PacienteDocumento.Contains(doc, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            _listado = lista.ToList();
+        }
+        catch (Exception ex) { _error = "No se pudo cargar el listado: " + ex.Message; }
+        finally { _listBusy = false; }
+    }
+
+    private async Task LimpiarFiltrosListado()
+    {
+        var hoy = DateTime.Now;
+        _fFechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
+        _fFechaFin = DateOnly.FromDateTime(hoy);
+        _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = "";
+        await AplicarFiltrosListado();
+    }
+
+    private static string FormatVigencia(short? anio, short? mesVig, short? mesFin)
+    {
+        if (anio is null && mesVig is null) { return ""; }
+        var m1 = mesVig is short mv && mv >= 1 && mv <= 12 ? MesNombreCorto(mv) : "?";
+        var m2 = mesFin is short mf && mf >= 1 && mf <= 12 ? "→" + MesNombreCorto(mf) : "";
+        var a = anio is short ay ? " " + ay : "";
+        return $"{m1}{m2}{a}";
+    }
+    private static string MesNombreCorto(short m) => m switch
+    {
+        1 => "Ene", 2 => "Feb", 3 => "Mar", 4 => "Abr", 5 => "May", 6 => "Jun",
+        7 => "Jul", 8 => "Ago", 9 => "Sep", 10 => "Oct", 11 => "Nov", 12 => "Dic",
+        _ => "?"
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -590,6 +1132,7 @@
     private async Task CargarServiciosDelContrato()
     {
         _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;
+        _paquetesDisponibles = new(); _paqueteSel = "";
         if (Guid.TryParse(_contratoIdSel, out var cid))
         {
             // Trae TODOS los servicios del contrato; el filtrado por modulo se hace luego con los radios.
@@ -600,6 +1143,18 @@
                 .Distinct()
                 .OrderBy(m => m)
                 .ToList();
+            // Paquetes disponibles: solo los que aparecen en algun servicio de este contrato.
+            var codigos = _servicios
+                .Where(s => !string.IsNullOrEmpty(s.PaqueteCodigo))
+                .Select(s => s.PaqueteCodigo!)
+                .Distinct()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (codigos.Count > 0)
+            {
+                _paquetesDisponibles = (await PaqSvc.ListarAsync(soloActivos: true))
+                    .Where(p => codigos.Contains(p.Codigo))
+                    .ToList();
+            }
         }
     }
 
@@ -730,6 +1285,103 @@
         _ok = $"Programacion copiada de '{u.NombreServicio}'. Selecciona un servicio de la grilla y presiona Agregar.";
     }
 
+    // "Editar" desde la tarjeta del historico: carga los datos en el form (igual que
+    // CopiarProgramacion) y marca _editandoId para que Guardar aplique UPDATE en vez
+    // de crear un nuevo registro. El carrito se limpia porque en modo edicion no
+    // aplica el flujo "N items en un lote".
+    private async Task EditarAsignacion(AsignacionMiniDto u)
+    {
+        _menuHistAbierto = null;
+        _error = _ok = null;
+        _carrito.Clear();
+
+        _editandoId = u.Id;
+        _autorizacion = u.CodigoAutorizacion;
+        _fechaInicio = u.FechaInicio;
+        _fechaFinal = u.FechaFinal;
+        _cantidad = u.Cantidad;
+        _obs = u.Observaciones;
+        if (u.AnioServicio is short anio) { _anio = anio.ToString(); }
+        if (u.MesVigencia is short mv) { _mesVig = mv; }
+        _mesFin = u.MesFinal is short mf ? mf : 0;
+
+        // Contrato (mismo camino que CopiarProgramacion). Si no se encuentra, avisar.
+        var contrato = _todosContratos.FirstOrDefault(c =>
+            string.Equals(c.CodigoContrato, u.ContratoCodigo, StringComparison.OrdinalIgnoreCase));
+        if (contrato is null)
+        {
+            _error = $"El contrato original ({u.ContratoCodigo}) ya no esta activo. Selecciona uno equivalente para poder guardar los cambios.";
+            return;
+        }
+        if (_contratoIdSel != contrato.ContratoId.ToString())
+        {
+            _contratoIdSel = contrato.ContratoId.ToString();
+            await CargarServiciosDelContrato();
+        }
+        var moduloTarget = !string.IsNullOrWhiteSpace(u.Modulo) ? u.Modulo! : u.TipoServicio;
+        if (_modulos.Contains(moduloTarget)) { _moduloSel = moduloTarget; }
+        if (Guid.TryParse(u.ServicioId, out var sid))
+        {
+            _servicioSel = _servicios.FirstOrDefault(s => s.Id == sid);
+        }
+        _ok = "Editando la asignacion. Ajusta los datos y presiona Guardar cambios.";
+    }
+
+    private void CancelarEdicion()
+    {
+        _editandoId = null;
+        _servicioSel = null;
+        _autorizacion = null;
+        _fechaInicio = DateOnly.FromDateTime(DateTime.Now);
+        _fechaFinal = null;
+        _cantidad = 1;
+        _obs = null;
+        _mesFin = 0;
+        _error = null;
+        _ok = "Edicion cancelada.";
+    }
+
+    private async Task GuardarEdicion()
+    {
+        if (_editandoId is not Guid id) { return; }
+        _error = _ok = null; _busy = true;
+        try
+        {
+            if (_servicioSel is null) { _error = "Selecciona un servicio de la grilla."; return; }
+            if (_contratoSel is null) { _error = "Selecciona un contrato."; return; }
+            if (_mesVig < 1) { _error = "Selecciona un mes de vigencia."; return; }
+
+            var req = new ActualizarAsignacionRequest(
+                id,
+                _contratoSel.CodigoContrato,
+                _servicioSel.Id.ToString(),
+                _servicioSel.Descripcion,
+                _servicioSel.Modulo ?? _moduloSel,
+                _servicioSel.Modulo,
+                _cantidad,
+                string.IsNullOrWhiteSpace(_autorizacion) ? null : _autorizacion,
+                short.TryParse(_anio, out var an) ? an : (short?)null,
+                (short)_mesVig,
+                _mesFin > 0 ? (short?)_mesFin : null,
+                _fechaInicio ?? DateOnly.FromDateTime(DateTime.Now),
+                _fechaFinal,
+                _obs,
+                _servicioSel.Historia);
+
+            await Svc.ActualizarAsignacionAsync(req, await Actor());
+            _ok = "Cambios guardados.";
+            _editandoId = null;
+            if (_paciente is not null)
+            {
+                _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();
+            }
+            _servicioSel = null;
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
     // "Eliminar" desde la tarjeta del historico. El servicio decide si se puede
     // (lanza InvalidOperationException si el estado no lo permite).
     private async Task EliminarUltimaAsync(AsignacionMiniDto u)
@@ -756,6 +1408,12 @@
             if (_paciente is null) { _error = "Selecciona un paciente."; return; }
             if (_contratoSel is null) { _error = "Selecciona un contrato."; return; }
             if (_carrito.Count == 0) { _error = "Agrega al menos un servicio."; return; }
+            // Contrato exige PDF? bloquear si no fue cargado.
+            if (_contratoSel.RequierePdfAutorizacion && string.IsNullOrWhiteSpace(_pdfAutorizacionUrl))
+            {
+                _error = $"El contrato {_contratoSel.CodigoContrato} exige adjuntar el PDF de autorizacion antes de guardar.";
+                return;
+            }
 
             var items = _carrito.Select(c => new AsignacionItemRequest(
                 c.Servicio.Id.ToString(),
@@ -775,10 +1433,14 @@
                 // el servicio ya dice que formato de HC corresponde.
                 c.Servicio.Historia)).ToList();
 
-            var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items);
+            var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items,
+                _pdfAutorizacionUrl,
+                _tipoPago, _categoriaPago, _valorPagoSugerido, _valorPagoReal);
             var r = await Svc.CrearLoteAsync(req, await Actor());
             _ok = $"Lote guardado: {r.CantidadServicios} servicio(s) asignados.";
             _carrito = new();
+            LimpiarPdf();
+            LimpiarPago();
             _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();
         }
         catch (InvalidOperationException ex) { _error = ex.Message; }

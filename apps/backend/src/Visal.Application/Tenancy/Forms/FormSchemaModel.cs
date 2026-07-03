@@ -149,9 +149,46 @@ public sealed class FormNode
     [JsonPropertyName("enableVoice")]
     public bool EnableVoice { get; set; }
 
+    /// <summary>
+    /// Regla de visibilidad condicional del nodo. Si esta seteada, el nodo
+    /// (seccion, campo o bloque de texto) solo se renderiza cuando la
+    /// condicion contra <see cref="VisibleWhenRule.Field"/> se cumple. Si es
+    /// null, el nodo se muestra siempre. El evaluador vive en
+    /// <see cref="VisibleWhenEvaluator"/> y lo usa el FormViewer y la vista
+    /// de impresion.
+    /// </summary>
+    [JsonPropertyName("visibleWhen")]
+    public VisibleWhenRule? VisibleWhen { get; set; }
+
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";
+}
+
+/// <summary>
+/// Regla de visibilidad condicional. Compara el valor actual del campo
+/// referenciado por <see cref="Field"/> (por su Name en el schema o el
+/// prefill del paciente) contra <see cref="Value"/> segun <see cref="Operator"/>.
+/// Operadores soportados: equals, notEquals, in, notIn, isEmpty, isNotEmpty.
+/// Diseñado para poder extenderse a greaterThan / lessThan en el futuro.
+/// </summary>
+public sealed class VisibleWhenRule
+{
+    /// <summary>Name del campo (schema field.Name o prefill key) a evaluar.</summary>
+    [JsonPropertyName("field")]
+    public string Field { get; set; } = "";
+
+    /// <summary>Comparador. Case-insensitive.</summary>
+    [JsonPropertyName("operator")]
+    public string Operator { get; set; } = "equals";
+
+    /// <summary>
+    /// Valor esperado. Para "in"/"notIn" se puede pasar como string separado
+    /// por coma (ej. "MASCULINO,OTRO") o serializar como array JSON — el
+    /// evaluador acepta ambos formatos.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public string? Value { get; set; }
 }
 
 /// <summary>Encabezado institucional del formato (logo, institucion, titulo y campos de cabecera).</summary>

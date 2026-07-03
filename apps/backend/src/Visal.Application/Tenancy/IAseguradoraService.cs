@@ -12,25 +12,32 @@ public sealed record SaveAseguradoraRequest(
 
 public sealed record ContratoDto(
     Guid Id, Guid AseguradoraId, string CodigoContrato, DateOnly? FechaInicial,
-    DateOnly? FechaFinal, string Estado, bool Prorroga);
+    DateOnly? FechaFinal, string Estado, bool Prorroga, bool RequierePdfAutorizacion);
 
 public sealed record SaveContratoRequest(
     Guid? Id, Guid AseguradoraId, string CodigoContrato, DateOnly? FechaInicial,
-    DateOnly? FechaFinal, string Estado, bool Prorroga);
+    DateOnly? FechaFinal, string Estado, bool Prorroga, bool RequierePdfAutorizacion);
 
 public sealed record ServicioDto(
-    Guid Id, Guid ContratoId, string? Sede, string? Historia, string? CodigoServicio,
+    Guid Id, Guid ContratoId, string? Sede, string? Historia,
+    Guid? PaqueteId, string? PaqueteCodigo,
+    string? CodigoServicio,
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
 
 public sealed record SaveServicioRequest(
-    Guid? Id, Guid ContratoId, string? Sede, string? Historia, string? CodigoServicio,
+    Guid? Id, Guid ContratoId, string? Sede, string? Historia,
+    Guid? PaqueteId,
+    string? CodigoServicio,
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
 
-/// <summary>Fila de servicio leida del Excel de carga (Hoja1).</summary>
+/// <summary>Fila de servicio leida del Excel de carga (Hoja1). El campo PaqueteCodigo
+/// es opcional; si viene y matchea un Paquete existente por codigo, se enlaza.</summary>
 public sealed record ServicioImportRow(
-    string? Contrato, string? Sede, string? Historia, string? CodigoServicio,
+    string? Contrato, string? Sede, string? Historia,
+    string? PaqueteCodigo,
+    string? CodigoServicio,
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
 

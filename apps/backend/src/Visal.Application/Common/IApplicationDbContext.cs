@@ -37,6 +37,8 @@ public interface IApplicationDbContext
     DbSet<Aseguradora> Aseguradoras { get; }
     DbSet<ContratoAseguradora> ContratosAseguradora { get; }
     DbSet<ServicioContrato> ServiciosContrato { get; }
+    DbSet<Paquete> Paquetes { get; }
+    DbSet<CuotaCopago> CuotasCopagos { get; }
     DbSet<TipoProfesional> TiposProfesional { get; }
     DbSet<SubCategoriaProfesional> SubCategoriasProfesional { get; }
     DbSet<Profesional> Profesionales { get; }

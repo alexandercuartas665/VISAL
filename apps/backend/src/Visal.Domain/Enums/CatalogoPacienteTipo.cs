@@ -17,5 +17,11 @@ public enum CatalogoPacienteTipo
     /// <summary>Contrato comercial entre IPS y aseguradora.</summary>
     Contrato,
     /// <summary>Mediamento contratado (SI/NO o detalle del contrato del medicamento).</summary>
-    MedContratado
+    MedContratado,
+    /// <summary>RIPS - Via de ingreso al servicio de salud (referido, contrarreferido, remitido, etc).</summary>
+    RipsViaIngreso,
+    /// <summary>RIPS - Finalidad de la consulta (proteccion especifica, diagnostico, tratamiento, etc).</summary>
+    RipsFinalidadConsulta,
+    /// <summary>RIPS - Causa externa que motiva la atencion (accidente, violencia, enfermedad general, etc).</summary>
+    RipsCausaExterna
 }

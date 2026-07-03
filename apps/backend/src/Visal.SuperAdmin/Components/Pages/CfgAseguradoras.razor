@@ -6,6 +6,7 @@
 @using ClosedXML.Excel
 @using Visal.Application.Tenancy
 @inject IAseguradoraService Svc
+@inject IPaqueteService PaqSvc
 @inject IJSRuntime JS
 
 <PageTitle>Entidades Aseguradoras - Visal</PageTitle>
@@ -79,7 +80,7 @@
                     <div class="ase-card-h">Contratos <button class="btn btn-outline-primary btn-sm ms-2" @onclick="AddContrato">+ Contrato</button></div>
                     <div class="table-responsive">
                         <table class="table table-sm align-middle ase-table">
-                            <thead><tr><th>Codigo</th><th>Fecha inicial</th><th>Fecha final</th><th>Estado</th><th>Prorroga</th><th></th></tr></thead>
+                            <thead><tr><th>Codigo</th><th>Fecha inicial</th><th>Fecha final</th><th>Estado</th><th>Prorroga</th><th title="Si se activa, la asignacion contra este contrato exige adjuntar el PDF de autorizacion.">PDF autorizacion</th><th></th></tr></thead>
                             <tbody>
                                 @foreach (var c in _contratos)
                                 {
@@ -96,6 +97,10 @@
                                             <select class="form-select form-select-sm" @bind="c.Prorroga">
                                                 <option value="false">NO</option><option value="true">SI</option>
                                             </select>
+                                        </td>
+                                        <td class="text-center">
+                                            <input type="checkbox" class="form-check-input" @bind="c.RequierePdfAutorizacion"
+                                                   title="Si se activa, la asignacion contra este contrato exige adjuntar el PDF de autorizacion." />
                                         </td>
                                         <td class="ase-row-actions">
                                             <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => SaveContrato(c)">&#10003;</button>
@@ -133,7 +138,7 @@
                         <div class="table-responsive">
                             <table class="table table-sm align-middle ase-table ase-serv">
                                 <thead><tr>
-                                    <th>Historia</th><th>Cod. Servicio</th><th>Cod. Interno</th><th>Descripcion</th><th>Tarifa</th>
+                                    <th>Historia</th><th>Paquete</th><th>Cod. Servicio</th><th>Cod. Interno</th><th>Descripcion</th><th>Tarifa</th>
                                     <th>Modulo</th><th>Especialidad</th><th>Modalidad</th><th>Sede</th><th></th>
                                 </tr></thead>
                                 <tbody>
@@ -141,6 +146,15 @@
                                     {
                                         <tr>
                                             <td><input class="form-control form-control-sm mono" @bind="s.Historia" /></td>
+                                            <td>
+                                                <select class="form-select form-select-sm mono" @bind="s.PaqueteId">
+                                                    <option value="">(opcional)</option>
+                                                    @foreach (var p in _paquetes)
+                                                    {
+                                                        <option value="@p.Id">@p.Codigo</option>
+                                                    }
+                                                </select>
+                                            </td>
                                             <td><input class="form-control form-control-sm mono" @bind="s.CodigoServicio" /></td>
                                             <td><input class="form-control form-control-sm mono" @bind="s.CodigoInterno" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Descripcion" /></td>
@@ -182,12 +196,17 @@
     private Guid? _contratoId;
 
     private List<ServicioEdit> _servicios = new();
+    private List<PaqueteDto> _paquetes = new();
     private string _filtro = "";
 
     private bool _busy;
     private string? _error, _ok;
 
-    protected override async Task OnInitializedAsync() => await LoadAseguradoras();
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAseguradoras();
+        _paquetes = (await PaqSvc.ListarAsync(soloActivos: true)).ToList();
+    }
 
     private async Task LoadAseguradoras() => _aseguradoras = (await Svc.ListAseguradorasAsync()).ToList();
 
@@ -254,7 +273,7 @@
         _error = _ok = null;
         try
         {
-            var req = new SaveContratoRequest(c.Id, _aseId!.Value, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga);
+            var req = new SaveContratoRequest(c.Id, _aseId!.Value, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga, c.RequierePdfAutorizacion);
             var saved = await Svc.SaveContratoAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar el contrato."; return; }
             c.Id = saved.Id;
@@ -309,7 +328,8 @@
         _error = _ok = null;
         try
         {
-            var req = new SaveServicioRequest(s.Id, _contratoId!.Value, s.Sede, s.Historia, s.CodigoServicio, s.CodigoInterno,
+            var req = new SaveServicioRequest(s.Id, _contratoId!.Value, s.Sede, s.Historia, s.PaqueteId,
+                s.CodigoServicio, s.CodigoInterno,
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones);
             var saved = await Svc.SaveServicioAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar el servicio."; return; }
@@ -354,7 +374,9 @@
             {
                 var r = ws.Row(i);
                 rows.Add(new ServicioImportRow(
-                    Col(r, "CONTRATO"), Col(r, "SEDE"), Col(r, "HISTORIA"), Col(r, "CODIGO_SERVICIO"),
+                    Col(r, "CONTRATO"), Col(r, "SEDE"), Col(r, "HISTORIA"),
+                    Col(r, "PAQUETE"),
+                    Col(r, "CODIGO_SERVICIO"),
                     Col(r, "CODIGO_INTERNO"), Col(r, "DESCRIPCION"), Num(r, "TARIFA"), Col(r, "MODULO"),
                     Col(r, "ESPECIALIDAD"), Col(r, "MODALIDAD"), Col(r, "CLASIFICACION"), Col(r, "OBSERVACIONES")));
             }
@@ -386,6 +408,7 @@
                 ("CONTRATO",        "Codigo del contrato (informativo, no se importa).", "NAC-006-25-PGP"),
                 ("SEDE",            "Sede o sucursal del servicio. Opcional.",            "IBAGUE"),
                 ("HISTORIA",        "Codigo del formato de historia clinica (HC-FO-XX). Conecta este servicio con la HC que se abre al atenderlo.", "HC-FO-08"),
+                ("PAQUETE",         "Codigo del paquete al que pertenece el servicio (ver /cfg-paquetes). Opcional: dejalo vacio si el servicio no esta agrupado en ningun paquete.", "E890167"),
                 ("CODIGO_SERVICIO", "Codigo CUPS o interno del servicio.",                "890201"),
                 ("CODIGO_INTERNO",  "Codigo interno de la aseguradora. Opcional.",        "S001"),
                 ("DESCRIPCION",     "Descripcion del servicio que aparecera en el listado.", "HC-FO-08 FORMATO HC GENERAL VERSION 02"),
@@ -466,8 +489,9 @@
         public DateOnly? FechaFinal { get; set; }
         public string Estado { get; set; } = "ACTIVO";
         public bool Prorroga { get; set; }
+        public bool RequierePdfAutorizacion { get; set; }
         public static ContratoEdit From(ContratoDto d) => new()
-        { Id = d.Id, CodigoContrato = d.CodigoContrato, FechaInicial = d.FechaInicial, FechaFinal = d.FechaFinal, Estado = d.Estado, Prorroga = d.Prorroga };
+        { Id = d.Id, CodigoContrato = d.CodigoContrato, FechaInicial = d.FechaInicial, FechaFinal = d.FechaFinal, Estado = d.Estado, Prorroga = d.Prorroga, RequierePdfAutorizacion = d.RequierePdfAutorizacion };
     }
 
     private sealed class ServicioEdit
@@ -475,6 +499,7 @@
         public Guid? Id { get; set; }
         public string? Sede { get; set; }
         public string? Historia { get; set; }
+        public Guid? PaqueteId { get; set; }
         public string? CodigoServicio { get; set; }
         public string? CodigoInterno { get; set; }
         public string? Descripcion { get; set; }
@@ -486,7 +511,8 @@
         public string? Observaciones { get; set; }
         public static ServicioEdit From(ServicioDto d) => new()
         {
-            Id = d.Id, Sede = d.Sede, Historia = d.Historia, CodigoServicio = d.CodigoServicio, CodigoInterno = d.CodigoInterno,
+            Id = d.Id, Sede = d.Sede, Historia = d.Historia, PaqueteId = d.PaqueteId,
+            CodigoServicio = d.CodigoServicio, CodigoInterno = d.CodigoInterno,
             Descripcion = d.Descripcion, Tarifa = d.Tarifa, Modulo = d.Modulo, Especialidad = d.Especialidad,
             Modalidad = d.Modalidad, Clasificacion = d.Clasificacion, Observaciones = d.Observaciones
         };

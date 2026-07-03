@@ -13,4 +13,8 @@ public class ContratoAseguradora : TenantEntity
     public DateOnly? FechaFinal { get; set; }
     public string Estado { get; set; } = "ACTIVO";
     public bool Prorroga { get; set; }
+    /// <summary>Si true, la asignacion contra este contrato exige adjuntar el PDF de
+    /// autorizacion antes de guardar. Si false, el PDF es opcional. Default false
+    /// para no romper contratos existentes.</summary>
+    public bool RequierePdfAutorizacion { get; set; }
 }

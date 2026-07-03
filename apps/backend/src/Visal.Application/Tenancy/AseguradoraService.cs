@@ -92,7 +92,7 @@ public sealed class AseguradoraService : IAseguradoraService
         return await _db.ContratosAseguradora.AsNoTracking()
             .Where(c => c.AseguradoraId == aseguradoraId)
             .OrderBy(c => c.CodigoContrato)
-            .Select(c => new ContratoDto(c.Id, c.AseguradoraId, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga))
+            .Select(c => new ContratoDto(c.Id, c.AseguradoraId, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga, c.RequierePdfAutorizacion))
             .ToListAsync(ct);
     }
 
@@ -121,9 +121,10 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.FechaFinal = req.FechaFinal;
         entity.Estado = string.IsNullOrWhiteSpace(req.Estado) ? "ACTIVO" : req.Estado.Trim();
         entity.Prorroga = req.Prorroga;
+        entity.RequierePdfAutorizacion = req.RequierePdfAutorizacion;
 
         await _db.SaveChangesAsync(ct);
-        return new ContratoDto(entity.Id, entity.AseguradoraId, entity.CodigoContrato, entity.FechaInicial, entity.FechaFinal, entity.Estado, entity.Prorroga);
+        return new ContratoDto(entity.Id, entity.AseguradoraId, entity.CodigoContrato, entity.FechaInicial, entity.FechaFinal, entity.Estado, entity.Prorroga, entity.RequierePdfAutorizacion);
     }
 
     public async Task<bool> DeleteContratoAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -152,7 +153,10 @@ public sealed class AseguradoraService : IAseguradoraService
                 (s.Sede != null && s.Sede.ToLower().Contains(f)));
         }
         return await q.OrderBy(s => s.Descripcion)
-            .Select(s => new ServicioDto(s.Id, s.ContratoId, s.Sede, s.Historia, s.CodigoServicio, s.CodigoInterno,
+            .Select(s => new ServicioDto(s.Id, s.ContratoId, s.Sede, s.Historia,
+                s.PaqueteId,
+                s.PaqueteId != null ? _db.Paquetes.Where(p => p.Id == s.PaqueteId).Select(p => p.Codigo).FirstOrDefault() : null,
+                s.CodigoServicio, s.CodigoInterno,
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones))
             .ToListAsync(ct);
     }
@@ -175,6 +179,7 @@ public sealed class AseguradoraService : IAseguradoraService
 
         entity.Sede = req.Sede?.Trim();
         entity.Historia = req.Historia?.Trim();
+        entity.PaqueteId = req.PaqueteId;
         entity.CodigoServicio = req.CodigoServicio?.Trim();
         entity.CodigoInterno = req.CodigoInterno?.Trim();
         entity.Descripcion = req.Descripcion?.Trim();
@@ -186,7 +191,12 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.Observaciones = req.Observaciones?.Trim();
 
         await _db.SaveChangesAsync(ct);
-        return new ServicioDto(entity.Id, entity.ContratoId, entity.Sede, entity.Historia, entity.CodigoServicio, entity.CodigoInterno,
+        var paqueteCod = entity.PaqueteId is Guid pid
+            ? await _db.Paquetes.Where(p => p.Id == pid).Select(p => p.Codigo).FirstOrDefaultAsync(ct)
+            : null;
+        return new ServicioDto(entity.Id, entity.ContratoId, entity.Sede, entity.Historia,
+            entity.PaqueteId, paqueteCod,
+            entity.CodigoServicio, entity.CodigoInterno,
             entity.Descripcion, entity.Tarifa, entity.Modulo, entity.Especialidad, entity.Modalidad, entity.Clasificacion, entity.Observaciones);
     }
 
@@ -205,16 +215,31 @@ public sealed class AseguradoraService : IAseguradoraService
         var contrato = await _db.ContratosAseguradora.FirstOrDefaultAsync(c => c.Id == contratoId, ct);
         if (contrato is null) { return 0; }
 
+        // Precargar mapa codigo -> paqueteId para no golpear la BD en cada fila.
+        var codigosPaquete = rows.Select(r => (r.PaqueteCodigo ?? "").Trim())
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var mapaPaquetes = codigosPaquete.Count == 0
+            ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+            : await _db.Paquetes
+                .Where(p => codigosPaquete.Contains(p.Codigo))
+                .ToDictionaryAsync(p => p.Codigo, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
+
         var n = 0;
         foreach (var r in rows)
         {
             if (string.IsNullOrWhiteSpace(r.CodigoServicio) && string.IsNullOrWhiteSpace(r.Descripcion)) { continue; }
+            Guid? paqueteId = null;
+            var codPaq = (r.PaqueteCodigo ?? "").Trim();
+            if (codPaq.Length > 0 && mapaPaquetes.TryGetValue(codPaq, out var pid)) { paqueteId = pid; }
             _db.ServiciosContrato.Add(new ServicioContrato
             {
                 TenantId = tid,
                 ContratoId = contratoId,
                 Sede = r.Sede?.Trim(),
                 Historia = r.Historia?.Trim(),
+                PaqueteId = paqueteId,
                 CodigoServicio = r.CodigoServicio?.Trim(),
                 CodigoInterno = r.CodigoInterno?.Trim(),
                 Descripcion = r.Descripcion?.Trim(),

@@ -86,6 +86,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
+    public DbSet<Paquete> Paquetes => Set<Paquete>();
+    public DbSet<CuotaCopago> CuotasCopagos => Set<CuotaCopago>();
     public DbSet<TipoProfesional> TiposProfesional => Set<TipoProfesional>();
     public DbSet<SubCategoriaProfesional> SubCategoriasProfesional => Set<SubCategoriaProfesional>();
     public DbSet<Profesional> Profesionales => Set<Profesional>();
@@ -785,6 +787,12 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ValoresJson).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
             b.Property(x => x.MotivoInactivacion).HasMaxLength(500);
+            b.Property(x => x.RipsViaIngresoCodigo).HasMaxLength(10);
+            b.Property(x => x.RipsViaIngresoNombre).HasMaxLength(200);
+            b.Property(x => x.RipsFinalidadCodigo).HasMaxLength(10);
+            b.Property(x => x.RipsFinalidadNombre).HasMaxLength(200);
+            b.Property(x => x.RipsCausaExternaCodigo).HasMaxLength(10);
+            b.Property(x => x.RipsCausaExternaNombre).HasMaxLength(200);
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.FormDefinition).WithMany().HasForeignKey(x => x.FormDefinitionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.Profesional).WithMany().HasForeignKey(x => x.ProfesionalId).OnDelete(DeleteBehavior.SetNull);
@@ -870,7 +878,25 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Clasificacion).HasMaxLength(80);
             b.Property(x => x.Observaciones).HasMaxLength(1000);
             b.HasOne(x => x.Contrato).WithMany().HasForeignKey(x => x.ContratoId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Paquete).WithMany().HasForeignKey(x => x.PaqueteId).OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.ContratoId });
+            b.HasIndex(x => new { x.TenantId, x.PaqueteId });
+        });
+
+        modelBuilder.Entity<Paquete>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(500).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+        });
+
+        modelBuilder.Entity<CuotaCopago>(b =>
+        {
+            b.Property(x => x.Tipo).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Categoria).HasMaxLength(80).IsRequired();
+            b.Property(x => x.ValorSugerido).HasPrecision(14, 2);
+            b.Property(x => x.Descripcion).HasMaxLength(500);
+            b.HasIndex(x => new { x.TenantId, x.Tipo, x.Categoria }).IsUnique();
         });
 
         modelBuilder.Entity<Rol>(b =>
@@ -999,6 +1025,11 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
             b.Property(x => x.CodigoAutorizacion).HasMaxLength(60);
             b.Property(x => x.FormatoHistoria).HasMaxLength(60);
+            b.Property(x => x.PdfAutorizacionUrl).HasMaxLength(500);
+            b.Property(x => x.TipoPago).HasMaxLength(20);
+            b.Property(x => x.CategoriaCopago).HasMaxLength(80);
+            b.Property(x => x.ValorPagoSugerido).HasPrecision(14, 2);
+            b.Property(x => x.ValorPagoReal).HasPrecision(14, 2);
             b.Property(x => x.Estado).HasMaxLength(30).IsRequired();
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasCheckConstraint("ck_asignaciones_cantidad", "cantidad > 0");

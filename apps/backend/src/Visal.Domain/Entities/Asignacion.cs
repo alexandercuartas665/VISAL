@@ -52,5 +52,21 @@ public class Asignacion : TenantEntity
     /// <summary>Formato de historia ligado al servicio (FormDefinition.Codigo, p.ej.).</summary>
     public string? FormatoHistoria { get; set; }
 
+    /// <summary>URL / ruta relativa del PDF de autorizacion adjunto. Opcional; solo se
+    /// vuelve obligatorio cuando el ContratoAseguradora.RequierePdfAutorizacion es true.</summary>
+    public string? PdfAutorizacionUrl { get; set; }
+
+    /// <summary>Tipo de pago del paciente: "CUOTA" (cuota moderadora), "COPAGO" o null si no aplica.</summary>
+    public string? TipoPago { get; set; }
+
+    /// <summary>Categoria/rango salarial del catalogo CuotaCopago que sugirio el valor.</summary>
+    public string? CategoriaCopago { get; set; }
+
+    /// <summary>Valor sugerido por el catalogo al momento de crear la asignacion.</summary>
+    public decimal? ValorPagoSugerido { get; set; }
+
+    /// <summary>Valor real que pago el paciente (puede diferir del sugerido).</summary>
+    public decimal? ValorPagoReal { get; set; }
+
     public AsignacionEstado Estado { get; set; } = AsignacionEstado.Pendiente;
 }

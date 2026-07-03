@@ -62,6 +62,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IFormDefinitionService, Tenancy.FormDefinitionService>();
         services.AddScoped<Tenancy.IFormDefinitionVersionService, Tenancy.FormDefinitionVersionService>();
         services.AddScoped<Tenancy.IAseguradoraService, Tenancy.AseguradoraService>();
+        services.AddScoped<Tenancy.IPaqueteService, Tenancy.PaqueteService>();
+        services.AddScoped<Tenancy.ICuotaCopagoService, Tenancy.CuotaCopagoService>();
         services.AddScoped<Tenancy.IProfesionalConfigService, Tenancy.ProfesionalConfigService>();
         services.AddScoped<Tenancy.IRolService, Tenancy.RolService>();
         services.AddScoped<Tenancy.ISucursalService, Tenancy.SucursalService>();

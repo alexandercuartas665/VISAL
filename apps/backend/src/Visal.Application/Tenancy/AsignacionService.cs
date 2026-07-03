@@ -33,7 +33,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             var lookup = await db.ContratosAseguradora.AsNoTracking()
                 .Where(c => idsOrdenados.Contains(c.Id))
                 .Join(db.Aseguradoras.AsNoTracking(), c => c.AseguradoraId, a => a.Id,
-                    (c, a) => new ContratoMiniDto(c.Id, a.Id, a.Nombre, c.CodigoContrato, c.Estado))
+                    (c, a) => new ContratoMiniDto(c.Id, a.Id, a.Nombre, c.CodigoContrato, c.Estado, c.RequierePdfAutorizacion))
                 .ToDictionaryAsync(c => c.ContratoId, ct);
             // Mantener el orden Contrato1 → Contrato2 → Contrato3 que viene del paciente.
             foreach (var cid in idsOrdenados)
@@ -95,9 +95,9 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return await db.ContratosAseguradora.AsNoTracking()
             .Where(c => c.Estado == "ACTIVO")
             .Join(db.Aseguradoras.AsNoTracking(), c => c.AseguradoraId, a => a.Id,
-                (c, a) => new { c.Id, c.AseguradoraId, AseguradoraNombre = a.Nombre, c.CodigoContrato, c.Estado })
+                (c, a) => new { c.Id, c.AseguradoraId, AseguradoraNombre = a.Nombre, c.CodigoContrato, c.Estado, c.RequierePdfAutorizacion })
             .OrderBy(x => x.AseguradoraNombre).ThenBy(x => x.CodigoContrato)
-            .Select(x => new ContratoMiniDto(x.Id, x.AseguradoraId, x.AseguradoraNombre, x.CodigoContrato, x.Estado))
+            .Select(x => new ContratoMiniDto(x.Id, x.AseguradoraId, x.AseguradoraNombre, x.CodigoContrato, x.Estado, x.RequierePdfAutorizacion))
             .ToListAsync(ct);
     }
 
@@ -174,7 +174,9 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 s.Id, s.CodigoServicio,
                 s.Descripcion ?? s.CodigoServicio ?? "(sin descripcion)",
                 s.Modulo, s.Especialidad, s.Tarifa,
-                s.CodigoInterno, s.Historia, s.Clasificacion, s.Modalidad))
+                s.CodigoInterno, s.Historia, s.Clasificacion, s.Modalidad,
+                s.PaqueteId,
+                s.PaqueteId != null ? db.Paquetes.Where(p => p.Id == s.PaqueteId).Select(p => p.Codigo).FirstOrDefault() : null))
             .ToListAsync(ct);
     }
 
@@ -215,6 +217,16 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             ContratoCodigo = req.ContratoCodigo
         };
         db.AsignacionLotes.Add(lote);
+        // Validacion de PDF obligatorio segun contrato.
+        var contrato = await db.ContratosAseguradora.FirstOrDefaultAsync(
+            c => c.CodigoContrato == req.ContratoCodigo, ct);
+        if (contrato is not null && contrato.RequierePdfAutorizacion
+            && string.IsNullOrWhiteSpace(req.PdfAutorizacionUrl))
+        {
+            throw new InvalidOperationException(
+                $"El contrato {req.ContratoCodigo} exige adjuntar el PDF de autorizacion antes de guardar.");
+        }
+
         foreach (var it in req.Items)
         {
             db.Asignaciones.Add(new Asignacion
@@ -237,6 +249,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 FechaFinal = it.FechaFinal,
                 Observaciones = it.Observaciones,
                 FormatoHistoria = it.FormatoHistoria,
+                PdfAutorizacionUrl = req.PdfAutorizacionUrl,
+                TipoPago = req.TipoPago,
+                CategoriaCopago = req.CategoriaCopago,
+                ValorPagoSugerido = req.ValorPagoSugerido,
+                ValorPagoReal = req.ValorPagoReal,
                 Estado = AsignacionEstado.Pendiente
             });
         }
@@ -276,6 +293,138 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         db.Asignaciones.Remove(a);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<bool> ActualizarAsignacionAsync(ActualizarAsignacionRequest req, Guid actor, CancellationToken ct = default)
+    {
+        var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == req.AsignacionId, ct);
+        if (a is null) { return false; }
+
+        // Solo se puede editar mientras esta Pendiente (no tomada por Coordinacion ni cerrada).
+        // Mismo criterio que EliminarAsignacionAsync para mantener el modelo simple.
+        if (a.Estado == AsignacionEstado.Asignado)
+        {
+            throw new InvalidOperationException(
+                "No se puede editar: la asignacion ya esta tomada por Coordinacion.");
+        }
+        if (a.Estado == AsignacionEstado.Cerrado)
+        {
+            throw new InvalidOperationException(
+                "No se puede editar: la asignacion esta cerrada.");
+        }
+        var tieneTurnos = await db.AsignacionTurnos.AnyAsync(t => t.AsignacionId == a.Id, ct);
+        if (tieneTurnos)
+        {
+            throw new InvalidOperationException(
+                "No se puede editar: la asignacion tiene turnos creados por Coordinacion.");
+        }
+
+        // Validaciones basicas (mismo criterio que CrearLote).
+        if (req.Cantidad <= 0) { throw new InvalidOperationException("La cantidad debe ser mayor a cero."); }
+        if (req.MesVigencia < 1 || req.MesVigencia > 12) { throw new InvalidOperationException("Mes de vigencia invalido."); }
+        if (req.MesFinal is short mf && (mf < 1 || mf > 12)) { throw new InvalidOperationException("Mes final invalido."); }
+
+        a.ServicioId = req.ServicioId;
+        a.NombreServicio = req.NombreServicio;
+        a.TipoServicio = req.TipoServicio;
+        a.Modulo = req.Modulo;
+        a.Cantidad = req.Cantidad;
+        a.ContratoCodigo = req.ContratoCodigo;
+        a.CodigoAutorizacion = req.CodigoAutorizacion;
+        a.AnioServicio = req.AnioServicio;
+        a.MesVigencia = req.MesVigencia;
+        a.MesFinal = req.MesFinal;
+        a.FechaInicio = req.FechaInicio;
+        a.FechaFinal = req.FechaFinal;
+        a.Observaciones = req.Observaciones;
+        a.FormatoHistoria = req.FormatoHistoria;
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default)
+    {
+        // Join principal: asignaciones + paciente (in-tenant por query filter global).
+        var q = from a in db.Asignaciones.AsNoTracking()
+                join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+                select new { a, p };
+
+        if (filtro.FechaInicial is DateOnly fi) { q = q.Where(x => x.a.FechaInicio >= fi); }
+        if (filtro.FechaFinal is DateOnly ff) { q = q.Where(x => x.a.FechaInicio <= ff); }
+        if (filtro.PacienteId is Guid pid) { q = q.Where(x => x.p.Id == pid); }
+        if (!string.IsNullOrWhiteSpace(filtro.ContratoCodigo))
+        {
+            var cc = filtro.ContratoCodigo.Trim().ToLower();
+            q = q.Where(x => x.a.ContratoCodigo.ToLower() == cc);
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Modulo))
+        {
+            var m = filtro.Modulo.Trim().ToLower();
+            q = q.Where(x => (x.a.Modulo != null && x.a.Modulo.ToLower() == m) || x.a.TipoServicio.ToLower() == m);
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.NombreServicio))
+        {
+            var ns = filtro.NombreServicio.Trim().ToLower();
+            q = q.Where(x => x.a.NombreServicio.ToLower().Contains(ns));
+        }
+
+        // Filtro por aseguradora: se hace via contrato_codigo -> ContratoAseguradora -> AseguradoraId.
+        if (filtro.AseguradoraId is Guid ase)
+        {
+            var codigosContrato = db.ContratosAseguradora.AsNoTracking()
+                .Where(c => c.AseguradoraId == ase)
+                .Select(c => c.CodigoContrato.ToLower());
+            q = q.Where(x => codigosContrato.Contains(x.a.ContratoCodigo.ToLower()));
+        }
+
+        var rows = await q
+            .OrderByDescending(x => x.a.CreatedAt)
+            .Take(2000)
+            .Select(x => new
+            {
+                x.a.Id,
+                x.a.CreatedAt,
+                Documento = x.p.NumeroDocumento,
+                PacienteNombre = x.p.NombreCompleto,
+                x.a.ContratoCodigo,
+                x.a.NombreServicio,
+                x.a.TipoServicio,
+                x.a.Modulo,
+                x.a.Cantidad,
+                Estado = x.a.Estado.ToString(),
+                x.a.FechaInicio,
+                x.a.FechaFinal,
+                x.a.AnioServicio,
+                x.a.MesVigencia,
+                x.a.MesFinal,
+                x.a.CodigoAutorizacion,
+                x.a.Observaciones,
+                x.a.Sucursal
+            })
+            .ToListAsync(ct);
+
+        // Resolver nombre de aseguradora en un segundo pase (evita join que no puede traducir EF Core en algunos casos).
+        var codigos = rows.Select(r => r.ContratoCodigo).Distinct().ToList();
+        var mapaAseguradora = await (from c in db.ContratosAseguradora.AsNoTracking()
+                                     join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
+                                     where codigos.Contains(c.CodigoContrato)
+                                     select new { c.CodigoContrato, AseguradoraNombre = a.Nombre })
+                                    .ToListAsync(ct);
+        var mapa = mapaAseguradora
+            .GroupBy(x => x.CodigoContrato)
+            .ToDictionary(g => g.Key, g => g.First().AseguradoraNombre, StringComparer.OrdinalIgnoreCase);
+
+        return rows.Select(r => new AsignacionListadoDto(
+            r.Id, r.CreatedAt,
+            r.Documento, r.PacienteNombre,
+            r.ContratoCodigo, mapa.TryGetValue(r.ContratoCodigo, out var an) ? an : null,
+            r.NombreServicio, r.TipoServicio, r.Modulo,
+            r.Cantidad, r.Estado,
+            r.FechaInicio, r.FechaFinal,
+            r.AnioServicio, r.MesVigencia, r.MesFinal,
+            r.CodigoAutorizacion, r.Observaciones,
+            r.Sucursal)).ToList();
     }
 
     public async Task<IReadOnlyList<AsignacionPendienteDto>> ListarPendientesAsync(

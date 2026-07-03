@@ -42,6 +42,19 @@ public class HistoriaClinica : TenantEntity
 
     /// <summary>Cache del nombre del profesional para mostrar sin join (opcional).</summary>
     public string? EspecialistaNombre { get; set; }
+
+    // ── Datos RIPS obligatorios al iniciar la HC ────────────────────────
+    /// <summary>Codigo del catalogo RipsViaIngreso (ej. "14" = CONTRARREFERIDO DE OTRA INSTITUCION).</summary>
+    public string? RipsViaIngresoCodigo { get; set; }
+    public string? RipsViaIngresoNombre { get; set; }
+
+    /// <summary>Codigo del catalogo RipsFinalidadConsulta (ej. "14" = PROTECCION ESPECIFICA).</summary>
+    public string? RipsFinalidadCodigo { get; set; }
+    public string? RipsFinalidadNombre { get; set; }
+
+    /// <summary>Codigo del catalogo RipsCausaExterna (ej. "13" = ENFERMEDAD GENERAL).</summary>
+    public string? RipsCausaExternaCodigo { get; set; }
+    public string? RipsCausaExternaNombre { get; set; }
 }
 
 public enum HistoriaClinicaEstado

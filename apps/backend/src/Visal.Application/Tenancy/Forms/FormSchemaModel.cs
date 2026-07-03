@@ -66,6 +66,12 @@ public sealed class FormNode
     [JsonPropertyName("content")]
     public string? Content { get; set; }
 
+    /// <summary>Alineacion horizontal para bloques de texto: left | center |
+    /// right. Default null = left (comportamiento historico). Aplica al
+    /// heading/subheading/paragraph tanto en el visor como en la impresion.</summary>
+    [JsonPropertyName("textAlign")]
+    public string? TextAlign { get; set; }
+
     // ── Campo ──
     /// <summary>text | number | email | date | textarea | select | autocomplete | calculated | table.</summary>
     [JsonPropertyName("fieldType")]

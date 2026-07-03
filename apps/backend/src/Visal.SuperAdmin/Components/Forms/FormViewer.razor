@@ -647,17 +647,26 @@ else
         <div class="@($"fv-col fv-col-{span}")">
             @if (node.IsText)
             {
+                // Alineacion configurable por bloque (left|center|right). Default
+                // sin estilo = comportamiento historico. Se aplica inline para
+                // que el visor no dependa de clases extra en el CSS host.
+                var alignStyle = node.TextAlign switch
+                {
+                    "center" => "text-align:center;",
+                    "right" => "text-align:right;",
+                    _ => (string?)null,
+                };
                 if (node.TextStyle == "heading")
                 {
-                    <h4 class="fv-h">@node.Content</h4>
+                    <h4 class="fv-h" style="@alignStyle">@node.Content</h4>
                 }
                 else if (node.TextStyle == "subheading")
                 {
-                    <h5 class="fv-sh">@node.Content</h5>
+                    <h5 class="fv-sh" style="@alignStyle">@node.Content</h5>
                 }
                 else
                 {
-                    <p class="fv-p">@node.Content</p>
+                    <p class="fv-p" style="@alignStyle">@node.Content</p>
                 }
             }
             else if (node.IsTable)

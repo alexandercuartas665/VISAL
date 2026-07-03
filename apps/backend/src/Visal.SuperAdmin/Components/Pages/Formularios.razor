@@ -274,6 +274,14 @@
                     </select>
                 </div>
                 <div class="fb-prop"><label>Contenido</label><textarea class="fb-input" rows="3" @bind="_selected.Content" @bind:event="oninput"></textarea></div>
+                <div class="fb-prop">
+                    <label>Alineacion</label>
+                    <select class="fb-input" @bind="_selected.TextAlign">
+                        <option value="">Izquierda (default)</option>
+                        <option value="center">Centrada</option>
+                        <option value="right">Derecha</option>
+                    </select>
+                </div>
                 @RenderVisibleWhenPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar texto</button>
             }
@@ -1784,7 +1792,16 @@
     private static string NodeKindLabel(FormNode n) =>
         n.IsSection ? "seccion" : (n.IsText ? "bloque de texto" : (n.IsTable ? "tabla" : "campo"));
 
-    private RenderFragment RenderText(FormNode n, List<FormNode> list) => @<div class="fb-textblock fb-ts-@n.TextStyle @(IsSelected(n) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(n)}")" @onclick="() => Select(n)" @onclick:stopPropagation="true">
+    // Vista previa del builder: refleja la alineacion elegida para que el
+    // resultado en /formularios coincida con el visor real.
+    private static string TextAlignInlineStyle(FormNode n) => n.TextAlign switch
+    {
+        "center" => "text-align:center;",
+        "right" => "text-align:right;",
+        _ => "",
+    };
+
+    private RenderFragment RenderText(FormNode n, List<FormNode> list) => @<div class="fb-textblock fb-ts-@n.TextStyle @(IsSelected(n) ? "sel" : "")" style="@($"flex-basis:{WidthBasis(n)};{TextAlignInlineStyle(n)}")" @onclick="() => Select(n)" @onclick:stopPropagation="true">
         <div class="fb-field-top">
             <span class="fb-tb-content">@(string.IsNullOrWhiteSpace(n.Content) ? "(texto)" : n.Content)</span>
             <span class="fb-node-actions">

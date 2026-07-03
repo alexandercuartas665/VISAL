@@ -206,6 +206,7 @@ else
                             <td class="text-end" style="white-space:nowrap;">
                                 @if (l.Provider == WhatsAppProvider.Gupshup)
                                 {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => EditGupshupAppOfLineAsync(l)" disabled="@_busy" title="Editar credenciales de la App Gupshup (apikey, numero, etc.)">Editar App</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenWebhookAsync(l)" disabled="@_busy" title="Ver URL del webhook para pegar en Gupshup">Webhook</button>
                                 }
                                 @if (l.Status == WhatsAppLineStatus.Connected)
@@ -701,6 +702,37 @@ else
         // Precarga vacio para creacion.
         _gupshupAppError = null;
         _gupshupApp = new GupshupAppForm();
+        _gupshupAppOpen = true;
+    }
+
+    /// <summary>Abre el modal de edicion pre-poblado con la App Gupshup que
+    /// esta linea tiene asignada. Los campos AppId/AppName/etc quedan
+    /// listos y el usuario solo pega la apikey nueva.</summary>
+    private async Task EditGupshupAppOfLineAsync(WhatsAppLineDto line)
+    {
+        _gupshupAppError = null;
+        if (line.GupshupAppId is not Guid gid)
+        {
+            _gupshupAppError = "Esta linea no tiene App Gupshup asignada.";
+            return;
+        }
+        var app = await GupshupSvc.GetAsync(gid);
+        if (app is null)
+        {
+            _gupshupAppError = "La App no se encontro.";
+            return;
+        }
+        _gupshupApp = new GupshupAppForm
+        {
+            Id = app.Id,
+            AppIdText = app.AppId.ToString(),
+            AppName = app.AppName,
+            WabaId = app.WabaId,
+            PhoneNumber = app.PhoneNumber,
+            DisplayName = app.DisplayName,
+            ApiKey = null, // Vacio para no re-mostrarla; el placeholder muestra el mask.
+            ApiKeyMasked = app.ApiKeyMasked,
+        };
         _gupshupAppOpen = true;
     }
 

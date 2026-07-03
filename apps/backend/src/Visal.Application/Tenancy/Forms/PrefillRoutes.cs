@@ -125,6 +125,16 @@ public static class PrefillSourceCatalog
         // Firma del profesional logueado: Profesional.FirmaUrl del TenantUser que
         // esta llenando el formulario (resuelto por TenantUser.ProfesionalId).
         ["firmaProfesional"] = new[] { "url" },
+        // Firmas y datos de los primeros 4 contactos de emergencia del paciente.
+        // El slot N-esimo lee de la fila con Orden=N (o la N-esima por Nombre si no
+        // tiene Orden). Cada slot expone la firma capturada por el pariente en
+        // /firma/{token} (o la del canvas de admision), su nombre y parentesco.
+        // Un formulario de consentimiento suele pedir "firma acompanante" +
+        // "nombre acompanante" + "parentesco acompanante" — los 3 campos aqui.
+        ["firmaAcompanante1"] = new[] { "url", "nombre", "parentesco" },
+        ["firmaAcompanante2"] = new[] { "url", "nombre", "parentesco" },
+        ["firmaAcompanante3"] = new[] { "url", "nombre", "parentesco" },
+        ["firmaAcompanante4"] = new[] { "url", "nombre", "parentesco" },
         // Contexto del sistema al momento de iniciar el formulario: fecha y
         // hora actuales en distintos formatos, agencia (tenant), sede activa
         // del usuario y datos del usuario logueado. Util sobre todo para
@@ -187,6 +197,10 @@ public static class PrefillSourceCatalog
         "historiaMedica" => "Historia Medica",
         "firmaPaciente" => "Firma del Paciente",
         "firmaProfesional" => "Firma del Profesional",
+        "firmaAcompanante1" => "Firma Acompanante 1",
+        "firmaAcompanante2" => "Firma Acompanante 2",
+        "firmaAcompanante3" => "Firma Acompanante 3",
+        "firmaAcompanante4" => "Firma Acompanante 4",
         "sistema" => "Sistema (fecha, hora, sede, agencia)",
         _ => sourceModule
     };

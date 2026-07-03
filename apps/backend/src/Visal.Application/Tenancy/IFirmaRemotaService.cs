@@ -18,7 +18,17 @@ public sealed record FirmaRequestDto(
     FirmaRequestStatus Status,
     /// <summary>URL publica relativa, ej. /firma/abc123. El frontend la concatena con
     /// el origen actual para mostrarla al profesional o enviarla por WhatsApp.</summary>
-    string PublicPath);
+    string PublicPath,
+    /// <summary>Contacto de emergencia que firma. NULL cuando el firmante es el paciente.</summary>
+    Guid? ContactoEmergenciaId = null);
+
+/// <summary>Un destinatario del envio de firma: puede ser el paciente mismo o un
+/// contacto de emergencia (pariente). Si ContactoEmergenciaId es null, el
+/// firmante es el paciente y el telefono/nombre son los del paciente.</summary>
+public sealed record FirmaDestinatarioSpec(
+    Guid? ContactoEmergenciaId,
+    string Telefono,
+    string? NombreContacto);
 
 /// <summary>Estado actual de una solicitud, usado para polling.</summary>
 public sealed record FirmaRequestStateDto(
@@ -37,7 +47,13 @@ public sealed record FirmaRequestPublicDto(
     string? NombreProfesional,
     string? NombreTenant,
     DateTimeOffset ExpiresAt,
-    FirmaRequestStatus Status);
+    FirmaRequestStatus Status,
+    /// <summary>Nombre del firmante real (paciente o pariente). Igual a
+    /// NombrePaciente cuando ContactoEmergenciaId es null.</summary>
+    string? NombreSignatario = null,
+    /// <summary>Rol del firmante: "PACIENTE" o el parentesco del contacto
+    /// (MADRE, PADRE, ACUDIENTE, etc). Se muestra como "Firmo como: {rol}".</summary>
+    string? RolSignatario = null);
 
 /// <summary>
 /// Servicio de solicitud y captura de firma remota del paciente. Genera un token
@@ -57,6 +73,16 @@ public interface IFirmaRemotaService
     /// archiva en FirmaPacienteRequest.ImageDataUrl pero NO actualiza ninguna
     /// nota; el operador puede consultarla luego desde el historial del paciente.</summary>
     Task<FirmaRequestDto?> CrearLibreParaPacienteAsync(Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default);
+
+    /// <summary>Crea (o reutiliza) solicitudes libres para varios destinatarios en
+    /// un solo lote. Cada destinatario (paciente o pariente) obtiene su propio
+    /// token/URL. Reutiliza solicitudes pendientes vigentes por destinatario si
+    /// existen. Firmas de pariente se persisten luego en PacienteContactoEmergencia.FirmaUrl.</summary>
+    Task<IReadOnlyList<FirmaRequestDto>> CrearMultipleParaPacienteAsync(
+        Guid pacienteId,
+        IReadOnlyList<FirmaDestinatarioSpec> destinatarios,
+        Guid actorTenantUserId,
+        CancellationToken ct = default);
 
     /// <summary>Devuelve la solicitud activa "libre" del paciente (sin nota asociada),
     /// para refrescar el estado del boton en el panel WhatsApp.</summary>

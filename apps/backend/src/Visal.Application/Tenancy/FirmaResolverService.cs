@@ -66,4 +66,17 @@ public sealed class FirmaResolverService : IFirmaResolverService
             .Select(p => p.FirmaUrl)
             .FirstOrDefaultAsync(ct);
     }
+
+    public async Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default)
+    {
+        if (pacienteId == Guid.Empty || indice1Based < 1) { return (null, null, null); }
+        var contactos = await _db.PacienteContactosEmergencia.AsNoTracking()
+            .Where(c => c.PacienteId == pacienteId)
+            .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
+            .Select(c => new { c.FirmaUrl, c.Nombre, c.Parentesco })
+            .ToListAsync(ct);
+        if (indice1Based > contactos.Count) { return (null, null, null); }
+        var c = contactos[indice1Based - 1];
+        return (c.FirmaUrl, c.Nombre, c.Parentesco);
+    }
 }

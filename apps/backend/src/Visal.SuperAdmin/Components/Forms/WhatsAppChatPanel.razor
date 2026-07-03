@@ -173,7 +173,7 @@
                         <button class="wac-qr-tab wac-qr-tab-manage" @onclick="OpenTemplateManager" title="Crear/editar pregrabados">+ Gestionar</button>
                         @if (PacienteId is not null)
                         {
-                            <button class="wac-qr-tab wac-qr-tab-firma" @onclick="SolicitarFirmaLibreAsync" disabled="@_firmaBusy" title="Enviar link de firma al paciente por WhatsApp">
+                            <button class="wac-qr-tab wac-qr-tab-firma" @onclick="AbrirModalFirmasAsync" disabled="@_firmaBusy" title="Abrir modal de solicitud de firmas (paciente + parientes)">
                                 @if (_firmaSolicitudActiva?.Status == FirmaRequestStatus.Pendiente)
                                 {
                                     <text>&#8987; Firma pendiente</text>
@@ -184,7 +184,7 @@
                                 }
                                 else
                                 {
-                                    <text>&#9997; Solicitar firma</text>
+                                    <text>&#9997; Solicitar firmas</text>
                                 }
                             </button>
                         }
@@ -327,30 +327,166 @@
    Usamos <dialog> con showModal() para que el browser lo mande al "top layer"
    y supere CUALQUIER stacking context (ej. el modal de HC que tiene z-index 1001
    y crearia un nuevo contexto que limitaria nuestros overlays normales). *@
-<dialog id="wac-tel-dialog" class="wac-dialog" @onclose="OnTelDialogClosed">
+@*
+   Modal unificado "Solicitar firmas" — reemplaza al viejo modal de solo editar
+   telefono. Combina 3 funciones en un lugar:
+     1) Editar telefono del paciente (codigo pais + numero).
+     2) Ver/seleccionar el paciente y sus contactos de emergencia como tarjetas.
+     3) Agregar un pariente nuevo sobre la marcha (queda persistido en la ficha).
+   Al confirmar, envia por WhatsApp un link de firma unico a cada destinatario
+   seleccionado. Los links del paciente y los parientes son iguales estructuralmente
+   (misma UX en el celular), solo cambia el rotulo "Firmo como: {rol}".
+*@
+<dialog id="wac-firma-dialog" class="wac-dialog wac-dialog-lg" @onclose="OnTelDialogClosed">
     <div class="wac-modal-head">
-        <h3>Telefono del paciente</h3>
+        <h3>Solicitar firmas</h3>
         <button class="wac-modal-close" @onclick="CloseTelefonoAsync" type="button">&times;</button>
     </div>
     <div class="wac-modal-body">
-        <div class="wac-field">
-            <label>Pais / Codigo</label>
-            <select class="form-control" @bind="_telCodigoPais">
-                @foreach (var p in PaisesCodigos)
+
+        @* ---- Seccion 1: telefono del paciente (edicion inline) ---- *@
+        <div class="wac-fmodal-sec">
+            <div class="wac-fmodal-sec-h">
+                <strong>Telefono del paciente</strong>
+                @if (_telefonoDigits is not null)
                 {
-                    <option value="@p.Codigo">@p.Nombre (+@p.Codigo)</option>
+                    <span class="wac-fmodal-hint">Actual: +@_telefonoDigits</span>
                 }
-            </select>
+            </div>
+            <div class="wac-fmodal-row2">
+                <div class="wac-field">
+                    <label>Pais</label>
+                    <select class="form-control" @bind="_telCodigoPais">
+                        @foreach (var p in PaisesCodigos)
+                        {
+                            <option value="@p.Codigo">@p.Nombre (+@p.Codigo)</option>
+                        }
+                    </select>
+                </div>
+                <div class="wac-field">
+                    <label>Numero local</label>
+                    <input class="form-control wac-tel-input" @bind="_telNumero" placeholder="Ej: 3001234567" inputmode="numeric" maxlength="15" />
+                </div>
+                <div class="wac-fmodal-savetel">
+                    <button class="btn btn-outline-primary btn-sm" @onclick="SaveTelefonoAsync" disabled="@_telBusy" type="button">
+                        @(_telBusy ? "..." : "Actualizar")
+                    </button>
+                </div>
+            </div>
+            @if (_telError is not null) { <div class="wac-error">@_telError</div> }
         </div>
-        <div class="wac-field">
-            <label>Numero local (sin codigo de pais)</label>
-            <input class="form-control wac-tel-input" @bind="_telNumero" placeholder="Ej: 3001234567" inputmode="numeric" maxlength="15" />
-            <div class="wac-tel-preview">Se guardara: <strong>+@_telCodigoPais @PreviewNumeroLocal()</strong></div>
+
+        @* ---- Seccion 2: tarjetas de destinatarios (paciente + parientes) ---- *@
+        <div class="wac-fmodal-sec">
+            <div class="wac-fmodal-sec-h">
+                <strong>Destinatarios de la firma</strong>
+                <span class="wac-fmodal-hint">Marca a quien enviar el link (@(_firmaDestSel.Count) seleccionados)</span>
+            </div>
+            <div class="wac-fmodal-cards">
+                @* Tarjeta del paciente. ContactoEmergenciaId = null. *@
+                <label class="wac-fmodal-card @(_firmaDestSel.Contains(Guid.Empty) ? "sel" : "") @(string.IsNullOrWhiteSpace(_telefonoDigits) ? "disabled" : "")">
+                    <input type="checkbox" checked="@_firmaDestSel.Contains(Guid.Empty)"
+                           disabled="@string.IsNullOrWhiteSpace(_telefonoDigits)"
+                           @onchange="() => ToggleDestinatario(Guid.Empty)" />
+                    <div class="wac-fmodal-card-body">
+                        <div class="wac-fmodal-card-name">&#128118; @(NombreContacto ?? "Paciente") <span class="wac-fmodal-card-tag">PACIENTE</span></div>
+                        <div class="wac-fmodal-card-sub">@(string.IsNullOrWhiteSpace(_telefonoDigits) ? "Sin telefono - actualiza arriba" : $"+{_telefonoDigits}")</div>
+                    </div>
+                </label>
+
+                @foreach (var c in _firmaParientes)
+                {
+                    var cid = c.Id ?? Guid.Empty;
+                    var telFull = (c.CodigoPais ?? "+57").TrimStart('+') + (c.Telefono ?? "");
+                    var telValido = new string(telFull.Where(char.IsDigit).ToArray()).Length >= 6;
+                    <label class="wac-fmodal-card @(_firmaDestSel.Contains(cid) ? "sel" : "") @(telValido ? "" : "disabled")">
+                        <input type="checkbox" checked="@_firmaDestSel.Contains(cid)"
+                               disabled="@(!telValido)"
+                               @onchange="() => ToggleDestinatario(cid)" />
+                        <div class="wac-fmodal-card-body">
+                            <div class="wac-fmodal-card-name">
+                                &#128100; @c.Nombre
+                                <span class="wac-fmodal-card-tag">@((c.Parentesco ?? "ACOMPANANTE").ToUpperInvariant())</span>
+                                @if (!string.IsNullOrWhiteSpace(c.FirmaUrl))
+                                {
+                                    <span class="wac-fmodal-card-badge">&#10003; firma</span>
+                                }
+                            </div>
+                            <div class="wac-fmodal-card-sub">
+                                @(telValido ? $"{c.CodigoPais} {c.Telefono}" : "Sin telefono valido")
+                            </div>
+                        </div>
+                    </label>
+                }
+            </div>
         </div>
-        @if (_telError is not null) { <div class="wac-error">@_telError</div> }
-        <div class="wac-modal-actions">
-            <button class="btn btn-primary" @onclick="SaveTelefonoAsync" disabled="@_telBusy" type="button">@(_telBusy ? "Guardando..." : "Guardar")</button>
-            <button class="btn btn-outline-secondary" @onclick="CloseTelefonoAsync" disabled="@_telBusy" type="button">Cancelar</button>
+
+        @* ---- Seccion 3: agregar pariente nuevo ---- *@
+        <div class="wac-fmodal-sec">
+            @if (!_firmaAddOpen)
+            {
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => { _firmaAddOpen = true; _firmaAddError = null; }" type="button">
+                    &#43; Agregar pariente
+                </button>
+            }
+            else
+            {
+                <div class="wac-fmodal-add">
+                    <div class="wac-fmodal-sec-h">
+                        <strong>Nuevo pariente</strong>
+                        <span class="wac-fmodal-hint">Queda guardado en la ficha del paciente</span>
+                    </div>
+                    <div class="wac-fmodal-add-grid">
+                        <div class="wac-field">
+                            <label>Nombre</label>
+                            <input class="form-control" @bind="_firmaAddNombre" placeholder="Ej: MARIA GOMEZ" />
+                        </div>
+                        <div class="wac-field">
+                            <label>Parentesco</label>
+                            <input class="form-control" @bind="_firmaAddParentesco" placeholder="Ej: MADRE, ACUDIENTE" />
+                        </div>
+                        <div class="wac-field">
+                            <label>Codigo pais</label>
+                            <select class="form-control" @bind="_firmaAddCodigoPais">
+                                @foreach (var p in PaisesCodigos)
+                                {
+                                    <option value="@("+" + p.Codigo)">@p.Nombre (+@p.Codigo)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="wac-field">
+                            <label>Telefono local</label>
+                            <input class="form-control" @bind="_firmaAddTelefono" placeholder="Ej: 3001234567" inputmode="numeric" maxlength="15" />
+                        </div>
+                    </div>
+                    @if (_firmaAddError is not null) { <div class="wac-error">@_firmaAddError</div> }
+                    <div class="wac-modal-actions">
+                        <button class="btn btn-primary btn-sm" @onclick="AgregarParienteAsync" disabled="@_firmaBusy" type="button">
+                            @(_firmaBusy ? "Guardando..." : "Guardar pariente")
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _firmaAddOpen = false" disabled="@_firmaBusy" type="button">
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (_firmaError is not null) { <div class="wac-error">@_firmaError</div> }
+        @if (_firmaMsg is not null) { <div class="wac-info">@_firmaMsg</div> }
+
+        <div class="wac-modal-actions wac-fmodal-actions">
+            <button class="btn btn-primary" @onclick="EnviarSolicitudesFirmaAsync" disabled="@(_firmaBusy || _firmaDestSel.Count == 0)" type="button">
+                @if (_firmaBusy)
+                {
+                    <text>Enviando...</text>
+                }
+                else
+                {
+                    <text>&#128241; Enviar solicitudes (@_firmaDestSel.Count)</text>
+                }
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="CloseTelefonoAsync" disabled="@_firmaBusy" type="button">Cerrar</button>
         </div>
     </div>
 </dialog>
@@ -514,6 +650,32 @@
     .wac-modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; line-height: 1; }
     .wac-modal-body { padding: 16px 18px; overflow-y: auto; }
     .wac-modal-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+    /* Modal grande unificado "Solicitar firmas" */
+    .wac-dialog.wac-dialog-lg { max-width: 640px; width: 92vw; }
+    .wac-fmodal-sec { padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+    .wac-fmodal-sec:last-of-type { border-bottom: none; }
+    .wac-fmodal-sec-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+    .wac-fmodal-sec-h strong { font-size: 13px; color: #0f172a; }
+    .wac-fmodal-hint { font-size: 11px; color: #64748b; }
+    .wac-fmodal-row2 { display: grid; grid-template-columns: 130px 1fr auto; gap: 8px; align-items: end; }
+    .wac-fmodal-savetel { align-self: end; padding-bottom: 2px; }
+    .wac-fmodal-cards { display: flex; flex-direction: column; gap: 6px; }
+    .wac-fmodal-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: all .15s; background: #fff; }
+    .wac-fmodal-card:hover { border-color: #cbd5e1; background: #f8fafc; }
+    .wac-fmodal-card.sel { border-color: #128c7e; background: #f0fdfa; }
+    .wac-fmodal-card.disabled { opacity: .55; cursor: not-allowed; }
+    .wac-fmodal-card input[type=checkbox] { transform: scale(1.1); accent-color: #128c7e; }
+    .wac-fmodal-card-body { flex: 1; min-width: 0; }
+    .wac-fmodal-card-name { font-size: 12.5px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .wac-fmodal-card-sub { font-size: 11.5px; color: #475569; margin-top: 2px; font-family: ui-monospace, "Cascadia Code", monospace; }
+    .wac-fmodal-card-tag { font-size: 9.5px; font-weight: 700; letter-spacing: .3px; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 999px; }
+    .wac-fmodal-card.sel .wac-fmodal-card-tag { color: #0f766e; background: #ccfbf1; }
+    .wac-fmodal-card-badge { font-size: 10px; color: #059669; background: #d1fae5; padding: 1px 6px; border-radius: 999px; font-weight: 600; }
+    .wac-fmodal-add { padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1; }
+    .wac-fmodal-add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .wac-fmodal-actions { justify-content: flex-end; padding-top: 12px; border-top: 1px solid #e2e8f0; margin-top: 10px; }
+    .wac-info { font-size: 12px; color: #059669; background: #d1fae5; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
     .wac-field { margin-bottom: 12px; }
     .wac-field label { display: block; font-size: 11px; font-weight: 700; color: #475569; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
     .wac-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -613,6 +775,20 @@
     private bool _firmaBusy;
     private string? _firmaMsg;
     private string? _firmaError;
+
+    // Estado del modal unificado "Solicitar firmas":
+    // - _firmaParientes: contactos de emergencia del paciente (traidos al abrir).
+    // - _firmaDestSel: Ids seleccionados como destinatarios. Guid.Empty representa
+    //   al paciente mismo. Cada otro Guid es el Id de un PacienteContactoEmergencia.
+    // - _firmaAdd*: form inline para crear un pariente nuevo.
+    private List<PacienteContactoEmergenciaDto> _firmaParientes = new();
+    private readonly HashSet<Guid> _firmaDestSel = new();
+    private bool _firmaAddOpen;
+    private string? _firmaAddNombre;
+    private string? _firmaAddParentesco;
+    private string _firmaAddCodigoPais = "+57";
+    private string? _firmaAddTelefono;
+    private string? _firmaAddError;
 
     /// <summary>Lista corta de paises (Latam + comunes) con codigo internacional.</summary>
     private static readonly (string Codigo, string Nombre, string Bandera)[] PaisesCodigos = new[]
@@ -1073,10 +1249,28 @@
     }
 
     // ===== Edicion de telefono del paciente =====
-    private async Task OpenEditTelefono()
+    /// <summary>Alias historico: cualquier trigger del panel que antes abria el
+    /// modal de "editar telefono" ahora abre el modal unificado de firmas (el
+    /// telefono se sigue editando en la primera seccion del mismo modal).</summary>
+    private Task OpenEditTelefono() => AbrirModalFirmasAsync();
+
+    /// <summary>Abre el modal unificado "Solicitar firmas": inicializa el editor
+    /// de telefono con el actual, carga la lista de parientes del paciente y
+    /// preselecciona al paciente como destinatario si tiene telefono valido.</summary>
+    private async Task AbrirModalFirmasAsync()
     {
-        if (PacienteId is null) { return; }
+        if (PacienteId is not Guid pid) { return; }
         _telError = null;
+        _firmaError = null;
+        _firmaMsg = null;
+        _firmaAddOpen = false;
+        _firmaAddNombre = _firmaAddParentesco = _firmaAddTelefono = null;
+        _firmaAddCodigoPais = "+57";
+
+        // Split telefono actual del paciente en (codigoPais, numeroLocal) para
+        // pre-llenar los inputs de la seccion 1. Misma logica que tenia el modal
+        // viejo de solo telefono: quita duplicaciones si el codigo pais quedo
+        // pegado al numero por imports viejos.
         var actual = _telefonoDigits ?? string.Empty;
         var match = PaisesCodigos
             .OrderByDescending(p => p.Codigo.Length)
@@ -1085,9 +1279,6 @@
         {
             _telCodigoPais = match.Codigo;
             var local = actual.Substring(match.Codigo.Length);
-            // Defensa contra registros con el codigo pais duplicado (import viejo,
-            // guardados previos rotos, etc). Si el numero local aun arranca con el
-            // mismo prefijo, lo quitamos hasta que no lo repita.
             while (local.Length > match.Codigo.Length && local.StartsWith(match.Codigo))
             {
                 local = local.Substring(match.Codigo.Length);
@@ -1099,18 +1290,130 @@
             _telCodigoPais = "57";
             _telNumero = string.IsNullOrWhiteSpace(actual) ? null : actual;
         }
+
+        // Cargar parientes de la ficha.
+        try { _firmaParientes = (await PacientesSvc.ListContactosEmergenciaAsync(pid)).ToList(); }
+        catch { _firmaParientes = new(); }
+
+        // Preseleccion: paciente si tiene telefono valido.
+        _firmaDestSel.Clear();
+        if (!string.IsNullOrWhiteSpace(_telefonoDigits)) { _firmaDestSel.Add(Guid.Empty); }
+
         _telOpen = true;
-        // Llamar showModal() del <dialog> para que vaya al top layer del browser y
-        // se renderice por encima de cualquier stacking context (como el modal HC).
-        try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-tel-dialog'); if (d && !d.open) d.showModal();"); }
+        try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-firma-dialog'); if (d && !d.open) d.showModal();"); }
         catch { }
     }
 
     private async Task CloseTelefonoAsync()
     {
         _telOpen = false;
-        try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-tel-dialog'); if (d && d.open) d.close();"); }
+        try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-firma-dialog'); if (d && d.open) d.close();"); }
         catch { }
+    }
+
+    private void ToggleDestinatario(Guid id)
+    {
+        if (_firmaDestSel.Contains(id)) { _firmaDestSel.Remove(id); }
+        else { _firmaDestSel.Add(id); }
+    }
+
+    /// <summary>Persiste un pariente nuevo en la ficha del paciente y lo agrega
+    /// a la lista visible del modal (queda preseleccionado como destinatario).</summary>
+    private async Task AgregarParienteAsync()
+    {
+        _firmaAddError = null;
+        if (PacienteId is not Guid pid) { _firmaAddError = "Sin paciente."; return; }
+        if (string.IsNullOrWhiteSpace(_firmaAddNombre)) { _firmaAddError = "El nombre es obligatorio."; return; }
+        var soloDigitos = new string((_firmaAddTelefono ?? "").Where(char.IsDigit).ToArray());
+        if (soloDigitos.Length < 6) { _firmaAddError = "Telefono con al menos 6 digitos."; return; }
+
+        _firmaBusy = true;
+        try
+        {
+            var dto = new PacienteContactoEmergenciaDto(
+                Id: null,
+                Nombre: _firmaAddNombre!.Trim(),
+                Parentesco: string.IsNullOrWhiteSpace(_firmaAddParentesco) ? null : _firmaAddParentesco!.Trim(),
+                CodigoPais: string.IsNullOrWhiteSpace(_firmaAddCodigoPais) ? "+57" : _firmaAddCodigoPais,
+                Telefono: soloDigitos,
+                Orden: 0,
+                FirmaUrl: null);
+            var saved = await PacientesSvc.UpsertContactoEmergenciaAsync(pid, dto, Guid.Empty);
+            if (saved is null) { _firmaAddError = "No se pudo guardar el pariente."; return; }
+            _firmaParientes.Add(saved);
+            if (saved.Id is Guid newId) { _firmaDestSel.Add(newId); }
+            _firmaAddOpen = false;
+            _firmaAddNombre = _firmaAddParentesco = _firmaAddTelefono = null;
+            _firmaAddCodigoPais = "+57";
+        }
+        catch (Exception ex) { _firmaAddError = ex.Message; }
+        finally { _firmaBusy = false; }
+    }
+
+    /// <summary>Envia por WhatsApp una solicitud de firma a cada destinatario
+    /// seleccionado. El paciente y cada pariente reciben su propio token/URL;
+    /// las firmas se persistiran cada una en su lugar (paciente o FirmaUrl del
+    /// contacto correspondiente) cuando abran el link en el celular.</summary>
+    private async Task EnviarSolicitudesFirmaAsync()
+    {
+        _firmaError = null; _firmaMsg = null;
+        if (PacienteId is not Guid pid) { _firmaError = "Sin paciente."; return; }
+        if (_firmaDestSel.Count == 0) { _firmaError = "Selecciona al menos un destinatario."; return; }
+        if (!Guid.TryParse(_lineaSelIdStr, out var lineId)) { _firmaError = "Selecciona una linea WhatsApp."; return; }
+
+        // Armar lista de destinatarios (paciente + parientes seleccionados con telefono valido).
+        var destinatarios = new List<FirmaDestinatarioSpec>(_firmaDestSel.Count);
+        if (_firmaDestSel.Contains(Guid.Empty))
+        {
+            if (string.IsNullOrWhiteSpace(_telefonoDigits))
+            {
+                _firmaError = "El paciente no tiene telefono valido. Actualizalo arriba.";
+                return;
+            }
+            destinatarios.Add(new FirmaDestinatarioSpec(null, _telefonoDigits!, NombreContacto));
+        }
+        foreach (var c in _firmaParientes)
+        {
+            if (c.Id is not Guid cid) { continue; }
+            if (!_firmaDestSel.Contains(cid)) { continue; }
+            var telFull = (c.CodigoPais ?? "+57").TrimStart('+') + (c.Telefono ?? "");
+            var digits = new string(telFull.Where(char.IsDigit).ToArray());
+            if (digits.Length < 6) { continue; }
+            destinatarios.Add(new FirmaDestinatarioSpec(cid, digits, c.Nombre));
+        }
+        if (destinatarios.Count == 0) { _firmaError = "Ningun destinatario con telefono valido."; return; }
+
+        _firmaBusy = true;
+        try
+        {
+            var solicitudes = await FirmaSvc.CrearMultipleParaPacienteAsync(pid, destinatarios, Guid.Empty);
+            if (solicitudes.Count == 0) { _firmaError = "No se pudo crear la solicitud."; return; }
+
+            var baseUri = Nav.BaseUri.TrimEnd('/');
+            int ok = 0, fail = 0;
+            var erroresDet = new List<string>();
+            foreach (var s in solicitudes)
+            {
+                var send = await FirmaSvc.EnviarPorWhatsAppAsync(s.Id, lineId, $"{baseUri}{s.PublicPath}", Guid.Empty);
+                if (send.Ok) { ok++; } else { fail++; erroresDet.Add(send.Error ?? "sin detalle"); }
+            }
+            if (ok > 0 && fail == 0)
+            {
+                _firmaMsg = $"Enviadas {ok} solicitud(es) de firma.";
+                // Mantenemos la solicitud del paciente como "activa" para el badge del boton.
+                _firmaSolicitudActiva = solicitudes.FirstOrDefault(s => s.ContactoEmergenciaId is null) ?? solicitudes[0];
+            }
+            else if (ok > 0)
+            {
+                _firmaMsg = $"Enviadas {ok}; fallaron {fail}: {string.Join("; ", erroresDet)}";
+            }
+            else
+            {
+                _firmaError = $"Todas fallaron: {string.Join("; ", erroresDet)}";
+            }
+        }
+        catch (Exception ex) { _firmaError = ex.Message; }
+        finally { _firmaBusy = false; }
     }
 
     private void OnTelDialogClosed()
@@ -1150,9 +1453,10 @@
             }
             _telefonoDigits = guardado;
             _ultimoTelefono = guardado;
-            _telOpen = false;
-            try { await JS.InvokeVoidAsync("eval", "var d=document.getElementById('wac-tel-dialog'); if (d && d.open) d.close();"); }
-            catch { }
+            // Nota: NO cerramos el modal - el usuario esta armando la lista de
+            // destinatarios y el telefono es solo una de las 3 secciones.
+            // Preseleccionamos al paciente ahora que ya tiene telefono valido.
+            _firmaDestSel.Add(Guid.Empty);
         }
         catch (Exception ex) { _telError = ex.Message; }
         finally { _telBusy = false; _dbLock.Release(); }

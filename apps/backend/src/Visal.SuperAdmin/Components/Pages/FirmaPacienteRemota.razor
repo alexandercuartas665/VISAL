@@ -16,6 +16,17 @@
         <div class="fp-brand">
             <div class="fp-brand-name">@(_req?.NombreTenant ?? "IPS Visal RT")</div>
             <div class="fp-brand-sub">Confirmacion de atencion</div>
+            @if (_req is not null && !string.IsNullOrWhiteSpace(_req.RolSignatario))
+            {
+                <div class="fp-rol">
+                    Firmo como
+                    <strong>@_req.RolSignatario</strong>
+                    @if (!string.IsNullOrWhiteSpace(_req.NombreSignatario) && _req.RolSignatario != "PACIENTE")
+                    {
+                        <span class="fp-rol-name">- @_req.NombreSignatario</span>
+                    }
+                </div>
+            }
         </div>
 
         @if (_loading)
@@ -62,8 +73,24 @@
         else
         {
             <div class="fp-msg">
-                <p>Hola <strong>@_req.NombrePaciente</strong>,</p>
-                <p>@(string.IsNullOrWhiteSpace(_req.NombreProfesional) ? "Tu profesional" : "El profesional " + _req.NombreProfesional) te solicita confirmar la atencion recibida hoy.</p>
+                @{
+                    // Personalizamos el saludo segun el rol. Si el firmante es un pariente,
+                    // lo saludamos por su nombre y explicamos que firma como acompanante del
+                    // paciente. Si es el paciente, se mantiene el mensaje historico.
+                    var esAcompanante = _req.RolSignatario is not null && _req.RolSignatario != "PACIENTE";
+                    var saludo = esAcompanante && !string.IsNullOrWhiteSpace(_req.NombreSignatario)
+                        ? _req.NombreSignatario
+                        : _req.NombrePaciente;
+                }
+                <p>Hola <strong>@saludo</strong>,</p>
+                @if (esAcompanante)
+                {
+                    <p>@(string.IsNullOrWhiteSpace(_req.NombreProfesional) ? "El profesional" : "El profesional " + _req.NombreProfesional) solicita tu firma como <strong>@_req.RolSignatario?.ToLowerInvariant()</strong> de <strong>@_req.NombrePaciente</strong>.</p>
+                }
+                else
+                {
+                    <p>@(string.IsNullOrWhiteSpace(_req.NombreProfesional) ? "Tu profesional" : "El profesional " + _req.NombreProfesional) te solicita confirmar la atencion recibida hoy.</p>
+                }
                 <p>Por favor firma con el dedo en el recuadro y pulsa <strong>Confirmar firma</strong>.</p>
             </div>
             <canvas id="fp-canvas" class="fp-canvas"></canvas>
@@ -106,6 +133,9 @@
     .fp-state-ok .fp-state-h { color: #166534; }
     .fp-state-err .fp-state-h { color: #991b1b; }
     .fp-state-ico { font-size: 48px; color: #16a34a; margin-bottom: 8px; }
+    .fp-rol { margin-top: 10px; font-size: 11px; color: #475569; text-transform: uppercase; letter-spacing: .08em; }
+    .fp-rol strong { color: #0b5b54; font-weight: 800; letter-spacing: .05em; margin-left: 4px; }
+    .fp-rol-name { text-transform: none; letter-spacing: 0; color: #64748b; font-weight: 500; margin-left: 4px; }
 </style>
 
 @code {

@@ -772,6 +772,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => x.Token).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.NotaMedicaId, x.Status });
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
+            b.HasIndex(x => x.ContactoEmergenciaId);
         });
 
         modelBuilder.Entity<TipologiaArchivo>(b =>

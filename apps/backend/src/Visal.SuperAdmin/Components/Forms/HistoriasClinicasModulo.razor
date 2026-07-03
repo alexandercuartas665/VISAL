@@ -1595,6 +1595,15 @@
                 }
             }
             FirmasPrefillHelper.Aplicar(_valores, firmaPac, firmaProf, _prefillRoutesActual);
+            // Acompanantes 1..4: firma + nombre + parentesco de los primeros 4
+            // contactos de emergencia del paciente. Corte temprano si un slot
+            // ya no existe (los siguientes tampoco existen).
+            for (int i = 1; i <= 4; i++)
+            {
+                var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(p.Id, i);
+                if (aUrl is null && aNombre is null && aParent is null) { break; }
+                FirmasPrefillHelper.AplicarAcompanante(_valores, i, aUrl, aNombre, aParent, _prefillRoutesActual);
+            }
         }
         catch { /* las firmas son opcionales: si fallan, el form sigue funcionando */ }
     }

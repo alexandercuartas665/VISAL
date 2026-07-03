@@ -258,6 +258,58 @@ public sealed class PacienteService : IPacienteService
         return digits;
     }
 
+    public async Task<IReadOnlyList<PacienteContactoEmergenciaDto>> ListContactosEmergenciaAsync(Guid pacienteId, CancellationToken ct = default)
+    {
+        return await _db.PacienteContactosEmergencia.AsNoTracking()
+            .Where(c => c.PacienteId == pacienteId)
+            .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
+            .Select(c => new PacienteContactoEmergenciaDto(
+                c.Id, c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden, c.FirmaUrl))
+            .ToListAsync(ct);
+    }
+
+    public async Task<PacienteContactoEmergenciaDto?> UpsertContactoEmergenciaAsync(Guid pacienteId, PacienteContactoEmergenciaDto contacto, Guid actor, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tenantId) { return null; }
+        var paciente = await _db.Pacientes.FirstOrDefaultAsync(p => p.Id == pacienteId, ct);
+        if (paciente is null) { return null; }
+
+        PacienteContactoEmergencia entidad;
+        if (contacto.Id is Guid existingId)
+        {
+            entidad = await _db.PacienteContactosEmergencia
+                .FirstOrDefaultAsync(c => c.Id == existingId && c.PacienteId == pacienteId, ct)
+                ?? throw new InvalidOperationException("Contacto no encontrado.");
+        }
+        else
+        {
+            // Nuevo contacto: le damos el siguiente Orden libre.
+            var siguienteOrden = 1 + (await _db.PacienteContactosEmergencia
+                .Where(c => c.PacienteId == pacienteId)
+                .Select(c => (int?)c.Orden)
+                .MaxAsync(ct) ?? 0);
+            entidad = new PacienteContactoEmergencia
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                PacienteId = pacienteId,
+                Orden = siguienteOrden
+            };
+            _db.PacienteContactosEmergencia.Add(entidad);
+        }
+        entidad.Nombre = (contacto.Nombre ?? string.Empty).Trim();
+        entidad.Parentesco = string.IsNullOrWhiteSpace(contacto.Parentesco) ? null : contacto.Parentesco!.Trim();
+        entidad.CodigoPais = string.IsNullOrWhiteSpace(contacto.CodigoPais) ? "+57" : contacto.CodigoPais!;
+        entidad.Telefono = string.IsNullOrWhiteSpace(contacto.Telefono)
+            ? null
+            : new string(contacto.Telefono!.Where(char.IsDigit).ToArray());
+        if (contacto.FirmaUrl is not null) { entidad.FirmaUrl = contacto.FirmaUrl; }
+        await _db.SaveChangesAsync(ct);
+        return new PacienteContactoEmergenciaDto(
+            entidad.Id, entidad.Nombre, entidad.Parentesco, entidad.CodigoPais,
+            entidad.Telefono, entidad.Orden, entidad.FirmaUrl);
+    }
+
     private static int? CalcularEdad(DateOnly? fechaNacimiento)
     {
         if (fechaNacimiento is not DateOnly fn) { return null; }

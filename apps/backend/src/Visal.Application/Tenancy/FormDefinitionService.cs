@@ -197,20 +197,29 @@ public sealed class FormDefinitionService : IFormDefinitionService
             }
 
             // Tambien preparamos las rutas firmaPaciente / firmaProfesional /
-            // historiaMedica / contrato. Lazy: solo se crean si hay al menos un match.
-            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null, rutaHm = null, rutaContrato = null, rutaSistema = null;
-            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null, mappingsHm = null, mappingsContrato = null, mappingsSistema = null;
+            // historiaMedica / contrato / firmaAcompanante1. Lazy: solo se crean
+            // si hay al menos un match.
+            JsonObject? rutaFirmaPac = null, rutaFirmaProf = null, rutaHm = null, rutaContrato = null, rutaSistema = null, rutaFirmaAcomp1 = null;
+            JsonArray? mappingsFirmaPac = null, mappingsFirmaProf = null, mappingsHm = null, mappingsContrato = null, mappingsSistema = null, mappingsFirmaAcomp1 = null;
 
             int agregadosEnEsteForm = 0;
             foreach (var (name, label) in names)
             {
                 if (targetsExistentes.Contains(name)) { continue; } // mapeo manual: respetar
 
-                // Orden de prueba: firma paciente, firma profesional, paciente.
-                // Es importante chequear firmas ANTES que paciente porque algunos
-                // nombres como "firma_profesional" o "firma_paciente" contienen
-                // "paciente"/"profesional" y podrian colisionar con la heuristica
-                // generica si la corremos primero.
+                // Orden de prueba: firma acompanante (mas especifico), firma paciente,
+                // firma profesional, paciente. Acompanante primero porque nombres
+                // como "firmaAcompananteMadre" contienen "firma" y podrian caer en
+                // firmaPaciente si dejamos ese chequeo antes.
+                var acompMatch = InferirCampoFirmaAcompanante(name, label);
+                if (acompMatch is not null)
+                {
+                    EnsureRuta(routes, acompMatch.Value.SourceModule, "Firma Acompanante 1", ref rutaFirmaAcomp1, ref mappingsFirmaAcomp1);
+                    mappingsFirmaAcomp1!.Add(new JsonObject { ["source"] = acompMatch.Value.SourceField, ["target"] = name });
+                    targetsExistentes.Add(name);
+                    agregadosEnEsteForm++;
+                    continue;
+                }
                 if (InferirCampoFirmaPaciente(name, label))
                 {
                     EnsureRuta(routes, "firmaPaciente", "Firma del Paciente", ref rutaFirmaPac, ref mappingsFirmaPac);
@@ -282,6 +291,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             ruta["mappings"] = mappingsArr;
             if (rutaFirmaPac is not null && mappingsFirmaPac is not null) { rutaFirmaPac["mappings"] = mappingsFirmaPac; }
             if (rutaFirmaProf is not null && mappingsFirmaProf is not null) { rutaFirmaProf["mappings"] = mappingsFirmaProf; }
+            if (rutaFirmaAcomp1 is not null && mappingsFirmaAcomp1 is not null) { rutaFirmaAcomp1["mappings"] = mappingsFirmaAcomp1; }
             if (rutaHm is not null && mappingsHm is not null) { rutaHm["mappings"] = mappingsHm; }
             if (rutaContrato is not null && mappingsContrato is not null) { rutaContrato["mappings"] = mappingsContrato; }
             if (rutaSistema is not null && mappingsSistema is not null) { rutaSistema["mappings"] = mappingsSistema; }
@@ -354,6 +364,36 @@ public sealed class FormDefinitionService : IFormDefinitionService
             if (n.Contains(f) || (l is not null && l.Contains(f))) { return true; }
         }
         return false;
+    }
+
+    /// <summary>Heuristica para detectar campos "acompanante" en consentimientos:
+    /// firmaAcompanante -> firmaAcompanante1.url,
+    /// nombreAcompanante -> firmaAcompanante1.nombre,
+    /// parentescoAcompanante -> firmaAcompanante1.parentesco.
+    /// Retorna (sourceModule, sourceField) o null. Cubre variantes comunes:
+    /// acudiente/acompanante/familiar/madre/padre/responsable. Auto-enlaza al slot 1
+    /// por default; el admin puede reasignar a 2/3/4 desde el modal Rutas prefill.</summary>
+    private static (string SourceModule, string SourceField)? InferirCampoFirmaAcompanante(string name, string? label)
+    {
+        var n = Normalizar(name);
+        var l = Normalizar(label);
+
+        // El campo es de tipo "acompanante" si menciona uno de estos actores.
+        // OJO: "acudiente" solo aca — la firma del paciente ya tiene "firmaacudiente"
+        // en su lista y matchea antes (orden importa).
+        var esAcompanante = false;
+        foreach (var frag in new[] { "acompanante", "acompaniante", "acompan", "familiar", "madre", "padre", "responsablefamiliar" })
+        {
+            if (n.Contains(frag) || (l is not null && l.Contains(frag))) { esAcompanante = true; break; }
+        }
+        if (!esAcompanante) { return null; }
+
+        // Un campo con "firma" → url. Sin "firma" pero con "parentesco" → parentesco.
+        // Sin "firma" ni "parentesco" pero con "nombre" → nombre.
+        if (n.Contains("firma") || (l is not null && l.Contains("firma"))) { return ("firmaAcompanante1", "url"); }
+        if (n.Contains("parentesco") || (l is not null && l.Contains("parentesco"))) { return ("firmaAcompanante1", "parentesco"); }
+        if (n.Contains("nombre") || (l is not null && l.Contains("nombre"))) { return ("firmaAcompanante1", "nombre"); }
+        return null;
     }
 
     /// <summary>Heuristica para detectar si un campo del formulario es la firma del profesional.

@@ -173,7 +173,8 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             .Select(r => new
             {
                 r.Id, r.Token, r.PacienteId, r.NotaMedicaId, r.TenantId,
-                r.ExpiresAt, r.Status, r.SolicitadaPorTenantUserId
+                r.ExpiresAt, r.Status, r.SolicitadaPorTenantUserId,
+                r.ContactoEmergenciaId, r.NombreContacto
             })
             .FirstOrDefaultAsync(ct);
         if (req is null) { return null; }
@@ -205,13 +206,36 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             .Select(t => t.Name)
             .FirstOrDefaultAsync(ct);
 
+        // Rol y nombre del firmante real. Si es pariente, leemos parentesco + nombre
+        // del contacto (con fallback al NombreContacto guardado en el request).
+        string? nombreSig = null;
+        string? rolSig = null;
+        if (req.ContactoEmergenciaId is Guid cid)
+        {
+            var contacto = await _db.PacienteContactosEmergencia.IgnoreQueryFilters()
+                .Where(c => c.Id == cid)
+                .Select(c => new { c.Nombre, c.Parentesco })
+                .FirstOrDefaultAsync(ct);
+            nombreSig = contacto?.Nombre ?? req.NombreContacto;
+            rolSig = string.IsNullOrWhiteSpace(contacto?.Parentesco)
+                ? "ACOMPANANTE"
+                : contacto!.Parentesco!.ToUpperInvariant();
+        }
+        else
+        {
+            nombreSig = paciente ?? "Paciente";
+            rolSig = "PACIENTE";
+        }
+
         return new FirmaRequestPublicDto(
             req.Id, req.Token,
             paciente ?? "Paciente",
             profesional,
             tenantName,
             req.ExpiresAt,
-            req.Status);
+            req.Status,
+            nombreSig,
+            rolSig);
     }
 
     public async Task<bool> GuardarFirmaPorTokenAsync(string token, string imageDataUrl, CancellationToken ct = default)
@@ -250,6 +274,20 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             if (nota is not null)
             {
                 nota.FirmaPacienteDataUrl = imageDataUrl;
+            }
+        }
+
+        // Si la solicitud es de un pariente, sobreescribimos su FirmaUrl en la ficha
+        // del paciente. Asi los formularios de consentimiento con ruta prefill
+        // pacienteContactoEmergenciaN.firmaUrl recogen automaticamente la firma
+        // remota mas reciente sin depender de que el admin abra /admision.
+        if (req.ContactoEmergenciaId is Guid contactoId)
+        {
+            var contacto = await _db.PacienteContactosEmergencia.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.Id == contactoId, ct);
+            if (contacto is not null)
+            {
+                contacto.FirmaUrl = imageDataUrl;
             }
         }
 
@@ -303,5 +341,63 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     private static FirmaRequestDto Map(FirmaPacienteRequest r) =>
         new(r.Id, r.PacienteId, r.NotaMedicaId, r.Token, r.Telefono, r.NombreContacto,
-            r.CreatedAt, r.ExpiresAt, r.CompletedAt, r.Status, $"/firma/{r.Token}");
+            r.CreatedAt, r.ExpiresAt, r.CompletedAt, r.Status, $"/firma/{r.Token}",
+            r.ContactoEmergenciaId);
+
+    public async Task<IReadOnlyList<FirmaRequestDto>> CrearMultipleParaPacienteAsync(
+        Guid pacienteId,
+        IReadOnlyList<FirmaDestinatarioSpec> destinatarios,
+        Guid actorTenantUserId,
+        CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tenantId) { return Array.Empty<FirmaRequestDto>(); }
+        if (destinatarios is null || destinatarios.Count == 0) { return Array.Empty<FirmaRequestDto>(); }
+
+        var ahora = _time.GetUtcNow();
+        var resultado = new List<FirmaRequestDto>(destinatarios.Count);
+
+        foreach (var d in destinatarios)
+        {
+            var digits = Digits(d.Telefono);
+            if (digits.Length == 0) { continue; }
+
+            // Reutilizamos solo si el destinatario coincide EXACTAMENTE (paciente o
+            // mismo pariente). Asi cada firma queda desacoplada aunque haya varias
+            // solicitudes libres en curso.
+            var existente = await _db.FirmaPacienteRequests
+                .FirstOrDefaultAsync(r => r.PacienteId == pacienteId
+                                          && r.NotaMedicaId == null
+                                          && r.ContactoEmergenciaId == d.ContactoEmergenciaId
+                                          && r.Status == FirmaRequestStatus.Pendiente
+                                          && r.ExpiresAt > ahora, ct);
+            if (existente is not null)
+            {
+                resultado.Add(Map(existente));
+                continue;
+            }
+
+            var req = new FirmaPacienteRequest
+            {
+                TenantId = tenantId,
+                Token = NewToken(),
+                PacienteId = pacienteId,
+                NotaMedicaId = null,
+                ContactoEmergenciaId = d.ContactoEmergenciaId,
+                Telefono = digits,
+                NombreContacto = d.NombreContacto,
+                SolicitadaPorTenantUserId = actorTenantUserId == Guid.Empty ? null : actorTenantUserId,
+                CreatedAt = ahora,
+                ExpiresAt = ahora + _vigencia,
+                Status = FirmaRequestStatus.Pendiente
+            };
+            _db.FirmaPacienteRequests.Add(req);
+            resultado.Add(Map(req));
+        }
+
+        if (resultado.Count > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        return resultado;
+    }
 }

@@ -314,6 +314,12 @@ else
                             }
                         }
                         FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+                        for (int i = 1; i <= 4; i++)
+                        {
+                            var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
+                            if (aUrl is null && aNombre is null && aParent is null) { break; }
+                            FirmasPrefillHelper.AplicarAcompanante(valores, i, aUrl, aNombre, aParent, rutas);
+                        }
                     }
                     catch { /* firmas opcionales */ }
 

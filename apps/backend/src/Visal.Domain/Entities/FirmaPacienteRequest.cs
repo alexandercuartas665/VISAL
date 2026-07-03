@@ -23,6 +23,13 @@ public class FirmaPacienteRequest : TenantEntity
     /// NotaMedica.FirmaPacienteDataUrl.</summary>
     public Guid? NotaMedicaId { get; set; }
 
+    /// <summary>Contacto de emergencia (pariente/acompañante) que firma. NULL cuando
+    /// firma el paciente mismo. Cuando esta seteado, la firma capturada se guarda en
+    /// PacienteContactoEmergencia.FirmaUrl del contacto correspondiente (ademas de
+    /// quedar en ImageDataUrl como historial). Permite recolectar N firmas por
+    /// consentimiento (una del paciente + una por cada acompañante seleccionado).</summary>
+    public Guid? ContactoEmergenciaId { get; set; }
+
     /// <summary>Telefono al que se envio la solicitud (solo digitos). Lo guardamos para auditoria
     /// porque el paciente podria cambiar de numero entre la solicitud y la firma.</summary>
     public string Telefono { get; set; } = null!;

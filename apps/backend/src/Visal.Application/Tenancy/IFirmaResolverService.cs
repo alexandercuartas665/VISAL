@@ -31,4 +31,10 @@ public interface IFirmaResolverService
     /// join completo: TenantUser by (platform_user_id, tenant_id) ->
     /// ProfesionalId -> Profesional.FirmaUrl.</summary>
     Task<string?> ResolverFirmaProfesionalPorPlatformUserAsync(Guid platformUserId, Guid tenantId, CancellationToken ct = default);
+
+    /// <summary>Resuelve el contacto de emergencia N-esimo del paciente (1-indexado,
+    /// ordenado por Orden luego Nombre). Devuelve firma, nombre y parentesco para
+    /// alimentar el prefill firmaAcompananteN. Devuelve todos null si N es mayor
+    /// que la cantidad de contactos registrados.</summary>
+    Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default);
 }

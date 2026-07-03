@@ -95,4 +95,14 @@ public interface IPacienteService
     /// <summary>Actualiza solo el telefono del paciente (rapido desde el chat WhatsApp).
     /// Devuelve null si el paciente no existe, o el telefono ya normalizado a digitos.</summary>
     Task<string?> UpdateTelefonoAsync(Guid pacienteId, string telefono, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Lista los contactos de emergencia de un paciente, ordenados. Sirve
+    /// para el modal "Solicitar firmas" del WhatsAppChatPanel sin tener que traer
+    /// el PacienteDetailDto completo.</summary>
+    Task<IReadOnlyList<PacienteContactoEmergenciaDto>> ListContactosEmergenciaAsync(Guid pacienteId, CancellationToken ct = default);
+
+    /// <summary>Agrega un contacto de emergencia al paciente (o actualiza si viene
+    /// con Id). Devuelve el DTO persistido con Id asignado. Usado desde el modal
+    /// "Solicitar firmas" cuando el operador crea un pariente nuevo sobre la marcha.</summary>
+    Task<PacienteContactoEmergenciaDto?> UpsertContactoEmergenciaAsync(Guid pacienteId, PacienteContactoEmergenciaDto contacto, Guid actor, CancellationToken ct = default);
 }

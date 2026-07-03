@@ -337,6 +337,13 @@ else
                             }
                         }
                         FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+                        // Acompanantes 1..4 desde los contactos de emergencia del paciente.
+                        for (int i = 1; i <= 4; i++)
+                        {
+                            var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(PacienteId!.Value, i);
+                            if (aUrl is null && aNombre is null && aParent is null) { break; }
+                            FirmasPrefillHelper.AplicarAcompanante(valores, i, aUrl, aNombre, aParent, rutas);
+                        }
                     }
                     catch { /* firmas opcionales: el documento se abre vacio en esos campos */ }
 

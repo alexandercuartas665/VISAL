@@ -846,7 +846,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.RegistroMedico).HasMaxLength(60);
             b.Property(x => x.Ciudad).HasMaxLength(120);
             b.Property(x => x.Celular).HasMaxLength(40);
-            b.Property(x => x.FirmaUrl).HasMaxLength(500);
+            b.Property(x => x.FirmaUrl).HasColumnType("text");
             b.HasOne(x => x.TipoProfesional).WithMany().HasForeignKey(x => x.TipoProfesionalId).OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.NumeroDocumento }).IsUnique();
         });

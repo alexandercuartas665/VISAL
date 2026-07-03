@@ -40,7 +40,7 @@ else
 {
     <div class="mp-tabs">
         <button class="mp-tab @(_tab == "datos" ? "active" : "")" @onclick='() => _tab = "datos"'>Datos personales</button>
-        <button class="mp-tab @(_tab == "firma" ? "active" : "")" @onclick='() => _tab = "firma"' disabled="@(_perfil.Profesional is null)">Firma profesional</button>
+        <button class="mp-tab @(_tab == "firma" ? "active" : "")" @onclick='() => { _tab = "firma"; _canvasInitPending = true; }' disabled="@(_perfil.Profesional is null)">Firma profesional</button>
         <button class="mp-tab @(_tab == "prof" ? "active" : "")" @onclick='() => _tab = "prof"' disabled="@(_perfil.Profesional is null)">Datos profesional</button>
         <button class="mp-tab @(_tab == "clave" ? "active" : "")" @onclick='() => _tab = "clave"'>Cambiar clave</button>
     </div>
@@ -129,13 +129,21 @@ else
             {
                 <div style="margin-top:8px;">
                     <canvas id="mp-firma-canvas" style="width:100%; max-width:500px; height:170px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; touch-action:none;"></canvas>
-                    <div style="display:flex; gap:8px; margin-top:8px;">
+                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
                         <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarCanvasFirmaAsync" type="button">&#129529; Limpiar</button>
                         <button class="btn btn-primary btn-sm" @onclick="GuardarFirmaAsync" disabled="@_busy" type="button">&#128190; Guardar firma</button>
                         @if (!string.IsNullOrEmpty(_firmaActualUrl))
                         {
-                            <button class="btn btn-link btn-sm" @onclick="() => _firmaCanvasAbierto = false" type="button">Cancelar</button>
+                            <button class="btn btn-link btn-sm" @onclick="CerrarCanvasFirma" type="button">Cancelar</button>
                         }
+                    </div>
+
+                    @* Alternativa: subir archivo PNG/JPG con la firma escaneada. *@
+                    <div style="margin-top:14px; padding-top:12px; border-top:1px dashed #cbd5e1;">
+                        <div style="font-size:12px; color:#475569; margin-bottom:4px;">
+                            &#128206; O sube una imagen escaneada / foto de tu firma (PNG, JPG - max 2 MB):
+                        </div>
+                        <InputFile OnChange="OnFirmaFileSelected" accept="image/png,image/jpeg" class="form-control form-control-sm" style="max-width:400px;" />
                     </div>
                 </div>
             }
@@ -308,9 +316,50 @@ else
         _canvasInitPending = true;
     }
 
+    private void CerrarCanvasFirma()
+    {
+        _firmaCanvasAbierto = false;
+    }
+
     private async Task LimpiarCanvasFirmaAsync()
     {
         try { await JS.InvokeVoidAsync("visalFirma.clear", "mp-firma-canvas"); } catch { }
+    }
+
+    /// <summary>Sube una imagen PNG/JPG con la firma escaneada o fotografiada
+    /// y la guarda como firma del profesional. Uso: escritorios donde no es
+    /// comodo dibujar la firma con el mouse, o si el profesional ya tiene la
+    /// firma digitalizada.</summary>
+    private async Task OnFirmaFileSelected(InputFileChangeEventArgs e)
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            const long max = 2 * 1024 * 1024;
+            var file = e.File;
+            if (file.Size == 0) { _error = "Archivo vacio."; return; }
+            if (file.Size > max) { _error = "Archivo mayor a 2 MB."; return; }
+            var mime = string.IsNullOrWhiteSpace(file.ContentType) ? "image/png" : file.ContentType.ToLowerInvariant();
+            if (mime != "image/png" && mime != "image/jpeg" && mime != "image/jpg")
+            {
+                _error = "Formato no soportado. Usa PNG o JPG.";
+                return;
+            }
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(max).CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            // Guardamos como data URL igual que el canvas para que el mismo
+            // servicio de perfil lo persista sin diferenciar el origen.
+            var dataUrl = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+            var uid = await UsuarioIdAsync();
+            var ok = await PerfilSvc.ActualizarFirmaProfesionalAsync(uid, dataUrl);
+            if (!ok) { _error = "No pudimos guardar la firma."; return; }
+            _firmaActualUrl = dataUrl;
+            _firmaCanvasAbierto = false;
+            _ok = "Firma actualizada desde archivo.";
+        }
+        catch (Exception ex) { _error = "Error subiendo la firma: " + ex.Message; }
+        finally { _busy = false; }
     }
 
     private async Task GuardarFirmaAsync()
@@ -352,7 +401,13 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_canvasInitPending)
+        // Inicializa el canvas cada vez que este visible: al pulsar "Cambiar firma"
+        // o al entrar directamente al tab firma cuando aun no hay firma cargada
+        // (en ese caso el canvas aparece de una y antes no lo estabamos inicializando).
+        var canvasVisible = _tab == "firma"
+                             && _perfil.Profesional is not null
+                             && (_firmaCanvasAbierto || string.IsNullOrEmpty(_firmaActualUrl));
+        if (canvasVisible && (_canvasInitPending || firstRender))
         {
             _canvasInitPending = false;
             try { await JS.InvokeVoidAsync("visalFirma.init", "mp-firma-canvas"); } catch { }

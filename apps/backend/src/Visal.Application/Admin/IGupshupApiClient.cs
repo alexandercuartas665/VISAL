@@ -80,20 +80,25 @@ public interface IGupshupApiClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lista las plantillas HSM del WABA asociado a la App. Usa User API
-    /// (header apikey). Devuelve estados actuales (APPROVED/PENDING/etc)
-    /// tal como Meta los tiene.
+    /// Lista las plantillas HSM del WABA asociado a la App. Endpoints
+    /// segun credencial:
+    /// - Si <paramref name="partnerToken"/> tiene valor: Partner API
+    ///   (partner.gupshup.io/partner/app/{appId}/templates). Es lo unico
+    ///   que Gupshup soporta hoy con seguridad para listar HSM.
+    /// - Si NO hay partner token: intenta User API con apikey; algunos
+    ///   endpoints antiguos aun responden pero Gupshup marco el nuevo
+    ///   como Partner-only y devuelve 401. Retorna error claro.
     /// </summary>
-    /// <param name="apiKey">apikey de la App.</param>
-    /// <param name="appName">Nombre de la App tal como esta en Gupshup dashboard.</param>
     Task<GupshupTemplateListResult> ListTemplatesAsync(
-        string apiKey, string appName, CancellationToken cancellationToken = default);
+        string apiKey, string appName, Guid appId, string? partnerToken,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Crea una plantilla HSM. El body inicial se manda en PENDING y Meta la
-    /// revisa (~1-24h). No hay forma de forzar aprobacion desde aca.
+    /// revisa (~1-24h). Requiere Partner Token: apikey no basta.
     /// </summary>
     Task<GupshupCreateTemplateResult> CreateTemplateAsync(
-        string apiKey, string appName, GupshupCreateTemplateRequest request,
+        string apiKey, string appName, Guid appId, string? partnerToken,
+        GupshupCreateTemplateRequest request,
         CancellationToken cancellationToken = default);
 }

@@ -38,7 +38,9 @@ internal sealed class HsmTemplateService : IHsmTemplateService
     {
         var creds = await ResolveAsync(lineId, ct);
         if (creds is null) { return NotConfigured(); }
-        var r = await _client.ListTemplatesAsync(creds.Value.ApiKey, creds.Value.AppName, ct);
+        var r = await _client.ListTemplatesAsync(
+            creds.Value.ApiKey, creds.Value.AppName, creds.Value.GupshupAppId,
+            creds.Value.PartnerToken, ct);
         return new HsmTemplateListResult(r.Ok, r.Error, r.Templates);
     }
 
@@ -50,7 +52,9 @@ internal sealed class HsmTemplateService : IHsmTemplateService
             req.ElementName, req.LanguageCode, req.Category,
             req.TemplateType, req.Content, req.Example,
             req.ExampleHeader, req.Header, req.Footer, req.Buttons);
-        var r = await _client.CreateTemplateAsync(creds.Value.ApiKey, creds.Value.AppName, payload, ct);
+        var r = await _client.CreateTemplateAsync(
+            creds.Value.ApiKey, creds.Value.AppName, creds.Value.GupshupAppId,
+            creds.Value.PartnerToken, payload, ct);
         _audit.Write(actorUserId, "gupshup.template.create", "TenantGupshupConfig", creds.Value.ConfigId,
             previousValue: null,
             newValue: new { req.ElementName, req.LanguageCode, req.Category, ok = r.Ok, id = r.Id },
@@ -76,7 +80,7 @@ internal sealed class HsmTemplateService : IHsmTemplateService
     /// <summary>Devuelve credenciales listas para invocar Gupshup o null si
     /// falta configuracion. Todas las lecturas ignoran query filters porque
     /// algunas llamadas vienen sin tenant scope activo (webhook, jobs).</summary>
-    private async Task<(Guid TenantId, Guid ConfigId, string AppName, string ApiKey, string Source)?> ResolveAsync(Guid lineId, CancellationToken ct)
+    private async Task<(Guid TenantId, Guid ConfigId, string AppName, Guid GupshupAppId, string ApiKey, string? PartnerToken, string Source)?> ResolveAsync(Guid lineId, CancellationToken ct)
     {
         var line = await _db.WhatsAppLines
             .IgnoreQueryFilters()
@@ -87,8 +91,15 @@ internal sealed class HsmTemplateService : IHsmTemplateService
             .FirstOrDefaultAsync(c => c.Id == appPk, ct);
         if (cfg is null || !cfg.IsActive || string.IsNullOrWhiteSpace(cfg.PhoneNumber)) { return null; }
         var apikey = _secretProtector.Unprotect(cfg.ApiKeyEncrypted);
+        string? partnerToken = null;
+        if (!string.IsNullOrWhiteSpace(cfg.PartnerTokenEncrypted))
+        {
+            try { partnerToken = _secretProtector.Unprotect(cfg.PartnerTokenEncrypted!); }
+            catch { /* si esta corrupto queda null y la UI pide re-ingresar */ }
+        }
         var source = new string(cfg.PhoneNumber!.Where(char.IsDigit).ToArray());
-        return (line.TenantId, cfg.Id, cfg.AppName, apikey, source);
+        // cfg.AppId es el GUID que Gupshup asigna a la App (no el pk de nuestra fila).
+        return (line.TenantId, cfg.Id, cfg.AppName, cfg.AppId, apikey, partnerToken, source);
     }
 
     private static HsmTemplateListResult NotConfigured() =>

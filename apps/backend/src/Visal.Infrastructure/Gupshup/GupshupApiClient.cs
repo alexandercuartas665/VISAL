@@ -90,13 +90,22 @@ public sealed class GupshupApiClient : IGupshupApiClient
     }
 
     public async Task<GupshupTemplateListResult> ListTemplatesAsync(
-        string apiKey, string appName, CancellationToken cancellationToken = default)
+        string apiKey, string appName, Guid appId, string? partnerToken,
+        CancellationToken cancellationToken = default)
     {
-        // GET /wa/app/{appName}/template -- User API. Devuelve {status, templates:[{...}]}.
+        if (string.IsNullOrWhiteSpace(partnerToken))
+        {
+            return new GupshupTemplateListResult(false,
+                "Falta Partner Token de Gupshup. La apikey de la App solo sirve para enviar; para listar/crear plantillas HSM necesitas el Partner Token (Dashboard Gupshup > Partner Portal). Cargalo en 'Editar App'.",
+                Array.Empty<GupshupTemplateInfo>());
+        }
+        // Partner API: GET partner.gupshup.io/partner/app/{appId}/templates
+        // Header Authorization: <token> (sin "Bearer ", asi lo pide Gupshup).
+        var url = $"https://partner.gupshup.io/partner/app/{appId:D}/templates";
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + $"/wa/app/{Uri.EscapeDataString(appName)}/template");
-            request.Headers.TryAddWithoutValidation("apikey", apiKey);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("Authorization", partnerToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(Timeout);
@@ -116,11 +125,19 @@ public sealed class GupshupApiClient : IGupshupApiClient
     }
 
     public async Task<GupshupCreateTemplateResult> CreateTemplateAsync(
-        string apiKey, string appName, GupshupCreateTemplateRequest req,
+        string apiKey, string appName, Guid appId, string? partnerToken,
+        GupshupCreateTemplateRequest req,
         CancellationToken cancellationToken = default)
     {
-        // POST /wa/app/{appName}/template -- form data. Gupshup responde
-        // {status:"success", template:{id, status, ...}} en el happy path.
+        if (string.IsNullOrWhiteSpace(partnerToken))
+        {
+            return new GupshupCreateTemplateResult(false,
+                "Falta Partner Token de Gupshup. Cargalo en 'Editar App' para poder crear plantillas HSM.",
+                null, null);
+        }
+        // Partner API: POST partner.gupshup.io/partner/app/{appId}/templates
+        // form-urlencoded como el user endpoint.
+        var url = $"https://partner.gupshup.io/partner/app/{appId:D}/templates";
         var form = new Dictionary<string, string>
         {
             ["elementName"] = req.ElementName,
@@ -139,11 +156,11 @@ public sealed class GupshupApiClient : IGupshupApiClient
         try
         {
             using var content = new FormUrlEncodedContent(form!);
-            using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + $"/wa/app/{Uri.EscapeDataString(appName)}/template")
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = content,
             };
-            request.Headers.TryAddWithoutValidation("apikey", apiKey);
+            request.Headers.TryAddWithoutValidation("Authorization", partnerToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(Timeout);

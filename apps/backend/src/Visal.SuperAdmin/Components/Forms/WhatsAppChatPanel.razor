@@ -475,7 +475,38 @@
         @if (_firmaError is not null) { <div class="wac-error">@_firmaError</div> }
         @if (_firmaMsg is not null) { <div class="wac-info">@_firmaMsg</div> }
 
+        @* ---- Seccion 4: links generados (aparece solo despues de enviar/generar) ---- *@
+        @if (_firmaLinksGenerados.Count > 0)
+        {
+            <div class="wac-fmodal-sec">
+                <div class="wac-fmodal-sec-h">
+                    <strong>Links generados</strong>
+                    <span class="wac-fmodal-hint">Copialos si necesitas enviarlos manualmente</span>
+                </div>
+                <div class="wac-fmodal-links">
+                    @foreach (var item in _firmaLinksGenerados)
+                    {
+                        var copiado = _firmaLinkCopiado == item.Dto.Id;
+                        <div class="wac-fmodal-link">
+                            <div class="wac-fmodal-link-info">
+                                <div class="wac-fmodal-link-etiq">@item.Nombre</div>
+                                <div class="wac-fmodal-link-url">@item.Url</div>
+                            </div>
+                            <button class="btn @(copiado ? "btn-success" : "btn-outline-primary") btn-sm wac-fmodal-link-btn"
+                                    @onclick="() => CopiarLinkAsync(item.Dto, item.Url)" type="button">
+                                @if (copiado) { <text>&#10003; Copiado</text> } else { <text>&#128203; Copiar</text> }
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
         <div class="wac-modal-actions wac-fmodal-actions">
+            <button class="btn btn-outline-primary" @onclick="GenerarLinksSinEnviarAsync" disabled="@(_firmaBusy || _firmaDestSel.Count == 0)" type="button"
+                    title="Solo crea los links, no envia por WhatsApp. Copialos manualmente.">
+                @if (_firmaBusy) { <text>Generando...</text> } else { <text>&#128279; Solo generar links</text> }
+            </button>
             <button class="btn btn-primary" @onclick="EnviarSolicitudesFirmaAsync" disabled="@(_firmaBusy || _firmaDestSel.Count == 0)" type="button">
                 @if (_firmaBusy)
                 {
@@ -676,6 +707,14 @@
     .wac-fmodal-add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .wac-fmodal-actions { justify-content: flex-end; padding-top: 12px; border-top: 1px solid #e2e8f0; margin-top: 10px; }
     .wac-info { font-size: 12px; color: #059669; background: #d1fae5; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
+
+    /* Lista de links generados: cada fila con etiqueta + URL truncada + boton copiar. */
+    .wac-fmodal-links { display: flex; flex-direction: column; gap: 6px; }
+    .wac-fmodal-link { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .wac-fmodal-link-info { flex: 1; min-width: 0; }
+    .wac-fmodal-link-etiq { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: #0f766e; text-transform: uppercase; }
+    .wac-fmodal-link-url { font-size: 11.5px; color: #475569; font-family: ui-monospace, "Cascadia Code", monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+    .wac-fmodal-link-btn { flex-shrink: 0; min-width: 90px; }
     .wac-field { margin-bottom: 12px; }
     .wac-field label { display: block; font-size: 11px; font-weight: 700; color: #475569; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
     .wac-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -789,6 +828,13 @@
     private string _firmaAddCodigoPais = "+57";
     private string? _firmaAddTelefono;
     private string? _firmaAddError;
+
+    /// <summary>Solicitudes generadas en la ultima operacion (envio por WhatsApp o
+    /// "Solo generar links"). Cada entrada tiene el DTO + la URL absoluta lista
+    /// para copiar. Se pinta bajo los destinatarios cuando el usuario necesita
+    /// enviar los links manualmente (linea caida, reenvio, etc).</summary>
+    private List<(FirmaRequestDto Dto, string Url, string Nombre)> _firmaLinksGenerados = new();
+    private Guid? _firmaLinkCopiado;
 
     /// <summary>Lista corta de paises (Latam + comunes) con codigo internacional.</summary>
     private static readonly (string Codigo, string Nombre, string Bandera)[] PaisesCodigos = new[]
@@ -1263,6 +1309,8 @@
         _telError = null;
         _firmaError = null;
         _firmaMsg = null;
+        _firmaLinksGenerados = new();
+        _firmaLinkCopiado = null;
         _firmaAddOpen = false;
         _firmaAddNombre = _firmaAddParentesco = _firmaAddTelefono = null;
         _firmaAddCodigoPais = "+57";
@@ -1350,25 +1398,18 @@
         finally { _firmaBusy = false; }
     }
 
-    /// <summary>Envia por WhatsApp una solicitud de firma a cada destinatario
-    /// seleccionado. El paciente y cada pariente reciben su propio token/URL;
-    /// las firmas se persistiran cada una en su lugar (paciente o FirmaUrl del
-    /// contacto correspondiente) cuando abran el link en el celular.</summary>
-    private async Task EnviarSolicitudesFirmaAsync()
+    /// <summary>Arma la lista de destinatarios a partir del estado del modal.
+    /// Retorna null + setea _firmaError si algo esta invalido.</summary>
+    private List<FirmaDestinatarioSpec>? ArmarDestinatariosOSetearError()
     {
-        _firmaError = null; _firmaMsg = null;
-        if (PacienteId is not Guid pid) { _firmaError = "Sin paciente."; return; }
-        if (_firmaDestSel.Count == 0) { _firmaError = "Selecciona al menos un destinatario."; return; }
-        if (!Guid.TryParse(_lineaSelIdStr, out var lineId)) { _firmaError = "Selecciona una linea WhatsApp."; return; }
-
-        // Armar lista de destinatarios (paciente + parientes seleccionados con telefono valido).
+        if (_firmaDestSel.Count == 0) { _firmaError = "Selecciona al menos un destinatario."; return null; }
         var destinatarios = new List<FirmaDestinatarioSpec>(_firmaDestSel.Count);
         if (_firmaDestSel.Contains(Guid.Empty))
         {
             if (string.IsNullOrWhiteSpace(_telefonoDigits))
             {
                 _firmaError = "El paciente no tiene telefono valido. Actualizalo arriba.";
-                return;
+                return null;
             }
             destinatarios.Add(new FirmaDestinatarioSpec(null, _telefonoDigits!, NombreContacto));
         }
@@ -1381,7 +1422,37 @@
             if (digits.Length < 6) { continue; }
             destinatarios.Add(new FirmaDestinatarioSpec(cid, digits, c.Nombre));
         }
-        if (destinatarios.Count == 0) { _firmaError = "Ningun destinatario con telefono valido."; return; }
+        if (destinatarios.Count == 0) { _firmaError = "Ningun destinatario con telefono valido."; return null; }
+        return destinatarios;
+    }
+
+    /// <summary>Etiqueta legible del destinatario para la lista de links generados
+    /// ("PACIENTE - MARIA CAMILA" o "MADRE - MARIA DEL PILAR ROJAS").</summary>
+    private string EtiquetaDestinatario(FirmaRequestDto dto)
+    {
+        if (dto.ContactoEmergenciaId is null)
+        {
+            return $"PACIENTE - {(NombreContacto ?? "Paciente")}";
+        }
+        var c = _firmaParientes.FirstOrDefault(p => p.Id == dto.ContactoEmergenciaId);
+        if (c is null) { return dto.NombreContacto ?? "Acompanante"; }
+        var rol = string.IsNullOrWhiteSpace(c.Parentesco) ? "ACOMPANANTE" : c.Parentesco!.ToUpperInvariant();
+        return $"{rol} - {c.Nombre}";
+    }
+
+    /// <summary>Envia por WhatsApp una solicitud de firma a cada destinatario
+    /// seleccionado. El paciente y cada pariente reciben su propio token/URL;
+    /// las firmas se persistiran cada una en su lugar (paciente o FirmaUrl del
+    /// contacto correspondiente) cuando abran el link en el celular.
+    /// Ademas pobla _firmaLinksGenerados para que el operador pueda copiar los
+    /// links manualmente aunque el envio por WhatsApp haya fallado o no exista linea.</summary>
+    private async Task EnviarSolicitudesFirmaAsync()
+    {
+        _firmaError = null; _firmaMsg = null;
+        if (PacienteId is not Guid pid) { _firmaError = "Sin paciente."; return; }
+        if (!Guid.TryParse(_lineaSelIdStr, out var lineId)) { _firmaError = "Selecciona una linea WhatsApp o usa 'Solo generar links'."; return; }
+        var destinatarios = ArmarDestinatariosOSetearError();
+        if (destinatarios is null) { return; }
 
         _firmaBusy = true;
         try
@@ -1390,6 +1461,12 @@
             if (solicitudes.Count == 0) { _firmaError = "No se pudo crear la solicitud."; return; }
 
             var baseUri = Nav.BaseUri.TrimEnd('/');
+            // Siempre publicamos los links generados (con o sin envio ok) — el
+            // operador puede querer copiar manualmente aunque tambien mandemos por WA.
+            _firmaLinksGenerados = solicitudes
+                .Select(s => (s, $"{baseUri}{s.PublicPath}", EtiquetaDestinatario(s)))
+                .ToList();
+
             int ok = 0, fail = 0;
             var erroresDet = new List<string>();
             foreach (var s in solicitudes)
@@ -1399,21 +1476,69 @@
             }
             if (ok > 0 && fail == 0)
             {
-                _firmaMsg = $"Enviadas {ok} solicitud(es) de firma.";
-                // Mantenemos la solicitud del paciente como "activa" para el badge del boton.
+                _firmaMsg = $"Enviadas {ok} solicitud(es) de firma por WhatsApp.";
                 _firmaSolicitudActiva = solicitudes.FirstOrDefault(s => s.ContactoEmergenciaId is null) ?? solicitudes[0];
             }
             else if (ok > 0)
             {
-                _firmaMsg = $"Enviadas {ok}; fallaron {fail}: {string.Join("; ", erroresDet)}";
+                _firmaMsg = $"Enviadas {ok}; fallaron {fail}: {string.Join("; ", erroresDet)}. Puedes copiar los links abajo.";
             }
             else
             {
-                _firmaError = $"Todas fallaron: {string.Join("; ", erroresDet)}";
+                _firmaError = $"WhatsApp fallo en todas ({string.Join("; ", erroresDet)}). Los links igual quedaron creados — copialos abajo.";
             }
         }
         catch (Exception ex) { _firmaError = ex.Message; }
         finally { _firmaBusy = false; }
+    }
+
+    /// <summary>Solo crea las solicitudes (tokens) sin enviar WhatsApp. El operador
+    /// copia los links y los envia por su cuenta (email, SMS, WhatsApp Web, etc).
+    /// Util cuando la linea no esta conectada o el envio automatico esta caido.</summary>
+    private async Task GenerarLinksSinEnviarAsync()
+    {
+        _firmaError = null; _firmaMsg = null;
+        if (PacienteId is not Guid pid) { _firmaError = "Sin paciente."; return; }
+        var destinatarios = ArmarDestinatariosOSetearError();
+        if (destinatarios is null) { return; }
+
+        _firmaBusy = true;
+        try
+        {
+            var solicitudes = await FirmaSvc.CrearMultipleParaPacienteAsync(pid, destinatarios, Guid.Empty);
+            if (solicitudes.Count == 0) { _firmaError = "No se pudo crear la solicitud."; return; }
+            var baseUri = Nav.BaseUri.TrimEnd('/');
+            _firmaLinksGenerados = solicitudes
+                .Select(s => (s, $"{baseUri}{s.PublicPath}", EtiquetaDestinatario(s)))
+                .ToList();
+            _firmaMsg = $"Generados {_firmaLinksGenerados.Count} link(s). Copialos y envialos manualmente.";
+            _firmaSolicitudActiva = solicitudes.FirstOrDefault(s => s.ContactoEmergenciaId is null) ?? solicitudes[0];
+        }
+        catch (Exception ex) { _firmaError = ex.Message; }
+        finally { _firmaBusy = false; }
+    }
+
+    /// <summary>Copia una URL al portapapeles con la API navigator.clipboard.
+    /// Marca visualmente el link copiado. Usa un helper JS asincrono para no
+    /// bloquear el circuito Blazor (evita TaskCanceledException al re-render).</summary>
+    private async Task CopiarLinkAsync(FirmaRequestDto dto, string url)
+    {
+        _firmaError = null;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", url);
+            _firmaLinkCopiado = dto.Id;
+        }
+        catch (TaskCanceledException)
+        {
+            // El navegador aborto la promesa por re-render. El writeText real
+            // ya se ejecuto en el DOM (el clipboard es sincrono para el navegador).
+            _firmaLinkCopiado = dto.Id;
+        }
+        catch (Exception ex)
+        {
+            _firmaError = "No se pudo copiar: " + ex.Message;
+        }
     }
 
     private void OnTelDialogClosed()

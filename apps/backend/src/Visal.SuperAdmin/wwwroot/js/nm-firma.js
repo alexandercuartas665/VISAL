@@ -39,10 +39,16 @@
         init: function (canvasId) {
             const canvas = document.getElementById(canvasId);
             if (!canvas) { return false; }
-            // Si ya estaba inicializado, no duplicar listeners.
-            if (pads.has(canvasId)) { return true; }
+            // OJO: Blazor puede destruir y recrear el <canvas> con el mismo id
+            // cuando el usuario alterna "Cambiar firma". Si nos quedamos con el
+            // pad viejo, los listeners apuntan a un nodo que ya no esta en el
+            // DOM y el nuevo canvas no responde al mouse/touch. Si es el mismo
+            // nodo, no re-cablear (evita listeners duplicados).
+            const prev = pads.get(canvasId);
+            if (prev && prev.canvas === canvas) { return true; }
+            if (prev) { pads.delete(canvasId); }
             const ctx = setup(canvas);
-            const state = { ctx, drawing: false, last: null };
+            const state = { canvas, ctx, drawing: false, last: null };
             pads.set(canvasId, state);
 
             const onStart = (ev) => {

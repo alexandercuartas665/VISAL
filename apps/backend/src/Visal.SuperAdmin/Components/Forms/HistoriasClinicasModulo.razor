@@ -565,22 +565,23 @@
    Modal RIPS: aparece al pulsar "Iniciar historia medica". Captura los 3 datos
    obligatorios de la Res. 202/2021 de MinSalud (via + finalidad + causa externa)
    antes de crear la HC. Sin estos tres campos la HC no se persiste.
+   z-index alto (1200/1201) para quedar por encima del modal padre de HC.
    ============================================================================= *@
 @if (_showRipsModal)
 {
-    <div class="ase-modal-backdrop" @onclick="CerrarModalRips"></div>
-    <div class="ase-modal rips-modal" @onclick:stopPropagation="true">
-        <div class="ase-modal-h">
-            <span>Datos RIPS obligatorios</span>
-            <button class="ase-modal-x" @onclick="CerrarModalRips" title="Cerrar">&times;</button>
+    <div class="rips-backdrop" @onclick="CerrarModalRips"></div>
+    <div class="rips-modal">
+        <div class="rips-modal-h">
+            <h3>&#128203; Datos RIPS obligatorios</h3>
+            <button class="rips-modal-close" @onclick="CerrarModalRips" title="Cerrar">&times;</button>
         </div>
-        <div class="ase-modal-b">
+        <div class="rips-modal-body">
             <div class="rips-intro">
                 Selecciona los tres datos obligatorios de la Resolucion 202/2021 de MinSalud.
                 Estos datos quedan atados a la Historia Clinica y no pueden cambiar despues.
             </div>
 
-            @if (_ripsError is not null) { <div class="ase-alert">@_ripsError</div> }
+            @if (_ripsError is not null) { <div class="ase-alert" style="margin-bottom:12px;">@_ripsError</div> }
 
             <div class="rips-row">
                 <label class="rips-lbl">Via de ingreso al servicio de salud <span class="rips-req">*</span></label>
@@ -615,7 +616,7 @@
                 </select>
             </div>
         </div>
-        <div class="ase-modal-f">
+        <div class="rips-modal-f">
             <button class="btn btn-outline-secondary" @onclick="CerrarModalRips">Cancelar</button>
             <button class="btn btn-primary" @onclick="ConfirmarRipsYCrearAsync">
                 &#128221; Iniciar historia
@@ -762,8 +763,16 @@
     .hc-rips-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; border-radius: 999px; font-size: 11.5px; font-weight: 500; }
     .hc-rips-tag-lbl { color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
 
-    /* Modal RIPS. Reutiliza estilos .ase-modal* si existen; caemos con reglas propias por si no. */
-    .rips-modal { width: 560px; max-width: 95vw; }
+    /* Modal RIPS. Estilos propios porque debe quedar por encima del modal padre de HC
+       (el modal de Atencion usa z-index ~1050). Backdrop 1200, modal 1201. */
+    .rips-backdrop { position: fixed !important; inset: 0 !important; background: rgba(15,23,42,.55) !important; z-index: 1200 !important; }
+    .rips-modal { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%,-50%) !important; width: 560px !important; max-width: 95vw !important; max-height: 90vh !important; background: #fff !important; border-radius: 12px !important; box-shadow: 0 24px 60px rgba(15,23,42,.35) !important; z-index: 1201 !important; display: flex !important; flex-direction: column !important; overflow: hidden !important; }
+    .rips-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; background: #fafbff; }
+    .rips-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .rips-modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #64748b; line-height: 1; padding: 0 4px; }
+    .rips-modal-close:hover { color: #0f172a; }
+    .rips-modal-body { padding: 18px; overflow-y: auto; }
+    .rips-modal-f { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid #e2e8f0; background: #f8fafc; }
     .rips-intro { font-size: 12.5px; color: #475569; margin-bottom: 14px; padding: 10px 12px; background: #f8fafc; border-left: 3px solid #1565c0; border-radius: 4px; }
     .rips-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
     .rips-lbl { font-size: 12px; font-weight: 600; color: #334155; }

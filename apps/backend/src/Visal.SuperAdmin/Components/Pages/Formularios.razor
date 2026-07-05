@@ -386,6 +386,45 @@
                                         </div>
                                     </div>
                                 }
+                                @* ---- Cascading select: opciones dependen de otra columna ---- *@
+                                @if (col.FieldType == "select" && triggerCandidates.Count > 0)
+                                {
+                                    col.OptionsMap ??= new Dictionary<string, List<string>>();
+                                    <div class="fb-col-cond">
+                                        <small>Opciones dependen de otra columna (cascading select)</small>
+                                        <select class="fb-input" @bind="col.OptionsMapKey">
+                                            <option value="">(usa Opciones fijas de arriba)</option>
+                                            @foreach (var t in triggerCandidates)
+                                            {
+                                                <option value="@t.Name">@t.Label</option>
+                                            }
+                                        </select>
+                                        @if (!string.IsNullOrEmpty(col.OptionsMapKey))
+                                        {
+                                            <div class="fb-hint">
+                                                Para cada valor posible de <b>@col.OptionsMapKey</b> define las
+                                                opciones que apareceran en <b>@col.Label</b>. Una opcion por linea.
+                                                Si la celda hermana no matchea, la celda muestra un placeholder.
+                                            </div>
+                                            @foreach (var k in col.OptionsMap.Keys.ToList())
+                                            {
+                                                var kLocal = k;
+                                                var colLocal = col;
+                                                <div class="fb-col-row" style="align-items:flex-start;">
+                                                    <input class="fb-input" style="max-width:180px;" value="@kLocal"
+                                                           @onchange="@(e => RenameOptionsMapKey(colLocal, kLocal, e.Value?.ToString()))" />
+                                                    <textarea class="fb-input" rows="3"
+                                                              placeholder="Opciones (una por linea)"
+                                                              value="@OptionsMapValueAsText(colLocal, kLocal)"
+                                                              @onchange="@(e => SetOptionsMapValueFromText(colLocal, kLocal, e.Value?.ToString()))"></textarea>
+                                                    <button class="fb-mini fb-mini-danger" title="Eliminar clave"
+                                                            @onclick="@(() => RemoveOptionsMapKey(colLocal, kLocal))">×</button>
+                                                </div>
+                                            }
+                                            <button class="fb-btn" @onclick="@(() => AddOptionsMapKey(col))">+ Agregar valor de @col.OptionsMapKey</button>
+                                        }
+                                    </div>
+                                }
                             </div>
                         }
                     }
@@ -1547,6 +1586,58 @@
     {
         if (string.IsNullOrWhiteSpace(text)) { col.Options = null; return; }
         col.Options = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    /// <summary>Lectura del textarea de opciones para una clave especifica del OptionsMap.</summary>
+    private static string OptionsMapValueAsText(FormColumn col, string key)
+    {
+        if (col.OptionsMap is null || !col.OptionsMap.TryGetValue(key, out var opts) || opts is null) { return ""; }
+        return string.Join("\n", opts);
+    }
+
+    /// <summary>Escritura del textarea del OptionsMap: parsea linea por linea.
+    /// Si queda vacio, guardamos lista vacia (la clave se conserva para no
+    /// perder la fila que el usuario esta editando).</summary>
+    private static void SetOptionsMapValueFromText(FormColumn col, string key, string? text)
+    {
+        col.OptionsMap ??= new Dictionary<string, List<string>>();
+        var list = string.IsNullOrWhiteSpace(text)
+            ? new List<string>()
+            : text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        col.OptionsMap[key] = list;
+    }
+
+    /// <summary>Renombra una clave del OptionsMap preservando su lista de opciones.
+    /// Si el nuevo nombre esta vacio o colisiona, no hace nada.</summary>
+    private void RenameOptionsMapKey(FormColumn col, string oldKey, string? newKey)
+    {
+        if (col.OptionsMap is null) { return; }
+        var trimmed = (newKey ?? "").Trim();
+        if (string.IsNullOrEmpty(trimmed) || string.Equals(trimmed, oldKey, StringComparison.OrdinalIgnoreCase)) { return; }
+        if (col.OptionsMap.ContainsKey(trimmed)) { return; }
+        if (!col.OptionsMap.TryGetValue(oldKey, out var opts)) { return; }
+        col.OptionsMap.Remove(oldKey);
+        col.OptionsMap[trimmed] = opts;
+        StateHasChanged();
+    }
+
+    /// <summary>Agrega una entrada nueva al OptionsMap con clave temporal
+    /// "valor_N" para que el usuario la renombre. Lista vacia inicial.</summary>
+    private void AddOptionsMapKey(FormColumn col)
+    {
+        col.OptionsMap ??= new Dictionary<string, List<string>>();
+        var idx = col.OptionsMap.Count + 1;
+        var name = $"valor_{idx}";
+        while (col.OptionsMap.ContainsKey(name)) { idx++; name = $"valor_{idx}"; }
+        col.OptionsMap[name] = new List<string>();
+        StateHasChanged();
+    }
+
+    /// <summary>Elimina una entrada del OptionsMap.</summary>
+    private void RemoveOptionsMapKey(FormColumn col, string key)
+    {
+        col.OptionsMap?.Remove(key);
+        StateHasChanged();
     }
 
     /// <summary>Estado de visibilidad del editor de opciones por fila seed.</summary>

@@ -960,15 +960,44 @@ else
         // El cleanup en el dict ya se hizo en OnTableCellChanged cuando se cambio el trigger;
         // este branch cubre el render inicial donde DefaultValuesHelper ya filtro.
         if (forceDisabled) { val = ""; }
-        // Si la celda seed trae opciones especificas, esas mandan; si no, las
-        // de la columna. Asi una tabla puede tener un "default" de columna y
-        // sobre-escribir por fila para casos como Examen Fisico (Atrofia con
-        // sus propias opciones, Pupilas con las suyas).
-        var opts = overrideOptions ?? c.Options;
+        // Prioridad al determinar opciones de la celda:
+        //  1) overrideOptions (SeedRowCellOptions por fila) — mas especifico.
+        //  2) cascading select: si la columna tiene OptionsMapKey, tomamos la
+        //     lista de OptionsMap segun el valor actual de la celda hermana
+        //     en la misma fila. Si la celda hermana esta vacia o la clave no
+        //     esta en el mapa, opts queda null y la celda muestra el placeholder
+        //     "Selecciona {OptionsMapKey} primero" (o el placeholder explicito
+        //     de la columna si esta seteado).
+        //  3) c.Options (opciones fijas de la columna) — comportamiento historico.
+        var opts = overrideOptions;
+        var cascadeEmpty = false;
+        if (opts is null && !string.IsNullOrEmpty(c.OptionsMapKey) && tableNode?.Columns is not null)
+        {
+            var mapCol = tableNode.Columns.FirstOrDefault(x =>
+                string.Equals(x.Name, c.OptionsMapKey, StringComparison.OrdinalIgnoreCase));
+            if (mapCol is not null)
+            {
+                var mapKey = GetValue($"tbl:{tableNode.Id}:{rowIdx}:{mapCol.Id}");
+                if (!string.IsNullOrWhiteSpace(mapKey) && c.OptionsMap is not null)
+                {
+                    var hit = c.OptionsMap.FirstOrDefault(kv =>
+                        string.Equals(kv.Key, mapKey.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (hit.Value is not null) { opts = hit.Value; }
+                }
+            }
+            if (opts is null) { cascadeEmpty = true; }
+        }
+        opts ??= c.Options;
         // Reglas: si la celda tiene opciones definidas, render como select aunque
         // el fieldType de la columna sea "text". Esto facilita configurar tablas
         // tipo Examen Fisico sin tener que cambiar el fieldType de la columna.
         var effectiveType = (opts is not null && opts.Count > 0 && c.FieldType == "text") ? "select" : c.FieldType;
+        // Cascade sin datos: si la clave hermana esta vacia o no matchea, forzamos
+        // que se comporte como select para que el placeholder guie al usuario.
+        if (cascadeEmpty && !string.IsNullOrEmpty(c.OptionsMapKey))
+        {
+            effectiveType = c.FieldType == "text" ? "select" : c.FieldType;
+        }
         // Render-time fallback: si la celda quedo sin valor (ni del doctor ni seed)
         // y es un select/autocomplete con opciones, mostramos la primera como default
         // visual. No aplica si la celda esta forzadamente deshabilitada (debe quedar vacia).
@@ -985,8 +1014,14 @@ else
         Func<string?, Task> setCell = v => OnTableCellChangedAsync(tableNode, rowIdx, c, key, v);
         // Placeholder explicito de la columna: si esta vacio NO mostramos hint
         // (antes caia a c.Catalog o "Elige o escribe" hardcodeado). El builder
-        // expone un input para escribirlo por columna.
+        // expone un input para escribirlo por columna. Excepcion: si es un
+        // cascade select sin datos (celda hermana vacia/no matchea), mostramos
+        // un hint dinamico "Selecciona {OptionsMapKey} primero" para guiar.
         var ph = c.Placeholder ?? "";
+        if (cascadeEmpty && string.IsNullOrEmpty(ph) && !string.IsNullOrEmpty(c.OptionsMapKey))
+        {
+            ph = $"Selecciona {c.OptionsMapKey} primero";
+        }
         switch (effectiveType)
         {
             case "number":
@@ -1108,22 +1143,51 @@ else
     /// <summary>SetValue para celdas de tabla con cascade: tras guardar el nuevo
     /// valor, si la columna actual es disparadora de otras columnas de la misma
     /// fila, recorre las dependientes y limpia las que dejaron de cumplir su
-    /// condicion. Asi el invariante "celda deshabilitada = vacia" se mantiene.</summary>
+    /// condicion. Aplica a dos mecanismos: EnabledByColumn (deshabilita) y
+    /// OptionsMapKey (cascading select — limpia si el valor previo ya no esta
+    /// en la nueva lista para evitar valores inconsistentes).</summary>
     private async Task OnTableCellChangedAsync(FormNode? tableNode, int rowIdx, FormColumn col, string key, string? newVal)
     {
         await SetValue(key, newVal);
         if (tableNode?.Columns is null || string.IsNullOrWhiteSpace(col.Name)) { return; }
         foreach (var depCol in tableNode.Columns)
         {
-            if (string.IsNullOrEmpty(depCol.EnabledByColumn)) { continue; }
-            if (!string.Equals(depCol.EnabledByColumn, col.Name, StringComparison.OrdinalIgnoreCase)) { continue; }
-            // depCol depende de la columna que acabamos de cambiar. Re-evaluar.
-            if (IsCellEnabled(tableNode, rowIdx, depCol)) { continue; }
+            var isEnabledDep = !string.IsNullOrEmpty(depCol.EnabledByColumn)
+                && string.Equals(depCol.EnabledByColumn, col.Name, StringComparison.OrdinalIgnoreCase);
+            var isCascadeDep = !string.IsNullOrEmpty(depCol.OptionsMapKey)
+                && string.Equals(depCol.OptionsMapKey, col.Name, StringComparison.OrdinalIgnoreCase);
+            if (!isEnabledDep && !isCascadeDep) { continue; }
+
             var depKey = $"tbl:{tableNode.Id}:{rowIdx}:{depCol.Id}";
-            if (!string.IsNullOrEmpty(GetValue(depKey)))
+            var depVal = GetValue(depKey);
+            if (string.IsNullOrEmpty(depVal)) { continue; }
+
+            var shouldClear = false;
+            if (isEnabledDep && !IsCellEnabled(tableNode, rowIdx, depCol))
             {
-                await SetValue(depKey, "");
+                shouldClear = true;
             }
+            else if (isCascadeDep)
+            {
+                // Con el nuevo valor de la columna madre, chequeamos si el valor
+                // actual de la celda dependiente sigue estando en la nueva lista
+                // de opciones. Si no (o no hay lista), limpiamos.
+                List<string>? newOpts = null;
+                if (!string.IsNullOrWhiteSpace(newVal) && depCol.OptionsMap is not null)
+                {
+                    var hit = depCol.OptionsMap.FirstOrDefault(kv =>
+                        string.Equals(kv.Key, newVal!.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (hit.Value is not null) { newOpts = hit.Value; }
+                }
+                if (newOpts is null || !newOpts.Any(o =>
+                    string.Equals(o, depVal.Trim(), StringComparison.OrdinalIgnoreCase)))
+                {
+                    // Si la columna permite valores libres, respetamos lo que escribio.
+                    if (!depCol.AllowCustom) { shouldClear = true; }
+                }
+            }
+
+            if (shouldClear) { await SetValue(depKey, ""); }
         }
     }
 

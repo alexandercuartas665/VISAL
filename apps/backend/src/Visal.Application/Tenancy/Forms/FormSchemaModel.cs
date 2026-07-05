@@ -299,4 +299,25 @@ public sealed class FormColumn
     /// como hint hardcodeado; ahora cada formulario decide explicitamente.</summary>
     [JsonPropertyName("placeholder")]
     public string? Placeholder { get; set; }
+
+    /// <summary>Nombre (Name) de OTRA columna de la misma tabla cuyo valor
+    /// determina las opciones de ESTA columna (cascading select). Si esta
+    /// seteado y fieldType = "select", el viewer toma las opciones de
+    /// <see cref="OptionsMap"/>[valorHermana] en vez de <see cref="Options"/>.
+    /// Si no hay match en OptionsMap, la lista queda vacia y la celda muestra
+    /// un placeholder tipo "Selecciona {OptionsMapKey} primero". Complementa
+    /// (no reemplaza) a Options: cuando OptionsMapKey esta seteado, Options
+    /// se ignora. Ejemplo: en HC-FO-10a la columna "patron" tiene
+    /// OptionsMapKey="dominio" y OptionsMap poblado con los patrones APTA
+    /// por dominio (CARDIOPULMONAR, OSTEOMUSCULAR, etc.).</summary>
+    [JsonPropertyName("optionsMapKey")]
+    public string? OptionsMapKey { get; set; }
+
+    /// <summary>Mapa clave -> lista de opciones. La clave se compara
+    /// case-insensitive con el valor de la celda hermana
+    /// <see cref="OptionsMapKey"/>. Si no hay match, la lista de opciones
+    /// queda vacia (celda muestra placeholder pero no permite elegir). Solo
+    /// se usa cuando OptionsMapKey esta seteado.</summary>
+    [JsonPropertyName("optionsMap")]
+    public Dictionary<string, List<string>>? OptionsMap { get; set; }
 }

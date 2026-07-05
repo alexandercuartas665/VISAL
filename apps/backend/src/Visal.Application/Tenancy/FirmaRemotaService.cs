@@ -88,9 +88,15 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         // primero (abre la ventana de 24h como conversacion iniciada por negocio)
         // y luego mandamos el link como texto de sesion — todo dentro de la
         // misma ventana recien abierta.
+        //
+        // Optimizacion: si el paciente ya tiene ventana abierta (respondio en las
+        // ultimas 23h) NO enviamos el HSM. Meta lo colapsaria visualmente contra
+        // la sesion activa y estariamos cobrando una utility redundante. Vamos
+        // directo al texto de sesion con el link.
         if (linea.Provider == WhatsAppProvider.Gupshup)
         {
-            var binding = await _bindings.GetAsync(WhatsAppTemplateRole.SolicitudFirma, ct);
+            var ventanaAbierta = await SesionAbiertaAsync(req.Telefono, ct);
+            var binding = ventanaAbierta ? null : await _bindings.GetAsync(WhatsAppTemplateRole.SolicitudFirma, ct);
             if (binding is not null)
             {
                 // Parametros de la plantilla: {{1}}=destinatario, {{2}}=profesional.
@@ -120,8 +126,9 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                     $"Plantilla HSM enviada: {binding.TemplateName} ({binding.LanguageCode})", ct);
                 return await _chat.SendViaLineAsync(conv.Id, lineaId, textoUrl, actorTenantUserId, ct);
             }
-            // Gupshup sin binding: intentamos texto pero avisamos que probablemente
-            // fallara si el paciente no ha escrito en 24h.
+            // Ventana ya abierta (o Gupshup sin binding): mandamos texto directo.
+            // En el primer caso ahorramos el HSM redundante; en el segundo caemos
+            // al comportamiento clasico y avisamos si Meta rechaza.
         }
 
         // Evolution o Gupshup sin binding: comportamiento clasico (texto libre).
@@ -131,6 +138,24 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                           + $"Por favor abra este link en su celular y firme con el dedo: {urlAbsoluta} "
                           + $"El link vence en 2 horas.";
         return await _chat.SendViaLineAsync(conv2.Id, lineaId, textoCompleto, actorTenantUserId, ct);
+    }
+
+    /// <summary>La conversacion identificada por <paramref name="telefono"/> tiene
+    /// ventana Meta abierta si el cliente respondio en las ultimas 23h. Usamos 23
+    /// (no 24) como margen para no chocar con el corte exacto de Meta si el
+    /// servidor y Meta desfasan por segundos. Retorna false si no hay conversacion
+    /// o si el ultimo Inbound es mas viejo.</summary>
+    private async Task<bool> SesionAbiertaAsync(string telefono, CancellationToken ct)
+    {
+        var digits = new string((telefono ?? "").Where(char.IsDigit).ToArray());
+        if (digits.Length == 0) { return false; }
+        var corte = _time.GetUtcNow() - TimeSpan.FromHours(23);
+        return await _db.Messages.AsNoTracking()
+            .Where(m => m.Conversation != null
+                        && m.Conversation.ContactPhone == digits
+                        && m.Direction == Visal.Domain.Enums.MessageDirection.Inbound
+                        && m.SentAt >= corte)
+            .AnyAsync(ct);
     }
 
     /// <summary>Nombre a mostrar del profesional que solicita la firma. Preferencia:

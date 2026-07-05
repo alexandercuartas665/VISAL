@@ -7,6 +7,7 @@
 @using Visal.Domain.Enums
 @inject IWhatsAppLineService LinesSvc
 @inject IHsmTemplateService HsmSvc
+@inject IWhatsAppTemplateBindingService BindingSvc
 @inject IJSRuntime JS
 
 <PageTitle>Plantillas WhatsApp - Visal</PageTitle>
@@ -43,6 +44,33 @@ else if (_gupshupLines.Count == 0)
 }
 else
 {
+    @* ===== Resumen de asignaciones por proceso =====
+       Card compacta que muestra que plantilla esta activa para cada rol del
+       sistema. La asignacion se hace marcando el checkbox en la tarjeta de la
+       plantilla misma (mas abajo), no aqui. *@
+    <div class="card" style="max-width:1180px;padding:14px 20px; margin-bottom:16px;">
+        <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+            <div>
+                <div style="font-weight:700;">Solicitud de Firma</div>
+                <div class="text-muted" style="font-size:11px;">HC, Notas y Atencion — a paciente y parientes.</div>
+            </div>
+            <div style="flex:1;">
+                @{
+                    var firmaBinding = _bindings.FirstOrDefault(b => b.Role == WhatsAppTemplateRole.SolicitudFirma);
+                }
+                @if (firmaBinding is not null)
+                {
+                    <span class="badge" style="background:#22c55e;color:#fff;">@firmaBinding.TemplateName</span>
+                    <span class="text-muted" style="font-size:11px;margin-left:8px;">@firmaBinding.LineName · @firmaBinding.ParameterCount param.</span>
+                }
+                else
+                {
+                    <span class="text-muted" style="font-size:12px;">Sin plantilla asignada — marca una plantilla APPROVED abajo con "Usar para solicitud de firma".</span>
+                }
+            </div>
+        </div>
+    </div>
+
     <div class="card" style="max-width:1180px;padding:16px 20px; margin-bottom:16px;">
         <div style="display:flex; gap:16px; align-items:end;">
             <div class="field" style="flex:1;">
@@ -68,14 +96,22 @@ else
     }
     else if (_templates.Count == 0)
     {
-        <p class="text-muted">Sin plantillas aun. Crea la primera con "+ Nueva plantilla".</p>
+        <div class="card" style="max-width:720px;padding:14px 18px;">
+            <p style="margin:0;">No hay plantillas visibles para esta linea.</p>
+            <p class="text-muted" style="font-size:13px; margin-top:6px;">
+                Si ya creaste plantillas en el <a href="https://partner.gupshup.io" target="_blank" rel="noopener">Dashboard de Gupshup</a>,
+                pueden no aparecer aqui hasta que cargues el Partner Token en <a href="lineas">Lineas WhatsApp</a> &rsaquo; Editar App.
+                El envio por API sigue funcionando igual cuando el sistema conoce el ID de la plantilla.
+            </p>
+        </div>
     }
     else
     {
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:14px;">
             @foreach (var t in _templates)
             {
-                <div class="card" style="padding:14px 16px; display:flex; flex-direction:column; gap:8px;">
+                var isFirma = _bindings.Any(b => b.Role == WhatsAppTemplateRole.SolicitudFirma && b.TemplateId == t.Id);
+                <div class="card" style="padding:14px 16px; display:flex; flex-direction:column; gap:8px; border:@(isFirma ? "2px solid #22c55e" : "1px solid var(--border)");">
                     <div style="display:flex; align-items:center; justify-content:space-between;">
                         <strong style="font-size:15px; word-break:break-all;">@t.ElementName</strong>
                         <span class="badge" style="background:@StatusColor(t.Status); color:#fff;">@t.Status</span>
@@ -84,6 +120,19 @@ else
                         @t.LanguageCode · @t.Category · @t.ParameterCount parametro(s)
                     </div>
                     <div style="font-size:13px; color:#111; white-space:pre-wrap; background:#f8fafc; padding:8px; border-radius:6px; max-height:120px; overflow-y:auto;">@t.Body</div>
+                    @* Selector "usar para..." — toggle: al marcar/desmarcar reasigna el
+                       rol al templateId de esta card. Deshabilitado si no APPROVED,
+                       Meta rechaza plantillas en otros estados. *@
+                    @if (t.Status == "APPROVED")
+                    {
+                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                            <input type="checkbox" checked="@isFirma" disabled="@_busy"
+                                   @onchange="e => ToggleFirmaAssignmentAsync(t, (bool)(e.Value ?? false))" />
+                            <span style="color:@(isFirma ? "#16a34a" : "var(--muted-foreground)");font-weight:@(isFirma ? "600" : "400");">
+                                @(isFirma ? "✓ Solicitud de firma" : "Usar para solicitud de firma")
+                            </span>
+                        </label>
+                    }
                     <div style="display:flex; gap:6px; margin-top:2px;">
                         <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenSendTest(t)" disabled="@(_busy || t.Status != "APPROVED")">Enviar test</button>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="() => CopyBodyAsync(t.Body)" title="Copiar contenido">Copiar</button>
@@ -206,7 +255,14 @@ else
     private List<WhatsAppLineDto> _gupshupLines = new();
     private Guid? _selectedLineId;
     private List<GupshupTemplateInfo> _templates = new();
+    private List<WhatsAppTemplateBindingDto> _bindings = new();
     private string? _lastError;
+
+    private static string RoleLabel(WhatsAppTemplateRole r) => r switch
+    {
+        WhatsAppTemplateRole.SolicitudFirma => "Plantilla de Solicitud de Firma",
+        _ => r.ToString(),
+    };
 
     // Nueva plantilla
     private bool _newOpen;
@@ -245,7 +301,36 @@ else
     {
         var all = await LinesSvc.ListAsync();
         _gupshupLines = all.Where(l => l.Provider == WhatsAppProvider.Gupshup).ToList();
+        _bindings = (await BindingSvc.ListAsync()).ToList();
         _loading = false;
+    }
+
+    // ===== Asignacion de plantillas por rol =====
+
+    /// <summary>Toggle del checkbox "Usar para solicitud de firma" en cada
+    /// tarjeta APPROVED. Al marcar upsert-ea el binding con esta plantilla; al
+    /// desmarcar elimina el binding entero (el rol queda sin plantilla y el
+    /// sender cae al fallback de texto libre).</summary>
+    private async Task ToggleFirmaAssignmentAsync(GupshupTemplateInfo t, bool checkedNow)
+    {
+        if (_selectedLineId is not Guid lid) { return; }
+        _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            if (checkedNow)
+            {
+                await BindingSvc.UpsertAsync(new WhatsAppTemplateBindingSetRequest(
+                    WhatsAppTemplateRole.SolicitudFirma, lid,
+                    t.Id, t.ElementName, t.LanguageCode, t.ParameterCount), actor);
+            }
+            else
+            {
+                await BindingSvc.DeleteAsync(WhatsAppTemplateRole.SolicitudFirma, actor);
+            }
+            _bindings = (await BindingSvc.ListAsync()).ToList();
+        }
+        finally { _busy = false; }
     }
 
     private async Task OnLineChangedAsync()

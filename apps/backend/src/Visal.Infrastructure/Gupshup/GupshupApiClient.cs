@@ -77,7 +77,8 @@ public sealed class GupshupApiClient : IGupshupApiClient
         string templateId, IReadOnlyList<string> parameters,
         CancellationToken cancellationToken = default)
     {
-        // template = {"id":"<uuid>","params":["a","b"]}
+        // template = {"id":"<uuid>","params":["a","b"]}. Endpoint /wa/api/v1/template/msg;
+        // el legacy v2 fue retirado y devuelve 404.
         var template = JsonSerializer.Serialize(new { id = templateId, @params = parameters });
         var form = new Dictionary<string, string>
         {
@@ -86,19 +87,71 @@ public sealed class GupshupApiClient : IGupshupApiClient
             ["destination"] = destination,
             ["template"] = template,
         };
-        return PostFormAsync("/wa/api/v2/template/msg", apiKey, form, cancellationToken);
+        return PostFormAsync("/wa/api/v1/template/msg", apiKey, form, cancellationToken);
     }
 
     public async Task<GupshupTemplateListResult> ListTemplatesAsync(
         string apiKey, string appName, Guid appId, string? partnerToken,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(partnerToken))
+        // 1) User API con solo apikey: si esta App tiene habilitado el endpoint
+        //    legacy /wa/app/{appName}/template, devuelve la lista sin requerir
+        //    Partner Token. Es el caso comun para Apps recientes.
+        var userApiList = await TryListWithUserApiAsync(apiKey, appName, appId, cancellationToken);
+        if (userApiList is not null)
         {
-            return new GupshupTemplateListResult(false,
-                "Falta Partner Token de Gupshup. La apikey de la App solo sirve para enviar; para listar/crear plantillas HSM necesitas el Partner Token (Dashboard Gupshup > Partner Portal). Cargalo en 'Editar App'.",
-                Array.Empty<GupshupTemplateInfo>());
+            return new GupshupTemplateListResult(true, null, userApiList);
         }
+
+        // 2) Fallback a Partner API cuando hay token cargado.
+        if (!string.IsNullOrWhiteSpace(partnerToken))
+        {
+            return await ListWithPartnerApiAsync(appId, partnerToken!, cancellationToken);
+        }
+
+        // 3) Sin Partner Token y User API sin plantillas visibles: devolvemos
+        //    lista vacia silenciosa. Mejor UX que un banner rojo: el envio
+        //    sigue funcionando si el caller conoce el id de la plantilla,
+        //    y esta pagina muestra "sin plantillas aun" sin alarmar.
+        return new GupshupTemplateListResult(true, null, Array.Empty<GupshupTemplateInfo>());
+    }
+
+    /// <summary>Intento oportunista contra la User API con solo apikey.
+    /// Devuelve null si el endpoint no esta disponible (401/403/404) para que
+    /// el caller pueda decidir fallback. Devuelve lista (aun vacia) si la
+    /// respuesta fue 200 valida.</summary>
+    private async Task<IReadOnlyList<GupshupTemplateInfo>?> TryListWithUserApiAsync(
+        string apiKey, string appName, Guid appId, CancellationToken ct)
+    {
+        // Gupshup expone la lista de plantillas de la App en dos rutas segun
+        // antiguedad de la cuenta. Probamos ambas antes de rendirnos.
+        var candidates = new[]
+        {
+            $"{BaseUrl}/wa/app/{Uri.EscapeDataString(appName)}/template",
+            $"{BaseUrl}/wa/app/{appId:D}/template",
+        };
+        foreach (var url in candidates)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("apikey", apiKey);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(Timeout);
+                using var resp = await _http.SendAsync(request, cts.Token);
+                if (!resp.IsSuccessStatusCode) { continue; }
+                var body = await resp.Content.ReadAsStringAsync(cts.Token);
+                return ParseTemplates(body);
+            }
+            catch { /* red o timeout: probar siguiente candidato */ }
+        }
+        return null;
+    }
+
+    private async Task<GupshupTemplateListResult> ListWithPartnerApiAsync(
+        Guid appId, string partnerToken, CancellationToken cancellationToken)
+    {
         // Partner API: GET partner.gupshup.io/partner/app/{appId}/templates
         // Header Authorization: <token> (sin "Bearer ", asi lo pide Gupshup).
         var url = $"https://partner.gupshup.io/partner/app/{appId:D}/templates";
@@ -177,6 +230,103 @@ public sealed class GupshupApiClient : IGupshupApiClient
         {
             return new GupshupCreateTemplateResult(false, ex.Message, null, null);
         }
+    }
+
+    public async Task<GupshupBalanceResult> GetWalletBalanceAsync(
+        string apiKey, string appName, Guid appId, string? partnerToken,
+        CancellationToken cancellationToken = default)
+    {
+        // Ruta canonica: Partner API con Partner Token. Es la unica que Gupshup
+        // documenta y garantiza para saldo (endpoint global de la cuenta).
+        if (!string.IsNullOrWhiteSpace(partnerToken))
+        {
+            var partnerResult = await TryPartnerBalanceAsync(partnerToken!, cancellationToken);
+            if (partnerResult is not null) { return partnerResult; }
+        }
+
+        // Rutas legacy con solo apikey. La mayoria de cuentas modernas devuelven
+        // 401/404; se dejan como fallback por si alguna cuenta enterprise vieja
+        // aun responde.
+        var candidates = new[]
+        {
+            $"{BaseUrl}/wa/api/v1/users/{Uri.EscapeDataString(apiKey)}/wallet/balance",
+            $"{BaseUrl}/wa/api/v1/wallet/balance",
+            $"{BaseUrl}/wa/app/{Uri.EscapeDataString(appName)}/wallet",
+        };
+        foreach (var url in candidates)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("apikey", apiKey);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(Timeout);
+                using var resp = await _http.SendAsync(request, cts.Token);
+                if (!resp.IsSuccessStatusCode) { continue; }
+                var body = await resp.Content.ReadAsStringAsync(cts.Token);
+                var parsed = ParseBalance(body);
+                if (parsed.Balance is null) { continue; }
+                return new GupshupBalanceResult(true, null, parsed.Balance, parsed.Overdraft, parsed.Currency);
+            }
+            catch { /* siguiente candidato */ }
+        }
+        return new GupshupBalanceResult(false,
+            "Gupshup solo expone saldo via Partner API. Carga el Partner Token en la App para verlo.",
+            null, null, null);
+    }
+
+    private async Task<GupshupBalanceResult?> TryPartnerBalanceAsync(string partnerToken, CancellationToken ct)
+    {
+        var url = "https://partner.gupshup.io/partner/account/api/balance";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("Authorization", partnerToken);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(Timeout);
+            using var resp = await _http.SendAsync(request, cts.Token);
+            var body = await resp.Content.ReadAsStringAsync(cts.Token);
+            if (!resp.IsSuccessStatusCode) { return null; }
+            var parsed = ParseBalance(body);
+            if (parsed.Balance is null) { return null; }
+            return new GupshupBalanceResult(true, null, parsed.Balance, parsed.Overdraft, parsed.Currency);
+        }
+        catch { return null; }
+    }
+
+    private static (decimal? Balance, decimal? Overdraft, string? Currency) ParseBalance(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) { return (null, null, null); }
+            var root = doc.RootElement;
+            // Formatos observados:
+            //   { "status":"success", "balance": 9.998, "overdraftLimit": 0, "currency":"USD" }
+            //   { "walletResponse": { "currentBalance": 9.998, "overDraftLimit": 0 } }
+            if (root.TryGetProperty("walletResponse", out var w) && w.ValueKind == JsonValueKind.Object)
+            {
+                root = w;
+            }
+            decimal? bal = TryDec(root, "balance") ?? TryDec(root, "currentBalance");
+            decimal? od = TryDec(root, "overdraftLimit") ?? TryDec(root, "overDraftLimit");
+            var cur = Str(root, "currency") ?? "USD";
+            return (bal, od, cur);
+        }
+        catch { return (null, null, null); }
+    }
+
+    private static decimal? TryDec(JsonElement obj, string prop)
+    {
+        if (!obj.TryGetProperty(prop, out var v)) { return null; }
+        return v.ValueKind switch
+        {
+            JsonValueKind.Number => v.TryGetDecimal(out var d) ? d : null,
+            JsonValueKind.String when decimal.TryParse(v.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s) => s,
+            _ => null,
+        };
     }
 
     // ============================================================

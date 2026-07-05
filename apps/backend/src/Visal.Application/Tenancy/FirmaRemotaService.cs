@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.WhatsApp;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -16,14 +17,21 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
     private readonly IChatService _chat;
     private readonly Common.IUploadStorage _storage;
     private readonly TimeProvider _time;
+    private readonly IWhatsAppTemplateBindingService _bindings;
+    private readonly IHsmTemplateService _hsm;
 
-    public FirmaRemotaService(IApplicationDbContext db, ITenantContext tenant, IChatService chat, Common.IUploadStorage storage, TimeProvider time)
+    public FirmaRemotaService(
+        IApplicationDbContext db, ITenantContext tenant, IChatService chat,
+        Common.IUploadStorage storage, TimeProvider time,
+        IWhatsAppTemplateBindingService bindings, IHsmTemplateService hsm)
     {
         _db = db;
         _tenant = tenant;
         _chat = chat;
         _storage = storage;
         _time = time;
+        _bindings = bindings;
+        _hsm = hsm;
     }
 
     public async Task<FirmaRequestDto?> CrearOReutilizarAsync(Guid notaMedicaId, Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default)
@@ -67,17 +75,94 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         if (req is null) { return new ChatSendResult(false, null, "Solicitud no encontrada."); }
         if (req.Status != FirmaRequestStatus.Pendiente) { return new ChatSendResult(false, null, "La solicitud ya no esta pendiente."); }
 
-        // Crear / obtener la conversacion por telefono y enviar el mensaje.
-        var conv = await _chat.GetOrCreateByPhoneAsync(req.Telefono, req.NombreContacto, ct);
-        if (conv is null) { return new ChatSendResult(false, null, "No se pudo crear la conversacion del paciente."); }
+        var linea = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineaId, ct);
+        if (linea is null) { return new ChatSendResult(false, null, "Linea no encontrada."); }
 
         var saludo = string.IsNullOrWhiteSpace(req.NombreContacto)
             ? "Hola"
             : "Hola " + req.NombreContacto!.Split(' ').FirstOrDefault();
-        var texto = $"{saludo}, en IPS Visal RT necesitamos su firma para confirmar la atencion recibida. "
-                  + $"Por favor abra este link en su celular y firme con el dedo: {urlAbsoluta} "
-                  + $"El link vence en 2 horas.";
-        return await _chat.SendViaLineAsync(conv.Id, lineaId, texto, actorTenantUserId, ct);
+        var textoUrl = $"{saludo}, aqui esta el link para firmar el documento clinico: {urlAbsoluta} El link vence en 2 horas.";
+
+        // Ruta HSM: Gupshup fuera de la ventana 24h no acepta texto libre. Si el
+        // admin ya asigno una plantilla al proceso SolicitudFirma, la enviamos
+        // primero (abre la ventana de 24h como conversacion iniciada por negocio)
+        // y luego mandamos el link como texto de sesion — todo dentro de la
+        // misma ventana recien abierta.
+        if (linea.Provider == WhatsAppProvider.Gupshup)
+        {
+            var binding = await _bindings.GetAsync(WhatsAppTemplateRole.SolicitudFirma, ct);
+            if (binding is not null)
+            {
+                // Parametros de la plantilla: {{1}}=destinatario, {{2}}=profesional.
+                // Si la plantilla exige mas placeholders, pasa cadenas vacias — Meta
+                // rechazara y la UI mostrara el mensaje. El operador reasigna.
+                var recipient = string.IsNullOrWhiteSpace(req.NombreContacto) ? "paciente" : req.NombreContacto!;
+                var profesional = await ResolverNombreProfesionalAsync(actorTenantUserId, ct);
+                var parms = BuildTemplateParams(binding.ParameterCount, recipient, profesional);
+                var digits = new string(req.Telefono.Where(char.IsDigit).ToArray());
+                var hsmRes = await _hsm.SendTestAsync(binding.LineId, binding.TemplateId, digits, parms, actorTenantUserId, ct);
+                if (!hsmRes.Ok)
+                {
+                    return new ChatSendResult(false, null,
+                        $"No se pudo enviar la plantilla '{binding.TemplateName}': {hsmRes.Error ?? "error desconocido"}");
+                }
+                // La ventana ya esta abierta. Enviamos el link como texto de sesion.
+                var conv = await _chat.GetOrCreateByPhoneAsync(req.Telefono, req.NombreContacto, ct);
+                if (conv is null)
+                {
+                    // Plantilla se envio pero no persistimos chat; para el negocio el
+                    // envio fue exitoso.
+                    return new ChatSendResult(true, null, null);
+                }
+                // Dejamos rastro en el chat de que la plantilla HSM salio. El paciente
+                // recibio 2 mensajes (HSM + link), el operador debe verlos como uno.
+                await _chat.AddNoticeAsync(conv.Id,
+                    $"Plantilla HSM enviada: {binding.TemplateName} ({binding.LanguageCode})", ct);
+                return await _chat.SendViaLineAsync(conv.Id, lineaId, textoUrl, actorTenantUserId, ct);
+            }
+            // Gupshup sin binding: intentamos texto pero avisamos que probablemente
+            // fallara si el paciente no ha escrito en 24h.
+        }
+
+        // Evolution o Gupshup sin binding: comportamiento clasico (texto libre).
+        var conv2 = await _chat.GetOrCreateByPhoneAsync(req.Telefono, req.NombreContacto, ct);
+        if (conv2 is null) { return new ChatSendResult(false, null, "No se pudo crear la conversacion del paciente."); }
+        var textoCompleto = $"{saludo}, en IPS Visal RT necesitamos su firma para confirmar la atencion recibida. "
+                          + $"Por favor abra este link en su celular y firme con el dedo: {urlAbsoluta} "
+                          + $"El link vence en 2 horas.";
+        return await _chat.SendViaLineAsync(conv2.Id, lineaId, textoCompleto, actorTenantUserId, ct);
+    }
+
+    /// <summary>Nombre a mostrar del profesional que solicita la firma. Preferencia:
+    /// nombres del Profesional vinculado > DisplayName del PlatformUser > fallback
+    /// generico. Cae al fallback si no hay TenantUser (webhook, cron, etc).</summary>
+    private async Task<string> ResolverNombreProfesionalAsync(Guid actorTenantUserId, CancellationToken ct)
+    {
+        if (actorTenantUserId == Guid.Empty) { return "su equipo medico"; }
+        var user = await _db.TenantUsers.AsNoTracking()
+            .Include(u => u.Profesional)
+            .Include(u => u.PlatformUser)
+            .FirstOrDefaultAsync(u => u.Id == actorTenantUserId, ct);
+        if (user?.Profesional is { } p)
+        {
+            var nombre = string.Join(" ", new[] { p.PrimerNombre, p.PrimerApellido }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(nombre)) { return nombre; }
+        }
+        if (!string.IsNullOrWhiteSpace(user?.PlatformUser?.DisplayName)) { return user!.PlatformUser!.DisplayName!; }
+        return "su equipo medico";
+    }
+
+    /// <summary>Rellena N parametros para la plantilla HSM: los dos primeros
+    /// vienen del sistema (destinatario, profesional); el resto quedan como
+    /// vacios para que Meta valide y — si sobran o faltan — el operador ajuste
+    /// la asignacion en Plantillas WA.</summary>
+    private static IReadOnlyList<string> BuildTemplateParams(int expected, string recipient, string profesional)
+    {
+        if (expected <= 0) { return Array.Empty<string>(); }
+        var list = new List<string>(expected) { recipient };
+        if (expected >= 2) { list.Add(profesional); }
+        while (list.Count < expected) { list.Add(""); }
+        return list;
     }
 
     public async Task<bool> CancelarAsync(Guid solicitudId, Guid actorTenantUserId, CancellationToken ct = default)

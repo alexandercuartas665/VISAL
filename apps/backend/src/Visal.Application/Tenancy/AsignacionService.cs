@@ -57,7 +57,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
             p.FechaNacimiento,
             p.Sexo, p.EstadoCivil,
-            p.Telefono, p.Email,
+            p.Telefono, p.CodigoPaisTelefono, p.Email,
             p.Direccion, p.Zona,
             p.Ocupacion, p.Regimen,
             p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,

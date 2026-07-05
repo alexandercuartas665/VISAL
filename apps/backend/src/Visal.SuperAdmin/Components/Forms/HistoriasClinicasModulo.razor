@@ -154,7 +154,11 @@
     @* Vive en el hc-grid (no dentro del modal) para que el doctor pueda colapsar
        paciente + chat y dejar el modulo de historia a maximo ancho. *@
     <div class="hc-chat-outer @(_chatColapsado ? "hc-chat-colapsado" : "")">
-        <WhatsAppChatPanel Telefono="@PacienteActivo?.Telefono"
+        @* Telefono completo con codigo pais concatenado. Gupshup rechaza numeros
+           en formato nacional (10 digitos "3217626882") — necesita E.164
+           completo "573217626882". Si el paciente no tiene codigo pais, cae
+           a +57. WhatsAppChatPanel aplica SoloDigitos internamente. *@
+        <WhatsAppChatPanel Telefono="@((PacienteActivo?.CodigoPaisTelefono ?? "+57").TrimStart('+') + (PacienteActivo?.Telefono ?? ""))"
                            NombreContacto="@PacienteActivo?.NombreCompleto"
                            Cedula="@PacienteActivo?.NumeroDocumento"
                            PacienteId="@PacienteActivo?.Id"

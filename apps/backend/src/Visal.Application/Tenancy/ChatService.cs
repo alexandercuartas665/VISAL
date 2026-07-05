@@ -241,6 +241,36 @@ public sealed class ChatService : IChatService
         return new ChatSendResult(true, dto, null);
     }
 
+    public async Task<MessageDto?> AddNoticeAsync(Guid conversationId, string body, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        if (conv is null)
+        {
+            return null;
+        }
+        var now = _timeProvider.GetUtcNow();
+        var msg = new Message
+        {
+            TenantId = conv.TenantId,
+            ConversationId = conv.Id,
+            Direction = MessageDirection.Outbound,
+            Body = body.Trim(),
+            MessageType = "notice",
+            SentAt = now
+        };
+        _db.Messages.Add(msg);
+        conv.LastMessageAt = now;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var dto = new MessageDto(msg.Id, msg.ConversationId, msg.Direction, msg.Body, msg.MessageType, msg.SentAt, msg.MediaType, msg.MediaUrl, msg.MediaMimeType, msg.SentByName);
+        await _broadcaster.MessageAddedAsync(conv.TenantId, conv.Id, dto, cancellationToken);
+        return dto;
+    }
+
     public async Task<IReadOnlyDictionary<string, LeadChatStateDto>> GetUnansweredByPhoneAsync(CancellationToken cancellationToken = default)
     {
         var convs = await _db.Conversations.AsNoTracking()

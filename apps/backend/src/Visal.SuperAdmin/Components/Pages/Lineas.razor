@@ -1,6 +1,7 @@
 @page "/lineas"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Admin
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.WhatsApp
 @using Visal.Domain.Enums
@@ -9,6 +10,7 @@
 @inject IWhatsAppConnectorService ConnectorSvc
 @inject IWebhookAdminService WebhookSvc
 @inject IGupshupConfigService GupshupSvc
+@inject IWhatsAppMetricsService MetricsSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -34,6 +36,23 @@
 }
 else
 {
+    @* ===== Acordeon: configuracion tecnica (Servidor + Webhook) =====
+       Ambos bloques estan colapsados por defecto para no abrumar al usuario
+       promedio, que solo quiere ver sus lineas y saldo. *@
+    <div class="card" style="max-width:1040px;padding:0;margin-bottom:22px;overflow:hidden;">
+        <button type="button" class="btn btn-link" style="width:100%;text-align:left;padding:14px 22px;text-decoration:none;color:inherit;display:flex;align-items:center;justify-content:space-between;"
+                @onclick="() => _configOpen = !_configOpen">
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <span style="font-weight:700;">Configuracion tecnica</span>
+                <span class="text-muted" style="font-size:12px;">Servidor de WhatsApp y webhook de mensajes entrantes (avanzado).</span>
+            </span>
+            <span style="font-size:18px;color:var(--muted-foreground);">@(_configOpen ? "▾" : "▸")</span>
+        </button>
+    </div>
+
+    @if (_configOpen)
+    {
+
     @* ===== Servidor Evolution (plataforma / propio) ===== *@
     <div class="card" style="max-width:1040px;padding:20px 22px;margin-bottom:22px;">
         <div style="font-weight:700;margin-bottom:4px;">Servidor de WhatsApp</div>
@@ -151,9 +170,10 @@ else
             }
         </div>
     }
+    } @* fin acordeon _configOpen *@
 
     @* ===== KPIs ===== *@
-    <div class="kpi-grid" style="margin-bottom:22px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));max-width:820px;">
+    <div class="kpi-grid" style="margin-bottom:22px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));max-width:1180px;">
         <div class="kpi-card">
             <div class="kpi-top"><div class="kpi-icon tone-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg></div></div>
             <div class="kpi-label">Lineas</div>
@@ -171,6 +191,50 @@ else
             <div class="kpi-label">Pendientes</div>
             <div class="kpi-value">@_lines.Count(l => l.Status is WhatsAppLineStatus.Connecting or WhatsAppLineStatus.Created)</div>
             <div class="kpi-hint">Por conectar</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-top"><div class="kpi-icon tone-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></div></div>
+            <div class="kpi-label">Enviados hoy</div>
+            <div class="kpi-value">@_sentToday</div>
+            <div class="kpi-hint">Mensajes salientes</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-top"><div class="kpi-icon tone-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></div></div>
+            <div class="kpi-label">Enviados mes</div>
+            <div class="kpi-value">@_sentMonth</div>
+            <div class="kpi-hint">Mes actual</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-top"><div class="kpi-icon tone-success"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg></div></div>
+            <div class="kpi-label">Saldo Gupshup</div>
+            <div class="kpi-value" style="font-size:@(_balance is { Ok: true } ? "24px" : "18px");">
+                @if (_balance is { Ok: true, Balance: not null })
+                {
+                    <text>@_balance.Balance.Value.ToString("N2", System.Globalization.CultureInfo.InvariantCulture) @(_balance.Currency ?? "USD")</text>
+                }
+                else if (_gupshupApps.Count == 0)
+                {
+                    <text>—</text>
+                }
+                else
+                {
+                    <span style="color:var(--muted-foreground);font-weight:600;">Requiere<br/>Partner Token</span>
+                }
+            </div>
+            <div class="kpi-hint">
+                @if (_balance is { Ok: true })
+                {
+                    <text>Wallet BSP</text>
+                }
+                else if (_gupshupApps.Count > 0)
+                {
+                    <text>Cargalo en <em>Editar App</em></text>
+                }
+                else
+                {
+                    <text>Sin linea Gupshup</text>
+                }
+            </div>
         </div>
     </div>
 
@@ -495,6 +559,15 @@ else
     private string? _serverMsg;
     private bool _serverOk;
 
+    // Acordeon de configuracion tecnica: inicia colapsado para que la vista
+    // por defecto sea lista de lineas + KPIs, no formularios de setup.
+    private bool _configOpen;
+
+    // KPIs de trafico y saldo Gupshup (se cargan en ReloadAsync).
+    private int _sentToday;
+    private int _sentMonth;
+    private GupshupBalanceResult? _balance;
+
     private bool _newOpen;
     private string? _newName;
     private string? _newError;
@@ -564,7 +637,22 @@ else
         _useMaster = _server.UseMasterServer;
         _ownUrl = _server.OwnBaseUrl;
         _lines = (await LinesSvc.ListAsync()).ToList();
+        _gupshupApps = (await GupshupSvc.ListAsync()).ToList();
         await LoadWebhookAsync();
+        await LoadMetricsAsync();
+    }
+
+    /// <summary>Trae contadores de envios + saldo Gupshup. Falla silenciosa:
+    /// si el saldo no se puede leer (apikey sin permisos, red caida, etc.) la
+    /// KPI queda como "—" y no bloqueamos el resto de la pagina.</summary>
+    private async Task LoadMetricsAsync()
+    {
+        try { _sentToday = await MetricsSvc.CountOutboundTodayAsync(); }
+        catch { _sentToday = 0; }
+        try { _sentMonth = await MetricsSvc.CountOutboundThisMonthAsync(); }
+        catch { _sentMonth = 0; }
+        try { _balance = await MetricsSvc.GetGupshupBalanceAsync(); }
+        catch (Exception ex) { _balance = new GupshupBalanceResult(false, ex.Message, null, null, null); }
     }
 
     private async Task LoadWebhookAsync()

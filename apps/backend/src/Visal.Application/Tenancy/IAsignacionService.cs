@@ -12,7 +12,7 @@ public sealed record PacienteAsignacionDto(
     string? PrimerApellido = null, string? SegundoApellido = null,
     DateOnly? FechaNacimiento = null,
     string? Sexo = null, string? EstadoCivil = null,
-    string? Telefono = null, string? Email = null,
+    string? Telefono = null, string? CodigoPaisTelefono = null, string? Email = null,
     string? Direccion = null, string? Zona = null,
     string? Ocupacion = null, string? Regimen = null,
     string? ContactoEmergencia = null, string? Parentesco = null, string? TelefonoEmergencia = null,

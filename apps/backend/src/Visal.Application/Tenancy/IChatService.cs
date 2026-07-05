@@ -31,4 +31,12 @@ public interface IChatService
 
     /// <summary>Envia una ubicacion por una linea y la persiste.</summary>
     Task<ChatSendResult> SendLocationViaLineAsync(Guid conversationId, Guid lineId, double latitude, double longitude, string? name, Guid actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Inserta un mensaje informativo (system notice) en la conversacion. No hace
+    /// envio real por la BSP; solo persiste + broadcast SignalR. Se renderiza como
+    /// divider centrado en el chat panel. Uso: dejar rastro de acciones fuera de banda
+    /// como "HSM enviada", "Firma vencida", etc.
+    /// </summary>
+    Task<MessageDto?> AddNoticeAsync(Guid conversationId, string body, CancellationToken cancellationToken = default);
 }

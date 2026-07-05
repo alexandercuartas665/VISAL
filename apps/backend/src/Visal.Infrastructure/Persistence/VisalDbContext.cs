@@ -45,6 +45,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantConfiguration> TenantConfigurations => Set<TenantConfiguration>();
     public DbSet<TenantEvolutionConfig> TenantEvolutionConfigs => Set<TenantEvolutionConfig>();
     public DbSet<TenantGupshupConfig> TenantGupshupConfigs => Set<TenantGupshupConfig>();
+    public DbSet<TenantWhatsAppTemplateBinding> TenantWhatsAppTemplateBindings => Set<TenantWhatsAppTemplateBinding>();
     public DbSet<WhatsAppLine> WhatsAppLines => Set<WhatsAppLine>();
     public DbSet<PipelineStage> PipelineStages => Set<PipelineStage>();
     public DbSet<PipelineFieldDefinition> PipelineFieldDefinitions => Set<PipelineFieldDefinition>();
@@ -363,6 +364,17 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.PartnerTokenEncrypted).HasColumnType("text");
             // Multiples Apps por tenant permitidas; unica por (tenant, appId).
             b.HasIndex(x => new { x.TenantId, x.AppId }).IsUnique();
+        });
+
+        modelBuilder.Entity<TenantWhatsAppTemplateBinding>(b =>
+        {
+            b.Property(x => x.Role).HasConversion<int>();
+            b.Property(x => x.TemplateId).HasMaxLength(80).IsRequired();
+            b.Property(x => x.TemplateName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.LanguageCode).HasMaxLength(20).IsRequired();
+            b.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
+            // Solo un binding por (tenant, rol). Al reasignar hacemos UPDATE, no INSERT.
+            b.HasIndex(x => new { x.TenantId, x.Role }).IsUnique();
         });
 
         modelBuilder.Entity<PipelineStage>(b =>

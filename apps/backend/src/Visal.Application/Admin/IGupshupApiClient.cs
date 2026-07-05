@@ -4,6 +4,11 @@ namespace Visal.Application.Admin;
 /// devuelve la API en el body de exito (para correlar acuses y logs).</summary>
 public sealed record GupshupSendResult(bool Ok, string? Error, string? MessageId = null);
 
+/// <summary>Saldo de la wallet Gupshup (USD). OverdraftLimit es opcional; algunas
+/// cuentas lo devuelven, otras no. Ok=false cuando el endpoint no responde o la
+/// apikey no tiene alcance para leer wallet.</summary>
+public sealed record GupshupBalanceResult(bool Ok, string? Error, decimal? Balance, decimal? OverdraftLimit, string? Currency);
+
 /// <summary>Metadatos de una plantilla HSM tal como Gupshup los devuelve en
 /// GET /wa/app/{appName}/template. La UI la muestra como tarjeta.</summary>
 /// <param name="Id">UUID interno de la plantilla en Gupshup. Requerido para enviarla.</param>
@@ -100,5 +105,17 @@ public interface IGupshupApiClient
     Task<GupshupCreateTemplateResult> CreateTemplateAsync(
         string apiKey, string appName, Guid appId, string? partnerToken,
         GupshupCreateTemplateRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lee el saldo actual de la wallet Gupshup. Estrategia:
+    /// 1) Si hay Partner Token, va contra Partner API
+    ///    (partner.gupshup.io/partner/account/api/balance) — ruta canonica.
+    /// 2) Sin Partner Token, intenta variantes legacy con solo apikey
+    ///    (raro que respondan; casi todas las cuentas modernas exigen
+    ///    Partner Token).
+    /// </summary>
+    Task<GupshupBalanceResult> GetWalletBalanceAsync(
+        string apiKey, string appName, Guid appId, string? partnerToken,
         CancellationToken cancellationToken = default);
 }

@@ -175,7 +175,9 @@ else
                 }
                 else
                 {
-                    <WhatsAppChatPanel Telefono="@_pacienteCtxNotas?.Telefono"
+                    @* CodigoPais + Telefono para E.164 completo — Gupshup no
+                       enruta numeros nacionales de 10 digitos. *@
+                    <WhatsAppChatPanel Telefono="@((_pacienteCtxNotas?.CodigoPaisTelefono ?? "+57").TrimStart('+') + (_pacienteCtxNotas?.Telefono ?? ""))"
                                        NombreContacto="@sel.NombrePaciente"
                                        Cedula="@sel.NumeroDocPaciente"
                                        PacienteId="@sel.PacienteId"

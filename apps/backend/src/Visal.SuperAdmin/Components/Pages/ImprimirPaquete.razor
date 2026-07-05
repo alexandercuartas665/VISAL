@@ -74,6 +74,7 @@
     .pack-firma { flex:1; max-width:280px; }
     .pack-firma-line { border-top:1px solid #000; padding-top:4px; font-weight:700; }
     .pack-firma-rol { font-size:10px; color:#555; }
+    .pack-firma-img { max-width:100%; max-height:70px; display:block; margin:2px 0; object-fit:contain; background:#fff; }
 
     /* Cada documento es una pagina al imprimir. */
     .pack-doc { page-break-after: always; break-after: page; }
@@ -869,9 +870,35 @@ else
         var val = vals.TryGetValue(key, out var vv) ? vv : null;
         <div class="pack-cell" style="grid-column: span @span;">
             <div class="pack-label">@n.Label</div>
-            <div class="pack-value">@(val ?? "")</div>
+            @if (IsImageUrl(val))
+            {
+                <img class="pack-firma-img" src="@val" alt="firma" />
+            }
+            else
+            {
+                <div class="pack-value">@(val ?? "")</div>
+            }
         </div>
     };
+
+    /// <summary>Detecta si el valor de un campo es una firma/imagen ya subida.
+    /// Reglas: data URL de imagen, ruta relativa que empieza en /uploads/, o URL
+    /// http(s) con extensión de imagen. Se mantiene en línea con la misma logica
+    /// de FormViewer para que la impresión coincida con lo que ve el operador.</summary>
+    private static bool IsImageUrl(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) { return false; }
+        var s = v.Trim();
+        if (s.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        if (s.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        if (s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            var lower = s.ToLowerInvariant();
+            return lower.EndsWith(".png") || lower.EndsWith(".jpg") || lower.EndsWith(".jpeg")
+                || lower.EndsWith(".svg") || lower.EndsWith(".gif") || lower.EndsWith(".webp");
+        }
+        return false;
+    }
 
     private static FormSchema? TryParseSchema(string? json)
     {

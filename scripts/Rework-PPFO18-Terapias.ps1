@@ -1,0 +1,232 @@
+# Rework-PPFO18-Terapias.ps1
+# Reconstruye PP-FO-18 CONSENTIMIENTO TERAPIAS segun docx fiel:
+# 5 tablas seed con columna "Marca" para X, guiones bajos como fields
+# de entrada, numerales 2/3/4/5 respetados.
+#
+# Preserva:
+#   - Seccion "Datos del Paciente (auto-llenado)"
+#   - prefill_routes_json
+#   - Seccion "Cierre"
+#   - Seccion "Firmas (auto-llenadas)" (existente)
+#
+# NO TOCA HC-FO-08.
+
+[CmdletBinding()]
+param(
+    [string]$TenantId    = "019e6b0a-a4d8-70d6-a343-d307ebd24b15",
+    [string]$PgContainer = "visal-postgres",
+    [string]$PgUser      = "visal",
+    [string]$PgDb        = "visal_dev"
+)
+$ErrorActionPreference = "Stop"
+function newId { return [Guid]::NewGuid().ToString("N").Substring(0,8) }
+
+function Col([string]$label, [string]$name, [string]$ft, $extra=@{}) {
+    $c = @{ id=newId; label=$label; name=$name; fieldType=$ft; allowCustom=$false }
+    foreach ($k in $extra.Keys) { $c[$k] = $extra[$k] }
+    return $c
+}
+function Tabla([string]$label, [string]$name, $cols, $seedRows, [bool]$lockRows, [int]$widthColumns=12) {
+    $rowsArr = New-Object System.Collections.ArrayList
+    foreach ($r in $seedRows) {
+        $celdas = New-Object System.Collections.ArrayList
+        foreach ($v in $r) { [void]$celdas.Add($v) }
+        $arr = $celdas.ToArray()
+        [void]$rowsArr.Add($arr)
+    }
+    return @{
+        id=newId; type="field"; fieldType="table"
+        label=$label; name=$name; widthColumns=$widthColumns
+        columns=$cols; seedRows=$rowsArr.ToArray()
+        lockRows=$lockRows; allowCustom=$false
+        isSection=$false; isText=$false; isTable=$true; required=$false
+    }
+}
+function SH([string]$content) { @{ id=newId; type="text"; textStyle="subheading"; content=$content } }
+function P([string]$content) { @{ id=newId; type="text"; textStyle="paragraph"; content=$content } }
+function Field([string]$label, [string]$name, [string]$ft, [int]$width=12, $extra=@{}) {
+    $f = @{ id=newId; type="field"; fieldType=$ft; label=$label; name=$name; widthColumns=$width; allowCustom=$false; required=$false }
+    foreach ($k in $extra.Keys) { $f[$k] = $extra[$k] }
+    return $f
+}
+
+# ================ Columnas ================
+$colsProc = @(
+    (Col "Procedimiento" "procedimiento" "text"),
+    (Col "Descripción"   "descripcion"   "text"),
+    (Col "Marca"         "marca"         "text" @{ defaultValue = "" })
+)
+$colsBenef = @( (Col "Beneficio" "beneficio" "text"), (Col "Marca" "marca" "text" @{ defaultValue = "" }) )
+$colsRiesgo = @( (Col "Riesgo" "riesgo" "text"), (Col "Marca" "marca" "text" @{ defaultValue = "" }) )
+$colsAltern = @( (Col "Alternativa" "alternativa" "text"), (Col "Marca" "marca" "text" @{ defaultValue = "" }) )
+$colsConsec = @( (Col "Consecuencia" "consecuencia" "text"), (Col "Marca" "marca" "text" @{ defaultValue = "" }) )
+
+# ================ SeedRows ================
+$descTF = "La rehabilitación es proceso terapéutico que ayuda a recuperar, mantener o mejorar las capacidades físicas, funcionales, y mentales, que se pierden por una enfermedad o lesión, o como un efecto secundario de un tratamiento médico. La rehabilitación busca el mejoramiento de la calidad de vida y la integración al medio familiar, social y ocupacional y su funcionamiento en la vida diaria."
+$descTR = "La rehabilitación pulmonar o respiratoria es un programa diseñado para quienes padecen enfermedades respiratorias crónicas. Ayuda a ganar fuerza de los músculos respiratorios, disminución de la disnea, aumenta capacidad de esfuerzo y mejora la calidad de vida, permitiendo realizar las actividades rutinarias."
+$descTO = "Conjunto de técnicas que ayudan a recuperar la funcionalidad de la motricidad fina a través material didáctico, de estimulación, que faciliten el desarrollo de las actividades con propósito, la integración sensorial y la facilitación neuromuscular"
+$descTF2 = "Prevenir, evaluar y tratar los trastornos de la deglución y comunicación humana y sus desordenes, con unas áreas de abordajes descritas como: habla, lenguaje, voz y audición, en todas las etapas del individuo"
+
+$rowsProc = @(
+    @("TERAPIA FISICA", $descTF, ""),
+    @("TERAPIA RESPIRATORIA", $descTR, ""),
+    @("TERAPIA OCUPACIONAL", $descTO, ""),
+    @("TERAPIA DE FONOAUDIOLOGIA", $descTF2, "")
+)
+
+$rowsBenef = @(
+    @("Mejoramiento de la movilidad y funcionalidad física", ""),
+    @("Prevención de complicaciones asociadas al desacondicionamiento físico", ""),
+    @("Disminución del dolor y mejoramiento de la tolerancia al esfuerzo", ""),
+    @("Fortalecimiento muscular y funcional.", ""),
+    @("Mejoramiento de la capacidad respiratoria y control de síntomas respiratorios.", ""),
+    @("Estimulación de habilidades motoras, cognitivas y ocupacionales", ""),
+    @("Mejoramiento de procesos de comunicación, lenguaje y deglución.", ""),
+    @("Prevención de complicaciones asociadas a inmovilidad o limitaciones funcionales.", ""),
+    @("Educación al usuario y cuidador sobre ejercicios, manejo seguro y continuidad terapéutica.", ""),
+    @("Fortalecimiento de la autonomía e integración funcional del usuario en sus actividades diarias.", "")
+)
+
+$rowsRiesgos = @(
+    @("Fatiga Muscular", ""),
+    @("Quemaduras", ""),
+    @("Dolor muscular leve o aumento temporal del dolor.", ""),
+    @("Caídas o pérdida del equilibrio durante ejercicios o movilizaciones.", ""),
+    @("Reacciones alérgicas o irritaciones", ""),
+    @("Asfixia y Broncoaspiración", ""),
+    @("Aumento del dolor", ""),
+    @("Frustración", ""),
+    @("Mareo o cefalea durante o posterior a la sesión.", ""),
+    @("Intolerancia al ejercicio o dificultad respiratoria.", "")
+)
+
+$rowsAltern = @(
+    @("Alta voluntaria conforme a decisión del usuario y/o responsable.", "")
+)
+
+$rowsConsec = @(
+    @("Deterioro de la funcionalidad física, respiratoria, ocupacional o comunicativa.", ""),
+    @("Incremento del dolor o limitación del movimiento.", ""),
+    @("Riesgo de complicaciones asociadas a inmovilidad.", ""),
+    @("Disminución de la capacidad respiratoria y tolerancia al esfuerzo.", ""),
+    @("Alteración en procesos de comunicación o alimentación segura.", ""),
+    @("Retraso en el proceso de rehabilitación y recuperación funcional.", ""),
+    @("Reingresos hospitalarios o necesidad de atención por urgencias.", ""),
+    @("Disminución de la calidad de vida del paciente.", ""),
+    @("Mayor riesgo de hospitalización o complicaciones clínicas asociadas a la enfermedad de base.", "")
+)
+
+# ================ Cargar y localizar auto sections ================
+$raw = docker exec $PgContainer psql -U $PgUser -d $PgDb -tA -c "SELECT schema_json::text FROM form_definitions WHERE codigo='PP-FO-18' AND tenant_id='$TenantId';"
+$schema = $raw | ConvertFrom-Json -AsHashtable
+
+$datosPaciente = $null; $cierre = $null; $firmasAuto = $null
+foreach ($sec in $schema.children) {
+    $lbl = [string]$sec["label"]
+    if ($lbl -eq "Datos del Paciente (auto-llenado)") { $datosPaciente = $sec }
+    elseif ($lbl -eq "Cierre") { $cierre = $sec }
+    elseif ($lbl -eq "Firmas (auto-llenadas)") { $firmasAuto = $sec }
+}
+if ($null -eq $datosPaciente) { throw "No encontre seccion 'Datos del Paciente (auto-llenado)'" }
+Write-Host "Seccion Datos del Paciente PRESERVADA" -ForegroundColor Green
+if ($null -eq $firmasAuto) {
+    $firmasAuto = @{
+        id = newId; type = "section"; label = "Firmas (auto-llenadas)"
+        children = @(
+            (Field "Firma del paciente (URL)"     "firma_paciente_consent"     "text" 12),
+            (Field "Firma del profesional (URL)"  "firma_profesional_consent"  "text" 12)
+        )
+    }
+    Write-Host "Seccion Firmas (auto-llenadas) CREADA" -ForegroundColor Yellow
+} else { Write-Host "Seccion Firmas (auto-llenadas) PRESERVADA" -ForegroundColor Green }
+if ($null -eq $cierre) {
+    $cierre = @{
+        id = newId; type = "section"; label = "Cierre"
+        children = @( (Field "Observaciones / Conclusiones" "observaciones_cierre" "textarea" 12 @{ enableVoice = $true }) )
+    }
+}
+
+# ================ Declaraciones textuales (docx literal) ================
+$decl_paciente_1 = "Me han explicado y he comprendido satisfactoriamente la esencia y el propósito de este procedimiento, también me han aclarado todas las dudas y me han dicho los posibles riesgos y complicaciones, así como las otras alternativas de tratamiento."
+$decl_paciente_2 = "Doy mi consentimiento para que me realicen el procedimiento descrito anteriormente y los procedimientos complementarios que sean necesarios o convenientes mediante la realización de este, a criterio de los profesionales que lo llevan a cabo."
+$decl_responsable = "sé que el paciente ha sido considerado por ahora incapaz de tomar por sí mismo la decisión de aceptar o rechazar el procedimiento. También se me han explicado los riesgos y complicaciones, así como las otras alternativas de tratamiento. Soy consciente que no existen garantías absolutas de los resultados del procedimiento. He comprendido todo lo anterior perfectamente y por ello doy mi consentimiento para que los profesionales tratantes y el personal auxiliar que precise le realicen este procedimiento. Puedo revocar este consentimiento cuando en bien del paciente se considere oportuno."
+$decl_profesional = "como profesional tratante, he informado al paciente sobre la esencia y el propósito del procedimiento descrito anteriormente, de sus alternativas, posibles riesgos, resultados esperados y que no existen garantías absolutas de los resultados del procedimiento."
+
+# ================ Seccion 2 ================
+$secInfo = @{
+    id = newId; type = "section"; label = "2. INFORMACIÓN SOBRE EL PROCEDIMIENTO"
+    children = @(
+        (P "Marque con X el procedimiento a realizar"),
+        (SH "PROCEDIMIENTOS"),
+        (Tabla "Procedimientos" "procedimientos" $colsProc $rowsProc $true),
+        (SH "BENEFICIOS DEL PROCEDIMIENTO"),
+        (Tabla "Beneficios del procedimiento" "beneficios" $colsBenef $rowsBenef $true),
+        (P "Marque con X los riesgos a los cuales se expone de acuerdo con el procedimiento:"),
+        (SH "RIESGOS DE LOS PROCEDIMIENTOS"),
+        (Tabla "Riesgos de los procedimientos" "riesgos" $colsRiesgo $rowsRiesgos $true),
+        (SH "OTRAS ALTERNATIVAS DISPONIBLES"),
+        (Tabla "Otras alternativas disponibles" "alternativas" $colsAltern $rowsAltern $true),
+        (SH "CONSECUENCIAS DE NO REALIZAR EL PROCEDIMIENTO"),
+        (Tabla "Consecuencias de no realizar el procedimiento" "consecuencias" $colsConsec $rowsConsec $true)
+    )
+}
+
+# ================ Seccion 3 ================
+$secDeclPaciente = @{
+    id = newId; type = "section"; label = "3. DECLARACIÓN DEL PACIENTE"
+    children = @(
+        (P $decl_paciente_1),
+        (P $decl_paciente_2),
+        (Field "Firma del Paciente" "firma_declaracion_paciente" "text" 8),
+        (Field "CC" "cc_declaracion_paciente" "text" 4)
+    )
+}
+
+# ================ Seccion 4 ================
+$secDeclResponsable = @{
+    id = newId; type = "section"; label = "4. DECLARACIÓN DEL RESPONSABLE DEL PACIENTE (Solo en caso de Incapacidad del Paciente)"
+    children = @(
+        (Field "Yo (nombre del responsable)" "nombre_responsable" "text" 12),
+        (Field "Nombre del paciente" "nombre_paciente_incap" "text" 8),
+        (Field "N° de identificación del paciente" "no_id_paciente_incap" "text" 4),
+        (P $decl_responsable),
+        (Field "Firma del Paciente / Responsable" "firma_responsable" "text" 8),
+        (Field "CC" "cc_responsable" "text" 4)
+    )
+}
+
+# ================ Seccion 5 ================
+$secDeclProfesional = @{
+    id = newId; type = "section"; label = "5. DECLARACIÓN DEL PROFESIONAL TRATANTE"
+    children = @(
+        (Field "Yo (nombre del profesional)" "nombre_profesional_declaracion" "text" 12),
+        (P $decl_profesional),
+        (Field "Firma del profesional" "firma_declaracion_profesional" "text" 8),
+        (Field "CC" "cc_declaracion_profesional" "text" 4),
+        (Field "No Registro Profesional" "reg_profesional" "text" 6),
+        (Field "Cargo" "cargo_profesional" "text" 6)
+    )
+}
+
+# ================ Ensamblar ================
+$schema.children = @($datosPaciente, $secInfo, $secDeclPaciente, $secDeclResponsable, $secDeclProfesional, $firmasAuto, $cierre)
+Write-Host ("Top-level ahora: {0} secciones" -f $schema.children.Count) -ForegroundColor Green
+
+$json = ($schema | ConvertTo-Json -Depth 30 -Compress)
+$jsonSql = $json.Replace("'","''")
+$now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss.fffzzz")
+$sql = "UPDATE form_definitions SET schema_json='$jsonSql'::jsonb, updated_at='$now' WHERE codigo='PP-FO-18' AND tenant_id='$TenantId';"
+$tmp = [System.IO.Path]::GetTempFileName()
+[System.IO.File]::WriteAllText($tmp, $sql, [System.Text.UTF8Encoding]::new($false))
+try {
+    $copy = "/tmp/visal_pp18_$([Guid]::NewGuid().ToString('N')).sql"
+    docker cp $tmp "${PgContainer}:${copy}" | Out-Null
+    $env:MSYS_NO_PATHCONV = "1"
+    $r = docker exec $PgContainer psql -U $PgUser -d $PgDb -v ON_ERROR_STOP=1 -f $copy 2>&1
+    $exit = $LASTEXITCODE
+    docker exec $PgContainer rm $copy 2>$null | Out-Null
+    $env:MSYS_NO_PATHCONV = $null
+    if ($exit -ne 0) { throw "psql fallo ($exit): $($r -join ' | ')" }
+} finally { Remove-Item $tmp -ErrorAction SilentlyContinue }
+
+Write-Host "OK PP-FO-18 actualizado." -ForegroundColor Green

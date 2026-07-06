@@ -981,6 +981,48 @@ app.MapGet("/api/profesionales/plantilla.xlsx", () =>
         "plantilla-profesionales.xlsx");
 }).RequireAuthorization();
 
+// Plantilla del import de la Base de datos Diagnosticos. Compatible con el
+// Excel TablaReferencia_CUPSRips (usa columna "Tabla" -> Fuente) y con listados
+// simples de CIE-10/CIE-11. Requiere Codigo + Nombre; el resto es opcional.
+app.MapGet("/api/diagnosticos/plantilla.xlsx", () =>
+{
+    using var wb = new ClosedXML.Excel.XLWorkbook();
+    var ws = wb.AddWorksheet("Diagnosticos");
+
+    var headers = new[] { "Codigo", "Nombre", "Descripcion", "Habilitado", "Fuente" };
+    for (var i = 0; i < headers.Length; i++)
+    {
+        ws.Cell(1, i + 1).Value = headers[i];
+        ws.Cell(1, i + 1).Style.Font.Bold = true;
+        ws.Cell(1, i + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#1565C0");
+        ws.Cell(1, i + 1).Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+    }
+    var ejemplos = new object[,]
+    {
+        { "A00.0",  "COLERA DEBIDO A VIBRIO CHOLERAE 01",   "Enfermedades infecciosas intestinales", "SI", "CIE10" },
+        { "010100", "PUNCION CISTERNAL SOD",                "SECCION 00 PROCEDIMIENTOS QUIRURGICOS", "SI", "CUPSRips" }
+    };
+    for (var r = 0; r < ejemplos.GetLength(0); r++)
+        for (var c = 0; c < ejemplos.GetLength(1); c++)
+            ws.Cell(2 + r, c + 1).Value = ejemplos[r, c]?.ToString();
+
+    ws.Cell(5, 1).Value = "Instrucciones:";
+    ws.Cell(5, 1).Style.Font.Bold = true;
+    ws.Cell(6, 1).Value = "1. 'Codigo' y 'Nombre' son obligatorios. El resto puede quedar vacio.";
+    ws.Cell(7, 1).Value = "2. 'Habilitado' acepta SI/NO, TRUE/FALSE o 1/0. Vacio = SI.";
+    ws.Cell(8, 1).Value = "3. 'Fuente' es libre (CIE10, CIE11, CUPSRips, PROPIA...). Sirve para filtrar por tipo.";
+    ws.Cell(9, 1).Value = "4. Si un codigo ya existe en la BD se ACTUALIZA; si no existe se INSERTA.";
+    ws.Cell(10, 1).Value = "5. Este importador tolera el Excel TablaReferencia_CUPSRips: usa la columna 'Tabla' como Fuente automaticamente.";
+
+    ws.Columns().AdjustToContents();
+
+    using var ms = new MemoryStream();
+    wb.SaveAs(ms);
+    return Results.File(ms.ToArray(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "plantilla-diagnosticos.xlsx");
+}).RequireAuthorization();
+
 // Plantilla del import de catalogos de servicios (Codigo, Nombre). Un solo
 // endpoint sirve las 4 (RxImagenologia, Laboratorio, ServicioGeneral, Insumo);
 // el header del Excel cambia levemente segun el tipo, pero el parser en la

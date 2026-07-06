@@ -1,0 +1,465 @@
+@page "/diagnosticos"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.IO
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject IDiagnosticoService Svc
+
+<PageTitle>Base de datos Diagnosticos - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion de la Entidad</div>
+        <h1 class="ase-title">Base de datos Diagnosticos</h1>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline-primary btn-sm" @onclick="OpenImport" title="Importar desde Excel">&#128229; Importar Excel</button>
+        <a class="btn btn-outline-secondary btn-sm" href="/api/diagnosticos/plantilla.xlsx" download="plantilla-diagnosticos.xlsx">&#128190; Plantilla</a>
+        <button class="btn btn-outline-danger btn-sm" @onclick="StartConfirmClear">&#128465; Vaciar todo</button>
+        <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo diagnostico</button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card">
+    <div class="ase-card-h" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span>Diagnosticos (@_total)</span>
+        <input class="form-control form-control-sm" type="search"
+               placeholder="Buscar por codigo o nombre..."
+               style="max-width:340px;"
+               @bind="_filtro" @bind:event="oninput" @onkeyup="OnFiltroKey" />
+        @if (!string.IsNullOrWhiteSpace(_filtro))
+        {
+            <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltro">Limpiar</button>
+        }
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width:140px;">Codigo</th>
+                    <th>Nombre</th>
+                    <th>Descripcion</th>
+                    <th style="width:100px;">Fuente</th>
+                    <th class="text-center" style="width:80px;">Habilit.</th>
+                    <th style="width:120px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var d in _rows)
+                {
+                    <tr>
+                        <td class="mono">@d.Codigo</td>
+                        <td>@d.Nombre</td>
+                        <td class="text-muted">@(d.Descripcion ?? "-")</td>
+                        <td class="text-muted">@(d.Fuente ?? "-")</td>
+                        <td class="text-center">@(d.Habilitado ? "SI" : "NO")</td>
+                        <td class="ase-row-actions">
+                            <button class="btn btn-outline-primary btn-sm" title="Editar" @onclick="() => Edit(d)">&#9998;</button>
+                            <button class="btn btn-outline-danger btn-sm" title="Borrar" @onclick="() => Delete(d)">&times;</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_rows.Count == 0)
+        {
+            <div class="ase-empty">
+                @(string.IsNullOrWhiteSpace(_filtro) ? "Sin diagnosticos. Importa tu Excel o agrega uno." : $"Sin resultados para \"{_filtro}\".")
+            </div>
+        }
+        @if (_total > _rows.Count)
+        {
+            <div style="padding:8px;text-align:center;">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="LoadMore" disabled="@_busy">
+                    Cargar mas (@(_total - _rows.Count) restantes)
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@* ===== Modal Crear/Editar ===== *@
+@if (_showForm && _edit is not null)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseForm"></div>
+    <div class="usu-modal">
+        <div class="usu-modal-h">
+            <h3>@(_edit.Id is null ? "Nuevo diagnostico" : "Editar diagnostico")</h3>
+            <button class="usu-modal-close" @onclick="CloseForm">&times;</button>
+        </div>
+        <div class="usu-modal-b">
+            <div class="ase-form">
+                <div class="ase-f"><label>Codigo *</label>
+                    <input class="form-control form-control-sm mono" @bind="_edit.Codigo" placeholder="Ej. A00.0" />
+                </div>
+                <div class="ase-f ase-f-wide"><label>Nombre *</label>
+                    <input class="form-control form-control-sm" @bind="_edit.Nombre" placeholder="Descripcion corta" />
+                </div>
+                <div class="ase-f ase-f-wide"><label>Descripcion</label>
+                    <textarea class="form-control form-control-sm" rows="2" @bind="_edit.Descripcion" placeholder="Detalle / clasificacion (opcional)"></textarea>
+                </div>
+                <div class="ase-f"><label>Fuente</label>
+                    <input class="form-control form-control-sm" @bind="_edit.Fuente" placeholder="CIE10, CUPSRips..." />
+                </div>
+                <div class="ase-f"><label>&nbsp;</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="dxHab" @bind="_edit.Habilitado" />
+                        <label class="form-check-label" for="dxHab">Habilitado</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseForm">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">Guardar</button>
+        </div>
+    </div>
+}
+
+@* ===== Modal Importar ===== *@
+@if (_showImport)
+{
+    <div class="usu-modal-backdrop" @onclick="CloseImport"></div>
+    <div class="usu-modal">
+        <div class="usu-modal-h">
+            <h3>Importar diagnosticos desde Excel</h3>
+            <button class="usu-modal-close" @onclick="CloseImport">&times;</button>
+        </div>
+        <div class="usu-modal-b">
+            <p class="text-muted" style="margin-bottom:8px;font-size:12px;">
+                Formato: primera columna <b>Codigo</b>, segunda <b>Nombre</b>, luego <b>Descripcion</b>, <b>Habilitado</b> (SI/NO) y <b>Fuente</b>.
+                Puede tener columnas extra (ignora si no matchea). Si el codigo ya existe se actualiza; si no, se inserta.
+            </p>
+            @if (_importError is not null) { <div class="ase-alert">@_importError</div> }
+            <div class="ase-f ase-f-wide">
+                <label>Archivo Excel (.xlsx)</label>
+                <InputFile class="form-control form-control-sm" accept=".xlsx" OnChange="OnExcelSelected" disabled="@_importing" />
+            </div>
+            @if (_importing || _importDone)
+            {
+                <div style="margin-top:12px;">
+                    <div class="imp-progress"><div class="imp-progress-bar" style="width:@($"{_importProgress:0}%")"></div></div>
+                    <div style="text-align:center;font-size:12px;margin-top:4px;">
+                        @_importFase @_importCurrent / @_importTotal
+                    </div>
+                </div>
+            }
+            @if (_importLog.Count > 0)
+            {
+                <pre class="imp-log">@string.Join("\n", _importLog)</pre>
+            }
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-secondary btn-sm" @onclick="CloseImport" disabled="@_importing">Cerrar</button>
+        </div>
+    </div>
+}
+
+@* ===== Confirmar Vaciar ===== *@
+@if (_showConfirmClear)
+{
+    <div class="usu-modal-backdrop" @onclick="() => _showConfirmClear = false"></div>
+    <div class="usu-modal" style="max-width:480px;">
+        <div class="usu-modal-h">
+            <h3>Vaciar toda la BD de diagnosticos</h3>
+            <button class="usu-modal-close" @onclick="() => _showConfirmClear = false">&times;</button>
+        </div>
+        <div class="usu-modal-b">
+            <p>Esto borra <b>@_total</b> registros de forma permanente.</p>
+            <p>Escribe la palabra <b>VACIAR</b> para confirmar.</p>
+            <input class="form-control form-control-sm" @bind="_clearConfirm" @onkeyup="OnClearKey" />
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-secondary btn-sm" @onclick="() => _showConfirmClear = false" disabled="@_busy">Cancelar</button>
+            <button class="btn btn-danger btn-sm" @onclick="ClearAll" disabled="@(_clearConfirm != "VACIAR" || _busy)">Vaciar todo</button>
+        </div>
+    </div>
+}
+
+<style>
+    .imp-progress { height:8px; background:#e2e8f0; border-radius:6px; overflow:hidden; }
+    .imp-progress-bar { height:100%; background:#3b82f6; transition:width .3s; }
+    .imp-log { max-height:180px; overflow:auto; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px; font-size:11px; margin-top:8px; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<DiagnosticoDto> _rows = new();
+    private int _total;
+    private int _skip;
+    private const int PageSize = 200;
+    private string _filtro = string.Empty;
+    private System.Threading.CancellationTokenSource? _searchCts;
+    private bool _busy;
+    private string? _error, _ok;
+
+    private bool _showForm;
+    private EditRow? _edit;
+
+    private bool _showImport;
+    private bool _importing;
+    private bool _importDone;
+    private string? _importError;
+    private double _importProgress;
+    private int _importCurrent, _importTotal;
+    private string _importFase = "";
+    private List<string> _importLog = new();
+
+    private bool _showConfirmClear;
+    private string _clearConfirm = string.Empty;
+
+    private sealed class EditRow
+    {
+        public Guid? Id { get; set; }
+        public string Codigo { get; set; } = "";
+        public string Nombre { get; set; } = "";
+        public string? Descripcion { get; set; }
+        public string? Fuente { get; set; }
+        public bool Habilitado { get; set; } = true;
+    }
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _busy = true; StateHasChanged();
+        try
+        {
+            _skip = 0;
+            var (rows, total) = await Svc.SearchAsync(_filtro, _skip, PageSize, soloHabilitados: false);
+            _rows = rows.ToList(); _total = total; _skip = _rows.Count;
+        }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task LoadMore()
+    {
+        _busy = true; StateHasChanged();
+        try
+        {
+            var (rows, total) = await Svc.SearchAsync(_filtro, _skip, PageSize, soloHabilitados: false);
+            _rows.AddRange(rows); _total = total; _skip = _rows.Count;
+        }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task OnFiltroKey(KeyboardEventArgs e)
+    {
+        // Debounce: cancela el reload anterior y espera 250ms antes de buscar.
+        _searchCts?.Cancel();
+        var cts = _searchCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            await Task.Delay(250, cts.Token);
+            await Reload();
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private async Task LimpiarFiltro()
+    {
+        _filtro = string.Empty;
+        await Reload();
+    }
+
+    // ---- Alta / edicion ----
+    private void New()
+    {
+        _edit = new EditRow();
+        _showForm = true; _error = _ok = null;
+    }
+
+    private void Edit(DiagnosticoDto d)
+    {
+        _edit = new EditRow { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre,
+                              Descripcion = d.Descripcion, Fuente = d.Fuente, Habilitado = d.Habilitado };
+        _showForm = true; _error = _ok = null;
+    }
+
+    private void CloseForm() { _showForm = false; _edit = null; }
+
+    private async Task Save()
+    {
+        if (_edit is null) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            var req = new SaveDiagnosticoRequest(_edit.Id, _edit.Codigo?.Trim() ?? "", _edit.Nombre?.Trim() ?? "",
+                                                 string.IsNullOrWhiteSpace(_edit.Descripcion) ? null : _edit.Descripcion.Trim(),
+                                                 _edit.Habilitado,
+                                                 string.IsNullOrWhiteSpace(_edit.Fuente) ? null : _edit.Fuente.Trim());
+            await Svc.SaveAsync(req, await Actor());
+            _showForm = false; _edit = null;
+            _ok = "Diagnostico guardado.";
+            await Reload();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task Delete(DiagnosticoDto d)
+    {
+        if (!await ConfirmAsync($"Borrar diagnostico {d.Codigo} - {d.Nombre}?")) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await Svc.DeleteAsync(d.Id, await Actor());
+            _ok = $"Diagnostico {d.Codigo} borrado.";
+            await Reload();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    // ---- Import Excel ----
+    private void OpenImport()
+    {
+        _showImport = true;
+        _importError = null; _importLog.Clear();
+        _importCurrent = _importTotal = 0; _importProgress = 0; _importDone = false;
+    }
+
+    private void CloseImport()
+    {
+        if (_importing) { return; }
+        _showImport = false;
+    }
+
+    private async Task OnExcelSelected(InputFileChangeEventArgs e)
+    {
+        _importError = null; _importLog.Clear();
+        _importCurrent = _importTotal = 0; _importProgress = 0;
+        _importing = true; _importDone = false; _importFase = "Leyendo";
+        try
+        {
+            const long max = 50L * 1024 * 1024;
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(max).CopyToAsync(ms);
+            ms.Position = 0;
+            using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+            var ws = wb.Worksheets.First();
+            var last = ws.LastRowUsed()?.RowNumber() ?? 1;
+
+            // Detectar cabecera flexible: buscamos las columnas Codigo/Nombre.
+            var header = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var headerRow = 1;
+            for (var probe = 1; probe <= Math.Min(last, 5); probe++)
+            {
+                var row = ws.Row(probe);
+                var found = 0;
+                for (var c = 1; c <= 30; c++)
+                {
+                    var h = row.Cell(c).GetString().Trim();
+                    if (string.IsNullOrEmpty(h)) { continue; }
+                    header[h] = c;
+                    found++;
+                }
+                if (header.Keys.Any(k => k.Equals("Codigo", StringComparison.OrdinalIgnoreCase))
+                    && header.Keys.Any(k => k.Equals("Nombre", StringComparison.OrdinalIgnoreCase)))
+                {
+                    headerRow = probe;
+                    break;
+                }
+                header.Clear();
+            }
+            if (header.Count == 0)
+            {
+                _importError = "No se encontraron columnas 'Codigo' y 'Nombre' en las primeras 5 filas.";
+                _importing = false; return;
+            }
+
+            int Col(string name) => header.TryGetValue(name, out var c) ? c : -1;
+            var cCod = Col("Codigo");
+            var cNom = Col("Nombre");
+            var cDesc = Col("Descripcion");
+            var cHab = Col("Habilitado");
+            var cFuente = Col("Fuente");
+            var cTabla = Col("Tabla"); // fuente alternativa: CUPSRips, CIE10...
+
+            var rows = new List<DiagnosticoImportRow>();
+            for (var r = headerRow + 1; r <= last; r++)
+            {
+                var cod = cCod > 0 ? ws.Cell(r, cCod).GetString().Trim() : "";
+                var nom = cNom > 0 ? ws.Cell(r, cNom).GetString().Trim() : "";
+                if (cod.Length == 0 || nom.Length == 0) { continue; }
+                rows.Add(new DiagnosticoImportRow(
+                    cod, nom,
+                    cDesc > 0 ? ws.Cell(r, cDesc).GetString().Trim() : null,
+                    cHab > 0 ? ws.Cell(r, cHab).GetString().Trim() : null,
+                    (cFuente > 0 ? ws.Cell(r, cFuente).GetString().Trim() : null)
+                        ?? (cTabla > 0 ? ws.Cell(r, cTabla).GetString().Trim() : null)
+                ));
+            }
+
+            _importTotal = rows.Count;
+            _importLog.Add($"Leidas {rows.Count} filas del Excel.");
+            StateHasChanged();
+            await Task.Yield();
+
+            var progress = new Progress<DiagnosticoImportProgress>(p =>
+            {
+                _importFase = p.Fase;
+                _importCurrent = p.Procesados;
+                _importTotal = p.Total;
+                _importProgress = p.Total > 0 ? (double)p.Procesados / p.Total * 100 : 0;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var (ins, upd) = await Svc.ImportAsync(rows, await Actor(), progress);
+            _importLog.Add($"Import terminado: {ins} nuevos, {upd} actualizados, {rows.Count - ins - upd} sin cambios/skip.");
+            _importDone = true;
+            _ok = $"Import terminado: {ins} nuevos, {upd} actualizados.";
+            await Reload();
+        }
+        catch (Exception ex) { _importError = ex.Message; }
+        finally { _importing = false; StateHasChanged(); }
+    }
+
+    // ---- Vaciar todo ----
+    private void StartConfirmClear()
+    {
+        _showConfirmClear = true;
+        _clearConfirm = string.Empty;
+    }
+
+    private async Task OnClearKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && _clearConfirm == "VACIAR") { await ClearAll(); }
+    }
+
+    private async Task ClearAll()
+    {
+        if (_clearConfirm != "VACIAR") { return; }
+        _busy = true; _error = null;
+        try
+        {
+            var n = await Svc.ClearAllAsync(await Actor());
+            _showConfirmClear = false; _clearConfirm = "";
+            _ok = $"BD de diagnosticos vaciada ({n} registros borrados).";
+            await Reload();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    // ---- helpers ----
+    private async Task<bool> ConfirmAsync(string msg)
+    {
+        return await Task.FromResult(true); // TODO: reemplazar con modal real si hace falta
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var state = await AuthState;
+        var v = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return Guid.TryParse(v, out var g) ? g : Guid.Empty;
+    }
+}

@@ -79,6 +79,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaEscala> HistoriaClinicaEscalas => Set<HistoriaClinicaEscala>();
     public DbSet<HistoriaClinicaDocumento> HistoriaClinicaDocumentos => Set<HistoriaClinicaDocumento>();
     public DbSet<Medicamento> Medicamentos => Set<Medicamento>();
+    public DbSet<Diagnostico> Diagnosticos => Set<Diagnostico>();
     public DbSet<CatalogoServicioReferencia> CatalogosServicioReferencia => Set<CatalogoServicioReferencia>();
     public DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas => Set<HistoriaClinicaOrdenExterna>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
@@ -616,6 +617,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.RegistroSanitario });
             b.HasIndex(x => new { x.TenantId, x.Ium });
             b.HasIndex(x => new { x.TenantId, x.Atc });
+        });
+
+        modelBuilder.Entity<Diagnostico>(b =>
+        {
+            // Base de datos de diagnosticos (reemplaza WHO ICD-11 API). Codigo unico
+            // por tenant. Nombre y descripcion en text por si la fuente trae
+            // clasificaciones largas ("SECCION 00 PROCEDIMIENTOS QUIRURGICOS...").
+            b.Property(x => x.Codigo).HasMaxLength(60).IsRequired();
+            b.Property(x => x.Nombre).HasColumnType("text").IsRequired();
+            b.Property(x => x.Descripcion).HasColumnType("text");
+            b.Property(x => x.Fuente).HasMaxLength(60);
+            b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Habilitado });
         });
 
         modelBuilder.Entity<CatalogoServicioReferencia>(b =>

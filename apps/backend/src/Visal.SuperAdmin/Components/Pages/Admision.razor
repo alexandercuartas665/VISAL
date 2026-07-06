@@ -9,6 +9,7 @@
 @inject ICatalogoPacienteService CatSvc
 @inject IGeografiaService GeoSvc
 @inject ICie11Service Cie11Svc
+@inject IDiagnosticoService DiagSvc
 @inject INotaMedicaService NotaSvc
 @inject IJSRuntime JS
 
@@ -476,18 +477,15 @@
             @if (_cieError is not null) { <div class="ase-alert" style="margin-top:10px;">@_cieError</div> }
             <div class="cie-result-h">Resultados de la Busqueda</div>
             <div class="cie-result-list">
-                @if (_cieBusy) { <div class="cie-empty">Buscando en WHO ICD-11...</div> }
+                @if (_cieBusy) { <div class="cie-empty">Buscando en la BD local...</div> }
                 else if (_cieResults.Count == 0) { <div class="cie-empty">Escribe un termino y pulsa Buscar.</div> }
                 else
                 {
                     @foreach (var r in _cieResults)
                     {
                         <button class="cie-result-item" @onclick="() => SelectCieAsync(r)">
-                            @if (!string.IsNullOrWhiteSpace(r.Code))
-                            {
-                                <span class="cie-code">@r.Code</span>
-                            }
-                            <span class="cie-title">@r.Title</span>
+                            <span class="cie-code">@r.Codigo</span>
+                            <span class="cie-title">@r.Nombre</span>
                         </button>
                     }
                 }
@@ -651,10 +649,12 @@
     private string _medContratado = "";
     private string? _cie10Codigo;
 
-    // Modal CIE-11
+    // Modal "Buscar diagnostico". La fuente ahora es la BD local de diagnosticos
+    // (IDiagnosticoService), no la WHO ICD-11 API. Mantenemos los mismos nombres
+    // de estado (_cieModal, _cieQuery, ...) para no tocar el markup del modal.
     private bool _cieModal;
     private string _cieQuery = "";
-    private List<Cie11SearchItem> _cieResults = new();
+    private List<DiagnosticoDto> _cieResults = new();
     private bool _cieBusy;
     private string? _cieError;
 
@@ -671,28 +671,25 @@
     {
         if (string.IsNullOrWhiteSpace(_cieQuery)) { return; }
         _cieError = null; _cieBusy = true; _cieResults = new();
-        try { _cieResults = (await Cie11Svc.SearchAsync(_cieQuery.Trim())).ToList(); }
-        catch (InvalidOperationException ex) { _cieError = ex.Message; }
+        try
+        {
+            var (rows, _) = await DiagSvc.SearchAsync(_cieQuery.Trim(), 0, 50, soloHabilitados: true);
+            _cieResults = rows.ToList();
+            if (_cieResults.Count == 0)
+            {
+                _cieError = "Sin resultados. Verifica que la BD de diagnosticos este cargada en /diagnosticos.";
+            }
+        }
         catch (Exception ex) { _cieError = "Error tecnico: " + ex.Message; }
         finally { _cieBusy = false; }
     }
-    private async Task SelectCieAsync(Cie11SearchItem item)
+    private Task SelectCieAsync(DiagnosticoDto item)
     {
+        _cie10Codigo = item.Codigo;
+        _dxPrincipal = item.Nombre;
+        _cieModal = false;
         _cieError = null;
-        try
-        {
-            var d = await Cie11Svc.GetDetailAsync(item.EntityId);
-            if (d is null || string.IsNullOrEmpty(d.Code))
-            {
-                _cieError = "No se pudo obtener el codigo del diagnostico seleccionado.";
-                return;
-            }
-            _cie10Codigo = d.Code;
-            _dxPrincipal = d.Title;
-            _cieModal = false;
-        }
-        catch (InvalidOperationException ex) { _cieError = ex.Message; }
-        catch (Exception ex) { _cieError = "Error tecnico: " + ex.Message; }
+        return Task.CompletedTask;
     }
     private static string TrimId(string id)
     {

@@ -233,16 +233,14 @@
                                     @foreach (var cp in _codigosPais) { <option value="@cp.Codigo">@cp.Codigo @cp.Pais</option> }
                                 </select>
                                 <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
-                                    @for (var i = 0; i < _telefonos.Count; i++)
+                                    @foreach (var row in _telefonos)
                                     {
-                                        var idx = i;
-                                        <div style="display:flex;gap:4px;">
+                                        <div style="display:flex;gap:4px;" @key="row">
                                             <input class="form-control form-control-sm" placeholder="Solo numero"
-                                                   value="@_telefonos[idx]"
-                                                   @onchange="@(e => _telefonos[idx] = (e.Value?.ToString() ?? string.Empty).Trim())" />
+                                                   @bind="row.Numero" @bind:event="oninput" />
                                             <button type="button" class="btn btn-outline-danger btn-sm"
                                                     style="padding:2px 8px;line-height:1;"
-                                                    @onclick="() => RemoverTelefono(idx)"
+                                                    @onclick="() => _telefonos.Remove(row)"
                                                     title="Quitar este telefono">&times;</button>
                                         </div>
                                     }
@@ -710,9 +708,12 @@
     // Multi-telefono: la UI muestra chips (una fila por telefono) y guardamos
     // en Paciente.Telefono separados por "; ". Los consumidores que necesitan
     // un unico numero (WhatsApp, firma remota) usan PacienteTelefonoHelper.Principal.
-    private List<string> _telefonos = new();
-    private void AgregarTelefono() { _telefonos.Add(""); }
-    private void RemoverTelefono(int idx) { if (idx >= 0 && idx < _telefonos.Count) _telefonos.RemoveAt(idx); }
+    // Envolvemos cada telefono en una clase para que @bind funcione correctamente
+    // (bind sobre indexer de List<string> pierde el ultimo cambio si el foco no sale
+    // del input antes de guardar).
+    private sealed class TelRow { public string Numero { get; set; } = ""; }
+    private List<TelRow> _telefonos = new();
+    private void AgregarTelefono() { _telefonos.Add(new TelRow()); }
     private string _sedeId = "";
 
     // Selects en cascada de geografia.
@@ -935,7 +936,7 @@
         _cie10Codigo = null;
         _dir = _barrio = _ciudad = null;
         _codPaisTel = "+57";
-        _telefonos = new List<string>();
+        _telefonos = new List<TelRow>();
         _email = null; _sedeId = "";
         _paisResidencia = _paisOrigen = _departamento = _municipio = "";
         _departamentos = new(); _municipios = new();
@@ -979,7 +980,8 @@
         _cie10Codigo = d.Cie10Codigo;
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _codPaisTel = string.IsNullOrWhiteSpace(d.CodigoPaisTelefono) ? "+57" : d.CodigoPaisTelefono!;
-        _telefonos = Visal.Application.Common.PacienteTelefonoHelper.Enumerar(d.Telefono).ToList();
+        _telefonos = Visal.Application.Common.PacienteTelefonoHelper.Enumerar(d.Telefono)
+            .Select(n => new TelRow { Numero = n }).ToList();
         _email = d.Email;
         _sedeId = d.SedeAtencionId?.ToString() ?? "";
         _paisResidencia = d.PaisResidenciaId?.ToString() ?? "";
@@ -1040,7 +1042,7 @@
                 _tutela, Try(_tipoTutela), Try(_medContratado),
                 Try(_paisResidencia), Try(_paisOrigen), Try(_departamento), Try(_municipio),
                 _dir, _barrio, _ciudad,
-                _codPaisTel, Visal.Application.Common.PacienteTelefonoHelper.Empaquetar(_telefonos), _email,
+                _codPaisTel, Visal.Application.Common.PacienteTelefonoHelper.Empaquetar(_telefonos.Select(r => r.Numero)), _email,
                 sede,
                 _emerNombre, _emerParentesco, _emerTel,
                 _contactos

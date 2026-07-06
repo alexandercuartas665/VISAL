@@ -248,14 +248,33 @@ public sealed class PacienteService : IPacienteService
     {
         var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
         if (p is null) { return null; }
-        // Normalizamos a solo digitos (descartamos +, espacios, guiones). El sistema
-        // siempre guarda el telefono como cadena de digitos pura para que el chat lo
-        // pueda usar como ContactPhone de Evolution sin transformaciones extra.
+        // Normalizamos a solo digitos (descartamos +, espacios, guiones).
         var digits = new string((telefono ?? string.Empty).Where(char.IsDigit).ToArray());
         if (digits.Length == 0) { return null; }
-        p.Telefono = digits;
+
+        // El telefono entrante viene como {codigoPais}{local}. Separamos para que
+        // p.Telefono guarde solo los locales (multi-valor separados por "; ") y el
+        // codigo pais viva en p.CodigoPaisTelefono. Evita corromper el formato
+        // multi-telefono: "Actualizar" solo reemplaza el PRINCIPAL, preserva los demas.
+        var codigoPais = (p.CodigoPaisTelefono ?? "+57").TrimStart('+');
+        var local = digits;
+        if (codigoPais.Length > 0 && local.StartsWith(codigoPais) && local.Length > codigoPais.Length)
+        {
+            local = local.Substring(codigoPais.Length);
+        }
+        if (local.Length == 0) { local = digits; }
+
+        var existentes = PacienteTelefonoHelper.Enumerar(p.Telefono)
+            .Select(t => new string(t.Where(char.IsDigit).ToArray()))
+            .Where(t => t.Length > 0 && t != local)
+            .ToList();
+        var nuevaLista = new List<string> { local };
+        nuevaLista.AddRange(existentes);
+        p.Telefono = PacienteTelefonoHelper.Empaquetar(nuevaLista);
+
         await _db.SaveChangesAsync(ct);
-        return digits;
+        // Devolvemos {codigoPaisSinPlus}{local} para que el chat lo use como ContactPhone.
+        return codigoPais + local;
     }
 
     public async Task<IReadOnlyList<PacienteContactoEmergenciaDto>> ListContactosEmergenciaAsync(Guid pacienteId, CancellationToken ct = default)

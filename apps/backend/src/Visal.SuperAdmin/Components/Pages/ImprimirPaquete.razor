@@ -18,6 +18,7 @@
 @inject IOrdenExternaService OrdExtSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
+@inject IFirmaResolverService FirmaResolverSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -651,10 +652,51 @@ else
         if (_incluirCon)
         {
             var items = await DocSvc.ListarPorHistoriaAsync(HcId, "CONSENTIMIENTO");
+            // La firma del paciente puede haber llegado DESPUES de haberse cerrado el
+            // consentimiento (via link de firma remota por WhatsApp). Como el
+            // ValoresJson del documento se congela al cerrar, aqui refrescamos los
+            // campos de firma (paciente / profesional / acompanantes) con lo mas
+            // reciente antes de renderizar la impresion.
+            string? firmaPacActual = null;
+            if (_paciente is not null)
+            {
+                try { firmaPacActual = await FirmaResolverSvc.ResolverFirmaPacienteAsync(_paciente.Id); }
+                catch { /* firmas opcionales */ }
+            }
             foreach (var it in items.Where(x => x.Estado == "Cerrada"))
             {
                 var d = await DocSvc.GetAsync(it.Id);
-                if (d is not null) { _conDetails.Add(d); }
+                if (d is null) { continue; }
+
+                // Aplicamos el prefill actualizado sobre una copia mutable del JSON.
+                // Solo re-aplicamos firma paciente (que puede haber llegado tarde por
+                // WhatsApp) y acompanantes; la firma profesional ya quedo en el JSON
+                // al cerrar el documento y no es esperable que cambie despues.
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(d.PrefillRoutesJson))
+                    {
+                        var rutas = PrefillRouteSet.FromJson(d.PrefillRoutesJson);
+                        var valores = TryParseValores(d.ValoresJson);
+                        FirmasPrefillHelper.Aplicar(valores, firmaPacActual, firmaProfesionalUrl: null, rutas);
+                        if (_paciente is not null)
+                        {
+                            for (int i = 1; i <= 4; i++)
+                            {
+                                try
+                                {
+                                    var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(_paciente.Id, i);
+                                    if (aUrl is null && aNombre is null && aParent is null) { break; }
+                                    FirmasPrefillHelper.AplicarAcompanante(valores, i, aUrl, aNombre, aParent, rutas);
+                                }
+                                catch { break; }
+                            }
+                        }
+                        d = d with { ValoresJson = JsonSerializer.Serialize(valores) };
+                    }
+                }
+                catch { /* si falla, mostramos el JSON tal cual estaba */ }
+                _conDetails.Add(d);
             }
         }
 

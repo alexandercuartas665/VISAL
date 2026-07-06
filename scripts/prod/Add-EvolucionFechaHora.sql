@@ -2,16 +2,18 @@
 -- SQL de PRODUCCION — Agregar campos obligatorios de Fecha/Hora/Minutos/AM-PM
 -- a los 5 formatos EVOLUCION.
 --
--- Como ejecutar:
---   1. Abrir la Consola SQL (menu SuperAdmin -> Consola SQL).
---   2. IMPORTANTE: reemplazar <TENANT_ID> por el GUID del tenant Visal RT.
---   3. Pegar y ejecutar TODO el bloque de abajo.
---   4. Debe reportar "UPDATE 5". Si sale "UPDATE 0", significa que ya se
---      habia ejecutado antes (es idempotente).
+-- COMO EJECUTAR:
+--   1. En el navegador ya logueado como SuperAdmin, ir a la Consola SQL.
+--   2. Copiar todo el bloque de abajo (desde WITH hasta el punto y coma).
+--   3. Pegar y ejecutar.
+--   4. Debe reportar "UPDATE 5".
+--      - Si sale "UPDATE 0" significa que ya se aplico antes (idempotente).
+--      - Si sale un numero distinto de 5 o 0, NO seguir y avisar.
 --
--- Que hace:
---   Dentro de la seccion "Notas de Evolucion" (o "Nota de Evolucion" en
---   PP-FO-200) inserta al INICIO 5 nodos:
+-- QUE HACE:
+--   Dentro de la seccion "Notas de Evolucion" de los 5 formatos EVOLUCION
+--   (PP-FO-200, PP-FO-85, PP-FO-85_F, PP-FO-85_O, PP-FO-85_R) inserta al
+--   INICIO 5 nodos:
 --     - Subheading "Fecha y hora de la Evolucion"
 --     - evolucion_fecha   (date, required)
 --     - evolucion_hora    (select 01..12, required)
@@ -19,17 +21,9 @@
 --     - evolucion_ampm    (select AM/PM, required)
 --   El textarea observaciones_cierre queda DEBAJO sin cambios.
 --
--- Idempotencia:
---   El WHERE excluye filas cuyo schema_json ya contenga el string
---   "evolucion_fecha". Ejecutarlo dos veces NO duplica los campos.
---
--- Verificacion tras ejecutar (opcional): correr en la misma Consola SQL
---   SELECT f.codigo, jsonb_array_length(sec->'children') as hijos
---   FROM form_definitions f, jsonb_array_elements(f.schema_json->'children') sec
---   WHERE f.tipo='EVOLUCION' AND (sec->>'label') ~* 'nota.*evoluc'
---     AND f.tenant_id='<TENANT_ID>'
---   ORDER BY f.codigo;
--- Debe salir 6 hijos por cada uno de los 5 codigos.
+-- NO REQUIERE reemplazar el tenant: el filtro por codigo + tipo=EVOLUCION es
+-- unico entre tenants. En prod solo existe un tenant cliente, asi que las
+-- 5 filas afectadas son las esperadas. Ejecutado en dev sin problemas.
 -- ============================================================================
 
 WITH extra AS (
@@ -59,5 +53,13 @@ SET schema_json = jsonb_set(
 updated_at = NOW()
 WHERE f.tipo = 'EVOLUCION'
   AND f.codigo IN ('PP-FO-200','PP-FO-85','PP-FO-85_F','PP-FO-85_O','PP-FO-85_R')
-  AND f.tenant_id = '<TENANT_ID>'
   AND (f.schema_json::text NOT ILIKE '%"evolucion_fecha"%');
+
+
+-- (Opcional) VERIFICACION post-UPDATE — pegar y ejecutar a continuacion.
+-- Debe salir 6 hijos por cada uno de los 5 codigos.
+--
+-- SELECT f.codigo, jsonb_array_length(sec->'children') as hijos
+-- FROM form_definitions f, jsonb_array_elements(f.schema_json->'children') sec
+-- WHERE f.tipo='EVOLUCION' AND (sec->>'label') ~* 'nota.*evoluc'
+-- ORDER BY f.codigo;

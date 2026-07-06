@@ -123,7 +123,10 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         {
             var ventanaAbierta = await SesionAbiertaAsync(req.Telefono, ct);
             var binding = ventanaAbierta ? null : await _bindings.GetAsync(WhatsAppTemplateRole.SolicitudFirma, ct);
-            _log.LogInformation(
+            // LogDebug: flujo feliz. En operacion normal no queremos ruido; si
+            // se necesita diagnosticar se sube el nivel a Debug via env var
+            // Logging__LogLevel__Visal.Application.Tenancy.FirmaRemotaService=Debug
+            _log.LogDebug(
                 "FirmaWA envio solicitud={SolicitudId} telefono={Telefono} provider=Gupshup ventanaAbierta={VentanaAbierta} binding={Binding} rutaElegida={Ruta}",
                 solicitudId, maskedPhone, ventanaAbierta,
                 binding?.TemplateName ?? "(none)",
@@ -139,12 +142,14 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 var parms = BuildTemplateParams(binding.ParameterCount, recipient, profesional);
                 var digits = new string(req.Telefono.Where(char.IsDigit).ToArray());
                 var hsmRes = await _hsm.SendTestAsync(binding.LineId, binding.TemplateId, digits, parms, actorTenantUserId, ct);
-                _log.LogInformation(
-                    "FirmaWA HSM solicitud={SolicitudId} template={Template} ok={Ok} error={Error}",
-                    solicitudId, binding.TemplateName, hsmRes.Ok, hsmRes.Error ?? "(none)");
-
-                if (!hsmRes.Ok)
+                if (hsmRes.Ok)
                 {
+                    _log.LogDebug("FirmaWA HSM solicitud={SolicitudId} template={Template} ok=True", solicitudId, binding.TemplateName);
+                }
+                else
+                {
+                    _log.LogWarning("FirmaWA HSM solicitud={SolicitudId} template={Template} ok=False error={Error}",
+                        solicitudId, binding.TemplateName, hsmRes.Error ?? "(none)");
                     return new ChatSendResult(false, null,
                         $"No se pudo enviar la plantilla '{binding.TemplateName}': {hsmRes.Error ?? "error desconocido"}");
                 }
@@ -162,9 +167,15 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 await _chat.AddNoticeAsync(conv.Id,
                     $"Plantilla HSM enviada: {binding.TemplateName} ({binding.LanguageCode})", ct);
                 var textoRes = await _chat.SendViaLineAsync(conv.Id, lineaId, textoUrl, actorTenantUserId, ct);
-                _log.LogInformation(
-                    "FirmaWA texto-sesion (post-HSM) solicitud={SolicitudId} ok={Ok} error={Error}",
-                    solicitudId, textoRes.Ok, textoRes.Error ?? "(none)");
+                if (textoRes.Ok)
+                {
+                    _log.LogDebug("FirmaWA texto-sesion (post-HSM) solicitud={SolicitudId} ok=True", solicitudId);
+                }
+                else
+                {
+                    _log.LogWarning("FirmaWA texto-sesion (post-HSM) solicitud={SolicitudId} ok=False error={Error}",
+                        solicitudId, textoRes.Error ?? "(none)");
+                }
                 return textoRes;
             }
             // Ventana ya abierta (o Gupshup sin binding): mandamos texto directo.
@@ -183,9 +194,16 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                           + $"Por favor abra este link en su celular y firme con el dedo: {urlAbsoluta} "
                           + $"El link vence en 2 horas.";
         var res = await _chat.SendViaLineAsync(conv2.Id, lineaId, textoCompleto, actorTenantUserId, ct);
-        _log.LogInformation(
-            "FirmaWA texto-directo solicitud={SolicitudId} telefono={Telefono} provider={Provider} ok={Ok} error={Error}",
-            solicitudId, maskedPhone, linea.Provider, res.Ok, res.Error ?? "(none)");
+        if (res.Ok)
+        {
+            _log.LogDebug("FirmaWA texto-directo solicitud={SolicitudId} telefono={Telefono} provider={Provider} ok=True",
+                solicitudId, maskedPhone, linea.Provider);
+        }
+        else
+        {
+            _log.LogWarning("FirmaWA texto-directo solicitud={SolicitudId} telefono={Telefono} provider={Provider} ok=False error={Error}",
+                solicitudId, maskedPhone, linea.Provider, res.Error ?? "(none)");
+        }
         return res;
     }
 
@@ -237,7 +255,10 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
         if (pendientes.Count == 0)
         {
-            _log.LogInformation("AutoResponderConLink telefono={Telefono} — sin solicitudes pendientes",
+            // Debug: se dispara cada mensaje entrante afirmativo aunque no
+            // haya solicitud (paciente responde por otra razon). Muy ruidoso
+            // en Information, se queda en Debug.
+            _log.LogDebug("AutoResponderConLink telefono={Telefono} — sin solicitudes pendientes",
                 MaskPhone(digits));
             return 0;
         }
@@ -258,7 +279,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 .AnyAsync(ct);
             if (recienteOutbound)
             {
-                _log.LogInformation("AutoResponderConLink telefono={Telefono} — dedupe: link ya enviado en los ultimos {Segundos}s",
+                _log.LogDebug("AutoResponderConLink telefono={Telefono} — dedupe: link ya enviado en los ultimos {Segundos}s",
                     MaskPhone(digits), _autoResponseDedupeWindow.TotalSeconds);
                 return 0;
             }
@@ -293,10 +314,17 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 : "Hola " + req.NombreContacto!.Split(' ').FirstOrDefault();
             var texto = $"{saludo}, aqui esta el link para firmar el documento clinico: {urlAbsoluta} El link vence en 2 horas.";
             var res = await _chat.SendViaLineTrustedAsync(tenantId, conv.Id, lineaId, texto, ct);
-            _log.LogInformation(
-                "AutoResponderConLink solicitud={SolicitudId} telefono={Telefono} ok={Ok} error={Error}",
-                req.Id, MaskPhone(digits), res.Ok, res.Error ?? "(none)");
-            if (res.Ok) { enviados++; }
+            if (res.Ok)
+            {
+                _log.LogDebug("AutoResponderConLink solicitud={SolicitudId} telefono={Telefono} ok=True",
+                    req.Id, MaskPhone(digits));
+                enviados++;
+            }
+            else
+            {
+                _log.LogWarning("AutoResponderConLink solicitud={SolicitudId} telefono={Telefono} ok=False error={Error}",
+                    req.Id, MaskPhone(digits), res.Error ?? "(none)");
+            }
         }
         return enviados;
     }

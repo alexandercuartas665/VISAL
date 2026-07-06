@@ -4,6 +4,7 @@
 @using System.IO
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Web
+@using Visal.Application.Common
 @using Visal.Application.Tenancy
 @inject IProfesionalConfigService Svc
 @inject IUsuarioAdminService UsuSvc
@@ -636,12 +637,42 @@
             const long max = 50L * 1024 * 1024;
             using var ms = new MemoryStream();
             await e.File.OpenReadStream(max).CopyToAsync(ms);
+            var xlsxBytes = ms.ToArray();
             ms.Position = 0;
 
             using var wb = new ClosedXML.Excel.XLWorkbook(ms);
             var ws = wb.Worksheets.First();
             var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
-            _importTotal = Math.Max(0, lastRow - 1);
+
+            // Detectar fila inicial de datos. En la plantilla estandar los datos
+            // empiezan en la fila 2 (fila 1 = encabezado). Algunos Excel reales
+            // traen filas de logo/metadata arriba y el encabezado esta mas abajo
+            // (p.ej. plantillas de Excel modernas). Detectamos el encabezado
+            // buscando la primera fila donde la col 1 diga "documento"/"cedula"/etc.
+            // y arrancamos una fila despues. Si no encontramos header, arrancamos
+            // en la 2 (comportamiento por defecto).
+            var startRow = 2;
+            for (var probe = 1; probe <= Math.Min(lastRow, 20); probe++)
+            {
+                var v = ws.Cell(probe, 1).GetString().Trim();
+                if (string.IsNullOrEmpty(v)) { continue; }
+                var vLower = v.ToLowerInvariant();
+                if (vLower.Contains("documento") || vLower.Contains("cedula") || vLower.Contains("cédula")
+                    || vLower.Contains("identifica") || vLower.Contains("n°") || vLower.StartsWith("no ") || vLower == "no")
+                {
+                    startRow = probe + 1;
+                    _importLog.Add($"Cabecera detectada en fila {probe}: datos empiezan en fila {startRow}.");
+                    break;
+                }
+                // Si encontramos algo que parece un documento numerico en la col 1,
+                // asumimos que ese es el inicio de datos (no hay header).
+                if (v.Length >= 4 && v.Any(char.IsDigit) && !v.Contains(' '))
+                {
+                    startRow = probe;
+                    break;
+                }
+            }
+            _importTotal = Math.Max(0, lastRow - startRow + 1);
 
             // Catalogos (resueltos una vez para no hacer 200 lookups).
             var tipos = await Svc.ListTiposAsync(false);
@@ -651,8 +682,7 @@
             var byDoc = new Dictionary<string, ProfesionalDto>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in existentes) { byDoc[p.NumeroDocumento.Trim()] = p; }
 
-            // Indice de pictures por fila. ClosedXML resuelve TopLeftCell incluso
-            // para imagenes ancladas con OneCellAnchor / TwoCellAnchor.
+            // Indice de pictures por fila (formato clasico: drawings ancladas a celda).
             var picsByRow = new Dictionary<int, ClosedXML.Excel.Drawings.IXLPicture>();
             foreach (var pic in ws.Pictures)
             {
@@ -663,15 +693,31 @@
                 }
                 catch { /* picture mal anclada — skip */ }
             }
-            _importLog.Add($"Detectadas {picsByRow.Count} firmas en {ws.Pictures.Count()} imagenes del archivo.");
+            // Mapa de imagenes "insertadas en celda" (rich data, formato moderno
+            // de Excel que ClosedXML no soporta). Se prefiere sobre picsByRow si
+            // ambos existen para la misma fila.
+            Dictionary<(int Row, int Col), byte[]> cellImages;
+            try { cellImages = XlsxCellImageReader.ReadFirstSheet(xlsxBytes); }
+            catch (Exception exImg)
+            {
+                cellImages = new();
+                _importLog.Add($"[WARN] No se pudo leer imagenes en celda (rich data): {exImg.Message}");
+            }
+            var cellImagesByRow = new Dictionary<int, byte[]>();
+            foreach (var kv in cellImages)
+            {
+                // La firma se espera en col 12 (columna L). Si viene en otra, la aceptamos igual.
+                if (!cellImagesByRow.ContainsKey(kv.Key.Row)) { cellImagesByRow[kv.Key.Row] = kv.Value; }
+            }
+            _importLog.Add($"Firmas detectadas: {picsByRow.Count} ancladas + {cellImagesByRow.Count} en celda.");
 
             var actor = await Actor();
             var firmaDir = Path.Combine(Env.WebRootPath, "uploads", "firmas");
             Directory.CreateDirectory(firmaDir);
 
-            for (var r = 2; r <= lastRow; r++)
+            for (var r = startRow; r <= lastRow; r++)
             {
-                _importCurrent = r - 1;
+                _importCurrent = r - startRow + 1;
                 _importProgress = (double)_importCurrent / Math.Max(1, _importTotal) * 100;
                 try
                 {
@@ -707,11 +753,20 @@
                         if (sc is not null) { subcatIds.Add(sc.Id); }
                     }
 
-                    // Firma: si hay picture en esta fila la persistimos a
-                    // /uploads/firmas. Si la fila es upsert y no trae firma,
-                    // mantenemos la existente.
+                    // Firma: preferimos "insertada en celda" (formato moderno)
+                    // sobre "picture anclada" clasica. Ambas se persisten a
+                    // /uploads/firmas. Si la fila es upsert y no trae firma nueva,
+                    // mantenemos la existente (mas abajo, al armar la request).
                     string? firmaUrl = null;
-                    if (picsByRow.TryGetValue(r, out var pic))
+                    if (cellImagesByRow.TryGetValue(r, out var imgBytes))
+                    {
+                        var ext = SniffImageExt(imgBytes);
+                        var name = $"firma-{Guid.NewGuid():N}{ext}";
+                        var path = Path.Combine(firmaDir, name);
+                        await File.WriteAllBytesAsync(path, imgBytes);
+                        firmaUrl = $"/uploads/firmas/{name}";
+                    }
+                    else if (picsByRow.TryGetValue(r, out var pic))
                     {
                         var ext = pic.Format switch
                         {
@@ -785,48 +840,95 @@
 
                     if (_importCrearUsuario)
                     {
-                        // Validacion del rol: si el Excel no trae rol, o el nombre no
-                        // existe entre los roles definidos, NO creamos usuario. El
-                        // profesional ya quedo guardado; solo saltamos la creacion.
-                        Guid? rolIdImport = null;
-                        if (string.IsNullOrWhiteSpace(rolNombre))
-                        {
-                            _importLog.Add($"[..]  Fila {r}: usuario NO creado (falta columna Rol).");
-                        }
-                        else
-                        {
-                            var rolMatch = _roles.FirstOrDefault(x => string.Equals(x.Nombre.Trim(), rolNombre, StringComparison.OrdinalIgnoreCase));
-                            if (rolMatch is null)
-                            {
-                                _importLog.Add($"[..]  Fila {r}: usuario NO creado (rol '{rolNombre}' no existe en catalogo).");
-                            }
-                            else
-                            {
-                                rolIdImport = rolMatch.Id;
-                            }
-                        }
+                        // Buscar TenantUser YA vinculado al profesional (por FK).
+                        UsuarioDto? existingUsu = null;
+                        try { existingUsu = await UsuSvc.GetPorProfesionalIdAsync(saved.Id); }
+                        catch { /* no bloquear el import por esto */ }
 
-                        if (rolIdImport is Guid rolIdOk)
+                        var pwd = doc.Length >= 6 ? doc : doc.PadLeft(6, '0');
+
+                        if (existingUsu is not null)
                         {
-                            // Email sintetico + clave = documento (con padding si < 6 chars).
-                            var email = $"{doc}@visal.travels";
-                            var pwd = doc.Length >= 6 ? doc : doc.PadLeft(6, '0');
+                            // UPDATE: el usuario ya existe -> reset clave = cedula,
+                            // sincronizar perfil (documento, nombres, celular, ciudad).
+                            // Rol + sedes ya se propagaron en SaveProfesionalAsync via
+                            // PropagarAlUsuarioVinculadoAsync (asumiendo que rolNombre
+                            // matcheo; si no, quedan los previos).
                             try
                             {
-                                await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, rolIdOk, actor);
-                                // Re-guardar para que el servicio propague sedes al TenantUser
-                                // recien creado (CrearUsuarioDesdeProfesionalAsync no asigna
-                                // sedes; el segundo Save del profesional dispara la
-                                // propagacion completa).
-                                await Svc.SaveProfesionalAsync(req, actor);
+                                await UsuSvc.ResetPasswordAsync(existingUsu.Id, pwd, actor);
+                                var perfil = new ActualizarPerfilUsuarioRequest(
+                                    DisplayName: nombreCompleto,
+                                    Username: existingUsu.Username,
+                                    Documento: doc,
+                                    PrimerNombre: string.IsNullOrWhiteSpace(pn) ? existingUsu.PrimerNombre : pn,
+                                    SegundoNombre: string.IsNullOrWhiteSpace(sn) ? existingUsu.SegundoNombre : sn,
+                                    PrimerApellido: string.IsNullOrWhiteSpace(pa) ? existingUsu.PrimerApellido : pa,
+                                    SegundoApellido: string.IsNullOrWhiteSpace(sa) ? existingUsu.SegundoApellido : sa,
+                                    Celular: string.IsNullOrWhiteSpace(celular) ? existingUsu.Celular : celular,
+                                    Fijo: existingUsu.Fijo,
+                                    Ciudad: string.IsNullOrWhiteSpace(ciudad) ? existingUsu.Ciudad : ciudad,
+                                    Direccion: existingUsu.Direccion,
+                                    Inhabilitado: false);
+                                await UsuSvc.ActualizarPerfilAsync(existingUsu.Id, perfil, actor);
+                                var rolMsg = rolIdImportRow is not null
+                                    ? "rol actualizado"
+                                    : (string.IsNullOrWhiteSpace(rolNombre) ? "rol sin cambios (Excel vacio)"
+                                       : $"rol NO actualizado (nombre '{rolNombre}' no existe en catalogo)");
+                                _importLog.Add($"[UP]  Fila {r}: usuario actualizado (clave=cedula, perfil, sedes; {rolMsg}).");
                             }
                             catch (InvalidOperationException ex)
                             {
-                                _importLog.Add($"[..]  Fila {r}: usuario no creado ({ex.Message}).");
+                                _importLog.Add($"[..]  Fila {r}: usuario NO actualizado ({ex.Message}).");
                             }
                             catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
                             {
-                                _importLog.Add($"[..]  Fila {r}: usuario no creado ({DetalleError(ex)}).");
+                                _importLog.Add($"[..]  Fila {r}: usuario NO actualizado ({DetalleError(ex)}).");
+                            }
+                        }
+                        else
+                        {
+                            // CREATE: el usuario aun no existe. Requiere rol valido para
+                            // no dejar el usuario huerfano sin permisos. Si no viene rol,
+                            // el profesional queda sin usuario (se puede crear despues
+                            // desde la ficha).
+                            Guid? rolIdImport = null;
+                            if (string.IsNullOrWhiteSpace(rolNombre))
+                            {
+                                _importLog.Add($"[..]  Fila {r}: usuario NO creado (falta columna Rol).");
+                            }
+                            else
+                            {
+                                var rolMatch = _roles.FirstOrDefault(x => string.Equals(x.Nombre.Trim(), rolNombre, StringComparison.OrdinalIgnoreCase));
+                                if (rolMatch is null)
+                                {
+                                    var rolesDisp = string.Join(", ", _roles.Select(x => x.Nombre));
+                                    _importLog.Add($"[..]  Fila {r}: usuario NO creado (rol '{rolNombre}' no existe). Roles disponibles: {rolesDisp}.");
+                                }
+                                else { rolIdImport = rolMatch.Id; }
+                            }
+
+                            if (rolIdImport is Guid rolIdOk)
+                            {
+                                var email = $"{doc}@visal.travels";
+                                try
+                                {
+                                    await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, rolIdOk, actor);
+                                    // Re-guardar para que el servicio propague sedes al TenantUser
+                                    // recien creado (CrearUsuarioDesdeProfesionalAsync no asigna
+                                    // sedes; el segundo Save del profesional dispara la
+                                    // propagacion completa).
+                                    await Svc.SaveProfesionalAsync(req, actor);
+                                    _importLog.Add($"[NEW] Fila {r}: usuario creado (email={email}, clave=cedula).");
+                                }
+                                catch (InvalidOperationException ex)
+                                {
+                                    _importLog.Add($"[..]  Fila {r}: usuario no creado ({ex.Message}).");
+                                }
+                                catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+                                {
+                                    _importLog.Add($"[..]  Fila {r}: usuario no creado ({DetalleError(ex)}).");
+                                }
                             }
                         }
                     }
@@ -922,6 +1024,16 @@
     /// "valor NULL en columna NOT NULL Z") en vez del envoltorio EF Core
     /// generico "An error occurred while saving the entity changes".
     /// </summary>
+    private static string SniffImageExt(byte[] bytes)
+    {
+        // Cabeceras PNG/JPG/GIF/BMP. Default png para PNG (mas comun en firmas modernas).
+        if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) { return ".png"; }
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) { return ".jpg"; }
+        if (bytes.Length >= 4 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) { return ".gif"; }
+        if (bytes.Length >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D) { return ".bmp"; }
+        return ".png";
+    }
+
     private static string DetalleError(Exception ex)
     {
         // Recorremos la cadena hasta la raiz para no perder ningun eslabon con info util.

@@ -277,26 +277,45 @@
     </div>
 }
 
-@* ===== Modal Crear usuario para profesional ===== *@
+@* ===== Modal Crear/Actualizar usuario para profesional =====
+   Modo dual: si el profesional ya tiene un TenantUser vinculado, el modal
+   se comporta como "Actualizar" (rol + clave, y las sedes se propagan
+   desde el card de arriba). Si no existe, comportamiento clasico "Crear". *@
 @if (_showCrearUsuModal)
 {
+    var esActualizacion = _usuarioVinculado is not null;
     <div class="usu-modal-backdrop" @onclick="CloseCrearUsuario"></div>
     <div class="usu-modal">
         <div class="usu-modal-h">
-            <h3>Crear usuario para @_nombreCompleto</h3>
+            <h3>@(esActualizacion ? "Actualizar usuario de" : "Crear usuario para") @_nombreCompleto</h3>
             <button class="usu-modal-close" @onclick="CloseCrearUsuario">&times;</button>
         </div>
         <div class="usu-modal-body">
             @if (_modalError is not null) { <div class="ase-alert">@_modalError</div> }
             <div class="ase-form">
                 <div class="ase-f ase-f-wide">
-                    <label>Correo *</label>
-                    <input class="form-control form-control-sm" @bind="_nuevoEmail" placeholder="profesional@ips.com" />
+                    <label>Correo @(esActualizacion ? "" : "*")</label>
+                    <input class="form-control form-control-sm" @bind="_nuevoEmail"
+                           placeholder="profesional@ips.com" disabled="@esActualizacion" />
+                    @if (esActualizacion)
+                    {
+                        <small class="text-muted">El correo no se puede cambiar aqui. Editalo desde /cfg-usuarios.</small>
+                    }
                 </div>
                 <div class="ase-f ase-f-wide">
-                    <label>Clave temporal *</label>
-                    <input type="password" class="form-control form-control-sm" @bind="_nuevoPwd" placeholder="Minimo 6 caracteres" />
-                    <small class="text-muted">El profesional la cambiara en su primer ingreso.</small>
+                    <label>Clave temporal @(esActualizacion ? "(opcional)" : "*")</label>
+                    <input type="password" class="form-control form-control-sm" @bind="_nuevoPwd"
+                           placeholder="@(esActualizacion ? "Deja vacio para no cambiarla" : "Minimo 6 caracteres")" />
+                    <small class="text-muted">
+                        @if (esActualizacion)
+                        {
+                            <span>Si escribes una nueva clave, la actual se reemplaza. Deja vacio para conservarla.</span>
+                        }
+                        else
+                        {
+                            <span>El profesional la cambiara en su primer ingreso.</span>
+                        }
+                    </small>
                 </div>
                 <div class="ase-f ase-f-wide">
                     <label>Rol *</label>
@@ -311,17 +330,31 @@
                 </div>
                 <div class="ase-f ase-f-wide">
                     <small class="usu-info">
-                        Se creara un usuario heredando documento, nombre, apellidos, celular y ciudad
-                        de <strong>@_nombreCompleto</strong>. Quedara vinculado a este profesional para
-                        ver sus turnos en el modulo de Atencion.
+                        @if (esActualizacion)
+                        {
+                            <span>
+                                Al guardar se actualizan: <strong>rol</strong>, <strong>clave</strong> (si la cambias) y las
+                                <strong>sedes</strong> asignadas arriba en el card "Sedes de atencion".
+                            </span>
+                        }
+                        else
+                        {
+                            <span>
+                                Se creara un usuario heredando documento, nombre, apellidos, celular y ciudad
+                                de <strong>@_nombreCompleto</strong>. Quedara vinculado a este profesional para
+                                ver sus turnos en el modulo de Atencion.
+                            </span>
+                        }
                     </small>
                 </div>
             </div>
         </div>
         <div class="usu-modal-f">
             <button class="btn btn-secondary btn-sm" @onclick="CloseCrearUsuario">Cancelar</button>
-            <button class="btn btn-primary btn-sm" @onclick="CrearUsuario" disabled="@_busyCrearUsu">
-                @(_busyCrearUsu ? "Creando..." : "Crear usuario")
+            <button class="btn btn-primary btn-sm" @onclick="CrearOActualizarUsuario" disabled="@_busyCrearUsu">
+                @(_busyCrearUsu
+                    ? (esActualizacion ? "Actualizando..." : "Creando...")
+                    : (esActualizacion ? "Actualizar usuario" : "Crear usuario"))
             </button>
         </div>
     </div>
@@ -377,15 +410,33 @@
     private void OpenCrearUsuario()
     {
         if (_id is null) { _error = "Guarda el profesional antes de crear su usuario."; return; }
-        _nuevoEmail = ""; _nuevoPwd = "";
-        // Pre-selecciona el rol persistido en el profesional. El operador puede
-        // cambiarlo al vuelo si lo desea.
-        _nuevoRolId = _rolPredeterminadoId;
         _modalError = null;
+        _nuevoPwd = ""; // clave nunca se prellena
+        if (_usuarioVinculado is not null)
+        {
+            // Modo actualizacion: precarga email + rol actuales para que el
+            // operador vea que existe y solo cambie lo que quiera.
+            _nuevoEmail = _usuarioVinculado.Email;
+            _nuevoRolId = _usuarioVinculado.RolId?.ToString() ?? _rolPredeterminadoId;
+        }
+        else
+        {
+            _nuevoEmail = "";
+            // Pre-selecciona el rol persistido en el profesional para el nuevo usuario.
+            _nuevoRolId = _rolPredeterminadoId;
+        }
         _showCrearUsuModal = true;
     }
 
     private void CloseCrearUsuario() => _showCrearUsuModal = false;
+
+    /// <summary>Punto de entrada del boton "Crear/Actualizar usuario". Decide segun
+    /// si ya existe TenantUser vinculado al profesional.</summary>
+    private async Task CrearOActualizarUsuario()
+    {
+        if (_usuarioVinculado is not null) { await ActualizarUsuario(); }
+        else { await CrearUsuario(); }
+    }
 
     private async Task CrearUsuario()
     {
@@ -403,6 +454,58 @@
             _ok = $"Usuario '{u.Email}' creado para {_nombreCompleto} con rol '{u.RolNombre}'.";
             _showCrearUsuModal = false;
             _usuarioVinculado = u; // refrescar UI
+        }
+        catch (InvalidOperationException ex) { _modalError = ex.Message; }
+        catch (Exception ex) { _modalError = "Error: " + ex.Message; }
+        finally { _busyCrearUsu = false; }
+    }
+
+    /// <summary>Actualiza el usuario ya existente en un solo paso: aplica rol
+    /// (persistido en profesional -> propaga a TenantUser junto con las sedes) y
+    /// resetea la clave si el operador ingreso una nueva.</summary>
+    private async Task ActualizarUsuario()
+    {
+        if (_id is not Guid pid || _usuarioVinculado is null) { return; }
+        if (!Guid.TryParse(_nuevoRolId, out var rolId))
+        {
+            _modalError = "Selecciona un rol.";
+            return;
+        }
+        if (!string.IsNullOrEmpty(_nuevoPwd) && _nuevoPwd.Length < 6)
+        {
+            _modalError = "La clave debe tener al menos 6 caracteres o dejarse vacia para no cambiarla.";
+            return;
+        }
+
+        _modalError = null; _busyCrearUsu = true;
+        try
+        {
+            var actor = await Actor();
+
+            // 1) Aplicar rol al profesional. Ese Save propaga rol + sedes al
+            //    TenantUser vinculado en una sola operacion, asi que evitamos
+            //    duplicar la logica de traduccion de sedes aqui.
+            _rolPredeterminadoId = rolId.ToString();
+            Guid? tipoId = Guid.TryParse(_tipoProfId, out var tg) ? tg : null;
+            var req = new SaveProfesionalRequest(pid, _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido,
+                _nombreCompleto, tipoId, _registro, _ciudad, _celular, _firmaUrl,
+                _subSel.ToList(), _agencias, rolId);
+            var saved = await Svc.SaveProfesionalAsync(req, actor);
+            if (saved is null) { _modalError = "No se pudo actualizar el rol (sin tenant activo)."; return; }
+
+            // 2) Reset de clave (opcional).
+            if (!string.IsNullOrEmpty(_nuevoPwd))
+            {
+                var okPwd = await UsuSvc.ResetPasswordAsync(_usuarioVinculado.Id, _nuevoPwd, actor);
+                if (!okPwd) { _modalError = "El rol se actualizo pero no se pudo reiniciar la clave."; return; }
+            }
+
+            // Refrescar estado + UI.
+            _usuarioVinculado = (await UsuSvc.ListAsync()).FirstOrDefault(u => u.Id == _usuarioVinculado.Id);
+            _ok = string.IsNullOrEmpty(_nuevoPwd)
+                ? $"Usuario '{_usuarioVinculado?.Email}' actualizado: rol y sedes."
+                : $"Usuario '{_usuarioVinculado?.Email}' actualizado: rol, sedes y clave.";
+            _showCrearUsuModal = false;
         }
         catch (InvalidOperationException ex) { _modalError = ex.Message; }
         catch (Exception ex) { _modalError = "Error: " + ex.Message; }

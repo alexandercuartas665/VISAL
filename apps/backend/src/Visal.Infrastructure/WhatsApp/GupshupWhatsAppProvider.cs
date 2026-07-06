@@ -83,7 +83,12 @@ internal sealed class GupshupWhatsAppProvider : IWhatsAppProvider
     private async Task<(string ApiKey, string Source)?> ResolveCredentialsAsync(WhatsAppLine line, CancellationToken ct)
     {
         if (line.GupshupAppId is not Guid appPk) { return null; }
+        // IgnoreQueryFilters: este provider tambien se llama desde flujos sin
+        // tenant scope (webhook auto-respuesta al Quick Reply). El AppId ya
+        // vino de la linea, cuyo TenantId es autoritativo — no hay riesgo de
+        // fuga entre tenants.
         var cfg = await _db.TenantGupshupConfigs.AsNoTracking()
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.Id == appPk, ct);
         if (cfg is null || !cfg.IsActive || string.IsNullOrWhiteSpace(cfg.PhoneNumber)) { return null; }
         var apikey = _secretProtector.Unprotect(cfg.ApiKeyEncrypted);

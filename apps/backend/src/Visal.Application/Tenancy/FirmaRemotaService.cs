@@ -4,6 +4,7 @@ using Visal.Application.Tenancy.WhatsApp;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Visal.Application.Tenancy;
 
@@ -19,11 +20,13 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
     private readonly TimeProvider _time;
     private readonly IWhatsAppTemplateBindingService _bindings;
     private readonly IHsmTemplateService _hsm;
+    private readonly ILogger<FirmaRemotaService> _log;
 
     public FirmaRemotaService(
         IApplicationDbContext db, ITenantContext tenant, IChatService chat,
         Common.IUploadStorage storage, TimeProvider time,
-        IWhatsAppTemplateBindingService bindings, IHsmTemplateService hsm)
+        IWhatsAppTemplateBindingService bindings, IHsmTemplateService hsm,
+        ILogger<FirmaRemotaService> log)
     {
         _db = db;
         _tenant = tenant;
@@ -32,6 +35,16 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         _time = time;
         _bindings = bindings;
         _hsm = hsm;
+        _log = log;
+    }
+
+    /// <summary>Ofusca un telefono para logs: deja los ultimos 4 digitos.
+    /// Cumple la regla del proyecto de no exponer contactos completos en logs.</summary>
+    private static string MaskPhone(string? tel)
+    {
+        var digits = new string((tel ?? "").Where(char.IsDigit).ToArray());
+        if (digits.Length <= 4) { return new string('*', digits.Length); }
+        return new string('*', digits.Length - 4) + digits.Substring(digits.Length - 4);
     }
 
     public async Task<FirmaRequestDto?> CrearOReutilizarAsync(Guid notaMedicaId, Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default)
@@ -72,12 +85,25 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
     public async Task<ChatSendResult> EnviarPorWhatsAppAsync(Guid solicitudId, Guid lineaId, string urlAbsoluta, Guid actorTenantUserId, CancellationToken ct = default)
     {
         var req = await _db.FirmaPacienteRequests.FirstOrDefaultAsync(r => r.Id == solicitudId, ct);
-        if (req is null) { return new ChatSendResult(false, null, "Solicitud no encontrada."); }
-        if (req.Status != FirmaRequestStatus.Pendiente) { return new ChatSendResult(false, null, "La solicitud ya no esta pendiente."); }
+        if (req is null)
+        {
+            _log.LogWarning("FirmaWA envio solicitud={SolicitudId} linea={LineaId} — solicitud no encontrada", solicitudId, lineaId);
+            return new ChatSendResult(false, null, "Solicitud no encontrada.");
+        }
+        if (req.Status != FirmaRequestStatus.Pendiente)
+        {
+            _log.LogWarning("FirmaWA envio solicitud={SolicitudId} status={Status} — ya no esta pendiente", solicitudId, req.Status);
+            return new ChatSendResult(false, null, "La solicitud ya no esta pendiente.");
+        }
 
         var linea = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineaId, ct);
-        if (linea is null) { return new ChatSendResult(false, null, "Linea no encontrada."); }
+        if (linea is null)
+        {
+            _log.LogWarning("FirmaWA envio solicitud={SolicitudId} linea={LineaId} — linea no encontrada", solicitudId, lineaId);
+            return new ChatSendResult(false, null, "Linea no encontrada.");
+        }
 
+        var maskedPhone = MaskPhone(req.Telefono);
         var saludo = string.IsNullOrWhiteSpace(req.NombreContacto)
             ? "Hola"
             : "Hola " + req.NombreContacto!.Split(' ').FirstOrDefault();
@@ -97,6 +123,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         {
             var ventanaAbierta = await SesionAbiertaAsync(req.Telefono, ct);
             var binding = ventanaAbierta ? null : await _bindings.GetAsync(WhatsAppTemplateRole.SolicitudFirma, ct);
+            _log.LogInformation(
+                "FirmaWA envio solicitud={SolicitudId} telefono={Telefono} provider=Gupshup ventanaAbierta={VentanaAbierta} binding={Binding} rutaElegida={Ruta}",
+                solicitudId, maskedPhone, ventanaAbierta,
+                binding?.TemplateName ?? "(none)",
+                binding is not null ? "HSM+texto" : "texto-directo");
+
             if (binding is not null)
             {
                 // Parametros de la plantilla: {{1}}=destinatario, {{2}}=profesional.
@@ -107,6 +139,10 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 var parms = BuildTemplateParams(binding.ParameterCount, recipient, profesional);
                 var digits = new string(req.Telefono.Where(char.IsDigit).ToArray());
                 var hsmRes = await _hsm.SendTestAsync(binding.LineId, binding.TemplateId, digits, parms, actorTenantUserId, ct);
+                _log.LogInformation(
+                    "FirmaWA HSM solicitud={SolicitudId} template={Template} ok={Ok} error={Error}",
+                    solicitudId, binding.TemplateName, hsmRes.Ok, hsmRes.Error ?? "(none)");
+
                 if (!hsmRes.Ok)
                 {
                     return new ChatSendResult(false, null,
@@ -116,6 +152,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 var conv = await _chat.GetOrCreateByPhoneAsync(req.Telefono, req.NombreContacto, ct);
                 if (conv is null)
                 {
+                    _log.LogWarning("FirmaWA HSM enviado pero no se pudo crear conversacion. solicitud={SolicitudId} telefono={Telefono}", solicitudId, maskedPhone);
                     // Plantilla se envio pero no persistimos chat; para el negocio el
                     // envio fue exitoso.
                     return new ChatSendResult(true, null, null);
@@ -124,7 +161,11 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 // recibio 2 mensajes (HSM + link), el operador debe verlos como uno.
                 await _chat.AddNoticeAsync(conv.Id,
                     $"Plantilla HSM enviada: {binding.TemplateName} ({binding.LanguageCode})", ct);
-                return await _chat.SendViaLineAsync(conv.Id, lineaId, textoUrl, actorTenantUserId, ct);
+                var textoRes = await _chat.SendViaLineAsync(conv.Id, lineaId, textoUrl, actorTenantUserId, ct);
+                _log.LogInformation(
+                    "FirmaWA texto-sesion (post-HSM) solicitud={SolicitudId} ok={Ok} error={Error}",
+                    solicitudId, textoRes.Ok, textoRes.Error ?? "(none)");
+                return textoRes;
             }
             // Ventana ya abierta (o Gupshup sin binding): mandamos texto directo.
             // En el primer caso ahorramos el HSM redundante; en el segundo caemos
@@ -133,11 +174,19 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
         // Evolution o Gupshup sin binding: comportamiento clasico (texto libre).
         var conv2 = await _chat.GetOrCreateByPhoneAsync(req.Telefono, req.NombreContacto, ct);
-        if (conv2 is null) { return new ChatSendResult(false, null, "No se pudo crear la conversacion del paciente."); }
+        if (conv2 is null)
+        {
+            _log.LogWarning("FirmaWA envio directo solicitud={SolicitudId} telefono={Telefono} — no se pudo crear conversacion", solicitudId, maskedPhone);
+            return new ChatSendResult(false, null, "No se pudo crear la conversacion del paciente.");
+        }
         var textoCompleto = $"{saludo}, en IPS Visal RT necesitamos su firma para confirmar la atencion recibida. "
                           + $"Por favor abra este link en su celular y firme con el dedo: {urlAbsoluta} "
                           + $"El link vence en 2 horas.";
-        return await _chat.SendViaLineAsync(conv2.Id, lineaId, textoCompleto, actorTenantUserId, ct);
+        var res = await _chat.SendViaLineAsync(conv2.Id, lineaId, textoCompleto, actorTenantUserId, ct);
+        _log.LogInformation(
+            "FirmaWA texto-directo solicitud={SolicitudId} telefono={Telefono} provider={Provider} ok={Ok} error={Error}",
+            solicitudId, maskedPhone, linea.Provider, res.Ok, res.Error ?? "(none)");
+        return res;
     }
 
     /// <summary>La conversacion identificada por <paramref name="telefono"/> tiene

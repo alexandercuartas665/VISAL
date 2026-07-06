@@ -1,10 +1,14 @@
 @using Visal.Application.Tenancy
-@inject ICie11Service Cie11Svc
+@inject IDiagnosticoService DiagSvc
 
 @*
-    Modal reusable de busqueda CIE-11. Encapsula la lupita/busqueda/seleccion
+    Modal reusable de busqueda de diagnostico. Encapsula la lupita/busqueda/seleccion
     que estaba inline en Admision.razor para poder usarla tambien dentro del
     FormViewer (celdas de tabla con fieldType=autocomplete + catalog=cie11).
+
+    El nombre "Cie11Picker" se conserva por compatibilidad con los llamadores,
+    pero la fuente de datos es ahora la BD local (IDiagnosticoService) que
+    reemplaza a la WHO ICD-11 API. Ver /diagnosticos para cargar el Excel.
 
     Uso:
         <Cie11Picker @bind-Visible="_pickerOpen" OnSelected="OnCiePicked" />
@@ -33,18 +37,15 @@
             @if (_error is not null) { <div class="ase-alert" style="margin-top:10px;">@_error</div> }
             <div class="cie-result-h">Resultados de la Busqueda</div>
             <div class="cie-result-list">
-                @if (_busy) { <div class="cie-empty">Buscando en WHO ICD-11...</div> }
+                @if (_busy) { <div class="cie-empty">Buscando en la BD local...</div> }
                 else if (_results.Count == 0) { <div class="cie-empty">Escribe un termino y pulsa Buscar.</div> }
                 else
                 {
                     @foreach (var r in _results)
                     {
                         <button class="cie-result-item" @onclick="() => SeleccionarAsync(r)">
-                            @if (!string.IsNullOrWhiteSpace(r.Code))
-                            {
-                                <span class="cie-code">@r.Code</span>
-                            }
-                            <span class="cie-title">@r.Title</span>
+                            <span class="cie-code">@r.Codigo</span>
+                            <span class="cie-title">@r.Nombre</span>
                         </button>
                     }
                 }
@@ -80,7 +81,7 @@
     [Parameter] public EventCallback<(string Code, string Title)> OnSelected { get; set; }
 
     private string _query = "";
-    private List<Cie11SearchItem> _results = new();
+    private List<DiagnosticoDto> _results = new();
     private bool _busy;
     private string? _error;
 
@@ -110,38 +111,23 @@
     {
         if (string.IsNullOrWhiteSpace(_query)) { return; }
         _error = null; _busy = true; _results = new();
-        try { _results = (await Cie11Svc.SearchAsync(_query.Trim())).ToList(); }
-        catch (InvalidOperationException ex) { _error = ex.Message; }
+        try
+        {
+            var (rows, _) = await DiagSvc.SearchAsync(_query.Trim(), 0, 50, soloHabilitados: true);
+            _results = rows.ToList();
+            if (_results.Count == 0)
+            {
+                _error = "Sin resultados. Verifica que la BD de diagnosticos este cargada en /diagnosticos.";
+            }
+        }
         catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
         finally { _busy = false; }
     }
 
-    private async Task SeleccionarAsync(Cie11SearchItem item)
+    private async Task SeleccionarAsync(DiagnosticoDto item)
     {
         _error = null;
-        try
-        {
-            // Si el search MMS ya nos dio Code, usamos esos datos sin pedir el detalle.
-            // Ahorra round-trip y evita los problemas de URL parsing que tiene MMS con
-            // entidades postcoordinadas (ej. .../mms/2B60/unspecified donde Segments.Last
-            // devuelve "unspecified" en vez del codigo). GetDetailAsync se conserva como
-            // fallback para items raros que vinieran sin codigo en el search.
-            if (!string.IsNullOrEmpty(item.Code))
-            {
-                await OnSelected.InvokeAsync((item.Code, item.Title));
-                await Cerrar();
-                return;
-            }
-            var d = await Cie11Svc.GetDetailAsync(item.EntityId);
-            if (d is null || string.IsNullOrEmpty(d.Code))
-            {
-                _error = "No se pudo obtener el codigo del diagnostico seleccionado.";
-                return;
-            }
-            await OnSelected.InvokeAsync((d.Code, d.Title));
-            await Cerrar();
-        }
-        catch (InvalidOperationException ex) { _error = ex.Message; }
-        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        await OnSelected.InvokeAsync((item.Codigo, item.Nombre));
+        await Cerrar();
     }
 }

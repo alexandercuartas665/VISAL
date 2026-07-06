@@ -93,7 +93,7 @@
             <h3>@(_edit.Id is null ? "Nuevo diagnostico" : "Editar diagnostico")</h3>
             <button class="usu-modal-close" @onclick="CloseForm">&times;</button>
         </div>
-        <div class="usu-modal-b">
+        <div class="usu-modal-body">
             <div class="ase-form">
                 <div class="ase-f"><label>Codigo *</label>
                     <input class="form-control form-control-sm mono" @bind="_edit.Codigo" placeholder="Ej. A00.0" />
@@ -131,7 +131,7 @@
             <h3>Importar diagnosticos desde Excel</h3>
             <button class="usu-modal-close" @onclick="CloseImport">&times;</button>
         </div>
-        <div class="usu-modal-b">
+        <div class="usu-modal-body">
             <p class="text-muted" style="margin-bottom:8px;font-size:12px;">
                 Formato: primera columna <b>Codigo</b>, segunda <b>Nombre</b>, luego <b>Descripcion</b>, <b>Habilitado</b> (SI/NO) y <b>Fuente</b>.
                 Puede tener columnas extra (ignora si no matchea). Si el codigo ya existe se actualiza; si no, se inserta.
@@ -170,7 +170,7 @@
             <h3>Vaciar toda la BD de diagnosticos</h3>
             <button class="usu-modal-close" @onclick="() => _showConfirmClear = false">&times;</button>
         </div>
-        <div class="usu-modal-b">
+        <div class="usu-modal-body">
             <p>Esto borra <b>@_total</b> registros de forma permanente.</p>
             <p>Escribe la palabra <b>VACIAR</b> para confirmar.</p>
             <input class="form-control form-control-sm" @bind="_clearConfirm" @onkeyup="OnClearKey" />
@@ -183,6 +183,23 @@
 }
 
 <style>
+    /* Modal overlay (mismo patron usado en /cfg-usuarios y /cfg-profesionales) */
+    .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
+    .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 640px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .usu-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .usu-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .usu-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .usu-modal-body { padding: 18px; overflow: auto; }
+    .usu-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Grid de formulario dentro del modal */
+    .ase-form { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .ase-f { display: flex; flex-direction: column; gap: 4px; }
+    .ase-f label { font-size: 12px; font-weight: 600; color: #475569; }
+    .ase-f-wide { grid-column: 1 / -1; }
+    .ase-row-actions { display: flex; gap: 4px; }
+
+    /* Barra de progreso del import + log */
     .imp-progress { height:8px; background:#e2e8f0; border-radius:6px; overflow:hidden; }
     .imp-progress-bar { height:100%; background:#3b82f6; transition:width .3s; }
     .imp-log { max-height:180px; overflow:auto; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px; font-size:11px; margin-top:8px; }

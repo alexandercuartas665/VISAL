@@ -1,11 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class OrdenExternaService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit, TimeProvider time) : IOrdenExternaService
+public sealed class OrdenExternaService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IAuditWriter audit,
+    TimeProvider time,
+    IHistoriaPrefillService prefill) : IOrdenExternaService
 {
     public async Task<IReadOnlyList<OrdenExternaItemDto>> ListarPorHistoriaAsync(
         Guid historiaClinicaId, TipoCatalogoServicio tipo, CancellationToken ct = default)
@@ -39,6 +45,10 @@ public sealed class OrdenExternaService(IApplicationDbContext db, ITenantContext
         };
         db.HistoriaClinicaOrdenesExternas.Add(entity);
         await db.SaveChangesAsync(ct);
+        // Refresca las rutas prefill (rx_imagenologia / laboratorios /
+        // insumos_externos) que apunten a esta HC. Sin esto el ValoresJson
+        // del formulario no ve el item nuevo hasta que el usuario recargue.
+        await prefill.ActualizarValoresAsync(historiaClinicaId, ct);
         audit.Write(actorUserId, "hc-orden-externa.add", nameof(HistoriaClinicaOrdenExterna), entity.Id,
             previousValue: null,
             newValue: new { historiaClinicaId, tipo = tipo.ToString(), entity.Descripcion, entity.Codigo },
@@ -50,8 +60,10 @@ public sealed class OrdenExternaService(IApplicationDbContext db, ITenantContext
     {
         var e = await db.HistoriaClinicaOrdenesExternas.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (e is null) { return false; }
+        var hcId = e.HistoriaClinicaId;
         db.HistoriaClinicaOrdenesExternas.Remove(e);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         audit.Write(actorUserId, "hc-orden-externa.delete", nameof(HistoriaClinicaOrdenExterna), e.Id,
             previousValue: new { e.HistoriaClinicaId, tipo = e.Tipo.ToString(), e.Descripcion },
             newValue: null, tenantId: e.TenantId);

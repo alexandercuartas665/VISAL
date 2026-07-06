@@ -116,7 +116,10 @@ public static class PrefillSourceCatalog
             "incapacidades.lista_numerada",
             "certificaciones.lista_numerada",
             "ordenes_servicio.lista_numerada",
-            "insumos.lista_numerada"
+            "insumos.lista_numerada",
+            "rx_imagenologia.lista_numerada",
+            "laboratorios.lista_numerada",
+            "insumos_externos.lista_numerada"
         },
         // Firma del paciente: PNG/URL del archivo mas reciente en NotaMedicaDocumento
         // con categoria "Firma del Paciente" para el paciente activo. Se resuelve en
@@ -182,6 +185,23 @@ public static class PrefillSourceCatalog
             "codigoServicio", "descripcion", "cantidad", "observaciones"
         },
         ["insumos.lista_numerada"] = new[]
+        {
+            "codigo", "descripcion", "cantidad", "observaciones"
+        },
+        // Ordenes externas (RX Imagenologia / Laboratorios / Insumos externos).
+        // Todas comparten el mismo shape del item (OrdenExternaItemDto): codigo +
+        // descripcion + cantidad + observaciones. Al mapear a una tabla de HC
+        // (ej. "estudios solicitados") cualquiera de estos campos puede caer a
+        // una columna concreta desde el modal de rutas.
+        ["rx_imagenologia.lista_numerada"] = new[]
+        {
+            "codigo", "descripcion", "cantidad", "observaciones"
+        },
+        ["laboratorios.lista_numerada"] = new[]
+        {
+            "codigo", "descripcion", "cantidad", "observaciones"
+        },
+        ["insumos_externos.lista_numerada"] = new[]
         {
             "codigo", "descripcion", "cantidad", "observaciones"
         }

@@ -23,5 +23,7 @@ public enum CatalogoPacienteTipo
     /// <summary>RIPS - Finalidad de la consulta (proteccion especifica, diagnostico, tratamiento, etc).</summary>
     RipsFinalidadConsulta,
     /// <summary>RIPS - Causa externa que motiva la atencion (accidente, violencia, enfermedad general, etc).</summary>
-    RipsCausaExterna
+    RipsCausaExterna,
+    /// <summary>Regimen de afiliacion del paciente (contributivo, subsidiado, particular, especial, etc).</summary>
+    Regimen
 }

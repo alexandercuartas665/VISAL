@@ -158,7 +158,7 @@
            en formato nacional (10 digitos "3217626882") — necesita E.164
            completo "573217626882". Si el paciente no tiene codigo pais, cae
            a +57. WhatsAppChatPanel aplica SoloDigitos internamente. *@
-        <WhatsAppChatPanel Telefono="@PhoneFormatHelper.BuildFullDigits(PacienteActivo?.CodigoPaisTelefono, PacienteActivo?.Telefono)"
+        <WhatsAppChatPanel Telefono="@PhoneFormatHelper.BuildFullDigits(PacienteActivo?.CodigoPaisTelefono, Visal.Application.Common.PacienteTelefonoHelper.Principal(PacienteActivo?.Telefono))"
                            NombreContacto="@PacienteActivo?.NombreCompleto"
                            Cedula="@PacienteActivo?.NumeroDocumento"
                            PacienteId="@PacienteActivo?.Id"

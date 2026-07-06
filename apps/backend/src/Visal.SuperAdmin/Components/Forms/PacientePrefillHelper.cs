@@ -37,7 +37,9 @@ public static class PacientePrefillHelper
             ["edad"] = CalcularEdad(p.FechaNacimiento),
             ["sexo"] = p.Sexo,
             ["estadoCivil"] = p.EstadoCivil,
-            ["telefono"] = p.Telefono,
+            // Prefill: mostrar el primer telefono (el campo p.Telefono puede
+            // contener varios separados por "; ").
+            ["telefono"] = Visal.Application.Common.PacienteTelefonoHelper.Principal(p.Telefono),
             ["email"] = p.Email,
             ["direccion"] = p.Direccion,
             ["ciudad"] = p.Ciudad,

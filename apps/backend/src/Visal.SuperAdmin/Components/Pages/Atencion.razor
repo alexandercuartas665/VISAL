@@ -177,7 +177,7 @@ else
                 {
                     @* CodigoPais + Telefono para E.164 completo — Gupshup no
                        enruta numeros nacionales de 10 digitos. *@
-                    <WhatsAppChatPanel Telefono="@Visal.SuperAdmin.Components.Forms.PhoneFormatHelper.BuildFullDigits(_pacienteCtxNotas?.CodigoPaisTelefono, _pacienteCtxNotas?.Telefono)"
+                    <WhatsAppChatPanel Telefono="@Visal.SuperAdmin.Components.Forms.PhoneFormatHelper.BuildFullDigits(_pacienteCtxNotas?.CodigoPaisTelefono, Visal.Application.Common.PacienteTelefonoHelper.Principal(_pacienteCtxNotas?.Telefono))"
                                        NombreContacto="@sel.NombrePaciente"
                                        Cedula="@sel.NumeroDocPaciente"
                                        PacienteId="@sel.PacienteId"

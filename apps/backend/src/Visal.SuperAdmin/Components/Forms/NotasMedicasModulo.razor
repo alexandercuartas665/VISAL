@@ -1101,7 +1101,8 @@ else if (_tabSel == "Ver Historial")
         {
             // 1. Cargar el paciente para tener el telefono.
             var paciente = await PacientesSvc.GetAsync(pacienteId);
-            if (paciente?.Telefono is null or "")
+            var telefonoPrincipal = Visal.Application.Common.PacienteTelefonoHelper.Principal(paciente?.Telefono);
+            if (string.IsNullOrWhiteSpace(telefonoPrincipal))
             {
                 _firmaRemotaError = "El paciente no tiene telefono asignado. Edita su telefono desde el chat WhatsApp del modulo.";
                 return;
@@ -1118,7 +1119,7 @@ else if (_tabSel == "Ver Historial")
             }
 
             // 3. Crear la solicitud (o reutilizar la pendiente).
-            var req = await FirmaSvc.CrearOReutilizarAsync(notaId, pacienteId, paciente.Telefono!, paciente.NombreCompleto, Guid.Empty);
+            var req = await FirmaSvc.CrearOReutilizarAsync(notaId, pacienteId, telefonoPrincipal, paciente!.NombreCompleto, Guid.Empty);
             if (req is null)
             {
                 _firmaRemotaError = "No se pudo crear la solicitud de firma.";

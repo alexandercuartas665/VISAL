@@ -8,11 +8,13 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
 {
     private readonly IApplicationDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly IUsuarioAdminService _usuarios;
 
-    public ProfesionalConfigService(IApplicationDbContext db, ITenantContext tenant)
+    public ProfesionalConfigService(IApplicationDbContext db, ITenantContext tenant, IUsuarioAdminService usuarios)
     {
         _db = db;
         _tenant = tenant;
+        _usuarios = usuarios;
     }
 
     // ── Tipos ──
@@ -117,7 +119,8 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
         var subs = await _db.ProfesionalSubCategorias.AsNoTracking().Where(x => x.ProfesionalId == id).Select(x => x.SubCategoriaId).ToListAsync(ct);
         var ags = await _db.ProfesionalAgencias.AsNoTracking().Where(x => x.ProfesionalId == id).OrderBy(x => x.Agencia).Select(x => x.Agencia).ToListAsync(ct);
         return new ProfesionalDetailDto(p.Id, p.NumeroDocumento, p.TipoDocumento, p.PrimerNombre, p.SegundoNombre,
-            p.PrimerApellido, p.SegundoApellido, p.NombreCompleto, p.TipoProfesionalId, p.RegistroMedico, p.Ciudad, p.Celular, p.FirmaUrl, subs, ags);
+            p.PrimerApellido, p.SegundoApellido, p.NombreCompleto, p.TipoProfesionalId, p.RegistroMedico, p.Ciudad, p.Celular, p.FirmaUrl, subs, ags,
+            p.RolPredeterminadoId);
     }
 
     public async Task<ProfesionalDetailDto?> SaveProfesionalAsync(SaveProfesionalRequest req, Guid actor, CancellationToken ct = default)
@@ -156,6 +159,7 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
         p.Ciudad = req.Ciudad?.Trim();
         p.Celular = req.Celular?.Trim();
         p.FirmaUrl = req.FirmaUrl;
+        p.RolPredeterminadoId = req.RolPredeterminadoId;
         await _db.SaveChangesAsync(ct);
 
         var tenant = p.TenantId;
@@ -167,15 +171,50 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
             _db.ProfesionalSubCategorias.Add(new ProfesionalSubCategoria { TenantId = tenant, ProfesionalId = p.Id, SubCategoriaId = sid });
         }
         // Sincronizar agencias
+        var agenciasLimpias = req.Agencias.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).Distinct().ToList();
         var existingAgs = await _db.ProfesionalAgencias.Where(x => x.ProfesionalId == p.Id).ToListAsync(ct);
         _db.ProfesionalAgencias.RemoveRange(existingAgs);
-        foreach (var ag in req.Agencias.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).Distinct())
+        foreach (var ag in agenciasLimpias)
         {
             _db.ProfesionalAgencias.Add(new ProfesionalAgencia { TenantId = tenant, ProfesionalId = p.Id, Agencia = ag });
         }
         await _db.SaveChangesAsync(ct);
 
+        // Propagar rol + sedes al TenantUser vinculado si existe. Es un no-op si el
+        // profesional aun no tiene usuario de acceso — el rol queda persistido en
+        // Profesional.RolPredeterminadoId y se aplica cuando se cree el usuario.
+        await PropagarAlUsuarioVinculadoAsync(p.Id, req.RolPredeterminadoId, agenciasLimpias, actor, ct);
+
         return await GetProfesionalAsync(p.Id, ct);
+    }
+
+    /// <summary>Si existe TenantUser con ProfesionalId=<paramref name="profesionalId"/>,
+    /// llama a UsuarioAdminService.AsignarAsync para replicarle rol + sedes (traduciendo
+    /// nombres de sedes a IDs de Sucursal). Preserva el flag EsGlobal actual del usuario.</summary>
+    private async Task PropagarAlUsuarioVinculadoAsync(Guid profesionalId, Guid? rolId, IReadOnlyList<string> nombresSedes, Guid actor, CancellationToken ct)
+    {
+        var tu = await _db.TenantUsers.AsNoTracking().IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.ProfesionalId == profesionalId, ct);
+        if (tu is null) { return; }
+
+        // Preservar EsGlobal del PlatformUser: AsignarAsync lo puede escribir y no
+        // queremos degradar accidentalmente un usuario global cuando el operador
+        // solo esta editando el profesional.
+        var esGlobal = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters()
+            .Where(pu => pu.Id == tu.PlatformUserId)
+            .Select(pu => pu.EsGlobal)
+            .FirstOrDefaultAsync(ct);
+
+        // Traducir nombres de sedes a IDs. Sedes que no matcheen se ignoran.
+        Guid[] sucursalIds = Array.Empty<Guid>();
+        if (nombresSedes.Count > 0)
+        {
+            sucursalIds = await _db.Sucursales.AsNoTracking().IgnoreQueryFilters()
+                .Where(s => s.TenantId == tu.TenantId && nombresSedes.Contains(s.Nombre))
+                .Select(s => s.Id)
+                .ToArrayAsync(ct);
+        }
+        await _usuarios.AsignarAsync(tu.Id, rolId, sucursalIds, esGlobal, actor, ct);
     }
 
     public async Task<bool> DeleteProfesionalAsync(Guid id, Guid actor, CancellationToken ct = default)

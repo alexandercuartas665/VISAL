@@ -20,6 +20,12 @@ public class Profesional : TenantEntity
     public string? Ciudad { get; set; }
     public string? Celular { get; set; }
     public string? FirmaUrl { get; set; }
+
+    /// <summary>Rol de acceso predeterminado que se aplica al TenantUser vinculado
+    /// cuando el profesional se guarda. Si aun no hay usuario, queda persistido
+    /// para aplicarse al momento de crearlo. Null = no forzar rol (el usuario
+    /// mantiene el suyo o queda sin rol al crearlo).</summary>
+    public Guid? RolPredeterminadoId { get; set; }
 }
 
 /// <summary>Subcategorias asignadas a un profesional (N a N). Tenant-scoped.</summary>

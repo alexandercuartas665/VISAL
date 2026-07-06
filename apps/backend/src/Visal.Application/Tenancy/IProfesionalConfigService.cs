@@ -10,13 +10,19 @@ public sealed record ProfesionalDetailDto(
     Guid Id, string NumeroDocumento, string TipoDocumento, string? PrimerNombre, string? SegundoNombre,
     string? PrimerApellido, string? SegundoApellido, string NombreCompleto, Guid? TipoProfesionalId,
     string? RegistroMedico, string? Ciudad, string? Celular, string? FirmaUrl,
-    IReadOnlyList<Guid> SubCategoriaIds, IReadOnlyList<string> Agencias);
+    IReadOnlyList<Guid> SubCategoriaIds, IReadOnlyList<string> Agencias,
+    /// <summary>Rol de acceso predeterminado. Al guardar el profesional se aplica
+    /// al TenantUser vinculado (si existe). Null = no forzar.</summary>
+    Guid? RolPredeterminadoId);
 
 public sealed record SaveProfesionalRequest(
     Guid? Id, string NumeroDocumento, string TipoDocumento, string? PrimerNombre, string? SegundoNombre,
     string? PrimerApellido, string? SegundoApellido, string? NombreCompleto, Guid? TipoProfesionalId,
     string? RegistroMedico, string? Ciudad, string? Celular, string? FirmaUrl,
-    IReadOnlyList<Guid> SubCategoriaIds, IReadOnlyList<string> Agencias);
+    IReadOnlyList<Guid> SubCategoriaIds, IReadOnlyList<string> Agencias,
+    /// <summary>Rol de acceso predeterminado. Al guardar se persiste en el profesional
+    /// y ademas se propaga al TenantUser vinculado (si existe) junto con las sedes.</summary>
+    Guid? RolPredeterminadoId = null);
 
 /// <summary>Configuracion de profesionales y sus catalogos (tipo profesional, subcategorias). Tenant-scoped.</summary>
 public interface IProfesionalConfigService

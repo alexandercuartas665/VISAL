@@ -148,6 +148,25 @@
                 }
             </div>
 
+            <!-- Rol de acceso predeterminado. Se persiste en el profesional y se
+                 replica al TenantUser vinculado al guardar. Si aun no existe usuario,
+                 queda listo para aplicarse al momento de crearlo. -->
+            <div class="ase-card">
+                <div class="ase-card-h">Rol de acceso al sistema</div>
+                <select class="form-select form-select-sm" @bind="_rolPredeterminadoId">
+                    <option value="">(sin rol)</option>
+                    @foreach (var r in _roles)
+                    {
+                        <option value="@r.Id">@r.Nombre</option>
+                    }
+                </select>
+                <div class="ase-hint">
+                    Al guardar, este rol y las sedes de arriba se aplican
+                    automaticamente al usuario de acceso del profesional. Si aun no
+                    existe usuario, quedan guardados y se aplicaran al crearlo.
+                </div>
+            </div>
+
             <!-- Firma + usuario -->
             <div class="ase-card">
                 <div class="ase-card-h">Firma del profesional</div>
@@ -336,6 +355,8 @@
     private HashSet<Guid> _subSel = new();
     private List<string> _agencias = new();
     private List<SucursalDto> _sedes = new();
+    /// <summary>Rol de acceso predeterminado (persiste en Profesional + se replica al TenantUser al guardar).</summary>
+    private string _rolPredeterminadoId = "";
 
     private bool _busy;
     private string? _error, _ok;
@@ -356,7 +377,11 @@
     private void OpenCrearUsuario()
     {
         if (_id is null) { _error = "Guarda el profesional antes de crear su usuario."; return; }
-        _nuevoEmail = ""; _nuevoPwd = ""; _nuevoRolId = ""; _modalError = null;
+        _nuevoEmail = ""; _nuevoPwd = "";
+        // Pre-selecciona el rol persistido en el profesional. El operador puede
+        // cambiarlo al vuelo si lo desea.
+        _nuevoRolId = _rolPredeterminadoId;
+        _modalError = null;
         _showCrearUsuModal = true;
     }
 
@@ -413,7 +438,7 @@
     {
         _id = null; _doc = ""; _tipoDoc = "CC"; _nombreCompleto = _pNombre = _sNombre = _pApellido = _sApellido = null;
         _tipoProfId = ""; _registro = _ciudad = _celular = _firmaUrl = null;
-        _subSel = new(); _agencias = new();
+        _subSel = new(); _agencias = new(); _rolPredeterminadoId = "";
         _showForm = true; _error = _ok = null;
     }
 
@@ -428,6 +453,7 @@
         _registro = d.RegistroMedico; _ciudad = d.Ciudad; _celular = d.Celular; _firmaUrl = d.FirmaUrl;
         _subSel = new(d.SubCategoriaIds);
         _agencias = d.Agencias.ToList();
+        _rolPredeterminadoId = d.RolPredeterminadoId?.ToString() ?? "";
         // Usuario vinculado al profesional: lo detectamos por documento (el
         // PlatformUser hereda el documento del profesional al crearse desde
         // este modulo). Si no existe, _usuarioVinculado queda null y la UI
@@ -451,9 +477,10 @@
         try
         {
             Guid? tipoId = Guid.TryParse(_tipoProfId, out var tg) ? tg : null;
+            Guid? rolId = Guid.TryParse(_rolPredeterminadoId, out var rg) ? rg : null;
             var req = new SaveProfesionalRequest(_id, _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido,
                 _nombreCompleto, tipoId, _registro, _ciudad, _celular, _firmaUrl,
-                _subSel.ToList(), _agencias);
+                _subSel.ToList(), _agencias, rolId);
             var saved = await Svc.SaveProfesionalAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id);
@@ -602,26 +629,51 @@
                         firmaUrl = $"/uploads/firmas/{name}";
                     }
 
+                    // Resolver rol del Excel (si viene y matchea). Si no, se
+                    // usara como fallback el rol persistido del profesional
+                    // existente — asi el import no pisa a null al hacer upsert.
+                    Guid? rolIdImportRow = null;
+                    if (!string.IsNullOrWhiteSpace(rolNombre))
+                    {
+                        var rolMatch = _roles.FirstOrDefault(x => string.Equals(x.Nombre.Trim(), rolNombre, StringComparison.OrdinalIgnoreCase));
+                        if (rolMatch is not null) { rolIdImportRow = rolMatch.Id; }
+                    }
+
                     Guid? id = null;
+                    // Upsert: cargar detalle actual para preservar campos que el
+                    // Excel deje vacios (regla acordada: import no pisa datos
+                    // existentes cuando la celda viene vacia).
+                    ProfesionalDetailDto? detExistente = null;
                     if (byDoc.TryGetValue(doc, out var existing))
                     {
                         id = existing.Id;
-                        if (firmaUrl is null)
-                        {
-                            // upsert sin firma nueva: preserve la actual
-                            var det = await Svc.GetProfesionalAsync(existing.Id);
-                            firmaUrl = det?.FirmaUrl;
-                        }
+                        detExistente = await Svc.GetProfesionalAsync(existing.Id);
+                        if (firmaUrl is null) { firmaUrl = detExistente?.FirmaUrl; }
                     }
 
                     var nombreCompleto = string.Join(' ', new[] { pn, sn, pa, sa }.Where(s => !string.IsNullOrWhiteSpace(s)));
-                    var agencias = string.IsNullOrWhiteSpace(_importSede)
-                        ? new List<string>()
-                        : new List<string> { _importSede.Trim() };
+                    // Sedes: si el Excel no trae sede seleccionada y el profesional
+                    // ya existia con sedes asignadas, las preservamos.
+                    List<string> agencias;
+                    if (!string.IsNullOrWhiteSpace(_importSede))
+                    {
+                        agencias = new List<string> { _importSede.Trim() };
+                    }
+                    else if (detExistente is not null && detExistente.Agencias.Count > 0)
+                    {
+                        agencias = detExistente.Agencias.ToList();
+                    }
+                    else
+                    {
+                        agencias = new List<string>();
+                    }
+
+                    // Rol: si no viene o no matchea, preservamos el rol persistido.
+                    var rolIdParaGuardar = rolIdImportRow ?? detExistente?.RolPredeterminadoId;
 
                     var req = new SaveProfesionalRequest(id, doc, tipoDoc,
                         pn, sn, pa, sa, nombreCompleto, tipo.Id, registro, ciudad, celular, firmaUrl,
-                        subcatIds, agencias);
+                        subcatIds, agencias, rolIdParaGuardar);
                     var saved = await Svc.SaveProfesionalAsync(req, actor);
                     if (saved is null)
                     {
@@ -661,6 +713,11 @@
                             try
                             {
                                 await UsuSvc.CrearUsuarioDesdeProfesionalAsync(saved.Id, email, pwd, rolIdOk, actor);
+                                // Re-guardar para que el servicio propague sedes al TenantUser
+                                // recien creado (CrearUsuarioDesdeProfesionalAsync no asigna
+                                // sedes; el segundo Save del profesional dispara la
+                                // propagacion completa).
+                                await Svc.SaveProfesionalAsync(req, actor);
                             }
                             catch (InvalidOperationException ex)
                             {

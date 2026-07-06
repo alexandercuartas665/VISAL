@@ -437,6 +437,23 @@ app.MapPost("/auth/reset", async (
 
 // Inicia el flujo OIDC con Google: arma la URL de challenge y guarda un state (proteccion CSRF).
 // Con mode=signup se recuerda el nombre de la agencia para crear el tenant al volver del callback.
+// Feed anonimo del dropdown SEDE del login. El cliente lo consulta cuando el usuario
+// termina de escribir su correo/documento para reducir el listado a solo las sedes
+// asignadas. Ver ISedeCatalogoPublicoService.ListParaUsuarioAsync para la regla de
+// fallback anti-enumeracion.
+app.MapGet("/api/login/sedes", async (
+    [FromQuery] string? usuario,
+    Visal.Application.Tenancy.ISedeCatalogoPublicoService sedes,
+    CancellationToken ct) =>
+{
+    var data = await sedes.ListParaUsuarioAsync(usuario ?? string.Empty, ct);
+    return Results.Json(new
+    {
+        mostrarGlobal = data.MostrarGlobal,
+        sedes = data.Sedes.Select(s => new { id = s.Id, nombre = s.Nombre })
+    });
+}).AllowAnonymous();
+
 app.MapGet("/connect/google", async (
     HttpContext http,
     [FromQuery] string? mode,

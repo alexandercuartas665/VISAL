@@ -211,6 +211,69 @@
             window.location = '/connect/google?mode=signup&agency=' + encodeURIComponent(agency);
         }
     };
+
+    // Al escribir el usuario en el login, filtramos el dropdown SEDE a las sedes
+    // que ese usuario tiene asignadas. Si el usuario no existe, el backend devuelve
+    // el listado completo (fallback anti-enumeracion), asi no revelamos existencia.
+    (function () {
+        var usuarioInput = document.getElementById('login-usuario');
+        var sedeSelect = document.getElementById('login-sede');
+        if (!usuarioInput || !sedeSelect) return;
+
+        var lastQuery = null;
+        var pending = null;
+
+        function refreshSedes() {
+            var q = (usuarioInput.value || '').trim();
+            if (q === lastQuery) return;
+            lastQuery = q;
+
+            fetch('/api/login/sedes?usuario=' + encodeURIComponent(q), {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin'
+            })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (data) {
+                    if (!data) return;
+                    var previo = sedeSelect.value;
+                    sedeSelect.innerHTML = '';
+                    var ph = document.createElement('option');
+                    ph.value = '';
+                    ph.disabled = true;
+                    ph.selected = true;
+                    ph.textContent = 'Selecciona SEDE';
+                    sedeSelect.appendChild(ph);
+
+                    if (data.mostrarGlobal) {
+                        var g = document.createElement('option');
+                        g.value = 'GLOBAL';
+                        g.textContent = 'GLOBAL';
+                        sedeSelect.appendChild(g);
+                    }
+                    (data.sedes || []).forEach(function (s) {
+                        var opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.nombre;
+                        sedeSelect.appendChild(opt);
+                    });
+
+                    if (previo) {
+                        var match = Array.prototype.find.call(sedeSelect.options, function (o) { return o.value === previo; });
+                        if (match) { sedeSelect.value = previo; }
+                    }
+                })
+                .catch(function () { /* silencioso: dejamos el listado actual */ });
+        }
+
+        function schedule() {
+            if (pending) { clearTimeout(pending); }
+            pending = setTimeout(refreshSedes, 250);
+        }
+
+        usuarioInput.addEventListener('change', refreshSedes);
+        usuarioInput.addEventListener('blur', refreshSedes);
+        usuarioInput.addEventListener('input', schedule);
+    })();
 </script>
 
 @code {

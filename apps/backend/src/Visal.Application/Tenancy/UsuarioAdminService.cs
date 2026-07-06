@@ -49,6 +49,18 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             .ToList();
     }
 
+    public async Task<UsuarioDto?> GetPorProfesionalIdAsync(Guid profesionalId, CancellationToken ct = default)
+    {
+        // Busca el TenantUser por FK y reusa la logica de listado para armar el DTO.
+        // Justificacion: matchear por documento fallaba en usuarios legacy con
+        // platform_users.documento NULL (ej. demo-admin). El vinculo autoritativo
+        // es TenantUser.ProfesionalId.
+        var tu = await _db.TenantUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.ProfesionalId == profesionalId, ct);
+        if (tu is null) { return null; }
+        return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tu.Id);
+    }
+
     public async Task<UsuarioDto?> ActualizarPerfilAsync(Guid tenantUserId, ActualizarPerfilUsuarioRequest req, Guid actor, CancellationToken ct = default)
     {
         var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);

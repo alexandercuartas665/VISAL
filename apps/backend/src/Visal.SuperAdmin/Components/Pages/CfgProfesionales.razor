@@ -557,13 +557,11 @@
         _subSel = new(d.SubCategoriaIds);
         _agencias = d.Agencias.ToList();
         _rolPredeterminadoId = d.RolPredeterminadoId?.ToString() ?? "";
-        // Usuario vinculado al profesional: lo detectamos por documento (el
-        // PlatformUser hereda el documento del profesional al crearse desde
-        // este modulo). Si no existe, _usuarioVinculado queda null y la UI
-        // muestra el CTA "Crear usuario".
-        _usuarioVinculado = string.IsNullOrWhiteSpace(_doc)
-            ? null
-            : (await UsuSvc.ListAsync()).FirstOrDefault(u => u.Documento == _doc);
+        // Usuario vinculado: usamos el FK autoritativo TenantUser.ProfesionalId
+        // en lugar de matchear por documento. El match por documento fallaba
+        // para usuarios legacy con platform_users.documento NULL (ej. demo-admin
+        // vinculado al profesional ADMINISTRADOR AGENCIA DEMO).
+        _usuarioVinculado = await UsuSvc.GetPorProfesionalIdAsync(id);
         _showForm = true; _error = _ok = null;
     }
 

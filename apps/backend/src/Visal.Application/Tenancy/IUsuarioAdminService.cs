@@ -56,4 +56,9 @@ public interface IUsuarioAdminService
     /// El TenantUser queda vinculado al profesional via ProfesionalId.
     /// </summary>
     Task<UsuarioDto?> CrearUsuarioDesdeProfesionalAsync(Guid profesionalId, string email, string password, Guid? rolId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Devuelve el TenantUser vinculado al profesional (via ProfesionalId FK)
+    /// o null si aun no tiene usuario. Usado por la UI de Profesionales para saber
+    /// si el modal debe mostrarse en modo Crear o Actualizar.</summary>
+    Task<UsuarioDto?> GetPorProfesionalIdAsync(Guid profesionalId, CancellationToken ct = default);
 }

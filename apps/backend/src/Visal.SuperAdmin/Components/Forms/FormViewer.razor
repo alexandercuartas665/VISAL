@@ -809,20 +809,19 @@ else
         var val = GetValue(key) ?? node.DefaultValue ?? "";
         var ro = IsNodeReadOnly(node);
 
-        // Caso especial: campo de firma con URL -> mostrar la imagen ademas
-        // del input de texto. Esto cubre firma_paciente_consent,
-        // firma_profesional_consent, y cualquier otro campo cuyo name contenga
-        // "firma" y reciba una URL como valor (clip de FirmasPrefillHelper o
-        // pegado manualmente por el usuario).
+        // Caso especial: campo de firma con URL -> mostrar solo la imagen.
+        // Cubre firma_paciente_consent, firma_profesional_consent, y cualquier
+        // otro campo cuyo name contenga "firma" y reciba una URL o data URI
+        // (clip de FirmasPrefillHelper). Se omite input crudo a proposito:
+        // los data URIs base64 tienen miles de caracteres y ensucian la vista,
+        // y nadie va a editar una URL/data URI de firma a mano. El valor
+        // persiste via el estado ya cargado por GetValue/SetValue.
         if (IsFirmaField(node.Name) && IsImageUrlLike(val))
         {
             <div class="fv-firma-prev">
                 <img src="@val" alt="firma" class="fv-firma-img"
                      style="max-height:90px;max-width:100%;border:1px solid #e2e8f0;border-radius:4px;background:#fff;padding:4px;display:block;margin-bottom:6px;" />
             </div>
-            <input type="text" class="form-control form-control-sm"
-                   disabled="@ro" value="@val"
-                   @onchange="e => SetValue(key, e.Value?.ToString())" />
             return;
         }
 

@@ -4,7 +4,7 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantContext tenant) : IHistoriaClinicaService
+public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -127,9 +127,18 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
         {
             throw new InvalidOperationException("No se puede cerrar una historia inactiva.");
         }
+        var estadoPrev = e.Estado;
         e.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
+        // Auditoria antes de SaveChanges: audit.Write solo agrega la entrada al
+        // DbContext; los cambios se persisten en el mismo SaveChangesAsync que
+        // guarda la HC, garantizando atomicidad (mismo patron que el resto del
+        // codebase — ver FormDefinitionService, WhatsAppLineService, etc.).
+        audit.Write(actor, "historia-clinica.cerrar", nameof(HistoriaClinica), e.Id,
+            previousValue: new { estado = estadoPrev.ToString() },
+            newValue: new { estado = e.Estado.ToString(), fechaCierre = e.FechaCierre, pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
+            tenantId: e.TenantId);
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -142,8 +151,17 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
         {
             throw new InvalidOperationException("Solo se puede reabrir una historia que este Cerrada.");
         }
+        var fechaCierrePrev = e.FechaCierre;
         e.Estado = HistoriaClinicaEstado.Abierta;
         e.FechaCierre = null;
+        // Auditoria critica: reabrir una HC cerrada es una accion administrativa
+        // que debe quedar trazada — que usuario reabrio, cuando, sobre que HC
+        // y de que paciente. En caso de disputas clinicas o auditoria externa
+        // (SOAT, Supersalud) este es el rastro para reconstruir el flujo.
+        audit.Write(actor, "historia-clinica.reabrir", nameof(HistoriaClinica), e.Id,
+            previousValue: new { estado = HistoriaClinicaEstado.Cerrada.ToString(), fechaCierre = fechaCierrePrev },
+            newValue: new { estado = e.Estado.ToString(), pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
+            tenantId: e.TenantId);
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -152,9 +170,14 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
     {
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
         if (e is null) { return false; }
+        var estadoPrev = e.Estado;
         e.Estado = HistoriaClinicaEstado.Inactiva;
         e.MotivoInactivacion = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim();
         e.FechaCierre = DateTimeOffset.UtcNow;
+        audit.Write(actor, "historia-clinica.descartar", nameof(HistoriaClinica), e.Id,
+            previousValue: new { estado = estadoPrev.ToString() },
+            newValue: new { estado = e.Estado.ToString(), motivo = e.MotivoInactivacion, fechaCierre = e.FechaCierre, pacienteId = e.PacienteId },
+            tenantId: e.TenantId);
         await db.SaveChangesAsync(ct);
         return true;
     }

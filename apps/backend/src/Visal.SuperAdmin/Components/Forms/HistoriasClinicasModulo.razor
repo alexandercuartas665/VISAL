@@ -1037,10 +1037,32 @@
     }
 
     /// <summary>
-    /// Solo un administrador del tenant (Owner/Admin) o un super admin de
-    /// plataforma puede reabrir una HC ya cerrada. La reapertura vuelve la HC a
-    /// estado Abierta permitiendo editar valores. Se resuelve una sola vez al
-    /// inicializar el componente leyendo los claims.
+    /// Resuelve el Guid del PlatformUser logueado a partir del claim
+    /// NameIdentifier — es el actor a pasar a los servicios que llevan
+    /// auditoria (Cerrar, Reabrir, Descartar HC). Devuelve Guid.Empty si no
+    /// se puede resolver (auditoria degradada pero no bloquea la accion).
+    /// </summary>
+    private async Task<Guid> ResolverActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var state = await AuthState;
+            var idStr = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(idStr, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
+    }
+
+    /// <summary>
+    /// Determina si el usuario logueado puede reabrir una HC cerrada. Tres vias
+    /// dan el permiso (el orden refleja precedencia, aunque cualquiera basta):
+    ///   1) Rol tenant Owner o Admin.
+    ///   2) SuperAdmin de plataforma.
+    ///   3) El rol asignado tiene marcado el permiso "historias.reabrir" en
+    ///      /cfg-roles (se lee del claim "perms" que trae el token, un CSV con
+    ///      los modulos con Ver=true del rol del usuario).
+    /// Se resuelve una sola vez al inicializar el componente.
     /// </summary>
     private async Task ResolverPuedeReabrirAsync()
     {
@@ -1050,12 +1072,17 @@
             var state = await AuthState;
             var tenantRole = state.User.FindFirst("tenant_role")?.Value;
             var platformRole = state.User.FindFirst("platform_role")?.Value;
-            // Roles administrativos del tenant que pueden reabrir HC.
             var esAdminTenant = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
                              || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase);
-            // Super admin de plataforma siempre puede.
             var esSuperAdmin = string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
-            _puedeReabrir = esAdminTenant || esSuperAdmin;
+            // Permiso granular del rol: el claim "perms" es un CSV de los
+            // modulos con Ver=true; si contiene "historias.reabrir" el usuario
+            // tiene el permiso administrativo aunque no sea Owner/Admin.
+            var perms = state.User.FindFirst("perms")?.Value;
+            var tienePermiso = !string.IsNullOrEmpty(perms)
+                && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(p => string.Equals(p.Trim(), "historias.reabrir", StringComparison.OrdinalIgnoreCase));
+            _puedeReabrir = esAdminTenant || esSuperAdmin || tienePermiso;
         }
         catch { _puedeReabrir = false; }
     }
@@ -1674,7 +1701,7 @@
                 "");
             if (string.IsNullOrWhiteSpace(motivo)) { return; }
 
-            await HcSvc.DescartarAsync(h.Id, motivo.Trim(), Guid.Empty);
+            await HcSvc.DescartarAsync(h.Id, motivo.Trim(), await ResolverActorAsync());
             h.Estado = "Inactiva";
             h.MotivoInactivacion = motivo.Trim();
         }
@@ -1697,7 +1724,7 @@
         _autosaveCts?.Cancel();
         if (_historiaSel is HistoriaRow h)
         {
-            await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), Guid.Empty);
+            await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), await ResolverActorAsync());
             h.Estado = "Cerrada";
         }
         _schemaActual = null; _valores = new();
@@ -1725,7 +1752,7 @@
 
         try
         {
-            await HcSvc.ReabrirAsync(h.Id, Guid.Empty);
+            await HcSvc.ReabrirAsync(h.Id, await ResolverActorAsync());
             h.Estado = "Abierta";
             _imprimirMsg = "Historia reabierta. Ahora puedes editarla y guardarla definitivamente cuando termines.";
             // Recargamos la HC seleccionada para que la vista muestre el schema

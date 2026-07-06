@@ -13,6 +13,12 @@ public static class ModuloCatalogo
         new("profesionales", "Profesionales (atencion)", "Operacion Clinica"),
         new("turnos", "Turnos", "Operacion Clinica"),
         new("historias", "Historias Clinicas", "Operacion Clinica"),
+        // Permiso administrativo: reabrir una HC previamente cerrada (marcarla
+        // como Abierta y limpiar FechaCierre para permitir editarla de nuevo).
+        // Sin este permiso, el rol solo puede consultar las HC cerradas. Los
+        // roles tenant Owner/Admin y el SuperAdmin de plataforma tienen este
+        // permiso implicitamente aunque el rol no lo tenga marcado.
+        new("historias.reabrir", "Historias Clinicas - Reabrir HC cerrada", "Operacion Clinica"),
         new("notas", "Notas Medicas", "Operacion Clinica"),
         new("ordenes", "Ordenes Clinicas", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),

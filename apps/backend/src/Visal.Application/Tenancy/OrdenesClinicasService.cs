@@ -93,12 +93,51 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             .GroupBy(x => x.HistoriaClinicaId)
             .Select(g => new { Id = g.Key, N = g.Count() })
             .ToListAsync(ct);
+        var insCounts = await db.HistoriaClinicaInsumos.AsNoTracking()
+            .Where(x => hcIds.Contains(x.HistoriaClinicaId))
+            .GroupBy(x => x.HistoriaClinicaId)
+            .Select(g => new { Id = g.Key, N = g.Count() })
+            .ToListAsync(ct);
+        // Ordenes externas: agrupamos por HC y por tipo para no traer las 3 en
+        // 3 queries separadas. Filtro por hcIds en una sola pasada.
+        var extCounts = await db.HistoriaClinicaOrdenesExternas.AsNoTracking()
+            .Where(x => hcIds.Contains(x.HistoriaClinicaId))
+            .GroupBy(x => new { x.HistoriaClinicaId, x.Tipo })
+            .Select(g => new { g.Key.HistoriaClinicaId, g.Key.Tipo, N = g.Count() })
+            .ToListAsync(ct);
+        var escCounts = await db.HistoriaClinicaEscalas.AsNoTracking()
+            .Where(x => hcIds.Contains(x.HistoriaClinicaId))
+            .GroupBy(x => x.HistoriaClinicaId)
+            .Select(g => new { Id = g.Key, N = g.Count() })
+            .ToListAsync(ct);
+        var docCounts = await db.HistoriaClinicaDocumentos.AsNoTracking()
+            .Where(x => hcIds.Contains(x.HistoriaClinicaId))
+            .GroupBy(x => new { x.HistoriaClinicaId, x.Tipo })
+            .Select(g => new { g.Key.HistoriaClinicaId, g.Key.Tipo, N = g.Count() })
+            .ToListAsync(ct);
 
         var med = medCounts.ToDictionary(x => x.Id, x => x.N);
         var srv = srvCounts.ToDictionary(x => x.Id, x => x.N);
         var rem = remCounts.ToDictionary(x => x.Id, x => x.N);
         var inc = incCounts.ToDictionary(x => x.Id, x => x.N);
         var cert = certCounts.ToDictionary(x => x.Id, x => x.N);
+        var ins = insCounts.ToDictionary(x => x.Id, x => x.N);
+        var esc = escCounts.ToDictionary(x => x.Id, x => x.N);
+        var rxImag = extCounts
+            .Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia)
+            .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
+        var labExt = extCounts
+            .Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio)
+            .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
+        var insExt = extCounts
+            .Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.Insumo)
+            .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
+        var evo = docCounts
+            .Where(x => x.Tipo == "EVOLUCION")
+            .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
+        var con = docCounts
+            .Where(x => x.Tipo == "CONSENTIMIENTO")
+            .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
 
         return rows.Select(r => new OrdenClinicaItemDto(
             r.Hc.Id,
@@ -115,7 +154,14 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             srv.GetValueOrDefault(r.Hc.Id, 0),
             rem.GetValueOrDefault(r.Hc.Id, 0),
             inc.GetValueOrDefault(r.Hc.Id, 0),
-            cert.GetValueOrDefault(r.Hc.Id, 0)
+            cert.GetValueOrDefault(r.Hc.Id, 0),
+            ins.GetValueOrDefault(r.Hc.Id, 0),
+            rxImag.GetValueOrDefault(r.Hc.Id, 0),
+            labExt.GetValueOrDefault(r.Hc.Id, 0),
+            insExt.GetValueOrDefault(r.Hc.Id, 0),
+            esc.GetValueOrDefault(r.Hc.Id, 0),
+            evo.GetValueOrDefault(r.Hc.Id, 0),
+            con.GetValueOrDefault(r.Hc.Id, 0)
         )).ToList();
     }
 

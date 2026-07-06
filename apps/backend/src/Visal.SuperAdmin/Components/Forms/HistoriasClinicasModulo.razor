@@ -177,8 +177,29 @@
                     &#128221; Iniciar historia medica
                 </button>
                 <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Abrir vista documento en nueva pestana para imprimir o guardar PDF">&#128424; Imprimir</button>
-                <button class="btn btn-danger btn-sm" disabled="@(_schemaActual is null)" @onclick="Descartar">&#128465; Descartar</button>
-                <button class="btn btn-outline-secondary btn-sm" disabled="@(_schemaActual is null)" @onclick="Cerrar">&#10006; Cerrar</button>
+                @* Descartar y Guardar definitivamente solo aplican mientras la HC este Abierta.
+                   Cuando esta Cerrada mostramos Reabrir para usuarios con permiso administrativo. *@
+                @if (_historiaSel is null || string.Equals(_historiaSel.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+                {
+                    <button class="btn btn-danger btn-sm" disabled="@(_schemaActual is null)" @onclick="Descartar">&#128465; Descartar</button>
+                    <button class="btn btn-outline-secondary btn-sm" disabled="@(_schemaActual is null)" @onclick="Cerrar"
+                            title="Cierra la historia clinica y la marca como Cerrada. Solo un administrador puede reabrirla despues.">
+                        &#10004; Guardar definitivamente
+                    </button>
+                }
+                else if (string.Equals(_historiaSel.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase) && _puedeReabrir)
+                {
+                    <button class="btn btn-warning btn-sm" @onclick="Reabrir"
+                            title="Reabre la historia clinica para permitir editar. Requiere permiso administrativo.">
+                        &#128275; Reabrir historia
+                    </button>
+                }
+                else if (string.Equals(_historiaSel.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase))
+                {
+                    <span class="hc-est-lock" title="Solo un usuario con permiso administrativo puede reabrir esta HC.">
+                        &#128274; Cerrada definitivamente
+                    </span>
+                }
                 @* Indicador de autoguardado. Solo se muestra cuando hay HC abierta. *@
                 @if (_historiaSel is not null && string.Equals(_historiaSel.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
                 {
@@ -692,6 +713,8 @@
 
     .hc-actions { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
     .hc-info-msg { padding: 8px 14px; background: #ecfdf5; border-left: 3px solid #16a34a; font-size: 12px; color: #166534; }
+    /* Chip que se muestra cuando la HC esta Cerrada y el usuario NO tiene permiso para reabrirla. */
+    .hc-est-lock { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: #e2e8f0; color: #475569; }
     .hc-autosave { margin-left: auto; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; transition: background-color .25s, color .25s; }
     .hc-autosave-limpio    { background: #f1f5f9; color: #475569; }
     .hc-autosave-sucio     { background: #fef3c7; color: #92400e; }
@@ -826,6 +849,9 @@
     private int _rxExtCount, _labExtCount, _insExtCount;
     /// <summary>Estado de colapso del menu lateral. False = visible con etiquetas, true = solo iconos.</summary>
     private bool _menuColapsado;
+    /// <summary>True si el usuario logueado tiene permiso administrativo para reabrir una HC cerrada.
+    /// Se calcula en OnInitializedAsync leyendo los claims tenant_role/platform_role.</summary>
+    private bool _puedeReabrir;
     /// <summary>Estado de colapso de la columna del chat WhatsApp (lateral derecha).
     /// Inicia en true (colapsado) para que el doctor no tenga el chat encima desde el
     /// arranque; lo expande con un click cuando necesita escribir al paciente.</summary>
@@ -1006,7 +1032,32 @@
             _formatoForzadoNombre = match?.Nombre;
         }
         await CargarNombreTenantAsync();
+        await ResolverPuedeReabrirAsync();
         await AutoCargarHcEnCursoSiCorrespondeAsync();
+    }
+
+    /// <summary>
+    /// Solo un administrador del tenant (Owner/Admin) o un super admin de
+    /// plataforma puede reabrir una HC ya cerrada. La reapertura vuelve la HC a
+    /// estado Abierta permitiendo editar valores. Se resuelve una sola vez al
+    /// inicializar el componente leyendo los claims.
+    /// </summary>
+    private async Task ResolverPuedeReabrirAsync()
+    {
+        if (AuthState is null) { _puedeReabrir = false; return; }
+        try
+        {
+            var state = await AuthState;
+            var tenantRole = state.User.FindFirst("tenant_role")?.Value;
+            var platformRole = state.User.FindFirst("platform_role")?.Value;
+            // Roles administrativos del tenant que pueden reabrir HC.
+            var esAdminTenant = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase);
+            // Super admin de plataforma siempre puede.
+            var esSuperAdmin = string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+            _puedeReabrir = esAdminTenant || esSuperAdmin;
+        }
+        catch { _puedeReabrir = false; }
     }
 
     /// <summary>
@@ -1633,6 +1684,14 @@
 
     private async Task Cerrar()
     {
+        // Confirmacion explicita: guardar definitivamente cierra la HC y solo un
+        // administrador con permiso puede reabrirla. Advertimos al usuario para
+        // evitar cierres accidentales.
+        var confirmar = await JS.InvokeAsync<bool>("confirm",
+            "Vas a GUARDAR DEFINITIVAMENTE esta historia clinica.\n\n" +
+            "Despues del cierre no podras editarla; solo un administrador con permiso especial podra reabrirla.\n\n" +
+            "¿Confirmas el cierre?");
+        if (!confirmar) { return; }
         // Cancelamos cualquier autoguardado pendiente — CerrarAsync ya persiste los
         // valores actuales como parte del cierre.
         _autosaveCts?.Cancel();
@@ -1645,6 +1704,38 @@
         _imprimirMsg = null;
         _saveStatus = "limpio";
         _ultimoGuardado = null;
+    }
+
+    /// <summary>
+    /// Reabre una HC previamente Cerrada. Solo se ejecuta si el usuario tiene el
+    /// permiso administrativo (_puedeReabrir) — el boton no se renderiza para el
+    /// resto. Vuelve la HC a estado Abierta y recarga la vista para permitir edicion.
+    /// </summary>
+    private async Task Reabrir()
+    {
+        if (!_puedeReabrir) { return; }
+        if (_historiaSel is not HistoriaRow h) { return; }
+        if (!string.Equals(h.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase)) { return; }
+
+        var confirmar = await JS.InvokeAsync<bool>("confirm",
+            "Vas a REABRIR esta historia clinica cerrada.\n\n" +
+            "La HC volvera a estado Abierta y podras editarla nuevamente.\n\n" +
+            "¿Confirmas la reapertura?");
+        if (!confirmar) { return; }
+
+        try
+        {
+            await HcSvc.ReabrirAsync(h.Id, Guid.Empty);
+            h.Estado = "Abierta";
+            _imprimirMsg = "Historia reabierta. Ahora puedes editarla y guardarla definitivamente cuando termines.";
+            // Recargamos la HC seleccionada para que la vista muestre el schema
+            // en modo editable (Seleccionar() decide readonly segun estado).
+            await Seleccionar(h);
+        }
+        catch (Exception ex)
+        {
+            _imprimirMsg = $"No se pudo reabrir la HC: {ex.Message}";
+        }
     }
 
     /// <summary>

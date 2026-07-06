@@ -16,14 +16,23 @@ public sealed record OrdenClinicaItemDto(
     int ServiciosCount,
     int RemisionesCount,
     int IncapacidadesCount,
-    int CertificacionesCount);
+    int CertificacionesCount,
+    int InsumosCount = 0,
+    int RxImagCount = 0,
+    int LabExtCount = 0,
+    int InsExtCount = 0,
+    int EscalasCount = 0,
+    int EvolucionesCount = 0,
+    int ConsentimientosCount = 0);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,
     DateOnly? Desde = null,
     DateOnly? Hasta = null,
     string? Especialista = null,
-    bool SoloCerradas = true);
+    // Por defecto ahora traemos todas (abiertas + cerradas). El listado marca
+    // el estado con un tag y la UI bloquea Consultar/Imprimir para las abiertas.
+    bool SoloCerradas = false);
 
 public interface IOrdenesClinicasService
 {

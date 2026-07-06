@@ -72,6 +72,12 @@ public interface IHistoriaClinicaService
     /// <summary>Cambia el estado a Cerrada y registra FechaCierre. Persiste los valores que llegan.</summary>
     Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
 
+    /// <summary>Reabre una HC previamente Cerrada volviendo su estado a Abierta y
+    /// limpiando FechaCierre. Solo se permite si estaba Cerrada (no aplica a
+    /// Inactiva). El caller debe validar el permiso administrativo del actor
+    /// antes de invocar este metodo.</summary>
+    Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default);
+
     /// <summary>Marca como Inactiva (descarte) con motivo opcional.</summary>
     Task<bool> DescartarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default);
 

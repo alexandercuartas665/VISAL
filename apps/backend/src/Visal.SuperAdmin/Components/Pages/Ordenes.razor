@@ -9,10 +9,13 @@
 @*
    Modulo "Ordenes Clinicas". Vista de consulta + reimpresion (sin edicion).
    Filtros: paciente (texto), rango de fechas (cierre), especialista (dropdown).
-   Listado ordenado alfabeticamente por paciente, secundario por fecha de cierre desc.
+   Ahora incluye HC Abiertas ademas de Cerradas — las abiertas se marcan con un
+   tag y sus botones Consultar/Imprimir quedan deshabilitados (no se pueden
+   consultar ni imprimir hasta que el profesional las cierre definitivamente).
+   Listado ordenado alfabeticamente por paciente, secundario por fecha desc.
    Cada fila muestra los conteos de cada tipo de orden ligado a esa HC.
-   El boton "Imprimir" abre /imprimir-paquete con todos los documentos disponibles.
-   El boton "Consultar" abre /imprimir-paquete tambien (es la misma vista read-only).
+   El boton "Imprimir" abre un modal con checkboxes de todos los documentos
+   disponibles para que el usuario elija cuales imprimir.
 *@
 
 <PageTitle>Ordenes Clinicas - Visal</PageTitle>
@@ -21,7 +24,7 @@
     <div>
         <div class="ase-eyebrow">Operacion Clinica</div>
         <h1 class="ase-title">Ordenes Clinicas</h1>
-        <small class="text-muted">Consulta y reimpresion de historias clinicas cerradas.</small>
+        <small class="text-muted">Consulta y reimpresion de historias clinicas. Las abiertas aparecen listadas pero no se pueden consultar ni imprimir.</small>
     </div>
 </div>
 
@@ -51,6 +54,14 @@
                 }
             </select>
         </div>
+        <div class="oc-f">
+            <label>Estado</label>
+            <select class="form-select form-select-sm" @bind="_estadoFiltro">
+                <option value="">(Todas)</option>
+                <option value="Cerrada">Solo Cerradas</option>
+                <option value="Abierta">Solo Abiertas</option>
+            </select>
+        </div>
         <div class="oc-f oc-f-acts">
             <button class="btn btn-primary btn-sm" @onclick="Buscar" disabled="@_buscando">
                 @(_buscando ? "Buscando..." : "🔍 Buscar")
@@ -62,7 +73,7 @@
     </div>
 
     <div class="oc-grid-h">
-        Historias clinicas cerradas (@_rows.Count)
+        Historias clinicas (@_rows.Count)
         @if (_rows.Count >= 500)
         {
             <span class="oc-warn">- mostrando primeros 500. Refina los filtros para ver mas.</span>
@@ -89,40 +100,79 @@
                         <th style="width:160px">Documento</th>
                         <th>Formato HC</th>
                         <th style="width:180px">Especialista</th>
-                        <th class="text-center" style="width:130px">Fecha cierre</th>
-                        <th class="text-center" style="width:260px">Documentos</th>
+                        <th class="text-center" style="width:110px">Estado</th>
+                        <th class="text-center" style="width:130px">Fecha</th>
+                        <th class="text-center" style="width:320px">Documentos</th>
                         <th class="text-end" style="width:220px"></th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var r in _rows)
                     {
-                        <tr>
+                        var cerrada = string.Equals(r.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase);
+                        var abierta = string.Equals(r.Estado, "Abierta", StringComparison.OrdinalIgnoreCase);
+                        var fechaMostrar = r.FechaCierre ?? r.FechaApertura;
+                        <tr class="@(abierta ? "oc-row-abierta" : "")">
                             <td>
                                 <div class="oc-pname">@r.PacienteNombre</div>
-                                <div class="oc-pmeta">HC cerrada el @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</div>
+                                <div class="oc-pmeta">
+                                    @if (cerrada) { <text>HC cerrada el @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</text> }
+                                    else if (abierta) { <text>HC abierta el @(r.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
+                                    else { <text>HC @r.Estado.ToLower() el @(fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
+                                </div>
                             </td>
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
                             <td>@r.FormatoNombre</td>
                             <td>@(r.EspecialistaNombre ?? "-")</td>
                             <td class="text-center">
-                                @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
+                                @if (cerrada)
+                                {
+                                    <span class="oc-est oc-est-cerrada" title="Cerrada definitivamente">&#10004; Cerrada</span>
+                                }
+                                else if (abierta)
+                                {
+                                    <span class="oc-est oc-est-abierta" title="La historia sigue abierta — el profesional aun no la ha cerrado">&#128276; Abierta</span>
+                                }
+                                else
+                                {
+                                    <span class="oc-est oc-est-inactiva" title="@(r.Estado)">@r.Estado</span>
+                                }
+                            </td>
+                            <td class="text-center">
+                                @fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy")
                             </td>
                             <td class="text-center">
                                 <div class="oc-pills">
                                     <span class="oc-pill" title="Historia clinica">HC</span>
                                     @if (r.MedicamentosCount > 0)   { <span class="oc-pill oc-pill-med"  title="@r.MedicamentosCount medicamento(s)">MED @r.MedicamentosCount</span> }
                                     @if (r.ServiciosCount > 0)      { <span class="oc-pill oc-pill-srv"  title="@r.ServiciosCount servicio(s)">SRV @r.ServiciosCount</span> }
+                                    @if (r.InsumosCount > 0)        { <span class="oc-pill oc-pill-ins"  title="@r.InsumosCount insumo(s)">INS @r.InsumosCount</span> }
                                     @if (r.RemisionesCount > 0)     { <span class="oc-pill oc-pill-rem"  title="@r.RemisionesCount remision(es)">REM @r.RemisionesCount</span> }
                                     @if (r.IncapacidadesCount > 0)  { <span class="oc-pill oc-pill-inc"  title="@r.IncapacidadesCount incapacidad(es)">INC @r.IncapacidadesCount</span> }
                                     @if (r.CertificacionesCount > 0){ <span class="oc-pill oc-pill-cert" title="@r.CertificacionesCount certificacion(es)">CRT @r.CertificacionesCount</span> }
+                                    @if (r.RxImagCount > 0)         { <span class="oc-pill oc-pill-rx"   title="@r.RxImagCount rx/imagenologia">RX @r.RxImagCount</span> }
+                                    @if (r.LabExtCount > 0)         { <span class="oc-pill oc-pill-lab"  title="@r.LabExtCount laboratorio(s)">LAB @r.LabExtCount</span> }
+                                    @if (r.InsExtCount > 0)         { <span class="oc-pill oc-pill-inx"  title="@r.InsExtCount insumo(s) externo(s)">INX @r.InsExtCount</span> }
+                                    @if (r.EscalasCount > 0)        { <span class="oc-pill oc-pill-esc"  title="@r.EscalasCount escala(s) diligenciada(s)">ESC @r.EscalasCount</span> }
+                                    @if (r.EvolucionesCount > 0)    { <span class="oc-pill oc-pill-evo"  title="@r.EvolucionesCount evolucion(es)">EVO @r.EvolucionesCount</span> }
+                                    @if (r.ConsentimientosCount > 0){ <span class="oc-pill oc-pill-con"  title="@r.ConsentimientosCount consentimiento(s)">CON @r.ConsentimientosCount</span> }
                                 </div>
                             </td>
                             <td class="text-end">
-                                <button class="btn btn-outline-secondary btn-sm" title="Consultar (solo lectura)"
-                                        @onclick="() => Consultar(r)">👁 Consultar</button>
-                                <button class="btn btn-primary btn-sm ms-1" title="Reimprimir paquete"
-                                        @onclick="() => Imprimir(r)">🖨 Imprimir</button>
+                                @if (cerrada)
+                                {
+                                    <button class="btn btn-outline-secondary btn-sm" title="Consultar todos los documentos (solo lectura)"
+                                            @onclick="() => Consultar(r)">👁 Consultar</button>
+                                    <button class="btn btn-primary btn-sm ms-1" title="Elegir documentos a imprimir"
+                                            @onclick="() => AbrirModalImprimir(r)">🖨 Imprimir</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-outline-secondary btn-sm" disabled
+                                            title="No se puede consultar hasta que la HC este cerrada definitivamente">👁 Consultar</button>
+                                    <button class="btn btn-primary btn-sm ms-1" disabled
+                                            title="No se puede imprimir hasta que la HC este cerrada definitivamente">🖨 Imprimir</button>
+                                }
                             </td>
                         </tr>
                     }
@@ -132,8 +182,158 @@
     }
 </div>
 
+@* =========================================================================
+   Modal "Elegir documentos a imprimir": checkboxes por tipo de documento.
+   Solo aparecen los tipos que la HC realmente tiene (count > 0). El
+   documento principal HC siempre se ofrece marcado por defecto.
+   Al confirmar abre /imprimir-paquete con los tipos seleccionados en la
+   query string y dispara window.print() al cargar (#print=1).
+   ========================================================================= *@
+@if (_showImprimirModal && _rowSel is not null)
+{
+    <div class="oc-backdrop" @onclick="CerrarModalImprimir"></div>
+    <div class="oc-modal">
+        <div class="oc-modal-h">
+            <h3>🖨 Imprimir documentos</h3>
+            <button class="oc-modal-close" @onclick="CerrarModalImprimir">&times;</button>
+        </div>
+        <div class="oc-modal-body">
+            <div class="oc-modal-meta">
+                <div><b>Paciente:</b> @_rowSel.PacienteNombre</div>
+                <div><b>Documento:</b> @_rowSel.PacienteTipoDoc @_rowSel.PacienteDoc</div>
+                <div><b>Formato HC:</b> @_rowSel.FormatoNombre</div>
+            </div>
+            <p class="oc-modal-lead">Selecciona los documentos que deseas imprimir. Solo aparecen los que tienen items registrados en esta historia.</p>
+
+            <div class="oc-impr-opt">
+                <label>
+                    <input type="checkbox" @bind="_selHc" />
+                    <span><b>Historia clinica</b></span>
+                </label>
+                <small>Documento principal del formato de la HC.</small>
+            </div>
+            @if (_rowSel.MedicamentosCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selMed" />
+                        <span><b>Orden de Medicamentos</b> <em>(@_rowSel.MedicamentosCount item@(_rowSel.MedicamentosCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.ServiciosCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selSrv" />
+                        <span><b>Orden a Servicios</b> <em>(@_rowSel.ServiciosCount item@(_rowSel.ServiciosCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.InsumosCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selIns" />
+                        <span><b>Orden de Insumos</b> <em>(@_rowSel.InsumosCount item@(_rowSel.InsumosCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.RemisionesCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selRem" />
+                        <span><b>Remisiones</b> <em>(@_rowSel.RemisionesCount item@(_rowSel.RemisionesCount == 1 ? "" : "es"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.RxImagCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selRxExt" />
+                        <span><b>Orden RX Imagenologia</b> <em>(@_rowSel.RxImagCount item@(_rowSel.RxImagCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.LabExtCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selLabExt" />
+                        <span><b>Orden Laboratorios</b> <em>(@_rowSel.LabExtCount item@(_rowSel.LabExtCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.InsExtCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selInsExt" />
+                        <span><b>Orden Insumos Externos</b> <em>(@_rowSel.InsExtCount item@(_rowSel.InsExtCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.IncapacidadesCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selInc" />
+                        <span><b>Orden de Incapacidad</b> <em>(@_rowSel.IncapacidadesCount item@(_rowSel.IncapacidadesCount == 1 ? "" : "es"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.CertificacionesCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selCert" />
+                        <span><b>Certificacion Medica</b> <em>(@_rowSel.CertificacionesCount item@(_rowSel.CertificacionesCount == 1 ? "" : "es"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.EscalasCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selEsc" />
+                        <span><b>Escalas diligenciadas</b> <em>(@_rowSel.EscalasCount escala@(_rowSel.EscalasCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.EvolucionesCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selEvo" />
+                        <span><b>Evoluciones diligenciadas</b> <em>(@_rowSel.EvolucionesCount evolucion@(_rowSel.EvolucionesCount == 1 ? "" : "es"))</em></span>
+                    </label>
+                </div>
+            }
+            @if (_rowSel.ConsentimientosCount > 0)
+            {
+                <div class="oc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_selCon" />
+                        <span><b>Consentimientos diligenciados</b> <em>(@_rowSel.ConsentimientosCount consentimiento@(_rowSel.ConsentimientosCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
+        </div>
+        <div class="oc-modal-foot">
+            @if (_modalErr is not null)
+            {
+                <div class="oc-modal-err">@_modalErr</div>
+            }
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModalImprimir">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="ConfirmarImprimir">🖨 Imprimir seleccion</button>
+        </div>
+    </div>
+}
+
 <style>
-    .oc-filtros { display:grid; grid-template-columns: 1.5fr 1fr 1fr 1.4fr auto; gap:14px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; align-items:end; }
+    .oc-filtros { display:grid; grid-template-columns: 1.5fr 1fr 1fr 1.4fr 1fr auto; gap:14px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; align-items:end; }
     .oc-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; display:block; }
     .oc-f-wide { min-width:200px; }
     .oc-f-acts { display:flex; gap:8px; }
@@ -143,17 +343,45 @@
     .oc-tbl { margin:0; font-size:12.5px; }
     .oc-tbl thead th { background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; }
     .oc-tbl td { padding:10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .oc-row-abierta { background:#fffbeb; }
     .oc-pname { font-weight:700; color:#0f172a; }
     .oc-pmeta { font-size:11px; color:#64748b; }
     .oc-pills { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; }
     .oc-pill { display:inline-block; padding:2px 7px; border-radius:999px; font-size:10px; font-weight:700; background:#e0e7ff; color:#3730a3; }
     .oc-pill-med  { background:#fee2e2; color:#991b1b; }
     .oc-pill-srv  { background:#dbeafe; color:#1e40af; }
+    .oc-pill-ins  { background:#fef9c3; color:#854d0e; }
     .oc-pill-rem  { background:#fef3c7; color:#92400e; }
     .oc-pill-inc  { background:#fce7f3; color:#9d174d; }
     .oc-pill-cert { background:#d1fae5; color:#065f46; }
+    .oc-pill-rx   { background:#ede9fe; color:#5b21b6; }
+    .oc-pill-lab  { background:#cffafe; color:#155e75; }
+    .oc-pill-inx  { background:#fef3c7; color:#78350f; }
+    .oc-pill-esc  { background:#e0e7ff; color:#312e81; }
+    .oc-pill-evo  { background:#dcfce7; color:#166534; }
+    .oc-pill-con  { background:#ffe4e6; color:#9f1239; }
+    .oc-est { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oc-est-cerrada { background:#d1fae5; color:#065f46; }
+    .oc-est-abierta { background:#fef3c7; color:#92400e; }
+    .oc-est-inactiva { background:#e5e7eb; color:#4b5563; }
     .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
     .ase-empty { text-align:center; color:#64748b; padding:16px; font-style:italic; }
+
+    /* Modal Imprimir */
+    .oc-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:950; }
+    .oc-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:951; width:520px; max-width:95vw; max-height:88vh; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.3); display:flex; flex-direction:column; }
+    .oc-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #e5e7eb; background:#f8fafc; border-radius:10px 10px 0 0; }
+    .oc-modal-h h3 { margin:0; font-size:16px; color:#0f172a; }
+    .oc-modal-close { background:none; border:none; font-size:22px; color:#64748b; cursor:pointer; }
+    .oc-modal-body { padding:16px 18px; overflow:auto; flex:1; }
+    .oc-modal-meta { background:#f1f5f9; border-radius:6px; padding:10px 12px; font-size:12px; color:#334155; margin-bottom:12px; display:grid; gap:2px; }
+    .oc-modal-lead { font-size:12.5px; color:#475569; margin-bottom:14px; }
+    .oc-impr-opt { padding:8px 10px; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:6px; }
+    .oc-impr-opt label { display:flex; gap:8px; align-items:center; cursor:pointer; margin:0; }
+    .oc-impr-opt small { display:block; color:#94a3b8; font-size:11px; margin-top:2px; margin-left:22px; }
+    .oc-impr-opt em { color:#64748b; font-style:normal; font-size:11.5px; margin-left:6px; }
+    .oc-modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:12px 18px; border-top:1px solid #e5e7eb; background:#fafbfc; border-radius:0 0 10px 10px; align-items:center; }
+    .oc-modal-err { color:#991b1b; font-size:12px; margin-right:auto; }
 </style>
 
 @code {
@@ -161,9 +389,16 @@
     private DateTime? _desde;
     private DateTime? _hasta;
     private string _especialista = "";
+    private string _estadoFiltro = ""; // "", "Cerrada", "Abierta"
     private List<string> _especialistas = new();
     private List<OrdenClinicaItemDto> _rows = new();
     private bool _buscando;
+
+    // Estado del modal de impresion
+    private bool _showImprimirModal;
+    private OrdenClinicaItemDto? _rowSel;
+    private string? _modalErr;
+    private bool _selHc = true, _selMed, _selSrv, _selIns, _selRem, _selRxExt, _selLabExt, _selInsExt, _selInc, _selCert, _selEsc, _selEvo, _selCon;
 
     protected override async Task OnInitializedAsync()
     {
@@ -176,13 +411,22 @@
         _buscando = true;
         try
         {
+            // SoloCerradas se resuelve segun el filtro visual: por defecto trae
+            // todas, pero el usuario puede restringir a solo cerradas o solo
+            // abiertas. Para "solo abiertas" pedimos todas y filtramos en memoria
+            // ya que el DTO trae Estado. Es simple y N<=500.
             var f = new OrdenesClinicasFiltro(
                 PacienteTexto: string.IsNullOrWhiteSpace(_filtroPaciente) ? null : _filtroPaciente.Trim(),
                 Desde: _desde is DateTime d1 ? DateOnly.FromDateTime(d1) : (DateOnly?)null,
                 Hasta: _hasta is DateTime d2 ? DateOnly.FromDateTime(d2) : (DateOnly?)null,
                 Especialista: string.IsNullOrWhiteSpace(_especialista) ? null : _especialista,
-                SoloCerradas: true);
-            _rows = (await OcSvc.BuscarAsync(f)).ToList();
+                SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase));
+            var todas = (await OcSvc.BuscarAsync(f)).ToList();
+            if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
+            {
+                todas = todas.Where(x => string.Equals(x.Estado, "Abierta", StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            _rows = todas;
         }
         finally { _buscando = false; }
     }
@@ -194,33 +438,87 @@
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = "";
+        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _estadoFiltro = "";
         await Buscar();
     }
 
-    /// <summary>Consultar: misma vista que imprimir pero la abre normalmente (read-only).</summary>
+    /// <summary>Consultar: abre el paquete completo (todos los docs) en vista read-only.</summary>
     private async Task Consultar(OrdenClinicaItemDto r)
     {
-        var docs = BuildDocsQuery(r);
+        var docs = BuildAllDocsQuery(r);
         await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{r.HistoriaClinicaId}?docs={docs}", "_blank");
     }
 
-    /// <summary>Imprimir: abre el paquete y dispara el dialogo de impresion del navegador.</summary>
-    private async Task Imprimir(OrdenClinicaItemDto r)
+    /// <summary>Abre el modal para que el usuario elija que documentos imprimir.</summary>
+    private void AbrirModalImprimir(OrdenClinicaItemDto r)
     {
-        var docs = BuildDocsQuery(r);
-        // El #print=1 al final permite que la pagina detecte y haga window.print() al cargar.
-        await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{r.HistoriaClinicaId}?docs={docs}#print=1", "_blank");
+        _rowSel = r;
+        _modalErr = null;
+        // Preselecciona todo lo que tiene datos (HC siempre, resto segun count).
+        _selHc = true;
+        _selMed = r.MedicamentosCount > 0;
+        _selSrv = r.ServiciosCount > 0;
+        _selIns = r.InsumosCount > 0;
+        _selRem = r.RemisionesCount > 0;
+        _selRxExt = r.RxImagCount > 0;
+        _selLabExt = r.LabExtCount > 0;
+        _selInsExt = r.InsExtCount > 0;
+        _selInc = r.IncapacidadesCount > 0;
+        _selCert = r.CertificacionesCount > 0;
+        _selEsc = r.EscalasCount > 0;
+        _selEvo = r.EvolucionesCount > 0;
+        _selCon = r.ConsentimientosCount > 0;
+        _showImprimirModal = true;
     }
 
-    private static string BuildDocsQuery(OrdenClinicaItemDto r)
+    private void CerrarModalImprimir()
+    {
+        _showImprimirModal = false;
+        _rowSel = null;
+        _modalErr = null;
+    }
+
+    /// <summary>Confirmacion del modal: abre /imprimir-paquete con los seleccionados y dispara print.</summary>
+    private async Task ConfirmarImprimir()
+    {
+        if (_rowSel is null) { CerrarModalImprimir(); return; }
+        var docs = new List<string>();
+        if (_selHc)     { docs.Add("HC"); }
+        if (_selMed)    { docs.Add("MED"); }
+        if (_selSrv)    { docs.Add("SRV"); }
+        if (_selIns)    { docs.Add("INS"); }
+        if (_selRem)    { docs.Add("REM"); }
+        if (_selRxExt)  { docs.Add("RXEXT"); }
+        if (_selLabExt) { docs.Add("LABEXT"); }
+        if (_selInsExt) { docs.Add("INSEXT"); }
+        if (_selInc)    { docs.Add("INC"); }
+        if (_selCert)   { docs.Add("CERT"); }
+        if (_selEsc)    { docs.Add("ESC"); }
+        if (_selEvo)    { docs.Add("EVO"); }
+        if (_selCon)    { docs.Add("CON"); }
+        if (docs.Count == 0) { _modalErr = "Selecciona al menos un documento."; return; }
+        var url = $"/imprimir-paquete/{_rowSel.HistoriaClinicaId}?docs={string.Join(",", docs)}#print=1";
+        _showImprimirModal = false;
+        _rowSel = null;
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    /// <summary>Construye la query de docs incluyendo TODOS los tipos con count > 0. Uso por Consultar.</summary>
+    private static string BuildAllDocsQuery(OrdenClinicaItemDto r)
     {
         var parts = new List<string> { "HC" };
-        if (r.MedicamentosCount > 0)   { parts.Add("MED"); }
-        if (r.ServiciosCount > 0)      { parts.Add("SRV"); }
-        if (r.RemisionesCount > 0)     { parts.Add("REM"); }
-        if (r.IncapacidadesCount > 0)  { parts.Add("INC"); }
-        if (r.CertificacionesCount > 0){ parts.Add("CERT"); }
+        if (r.MedicamentosCount > 0)    { parts.Add("MED"); }
+        if (r.ServiciosCount > 0)       { parts.Add("SRV"); }
+        if (r.InsumosCount > 0)         { parts.Add("INS"); }
+        if (r.RemisionesCount > 0)      { parts.Add("REM"); }
+        if (r.RxImagCount > 0)          { parts.Add("RXEXT"); }
+        if (r.LabExtCount > 0)          { parts.Add("LABEXT"); }
+        if (r.InsExtCount > 0)          { parts.Add("INSEXT"); }
+        if (r.IncapacidadesCount > 0)   { parts.Add("INC"); }
+        if (r.CertificacionesCount > 0) { parts.Add("CERT"); }
+        if (r.EscalasCount > 0)         { parts.Add("ESC"); }
+        if (r.EvolucionesCount > 0)     { parts.Add("EVO"); }
+        if (r.ConsentimientosCount > 0) { parts.Add("CON"); }
         return string.Join(",", parts);
     }
 }

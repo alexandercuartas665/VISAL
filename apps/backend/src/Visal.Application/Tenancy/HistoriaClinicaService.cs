@@ -134,6 +134,20 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
         return true;
     }
 
+    public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
+        if (e is null) { return false; }
+        if (e.Estado != HistoriaClinicaEstado.Cerrada)
+        {
+            throw new InvalidOperationException("Solo se puede reabrir una historia que este Cerrada.");
+        }
+        e.Estado = HistoriaClinicaEstado.Abierta;
+        e.FechaCierre = null;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<bool> DescartarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default)
     {
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);

@@ -22,13 +22,25 @@
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
 <div class="ase-card">
-    <div class="ase-card-h">Usuarios (@_users.Count)</div>
+    <div class="ase-card-h" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span>Usuarios (@FilteredUsers.Count@(FilteredUsers.Count != _users.Count ? $" / {_users.Count}" : ""))</span>
+        <div style="flex:1;max-width:340px;position:relative;">
+            <input class="form-control form-control-sm" type="search"
+                   placeholder="Buscar por nombre, correo, cedula o usuario..."
+                   @bind="_filtro" @bind:event="oninput" />
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_filtro))
+        {
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _filtro = string.Empty">Limpiar</button>
+        }
+    </div>
     <div class="table-responsive">
         <table class="table table-sm align-middle">
             <thead>
                 <tr>
                     <th>Correo</th>
                     <th>Nombre</th>
+                    <th>Documento</th>
                     <th>Estado</th>
                     <th>Rol</th>
                     <th>Sedes</th>
@@ -37,11 +49,12 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var u in _users)
+                @foreach (var u in FilteredUsers)
                 {
                     <tr>
                         <td class="mono">@u.Email</td>
                         <td>@u.DisplayName</td>
+                        <td class="mono">@(string.IsNullOrWhiteSpace(u.Documento) ? "-" : u.Documento)</td>
                         <td>@u.Estado</td>
                         <td>
                             <select class="form-select form-select-sm" @bind="u.RolSel">
@@ -76,6 +89,7 @@
             </tbody>
         </table>
         @if (_users.Count == 0) { <div class="ase-empty">Sin usuarios.</div> }
+        else if (FilteredUsers.Count == 0) { <div class="ase-empty">No hay usuarios que coincidan con "@_filtro".</div> }
     </div>
 </div>
 
@@ -307,6 +321,25 @@
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<Row> _users = new();
+    private string _filtro = string.Empty;
+
+    /// <summary>Usuarios filtrados por el input de busqueda (nombre, correo,
+    /// documento o username). Match case-insensitive con Contains sobre cada campo.</summary>
+    private List<Row> FilteredUsers
+    {
+        get
+        {
+            var q = (_filtro ?? string.Empty).Trim();
+            if (q.Length == 0) { return _users; }
+            var qLower = q.ToLowerInvariant();
+            bool Match(string? s) => !string.IsNullOrWhiteSpace(s) && s.ToLowerInvariant().Contains(qLower);
+            return _users.Where(u =>
+                Match(u.Email) ||
+                Match(u.DisplayName) ||
+                Match(u.Documento) ||
+                Match(u.Username)).ToList();
+        }
+    }
     private List<RolDto> _roles = new();
     private List<SucursalDto> _sucursales = new();
 

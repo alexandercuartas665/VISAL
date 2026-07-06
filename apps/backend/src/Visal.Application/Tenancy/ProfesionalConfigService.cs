@@ -112,6 +112,50 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<ProfesionalTablaDto>> ListProfesionalesTablaAsync(CancellationToken ct = default)
+    {
+        // 1) Datos base + tipo profesional + rol (nombre) en un solo query.
+        var basicos = await _db.Profesionales.AsNoTracking()
+            .OrderBy(p => p.NombreCompleto)
+            .Select(p => new
+            {
+                p.Id,
+                p.NombreCompleto,
+                p.TipoDocumento,
+                p.NumeroDocumento,
+                TipoProfesional = p.TipoProfesional != null ? p.TipoProfesional.Nombre : null,
+                Rol = p.RolPredeterminadoId != null
+                    ? _db.Roles.Where(r => r.Id == p.RolPredeterminadoId).Select(r => r.Nombre).FirstOrDefault()
+                    : null,
+                TieneFirma = p.FirmaUrl != null && p.FirmaUrl != ""
+            })
+            .ToListAsync(ct);
+
+        if (basicos.Count == 0) { return Array.Empty<ProfesionalTablaDto>(); }
+
+        // 2) Sedes por profesional (M:N via ProfesionalAgencias) en una sola pasada.
+        var ids = basicos.Select(b => b.Id).ToList();
+        var sedesFlat = await _db.ProfesionalAgencias.AsNoTracking()
+            .Where(x => ids.Contains(x.ProfesionalId))
+            .OrderBy(x => x.Agencia)
+            .Select(x => new { x.ProfesionalId, x.Agencia })
+            .ToListAsync(ct);
+        var sedesPorProf = sedesFlat
+            .GroupBy(x => x.ProfesionalId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Agencia).ToList());
+
+        return basicos.Select(b => new ProfesionalTablaDto(
+            b.Id,
+            b.NombreCompleto,
+            b.TipoDocumento,
+            b.NumeroDocumento,
+            b.TipoProfesional,
+            b.Rol,
+            sedesPorProf.TryGetValue(b.Id, out var s) ? s : Array.Empty<string>(),
+            b.TieneFirma
+        )).ToList();
+    }
+
     public async Task<ProfesionalDetailDto?> GetProfesionalAsync(Guid id, CancellationToken ct = default)
     {
         var p = await _db.Profesionales.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);

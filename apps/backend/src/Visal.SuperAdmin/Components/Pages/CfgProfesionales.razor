@@ -29,6 +29,144 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
+@* Tabs: Fichas (vista actual detalle + edicion) | Listado (tabla completa con filtros) *@
+<div class="prof-tabs">
+    <button class="prof-tab @(_tabActivo == 0 ? "sel" : "")" @onclick="() => SetTab(0)">
+        &#128100; Fichas
+    </button>
+    <button class="prof-tab @(_tabActivo == 1 ? "sel" : "")" @onclick="() => SetTab(1)">
+        &#128203; Listado
+    </button>
+</div>
+
+@if (_tabActivo == 1)
+{
+    @* ===================== TAB LISTADO (tabla) ===================== *@
+    <div class="ase-card">
+        <div class="prof-filtros">
+            <div class="prof-f prof-f-wide">
+                <label>Nombre</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Nombre o identificacion..."
+                       @bind="_tFilNombre" @bind:event="oninput" />
+            </div>
+            <div class="prof-f">
+                <label>Sede</label>
+                <select class="form-select form-select-sm" @bind="_tFilSede">
+                    <option value="">(Todas)</option>
+                    @foreach (var s in _tSedesDisponibles)
+                    {
+                        <option value="@s">@s</option>
+                    }
+                </select>
+            </div>
+            <div class="prof-f">
+                <label>Rol asignado</label>
+                <select class="form-select form-select-sm" @bind="_tFilRol">
+                    <option value="">(Todos)</option>
+                    @foreach (var r in _tRolesDisponibles)
+                    {
+                        <option value="@r">@r</option>
+                    }
+                    <option value="__SIN_ROL__">(Sin rol)</option>
+                </select>
+            </div>
+            <div class="prof-f">
+                <label>Firma</label>
+                <select class="form-select form-select-sm" @bind="_tFilFirma">
+                    <option value="">(Cualquiera)</option>
+                    <option value="si">Con firma</option>
+                    <option value="no">Sin firma</option>
+                </select>
+            </div>
+            <div class="prof-f prof-f-acts">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosTabla">Limpiar</button>
+            </div>
+        </div>
+
+        <div class="prof-tbl-h">
+            Profesionales (@FilteredTabla.Count de @_tabla.Count)
+        </div>
+
+        @if (_tabla.Count == 0)
+        {
+            <div class="ase-empty" style="padding:30px;">Cargando o sin profesionales.</div>
+        }
+        else
+        {
+            <div class="prof-tbl-wrap">
+                <table class="table table-sm prof-tbl">
+                    <thead>
+                        <tr>
+                            <th style="min-width:220px">Nombre</th>
+                            <th style="width:160px">Identificacion</th>
+                            <th style="min-width:180px">Tipo profesional</th>
+                            <th style="min-width:180px">Rol asignado</th>
+                            <th>Sedes que aplica</th>
+                            <th class="text-center" style="width:90px">Firma</th>
+                            <th class="text-end" style="width:100px"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in FilteredTabla)
+                        {
+                            <tr>
+                                <td><div class="prof-nombre">@r.NombreCompleto</div></td>
+                                <td class="mono">@r.TipoDocumento @r.NumeroDocumento</td>
+                                <td>@(r.TipoProfesional ?? "-")</td>
+                                <td>
+                                    @if (string.IsNullOrWhiteSpace(r.Rol))
+                                    {
+                                        <span class="prof-badge prof-badge-off">(Sin rol)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="prof-badge prof-badge-rol">@r.Rol</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (r.Sedes.Count == 0)
+                                    {
+                                        <span class="prof-badge prof-badge-off">(Sin sedes)</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="prof-sedes">
+                                            @foreach (var s in r.Sedes)
+                                            {
+                                                <span class="prof-badge prof-badge-sede">@s</span>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                                <td class="text-center">
+                                    @if (r.TieneFirma)
+                                    {
+                                        <span class="prof-firma-si" title="Este profesional tiene firma cargada">&#10004; Si</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="prof-firma-no" title="No hay firma cargada">&#10006; No</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-outline-primary btn-sm"
+                                            title="Abrir ficha para editar"
+                                            @onclick="() => AbrirFichaDesdeTabla(r.Id)">
+                                        &#9998; Ficha
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+else
+{
+@* ===================== TAB FICHAS (vista actual) ===================== *@
 <div class="ase-grid">
     <div class="ase-card ase-list">
         <div class="ase-card-h">Profesionales (@_lista.Count)</div>
@@ -206,6 +344,7 @@
         }
     </div>
 </div>
+}
 
 @* ===== Modal Importar desde Excel ===== *@
 @if (_showImportModal)
@@ -370,6 +509,32 @@
     .usu-modal-body { padding: 18px; overflow: auto; }
     .usu-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
     .usu-info { font-size: 12px; color: #475569; padding: 8px 10px; background: #f1f5f9; border-radius: 8px; }
+
+    /* Tabs */
+    .prof-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 2px solid #e2e8f0; }
+    .prof-tab { background: none; border: none; padding: 10px 16px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color .15s, border-color .15s; }
+    .prof-tab:hover { color: #1565c0; }
+    .prof-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
+
+    /* Tab Listado */
+    .prof-filtros { display: grid; grid-template-columns: 1.6fr 1fr 1.2fr 1fr auto; gap: 14px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; align-items: end; }
+    .prof-f label { font-size: 11px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 4px; display: block; }
+    .prof-f-wide { min-width: 200px; }
+    .prof-f-acts { display: flex; gap: 8px; }
+    .prof-tbl-h { padding: 10px 6px; font-size: 13px; font-weight: 700; color: #0f172a; }
+    .prof-tbl-wrap { border: 1px solid #e2e8f0; border-radius: 6px; overflow: auto; }
+    .prof-tbl { margin: 0; font-size: 12.5px; }
+    .prof-tbl thead th { background: #1565c0; color: #fff; padding: 8px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .prof-tbl td { padding: 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .prof-nombre { font-weight: 700; color: #0f172a; }
+    .prof-sedes { display: flex; flex-wrap: wrap; gap: 4px; }
+    .prof-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
+    .prof-badge-sede { background: #dbeafe; color: #1e40af; }
+    .prof-badge-rol { background: #e0e7ff; color: #3730a3; }
+    .prof-badge-off { background: #e2e8f0; color: #94a3b8; font-style: italic; }
+    .prof-firma-si { color: #059669; font-weight: 700; font-size: 12px; }
+    .prof-firma-no { color: #dc2626; font-weight: 600; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 </style>
 
 @code {
@@ -537,6 +702,100 @@
 
     private async Task LoadLista() => _lista = (await Svc.ListProfesionalesAsync(string.IsNullOrWhiteSpace(_filtro) ? null : _filtro)).ToList();
     private async Task OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; await LoadLista(); }
+
+    // =========================================================================
+    // Tab Listado (tabla): estado + carga + filtros locales
+    // =========================================================================
+    /// <summary>Tab activo: 0 = Fichas (vista actual), 1 = Listado (tabla).</summary>
+    private int _tabActivo = 0;
+    private List<ProfesionalTablaDto> _tabla = new();
+    private string _tFilNombre = "";
+    private string _tFilSede = "";
+    private string _tFilRol = "";
+    private string _tFilFirma = ""; // "", "si", "no"
+
+    /// <summary>Sedes distintas presentes en la tabla — feed del dropdown de sede.</summary>
+    private IReadOnlyList<string> _tSedesDisponibles = Array.Empty<string>();
+    /// <summary>Roles distintos presentes en la tabla — feed del dropdown de rol.</summary>
+    private IReadOnlyList<string> _tRolesDisponibles = Array.Empty<string>();
+
+    /// <summary>Cambia de tab y carga la tabla lazy si es la primera vez.</summary>
+    private async Task SetTab(int t)
+    {
+        _tabActivo = t;
+        if (t == 1 && _tabla.Count == 0)
+        {
+            await CargarTablaAsync();
+        }
+    }
+
+    private async Task CargarTablaAsync()
+    {
+        _tabla = (await Svc.ListProfesionalesTablaAsync()).ToList();
+        _tSedesDisponibles = _tabla
+            .SelectMany(x => x.Sedes)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s)
+            .ToList();
+        _tRolesDisponibles = _tabla
+            .Select(x => x.Rol)
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(r => r)
+            .ToList()!;
+    }
+
+    private void LimpiarFiltrosTabla()
+    {
+        _tFilNombre = ""; _tFilSede = ""; _tFilRol = ""; _tFilFirma = "";
+    }
+
+    /// <summary>Vista filtrada de la tabla — nombre/documento contiene, sede aplica, rol asignado, si tiene firma.</summary>
+    private List<ProfesionalTablaDto> FilteredTabla
+    {
+        get
+        {
+            IEnumerable<ProfesionalTablaDto> q = _tabla;
+            if (!string.IsNullOrWhiteSpace(_tFilNombre))
+            {
+                var f = _tFilNombre.Trim().ToLowerInvariant();
+                q = q.Where(x => x.NombreCompleto.ToLowerInvariant().Contains(f)
+                              || x.NumeroDocumento.ToLowerInvariant().Contains(f));
+            }
+            if (!string.IsNullOrWhiteSpace(_tFilSede))
+            {
+                q = q.Where(x => x.Sedes.Any(s => string.Equals(s, _tFilSede, StringComparison.OrdinalIgnoreCase)));
+            }
+            if (!string.IsNullOrWhiteSpace(_tFilRol))
+            {
+                if (string.Equals(_tFilRol, "__SIN_ROL__", StringComparison.Ordinal))
+                {
+                    q = q.Where(x => string.IsNullOrWhiteSpace(x.Rol));
+                }
+                else
+                {
+                    q = q.Where(x => string.Equals(x.Rol, _tFilRol, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            if (string.Equals(_tFilFirma, "si", StringComparison.OrdinalIgnoreCase))
+            {
+                q = q.Where(x => x.TieneFirma);
+            }
+            else if (string.Equals(_tFilFirma, "no", StringComparison.OrdinalIgnoreCase))
+            {
+                q = q.Where(x => !x.TieneFirma);
+            }
+            return q.ToList();
+        }
+    }
+
+    /// <summary>Al hacer clic en "Ficha" de una fila, vuelve al tab Fichas y selecciona ese profesional.</summary>
+    private async Task AbrirFichaDesdeTabla(Guid id)
+    {
+        _tabActivo = 0;
+        await Select(id);
+    }
 
     private void New()
     {

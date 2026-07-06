@@ -6,6 +6,22 @@ public sealed record CatalogItemDto(Guid Id, string Nombre, bool Activo, int Ord
 public sealed record ProfesionalDto(
     Guid Id, string NumeroDocumento, string NombreCompleto, string? TipoProfesional, string? Ciudad, string? RegistroMedico);
 
+/// <summary>
+/// Item plano para la vista tabla del modulo profesionales — incluye sedes,
+/// rol asignado, si tiene firma y tipo profesional. No lleva la URL de la
+/// firma (solo un boolean para la columna "Firma"), por lo que se puede
+/// serializar sin exponer la ruta al PNG.
+/// </summary>
+public sealed record ProfesionalTablaDto(
+    Guid Id,
+    string NombreCompleto,
+    string TipoDocumento,
+    string NumeroDocumento,
+    string? TipoProfesional,
+    string? Rol,
+    IReadOnlyList<string> Sedes,
+    bool TieneFirma);
+
 public sealed record ProfesionalDetailDto(
     Guid Id, string NumeroDocumento, string TipoDocumento, string? PrimerNombre, string? SegundoNombre,
     string? PrimerApellido, string? SegundoApellido, string NombreCompleto, Guid? TipoProfesionalId,
@@ -38,6 +54,9 @@ public interface IProfesionalConfigService
 
     // Profesionales
     Task<IReadOnlyList<ProfesionalDto>> ListProfesionalesAsync(string? filtro, CancellationToken ct = default);
+
+    /// <summary>Lista completa de profesionales con sedes + rol + tipo + si tiene firma. Para vista tabla.</summary>
+    Task<IReadOnlyList<ProfesionalTablaDto>> ListProfesionalesTablaAsync(CancellationToken ct = default);
     Task<ProfesionalDetailDto?> GetProfesionalAsync(Guid id, CancellationToken ct = default);
     Task<ProfesionalDetailDto?> SaveProfesionalAsync(SaveProfesionalRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteProfesionalAsync(Guid id, Guid actor, CancellationToken ct = default);

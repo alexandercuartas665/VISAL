@@ -210,7 +210,12 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         {
             return new LineSendResult(false, "Indica el numero y el mensaje.");
         }
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        // IgnoreQueryFilters: SendTestAsync se llama tambien desde flujos sin
+        // tenant scope (webhook auto-respuesta al Quick Reply). El caller ya
+        // paso el lineId correcto — la linea siempre tiene un solo TenantId.
+        var line = await _db.WhatsAppLines
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return new LineSendResult(false, "La linea no existe.");

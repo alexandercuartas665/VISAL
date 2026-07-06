@@ -655,6 +655,7 @@ app.MapPost("/webhooks/gupshup/{token}", async (
     HttpRequest request,
     IApplicationDbContext db,
     Visal.Application.Tenancy.IChatIngestService ingest,
+    Visal.Application.Tenancy.IFirmaRemotaService firma,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(token) || token.Length > 128) { return Results.Unauthorized(); }
@@ -668,10 +669,47 @@ app.MapPost("/webhooks/gupshup/{token}", async (
     if (payload is null) { return Results.Ok(new { status = "ignored" }); }
 
     var result = await ingest.IngestTrustedAsync(line.TenantId, payload, ct);
+
+    // Auto-respuesta a la plantilla de firma remota: si el destinatario respondio
+    // al Quick Reply o mando un afirmativo con keyword ("si", "enviar", "enlace",
+    // "link") Y tiene una solicitud pendiente, respondemos con el link automatico.
+    // El operador no tiene que reabrir el modal "Solicitar firmas".
+    // Nota: idempotencia + dedupe viven adentro de AutoResponderConLinkAsync.
+    if (result == Visal.Application.Tenancy.ChatIngestResult.Accepted
+        && EsRespuestaAfirmativaFirma(payload.MessageType, payload.Body))
+    {
+        var baseUri = $"{request.Scheme}://{request.Host.Value}";
+        _ = await firma.AutoResponderConLinkAsync(line.TenantId, payload.ContactPhone, line.Id, baseUri, ct);
+    }
+
     return result == Visal.Application.Tenancy.ChatIngestResult.Duplicate
         ? Results.Ok(new { status = "duplicate" })
         : Results.Accepted();
 }).AllowAnonymous().DisableAntiforgery();
+
+// Heuristica de afirmativo para auto-responder con el link de firma. Cubre:
+//   - Quick Reply de plantillas HSM (parser marca messageType=button_reply).
+//   - Respuestas de texto libre: "si", "sí", "si enviar", "enviar enlace",
+//     "enviar link", "envieme el link", "link por favor", etc.
+// Deliberadamente laxo: es mejor auto-responder de mas (el link igual esta
+// pendiente para el paciente) que dejarlo esperando.
+static bool EsRespuestaAfirmativaFirma(string? messageType, string body)
+{
+    if (string.Equals(messageType, "button_reply", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+    if (string.IsNullOrWhiteSpace(body)) { return false; }
+    var norm = body.Trim().ToLowerInvariant();
+    // Match por keywords aisladas para no gatillar en "no envien link" o similar.
+    string[] keywords = { "enlace", "link", "envienlace", "envieme", "enviar" };
+    string[] afirmativos = { "si", "sí", "yes", "ok", "listo", "acepto", "claro" };
+    if (keywords.Any(k => norm.Contains(k))) { return true; }
+    // "si" solo lo aceptamos como afirmativo si es palabra corta (<=15 chars)
+    // para no matchear frases como "no siga con eso" o "prosiga".
+    if (norm.Length <= 15 && afirmativos.Any(a => norm == a || norm.StartsWith(a + " ") || norm.StartsWith(a + ","))) { return true; }
+    return false;
+}
 
 // Endpoint publico que recibe la firma capturada en el celular del paciente.
 // La pagina /firma/{token} la sirve la propia app Blazor (componente FirmaPacienteRemota).

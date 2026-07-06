@@ -207,6 +207,100 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             .AnyAsync(ct);
     }
 
+    /// <summary>Reintervalo minimo entre auto-envios para el mismo telefono. Evita
+    /// loops si el paciente presiona el boton 2 veces por accidente o si Meta
+    /// reintega el webhook.</summary>
+    private static readonly TimeSpan _autoResponseDedupeWindow = TimeSpan.FromSeconds(30);
+
+    public async Task<int> AutoResponderConLinkAsync(
+        Guid tenantId,
+        string telefonoDigits,
+        Guid lineaId,
+        string baseUri,
+        CancellationToken ct = default)
+    {
+        var digits = new string((telefonoDigits ?? "").Where(char.IsDigit).ToArray());
+        if (digits.Length == 0)
+        {
+            _log.LogWarning("AutoResponderConLink tenant={TenantId} — telefono vacio", tenantId);
+            return 0;
+        }
+
+        var ahora = _time.GetUtcNow();
+        var pendientes = await _db.FirmaPacienteRequests
+            .IgnoreQueryFilters()
+            .Where(r => r.TenantId == tenantId
+                        && r.Telefono == digits
+                        && r.Status == FirmaRequestStatus.Pendiente
+                        && r.ExpiresAt > ahora)
+            .ToListAsync(ct);
+
+        if (pendientes.Count == 0)
+        {
+            _log.LogInformation("AutoResponderConLink telefono={Telefono} — sin solicitudes pendientes",
+                MaskPhone(digits));
+            return 0;
+        }
+
+        // Idempotencia: si acabamos de enviar el link a este telefono hace <30s
+        // (por retry del webhook o doble click del cliente), no re-enviamos.
+        var corteDedupe = ahora - _autoResponseDedupeWindow;
+        var conv = await _db.Conversations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.ContactPhone == digits, ct);
+        if (conv is not null)
+        {
+            var recienteOutbound = await _db.Messages.AsNoTracking()
+                .Where(m => m.ConversationId == conv.Id
+                            && m.Direction == MessageDirection.Outbound
+                            && m.SentAt >= corteDedupe
+                            && m.Body.Contains("/firma/"))
+                .AnyAsync(ct);
+            if (recienteOutbound)
+            {
+                _log.LogInformation("AutoResponderConLink telefono={Telefono} — dedupe: link ya enviado en los ultimos {Segundos}s",
+                    MaskPhone(digits), _autoResponseDedupeWindow.TotalSeconds);
+                return 0;
+            }
+        }
+
+        // Si no habia conversacion (raro, porque el webhook la crea al ingestar
+        // el Inbound previo), la obtenemos o creamos ahora — SendViaLineAsync
+        // necesita conversationId valido.
+        if (conv is null)
+        {
+            var chatConv = await _chat.GetOrCreateByPhoneAsync(digits, pendientes[0].NombreContacto, ct);
+            if (chatConv is null)
+            {
+                _log.LogWarning("AutoResponderConLink telefono={Telefono} — no se pudo obtener conversacion", MaskPhone(digits));
+                return 0;
+            }
+            conv = await _db.Conversations
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.Id == chatConv.Id, ct);
+            if (conv is null) { return 0; }
+        }
+
+        var enviados = 0;
+        var baseTrim = (baseUri ?? "").TrimEnd('/');
+        foreach (var req in pendientes)
+        {
+            var urlAbsoluta = string.IsNullOrEmpty(baseTrim)
+                ? $"/firma/{req.Token}"
+                : $"{baseTrim}/firma/{req.Token}";
+            var saludo = string.IsNullOrWhiteSpace(req.NombreContacto)
+                ? "Hola"
+                : "Hola " + req.NombreContacto!.Split(' ').FirstOrDefault();
+            var texto = $"{saludo}, aqui esta el link para firmar el documento clinico: {urlAbsoluta} El link vence en 2 horas.";
+            var res = await _chat.SendViaLineTrustedAsync(tenantId, conv.Id, lineaId, texto, ct);
+            _log.LogInformation(
+                "AutoResponderConLink solicitud={SolicitudId} telefono={Telefono} ok={Ok} error={Error}",
+                req.Id, MaskPhone(digits), res.Ok, res.Error ?? "(none)");
+            if (res.Ok) { enviados++; }
+        }
+        return enviados;
+    }
+
     /// <summary>Nombre a mostrar del profesional que solicita la firma. Preferencia:
     /// nombres del Profesional vinculado > DisplayName del PlatformUser > fallback
     /// generico. Cae al fallback si no hay TenantUser (webhook, cron, etc).</summary>

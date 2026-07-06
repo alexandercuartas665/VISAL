@@ -127,7 +127,35 @@ public sealed class ChatService : IChatService
         {
             return new ChatSendResult(false, null, "Conversacion no encontrada.");
         }
+        return await SendCoreAsync(conv, lineId, body, actorUserId, cancellationToken);
+    }
 
+    /// <summary>Variante "trusted" para servicios que operan sin tenant scope
+    /// (webhook Gupshup, cron). El caller ya validó a qué tenant pertenece la
+    /// conversación (via el token de la linea), asi que aqui solo confirmamos
+    /// la coincidencia por (Id + TenantId) para evitar fuga entre tenants.</summary>
+    public async Task<ChatSendResult> SendViaLineTrustedAsync(Guid tenantId, Guid conversationId, Guid lineId, string body, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return new ChatSendResult(false, null, "El mensaje esta vacio.");
+        }
+        var conv = await _db.Conversations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == conversationId && c.TenantId == tenantId, cancellationToken);
+        if (conv is null)
+        {
+            return new ChatSendResult(false, null, "Conversacion no encontrada.");
+        }
+        // actorUserId = Guid.Empty: es un envio automatico del sistema, sin
+        // profesional atras. SentByName queda como "Sistema" en el chat.
+        return await SendCoreAsync(conv, lineId, body, Guid.Empty, cancellationToken);
+    }
+
+    /// <summary>Nucleo del envio outbound compartido por SendViaLineAsync y
+    /// SendViaLineTrustedAsync. Recibe la Conversation ya cargada.</summary>
+    private async Task<ChatSendResult> SendCoreAsync(Conversation conv, Guid lineId, string body, Guid actorUserId, CancellationToken cancellationToken)
+    {
         // Envio real por la linea elegida (Evolution).
         var send = await _connector.SendTestAsync(lineId, conv.ContactPhone, body, actorUserId, cancellationToken);
         if (!send.Ok)

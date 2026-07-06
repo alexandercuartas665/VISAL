@@ -26,6 +26,11 @@ public interface IChatService
     /// <summary>Envia un mensaje por una linea WhatsApp (Evolution real) y lo persiste como saliente.</summary>
     Task<ChatSendResult> SendViaLineAsync(Guid conversationId, Guid lineId, string body, Guid actorUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>Igual a SendViaLineAsync pero para servicios que operan sin
+    /// tenant scope (webhook, cron). Recibe el tenantId explicito y confirma
+    /// que la conversacion pertenece a ese tenant antes de enviar.</summary>
+    Task<ChatSendResult> SendViaLineTrustedAsync(Guid tenantId, Guid conversationId, Guid lineId, string body, CancellationToken cancellationToken = default);
+
     /// <summary>Envia un adjunto (imagen/video/audio/documento) por una linea y lo persiste. base64 va a Evolution; localUrl se guarda para mostrar.</summary>
     Task<ChatSendResult> SendMediaViaLineAsync(Guid conversationId, Guid lineId, Domain.Enums.MessageMediaType mediaType, string base64, string localUrl, string? mimeType, string? fileName, string? caption, Guid actorUserId, CancellationToken cancellationToken = default);
 

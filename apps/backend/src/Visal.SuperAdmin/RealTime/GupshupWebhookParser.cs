@@ -79,9 +79,15 @@ public static class GupshupWebhookParser
         if (string.IsNullOrWhiteSpace(body)) { body = "(mensaje no soportado)"; }
 
         // messageType para downstream: normalizamos a lo mismo que ya usamos
-        // en Evolution ("text" | "media"). Si algun dia se distingue mas, el
-        // cambio va en IChatIngestService, no aca.
-        var messageType = innerType == "text" ? "text" : "media";
+        // en Evolution ("text" | "media") + un tipo nuevo "button_reply" para
+        // que la ingesta detecte los Quick Reply de plantillas HSM sin
+        // depender del texto (algunas plantillas usan otro idioma o wording).
+        var messageType = innerType switch
+        {
+            "text" => "text",
+            "button" or "button_reply" or "quick_reply" => "button_reply",
+            _ => "media",
+        };
 
         DateTimeOffset? sentAt = null;
         if (root.TryGetProperty("timestamp", out var ts) && ts.ValueKind == JsonValueKind.Number &&
@@ -104,8 +110,33 @@ public static class GupshupWebhookParser
             "audio" => "(audio)",
             "location" => Location(inner),
             "contacts" => "(contacto)",
+            "button" or "button_reply" or "quick_reply" => ButtonLabel(inner),
             _ => $"({innerType})",
         };
+    }
+
+    /// <summary>Extrae el texto visible del boton respondido. Gupshup usa
+    /// distintos campos segun la version del payload — cubrimos los mas
+    /// comunes: <c>title</c>, <c>text</c>, <c>reply.title</c>.</summary>
+    private static string ButtonLabel(JsonElement inner)
+    {
+        if (inner.TryGetProperty("title", out var titleEl) && titleEl.ValueKind == JsonValueKind.String)
+        {
+            var t = titleEl.GetString();
+            if (!string.IsNullOrWhiteSpace(t)) { return t!; }
+        }
+        if (inner.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String)
+        {
+            var t = textEl.GetString();
+            if (!string.IsNullOrWhiteSpace(t)) { return t!; }
+        }
+        if (inner.TryGetProperty("reply", out var reply) && reply.ValueKind == JsonValueKind.Object
+            && reply.TryGetProperty("title", out var rt) && rt.ValueKind == JsonValueKind.String)
+        {
+            var t = rt.GetString();
+            if (!string.IsNullOrWhiteSpace(t)) { return t!; }
+        }
+        return "(boton)";
     }
 
     private static string Caption(JsonElement inner, string kind)

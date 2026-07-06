@@ -99,6 +99,22 @@ public interface IFirmaRemotaService
     /// linea elegida. Devuelve el resultado del envio (Ok/Error + texto del mensaje).</summary>
     Task<ChatSendResult> EnviarPorWhatsAppAsync(Guid solicitudId, Guid lineaId, string urlAbsoluta, Guid actorTenantUserId, CancellationToken ct = default);
 
+    /// <summary>Auto-responde con el link de firma cuando el destinatario responde al
+    /// Quick Reply de la plantilla HSM. Se dispara desde la ingesta del webhook al
+    /// recibir un Inbound tipo boton o con keyword afirmativo. Sin intervencion del
+    /// operador: la ventana de sesion ya esta abierta (el paciente acaba de escribir),
+    /// asi que solo mandamos el link como texto. Idempotente: no re-envia si acabamos
+    /// de mandarlo en los ultimos 30 segundos.
+    ///
+    /// Devuelve el numero de solicitudes que dispararon envio (0 si no habia
+    /// pendientes para ese telefono, o si fue idempotente).</summary>
+    Task<int> AutoResponderConLinkAsync(
+        Guid tenantId,
+        string telefonoDigits,
+        Guid lineaId,
+        string baseUri,
+        CancellationToken ct = default);
+
     /// <summary>Cancela la solicitud activa (el link queda invalido). El profesional
     /// puede crear otra despues.</summary>
     Task<bool> CancelarAsync(Guid solicitudId, Guid actorTenantUserId, CancellationToken ct = default);

@@ -20,8 +20,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 # descargado necesita para arrancar, mas las fuentes. Se deja antes del COPY para cachear la capa.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       chromium fonts-liberation fonts-noto-color-emoji ca-certificates \
+       chromium fonts-liberation fonts-noto-color-emoji ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
+# tzdata: garantiza que /usr/share/zoneinfo/America/Bogota existe para que .NET
+# TimeZoneInfo.Local resuelva la env var TZ (seteada por docker-compose) en
+# lugar de quedarse en UTC.
 # (Sin VISAL_CHROME_PATH a proposito: que PuppeteerSharp use el Chromium que descarga, compatible.)
 
 WORKDIR /app

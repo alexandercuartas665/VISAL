@@ -45,6 +45,13 @@ services:
       VISAL_DB_CONNECTION: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
       VISAL_RUN_MIGRATIONS: "true"
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      # Zona horaria del contenedor: sin esta variable Linux corre en UTC y
+      # DateTime.Now / DateTimeOffset.Now devuelven UTC. Al setearla:
+      #   - Los timestamps de logs (Serilog "zzz") salen como -05:00
+      #   - PacientePrefillHelper.CalcularEdad usa fecha local Colombia
+      #   - SistemaPrefillHelper (fecha/hora del formulario) devuelve hora local
+      # Requiere la imagen base con tzdata (mcr.microsoft.com/dotnet:9.0 ya trae).
+      TZ: America/Bogota
     ports:
       # Publica SOLO al loopback del server (no expuesto a internet).
       # Tu reverse proxy global hace TLS y forwardea a este puerto.
@@ -70,6 +77,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
+      # TZ del proceso postgres + PGTZ para que now(), current_timestamp y los
+      # logs del server salgan en hora Colombia. Los timestamptz almacenados no
+      # cambian (siempre son UTC en disco), solo el rendering al consultar.
+      TZ: America/Bogota
+      PGTZ: America/Bogota
     volumes:
       - visal-pgdata:/var/lib/postgresql/data
     networks:

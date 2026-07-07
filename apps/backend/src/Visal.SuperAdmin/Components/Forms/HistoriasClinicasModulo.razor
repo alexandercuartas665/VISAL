@@ -132,9 +132,9 @@
                                         <div class="hc-menu-h">Acciones</div>
                                         <button class="hc-menu-item" @onclick="() => Seleccionar(h)">Ver esta historia</button>
                                         <button class="hc-menu-item" @onclick="() => CrearCopiaAsync(h)">Crear una copia</button>
-                                        <button class="hc-menu-item" disabled>Impresion</button>
-                                        <button class="hc-menu-item" disabled>Procesar Interoperabilidad</button>
-                                        <button class="hc-menu-item" disabled>Abrir Documento</button>
+                                        <button class="hc-menu-item" @onclick='() => AccionSinPermisoAsync("Impresion")'>Impresion</button>
+                                        <button class="hc-menu-item" @onclick='() => AccionSinPermisoAsync("Procesar Interoperabilidad")'>Procesar Interoperabilidad</button>
+                                        <button class="hc-menu-item" @onclick='() => AccionSinPermisoAsync("Abrir Documento")'>Abrir Documento</button>
                                     </div>
                                 }
                             </div>
@@ -1800,6 +1800,21 @@
         {
             await JS.InvokeVoidAsync("alert", $"No se pudo crear la copia: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Placeholder para acciones del kebab que aun no estan cableadas
+    /// (Impresion / Procesar Interoperabilidad / Abrir Documento). Los
+    /// botones quedan habilitados para que el usuario descubra que existen,
+    /// pero al hacer click ven un alert consistente que aclara que la accion
+    /// requiere un permiso que su rol no tiene. Cuando cada modulo se cablee
+    /// se reemplaza este handler por su implementacion real.
+    /// </summary>
+    private async Task AccionSinPermisoAsync(string accion)
+    {
+        _menuAbierto = null;
+        await JS.InvokeVoidAsync("alert",
+            $"No tienes permiso para ejecutar: {accion}.\nSolicitalo al administrador de tu agencia.");
     }
 
     private async Task Descartar()

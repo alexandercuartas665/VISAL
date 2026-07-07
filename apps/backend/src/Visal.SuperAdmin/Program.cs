@@ -11,11 +11,36 @@ using Visal.SuperAdmin.Auth;
 using Visal.SuperAdmin.Components;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
+
+// Serilog: log estructurado a archivo rotativo diario + console. Configurado
+// ANTES de builder para captar tambien los eventos de startup. Nivel default
+// Information; Microsoft.AspNetCore a Warning (para que aparezcan los errores
+// de circuito Blazor que se logean por default en la categoria
+// Microsoft.AspNetCore.Components.Server.Circuits.CircuitHost a nivel Error).
+// Archivos en logs/visal-YYYYMMDD.log, retencion 30 dias, 100 MB por archivo.
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.File(
+        path: Path.Combine(AppContext.BaseDirectory, "logs", "visal-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 30,
+        fileSizeLimitBytes: 100L * 1024 * 1024,
+        rollOnFileSizeLimit: true,
+        shared: true,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] ({SourceContext}) {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog();
 
 // Formato numerico uniforme en todo el sistema, independiente del locale del servidor (dev o Railway):
 // coma = separador de miles, punto = decimal (ej. 3,500,000.50). Evita que el host cambie como se ven los montos.
@@ -58,8 +83,18 @@ builder.Services.AddSingleton<Visal.Application.Tenancy.IDevTunnel, Visal.SuperA
 // Storage de archivos servibles (wwwroot/uploads) para que servicios de Application
 // puedan persistir binarios (ej. firmas remotas) sin acoplarse a IWebHostEnvironment.
 builder.Services.AddSingleton<Visal.Application.Common.IUploadStorage, Visal.SuperAdmin.RealTime.WwwRootUploadStorage>();
+// CircuitHandler propio: agrega contexto (usuario + tenant + path) a los logs de
+// Blazor Server cuando un circuito se abre, cae o se cierra. Correla con los
+// Error que el framework loguea automaticamente cuando una excepcion tumba el
+// circuito y dispara el banner "Ha ocurrido un error. Recargar." en el cliente.
+builder.Services.AddScoped<CircuitHandler, Visal.SuperAdmin.RealTime.VisalCircuitHandler>();
 
 var app = builder.Build();
+
+// Log request/response de cada peticion HTTP (method, path, status, duracion).
+// Sirve para diagnosticar si el error de circuito viene precedido de un 500 en
+// una peticion normal (ej. autosave POST).
+app.UseSerilogRequestLogging();
 
 // Detras del proxy de Railway (TLS en el borde, HTTP al contenedor): leer
 // X-Forwarded-Proto/For para que Request.Scheme sea "https". Asi las cookies
@@ -1079,7 +1114,16 @@ app.MapPost("/api/firma/{token}/submit", async (
     return ok ? Results.Ok(new { ok = true }) : Results.BadRequest(new { ok = false, error = "Solicitud invalida, ya cerrada o expirada." });
 }).AllowAnonymous().DisableAntiforgery();
 
-app.Run();
+try
+{
+    app.Run();
+}
+finally
+{
+    // Vaciar buffers de Serilog al apagar (sino se pueden perder los ultimos
+    // eventos, incluidos los que expliquen POR QUE el proceso murio).
+    Log.CloseAndFlush();
+}
 
 // Payload del POST publico de firma (queda al fondo del file porque Program.cs es top-level).
 record SubmitFirmaPayload(string DataUrl);

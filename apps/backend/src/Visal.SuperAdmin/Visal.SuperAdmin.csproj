@@ -13,6 +13,12 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- Logging estructurado a archivo rotativo diario para diagnosticar errores
+         de circuito Blazor ("Ha ocurrido un error. Recargar.") que en prod
+         tumban SignalR y quedaban sin trazar. Serilog + sink File retiene 30 dias
+         de logs incluso si el contenedor se reinicia. -->
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
   </ItemGroup>
 
   <PropertyGroup>

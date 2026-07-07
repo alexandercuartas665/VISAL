@@ -1028,21 +1028,31 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _formatos = (await FormsSvc.ListAsync()).Where(f => f.Activo).ToList();
-        // Si nos pasaron un codigo de formato forzado (viene del servicio asignado),
-        // lo resolvemos a su Guid para usarlo al iniciar historia. NO toca _filFormato
-        // (que es solo el filtro de busqueda de historias previas).
-        if (!string.IsNullOrWhiteSpace(FormatoForzadoCodigo))
+        // Serializar TODO el arranque del componente contra el DbContext scoped
+        // del circuito Blazor. Sin esto, en prod se disparaba
+        // InvalidOperationException "A second operation was started..." porque
+        // los subcomponentes hijos (WhatsAppChatPanel, tabs de HC) tambien
+        // corren su OnInitialized/OnParametersSet al mismo tiempo y comparten
+        // el mismo DbContext. El circuito Blazor moria y el usuario veia
+        // "Ha ocurrido un error. Recargar."
+        await LockedAsync(async () =>
         {
-            var match = _formatos.FirstOrDefault(f =>
-                string.Equals(f.Codigo, FormatoForzadoCodigo, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(f.CodigoSecundario, FormatoForzadoCodigo, StringComparison.OrdinalIgnoreCase));
-            _formatoForzadoId = match?.Id;
-            _formatoForzadoNombre = match?.Nombre;
-        }
-        await CargarNombreTenantAsync();
-        await ResolverPuedeReabrirAsync();
-        await AutoCargarHcEnCursoSiCorrespondeAsync();
+            _formatos = (await FormsSvc.ListAsync()).Where(f => f.Activo).ToList();
+            // Si nos pasaron un codigo de formato forzado (viene del servicio asignado),
+            // lo resolvemos a su Guid para usarlo al iniciar historia. NO toca _filFormato
+            // (que es solo el filtro de busqueda de historias previas).
+            if (!string.IsNullOrWhiteSpace(FormatoForzadoCodigo))
+            {
+                var match = _formatos.FirstOrDefault(f =>
+                    string.Equals(f.Codigo, FormatoForzadoCodigo, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(f.CodigoSecundario, FormatoForzadoCodigo, StringComparison.OrdinalIgnoreCase));
+                _formatoForzadoId = match?.Id;
+                _formatoForzadoNombre = match?.Nombre;
+            }
+            await CargarNombreTenantAsync();
+            await ResolverPuedeReabrirAsync();
+            await AutoCargarHcEnCursoSiCorrespondeAsync();
+        });
     }
 
     /// <summary>
@@ -1230,6 +1240,13 @@
         _saveStatus = "limpio";
         _ultimoGuardado = null;
         _saveTitle = null;
+        // Envolver TODO el Seleccionar en el lock del DbContext: hace ~15 queries
+        // en serie contra el mismo contexto scoped del circuito, y en prod chocaba
+        // con queries paralelas de subcomponentes hijos que se re-inicializaban
+        // al recibir el nuevo HistoriaClinicaId. RefrescarPrefillHistoriaMedica
+        // (que ya usa LockedAsync internamente) es reentrante y no da deadlock.
+        await LockedAsync(async () =>
+        {
         // IMPORTANTE: forzar el tab a "Historial" ANTES de asignar _historiaSel.
         // Si el usuario estaba parado en otra pestana (Remisiones / Insumos / etc.)
         // y le damos primero un HistoriaClinicaId real, el sub-componente hijo
@@ -1309,6 +1326,7 @@
         // ANTES de pintar. Asi al abrir una HC vieja el contenido refleja la orden
         // actual aunque haya cambiado entre sesiones, no el ValoresJson historico.
         await RefrescarPrefillHistoriaMedicaAsync(h.Id);
+        });
     }
 
     /// <summary>
@@ -1324,6 +1342,36 @@
     // los Query Filters de tenant retornarian 0 filas, asi que mantenemos el
     // DbContext del componente pero turnamos las operaciones.
     private readonly SemaphoreSlim _dbLock = new(1, 1);
+    // Flag para hacer el lock "reentrante" logicamente: cuando OnInitializedAsync
+    // agarra el lock y llama a Seleccionar (que a su vez llama a
+    // RefrescarPrefillHistoriaMedica), NO queremos deadlock. SemaphoreSlim no es
+    // reentrante nativamente, asi que este flag le indica al helper que ya
+    // tenemos el lock y no debe intentar readquirirlo.
+    private bool _dbLockHeld;
+
+    /// <summary>Ejecuta <paramref name="op"/> serializada por _dbLock. Reentrante:
+    /// si el caller ya tiene el lock, ejecuta directo sin re-adquirirlo. Esto
+    /// permite envolver metodos de alto nivel (OnInitializedAsync, Seleccionar)
+    /// sin romper los metodos internos que tambien usan el lock
+    /// (RefrescarPrefillHistoriaMedica).</summary>
+    private async Task LockedAsync(Func<Task> op)
+    {
+        if (_dbLockHeld) { await op(); return; }
+        await _dbLock.WaitAsync();
+        _dbLockHeld = true;
+        try { await op(); }
+        finally { _dbLockHeld = false; _dbLock.Release(); }
+    }
+
+    /// <summary>Version con retorno del helper <see cref="LockedAsync(Func{Task})"/>.</summary>
+    private async Task<T> LockedAsync<T>(Func<Task<T>> op)
+    {
+        if (_dbLockHeld) { return await op(); }
+        await _dbLock.WaitAsync();
+        _dbLockHeld = true;
+        try { return await op(); }
+        finally { _dbLockHeld = false; _dbLock.Release(); }
+    }
 
     /// <summary>Reintenta una operacion EF Core hasta 3 veces si choca con otro
     /// flujo (chat IA, WhatsApp panel) que tiene el DbContext ocupado.</summary>
@@ -1342,9 +1390,10 @@
 
     private async Task RefrescarPrefillHistoriaMedicaAsync(Guid hcId)
     {
-        await _dbLock.WaitAsync();
-        try
+        await LockedAsync(async () =>
         {
+            try
+            {
             var meds = await RetryAsync(() => OrdMedSvc.ListarPorHistoriaAsync(hcId));
             var rem = await RetryAsync(() => RemSvc.ListarPorHistoriaAsync(hcId));
             var inc = await RetryAsync(() => IncSvc.ListarPorHistoriaAsync(hcId));
@@ -1372,18 +1421,15 @@
             // FormViewer renderiza el dict viejo y la fila auto no aparece hasta
             // que el usuario navega afuera y vuelve.
             _valores = new Dictionary<string, string?>(_valores, StringComparer.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-        {
-            // Loggea pero NO oculta el error: si la rama tabla falla queremos
-            // saberlo. Mantenemos las keys del header siempre.
-            Console.WriteLine($"[RefrescarPrefillHistoriaMedica] {ex.GetType().Name}: {ex.Message}");
-            _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            _dbLock.Release();
-        }
+            }
+            catch (Exception ex)
+            {
+                // Loggea pero NO oculta el error: si la rama tabla falla queremos
+                // saberlo. Mantenemos las keys del header siempre.
+                Console.WriteLine($"[RefrescarPrefillHistoriaMedica] {ex.GetType().Name}: {ex.Message}");
+                _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
+            }
+        });
     }
 
     /// <summary>

@@ -52,6 +52,22 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 .FirstOrDefaultAsync(ct);
         }
 
+        // Resolver los 5 FK a catalogos_paciente en 1 sola query batch. Cada uno
+        // apunta a la misma tabla, solo cambia el Tipo — con un IN sobre los ids
+        // no-nulos + un lookup Dictionary evitamos 5 idas separadas a la BD.
+        var catalogoIds = new[] {
+                p.TipoUsuarioId, p.ClasificacionPacienteId, p.ClasificacionGrupoPatologiaId,
+                p.TipoTutelaId, p.MedContratadoId
+            }
+            .Where(g => g is not null).Select(g => g!.Value).ToArray();
+        var catalogoLookup = catalogoIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : await db.CatalogosPaciente.AsNoTracking()
+                .Where(c => catalogoIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.Nombre, ct);
+        string? ResolverCatalogo(Guid? id) =>
+            id is Guid g && catalogoLookup.TryGetValue(g, out var nombre) ? nombre : null;
+
         return new PacienteAsignacionDto(p.Id, p.NumeroDocumento, p.TipoDocumento, p.NombreCompleto,
             sedeNombre, p.Ciudad, contratos,
             p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
@@ -62,7 +78,16 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             p.Ocupacion, p.Regimen,
             p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
             epsNombre,
-            p.EstadoAdmision);
+            p.EstadoAdmision,
+            // Campos ampliados: raw + fechas + FKs resueltos.
+            p.Barrio, p.Incapacidad, p.GrupoRh, p.Estado, p.EstratoSocial, p.Tutela,
+            p.CodigoAceptacion, p.Cie10Codigo, p.DiagnosticoPrincipal,
+            p.FechaComentan, p.FechaIngresoPad, p.FechaEgresoPad,
+            ResolverCatalogo(p.TipoUsuarioId),
+            ResolverCatalogo(p.ClasificacionPacienteId),
+            ResolverCatalogo(p.ClasificacionGrupoPatologiaId),
+            ResolverCatalogo(p.TipoTutelaId),
+            ResolverCatalogo(p.MedContratadoId));
     }
 
     public async Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default)

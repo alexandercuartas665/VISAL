@@ -20,7 +20,31 @@ public sealed record PacienteAsignacionDto(
     // prefill "paciente.eps" en cualquier formulario.
     string? Eps = null,
     // Estado de admision: "Abierto" o "Cerrado". Solo pacientes Cerrados pueden asignarse.
-    string EstadoAdmision = "Abierto");
+    string EstadoAdmision = "Abierto",
+    // ----- Ampliacion: campos administrativos, de clasificacion y diagnostico
+    //       que la ficha de admision captura y que deben poder enrutarse como
+    //       prefill a HC / Escalas / Consentimientos. Todos opcionales. -----
+    string? Barrio = null,
+    string? Incapacidad = null,
+    string? GrupoRh = null,
+    string? Estado = null,
+    string? EstratoSocial = null,
+    string? Tutela = null,
+    string? CodigoAceptacion = null,
+    string? Cie10Codigo = null,
+    string? DiagnosticoPrincipal = null,
+    // Fechas de la estancia PAD (formato ISO en el prefill).
+    DateOnly? FechaComentan = null,
+    DateOnly? FechaIngresoPad = null,
+    DateOnly? FechaEgresoPad = null,
+    // Nombre legible resuelto de los FK a catalogos_paciente. El servicio hace
+    // el join una sola vez y devuelve el texto para que el prefill lo escriba
+    // directo al input/dropdown del formulario destino.
+    string? TipoUsuario = null,
+    string? ClasificacionPaciente = null,
+    string? ClasificacionGrupoPatologia = null,
+    string? TipoTutela = null,
+    string? MedContratado = null);
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado, bool RequierePdfAutorizacion);
 

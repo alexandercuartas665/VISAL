@@ -85,10 +85,19 @@ public static class PrefillSourceCatalog
             "numeroDocumento", "tipoDocumento", "nombreCompleto",
             "primerNombre", "segundoNombre", "primerApellido", "segundoApellido",
             "fechaNacimiento", "edad", "sexo", "estadoCivil",
-            "telefono", "email", "direccion", "ciudad", "zona",
+            "telefono", "email", "direccion", "barrio", "ciudad", "zona",
             "ocupacion", "regimen",
             "contactoEmergencia", "parentesco", "telefonoEmergencia",
-            "sede", "eps"
+            "sede", "eps",
+            // Clasificaciones y catalogos (nombre legible del FK ya resuelto).
+            "tipoUsuario", "clasificacionPaciente", "clasificacionGrupoPatologia",
+            // Salud y estados.
+            "grupoRh", "incapacidad", "estado", "estratoSocial",
+            // Administrativo PAD.
+            "codigoAceptacion", "fechaComentan", "fechaIngresoPad", "fechaEgresoPad",
+            // Diagnostico y tutela.
+            "cie10Codigo", "diagnosticoPrincipal",
+            "tutela", "tipoTutela", "medContratado"
         },
         ["profesional"] = new[]
         {

@@ -50,7 +50,27 @@ public static class PacientePrefillHelper
             ["parentesco"] = p.Parentesco,
             ["telefonoEmergencia"] = p.TelefonoEmergencia,
             ["sede"] = p.Sede,
-            ["eps"] = p.Eps
+            ["eps"] = p.Eps,
+            // Ampliacion: campos administrativos, de clasificacion y diagnostico
+            // de la ficha de admision. Las claves coinciden con
+            // PrefillSourceCatalog.Campos["paciente"].
+            ["barrio"] = p.Barrio,
+            ["tipoUsuario"] = p.TipoUsuario,
+            ["clasificacionPaciente"] = p.ClasificacionPaciente,
+            ["clasificacionGrupoPatologia"] = p.ClasificacionGrupoPatologia,
+            ["grupoRh"] = p.GrupoRh,
+            ["incapacidad"] = p.Incapacidad,
+            ["estado"] = p.Estado,
+            ["estratoSocial"] = p.EstratoSocial,
+            ["codigoAceptacion"] = p.CodigoAceptacion,
+            ["fechaComentan"] = p.FechaComentan?.ToString("yyyy-MM-dd"),
+            ["fechaIngresoPad"] = p.FechaIngresoPad?.ToString("yyyy-MM-dd"),
+            ["fechaEgresoPad"] = p.FechaEgresoPad?.ToString("yyyy-MM-dd"),
+            ["cie10Codigo"] = p.Cie10Codigo,
+            ["diagnosticoPrincipal"] = p.DiagnosticoPrincipal,
+            ["tutela"] = p.Tutela,
+            ["tipoTutela"] = p.TipoTutela,
+            ["medContratado"] = p.MedContratado
         };
     }
 

@@ -131,6 +131,7 @@
                                     <div class="hc-menu">
                                         <div class="hc-menu-h">Acciones</div>
                                         <button class="hc-menu-item" @onclick="() => Seleccionar(h)">Ver esta historia</button>
+                                        <button class="hc-menu-item" @onclick="() => CrearCopiaAsync(h)">Crear una copia</button>
                                         <button class="hc-menu-item" disabled>Impresion</button>
                                         <button class="hc-menu-item" disabled>Procesar Interoperabilidad</button>
                                         <button class="hc-menu-item" disabled>Abrir Documento</button>
@@ -1741,6 +1742,64 @@
             }
         }
         catch { /* las firmas son opcionales: si fallan, el form sigue funcionando */ }
+    }
+
+    /// <summary>
+    /// Duplica la HC seleccionada: llama al backend para crear una nueva HC
+    /// con el mismo formato + copia de items y ValoresJson. Luego re-aplica
+    /// el prefill (paciente + sistema + firmas) sobre la copia para que los
+    /// campos volatiles (fecha, hora, medico logueado) queden con datos
+    /// frescos — el prefill sobrescribe los valores heredados del origen en
+    /// esas keys; los campos clinicos libres (enfermedad_actual, plan, etc.)
+    /// se preservan porque el prefill no los toca.
+    /// </summary>
+    private async Task CrearCopiaAsync(HistoriaRow src)
+    {
+        _menuAbierto = null;
+        if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Crear una copia de la historia del {src.Fecha:dd/MM/yyyy}?\nSe generara una HC nueva Abierta con los mismos items clinicos y datos, y con la fecha/hora/medico actualizados.");
+        if (!ok) { return; }
+
+        try
+        {
+            var especialista = await GetEspecialistaNombreAsync();
+            var miProf = await ResolverMiProfesionalIdAsync();
+            var copia = await HcSvc.CopiarAsync(new CopiarHistoriaRequest(src.Id, especialista, miProf), Guid.Empty);
+            if (copia is null) { return; }
+
+            // Insertar arriba en la lista + seleccionar (carga schema/valores + refresca
+            // prefill historiaMedica desde los items ya clonados).
+            var fila = new HistoriaRow
+            {
+                Id = copia.Id,
+                Especialista = copia.EspecialistaNombre ?? especialista ?? "(usuario actual)",
+                Fecha = DateOnly.FromDateTime(copia.FechaApertura.LocalDateTime),
+                Estado = copia.Estado,
+                Observaciones = $"Copia de la historia del {src.Fecha:dd/MM/yyyy}",
+                ProfesionalId = copia.ProfesionalId,
+                RipsViaNombre = copia.RipsViaIngresoNombre,
+                RipsFinalidadNombre = copia.RipsFinalidadNombre,
+                RipsCausaNombre = copia.RipsCausaExternaNombre
+            };
+            _historias.Insert(0, fila);
+            await Seleccionar(fila);
+
+            // Correr el prefill del paciente + sistema + firmas SOBRE _valores que ya
+            // trae el contenido del origen. Como se aplica al final, sus keys ganan
+            // (fecha/hora/medico/firmas del usuario actual). Los campos clinicos libres
+            // del origen se preservan porque el prefill solo escribe las keys mapeadas.
+            await PrefillFromPaciente();
+            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, copia.Id, copia.FechaApertura);
+            _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
+
+            // Persistir los valores actualizados (source + prefill fresco) en la copia.
+            await HcSvc.GuardarValoresAsync(copia.Id, SerializeValores(_valores), await ResolverActorAsync());
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"No se pudo crear la copia: {ex.Message}");
+        }
     }
 
     private async Task Descartar()

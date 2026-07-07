@@ -88,4 +88,23 @@ public interface IHistoriaClinicaService
     /// formato dado. Sirve para reanudar la HC en curso cuando el doctor vuelve
     /// al paciente (en vez de crear una nueva). Null si no hay.</summary>
     Task<Guid?> BuscarAbiertaDelProfesionalAsync(Guid pacienteId, Guid profesionalId, Guid formDefinitionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Duplica una HC existente: crea una nueva HC en estado Abierta, con el mismo
+    /// FormDefinitionId y PacienteId, copiando el ValoresJson origen y todos los items
+    /// clinicos (medicamentos, insumos, remisiones, incapacidades, certificaciones,
+    /// ordenes de servicio, ordenes externas). El caller (frontend) es responsable de
+    /// re-aplicar el prefill (paciente + sistema + firmas) sobre la HC nueva para que
+    /// los campos volatiles (fecha, hora, medico logueado) se refresquen — el prefill
+    /// sobrescribe sobre los valores copiados.
+    /// </summary>
+    Task<HistoriaClinicaDetailDto?> CopiarAsync(CopiarHistoriaRequest req, Guid actor, CancellationToken ct = default);
 }
+
+/// <summary>Peticion de duplicacion de HC. EspecialistaNombre y ProfesionalId
+/// permiten reemplazar los datos del profesional origen por los del usuario que
+/// esta creando la copia; si son null, se conservan los del origen.</summary>
+public sealed record CopiarHistoriaRequest(
+    Guid SourceHistoriaId,
+    string? EspecialistaNombre,
+    Guid? ProfesionalId);

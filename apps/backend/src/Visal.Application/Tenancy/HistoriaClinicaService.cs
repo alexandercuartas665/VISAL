@@ -206,4 +206,164 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
             .Select(h => (Guid?)h.Id)
             .FirstOrDefaultAsync(ct);
     }
+
+    public async Task<HistoriaClinicaDetailDto?> CopiarAsync(CopiarHistoriaRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        // Cargar la HC origen — sirve tanto para copiar sus campos base como para
+        // validar que existe y pertenece al tenant (via Query Filter).
+        var source = await db.HistoriasClinicas.AsNoTracking()
+            .FirstOrDefaultAsync(h => h.Id == req.SourceHistoriaId, ct);
+        if (source is null) { return null; }
+        if (source.Estado == HistoriaClinicaEstado.Inactiva)
+        {
+            throw new InvalidOperationException("No se puede copiar una historia inactiva.");
+        }
+
+        // Crear la copia. Estrategia:
+        //   - Estado siempre Abierta y FechaApertura = ahora (es una HC nueva).
+        //   - Profesional/Especialista: usar los del actor si vienen; si no, heredar los del origen.
+        //   - RIPS: se heredan del origen — el doctor no tiene que re-elegirlos.
+        //   - ValoresJson: se copia tal cual del origen. El frontend correra el prefill de
+        //     paciente/sistema/firmas DESPUES para que refresque fecha/hora/medico logueado y
+        //     "gane" sobre los valores copiados en esas keys (los campos clinicos libres se
+        //     preservan porque el prefill no los toca).
+        var ahora = DateTimeOffset.UtcNow;
+        var nueva = new HistoriaClinica
+        {
+            TenantId = tid,
+            PacienteId = source.PacienteId,
+            FormDefinitionId = source.FormDefinitionId,
+            ValoresJson = string.IsNullOrWhiteSpace(source.ValoresJson) ? "{}" : source.ValoresJson,
+            Estado = HistoriaClinicaEstado.Abierta,
+            FechaApertura = ahora,
+            EspecialistaNombre = req.EspecialistaNombre ?? source.EspecialistaNombre,
+            ProfesionalId = req.ProfesionalId ?? source.ProfesionalId,
+            RipsViaIngresoCodigo = source.RipsViaIngresoCodigo,
+            RipsViaIngresoNombre = source.RipsViaIngresoNombre,
+            RipsFinalidadCodigo = source.RipsFinalidadCodigo,
+            RipsFinalidadNombre = source.RipsFinalidadNombre,
+            RipsCausaExternaCodigo = source.RipsCausaExternaCodigo,
+            RipsCausaExternaNombre = source.RipsCausaExternaNombre
+        };
+        db.HistoriasClinicas.Add(nueva);
+        await db.SaveChangesAsync(ct);
+
+        // Clonar las 7 colecciones clinicas. Cada item nuevo lleva Id fresco + HistoriaClinicaId
+        // apuntando a la HC copia. Escalas / Documentos NO se copian: son adjuntos con fecha propia.
+        var meds = await db.HistoriaClinicaMedicamentos.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var m in meds)
+        {
+            db.HistoriaClinicaMedicamentos.Add(new HistoriaClinicaMedicamento
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                MedicamentoId = m.MedicamentoId,
+                NombreMedicamento = m.NombreMedicamento,
+                CodigoMedicamento = m.CodigoMedicamento,
+                Cantidad = m.Cantidad, Frecuencia = m.Frecuencia,
+                Dias = m.Dias, Posologia = m.Posologia,
+                Observacion = m.Observacion, MipresUrl = m.MipresUrl,
+                Orden = m.Orden
+            });
+        }
+        var insumos = await db.HistoriaClinicaInsumos.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var i in insumos)
+        {
+            db.HistoriaClinicaInsumos.Add(new HistoriaClinicaInsumo
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                Codigo = i.Codigo, Descripcion = i.Descripcion,
+                Cantidad = i.Cantidad, Observaciones = i.Observaciones,
+                MipresUrl = i.MipresUrl, Orden = i.Orden
+            });
+        }
+        var rems = await db.HistoriaClinicaRemisiones.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var r in rems)
+        {
+            db.HistoriaClinicaRemisiones.Add(new HistoriaClinicaRemision
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                Capitulo = r.Capitulo,
+                EspecialidadCodigo = r.EspecialidadCodigo,
+                EspecialidadNombre = r.EspecialidadNombre,
+                Cantidad = r.Cantidad, Motivo = r.Motivo, Orden = r.Orden
+            });
+        }
+        var incs = await db.HistoriaClinicaIncapacidades.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var x in incs)
+        {
+            db.HistoriaClinicaIncapacidades.Add(new HistoriaClinicaIncapacidad
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                Motivo = x.Motivo,
+                FechaDesde = x.FechaDesde, FechaHasta = x.FechaHasta,
+                Dias = x.Dias, Tipo = x.Tipo, Orden = x.Orden
+            });
+        }
+        var certs = await db.HistoriaClinicaCertificaciones.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var c in certs)
+        {
+            db.HistoriaClinicaCertificaciones.Add(new HistoriaClinicaCertificacion
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                Titulo = c.Titulo, Contenido = c.Contenido, Orden = c.Orden
+            });
+        }
+        var ords = await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var o in ords)
+        {
+            db.HistoriaClinicaOrdenesServicio.Add(new HistoriaClinicaOrdenServicio
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                ServicioContratoId = o.ServicioContratoId,
+                CodigoServicio = o.CodigoServicio,
+                Descripcion = o.Descripcion,
+                Cantidad = o.Cantidad, Observaciones = o.Observaciones,
+                Orden = o.Orden
+            });
+        }
+        var exts = await db.HistoriaClinicaOrdenesExternas.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == source.Id).ToListAsync(ct);
+        foreach (var e in exts)
+        {
+            db.HistoriaClinicaOrdenesExternas.Add(new HistoriaClinicaOrdenExterna
+            {
+                TenantId = tid, HistoriaClinicaId = nueva.Id,
+                Tipo = e.Tipo, Codigo = e.Codigo,
+                Descripcion = e.Descripcion,
+                Cantidad = e.Cantidad, Observaciones = e.Observaciones,
+                Orden = e.Orden
+            });
+        }
+
+        audit.Write(actor, "historia-clinica.copiar", nameof(HistoriaClinica), nueva.Id,
+            previousValue: null,
+            newValue: new
+            {
+                origenId = source.Id,
+                formDefinitionId = nueva.FormDefinitionId,
+                pacienteId = nueva.PacienteId,
+                items = new
+                {
+                    medicamentos = meds.Count,
+                    insumos = insumos.Count,
+                    remisiones = rems.Count,
+                    incapacidades = incs.Count,
+                    certificaciones = certs.Count,
+                    ordenesServicio = ords.Count,
+                    ordenesExternas = exts.Count
+                }
+            },
+            tenantId: tid);
+        await db.SaveChangesAsync(ct);
+
+        return await GetAsync(nueva.Id, ct);
+    }
 }

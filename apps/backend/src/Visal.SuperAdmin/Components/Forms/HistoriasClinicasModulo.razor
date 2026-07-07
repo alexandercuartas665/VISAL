@@ -310,90 +310,121 @@
                                     No puedes modificarla. Inicia una nueva con tu usuario si necesitas registrar tu propia atencion.
                                 </div>
                             }
+                            else if (_hcCerrada)
+                            {
+                                <div class="ase-alert" style="background:#fee2e2;color:#991b1b;border-color:#f87171;margin-bottom:10px;">
+                                    <strong>&#128274; Historia cerrada.</strong>
+                                    Esta historia clinica esta en estado <strong>@_historiaSel?.Estado</strong> y no admite cambios.
+                                    Si tienes permiso "historias.reabrir" puedes abrirla desde el menu de la fila; de lo contrario,
+                                    inicia una nueva historia.
+                                </div>
+                            }
                             <FormViewer Schema="@_schemaActual" Valores="@_valores"
                                         Titulo="@_formatoActualNombre" Subtitulo="@_subtituloFormato"
                                         ReadOnlyKeys="@_hcReadOnlyKeys"
-                                        ReadOnly="@_hcEsDeOtroDoctor"
+                                        ReadOnly="@_hcSoloLectura"
                                         OnValueChanged="OnValorCambiado" />
                         }
                     }
-                    else if (_tabSel == "Escalas")
+                    else
                     {
-                        <HcEscalas HistoriaClinicaId="@_historiaSel?.Id"
-                                   PacienteId="@PacienteActivo?.Id"
-                                   Paciente="@PacienteActivo"
-                                   EspecialistaNombre="@_historiaSel?.Especialista"
-                                   OnCountChanged="@(c => _escCount = c)" />
-                    }
-                    else if (_tabSel == "Evoluciones")
-                    {
-                        <HcDocumentos Tipo="EVOLUCION"
-                                      HistoriaClinicaId="@_historiaSel?.Id"
-                                      PacienteId="@PacienteActivo?.Id"
-                                      Paciente="@PacienteActivo"
-                                      EspecialistaNombre="@_historiaSel?.Especialista"
-                                      OnCountChanged="@(c => _evoCount = c)" />
-                    }
-                    else if (_tabSel == "Consentimientos")
-                    {
-                        <HcDocumentos Tipo="CONSENTIMIENTO"
-                                      HistoriaClinicaId="@_historiaSel?.Id"
-                                      PacienteId="@PacienteActivo?.Id"
-                                      Paciente="@PacienteActivo"
-                                      EspecialistaNombre="@_historiaSel?.Especialista"
-                                      OnCountChanged="@(c => _conCount = c)" />
-                    }
-                    else if (_tabSel == "Ordenes medicamento")
-                    {
-                        <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
-                                           OnCountChanged="OnMedicamentosCountChanged"
-                                           OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "Ordenes servicios")
-                    {
-                        <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
-                                        OnCountChanged="@(c => _servCount = c)"
-                                        OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "Insumos")
-                    {
-                        <OrdenInsumos HistoriaClinicaId="@_historiaSel?.Id"
-                                      OnCountChanged="@(c => _insCount = c)"
-                                      OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "Remisiones")
-                    {
-                        <OrdenRemisiones HistoriaClinicaId="@_historiaSel?.Id"
-                                         OnCountChanged="@(c => _remCount = c)"
-                                         OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "Ordenes incapacidad")
-                    {
-                        <OrdenIncapacidades HistoriaClinicaId="@_historiaSel?.Id"
-                                            OnCountChanged="@(c => _incCount = c)"
-                                            OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "Ordenes certificaciones")
-                    {
-                        <OrdenCertificaciones HistoriaClinicaId="@_historiaSel?.Id"
-                                              OnCountChanged="@(c => _certCount = c)"
+                        // Todos los sub-tabs (Escalas, Evoluciones, Consentimientos, Ordenes
+                        // *, RX, Lab, Insumos, Remisiones, etc.) van dentro de un wrapper
+                        // que se pone en modo consulta si la HC ya no esta Abierta. Los
+                        // sub-componentes en si no aceptan un flag readonly (todavia); los
+                        // desactivamos con el atributo HTML "inert", que ignora clicks,
+                        // teclado y focus sin ocultar el contenido. Complementa la
+                        // validacion en backend (HistoriaClinicaService rechaza mutaciones
+                        // sobre HC cerrada).
+                        if (_hcCerrada)
+                        {
+                            <div class="ase-alert" style="background:#fee2e2;color:#991b1b;border-color:#f87171;margin-bottom:10px;">
+                                <strong>&#128274; Historia cerrada.</strong>
+                                Esta pestana esta en modo consulta: puedes ver los registros
+                                pero no agregar, editar ni eliminar. Reabre la HC (si tienes
+                                permiso) o inicia una nueva para registrar cambios.
+                            </div>
+                        }
+                        <div inert="@_hcCerrada" style="@(_hcCerrada ? "opacity:.75;filter:grayscale(.15);" : "")">
+                            @if (_tabSel == "Escalas")
+                            {
+                                <HcEscalas HistoriaClinicaId="@_historiaSel?.Id"
+                                           PacienteId="@PacienteActivo?.Id"
+                                           Paciente="@PacienteActivo"
+                                           EspecialistaNombre="@_historiaSel?.Especialista"
+                                           OnCountChanged="@(c => _escCount = c)" />
+                            }
+                            else if (_tabSel == "Evoluciones")
+                            {
+                                <HcDocumentos Tipo="EVOLUCION"
+                                              HistoriaClinicaId="@_historiaSel?.Id"
+                                              PacienteId="@PacienteActivo?.Id"
+                                              Paciente="@PacienteActivo"
+                                              EspecialistaNombre="@_historiaSel?.Especialista"
+                                              OnCountChanged="@(c => _evoCount = c)" />
+                            }
+                            else if (_tabSel == "Consentimientos")
+                            {
+                                <HcDocumentos Tipo="CONSENTIMIENTO"
+                                              HistoriaClinicaId="@_historiaSel?.Id"
+                                              PacienteId="@PacienteActivo?.Id"
+                                              Paciente="@PacienteActivo"
+                                              EspecialistaNombre="@_historiaSel?.Especialista"
+                                              OnCountChanged="@(c => _conCount = c)" />
+                            }
+                            else if (_tabSel == "Ordenes medicamento")
+                            {
+                                <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
+                                                   OnCountChanged="OnMedicamentosCountChanged"
+                                                   OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "Ordenes servicios")
+                            {
+                                <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
+                                                OnCountChanged="@(c => _servCount = c)"
+                                                OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "Insumos")
+                            {
+                                <OrdenInsumos HistoriaClinicaId="@_historiaSel?.Id"
+                                              OnCountChanged="@(c => _insCount = c)"
                                               OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "RX Imagenologia")
-                    {
-                        <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
-                                        Tipo="Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia"
-                                        Titulo="RX / Imagenologia"
-                                        OnCountChanged="@(c => _rxExtCount = c)"
-                                        OnItemsChanged="RecargarValoresDesdeBackendAsync" />
-                    }
-                    else if (_tabSel == "Laboratorios")
-                    {
-                        <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
-                                        Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio"
-                                        Titulo="Laboratorios"
-                                        OnCountChanged="@(c => _labExtCount = c)"
-                                        OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "Remisiones")
+                            {
+                                <OrdenRemisiones HistoriaClinicaId="@_historiaSel?.Id"
+                                                 OnCountChanged="@(c => _remCount = c)"
+                                                 OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "Ordenes incapacidad")
+                            {
+                                <OrdenIncapacidades HistoriaClinicaId="@_historiaSel?.Id"
+                                                    OnCountChanged="@(c => _incCount = c)"
+                                                    OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "Ordenes certificaciones")
+                            {
+                                <OrdenCertificaciones HistoriaClinicaId="@_historiaSel?.Id"
+                                                      OnCountChanged="@(c => _certCount = c)"
+                                                      OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "RX Imagenologia")
+                            {
+                                <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
+                                                Tipo="Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia"
+                                                Titulo="RX / Imagenologia"
+                                                OnCountChanged="@(c => _rxExtCount = c)"
+                                                OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                            else if (_tabSel == "Laboratorios")
+                            {
+                                <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
+                                                Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio"
+                                                Titulo="Laboratorios"
+                                                OnCountChanged="@(c => _labExtCount = c)"
+                                                OnItemsChanged="RecargarValoresDesdeBackendAsync" />
+                            }
+                        </div>
                     }
                 }
             </div>
@@ -940,6 +971,14 @@
     /// el FormViewer va en modo lectura para impedir modificar HC ajenas. Los
     /// usuarios admin sin profesional_id NO entran en este modo.</summary>
     private bool _hcEsDeOtroDoctor;
+    /// <summary>True cuando la HC seleccionada esta en cualquier estado distinto
+    /// de "Abierta" (Cerrada, Inactiva, Anulada). Bloquea toda edicion.</summary>
+    private bool _hcCerrada
+        => _historiaSel is HistoriaRow h
+           && !string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Solo lectura efectiva del FormViewer: HC ajena O HC ya cerrada.
+    /// Cualquier futuro flag de solo lectura entra por aca.</summary>
+    private bool _hcSoloLectura => _hcEsDeOtroDoctor || _hcCerrada;
     /// <summary>Conteo de medicamentos para badge en la pestana. Se mantiene
     /// sincronizado via OnCountChanged del componente OrdenMedicamentos.</summary>
     private int _medCount;

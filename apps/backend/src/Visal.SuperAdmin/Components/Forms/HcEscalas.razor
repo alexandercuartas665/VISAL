@@ -359,15 +359,77 @@ else
         finally { _busy = false; }
     }
 
-    private Task AbrirVisorDetail(EscalaDetailDto d)
+    private async Task AbrirVisorDetail(EscalaDetailDto d)
     {
         _visor = d;
         try { _visorSchema = JsonSerializer.Deserialize<FormSchema>(d.SchemaJson) ?? new(); }
         catch { _visorSchema = new(); }
         try { _visorValores = JsonSerializer.Deserialize<Dictionary<string, string?>>(d.ValoresJson) ?? new(); }
         catch { _visorValores = new(); }
+
+        // Refrescar firmas en vivo (paciente + profesional + acompanantes 1..4).
+        // Cuando el paciente firma remoto por WhatsApp o /firma/{token} DESPUES
+        // de que la escala se creo, el ValoresJson persistido tiene la firma
+        // anterior (o vacia) — aca re-resolvemos y sobrescribimos. Si esta
+        // Abierta y cambio algo, persistimos silenciosamente.
+        var _valoresJsonAntesFirmas = JsonSerializer.Serialize(_visorValores);
+        await RefrescarFirmasEnVivoAsync(d);
+        if (string.Equals(d.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+        {
+            var _valoresJsonDespuesFirmas = JsonSerializer.Serialize(_visorValores);
+            if (!string.Equals(_valoresJsonAntesFirmas, _valoresJsonDespuesFirmas, StringComparison.Ordinal))
+            {
+                try { await EscSvc.GuardarValoresAsync(d.Id, _valoresJsonDespuesFirmas, Guid.Empty); }
+                catch { /* si falla el guardado, seguimos mostrando en memoria */ }
+            }
+        }
         StateHasChanged();
-        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Re-resuelve firma del paciente + firma del profesional logueado +
+    /// firmas de los acompanantes 1..4 y las aplica sobre _visorValores.
+    /// Se llama al abrir una escala existente para reflejar firmas capturadas
+    /// despues de la creacion.
+    /// </summary>
+    private async Task RefrescarFirmasEnVivoAsync(EscalaDetailDto d)
+    {
+        if (Paciente is null) { return; }
+        PrefillRouteSet rutas;
+        try { rutas = PrefillRouteSet.FromJson(d.PrefillRoutesJson); }
+        catch { return; }
+        if (rutas.Routes.Count == 0) { return; }
+        try
+        {
+            var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(Paciente.Id);
+            string? firmaProf = null;
+            if (AuthState is not null)
+            {
+                var st = await AuthState;
+                var profClaim = st.User.FindFirst("profesional_id")?.Value;
+                if (Guid.TryParse(profClaim, out var pid) && pid != Guid.Empty)
+                {
+                    firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+                }
+                else
+                {
+                    var puid = st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                    var tidStr = st.User.FindFirst("tenant_id")?.Value;
+                    if (Guid.TryParse(puid, out var platformUserId) && Guid.TryParse(tidStr, out var tid))
+                    {
+                        firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(platformUserId, tid);
+                    }
+                }
+            }
+            FirmasPrefillHelper.Aplicar(_visorValores, firmaPac, firmaProf, rutas);
+            for (int i = 1; i <= 4; i++)
+            {
+                var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
+                if (aUrl is null && aNombre is null && aParent is null) { break; }
+                FirmasPrefillHelper.AplicarAcompanante(_visorValores, i, aUrl, aNombre, aParent, rutas);
+            }
+        }
+        catch { /* firmas opcionales */ }
     }
 
     private void CerrarVisor() { _visor = null; _visorSchema = null; _visorValores = new(); }

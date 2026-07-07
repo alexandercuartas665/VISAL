@@ -1257,6 +1257,23 @@
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = DeserializeValores(detail.ValoresJson);
+        // Refrescar firmas en vivo (paciente + profesional + acompanantes 1..4).
+        // Si el paciente firmo remotamente por WhatsApp o /firma/{token} DESPUES
+        // de que la HC se creo, el ValoresJson persistido tiene la firma anterior
+        // (o vacia). Aca re-resolvemos y sobrescribimos las keys de firma antes
+        // de pintar. Si la HC esta Abierta y cambio algo, persistimos para que la
+        // proxima carga ya venga con las firmas al dia sin re-resolver.
+        var _valoresJsonAntesFirmas = SerializeValores(_valores);
+        await RefrescarFirmasEnVivoAsync();
+        if (h.Estado == "Abierta")
+        {
+            var _valoresJsonDespuesFirmas = SerializeValores(_valores);
+            if (!string.Equals(_valoresJsonAntesFirmas, _valoresJsonDespuesFirmas, StringComparison.Ordinal))
+            {
+                try { await HcSvc.GuardarValoresAsync(h.Id, _valoresJsonDespuesFirmas, await ResolverActorAsync()); }
+                catch { /* si el guardado falla, la HC sigue mostrando las firmas frescas en memoria */ }
+            }
+        }
         // Re-aplicar header autofill (No Historia / Fecha / Hora) por si la HC se
         // creo antes de esta feature o el schema cambio. Mantiene el header sincronizado.
         _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura);
@@ -1656,6 +1673,50 @@
                 ?? st.User.FindFirst(ClaimTypes.Email)?.Value;
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Re-resuelve las firmas del paciente + profesional logueado + acompanantes
+    /// (contactos de emergencia 1..4) contra BD y las escribe encima de _valores
+    /// usando FirmasPrefillHelper. Usado al ABRIR una HC existente para que
+    /// las firmas capturadas via WhatsApp / URL de firma DESPUES de crearse la
+    /// HC se reflejen sin que el usuario tenga que recrearla.
+    /// </summary>
+    private async Task RefrescarFirmasEnVivoAsync()
+    {
+        if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+        if (_prefillRoutesActual is null) { return; }
+        try
+        {
+            var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(p.Id);
+            string? firmaProf = null;
+            if (AuthState is not null)
+            {
+                var state = await AuthState;
+                var profClaim = state.User.FindFirst("profesional_id")?.Value;
+                if (Guid.TryParse(profClaim, out var pid) && pid != Guid.Empty)
+                {
+                    firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+                }
+                else
+                {
+                    var puid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                    var tidStr = state.User.FindFirst("tenant_id")?.Value;
+                    if (Guid.TryParse(puid, out var platformUserId) && Guid.TryParse(tidStr, out var tid))
+                    {
+                        firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(platformUserId, tid);
+                    }
+                }
+            }
+            FirmasPrefillHelper.Aplicar(_valores, firmaPac, firmaProf, _prefillRoutesActual);
+            for (int i = 1; i <= 4; i++)
+            {
+                var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(p.Id, i);
+                if (aUrl is null && aNombre is null && aParent is null) { break; }
+                FirmasPrefillHelper.AplicarAcompanante(_valores, i, aUrl, aNombre, aParent, _prefillRoutesActual);
+            }
+        }
+        catch { /* firmas opcionales: si fallan, la HC sigue funcionando con lo que tenia persistido */ }
     }
 
     private async Task PrefillFromPaciente()

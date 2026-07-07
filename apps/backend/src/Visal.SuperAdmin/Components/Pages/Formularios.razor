@@ -52,6 +52,8 @@
                     <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
                     <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
                     <button class="fb-btn" @onclick="OpenVersionHistoryAsync" title="Ver versiones anteriores y restaurar">&#128344; Historial</button>
+                    <button class="fb-btn" @onclick="AbrirCopiarSeccionesModalAsync" disabled="@_busy"
+                            title="Copia secciones de OTRO formulario a este. Preserva Names para no romper prefill; copia rutas de prefill que apliquen y no colisionen.">&#128229; Copiar secciones</button>
                     <button class="fb-btn" @onclick="AbrirExportarJsonModal" disabled="@_busy"
                             title="Descarga un JSON con el formulario. Puedes elegir si incluir o no las Rutas de prefill.">&#128190; Exportar JSON</button>
                     <button class="fb-btn fb-btn-danger" @onclick="DeleteFormAsync" disabled="@_busy"
@@ -820,6 +822,15 @@
     .fb-modal-close { background:none; border:none; font-size:22px; color:#64748b; cursor:pointer; }
     .fb-modal-b { overflow:auto; }
     .fb-btn-primary { background:#1565c0 !important; color:#fff !important; border-color:#1565c0 !important; }
+
+    /* Filas de seccion en el modal Copiar secciones */
+    .cs-seccion-row { display:flex; gap:10px; align-items:center; padding:10px 12px; border-bottom:1px solid #f1f5f9; cursor:pointer; margin:0; }
+    .cs-seccion-row:hover { background:#f8fafc; }
+    .cs-seccion-row.sel { background:#eff6ff; }
+    .cs-seccion-row input[type=checkbox] { flex:none; }
+    .cs-seccion-info { flex:1; }
+    .cs-seccion-lbl { font-size:13px; font-weight:600; color:#0f172a; }
+    .cs-seccion-meta { font-size:11px; color:#64748b; }
 </style>
 
 <script>
@@ -842,6 +853,75 @@
         if (el) { el.click(); }
     };
 </script>
+
+@* ===== Modal Copiar Secciones desde otro formulario ===== *@
+@if (_showCopySeccionesModal)
+{
+    <div class="fb-modal-backdrop" @onclick="CerrarCopiarSeccionesModal"></div>
+    <div class="fb-modal" style="width:640px;">
+        <div class="fb-modal-h">
+            <h3>&#128229; Copiar secciones desde otro formulario</h3>
+            <button class="fb-modal-close" @onclick="CerrarCopiarSeccionesModal">&times;</button>
+        </div>
+        <div class="fb-modal-b" style="padding:18px;">
+            <p style="font-size:12.5px; color:#334155; margin-bottom:12px;">
+                Copia una o mas secciones al formulario actual (<strong>@_codigo</strong>). Se preservan
+                los <em>Name</em> de los campos para que las rutas de prefill sigan funcionando.
+                Las rutas de prefill del origen se copian tambien, pero solo si el destino no tiene
+                ya un mapping para ese mismo campo — asi no se pisa tu configuracion.
+            </p>
+
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; margin-bottom:4px;">Formulario origen</label>
+                <select class="form-select form-select-sm" @onchange="OnOrigenSeccionesChanged" value="@_copyOrigenId">
+                    <option value="">-- Elige un formulario --</option>
+                    @foreach (var f in _copyFormsDisponibles)
+                    {
+                        <option value="@f.Id">[@f.Codigo] @f.Nombre @(f.Tipo is null ? "" : $"({f.Tipo})")</option>
+                    }
+                </select>
+            </div>
+
+            @if (_copyCargandoSecciones)
+            {
+                <div style="text-align:center; padding:20px; color:#64748b;">Cargando secciones...</div>
+            }
+            else if (!string.IsNullOrEmpty(_copyOrigenId) && _copySeccionesOrigen.Count == 0)
+            {
+                <div style="padding:14px; background:#fef9c3; border-left:3px solid #eab308; font-size:12px; color:#78350f; border-radius:0 6px 6px 0;">
+                    Este formulario no tiene secciones. Solo se pueden copiar nodos tipo "seccion".
+                </div>
+            }
+            else if (_copySeccionesOrigen.Count > 0)
+            {
+                <div style="margin-bottom:6px; font-size:11px; font-weight:700; color:#334155; text-transform:uppercase;">
+                    Secciones disponibles (@_copySeccionesSeleccionadas.Count seleccionada@(_copySeccionesSeleccionadas.Count == 1 ? "" : "s"))
+                </div>
+                <div style="max-height:280px; overflow:auto; border:1px solid #e2e8f0; border-radius:6px;">
+                    @foreach (var s in _copySeccionesOrigen)
+                    {
+                        var isSel = _copySeccionesSeleccionadas.Contains(s.Id);
+                        var sId = s.Id;
+                        <div class="cs-seccion-row @(isSel ? "sel" : "")" @onclick="() => ToggleSeccionCopia(sId)">
+                            <input type="checkbox" checked="@isSel" @onclick:stopPropagation="true" @onchange="() => ToggleSeccionCopia(sId)" />
+                            <div class="cs-seccion-info">
+                                <div class="cs-seccion-lbl">@s.Label</div>
+                                <div class="cs-seccion-meta">@s.CantidadCampos campo@(s.CantidadCampos == 1 ? "" : "s")</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="fb-modal-f" style="padding:12px 18px; border-top:1px solid #e2e8f0; display:flex; gap:8px; justify-content:flex-end;">
+            <button class="fb-btn" @onclick="CerrarCopiarSeccionesModal">Cancelar</button>
+            <button class="fb-btn fb-btn-primary" @onclick="ConfirmarCopiarSeccionesAsync"
+                    disabled="@(_copySeccionesSeleccionadas.Count == 0 || _busy)">
+                @(_busy ? "Copiando..." : $"Copiar {_copySeccionesSeleccionadas.Count} seccion(es)")
+            </button>
+        </div>
+    </div>
+}
 
 @* ===== Modal Exportar JSON: pregunta si incluir Rutas de prefill ===== *@
 @if (_showExportModal)
@@ -1197,6 +1277,88 @@
     // El JSON exportado incluye codigo, tipo, schema completo (con seedRows y
     // formulas), rutas de prefill y flag activo. Al importar, si el codigo ya
     // existe en el tenant preguntamos si sobrescribir o crear copia con sufijo.
+
+    // Modal Copiar secciones desde otro formulario
+    private bool _showCopySeccionesModal;
+    private bool _copyCargandoSecciones;
+    private string _copyOrigenId = "";
+    private List<FormDefinitionLiteDto> _copyFormsDisponibles = new();
+    private List<SeccionResumenDto> _copySeccionesOrigen = new();
+    private HashSet<string> _copySeccionesSeleccionadas = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task AbrirCopiarSeccionesModalAsync()
+    {
+        if (_currentId is null) { _error = "Selecciona un formulario destino primero."; return; }
+        _copyOrigenId = "";
+        _copySeccionesOrigen = new();
+        _copySeccionesSeleccionadas = new(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            _copyFormsDisponibles = (await FormsSvc.ListLiteAsync())
+                .Where(f => f.Id != _currentId) // Excluir el actual
+                .ToList();
+            _showCopySeccionesModal = true;
+        }
+        catch (Exception ex) { _error = "No se pudo cargar la lista de formularios: " + ex.Message; }
+    }
+
+    private void CerrarCopiarSeccionesModal()
+    {
+        _showCopySeccionesModal = false;
+        _copyOrigenId = "";
+        _copySeccionesOrigen = new();
+        _copySeccionesSeleccionadas = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task OnOrigenSeccionesChanged(ChangeEventArgs e)
+    {
+        _copyOrigenId = e.Value?.ToString() ?? "";
+        _copySeccionesOrigen = new();
+        _copySeccionesSeleccionadas = new(StringComparer.OrdinalIgnoreCase);
+        if (!Guid.TryParse(_copyOrigenId, out var gid)) { return; }
+        _copyCargandoSecciones = true;
+        try
+        {
+            _copySeccionesOrigen = (await FormsSvc.ListSeccionesAsync(gid)).ToList();
+        }
+        catch (Exception ex) { _error = "No se pudo cargar las secciones: " + ex.Message; }
+        finally { _copyCargandoSecciones = false; }
+    }
+
+    private void ToggleSeccionCopia(string id)
+    {
+        if (_copySeccionesSeleccionadas.Contains(id)) { _copySeccionesSeleccionadas.Remove(id); }
+        else { _copySeccionesSeleccionadas.Add(id); }
+    }
+
+    private async Task ConfirmarCopiarSeccionesAsync()
+    {
+        if (_currentId is not Guid dst) { return; }
+        if (!Guid.TryParse(_copyOrigenId, out var src)) { _error = "Elige un formulario origen."; return; }
+        if (_copySeccionesSeleccionadas.Count == 0) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var seccionIds = _copySeccionesSeleccionadas.ToList();
+            var res = await FormsSvc.CopiarSeccionesAsync(dst, src, seccionIds, await ActorAsync());
+            if (res is null) { _error = "No se pudo copiar."; return; }
+            _showCopySeccionesModal = false;
+            // Recargar schema y rutas actualizados en memoria.
+            var det = await FormsSvc.GetAsync(dst);
+            if (det is not null)
+            {
+                _schema = FormSchema.FromJson(det.SchemaJson);
+                _prefillRoutes = PrefillRouteSet.FromJson(det.PrefillRoutesJson);
+                _selected = null; _headerSel = false;
+            }
+            var dupsMsg = res.NombresDuplicados.Count == 0 ? "" :
+                $" Advertencia: {res.NombresDuplicados.Count} Name(s) duplicado(s) — revisa: {string.Join(", ", res.NombresDuplicados.Take(3))}{(res.NombresDuplicados.Count > 3 ? "..." : "")}";
+            _ok = $"Copiadas {res.SeccionesCopiadas} secciones ({res.CamposCopiados} campos). " +
+                  $"Rutas prefill: {res.RutasPrefillCopiadas} copiadas, {res.RutasPrefillOmitidasPorConflicto} omitidas por conflicto en destino.{dupsMsg}";
+        }
+        catch (Exception ex) { _error = "No se pudo copiar: " + ex.Message; }
+        finally { _busy = false; }
+    }
 
     // Modal Exportar JSON: pregunta si incluir Rutas de prefill.
     private bool _showExportModal;

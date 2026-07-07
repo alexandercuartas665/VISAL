@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -1062,5 +1063,180 @@ public sealed class FormDefinitionService : IFormDefinitionService
             newValue: new { codigo = codigoFinal, codigoOriginal = codigo, tipo, colision = existente is not null && !sobrescribir },
             tenantId: tenantId);
         return await GetAsync(nuevo.Id, cancellationToken);
+    }
+
+    // =========================================================================
+    // Copiar secciones entre formularios
+    // =========================================================================
+
+    public async Task<IReadOnlyList<FormDefinitionLiteDto>> ListLiteAsync(CancellationToken cancellationToken = default)
+    {
+        return await _db.FormDefinitions.AsNoTracking()
+            .OrderBy(f => f.Codigo)
+            .Select(f => new FormDefinitionLiteDto(f.Id, f.Codigo, f.Nombre, f.Tipo))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SeccionResumenDto>> ListSeccionesAsync(Guid formDefinitionId, CancellationToken cancellationToken = default)
+    {
+        var f = await _db.FormDefinitions.AsNoTracking()
+            .Where(x => x.Id == formDefinitionId)
+            .Select(x => x.SchemaJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (f is null) { return Array.Empty<SeccionResumenDto>(); }
+        var schema = FormSchema.FromJson(f);
+        return schema.Children
+            .Where(n => string.Equals(n.Type, "section", StringComparison.OrdinalIgnoreCase))
+            .Select(n => new SeccionResumenDto(n.Id, n.Label ?? "(sin titulo)", n.Children?.Count ?? 0))
+            .ToList();
+    }
+
+    public async Task<CopiarSeccionesResultDto?> CopiarSeccionesAsync(
+        Guid destinoId, Guid origenId, IReadOnlyList<string> seccionIds,
+        Guid actorUserId, CancellationToken cancellationToken = default)
+    {
+        if (seccionIds.Count == 0) { throw new InvalidOperationException("Debes seleccionar al menos una seccion para copiar."); }
+
+        var destino = await _db.FormDefinitions.FirstOrDefaultAsync(x => x.Id == destinoId, cancellationToken)
+            ?? throw new InvalidOperationException("Formulario destino no existe.");
+        var origen = await _db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == origenId, cancellationToken)
+            ?? throw new InvalidOperationException("Formulario origen no existe.");
+
+        var destinoSchema = FormSchema.FromJson(destino.SchemaJson);
+        var origenSchema = FormSchema.FromJson(origen.SchemaJson);
+        var destinoRutas = PrefillRouteSet.FromJson(destino.PrefillRoutesJson);
+        var origenRutas = PrefillRouteSet.FromJson(origen.PrefillRoutesJson);
+
+        // Names ya existentes en destino — si al copiar aparece uno repetido, lo
+        // reportamos como advertencia y NO copiamos su prefill (mantener el
+        // existente de destino). El schema si se copia con el Name repetido
+        // porque puede ser intencional (ej. el usuario luego renombra).
+        var namesDestino = new HashSet<string>(RecolectarNames(destinoSchema), StringComparer.OrdinalIgnoreCase);
+        // Targets con mapping ya en destino — no los pisamos aunque venga el mismo del origen.
+        var targetsConMappingEnDestino = new HashSet<string>(
+            destinoRutas.Routes.SelectMany(r => r.Mappings.Select(m => m.Target)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var seccionesPedidas = new HashSet<string>(seccionIds, StringComparer.OrdinalIgnoreCase);
+        var seccionesEncontradas = origenSchema.Children
+            .Where(n => string.Equals(n.Type, "section", StringComparison.OrdinalIgnoreCase)
+                     && seccionesPedidas.Contains(n.Id))
+            .ToList();
+
+        int camposCopiados = 0;
+        var duplicados = new List<string>();
+        var namesCopiados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var seccion in seccionesEncontradas)
+        {
+            var clon = ClonarNodo(seccion);
+            // Regenerar Id de la seccion y sus hijos para no colisionar con
+            // nodos existentes; preservar Name para que las rutas de prefill
+            // sigan apuntando al campo correcto.
+            RegenerarIds(clon);
+            RecolectarNamesEnClon(clon, namesCopiados);
+            destinoSchema.Children.Add(clon);
+            camposCopiados += clon.Children?.Count ?? 0;
+        }
+        // Detectar duplicados: names copiados que ya existian en destino.
+        foreach (var n in namesCopiados)
+        {
+            if (namesDestino.Contains(n)) { duplicados.Add(n); }
+        }
+
+        // Copiar rutas de prefill: solo mappings cuyo target este entre los
+        // names copiados Y NO tenga ya un mapping en destino.
+        int rutasCopiadas = 0, rutasOmitidas = 0;
+        foreach (var rutaOrigen in origenRutas.Routes)
+        {
+            foreach (var m in rutaOrigen.Mappings)
+            {
+                if (string.IsNullOrWhiteSpace(m.Target)) { continue; }
+                if (!namesCopiados.Contains(m.Target)) { continue; }
+                if (targetsConMappingEnDestino.Contains(m.Target))
+                {
+                    rutasOmitidas++;
+                    continue;
+                }
+                // Encontrar/crear la ruta con el mismo SourceModule en destino.
+                var rutaDestino = destinoRutas.Routes.FirstOrDefault(r =>
+                    string.Equals(r.SourceModule, rutaOrigen.SourceModule, StringComparison.OrdinalIgnoreCase));
+                if (rutaDestino is null)
+                {
+                    rutaDestino = new PrefillRoute
+                    {
+                        Name = rutaOrigen.Name,
+                        SourceModule = rutaOrigen.SourceModule
+                    };
+                    destinoRutas.Routes.Add(rutaDestino);
+                }
+                rutaDestino.Mappings.Add(new PrefillFieldMap
+                {
+                    Source = m.Source,
+                    Target = m.Target,
+                    ColumnMappings = m.ColumnMappings is null ? null : new Dictionary<string, string>(m.ColumnMappings)
+                });
+                targetsConMappingEnDestino.Add(m.Target);
+                rutasCopiadas++;
+            }
+        }
+
+        destino.SchemaJson = destinoSchema.ToJson();
+        destino.PrefillRoutesJson = destinoRutas.Routes.Count == 0 ? null : destinoRutas.ToJson();
+        _audit.Write(actorUserId, "form-definition.copiar-secciones", nameof(FormDefinition), destino.Id,
+            previousValue: new { destino = destino.Codigo, origen = origen.Codigo },
+            newValue: new { seccionesCopiadas = seccionesEncontradas.Count, camposCopiados, rutasCopiadas, rutasOmitidas },
+            tenantId: destino.TenantId);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return new CopiarSeccionesResultDto(
+            seccionesEncontradas.Count, camposCopiados, rutasCopiadas, rutasOmitidas, duplicados);
+    }
+
+    /// <summary>Devuelve todos los Name (no vacios) de un schema — usados para
+    /// detectar colisiones al copiar secciones.</summary>
+    private static IEnumerable<string> RecolectarNames(FormSchema schema)
+    {
+        foreach (var n in schema.Children) { foreach (var s in RecolectarNamesRec(n)) { yield return s; } }
+    }
+
+    private static IEnumerable<string> RecolectarNamesRec(FormNode n)
+    {
+        if (!string.IsNullOrWhiteSpace(n.Name)) { yield return n.Name!; }
+        if (n.Children is not null)
+        {
+            foreach (var c in n.Children)
+            {
+                foreach (var s in RecolectarNamesRec(c)) { yield return s; }
+            }
+        }
+    }
+
+    private static void RecolectarNamesEnClon(FormNode clon, HashSet<string> destino)
+    {
+        if (!string.IsNullOrWhiteSpace(clon.Name)) { destino.Add(clon.Name!); }
+        if (clon.Children is not null)
+        {
+            foreach (var c in clon.Children) { RecolectarNamesEnClon(c, destino); }
+        }
+    }
+
+    /// <summary>Deep clone via JSON round-trip — simple y seguro contra referencias
+    /// compartidas o mutaciones accidentales del origen.</summary>
+    private static FormNode ClonarNodo(FormNode n)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(n, FormSchema.JsonOptions);
+        return System.Text.Json.JsonSerializer.Deserialize<FormNode>(json, FormSchema.JsonOptions)!;
+    }
+
+    /// <summary>Reasigna Id de la seccion y de todos sus descendientes con
+    /// nuevos GUIDs cortos, preservando Name (crucial para prefill).</summary>
+    private static void RegenerarIds(FormNode n)
+    {
+        n.Id = Guid.NewGuid().ToString("N")[..8];
+        if (n.Children is not null)
+        {
+            foreach (var c in n.Children) { RegenerarIds(c); }
+        }
     }
 }

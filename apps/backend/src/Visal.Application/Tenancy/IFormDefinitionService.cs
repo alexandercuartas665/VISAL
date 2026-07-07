@@ -88,7 +88,44 @@ public interface IFormDefinitionService
     /// actualiza el existente; si es false, agrega sufijo "-import" al codigo para
     /// no colisionar. Devuelve el detalle del formulario resultante.</summary>
     Task<FormDefinitionDetailDto?> ImportarJsonAsync(byte[] jsonBytes, bool sobrescribir, Guid actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Copia una o mas secciones del formulario <paramref name="origenId"/> al
+    /// final del formulario <paramref name="destinoId"/>. Regenera el Id del
+    /// nodo pero preserva su Name — asi las rutas de prefill que apuntan a esos
+    /// campos siguen funcionando. Ademas, si el origen tiene mappings de
+    /// prefill que apuntan a alguno de los campos copiados y el destino NO
+    /// tiene ya un mapping para ese mismo target, copia esos mappings a las
+    /// rutas correspondientes (creando la ruta en destino si no existia).
+    /// El schema y las rutas se persisten en la misma transaccion.
+    /// </summary>
+    Task<CopiarSeccionesResultDto?> CopiarSeccionesAsync(
+        Guid destinoId, Guid origenId, IReadOnlyList<string> seccionIds,
+        Guid actorUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Listado ligero para el selector "Copiar desde otro formulario":
+    /// codigo + nombre + tipo. No incluye el schema para que el request sea liviano.</summary>
+    Task<IReadOnlyList<FormDefinitionLiteDto>> ListLiteAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Solo las secciones (nodos Type=section) de un formulario, con su
+    /// Id, Label y cantidad de campos hijos. Para renderizar los checkboxes en
+    /// el modal de copiar secciones sin traer todo el schema al frontend.</summary>
+    Task<IReadOnlyList<SeccionResumenDto>> ListSeccionesAsync(Guid formDefinitionId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Item ligero de un FormDefinition, para dropdowns.</summary>
+public sealed record FormDefinitionLiteDto(Guid Id, string Codigo, string Nombre, string? Tipo);
+
+/// <summary>Resumen de una seccion de un formulario para el modal de copia.</summary>
+public sealed record SeccionResumenDto(string Id, string Label, int CantidadCampos);
+
+/// <summary>Reporte del resultado de copiar secciones.</summary>
+public sealed record CopiarSeccionesResultDto(
+    int SeccionesCopiadas,
+    int CamposCopiados,
+    int RutasPrefillCopiadas,
+    int RutasPrefillOmitidasPorConflicto,
+    IReadOnlyList<string> NombresDuplicados);
 
 public sealed record AutoEnlazarPacienteResultDto(
     int FormulariosRevisados,

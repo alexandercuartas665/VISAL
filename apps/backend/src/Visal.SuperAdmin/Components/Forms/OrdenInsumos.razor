@@ -67,13 +67,33 @@ else
             </div>
         </div>
         <div class="oi-row">
-            <div class="oi-f oi-c-3">
-                <label>Cantidad</label>
-                <input class="form-control form-control-sm"
-                       placeholder="Ej: 30, 1 caja, 100 unidades"
-                       @bind="_borrador.Cantidad" @bind:event="oninput" />
+            @* Posologia: reemplaza el input de Cantidad libre. Al Agregar se
+               calcula el total (cantidad_por_toma * (24/frecuencia) * dias) y
+               ese numero se guarda como Cantidad en la tabla del detalle. *@
+            <div class="oi-f oi-c-4">
+                <div class="oi-posol">
+                    <div class="oi-posol-grid">
+                        <div>
+                            <label class="oi-mini">Cantidad</label>
+                            <input class="form-control form-control-sm text-center"
+                                   @bind="_borrador.PosolCantidad" @bind:event="oninput" />
+                        </div>
+                        <div>
+                            <label class="oi-mini" title="Intervalo entre dosis en horas (8 = cada 8 horas, 24 = una vez al dia)">Cada (h)</label>
+                            <input class="form-control form-control-sm text-center"
+                                   @bind="_borrador.Frecuencia" @bind:event="oninput"
+                                   placeholder="8" />
+                        </div>
+                        <div>
+                            <label class="oi-mini">Dias</label>
+                            <input class="form-control form-control-sm text-center"
+                                   @bind="_borrador.Dias" @bind:event="oninput" />
+                        </div>
+                    </div>
+                    <div class="oi-posol-preview">@PosologiaPreview()</div>
+                </div>
             </div>
-            <div class="oi-f oi-c-9">
+            <div class="oi-f oi-c-8">
                 <label>Observaciones</label>
                 <input class="form-control form-control-sm"
                        placeholder="Opcional"
@@ -163,8 +183,15 @@ else
     .oi-row-action { display:flex; justify-content:flex-end; }
     .oi-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
     .oi-c-3 { grid-column: span 3; }
+    .oi-c-4 { grid-column: span 4; }
+    .oi-c-8 { grid-column: span 8; }
     .oi-c-9 { grid-column: span 9; }
     .oi-c-12 { grid-column: span 12; }
+    /* Bloque de posologia (identico al de OrdenMedicamentos, prefijo oi- en vez de od-) */
+    .oi-posol { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:8px; padding:8px; }
+    .oi-posol-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+    .oi-mini { font-size:10px !important; text-align:center; }
+    .oi-posol-preview { font-size:11px; color:#64748b; font-style:italic; text-align:center; margin-top:6px; min-height:14px; }
     .oi-list { margin-top:16px; }
     .oi-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
     .oi-table { font-size:12.5px; }
@@ -274,10 +301,16 @@ else
         _agregando = true;
         try
         {
+            // Calcula el total (cantidad_por_toma * (24/intervalo_horas) * dias)
+            // y lo persiste como el valor "Cantidad" del item — el que se ve en
+            // la tabla del detalle. Si la posologia esta incompleta o no numerica,
+            // guardamos el texto libre de cantidad como fallback.
+            var totalPosologia = CalcularTotal(_borrador.PosolCantidad, _borrador.Frecuencia, _borrador.Dias);
+            var cantidadPersistida = totalPosologia ?? _borrador.PosolCantidad?.Trim();
             var creado = await InsumoSvc.AgregarAsync(hid, new AgregarInsumoRequest(
                 _borrador.Codigo,
                 _borrador.Descripcion!,
-                _borrador.Cantidad,
+                cantidadPersistida,
                 _borrador.Observaciones,
                 _borrador.MipresUrl), Guid.Empty);
             _items.Add(creado);
@@ -287,6 +320,62 @@ else
             _mostrarSugerencias = false;
         }
         finally { _agregando = false; }
+    }
+
+    /// <summary>Vista previa de la frase clinica: "1 cada 8 horas durante 5 dias
+    /// - Total: 15". Si aun no hay datos completos muestra un hint.</summary>
+    private string PosologiaPreview()
+    {
+        var c = _borrador.PosolCantidad?.Trim();
+        var f = _borrador.Frecuencia?.Trim();
+        var d = _borrador.Dias?.Trim();
+        if (string.IsNullOrWhiteSpace(c) && string.IsNullOrWhiteSpace(f) && string.IsNullOrWhiteSpace(d))
+        {
+            return "Define cantidad, frecuencia y dias.";
+        }
+        var sb = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(c)) { sb.Append(c); }
+        if (!string.IsNullOrWhiteSpace(f))
+        {
+            if (sb.Length > 0) { sb.Append(' '); }
+            sb.Append(FrecuenciaTexto(f!));
+        }
+        if (!string.IsNullOrWhiteSpace(d))
+        {
+            if (sb.Length > 0) { sb.Append(' '); }
+            sb.Append(int.TryParse(d, out _) ? $"durante {d} dias" : d!);
+        }
+        var preview = sb.ToString();
+        var total = CalcularTotal(c, f, d);
+        if (total is not null) { preview += $" - Total: {total}"; }
+        return preview + ".";
+    }
+
+    private static string FrecuenciaTexto(string f)
+    {
+        if (!int.TryParse(f, out var fn) || fn <= 0) { return f; }
+        if (fn == 1) { return "cada hora"; }
+        return $"cada {fn} horas";
+    }
+
+    /// <summary>Cantidad total = cantidad_por_toma * (24/intervalo_horas) * dias.
+    /// Devuelve null si alguno no se puede parsear — misma logica que
+    /// OrdenMedicamentos para consistencia visual y de datos.</summary>
+    private static string? CalcularTotal(string? cantidad, string? frecuencia, string? dias)
+    {
+        if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var c)
+            && decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var f)
+            && int.TryParse(dias?.Trim(), out var d)
+            && c > 0 && f > 0 && d > 0)
+        {
+            var total = c * (24m / f) * d;
+            return total == Math.Truncate(total)
+                ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return null;
     }
 
     private async Task EliminarAsync(InsumoItemDto it)
@@ -308,7 +397,12 @@ else
     {
         public string? Codigo { get; set; }
         public string? Descripcion { get; set; }
-        public string? Cantidad { get; set; }
+        // Posologia: cantidad por toma + intervalo entre tomas en horas + dias.
+        // Al Agregar se calcula el TOTAL y ese numero se persiste como
+        // "Cantidad" del item (columna en la tabla del detalle).
+        public string? PosolCantidad { get; set; }
+        public string? Frecuencia { get; set; }
+        public string? Dias { get; set; }
         public string? Observaciones { get; set; }
         public string? MipresUrl { get; set; }
     }

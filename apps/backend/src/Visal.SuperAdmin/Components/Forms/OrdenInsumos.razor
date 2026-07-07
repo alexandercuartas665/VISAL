@@ -214,6 +214,15 @@ else
 @code {
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+    /// <summary>Se dispara despues de Agregar/Eliminar para refrescar el
+    /// FormViewer del tab Historial en vivo. Sin esto la tabla de insumos en
+    /// HC-FO-08 no se actualiza hasta salir y volver a la HC.</summary>
+    [Parameter] public EventCallback OnItemsChanged { get; set; }
+
+    private async Task NotifyItemsChanged()
+    {
+        if (OnItemsChanged.HasDelegate) { await OnItemsChanged.InvokeAsync(); }
+    }
 
     private Guid? _ultimoIdCargado;
     private List<InsumoItemDto> _items = new();
@@ -338,6 +347,7 @@ else
                 _borrador.MipresUrl), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
+            await NotifyItemsChanged();
             _borrador = new();
             _sugerencias.Clear();
             _mostrarSugerencias = false;
@@ -408,6 +418,7 @@ else
         await InsumoSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+        await NotifyItemsChanged();
     }
 
     private async Task ImprimirAsync()

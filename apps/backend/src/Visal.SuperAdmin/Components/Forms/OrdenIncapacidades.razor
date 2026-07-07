@@ -147,6 +147,13 @@ else
 @code {
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+    /// <summary>Refresca el FormViewer del tab Historial tras Agregar/Eliminar.</summary>
+    [Parameter] public EventCallback OnItemsChanged { get; set; }
+
+    private async Task NotifyItemsChanged()
+    {
+        if (OnItemsChanged.HasDelegate) { await OnItemsChanged.InvokeAsync(); }
+    }
 
     private Guid? _ultimoIdCargado;
     private List<IncapacidadItemDto> _items = new();
@@ -199,6 +206,7 @@ else
                 _borrador.Tipo), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
+            await NotifyItemsChanged();
             _borrador = new();
         }
         finally { _agregando = false; }
@@ -211,6 +219,7 @@ else
         await IncSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+        await NotifyItemsChanged();
     }
 
     /// <summary>Abre la vista imprimible /orden-doc en una nueva pestana del navegador.</summary>

@@ -351,41 +351,48 @@
                     else if (_tabSel == "Ordenes servicios")
                     {
                         <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
-                                        OnCountChanged="@(c => _servCount = c)" />
+                                        OnCountChanged="@(c => _servCount = c)"
+                                        OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "Insumos")
                     {
                         <OrdenInsumos HistoriaClinicaId="@_historiaSel?.Id"
-                                      OnCountChanged="@(c => _insCount = c)" />
+                                      OnCountChanged="@(c => _insCount = c)"
+                                      OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "Remisiones")
                     {
                         <OrdenRemisiones HistoriaClinicaId="@_historiaSel?.Id"
-                                         OnCountChanged="@(c => _remCount = c)" />
+                                         OnCountChanged="@(c => _remCount = c)"
+                                         OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "Ordenes incapacidad")
                     {
                         <OrdenIncapacidades HistoriaClinicaId="@_historiaSel?.Id"
-                                            OnCountChanged="@(c => _incCount = c)" />
+                                            OnCountChanged="@(c => _incCount = c)"
+                                            OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "Ordenes certificaciones")
                     {
                         <OrdenCertificaciones HistoriaClinicaId="@_historiaSel?.Id"
-                                              OnCountChanged="@(c => _certCount = c)" />
+                                              OnCountChanged="@(c => _certCount = c)"
+                                              OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "RX Imagenologia")
                     {
                         <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
                                         Tipo="Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia"
                                         Titulo="RX / Imagenologia"
-                                        OnCountChanged="@(c => _rxExtCount = c)" />
+                                        OnCountChanged="@(c => _rxExtCount = c)"
+                                        OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "Laboratorios")
                     {
                         <OrdenesExternas HistoriaClinicaId="@_historiaSel?.Id"
                                         Tipo="Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio"
                                         Titulo="Laboratorios"
-                                        OnCountChanged="@(c => _labExtCount = c)" />
+                                        OnCountChanged="@(c => _labExtCount = c)"
+                                        OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                 }
             </div>

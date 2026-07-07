@@ -197,6 +197,16 @@ else
     /// <summary>Id de la HC actualmente abierta. Cuando cambia, recargamos los items.</summary>
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+    /// <summary>Se dispara despues de Agregar/Actualizar/Eliminar para que el
+    /// padre (HistoriasClinicasModulo) recargue ValoresJson y el FormViewer del
+    /// tab Historial muestre las filas nuevas en vivo. Sin esto la tabla de
+    /// servicios en HC-FO-08 no se llena hasta cerrar y reabrir la HC.</summary>
+    [Parameter] public EventCallback OnItemsChanged { get; set; }
+
+    private async Task NotifyItemsChanged()
+    {
+        if (OnItemsChanged.HasDelegate) { await OnItemsChanged.InvokeAsync(); }
+    }
 
     private Guid? _ultimoIdCargado;
     private string _terminoBusqueda = "";
@@ -275,6 +285,7 @@ else
                 _borrador.Observaciones), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
+            await NotifyItemsChanged();
             LimpiarBorrador();
         }
         finally { _agregando = false; }
@@ -293,6 +304,7 @@ else
         await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
         var idx = _items.FindIndex(x => x.Id == it.Id);
         if (idx >= 0) { _items[idx] = it with { Cantidad = nueva }; }
+        await NotifyItemsChanged();
     }
 
     private async Task GuardarObservaciones(OrdenServicioItemDto it, string? nuevas)
@@ -301,6 +313,7 @@ else
         await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
         var idx = _items.FindIndex(x => x.Id == it.Id);
         if (idx >= 0) { _items[idx] = it with { Observaciones = nuevas }; }
+        await NotifyItemsChanged();
     }
 
     private async Task EliminarAsync(OrdenServicioItemDto it)
@@ -310,6 +323,7 @@ else
         await OrdSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+        await NotifyItemsChanged();
     }
 
     /// <summary>Abre la vista imprimible /orden-doc en una nueva pestana del navegador.</summary>

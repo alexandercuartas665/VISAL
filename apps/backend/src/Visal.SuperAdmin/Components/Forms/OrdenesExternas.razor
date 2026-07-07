@@ -27,22 +27,28 @@ else
 {
     <div class="oi-card">
         <div class="oi-row">
-            <div class="oi-f oi-c-12" style="position:relative;">
-                <label>Buscar en catalogo (codigo o nombre)</label>
+            <div class="oi-f oi-c-3">
+                <label>Codigo</label>
                 <input class="form-control form-control-sm"
-                       placeholder="Ej: hemograma, 902210, tomografia..."
-                       value="@_terminoBusqueda"
-                       @oninput="OnTerminoChanged" />
+                       placeholder="Opcional"
+                       @bind="_borrador.Codigo" @bind:event="oninput" />
+            </div>
+            <div class="oi-f oi-c-9" style="position:relative;">
+                <label>Descripcion (busca en el catalogo)</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Escribe 2+ letras para buscar por codigo o nombre..."
+                       value="@_borrador.Descripcion"
+                       @oninput="OnDescripcionChanged" />
                 @if (_sugerencias.Count > 0)
                 {
                     <div class="oi-sug">
                         @foreach (var s in _sugerencias)
                         {
                             var sCopy = s;
-                            <button type="button" class="oi-sug-item"
-                                    @onclick="() => AplicarSugerencia(sCopy)">
-                                <strong>@sCopy.Codigo</strong> &mdash; @sCopy.Nombre
-                            </button>
+                            <div class="oi-sug-item" @onmousedown="() => AplicarSugerencia(sCopy)">
+                                <span class="oi-sug-cod">@sCopy.Codigo</span>
+                                <span class="oi-sug-nom">@sCopy.Nombre</span>
+                            </div>
                         }
                         @* "Cargar mas" aparece cuando llenamos el tope actual — indica
                            que hay probablemente mas resultados y sube _pageSize +50. *@
@@ -56,24 +62,10 @@ else
                         }
                     </div>
                 }
-                else if (!string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2 && !_buscando)
+                else if (!string.IsNullOrWhiteSpace(_borrador.Descripcion) && _borrador.Descripcion.Trim().Length >= 2 && !_buscando)
                 {
-                    <div class="oi-sug oi-sug-empty">Sin resultados para "@_terminoBusqueda"</div>
+                    <div class="oi-sug oi-sug-empty">Sin coincidencias en el catalogo — puedes agregar el texto libre.</div>
                 }
-            </div>
-        </div>
-        <div class="oi-row">
-            <div class="oi-f oi-c-3">
-                <label>Codigo</label>
-                <input class="form-control form-control-sm"
-                       placeholder="—"
-                       @bind="_borrador.Codigo" @bind:event="oninput" />
-            </div>
-            <div class="oi-f oi-c-9">
-                <label>Descripcion</label>
-                <input class="form-control form-control-sm"
-                       placeholder="Elige del catalogo arriba o escribe libre."
-                       @bind="_borrador.Descripcion" @bind:event="oninput" />
             </div>
         </div>
         <div class="oi-row">
@@ -153,10 +145,12 @@ else
     .oi-list { margin-top:16px; }
     .oi-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
     .oi-table { font-size:12.5px; }
-    .oi-sug { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; max-height:320px; overflow-y:auto; z-index:20; box-shadow:0 12px 30px rgba(15,23,42,.12); margin-top:4px; }
-    .oi-sug-item { display:block; width:100%; text-align:left; padding:8px 12px; border:0; background:transparent; font-size:12.5px; cursor:pointer; border-bottom:1px solid #f1f5f9; }
+    .oi-sug { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:6px; max-height:320px; overflow-y:auto; z-index:30; box-shadow:0 6px 18px rgba(0,0,0,.12); margin-top:2px; }
+    .oi-sug-item { padding:6px 10px; cursor:pointer; display:grid; grid-template-columns:100px 1fr; gap:8px; align-items:baseline; font-size:12px; border-bottom:1px solid #f1f5f9; }
     .oi-sug-item:hover { background:#eff6ff; }
-    .oi-sug-item:last-child { border-bottom:0; }
+    .oi-sug-item:last-child { border-bottom:none; }
+    .oi-sug-cod { font-family:'JetBrains Mono','Consolas',monospace; color:#1565c0; font-weight:600; }
+    .oi-sug-nom { color:#0f172a; }
     .oi-sug-empty { padding:10px 12px; font-size:12px; color:#64748b; font-style:italic; }
     .oi-sug-more { display:block; width:100%; text-align:center; padding:10px 12px; border:0; border-top:2px dashed #cbd5e1; background:#f8fafc; color:#2563eb; font-weight:600; cursor:pointer; font-size:12px; position:sticky; bottom:0; }
     .oi-sug-more:hover:not(:disabled) { background:#eff6ff; }
@@ -186,7 +180,6 @@ else
     private bool _buscando;
     private Borrador _borrador = new();
 
-    private string _terminoBusqueda = "";
     private System.Threading.CancellationTokenSource? _debounceCts;
 
     /// <summary>Tope de sugerencias por consulta. Empieza en 50 y sube en +50
@@ -202,7 +195,6 @@ else
             _ultimoTipo = Tipo;
             _borrador = new();
             _sugerencias.Clear();
-            _terminoBusqueda = "";
             _pageSize = _pageStep;
             await CargarItemsAsync();
         }
@@ -221,11 +213,12 @@ else
     }
 
     /// <summary>Busca por codigo O nombre en CatalogoServicioReferencia del Tipo
-    /// activo. Debounce 200ms para no saturar. El tope inicial es _pageStep (50)
-    /// y sube al pulsar "Cargar mas". Al cambiar el termino, resetea el tope.</summary>
-    private async Task OnTerminoChanged(ChangeEventArgs e)
+    /// activo mientras el doctor teclea en Descripcion. Debounce 200ms para no
+    /// saturar. Tope inicial _pageStep (50), sube al pulsar "Cargar mas". El
+    /// tope se resetea al cambiar el termino.</summary>
+    private async Task OnDescripcionChanged(ChangeEventArgs e)
     {
-        _terminoBusqueda = e.Value?.ToString() ?? "";
+        _borrador.Descripcion = e.Value?.ToString();
         _pageSize = _pageStep;
         _debounceCts?.Cancel();
         _debounceCts = new();
@@ -233,14 +226,15 @@ else
         try
         {
             await Task.Delay(200, token);
-            if (string.IsNullOrWhiteSpace(_terminoBusqueda) || _terminoBusqueda.Trim().Length < 2)
+            var q = _borrador.Descripcion;
+            if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 2)
             {
                 _sugerencias.Clear();
                 StateHasChanged();
                 return;
             }
             _buscando = true;
-            var (rows, _) = await CatSvc.SearchAsync(Tipo, _terminoBusqueda.Trim(), 0, _pageSize, token);
+            var (rows, _) = await CatSvc.SearchAsync(Tipo, q.Trim(), 0, _pageSize, token);
             _sugerencias = rows.ToList();
             _buscando = false;
             StateHasChanged();
@@ -252,12 +246,13 @@ else
     /// _sugerencias.Count == _pageSize (probable que la BD tenga mas).</summary>
     private async Task CargarMasSugerenciasAsync()
     {
-        if (string.IsNullOrWhiteSpace(_terminoBusqueda) || _buscando) { return; }
+        var q = _borrador.Descripcion;
+        if (string.IsNullOrWhiteSpace(q) || _buscando) { return; }
         _pageSize += _pageStep;
         _buscando = true;
         try
         {
-            var (rows, _) = await CatSvc.SearchAsync(Tipo, _terminoBusqueda.Trim(), 0, _pageSize);
+            var (rows, _) = await CatSvc.SearchAsync(Tipo, q.Trim(), 0, _pageSize);
             _sugerencias = rows.ToList();
         }
         finally { _buscando = false; }
@@ -268,7 +263,6 @@ else
         _borrador.Codigo = s.Codigo;
         _borrador.Descripcion = s.Nombre;
         _sugerencias.Clear();
-        _terminoBusqueda = "";
     }
 
     private async Task AgregarAsync()
@@ -288,7 +282,6 @@ else
             await NotifyItemsChanged();
             _borrador = new();
             _sugerencias.Clear();
-            _terminoBusqueda = "";
             _pageSize = _pageStep;
         }
         finally { _agregando = false; }

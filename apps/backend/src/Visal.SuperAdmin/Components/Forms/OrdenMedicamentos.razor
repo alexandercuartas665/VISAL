@@ -1,8 +1,6 @@
 @using Visal.Application.Tenancy
 @using Visal.Application.Common
 @inject IOrdenMedicamentoService OrdSvc
-@inject ISucursalService SucSvc
-@inject ITenantContext Tenant
 @inject IJSRuntime JS
 
 @*
@@ -57,6 +55,15 @@ else
                                 </div>
                             </button>
                         }
+                        @* "Cargar mas" aparece cuando la ultima consulta trajo el tope
+                           actual (_pageSize) — es la senal de que probablemente hay mas
+                           registros que la BD podria retornar. Sube el tope y re-consulta. *@
+                        @if (_sugerencias.Count >= _pageSize)
+                        {
+                            <button class="od-suggest-more" @onclick="CargarMasSugerenciasAsync" disabled="@_buscando">
+                                @(_buscando ? "Cargando..." : $"+ Cargar mas resultados ({_pageSize} mostrados)")
+                            </button>
+                        }
                     </div>
                 }
                 else if (!string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2 && !_buscando)
@@ -108,24 +115,7 @@ else
             </div>
         </div>
 
-        @* ---- Fila 3: URL MIPRES. Obligatorio solo si la sede activa lo exige
-             (bandera MipresObligatorio en Configuracion de empresa). Al Agregar
-             se valida y se persiste. ---- *@
-        <div class="od-row od-row-mip">
-            <div class="od-f od-c-12">
-                <label>
-                    URL MIPRES @if (_sedeExigeMipres) { <span class="od-mip-req" title="La sede exige registrar el MIPRES">obligatorio</span> } else { <small class="text-muted">(opcional, pega el link del formato radicado)</small> }
-                    <a class="btn btn-outline-primary btn-sm od-mip-link" href="https://mipres.sispro.gov.co/" target="_blank" rel="noopener noreferrer"
-                       title="Abrir MIPRES en una nueva pestana">&#128279; Abrir MIPRES</a>
-                </label>
-                <input class="form-control form-control-sm od-mip-input"
-                       type="url"
-                       placeholder="https://mipres.sispro.gov.co/..."
-                       @bind="_borrador.MipresUrl" @bind:event="oninput" />
-            </div>
-        </div>
-
-        @if (!string.IsNullOrWhiteSpace(_borrador.NombreMedicamento))
+@if (!string.IsNullOrWhiteSpace(_borrador.NombreMedicamento))
         {
             <div class="od-borrador">
                 Medicamento seleccionado: <strong>@_borrador.NombreMedicamento</strong>
@@ -210,6 +200,9 @@ else
     .od-suggest-meta { font-size:11px; color:#64748b; display:flex; gap:4px; flex-wrap:wrap; }
     .od-suggest-reg { background:#f1f5f9; color:#475569; padding:1px 6px; border-radius:4px; font-family:'JetBrains Mono','Consolas',monospace; }
     .od-suggest-empty { padding:10px 12px; font-size:12px; color:#64748b; font-style:italic; }
+    .od-suggest-more { display:block; width:100%; text-align:center; padding:10px 12px; border:0; border-top:2px dashed #cbd5e1; background:#f8fafc; color:#2563eb; font-weight:600; cursor:pointer; font-size:12px; position:sticky; bottom:0; }
+    .od-suggest-more:hover:not(:disabled) { background:#eff6ff; }
+    .od-suggest-more:disabled { color:#94a3b8; cursor:wait; }
 
     .od-borrador { margin-bottom:12px; padding:8px 12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:12.5px; color:#1e40af; display:flex; align-items:center; gap:8px; }
     .od-borrador-x { color:#dc2626; padding:0 4px; }
@@ -261,12 +254,13 @@ else
     private bool _agregando;
     private System.Threading.CancellationTokenSource? _debounceCts;
 
-    private BorradorMed _borrador = new();
+    /// <summary>Tope de sugerencias por consulta. Empieza en 50 y sube en +50
+    /// cada vez que el usuario pulsa "Cargar mas resultados". Se reinicia al
+    /// cambiar el termino de busqueda para no acumular tope infinito.</summary>
+    private const int _pageStep = 50;
+    private int _pageSize = _pageStep;
 
-    /// <summary>La sede activa exige registrar MIPRES al entregar medicamentos.
-    /// Se lee una vez al abrir la HC desde <see cref="ISucursalService.GetMipresObligatorioAsync"/>.
-    /// Si el usuario es global y no tiene sede activa, queda false (no bloquea).</summary>
-    private bool _sedeExigeMipres;
+    private BorradorMed _borrador = new();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -276,19 +270,8 @@ else
             _borrador = new();
             _terminoBusqueda = "";
             _sugerencias.Clear();
+            _pageSize = _pageStep;
             await CargarItemsAsync();
-            await CargarConfigSedeAsync();
-        }
-    }
-
-    /// <summary>Consulta si la sede activa exige MIPRES. Se hace una sola vez
-    /// por apertura de HC — el flag no cambia en medio de la sesion.</summary>
-    private async Task CargarConfigSedeAsync()
-    {
-        _sedeExigeMipres = false;
-        if (Tenant.SucursalId is Guid sid)
-        {
-            _sedeExigeMipres = await SucSvc.GetMipresObligatorioAsync(sid);
         }
     }
 
@@ -304,10 +287,13 @@ else
         if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
     }
 
-    /// <summary>Lanza busqueda al catalogo con debounce de ~200ms para no saturar.</summary>
+    /// <summary>Lanza busqueda al catalogo con debounce de ~200ms para no saturar.
+    /// Cada nuevo tecleo reinicia _pageSize al step base — asi el usuario no arrastra
+    /// un tope inflado de una busqueda anterior.</summary>
     private async Task OnTerminoChanged(ChangeEventArgs e)
     {
         _terminoBusqueda = e.Value?.ToString() ?? "";
+        _pageSize = _pageStep;
         _debounceCts?.Cancel();
         _debounceCts = new();
         var token = _debounceCts.Token;
@@ -316,11 +302,25 @@ else
             await Task.Delay(200, token);
             _buscando = true;
             var t = _terminoBusqueda;
-            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, 12, token)).ToList();
+            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, _pageSize, token)).ToList();
             _buscando = false;
             StateHasChanged();
         }
         catch (TaskCanceledException) { /* siguiente tecleo cancelo */ }
+    }
+
+    /// <summary>Sube el tope en +_pageStep y re-consulta. Aparece cuando
+    /// _sugerencias.Count == _pageSize (la BD probablemente tiene mas).</summary>
+    private async Task CargarMasSugerenciasAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_terminoBusqueda) || _buscando) { return; }
+        _pageSize += _pageStep;
+        _buscando = true;
+        try
+        {
+            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(_terminoBusqueda, _pageSize)).ToList();
+        }
+        finally { _buscando = false; }
     }
 
     private void SeleccionarSugerencia(MedicamentoSugerenciaDto s)
@@ -415,16 +415,6 @@ else
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
         if (string.IsNullOrWhiteSpace(_borrador.NombreMedicamento)) { return; }
-        // Regla operativa: si la sede tiene MipresObligatorio=true, no permitir
-        // agregar medicamentos sin URL MIPRES. La sede sin el flag deja pasar
-        // sin mas (comportamiento anterior).
-        if (_sedeExigeMipres && string.IsNullOrWhiteSpace(_borrador.MipresUrl))
-        {
-            await JS.InvokeVoidAsync("alert",
-                "La sede activa exige registrar la URL de MIPRES antes de agregar un medicamento. " +
-                "Pega el link del formato radicado en el campo MIPRES para continuar.");
-            return;
-        }
         _agregando = true;
         try
         {

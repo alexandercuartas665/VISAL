@@ -83,6 +83,7 @@ public sealed class OrdenServicioService(
         {
             throw new InvalidOperationException("La descripcion del servicio es obligatoria.");
         }
+        await db.EnsureAbiertaAsync(historiaId, ct);
 
         // Calcular siguiente orden en la historia.
         var siguiente = 1 + await db.HistoriaClinicaOrdenesServicio
@@ -118,6 +119,7 @@ public sealed class OrdenServicioService(
     {
         var entity = await db.HistoriaClinicaOrdenesServicio.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Observaciones = Trim(req.Observaciones);
         await db.SaveChangesAsync(ct);
@@ -130,6 +132,7 @@ public sealed class OrdenServicioService(
         var entity = await db.HistoriaClinicaOrdenesServicio.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaOrdenesServicio.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);

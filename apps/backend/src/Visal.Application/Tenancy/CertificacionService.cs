@@ -30,6 +30,7 @@ public sealed class CertificacionService(
         {
             throw new InvalidOperationException("El titulo de la certificacion es obligatorio.");
         }
+        await db.EnsureAbiertaAsync(historiaId, ct);
 
         var siguiente = 1 + await db.HistoriaClinicaCertificaciones
             .Where(x => x.HistoriaClinicaId == historiaId)
@@ -56,6 +57,7 @@ public sealed class CertificacionService(
     {
         var entity = await db.HistoriaClinicaCertificaciones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         if (string.IsNullOrWhiteSpace(req.Titulo))
         {
             throw new InvalidOperationException("El titulo de la certificacion es obligatorio.");
@@ -72,6 +74,7 @@ public sealed class CertificacionService(
         var entity = await db.HistoriaClinicaCertificaciones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaCertificaciones.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);

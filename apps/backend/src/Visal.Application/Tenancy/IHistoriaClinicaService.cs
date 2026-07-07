@@ -69,6 +69,13 @@ public interface IHistoriaClinicaService
     /// <summary>Sobrescribe los valores diligenciados de una historia abierta.</summary>
     Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
 
+    /// <summary>Devuelve true si la HC existe Y esta en estado "Abierta". Cualquier
+    /// otro estado (Cerrada, Inactiva) devuelve false. Los servicios de items
+    /// (medicamentos, insumos, remisiones, etc.) llaman este helper antes de
+    /// mutar para bloquear cambios post-cierre. Devuelve false tambien si la HC
+    /// no existe.</summary>
+    Task<bool> EsAbiertaAsync(Guid historiaClinicaId, CancellationToken ct = default);
+
     /// <summary>Cambia el estado a Cerrada y registra FechaCierre. Persiste los valores que llegan.</summary>
     Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
 

@@ -30,6 +30,7 @@ public sealed class RemisionService(
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.EspecialidadNombre))
         { throw new InvalidOperationException("La descripcion de la remision es obligatoria."); }
+        await db.EnsureAbiertaAsync(historiaId, ct);
 
         var siguiente = 1 + await db.HistoriaClinicaRemisiones
             .Where(x => x.HistoriaClinicaId == historiaId)
@@ -61,6 +62,7 @@ public sealed class RemisionService(
         var entity = await db.HistoriaClinicaRemisiones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaRemisiones.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);

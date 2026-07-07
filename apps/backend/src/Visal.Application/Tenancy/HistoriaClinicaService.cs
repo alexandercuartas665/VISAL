@@ -119,6 +119,18 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
         return true;
     }
 
+    /// <summary>Guard reutilizable para los servicios de items (medicamentos,
+    /// insumos, remisiones, RX, lab, etc.). AsNoTracking porque solo lee el
+    /// estado; no debe interferir con entidades trackeadas del mismo DbContext
+    /// scoped del circuito Blazor.</summary>
+    public async Task<bool> EsAbiertaAsync(Guid historiaClinicaId, CancellationToken ct = default)
+    {
+        return await db.HistoriasClinicas
+            .AsNoTracking()
+            .Where(h => h.Id == historiaClinicaId && h.Estado == HistoriaClinicaEstado.Abierta)
+            .AnyAsync(ct);
+    }
+
     public async Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);

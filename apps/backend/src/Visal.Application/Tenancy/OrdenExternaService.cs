@@ -28,6 +28,7 @@ public sealed class OrdenExternaService(
         AgregarOrdenExternaRequest req, Guid actorUserId, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tenantId) { throw new InvalidOperationException("Sin tenant activo."); }
+        await db.EnsureAbiertaAsync(historiaClinicaId, ct);
         var siguiente = await db.HistoriaClinicaOrdenesExternas
             .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.Tipo == tipo)
             .Select(o => (int?)o.Orden).MaxAsync(ct) ?? 0;
@@ -61,6 +62,7 @@ public sealed class OrdenExternaService(
         var e = await db.HistoriaClinicaOrdenesExternas.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (e is null) { return false; }
         var hcId = e.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaOrdenesExternas.Remove(e);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);

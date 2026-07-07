@@ -31,6 +31,7 @@ public sealed class IncapacidadService(
         {
             throw new InvalidOperationException("El motivo de la incapacidad es obligatorio.");
         }
+        await db.EnsureAbiertaAsync(historiaId, ct);
 
         var siguiente = 1 + await db.HistoriaClinicaIncapacidades
             .Where(x => x.HistoriaClinicaId == historiaId)
@@ -61,6 +62,7 @@ public sealed class IncapacidadService(
     {
         var entity = await db.HistoriaClinicaIncapacidades.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         if (string.IsNullOrWhiteSpace(req.Motivo))
         {
             throw new InvalidOperationException("El motivo de la incapacidad es obligatorio.");
@@ -80,6 +82,7 @@ public sealed class IncapacidadService(
         var entity = await db.HistoriaClinicaIncapacidades.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaIncapacidades.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);

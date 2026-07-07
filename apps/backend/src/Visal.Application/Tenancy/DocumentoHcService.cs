@@ -71,6 +71,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var t = NormalizarTipo(req.Tipo);
+        await db.EnsureAbiertaAsync(req.HistoriaClinicaId, ct);
 
         var hc = await db.HistoriasClinicas.AsNoTracking()
             .FirstOrDefaultAsync(h => h.Id == req.HistoriaClinicaId, ct)
@@ -139,6 +140,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     {
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
+        await db.EnsureAbiertaAsync(d.HistoriaClinicaId, ct);
         d.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? "{}" : valoresJson;
         await db.SaveChangesAsync(ct);
         return true;
@@ -148,6 +150,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     {
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
+        await db.EnsureAbiertaAsync(d.HistoriaClinicaId, ct);
         d.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? d.ValoresJson : valoresJson;
         d.Estado = HistoriaClinicaEstado.Cerrada;
         d.FechaCierre = DateTimeOffset.UtcNow;
@@ -159,6 +162,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     {
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
+        await db.EnsureAbiertaAsync(d.HistoriaClinicaId, ct);
         db.HistoriaClinicaDocumentos.Remove(d);
         await db.SaveChangesAsync(ct);
         return true;

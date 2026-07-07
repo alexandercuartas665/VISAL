@@ -48,6 +48,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
     public async Task<EscalaDetailDto> IniciarAsync(IniciarEscalaRequest req, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        await db.EnsureAbiertaAsync(req.HistoriaClinicaId, ct);
 
         var hc = await db.HistoriasClinicas.AsNoTracking()
             .FirstOrDefaultAsync(h => h.Id == req.HistoriaClinicaId, ct)
@@ -105,6 +106,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
     {
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
+        await db.EnsureAbiertaAsync(e.HistoriaClinicaId, ct);
         e.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? "{}" : valoresJson;
         await db.SaveChangesAsync(ct);
         return true;
@@ -114,6 +116,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
     {
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
+        await db.EnsureAbiertaAsync(e.HistoriaClinicaId, ct);
         e.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
@@ -125,6 +128,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
     {
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
+        await db.EnsureAbiertaAsync(e.HistoriaClinicaId, ct);
         db.HistoriaClinicaEscalas.Remove(e);
         await db.SaveChangesAsync(ct);
         return true;

@@ -65,6 +65,8 @@ public sealed class OrdenMedicamentoService(
         {
             throw new InvalidOperationException("El nombre del medicamento es obligatorio.");
         }
+        // Guard: HC debe estar Abierta. Una HC cerrada es un documento firmado.
+        await db.EnsureAbiertaAsync(historiaId, ct);
 
         // Calcular siguiente orden en la historia.
         var siguiente = 1 + await db.HistoriaClinicaMedicamentos
@@ -105,6 +107,7 @@ public sealed class OrdenMedicamentoService(
     {
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
+        await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Frecuencia = Trim(req.Frecuencia);
         entity.Dias = Trim(req.Dias);
@@ -121,6 +124,7 @@ public sealed class OrdenMedicamentoService(
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);

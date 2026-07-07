@@ -345,7 +345,8 @@
                     else if (_tabSel == "Ordenes medicamento")
                     {
                         <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
-                                           OnCountChanged="OnMedicamentosCountChanged" />
+                                           OnCountChanged="OnMedicamentosCountChanged"
+                                           OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                     }
                     else if (_tabSel == "Ordenes servicios")
                     {
@@ -1402,6 +1403,41 @@
             {
                 Console.WriteLine($"[CambiarTab Historial] {ex.GetType().Name}: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Callback disparado por los submodulos de la HC (Medicamentos, en el
+    /// futuro tambien Insumos/RxImag/etc.) cada vez que MUTAN sus items en BD:
+    /// agregar, actualizar posologia u observacion, eliminar. El backend ya
+    /// refresco ValoresJson via IHistoriaPrefillService, pero nuestro
+    /// _valores en memoria sigue siendo el snapshot anterior. Aqui releemos
+    /// el ValoresJson mas nuevo y actualizamos el diccionario en vivo — asi
+    /// el FormViewer del tab Historial refleja el cambio SIN que el usuario
+    /// tenga que salir y volver a la HC.
+    /// </summary>
+    private async Task RecargarValoresDesdeBackendAsync()
+    {
+        if (_historiaSel is not HistoriaRow h) { return; }
+        try
+        {
+            var detail = await HcSvc.GetAsync(h.Id);
+            if (detail is null) { return; }
+            // Preservamos las claves marcadas como readonly (header + prefill
+            // paciente que no se guarda como valor). Solo actualizamos el
+            // resto — asi no perdemos edicion en curso del doctor sobre
+            // campos que el no relaciono con historiaMedica.
+            var nuevo = DeserializeValores(detail.ValoresJson);
+            foreach (var kv in nuevo)
+            {
+                _valores[kv.Key] = kv.Value;
+            }
+            StateHasChanged();
+        }
+        catch
+        {
+            // Si el refresh falla, dejamos el snapshot local — el usuario
+            // vera el cambio la proxima vez que abra la HC.
         }
     }
 

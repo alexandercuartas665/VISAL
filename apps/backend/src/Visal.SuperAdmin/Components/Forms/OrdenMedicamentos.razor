@@ -94,6 +94,17 @@ else
             </div>
         </div>
 
+        @* ---- Fila 2: observacion del medicamento en captura (evita tener que
+             agregar el item primero e ir a la tabla a editar la observacion). ---- *@
+        <div class="od-row od-row-obs">
+            <div class="od-f od-c-12">
+                <label>Observacion clinica (opcional)</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: administrar con alimentos, suspender si aparece rash..."
+                       @bind="_borrador.Observacion" @bind:event="oninput" />
+            </div>
+        </div>
+
         @if (!string.IsNullOrWhiteSpace(_borrador.NombreMedicamento))
         {
             <div class="od-borrador">
@@ -196,12 +207,27 @@ else
     .od-inline-input { font-size:12px; }
     .od-codigo { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#475569; }
     .od-total { font-weight:700; color:#0f172a; background:#fef9c3; }
+    .od-c-12 { grid-column: span 12; }
+    .od-row-obs { margin-top:-4px; }
 </style>
 
 @code {
     /// <summary>Id de la HC actualmente abierta. Cuando cambia, recargamos los items.</summary>
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+    /// <summary>
+    /// Se dispara cada vez que la lista de medicamentos cambia (agregar,
+    /// actualizar posologia/observacion, eliminar). Sirve para que el padre
+    /// (HistoriasClinicasModulo) recargue ValoresJson y refresque el
+    /// FormViewer del tab Historial en vivo: sin esto, el usuario tenia que
+    /// salir y volver a la HC para ver la observacion actualizada.
+    /// </summary>
+    [Parameter] public EventCallback OnItemsChanged { get; set; }
+
+    private async Task NotifyItemsChanged()
+    {
+        if (OnItemsChanged.HasDelegate) { await OnItemsChanged.InvokeAsync(); }
+    }
 
     private Guid? _ultimoIdCargado;
     private string _terminoBusqueda = "";
@@ -363,6 +389,7 @@ else
                 _borrador.Observacion), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
+            await NotifyItemsChanged();
             LimpiarBorrador();
         }
         finally { _agregando = false; }
@@ -381,6 +408,7 @@ else
         await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
         var idx = _items.FindIndex(x => x.Id == it.Id);
         if (idx >= 0) { _items[idx] = it with { Posologia = nuevaPosologia }; }
+        await NotifyItemsChanged();
     }
 
     private async Task GuardarObservacion(OrdenMedicamentoItemDto it, string? nuevaObs)
@@ -389,6 +417,7 @@ else
         await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
         var idx = _items.FindIndex(x => x.Id == it.Id);
         if (idx >= 0) { _items[idx] = it with { Observacion = nuevaObs }; }
+        await NotifyItemsChanged();
     }
 
     private async Task EliminarAsync(OrdenMedicamentoItemDto it)
@@ -398,6 +427,7 @@ else
         await OrdSvc.EliminarAsync(it.Id, Guid.Empty);
         _items.RemoveAll(x => x.Id == it.Id);
         await NotifyCount();
+        await NotifyItemsChanged();
     }
 
     /// <summary>Abre la vista imprimible /orden-doc en una nueva pestana del navegador.</summary>

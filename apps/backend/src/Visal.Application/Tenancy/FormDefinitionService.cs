@@ -910,7 +910,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public async Task<byte[]?> ExportarJsonAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<byte[]?> ExportarJsonAsync(Guid id, bool incluirRutasPrefill = true, CancellationToken cancellationToken = default)
     {
         var e = await _db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (e is null) { return null; }
@@ -921,9 +921,6 @@ public sealed class FormDefinitionService : IFormDefinitionService
         JsonNode? schemaNode = null;
         try { schemaNode = string.IsNullOrWhiteSpace(e.SchemaJson) ? null : JsonNode.Parse(e.SchemaJson); }
         catch { schemaNode = null; }
-        JsonNode? prefillNode = null;
-        try { prefillNode = string.IsNullOrWhiteSpace(e.PrefillRoutesJson) ? null : JsonNode.Parse(e.PrefillRoutesJson); }
-        catch { prefillNode = null; }
 
         var payload = new JsonObject
         {
@@ -935,9 +932,20 @@ public sealed class FormDefinitionService : IFormDefinitionService
             ["version"] = e.Version,
             ["tipo"] = e.Tipo,
             ["activo"] = e.Activo,
-            ["schema"] = schemaNode,
-            ["prefillRoutes"] = prefillNode
+            ["schema"] = schemaNode
         };
+
+        // Solo incluimos "prefillRoutes" cuando el caller lo pidio. Omitir la
+        // clave (en lugar de mandar null) marca el "no toques las rutas
+        // existentes en destino" — el import lo interpreta asi para preservar
+        // configuracion de prod al sobrescribir.
+        if (incluirRutasPrefill)
+        {
+            JsonNode? prefillNode = null;
+            try { prefillNode = string.IsNullOrWhiteSpace(e.PrefillRoutesJson) ? null : JsonNode.Parse(e.PrefillRoutesJson); }
+            catch { prefillNode = null; }
+            payload["prefillRoutes"] = prefillNode;
+        }
 
         var json = payload.ToJsonString(_exportJsonOpts);
         return System.Text.Encoding.UTF8.GetBytes(json);
@@ -993,7 +1001,13 @@ public sealed class FormDefinitionService : IFormDefinitionService
             return n.ToJsonString();
         }
         var schemaJson = NodeToJsonString(root["schema"]) ?? "{\"children\":[]}";
-        var prefillRoutesJson = NodeToJsonString(root["prefillRoutes"]);
+        // Distinguimos "clave ausente" (usuario exporto SIN rutas — preservar destino)
+        // de "clave presente con null" (usuario si tiene rutas, aunque sean vacias).
+        // Cuando la clave no viene, en sobrescribir NO tocamos las rutas existentes
+        // — asi puedes portar solo el schema a un tenant que ya tiene rutas prefill
+        // configuradas manualmente y no perderlas.
+        var traeRutasPrefill = root.ContainsKey("prefillRoutes");
+        var prefillRoutesJson = traeRutasPrefill ? NodeToJsonString(root["prefillRoutes"]) : null;
 
         // Sufijo para evitar colision cuando no se pide sobrescribir.
         var codigoFinal = codigo;
@@ -1009,7 +1023,12 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 existente.Tipo = tipo;
                 existente.Activo = activo;
                 existente.SchemaJson = schemaJson;
-                existente.PrefillRoutesJson = prefillRoutesJson;
+                if (traeRutasPrefill)
+                {
+                    existente.PrefillRoutesJson = prefillRoutesJson;
+                }
+                // Si no trae la clave, NO tocamos existente.PrefillRoutesJson
+                // — preservamos la configuracion del tenant destino.
                 await _db.SaveChangesAsync(cancellationToken);
                 _audit.Write(actorUserId, "form-definition.import.overwrite", nameof(FormDefinition), existente.Id,
                     previousValue: new { codigo = existente.Codigo }, newValue: new { codigo, tipo }, tenantId: tenantId);

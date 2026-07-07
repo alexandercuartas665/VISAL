@@ -72,10 +72,13 @@ public interface IFormDefinitionService
     Task<AutoEnlazarPacienteResultDto> AutoEnlazarPacienteEnTodosAsync(Guid actorUserId, CancellationToken cancellationToken = default);
 
     /// <summary>Bytes UTF-8 con el JSON de exportacion del formulario. Incluye
-    /// codigo, tipo, schema deserializado, rutas de prefill deserializadas — todo
-    /// lo necesario para recrearlo en otro tenant. Devuelve null si el formulario
-    /// no existe. El nombre sugerido del archivo va aparte via GetExportFileNameAsync.</summary>
-    Task<byte[]?> ExportarJsonAsync(Guid id, CancellationToken cancellationToken = default);
+    /// codigo, tipo, schema deserializado y opcionalmente las rutas de prefill.
+    /// Cuando <paramref name="incluirRutasPrefill"/> es false, el JSON exportado
+    /// NO trae la clave "prefillRoutes" — util cuando el tenant destino ya tiene
+    /// las rutas configuradas y no queremos sobrescribirlas al importar.
+    /// Devuelve null si el formulario no existe. El nombre sugerido del archivo
+    /// va aparte via GetExportFileNameAsync.</summary>
+    Task<byte[]?> ExportarJsonAsync(Guid id, bool incluirRutasPrefill = true, CancellationToken cancellationToken = default);
 
     /// <summary>Nombre de archivo sugerido para la descarga (codigo o Id + .json).</summary>
     Task<string?> GetExportFileNameAsync(Guid id, CancellationToken cancellationToken = default);

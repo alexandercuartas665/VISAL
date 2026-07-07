@@ -52,8 +52,8 @@
                     <a class="fb-btn" href="@($"/formulario-doc/{_currentId}")" target="_blank">Vista documento</a>
                     <button class="fb-btn" @onclick="OpenPrefillRoutesModal" title="Configurar rutas de prefill desde otros modulos">&#128279; Rutas de prefill</button>
                     <button class="fb-btn" @onclick="OpenVersionHistoryAsync" title="Ver versiones anteriores y restaurar">&#128344; Historial</button>
-                    <button class="fb-btn" @onclick="ExportarJsonAsync" disabled="@_busy"
-                            title="Descarga un JSON con TODO el formulario (codigo, tipo, schema, rutas de prefill, formulas, seedRows) para portarlo a otro tenant.">&#128190; Exportar JSON</button>
+                    <button class="fb-btn" @onclick="AbrirExportarJsonModal" disabled="@_busy"
+                            title="Descarga un JSON con el formulario. Puedes elegir si incluir o no las Rutas de prefill.">&#128190; Exportar JSON</button>
                     <button class="fb-btn fb-btn-danger" @onclick="DeleteFormAsync" disabled="@_busy"
                             title="Eliminar definitivamente este formulario">&#128465; Eliminar</button>
                 }
@@ -811,6 +811,15 @@
     .pr-col-map-label { font-size: 12px; color: #1f2937; }
     .pr-col-map-label small { color: #6b7280; font-size: 10.5px; margin-left: 4px; }
     .pr-col-sel { background: #fff; }
+
+    /* Modal Exportar JSON (Rutas de prefill opcionales) */
+    .fb-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:950; }
+    .fb-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:10px; box-shadow:0 20px 60px rgba(15,23,42,.3); z-index:951; max-width:95vw; max-height:88vh; display:flex; flex-direction:column; }
+    .fb-modal-h { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid #e2e8f0; background:#f8fafc; border-radius:10px 10px 0 0; }
+    .fb-modal-h h3 { margin:0; font-size:15px; color:#0f172a; }
+    .fb-modal-close { background:none; border:none; font-size:22px; color:#64748b; cursor:pointer; }
+    .fb-modal-b { overflow:auto; }
+    .fb-btn-primary { background:#1565c0 !important; color:#fff !important; border-color:#1565c0 !important; }
 </style>
 
 <script>
@@ -833,6 +842,45 @@
         if (el) { el.click(); }
     };
 </script>
+
+@* ===== Modal Exportar JSON: pregunta si incluir Rutas de prefill ===== *@
+@if (_showExportModal)
+{
+    <div class="fb-modal-backdrop" @onclick="() => _showExportModal = false"></div>
+    <div class="fb-modal" style="width:520px;">
+        <div class="fb-modal-h">
+            <h3>&#128190; Exportar JSON</h3>
+            <button class="fb-modal-close" @onclick="() => _showExportModal = false">&times;</button>
+        </div>
+        <div class="fb-modal-b" style="padding:18px;">
+            <p style="font-size:13px; color:#334155; margin-bottom:14px;">
+                Vas a exportar el formulario <strong>@_codigo</strong>. Elige que llevar en el JSON:
+            </p>
+            <label class="fb-exp-opt" style="display:flex; gap:10px; align-items:flex-start; padding:12px; border:1px solid #e2e8f0; border-radius:8px; cursor:pointer; margin-bottom:10px; @(_exportIncluirPrefill ? "background:#eff6ff; border-color:#93c5fd;" : "")">
+                <input type="checkbox" @bind="_exportIncluirPrefill" style="margin-top:3px;" />
+                <div>
+                    <div style="font-weight:700; font-size:13px; color:#0f172a;">Incluir Rutas de prefill</div>
+                    <div style="font-size:11.5px; color:#64748b; margin-top:3px;">
+                        Copia las rutas de prefill (paciente, historia medica, firmas, etc.) al JSON.
+                        Si al importar SOBRESCRIBES un formulario existente, sus rutas de prefill actuales
+                        seran <strong>reemplazadas</strong> por las de este JSON.
+                    </div>
+                </div>
+            </label>
+            <div class="fb-exp-hint" style="font-size:11.5px; color:#475569; background:#fef9c3; border-left:3px solid #eab308; padding:8px 12px; border-radius:0 6px 6px 0;">
+                &#128161; Deja el checkbox <strong>desmarcado</strong> si el tenant destino ya tiene sus rutas
+                configuradas (ej. produccion) y solo quieres actualizar el schema. El importador
+                preserva las rutas existentes cuando el JSON no las trae.
+            </div>
+        </div>
+        <div class="fb-modal-f" style="padding:12px 18px; border-top:1px solid #e2e8f0; display:flex; gap:8px; justify-content:flex-end;">
+            <button class="fb-btn" @onclick="() => _showExportModal = false">Cancelar</button>
+            <button class="fb-btn fb-btn-primary" @onclick="ExportarJsonAsync" disabled="@_busy">
+                &#128190; Descargar JSON
+            </button>
+        </div>
+    </div>
+}
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
@@ -1150,18 +1198,34 @@
     // formulas), rutas de prefill y flag activo. Al importar, si el codigo ya
     // existe en el tenant preguntamos si sobrescribir o crear copia con sufijo.
 
+    // Modal Exportar JSON: pregunta si incluir Rutas de prefill.
+    private bool _showExportModal;
+    private bool _exportIncluirPrefill = true;
+
+    private void AbrirExportarJsonModal()
+    {
+        if (_currentId is null) { return; }
+        // Default = incluir. El usuario lo desmarca cuando quiere preservar
+        // las rutas del tenant destino (caso: mover schema de dev a prod).
+        _exportIncluirPrefill = true;
+        _showExportModal = true;
+    }
+
     private async Task ExportarJsonAsync()
     {
         if (_currentId is not Guid id) { return; }
+        _showExportModal = false;
         _busy = true; _error = _ok = null;
         try
         {
-            var bytes = await FormsSvc.ExportarJsonAsync(id);
+            var bytes = await FormsSvc.ExportarJsonAsync(id, _exportIncluirPrefill);
             if (bytes is null) { _error = "No se pudo exportar: el formulario no existe."; return; }
             var name = await FormsSvc.GetExportFileNameAsync(id) ?? $"form-{id:N}.json";
             var content = System.Text.Encoding.UTF8.GetString(bytes);
             await JS.InvokeVoidAsync("visalDescargarJson", name, content);
-            _ok = $"Formulario exportado como {name}.";
+            _ok = _exportIncluirPrefill
+                ? $"Formulario exportado como {name} (con rutas de prefill)."
+                : $"Formulario exportado como {name} (SIN rutas de prefill — preserva las del destino).";
         }
         catch (Exception ex) { _error = "No se pudo exportar: " + ex.Message; }
         finally { _busy = false; }

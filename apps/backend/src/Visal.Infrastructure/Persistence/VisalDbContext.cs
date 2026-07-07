@@ -1017,6 +1017,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasMany(x => x.ContactosEmergencia).WithOne(x => x.Paciente!)
                 .HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.NumeroDocumento }).IsUnique();
+            // Estado de admision del paciente. Default "Abierto" para pacientes existentes.
+            b.Property(x => x.EstadoAdmision).HasMaxLength(20).HasDefaultValue("Abierto").IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.EstadoAdmision });
         });
 
         modelBuilder.Entity<PacienteContactoEmergencia>(b =>

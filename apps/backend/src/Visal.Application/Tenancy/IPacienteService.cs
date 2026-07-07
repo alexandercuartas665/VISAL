@@ -42,7 +42,10 @@ public sealed record PacienteDetailDto(
     string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia,
     // Lista completa de contactos de emergencia (puede tener 0..N)
     IReadOnlyList<PacienteContactoEmergenciaDto> ContactosEmergencia,
-    bool Activo);
+    bool Activo,
+    // Estado de admision: "Abierto" (default) o "Cerrado". Un paciente Cerrado
+    // pasa validacion de campos obligatorios y ya se puede usar en /asignacion.
+    string EstadoAdmision = "Abierto");
 
 public sealed record SavePacienteRequest(
     Guid? Id,
@@ -105,4 +108,29 @@ public interface IPacienteService
     /// con Id). Devuelve el DTO persistido con Id asignado. Usado desde el modal
     /// "Solicitar firmas" cuando el operador crea un pariente nuevo sobre la marcha.</summary>
     Task<PacienteContactoEmergenciaDto?> UpsertContactoEmergenciaAsync(Guid pacienteId, PacienteContactoEmergenciaDto contacto, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Valida los campos obligatorios y cambia el estado del paciente a Cerrado.
+    /// Devuelve la lista de campos faltantes si la validacion falla — en ese
+    /// caso el estado NO cambia. Los unicos campos NO obligatorios son
+    /// DiasEstancia, OpIngresoDias, GrupoRh y Email; el resto de los datos
+    /// basicos (identificacion, fechas, aseguradora, diagnostico, contacto y
+    /// contactos de emergencia) deben estar diligenciados.
+    /// </summary>
+    Task<CerrarPacienteResult> CerrarAsync(Guid id, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reabre un paciente Cerrado (vuelve a Abierto) permitiendo editarlo y
+    /// eliminarlo. El caller debe validar el permiso administrativo del actor
+    /// antes de invocar este metodo (mismo permiso "historias.reabrir" usado
+    /// para reabrir HC).
+    /// </summary>
+    Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Resultado de intentar cerrar un paciente. Si Ok=true el cierre se aplico;
+/// si Ok=false, CamposFaltantes trae los campos que falta llenar (nombres
+/// legibles para mostrar al usuario).
+/// </summary>
+public sealed record CerrarPacienteResult(bool Ok, IReadOnlyList<string> CamposFaltantes);

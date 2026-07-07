@@ -61,7 +61,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             p.Direccion, p.Zona,
             p.Ocupacion, p.Regimen,
             p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
-            epsNombre);
+            epsNombre,
+            p.EstadoAdmision);
     }
 
     public async Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default)

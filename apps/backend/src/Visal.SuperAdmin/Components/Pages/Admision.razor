@@ -51,7 +51,19 @@
         }
         else
         {
-            <div class="ase-card">
+            @* Banner de estado: verde cuando esta Cerrado (readonly). El wrapper
+               ase-locked deshabilita todos los inputs internos con CSS. *@
+            @if (EsCerrado)
+            {
+                <div class="ase-locked-banner">
+                    <div class="ase-locked-ico">&#128274;</div>
+                    <div>
+                        <div class="ase-locked-t">Paciente cerrado &mdash; solo lectura</div>
+                        <div class="ase-locked-s">Este paciente esta listo para asignaciones. Los datos no se pueden editar hasta reabrirlo.</div>
+                    </div>
+                </div>
+            }
+            <div class="ase-card @(EsCerrado ? "ase-locked" : "")">
                 <div class="pac-tabs">
                     <button class="pac-tab @(_tab == "generales" ? "active" : "")" @onclick="@(() => _tab = "generales")">Datos Generales</button>
                     <button class="pac-tab @(_tab == "adicionales" ? "active" : "")" @onclick="@(() => _tab = "adicionales")">Datos Adicionales</button>
@@ -446,11 +458,36 @@
                 }
 
                 <div class="ase-actions" style="margin-top:18px;">
-                    <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar paciente")</button>
-                    @if (_id is not null)
+                    @* Cuando el paciente esta Cerrado: no permite guardar cambios ni desactivar/eliminar.
+                       Solo se puede reabrir (si el usuario tiene permiso administrativo). *@
+                    @if (EsCerrado)
                     {
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="Desactivar" disabled="@_busy" title="Marcar como inactivo sin borrar el historial clinico">Desactivar</button>
-                        <button class="btn btn-outline-danger btn-sm" @onclick="Delete" disabled="@_busy" title="Eliminar definitivamente. Solo se puede si el paciente no tiene HC, notas ni asignaciones.">Eliminar</button>
+                        @if (_puedeReabrir)
+                        {
+                            <button class="btn btn-warning btn-sm" @onclick="Reabrir" disabled="@_busy"
+                                    title="Reabre el paciente para permitir editar o eliminar. Requiere permiso administrativo.">
+                                &#128275; Reabrir paciente
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="ase-lock-chip" title="Solo un usuario con permiso administrativo puede reabrir este paciente.">
+                                &#128274; Cerrado &mdash; solo lectura
+                            </span>
+                        }
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar paciente")</button>
+                        @if (_id is not null)
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="Cerrar" disabled="@_busy"
+                                    title="Valida los campos obligatorios y cierra el paciente. Solo pacientes Cerrados pueden asignarse en /asignacion.">
+                                &#10004; Cerrar paciente
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="Desactivar" disabled="@_busy" title="Marcar como inactivo sin borrar el historial clinico">Desactivar</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="Delete" disabled="@_busy" title="Eliminar definitivamente. Solo se puede si el paciente no tiene HC, notas ni asignaciones.">Eliminar</button>
+                        }
                     }
                 </div>
             </div>
@@ -522,6 +559,27 @@
     .cie-title { flex:1; font-size:13px; color:#0f172a; }
     .cie-id { font-family: monospace; font-size:10px; color:#94a3b8; }
     .cie-code { font-family: monospace; font-size: 12px; font-weight: 700; color: #0f172a; background:#fef3c7; padding: 3px 8px; border-radius: 4px; min-width: 64px; text-align: center; }
+
+    /* Estado Cerrado: banner + wrapper readonly */
+    .ase-locked-banner { display:flex; align-items:center; gap:12px; background:#d1fae5; border:1px solid #6ee7b7; border-radius:8px; padding:10px 14px; margin-bottom:12px; }
+    .ase-locked-ico { font-size:22px; }
+    .ase-locked-t { font-weight:700; color:#065f46; font-size:13px; }
+    .ase-locked-s { font-size:11.5px; color:#047857; }
+    .ase-locked input:not([type=checkbox]):not([type=radio]), .ase-locked select, .ase-locked textarea { background:#f1f5f9 !important; pointer-events:none; color:#475569; }
+    .ase-locked button.btn-primary, .ase-locked button.btn-success, .ase-locked button.btn-outline-primary, .ase-locked button.btn-outline-danger { pointer-events:none; opacity:0.5; }
+    .ase-locked .pac-tabs button { pointer-events:auto; }
+    .ase-lock-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; font-size:12px; font-weight:600; background:#e2e8f0; color:#475569; }
+
+    /* Modal campos faltantes */
+    .ase-faltantes-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.5); z-index:1000; }
+    .ase-faltantes-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:520px; max-width:95vw; max-height:80vh; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.3); z-index:1001; }
+    .ase-faltantes-h { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid #e2e8f0; background:#fef2f2; border-radius:10px 10px 0 0; }
+    .ase-faltantes-h h3 { margin:0; font-size:15px; color:#991b1b; }
+    .ase-faltantes-b { padding:16px 18px; }
+    .ase-faltantes-b p { font-size:13px; color:#475569; margin-bottom:12px; }
+    .ase-faltantes-list { list-style:none; padding:0; margin:0; max-height:280px; overflow:auto; }
+    .ase-faltantes-list li { padding:6px 12px; background:#fef2f2; border-left:3px solid #ef4444; margin-bottom:4px; font-size:12.5px; color:#991b1b; border-radius:4px; }
+    .ase-faltantes-f { padding:12px 18px; border-top:1px solid #e2e8f0; text-align:right; }
 </style>
 
 @* ===== Modal Importar pacientes desde Excel ===== *@
@@ -579,8 +637,41 @@
     </div>
 }
 
+@* ===== Modal Campos faltantes al intentar cerrar paciente ===== *@
+@if (_showFaltantesModal)
+{
+    <div class="ase-faltantes-backdrop" @onclick="() => _showFaltantesModal = false"></div>
+    <div class="ase-faltantes-modal">
+        <div class="ase-faltantes-h">
+            <h3>&#9888; No se puede cerrar el paciente</h3>
+            <button class="cie-modal-close" @onclick="() => _showFaltantesModal = false">&times;</button>
+        </div>
+        <div class="ase-faltantes-b">
+            <p>Antes de cerrar el paciente debes completar los siguientes campos obligatorios:</p>
+            <ul class="ase-faltantes-list">
+                @foreach (var f in _camposFaltantes)
+                {
+                    <li>&#10006; @f</li>
+                }
+            </ul>
+        </div>
+        <div class="ase-faltantes-f">
+            <button class="btn btn-primary btn-sm" @onclick="() => _showFaltantesModal = false">Entendido</button>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    // Estado del paciente cargado y flags derivadas del rol/permisos
+    private string _estadoAdmision = "Abierto";
+    private bool _puedeReabrir;
+    private bool EsCerrado => string.Equals(_estadoAdmision, "Cerrado", StringComparison.OrdinalIgnoreCase);
+
+    // Modal de campos faltantes (mostrado al intentar cerrar cuando validacion falla)
+    private bool _showFaltantesModal;
+    private List<string> _camposFaltantes = new();
 
     private List<PacienteDto> _lista = new();
     private List<AseguradoraDto> _aseguradoras = new();
@@ -842,7 +933,90 @@
         _sedes = (await SucSvc.ListAsync()).ToList();
         _catalogos = (await CatSvc.ListAsync(null)).ToList();
         _paises = (await GeoSvc.ListPaisesAsync()).ToList();
+        await ResolverPuedeReabrirAsync();
         await LoadLista();
+    }
+
+    /// <summary>
+    /// Determina si el usuario logueado puede reabrir un paciente cerrado. Usa
+    /// las mismas 3 fuentes que la reapertura de HC (mismo permiso administrativo
+    /// "historias.reabrir" — cubre ambos flujos).
+    /// </summary>
+    private async Task ResolverPuedeReabrirAsync()
+    {
+        if (AuthState is null) { _puedeReabrir = false; return; }
+        try
+        {
+            var state = await AuthState;
+            var tenantRole = state.User.FindFirst("tenant_role")?.Value;
+            var platformRole = state.User.FindFirst("platform_role")?.Value;
+            var esAdminTenant = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase);
+            var esSuperAdmin = string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+            var perms = state.User.FindFirst("perms")?.Value;
+            var tienePermiso = !string.IsNullOrEmpty(perms)
+                && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(p => string.Equals(p.Trim(), "historias.reabrir", StringComparison.OrdinalIgnoreCase));
+            _puedeReabrir = esAdminTenant || esSuperAdmin || tienePermiso;
+        }
+        catch { _puedeReabrir = false; }
+    }
+
+    private async Task<Guid> ResolverActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var state = await AuthState;
+            var idStr = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(idStr, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
+    }
+
+    /// <summary>Cierra el paciente. Si faltan campos obligatorios muestra el modal
+    /// con la lista y NO cambia el estado.</summary>
+    private async Task Cerrar()
+    {
+        if (_id is not Guid id) { return; }
+        _busy = true;
+        try
+        {
+            var actor = await ResolverActorAsync();
+            var result = await Svc.CerrarAsync(id, actor);
+            if (!result.Ok)
+            {
+                _camposFaltantes = result.CamposFaltantes.ToList();
+                _showFaltantesModal = true;
+                return;
+            }
+            _estadoAdmision = "Cerrado";
+            _ok = $"Paciente cerrado. Ya se puede usar en /asignacion.";
+            await LoadLista();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Reabre el paciente. Solo funciona si el usuario tiene permiso.</summary>
+    private async Task Reabrir()
+    {
+        if (_id is not Guid id) { return; }
+        if (!_puedeReabrir) { _error = "No tienes permiso para reabrir pacientes cerrados."; return; }
+        var confirmar = await JS.InvokeAsync<bool>("confirm",
+            "Vas a REABRIR este paciente cerrado.\n\nEl paciente volvera a estado Abierto y podras editarlo o eliminarlo.\n\n¿Confirmas la reapertura?");
+        if (!confirmar) { return; }
+        _busy = true;
+        try
+        {
+            var actor = await ResolverActorAsync();
+            await Svc.ReabrirAsync(id, actor);
+            _estadoAdmision = "Abierto";
+            _ok = "Paciente reabierto. Ya puedes editarlo o eliminarlo.";
+            await LoadLista();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
     }
 
     private async Task OnIpsComentaChanged(ChangeEventArgs e)
@@ -990,6 +1164,7 @@
         if (Guid.TryParse(_departamento, out var did)) { _municipios = (await GeoSvc.ListMunicipiosAsync(did)).ToList(); }
         else { _municipios = new(); }
         _emerNombre = d.ContactoEmergencia; _emerParentesco = d.Parentesco; _emerTel = d.TelefonoEmergencia; _activo = d.Activo;
+        _estadoAdmision = d.EstadoAdmision;
         // Lista de contactos: si vino del backend la usamos; si esta vacia pero hay
         // datos legacy (paciente viejo), creamos una fila con esos datos.
         _contactos = d.ContactosEmergencia

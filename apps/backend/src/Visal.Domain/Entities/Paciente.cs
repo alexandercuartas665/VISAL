@@ -114,4 +114,18 @@ public class Paciente : TenantEntity
 
     // ===== Estado del registro =====
     public bool Activo { get; set; } = true;
+
+    // ===== Estado de admision (Abierto / Cerrado) =====
+    /// <summary>
+    /// Estado del proceso de admision del paciente. Un paciente Abierto es un
+    /// registro en captura: campos incompletos permitidos y editable. Un
+    /// paciente Cerrado tiene todos los datos obligatorios diligenciados y ya
+    /// se puede usar para asignaciones. Modulo Asignacion RECHAZA pacientes
+    /// Abiertos (obliga a la coordinadora a completar los datos antes).
+    /// Valores: "Abierto" (default) o "Cerrado".
+    /// </summary>
+    public string EstadoAdmision { get; set; } = "Abierto";
+
+    /// <summary>Timestamp UTC del cierre; null mientras el paciente esta Abierto.</summary>
+    public DateTimeOffset? FechaCierreAdmision { get; set; }
 }

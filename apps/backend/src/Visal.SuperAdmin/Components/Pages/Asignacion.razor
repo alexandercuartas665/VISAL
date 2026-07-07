@@ -1101,6 +1101,22 @@ else
 
     private async Task PickPaciente(PacienteAsignacionDto p)
     {
+        // Bloqueo total: no se permite asignar servicios a pacientes cuya
+        // admision no este Cerrada. La coordinadora tiene que ir a /admision,
+        // completar los campos obligatorios y pulsar "Cerrar paciente" antes
+        // de poder asignarle servicios aqui. Politica de negocio para
+        // garantizar datos completos en todo lo que llega a asignacion.
+        if (!string.Equals(p.EstadoAdmision, "Cerrado", StringComparison.OrdinalIgnoreCase))
+        {
+            await JS.InvokeVoidAsync("alert",
+                $"El paciente {p.NombreCompleto} (doc. {p.NumeroDocumento}) NO esta cerrado.\n\n" +
+                "No se pueden hacer asignaciones a pacientes abiertos.\n\n" +
+                "Ve a Admision, completa los campos obligatorios y pulsa \"Cerrar paciente\" antes de asignar servicios.");
+            _error = $"Paciente {p.NombreCompleto} esta ABIERTO. Cierralo en Admision antes de asignar.";
+            _paciente = null;
+            _docBusqueda = "";
+            return;
+        }
         _paciente = p;
         _docBusqueda = p.NumeroDocumento;
         _servicios = new(); _modulos = new(); _moduloSel = ""; _servicioSel = null;

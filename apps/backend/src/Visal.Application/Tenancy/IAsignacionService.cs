@@ -18,7 +18,9 @@ public sealed record PacienteAsignacionDto(
     string? ContactoEmergencia = null, string? Parentesco = null, string? TelefonoEmergencia = null,
     // Nombre de la aseguradora/EPS principal del paciente. Disponible como ruta de
     // prefill "paciente.eps" en cualquier formulario.
-    string? Eps = null);
+    string? Eps = null,
+    // Estado de admision: "Abierto" o "Cerrado". Solo pacientes Cerrados pueden asignarse.
+    string EstadoAdmision = "Abierto");
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado, bool RequierePdfAutorizacion);
 

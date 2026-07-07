@@ -8,11 +8,13 @@ public sealed class PacienteService : IPacienteService
 {
     private readonly IApplicationDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly IAuditWriter _audit;
 
-    public PacienteService(IApplicationDbContext db, ITenantContext tenant)
+    public PacienteService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit)
     {
         _db = db;
         _tenant = tenant;
+        _audit = audit;
     }
 
     public async Task<IReadOnlyList<PacienteDto>> ListAsync(string? filtro, CancellationToken ct = default)
@@ -61,7 +63,8 @@ public sealed class PacienteService : IPacienteService
             p.SedeAtencionId,
             p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
             contactos,
-            p.Activo);
+            p.Activo,
+            p.EstadoAdmision);
     }
 
     public async Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default)
@@ -344,5 +347,113 @@ public sealed class PacienteService : IPacienteService
         var fin = egreso ?? DateOnly.FromDateTime(DateTime.UtcNow);
         var dias = fin.DayNumber - i.DayNumber;
         return dias >= 0 ? dias : null;
+    }
+
+    // =========================================================================
+    // Cerrar / Reabrir admision del paciente
+    // =========================================================================
+
+    /// <summary>
+    /// Valida los campos obligatorios y cambia el estado a Cerrado. Los campos
+    /// EXCLUIDOS de la validacion son (por decision de negocio): DiasEstancia,
+    /// OpIngresoDias, GrupoRh, Email. El resto (identificacion, fechas basicas,
+    /// admin PAD, contactos, geografia, contactos de emergencia) es obligatorio
+    /// para permitir el cierre. Un paciente Cerrado ya no se puede editar ni
+    /// eliminar hasta que un admin lo reabra.
+    /// </summary>
+    public async Task<CerrarPacienteResult> CerrarAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var p = await _db.Pacientes
+            .Include(x => x.ContactosEmergencia)
+            .FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null) { return new CerrarPacienteResult(false, new[] { "Paciente no existe" }); }
+
+        var faltantes = ValidarCamposObligatorios(p);
+        if (faltantes.Count > 0)
+        {
+            return new CerrarPacienteResult(false, faltantes);
+        }
+
+        var estadoPrev = p.EstadoAdmision;
+        p.EstadoAdmision = "Cerrado";
+        p.FechaCierreAdmision = DateTimeOffset.UtcNow;
+        _audit.Write(actor, "paciente.cerrar", nameof(Paciente), p.Id,
+            previousValue: new { estadoAdmision = estadoPrev },
+            newValue: new { estadoAdmision = p.EstadoAdmision, fechaCierre = p.FechaCierreAdmision, documento = p.NumeroDocumento, nombre = p.NombreCompleto },
+            tenantId: p.TenantId);
+        await _db.SaveChangesAsync(ct);
+        return new CerrarPacienteResult(true, Array.Empty<string>());
+    }
+
+    /// <summary>Vuelve el paciente a estado Abierto. Auditoria obligatoria: la
+    /// reapertura permite editar y eliminar de nuevo — es una accion administrativa.</summary>
+    public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (p is null) { return false; }
+        if (!string.Equals(p.EstadoAdmision, "Cerrado", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Solo se puede reabrir un paciente que este Cerrado.");
+        }
+        var fechaCierrePrev = p.FechaCierreAdmision;
+        p.EstadoAdmision = "Abierto";
+        p.FechaCierreAdmision = null;
+        _audit.Write(actor, "paciente.reabrir", nameof(Paciente), p.Id,
+            previousValue: new { estadoAdmision = "Cerrado", fechaCierre = fechaCierrePrev },
+            newValue: new { estadoAdmision = p.EstadoAdmision, documento = p.NumeroDocumento, nombre = p.NombreCompleto },
+            tenantId: p.TenantId);
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Retorna la lista de campos obligatorios que NO estan diligenciados. Si
+    /// esta vacia, el paciente esta listo para cerrarse. Los nombres devueltos
+    /// son legibles para mostrarlos al usuario en el modal de error.
+    /// EXCLUIDOS (opcionales): DiasEstancia, OpIngresoDias, GrupoRh, Email.
+    /// </summary>
+    private static List<string> ValidarCamposObligatorios(Paciente p)
+    {
+        var faltantes = new List<string>();
+        // Identificacion
+        if (string.IsNullOrWhiteSpace(p.NumeroDocumento)) { faltantes.Add("Numero de documento"); }
+        if (string.IsNullOrWhiteSpace(p.TipoDocumento)) { faltantes.Add("Tipo de documento"); }
+        if (string.IsNullOrWhiteSpace(p.NombreCompleto)) { faltantes.Add("Nombre completo"); }
+        if (string.IsNullOrWhiteSpace(p.PrimerNombre)) { faltantes.Add("Primer nombre"); }
+        if (string.IsNullOrWhiteSpace(p.PrimerApellido)) { faltantes.Add("Primer apellido"); }
+        if (p.FechaNacimiento is null) { faltantes.Add("Fecha de nacimiento"); }
+        if (string.IsNullOrWhiteSpace(p.Sexo)) { faltantes.Add("Sexo"); }
+        if (string.IsNullOrWhiteSpace(p.EstadoCivil)) { faltantes.Add("Estado civil"); }
+        // Admin PAD (IPS que remite / codigo aceptacion / fechas / aseguradora / diagnostico)
+        if (p.IpsComentaId is null) { faltantes.Add("IPS que comenta"); }
+        if (string.IsNullOrWhiteSpace(p.CodigoAceptacion)) { faltantes.Add("Codigo de aceptacion"); }
+        if (p.FechaComentan is null) { faltantes.Add("Fecha comentan"); }
+        if (p.AseguradoraId is null) { faltantes.Add("Aseguradora"); }
+        if (p.FechaIngresoPad is null) { faltantes.Add("Fecha ingreso PAD"); }
+        if (p.Contrato1Id is null) { faltantes.Add("Contrato 1"); }
+        if (string.IsNullOrWhiteSpace(p.Cie10Codigo)) { faltantes.Add("Codigo CIE-10 / diagnostico"); }
+        if (string.IsNullOrWhiteSpace(p.DiagnosticoPrincipal)) { faltantes.Add("Diagnostico principal"); }
+        // Clasificaciones
+        if (p.TipoUsuarioId is null) { faltantes.Add("Tipo de usuario"); }
+        if (string.IsNullOrWhiteSpace(p.Estado)) { faltantes.Add("Estado clinico"); }
+        if (string.IsNullOrWhiteSpace(p.Regimen)) { faltantes.Add("Regimen"); }
+        // Geografia
+        if (p.PaisResidenciaId is null) { faltantes.Add("Pais de residencia"); }
+        if (p.DepartamentoId is null) { faltantes.Add("Departamento"); }
+        if (p.MunicipioId is null) { faltantes.Add("Municipio"); }
+        if (string.IsNullOrWhiteSpace(p.Direccion)) { faltantes.Add("Direccion"); }
+        // Contacto (Telefono obligatorio; Email opcional)
+        if (string.IsNullOrWhiteSpace(p.Telefono)) { faltantes.Add("Telefono"); }
+        // Sede
+        if (p.SedeAtencionId is null) { faltantes.Add("Sede de atencion"); }
+        // Contacto de emergencia: al menos uno con nombre + parentesco + telefono
+        var tieneEmergencia = !string.IsNullOrWhiteSpace(p.ContactoEmergencia)
+                           && !string.IsNullOrWhiteSpace(p.Parentesco)
+                           && !string.IsNullOrWhiteSpace(p.TelefonoEmergencia);
+        if (!tieneEmergencia && p.ContactosEmergencia.Count == 0)
+        {
+            faltantes.Add("Contacto de emergencia (nombre, parentesco y telefono)");
+        }
+        return faltantes;
     }
 }

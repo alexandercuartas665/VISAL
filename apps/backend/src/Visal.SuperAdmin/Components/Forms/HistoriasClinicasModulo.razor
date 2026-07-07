@@ -1671,6 +1671,7 @@
         try
         {
             string? usuarioNombre = null, usuarioEmail = null, sedeNombre = null;
+            Guid? profId = null, platformUid = null, tenantId = null;
             if (AuthState is not null)
             {
                 var state = await AuthState;
@@ -1678,7 +1679,13 @@
                     ?? state.User.FindFirst("display_name")?.Value;
                 usuarioEmail = state.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
                 sedeNombre = state.User.FindFirst("sede_nombre")?.Value;
+                if (Guid.TryParse(state.User.FindFirst("profesional_id")?.Value, out var pid)) { profId = pid; }
+                if (Guid.TryParse(state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var puid)) { platformUid = puid; }
+                if (Guid.TryParse(state.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
             }
+            // Buscar datos del profesional (documento, registro medico, firma).
+            // Best-effort: si el usuario no tiene profesional vinculado quedan null.
+            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(profId, platformUid, tenantId);
             var sistemaCtx = new SistemaPrefillHelper.SistemaCtx(
                 Ahora: DateTimeOffset.Now,
                 AgenciaNombre: null,
@@ -1686,7 +1693,10 @@
                 SedeNombre: sedeNombre ?? p.Sede,
                 SedeCiudad: p.Ciudad,
                 UsuarioNombre: usuarioNombre,
-                UsuarioEmail: usuarioEmail);
+                UsuarioEmail: usuarioEmail,
+                UsuarioIdentificacion: datosProf?.Identificacion,
+                UsuarioRegistroMedico: datosProf?.RegistroMedico,
+                UsuarioFirmaUrl: datosProf?.FirmaUrl);
             SistemaPrefillHelper.Aplicar(_valores, sistemaCtx, _prefillRoutesActual);
         }
         catch { /* el prefill de sistema es best-effort */ }

@@ -150,7 +150,9 @@ public static class PrefillSourceCatalog
             "fechaHoraActual",
             "agencia", "agenciaNombre", "agenciaSlogan",
             "sede", "sedeNombre", "sedeCiudad",
-            "usuario", "usuarioNombre", "usuarioEmail"
+            "usuario", "usuarioNombre", "usuarioEmail",
+            // Datos del profesional vinculado al usuario logueado.
+            "usuarioIdentificacion", "usuarioRegistroMedico", "usuarioFirma"
         }
     };
 

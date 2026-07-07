@@ -37,4 +37,24 @@ public interface IFirmaResolverService
     /// alimentar el prefill firmaAcompananteN. Devuelve todos null si N es mayor
     /// que la cantidad de contactos registrados.</summary>
     Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default);
+
+    /// <summary>
+    /// Datos del profesional usados por el sistema-prefill: nombre, identificacion,
+    /// registro medico y URL de firma. Se resuelve por (a) claim profesional_id
+    /// directo o (b) fallback via TenantUser (platformUserId + tenantId) — el
+    /// mismo doble camino que <see cref="ResolverFirmaPorProfesionalAsync"/> vs
+    /// <see cref="ResolverFirmaProfesionalPorPlatformUserAsync"/>. Devuelve null
+    /// si no se logra localizar el profesional (usuario admin no vinculado, etc).
+    /// </summary>
+    Task<PrefillProfesionalDatosDto?> ResolverDatosProfesionalAsync(
+        Guid? profesionalId, Guid? platformUserId, Guid? tenantId,
+        CancellationToken ct = default);
 }
+
+/// <summary>Datos que la ruta sistema (usuario logueado) puede consumir del
+/// profesional vinculado al usuario.</summary>
+public sealed record PrefillProfesionalDatosDto(
+    string? Nombre,
+    string? Identificacion,
+    string? RegistroMedico,
+    string? FirmaUrl);

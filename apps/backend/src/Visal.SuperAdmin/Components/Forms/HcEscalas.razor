@@ -271,19 +271,27 @@ else
                     try
                     {
                         string? uName = null, uEmail = null, uSede = null;
+                        Guid? profId = null, platformUid = null, tenantId = null;
                         if (AuthState is not null)
                         {
                             var st = await AuthState;
                             uName = st.User.Identity?.Name ?? st.User.FindFirst("display_name")?.Value;
                             uEmail = st.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
                             uSede = st.User.FindFirst("sede_nombre")?.Value;
+                            if (Guid.TryParse(st.User.FindFirst("profesional_id")?.Value, out var pid)) { profId = pid; }
+                            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var puid)) { platformUid = puid; }
+                            if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
                         }
+                        var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(profId, platformUid, tenantId);
                         SistemaPrefillHelper.Aplicar(valores, new SistemaPrefillHelper.SistemaCtx(
                             Ahora: DateTimeOffset.Now,
                             AgenciaNombre: null, AgenciaSlogan: null,
                             SedeNombre: uSede ?? Paciente.Sede,
                             SedeCiudad: Paciente.Ciudad,
-                            UsuarioNombre: uName, UsuarioEmail: uEmail), rutas);
+                            UsuarioNombre: uName, UsuarioEmail: uEmail,
+                            UsuarioIdentificacion: datosProf?.Identificacion,
+                            UsuarioRegistroMedico: datosProf?.RegistroMedico,
+                            UsuarioFirmaUrl: datosProf?.FirmaUrl), rutas);
                     }
                     catch { }
 

@@ -22,7 +22,13 @@ public static class SistemaPrefillHelper
         string? SedeNombre,
         string? SedeCiudad,
         string? UsuarioNombre,
-        string? UsuarioEmail);
+        string? UsuarioEmail,
+        // Datos del profesional vinculado al usuario logueado. Todos opcionales:
+        // si el usuario no esta ligado a un profesional (o el profesional no tiene
+        // el dato) quedan en null y el prefill no escribe la celda.
+        string? UsuarioIdentificacion = null,
+        string? UsuarioRegistroMedico = null,
+        string? UsuarioFirmaUrl = null);
 
     /// <summary>Diccionario fuente con todos los valores disponibles bajo
     /// sourceModule = "sistema". Las claves coinciden con
@@ -54,7 +60,16 @@ public static class SistemaPrefillHelper
             // Usuario logueado.
             ["usuario"] = ctx.UsuarioNombre,
             ["usuarioNombre"] = ctx.UsuarioNombre,
-            ["usuarioEmail"] = ctx.UsuarioEmail
+            ["usuarioEmail"] = ctx.UsuarioEmail,
+            // Datos del profesional vinculado (identificacion, registro medico,
+            // firma). El source expuesto en el catalogo es "usuarioX"; se
+            // aceptan alias sin el prefijo por ergonomia del usuario admin.
+            ["usuarioIdentificacion"] = ctx.UsuarioIdentificacion,
+            ["identificacion"] = ctx.UsuarioIdentificacion,
+            ["usuarioRegistroMedico"] = ctx.UsuarioRegistroMedico,
+            ["registroMedico"] = ctx.UsuarioRegistroMedico,
+            ["usuarioFirma"] = ctx.UsuarioFirmaUrl,
+            ["firma"] = ctx.UsuarioFirmaUrl
         };
     }
 

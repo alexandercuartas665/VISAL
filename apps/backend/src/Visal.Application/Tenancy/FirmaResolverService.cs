@@ -67,6 +67,30 @@ public sealed class FirmaResolverService : IFirmaResolverService
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<PrefillProfesionalDatosDto?> ResolverDatosProfesionalAsync(
+        Guid? profesionalId, Guid? platformUserId, Guid? tenantId, CancellationToken ct = default)
+    {
+        // Camino directo: si el caller ya trae profesional_id del claim, evitar el
+        // join a tenant_users. Es el caso comun para usuarios de campo.
+        Guid? pid = profesionalId is Guid p1 && p1 != Guid.Empty ? p1 : null;
+        // Fallback para admins sin claim profesional_id: resolver via TenantUser
+        // (platform_user_id, tenant_id) -> ProfesionalId.
+        if (pid is null && platformUserId is Guid puid && puid != Guid.Empty
+            && tenantId is Guid tid && tid != Guid.Empty)
+        {
+            pid = await _db.TenantUsers.AsNoTracking()
+                .Where(u => u.PlatformUserId == puid && u.TenantId == tid)
+                .Select(u => u.ProfesionalId)
+                .FirstOrDefaultAsync(ct);
+        }
+        if (pid is not Guid gid || gid == Guid.Empty) { return null; }
+        return await _db.Profesionales.AsNoTracking()
+            .Where(pp => pp.Id == gid)
+            .Select(pp => new PrefillProfesionalDatosDto(
+                pp.NombreCompleto, pp.NumeroDocumento, pp.RegistroMedico, pp.FirmaUrl))
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default)
     {
         if (pacienteId == Guid.Empty || indice1Based < 1) { return (null, null, null); }

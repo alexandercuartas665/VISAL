@@ -14,6 +14,7 @@ public sealed class HttpContextTenantContext : ITenantContext
 
     public Guid? TenantId => ReadGuidClaim("tenant_id");
     public Guid? UserId => ReadGuidClaim("sub");
+    public Guid? SucursalId => ReadGuidClaim("sucursal_id");
 
     private Guid? ReadGuidClaim(string claimType)
     {

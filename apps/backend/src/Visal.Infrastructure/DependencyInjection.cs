@@ -6,6 +6,7 @@ using Visal.Infrastructure.Persistence.Interceptors;
 using Visal.Infrastructure.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -34,7 +35,13 @@ public static class DependencyInjection
         {
             options.UseNpgsql(connectionString)
                    .UseSnakeCaseNamingConvention()
-                   .AddInterceptors(sp.GetRequiredService<AuditableTenantInterceptor>());
+                   .AddInterceptors(sp.GetRequiredService<AuditableTenantInterceptor>())
+                   // EF 9 lanza fatal PendingModelChangesWarning al iniciar MigrateAsync
+                   // cuando cree ver diferencias entre modelo compilado y snapshot. En
+                   // este repo las migraciones a veces se marcan a mano en la BD (ver
+                   // memoria "workflow_local") y el snapshot puede ir un paso atras de
+                   // la BD. Bajarlo a Warning para que no tumbe el arranque.
+                   .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
         });
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<VisalDbContext>());

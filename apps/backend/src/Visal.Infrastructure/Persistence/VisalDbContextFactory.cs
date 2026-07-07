@@ -28,5 +28,6 @@ public sealed class VisalDbContextFactory : IDesignTimeDbContextFactory<VisalDbC
     {
         public Guid? TenantId => null;
         public Guid? UserId => null;
+        public Guid? SucursalId => null;
     }
 }

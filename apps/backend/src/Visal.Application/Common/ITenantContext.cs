@@ -9,4 +9,11 @@ public interface ITenantContext
 {
     Guid? TenantId { get; }
     Guid? UserId { get; }
+
+    /// <summary>
+    /// Sucursal / sede que el usuario eligio al ingresar. Null si el tenant tiene una sola
+    /// sede, si el usuario aun no la eligio, o si es super admin de plataforma.
+    /// La usan las validaciones que dependen de la sede activa (p.ej. exigir MIPRES en HC).
+    /// </summary>
+    Guid? SucursalId { get; }
 }

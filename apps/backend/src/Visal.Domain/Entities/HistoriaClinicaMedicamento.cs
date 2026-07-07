@@ -43,5 +43,13 @@ public class HistoriaClinicaMedicamento : TenantEntity
     /// <summary>Observacion clinica del medicamento (libre).</summary>
     public string? Observacion { get; set; }
 
+    /// <summary>
+    /// URL del formato MIPRES radicado ante la EPS (opcional en general,
+    /// obligatorio cuando la sede tiene MipresObligatorio=true). Guarda el link
+    /// completo del formato tal como lo copie el profesional desde
+    /// mipres.sispro.gov.co para trazabilidad de la entrega.
+    /// </summary>
+    public string? MipresUrl { get; set; }
+
     public int Orden { get; set; }
 }

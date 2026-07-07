@@ -41,7 +41,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .OrderBy(m => m.Orden)
             .Select(m => new OrdenMedicamentoItemDto(
                 m.Id, m.HistoriaClinicaId, m.MedicamentoId, m.CodigoMedicamento, m.NombreMedicamento,
-                m.Cantidad, m.Frecuencia, m.Dias, m.Posologia, m.Observacion, m.Orden))
+                m.Cantidad, m.Frecuencia, m.Dias, m.Posologia, m.Observacion, m.Orden, m.MipresUrl))
             .ToListAsync(ct);
 
         var rem = await db.HistoriaClinicaRemisiones

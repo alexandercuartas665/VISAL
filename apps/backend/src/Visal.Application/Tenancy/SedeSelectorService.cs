@@ -25,7 +25,7 @@ public sealed class SedeSelectorService(IApplicationDbContext db) : ISedeSelecto
         if (tu is null)
         {
             if (!user.EsGlobal) { return Array.Empty<SucursalDto>(); }
-            return todas.Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo)).ToList();
+            return todas.Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio)).ToList();
         }
 
         var asignadas = await db.TenantUserSucursales.IgnoreQueryFilters()
@@ -35,12 +35,12 @@ public sealed class SedeSelectorService(IApplicationDbContext db) : ISedeSelecto
 
         if (asignadas.Count == 0 && user.EsGlobal)
         {
-            return todas.Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo)).ToList();
+            return todas.Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio)).ToList();
         }
 
         var set = asignadas.ToHashSet();
         return todas.Where(s => set.Contains(s.Id))
-            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo))
+            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio))
             .ToList();
     }
 

@@ -1,5 +1,8 @@
 @using Visal.Application.Tenancy
+@using Visal.Application.Common
 @inject IOrdenMedicamentoService OrdSvc
+@inject ISucursalService SucSvc
+@inject ITenantContext Tenant
 @inject IJSRuntime JS
 
 @*
@@ -102,6 +105,23 @@ else
                 <input class="form-control form-control-sm"
                        placeholder="Ej: administrar con alimentos, suspender si aparece rash..."
                        @bind="_borrador.Observacion" @bind:event="oninput" />
+            </div>
+        </div>
+
+        @* ---- Fila 3: URL MIPRES. Obligatorio solo si la sede activa lo exige
+             (bandera MipresObligatorio en Configuracion de empresa). Al Agregar
+             se valida y se persiste. ---- *@
+        <div class="od-row od-row-mip">
+            <div class="od-f od-c-12">
+                <label>
+                    URL MIPRES @if (_sedeExigeMipres) { <span class="od-mip-req" title="La sede exige registrar el MIPRES">obligatorio</span> } else { <small class="text-muted">(opcional, pega el link del formato radicado)</small> }
+                    <a class="btn btn-outline-primary btn-sm od-mip-link" href="https://mipres.sispro.gov.co/" target="_blank" rel="noopener noreferrer"
+                       title="Abrir MIPRES en una nueva pestana">&#128279; Abrir MIPRES</a>
+                </label>
+                <input class="form-control form-control-sm od-mip-input"
+                       type="url"
+                       placeholder="https://mipres.sispro.gov.co/..."
+                       @bind="_borrador.MipresUrl" @bind:event="oninput" />
             </div>
         </div>
 
@@ -209,6 +229,10 @@ else
     .od-total { font-weight:700; color:#0f172a; background:#fef9c3; }
     .od-c-12 { grid-column: span 12; }
     .od-row-obs { margin-top:-4px; }
+    .od-row-mip { margin-top:-4px; }
+    .od-mip-input { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; }
+    .od-mip-link { margin-left:10px; padding:2px 10px; font-size:11px; font-weight:600; vertical-align:baseline; text-decoration:none; }
+    .od-mip-req { color:#b91c1c; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; margin-left:6px; }
 </style>
 
 @code {
@@ -239,6 +263,11 @@ else
 
     private BorradorMed _borrador = new();
 
+    /// <summary>La sede activa exige registrar MIPRES al entregar medicamentos.
+    /// Se lee una vez al abrir la HC desde <see cref="ISucursalService.GetMipresObligatorioAsync"/>.
+    /// Si el usuario es global y no tiene sede activa, queda false (no bloquea).</summary>
+    private bool _sedeExigeMipres;
+
     protected override async Task OnParametersSetAsync()
     {
         if (HistoriaClinicaId != _ultimoIdCargado)
@@ -248,6 +277,18 @@ else
             _terminoBusqueda = "";
             _sugerencias.Clear();
             await CargarItemsAsync();
+            await CargarConfigSedeAsync();
+        }
+    }
+
+    /// <summary>Consulta si la sede activa exige MIPRES. Se hace una sola vez
+    /// por apertura de HC — el flag no cambia en medio de la sesion.</summary>
+    private async Task CargarConfigSedeAsync()
+    {
+        _sedeExigeMipres = false;
+        if (Tenant.SucursalId is Guid sid)
+        {
+            _sedeExigeMipres = await SucSvc.GetMipresObligatorioAsync(sid);
         }
     }
 
@@ -374,6 +415,16 @@ else
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
         if (string.IsNullOrWhiteSpace(_borrador.NombreMedicamento)) { return; }
+        // Regla operativa: si la sede tiene MipresObligatorio=true, no permitir
+        // agregar medicamentos sin URL MIPRES. La sede sin el flag deja pasar
+        // sin mas (comportamiento anterior).
+        if (_sedeExigeMipres && string.IsNullOrWhiteSpace(_borrador.MipresUrl))
+        {
+            await JS.InvokeVoidAsync("alert",
+                "La sede activa exige registrar la URL de MIPRES antes de agregar un medicamento. " +
+                "Pega el link del formato radicado en el campo MIPRES para continuar.");
+            return;
+        }
         _agregando = true;
         try
         {
@@ -386,7 +437,8 @@ else
                 _borrador.Frecuencia,
                 _borrador.Dias,
                 preview,
-                _borrador.Observacion), Guid.Empty);
+                _borrador.Observacion,
+                _borrador.MipresUrl), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
             await NotifyItemsChanged();
@@ -446,5 +498,6 @@ else
         public string? Frecuencia { get; set; }
         public string? Dias { get; set; }
         public string? Observacion { get; set; }
+        public string? MipresUrl { get; set; }
     }
 }

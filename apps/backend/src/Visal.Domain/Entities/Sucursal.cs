@@ -11,4 +11,12 @@ public class Sucursal : TenantEntity
     public string? Ciudad { get; set; }
     public string? Telefono { get; set; }
     public bool Activo { get; set; } = true;
+
+    /// <summary>
+    /// Cuando es true, la sede exige que toda entrega de medicamentos e insumos
+    /// registre el codigo/URL de MIPRES. La HC (tabs Medicamentos e Insumos)
+    /// bloquea el boton Agregar si falta ese dato. Regla operativa por sede
+    /// (ej. IBAGUE lo exige, otras sedes no). Default false.
+    /// </summary>
+    public bool MipresObligatorio { get; set; }
 }

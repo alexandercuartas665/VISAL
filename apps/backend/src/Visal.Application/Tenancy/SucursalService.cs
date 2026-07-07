@@ -20,7 +20,7 @@ public sealed class SucursalService : ISucursalService
         var q = _db.Sucursales.AsNoTracking();
         if (soloActivas) { q = q.Where(s => s.Activo); }
         return await q.OrderBy(s => s.Nombre)
-            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo)).ToListAsync(ct);
+            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio)).ToListAsync(ct);
     }
 
     public async Task<SucursalDto?> SaveAsync(SaveSucursalRequest req, Guid actor, CancellationToken ct = default)
@@ -43,8 +43,9 @@ public sealed class SucursalService : ISucursalService
         }
         e.Codigo = codigo; e.Nombre = nombre; e.Direccion = req.Direccion?.Trim();
         e.Ciudad = req.Ciudad?.Trim(); e.Telefono = req.Telefono?.Trim(); e.Activo = req.Activo;
+        e.MipresObligatorio = req.MipresObligatorio;
         await _db.SaveChangesAsync(ct);
-        return new SucursalDto(e.Id, e.Codigo, e.Nombre, e.Direccion, e.Ciudad, e.Telefono, e.Activo);
+        return new SucursalDto(e.Id, e.Codigo, e.Nombre, e.Direccion, e.Ciudad, e.Telefono, e.Activo, e.MipresObligatorio);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -54,5 +55,13 @@ public sealed class SucursalService : ISucursalService
         _db.Sucursales.Remove(e);
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<bool> GetMipresObligatorioAsync(Guid sucursalId, CancellationToken ct = default)
+    {
+        return await _db.Sucursales.AsNoTracking()
+            .Where(s => s.Id == sucursalId)
+            .Select(s => s.MipresObligatorio)
+            .FirstOrDefaultAsync(ct);
     }
 }

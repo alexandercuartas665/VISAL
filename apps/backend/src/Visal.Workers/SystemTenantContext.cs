@@ -11,4 +11,5 @@ public sealed class SystemTenantContext : ITenantContext
 {
     public Guid? TenantId => null;
     public Guid? UserId => null;
+    public Guid? SucursalId => null;
 }

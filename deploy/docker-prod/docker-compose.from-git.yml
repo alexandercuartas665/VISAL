@@ -56,6 +56,11 @@ services:
       # Publica SOLO al loopback del server (no expuesto a internet).
       # Tu reverse proxy global hace TLS y forwardea a este puerto.
       - "${VISAL_PORT:-5380}:8080"
+    volumes:
+      # Persistencia de archivos subidos por los usuarios (firmas, avatares,
+      # logos, adjuntos WA, plantillas de cotizacion). Sin este volumen cada
+      # deploy pierde los archivos y los URLs en la BD quedan rotos.
+      - visal-uploads:/app/wwwroot/uploads
     depends_on:
       postgres:
         condition: service_healthy

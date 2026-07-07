@@ -47,6 +47,19 @@ services:
       # Publica al host en un puerto uncommon. Por default 5380 (ASCII de "S-D" : SuperAdmin).
       # Tu reverse proxy global apunta a http://localhost:${VISAL_PORT}.
       - "${VISAL_PORT:-5380}:8080"
+    volumes:
+      # Persistencia de archivos subidos por los usuarios:
+      #   - firmas de profesionales   (/uploads/firmas)
+      #   - firmas de pacientes/acompañantes (/uploads/notas)
+      #   - avatares                  (/uploads/avatars)
+      #   - logos de tenant/formularios (/uploads/branding, /uploads/forms)
+      #   - adjuntos de chat WhatsApp (/uploads/chat)
+      #   - archivos de leads         (/uploads/leads)
+      #   - plantillas de cotizacion  (/uploads/templates)
+      # Sin este volumen, cada deploy (docker compose pull && up -d) recrea el
+      # contenedor desde imagen limpia y borra todo, dejando los URLs en la BD
+      # apuntando a archivos inexistentes ("imagenes rotas").
+      - visal-uploads:/app/wwwroot/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +98,7 @@ services:
 
 volumes:
   visal-pgdata:
+  visal-uploads:
 
 networks:
   visal-net:

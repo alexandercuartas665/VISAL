@@ -318,6 +318,51 @@ else
 
     private string? GetValue(string key) => Valores.TryGetValue(key, out var v) ? v : null;
 
+    /// <summary>Resuelve el valor a la opcion canonica del select para tolerar
+    /// diferencias de mayusculas/tildes entre el prefill y las opciones. Ejemplo:
+    /// paciente.sexo = "FEMENINO" y opciones = ["Femenino","Masculino"] -> devuelve
+    /// "Femenino" para que el select lo muestre seleccionado. Si no matchea ninguna
+    /// opcion (ni por caso ni sin tildes), devuelve el valor original — asi el
+    /// select cae a "Seleccione..." pero el dato subyacente no se pierde.</summary>
+    private static string? MatchOptionCanon(string? value, List<string>? options)
+    {
+        if (string.IsNullOrEmpty(value) || options is null || options.Count == 0) { return value; }
+        // Match exacto (rapido, cubre >99% de los renders).
+        for (var i = 0; i < options.Count; i++)
+        {
+            if (string.Equals(options[i], value, StringComparison.Ordinal)) { return options[i]; }
+        }
+        // Match case-insensitive.
+        for (var i = 0; i < options.Count; i++)
+        {
+            if (string.Equals(options[i], value, StringComparison.OrdinalIgnoreCase)) { return options[i]; }
+        }
+        // Match ignorando tildes y case (paciente=OCUPACION vs opcion=Ocupacion, etc).
+        var norm = QuitarTildes(value);
+        for (var i = 0; i < options.Count; i++)
+        {
+            if (string.Equals(QuitarTildes(options[i]), norm, StringComparison.OrdinalIgnoreCase))
+            {
+                return options[i];
+            }
+        }
+        return value;
+    }
+
+    private static string QuitarTildes(string s)
+    {
+        var normalized = s.Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString().Normalize(System.Text.NormalizationForm.FormC);
+    }
+
     private async Task SetValue(string key, string? value)
     {
         Valores[key] = value;
@@ -893,13 +938,16 @@ else
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "select":
+                // Tolerar diferencias de mayusculas/tildes entre el valor guardado
+                // y las opciones del select. Frecuente en prefills: paciente.sexo
+                // llega como "FEMENINO" pero las opciones estan como "Femenino".
+                // Sin esto el select queda en "Seleccione..." aunque el dato exista.
+                var selCanon = MatchOptionCanon(val, node.Options);
                 @if (node.AllowCustom)
                 {
-                    // Modo libre: input con sugerencias (datalist). El usuario
-                    // puede elegir una opcion o escribir cualquier cosa.
                     var listId = $"dl_{node.Id}";
                     <input class="form-control form-control-sm" list="@listId"
-                           placeholder="@node.Placeholder" disabled="@ro" value="@val"
+                           placeholder="@node.Placeholder" disabled="@ro" value="@selCanon"
                            onfocus="this.dataset.prev=this.value; this.value='';"
                            onblur="if(!this.value && this.dataset.prev){this.value=this.dataset.prev;}"
                            @onchange="e => SetValue(key, e.Value?.ToString())" />
@@ -912,7 +960,7 @@ else
                 }
                 else
                 {
-                    <select class="form-select form-select-sm" disabled="@ro" value="@val"
+                    <select class="form-select form-select-sm" disabled="@ro" value="@selCanon"
                             @onchange="e => SetValue(key, e.Value?.ToString())">
                         <option value="">Seleccione...</option>
                         @if (node.Options is not null)
@@ -1034,6 +1082,8 @@ else
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "select":
+                // Tolerar diferencias de caso/tildes valor guardado vs opciones.
+                var cellCanon = MatchOptionCanon(val, opts);
                 @if (c.AllowCustom)
                 {
                     var listId = $"dlc_{c.Id}_{key.GetHashCode():X}";
@@ -1044,7 +1094,7 @@ else
                     // otra opcion o escribe, el onchange dispara y se actualiza.
                     <input class="form-control form-control-sm" list="@listId"
                            placeholder="@ph"
-                           disabled="@ro" value="@val"
+                           disabled="@ro" value="@cellCanon"
                            onfocus="this.dataset.prev=this.value; this.value='';"
                            onblur="if(!this.value && this.dataset.prev){this.value=this.dataset.prev;}"
                            @onchange="e => setCell(e.Value?.ToString())" />
@@ -1057,7 +1107,7 @@ else
                 }
                 else
                 {
-                    <select class="form-select form-select-sm" disabled="@ro" value="@val"
+                    <select class="form-select form-select-sm" disabled="@ro" value="@cellCanon"
                             @onchange="e => setCell(e.Value?.ToString())">
                         <option value="">@(string.IsNullOrEmpty(ph) ? "Seleccione..." : ph)</option>
                         @if (opts is not null)

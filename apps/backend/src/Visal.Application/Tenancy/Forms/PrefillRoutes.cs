@@ -24,14 +24,33 @@ public sealed class PrefillRouteSet
     public static PrefillRouteSet FromJson(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) { return new PrefillRouteSet(); }
+        PrefillRouteSet set;
         try
         {
-            return JsonSerializer.Deserialize<PrefillRouteSet>(json, JsonOptions) ?? new PrefillRouteSet();
+            set = JsonSerializer.Deserialize<PrefillRouteSet>(json, JsonOptions) ?? new PrefillRouteSet();
         }
         catch
         {
             return new PrefillRouteSet();
         }
+        // Dedup defensivo al leer: si en la BD quedaron mapeos duplicados por bugs
+        // historicos de Auto-enlazar, el modal debe verse limpio y el runtime del
+        // prefill no debe aplicar el mismo mapeo dos veces. Se conserva la primera
+        // ocurrencia de cada par (source, target) dentro de cada ruta — normalmente
+        // es la manual y trae ColumnMappings del usuario.
+        foreach (var r in set.Routes)
+        {
+            if (r.Mappings.Count <= 1) { continue; }
+            var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var deduped = new List<PrefillFieldMap>(r.Mappings.Count);
+            foreach (var m in r.Mappings)
+            {
+                var key = $"{m.Source}|{m.Target}";
+                if (vistos.Add(key)) { deduped.Add(m); }
+            }
+            r.Mappings = deduped;
+        }
+        return set;
     }
 }
 

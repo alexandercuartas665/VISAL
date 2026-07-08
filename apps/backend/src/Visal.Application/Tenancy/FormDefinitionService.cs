@@ -191,10 +191,23 @@ public sealed class FormDefinitionService : IFormDefinitionService
             // Mappings actuales: indexamos por target para preservar lo manual.
             var mappingsArr = ruta["mappings"] as JsonArray ?? new JsonArray();
             var targetsExistentes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var m in mappingsArr)
+            // BUG HISTORICO: antes solo se cargaban los targets de la ruta "paciente".
+            // Cuando el formulario ya tenia rutas firmaPaciente/firmaProfesional/
+            // historiaMedica/sistema/contrato/firmaAcompanante con targets como
+            // "firma_declaracion_paciente" o "fecha_atencion_consent", cada
+            // ejecucion de Auto-enlazar volvia a agregarlos porque las heuristicas
+            // los detectaban sin saber que ya existian. Resultado: duplicados
+            // acumulativos por corrida. Ahora cargamos targets de TODAS las rutas
+            // preexistentes — asi el guard `if (targetsExistentes.Contains(name))`
+            // funciona para cualquier destino ya mapeado sin importar la fuente.
+            foreach (var r in routes)
             {
-                var tgt = m?["target"]?.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(tgt)) { targetsExistentes.Add(tgt); }
+                if (r?["mappings"] is not JsonArray existentes) { continue; }
+                foreach (var m in existentes)
+                {
+                    var tgt = m?["target"]?.GetValue<string>();
+                    if (!string.IsNullOrWhiteSpace(tgt)) { targetsExistentes.Add(tgt); }
+                }
             }
 
             // Tambien preparamos las rutas firmaPaciente / firmaProfesional /

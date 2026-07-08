@@ -1185,17 +1185,35 @@
         _prefillError = null; _prefillOk = null; _prefillBusy = true;
         try
         {
-            // Limpiar entradas vacias.
+            // Limpiar entradas vacias y deduplicar mapeos IGUALES (mismo source
+            // y target). Es la ultima linea de defensa: si por bug historico o
+            // por errores de UI llegaron pares repetidos a memoria, no los
+            // persistimos. El primer mapeo por (source, target) gana — asi
+            // preservamos el ColumnMappings del primero, que suele ser el que
+            // el usuario configuro a mano.
+            var dedupTotal = 0;
             foreach (var r in _prefillRoutes.Routes)
             {
-                r.Mappings = r.Mappings.Where(m => !string.IsNullOrWhiteSpace(m.Source) && !string.IsNullOrWhiteSpace(m.Target)).ToList();
+                var noVacios = r.Mappings.Where(m =>
+                    !string.IsNullOrWhiteSpace(m.Source) && !string.IsNullOrWhiteSpace(m.Target)).ToList();
+                var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var deduped = new List<PrefillFieldMap>(noVacios.Count);
+                foreach (var m in noVacios)
+                {
+                    var key = $"{m.Source}|{m.Target}";
+                    if (vistos.Add(key)) { deduped.Add(m); }
+                    else { dedupTotal++; }
+                }
+                r.Mappings = deduped;
             }
             _prefillRoutes.Routes = _prefillRoutes.Routes.Where(r => !string.IsNullOrWhiteSpace(r.Name)).ToList();
 
             var json = _prefillRoutes.ToJson();
             var ok = await FormsSvc.UpdatePrefillRoutesAsync(id, json, await ActorAsync());
             if (!ok) { _prefillError = "No se pudo guardar."; return; }
-            _prefillOk = $"Rutas guardadas ({_prefillRoutes.Routes.Count}).";
+            _prefillOk = dedupTotal > 0
+                ? $"Rutas guardadas ({_prefillRoutes.Routes.Count}). Se removieron {dedupTotal} mapeo(s) duplicado(s)."
+                : $"Rutas guardadas ({_prefillRoutes.Routes.Count}).";
         }
         catch (Exception ex) { _prefillError = "Error: " + ex.Message; }
         finally { _prefillBusy = false; }

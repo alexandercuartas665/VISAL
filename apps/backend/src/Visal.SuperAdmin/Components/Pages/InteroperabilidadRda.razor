@@ -33,32 +33,83 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
+@{
+    var sedesSinCred = _rows
+        .Where(r => !r.TieneCredencialSede
+            && r.Estado is EstadoRdaEvento.Borrador or EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+        .Select(r => new { Sede = r.SucursalNombre, r.Ambiente })
+        .Distinct()
+        .ToList();
+}
+@if (sedesSinCred.Count > 0)
+{
+    <div class="ase-alert" style="background:#fff7e6;border-color:#ffd591;color:#7a4f01;margin-bottom:14px;">
+        <b>Faltan credenciales IHCE para @sedesSinCred.Count sede@(sedesSinCred.Count == 1 ? "" : "s"):</b>
+        <ul style="margin:6px 0 0 18px;font-size:13px;">
+            @foreach (var g in sedesSinCred)
+            {
+                <li>@g.Sede — ambiente <b>@g.Ambiente</b></li>
+            }
+        </ul>
+        <div style="margin-top:8px;font-size:13px;">
+            Configuralas en <a href="/cfg-interoperabilidad">Configuracion de Interoperabilidad</a>
+            antes de intentar enviar. Los eventos afectados quedan con el boton "Enviar al IHCE" bloqueado.
+        </div>
+    </div>
+}
+
 @* ===================== Probador de servicios IHCE ===================== *@
 <details class="ase-card" style="margin-bottom:14px;">
     <summary style="cursor:pointer;font-weight:600;padding:6px 0;">
-        🔧 Probar servicios IHCE (consultar paciente / profesional)
+        🔧 Probar servicios IHCE (paciente / profesional / IPS / EAPB)
     </summary>
-    <div class="ase-form" style="display:grid;grid-template-columns:120px 1fr 180px 140px;gap:10px;align-items:end;padding-top:10px;">
+    @{
+        var esOrg = _probadorServicio == "organizacion";
+        var esEapb = _probadorServicio == "eapb";
+        var esPersona = _probadorServicio == "paciente" || _probadorServicio == "profesional";
+        string LabelBusqueda() => _probadorServicio switch
+        {
+            "paciente" => "Número de documento",
+            "profesional" => "Número de documento",
+            "organizacion" => "REPS (código de habilitación)",
+            "eapb" => "Nombre de la EAPB",
+            _ => "Valor"
+        };
+        string PlaceholderBusqueda() => _probadorServicio switch
+        {
+            "paciente" => "ej. 80189301",
+            "profesional" => "ej. 1143131723",
+            "organizacion" => "ej. 7600112543",
+            "eapb" => "ej. Famisanar",
+            _ => ""
+        };
+    }
+    <div class="ase-form" style="display:grid;grid-template-columns:@(esPersona ? "120px 1fr 240px 140px" : "1fr 240px 140px");gap:10px;align-items:end;padding-top:10px;">
+        @if (esPersona)
+        {
+            <div class="ase-f">
+                <label>Tipo doc</label>
+                <select class="form-select form-select-sm" @bind="_probadorTipoDoc">
+                    <option value="CC">CC</option>
+                    <option value="TI">TI</option>
+                    <option value="CE">CE</option>
+                    <option value="PA">PA</option>
+                    <option value="RC">RC</option>
+                </select>
+            </div>
+        }
         <div class="ase-f">
-            <label>Tipo doc</label>
-            <select class="form-select form-select-sm" @bind="_probadorTipoDoc">
-                <option value="CC">CC</option>
-                <option value="TI">TI</option>
-                <option value="CE">CE</option>
-                <option value="PA">PA</option>
-                <option value="RC">RC</option>
-            </select>
-        </div>
-        <div class="ase-f">
-            <label>Número de documento</label>
+            <label>@LabelBusqueda()</label>
             <input class="form-control form-control-sm mono" @bind="_probadorNumDoc"
-                   placeholder="ej. 1143131723" />
+                   placeholder="@PlaceholderBusqueda()" />
         </div>
         <div class="ase-f">
             <label>Servicio</label>
             <select class="form-select form-select-sm" @bind="_probadorServicio">
                 <option value="paciente">Consultar paciente</option>
                 <option value="profesional">Consultar profesional</option>
+                <option value="organizacion">Consultar IPS (REPS)</option>
+                <option value="eapb">Consultar EAPB (nombre)</option>
             </select>
         </div>
         <button class="btn btn-primary btn-sm" @onclick="EjecutarProbador" disabled="@_probadorBusy">
@@ -155,7 +206,18 @@
                             <small class="mono" style="color:var(--muted)">@r.PacienteDocumento</small>
                         </td>
                         <td><small>@r.ProfesionalNombre</small></td>
-                        <td><small>@r.SucursalNombre</small></td>
+                        <td>
+                            <small>@r.SucursalNombre</small>
+                            @if (!r.TieneCredencialSede)
+                            {
+                                <div>
+                                    <span class="badge bg-warning text-dark" style="font-size:10px;"
+                                          title="@r.MotivoBloqueoEnvio">
+                                        sin credencial @r.Ambiente
+                                    </span>
+                                </div>
+                            }
+                        </td>
                         <td><small>@r.Modalidad</small></td>
                         <td>
                             @if (r.Ambiente == AmbienteIhce.Sandbox)
@@ -174,7 +236,9 @@
                             <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(r.Id)">Descargar</button>
                             @if (r.Estado is EstadoRdaEvento.Borrador or EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
                             {
-                                <button class="btn btn-success btn-sm" @onclick="() => EnviarAlIhce(r.Id)" disabled="@(_enviandoId == r.Id)">
+                                <button class="btn btn-success btn-sm" @onclick="() => EnviarAlIhce(r.Id)"
+                                        disabled="@(_enviandoId == r.Id || !r.TieneCredencialSede)"
+                                        title="@(r.TieneCredencialSede ? null : r.MotivoBloqueoEnvio)">
                                     @if (_enviandoId == r.Id) { <span>Enviando…</span> } else { <span>Enviar al IHCE</span> }
                                 </button>
                             }
@@ -510,16 +574,28 @@
         _error = null; _ok = null; _probadorResult = null;
         if (string.IsNullOrWhiteSpace(_probadorNumDoc))
         {
-            _error = "Ingresa un número de documento.";
+            _error = _probadorServicio switch
+            {
+                "organizacion" => "Ingresa el REPS (codigo de habilitacion) a consultar.",
+                "eapb" => "Ingresa el nombre de la EAPB a consultar.",
+                _ => "Ingresa un numero de documento."
+            };
             return;
         }
         _probadorBusy = true;
         try
         {
-            var req = new ConsultaPacienteRequest(_probadorTipoDoc, _probadorNumDoc.Trim());
-            _probadorResult = _probadorServicio == "profesional"
-                ? await Sender.ConsultarProfesionalAsync(req)
-                : await Sender.ConsultarPacienteAsync(req);
+            var valor = _probadorNumDoc.Trim();
+            _probadorResult = _probadorServicio switch
+            {
+                "profesional" => await Sender.ConsultarProfesionalAsync(new ConsultaPacienteRequest(_probadorTipoDoc, valor)),
+                "organizacion" => await Sender.ConsultarOrganizacionAsync(new ConsultaOrganizacionRequest(
+                    TaxIdentifier: null,
+                    HealthcareProviderIdentifier: valor,
+                    Name: null)),
+                "eapb" => await Sender.ConsultarEapbAsync(new ConsultaEapbRequest(valor)),
+                _ => await Sender.ConsultarPacienteAsync(new ConsultaPacienteRequest(_probadorTipoDoc, valor))
+            };
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _probadorBusy = false; }

@@ -29,6 +29,14 @@ public sealed class IhceSenderService(
     private static readonly Dictionary<string, (string token, DateTime exp)> _tokenCache = new();
     private static readonly SemaphoreSlim _tokenLock = new(1, 1);
 
+    // Cache de UUIDs FHIR resueltos contra el directorio IHCE.
+    //   Sede: key = "{ambiente}|REPS|{codigoHabilitacion}"      value = uuid FHIR devuelto por MinSalud
+    //   EAPB: key = "{ambiente}|EAPB|{nombreNormalizado}"        value = uuid FHIR devuelto por MinSalud
+    // Se llenan la primera vez que se envia un RDA y se reutilizan en envios siguientes.
+    // TTL implicito: hasta que reinicien el proceso — los UUIDs FHIR de MinSalud son estables.
+    private static readonly Dictionary<string, string> _orgUuidCache = new();
+    private static readonly SemaphoreSlim _orgUuidLock = new(1, 1);
+
     public async Task<EnvioRdaResultado> EnviarRdaAsync(Guid rdaEventoId, Guid actor, CancellationToken ct = default)
     {
         var ev = await db.RdaEventos.FirstOrDefaultAsync(x => x.Id == rdaEventoId, ct)
@@ -82,9 +90,16 @@ public sealed class IhceSenderService(
             }
         }
 
+        // PASO CLAVE: resolver los UUIDs FHIR reales de las Organizations contra el directorio
+        // IHCE y reescribir el bundle. El builder pone REPS y PAYER-<codigo> como Ids, pero
+        // MinSalud rechaza con BUNDLE-005 si esos ids no existen en su directorio interno —
+        // en su lugar hay que usar los UUIDs FHIR asignados por su servidor. Al enviar, hacemos
+        // $consultar-organizacion / $consultar-eapb, cacheamos el uuid, y reemplazamos en el JSON.
+        var bundleJson = await ResolverOrganizationUuidsAsync(ev, urlBase, apimSubskey, bearer, ct);
+
         log.LogInformation("Enviando RDA {Id} ({Ambiente}) a {Url}", ev.Id, ev.Ambiente, url);
 
-        var call = await PostJsonAsync(url, apimSubskey, ev.BundleJson, bearer, ct);
+        var call = await PostJsonAsync(url, apimSubskey, bundleJson, bearer, ct);
 
         // Actualizar estado del evento segun resultado.
         ev.UltimoIntento = DateTimeOffset.UtcNow;
@@ -173,6 +188,255 @@ public sealed class IhceSenderService(
 
         var json = ParametersPayload(req.TipoDocumento, req.NumeroDocumento);
         return await PostJsonAsync(url, apimSubskey, json, bearer, ct);
+    }
+
+    public async Task<IhceCallResult> ConsultarOrganizacionAsync(ConsultaOrganizacionRequest req, CancellationToken ct = default)
+    {
+        var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        // El path no vive en la config todavia; el Postman oficial lo fija en /Organization/$consultar-organizacion.
+        var url = JoinUrl(urlBase, "/Organization/$consultar-organizacion");
+
+        var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Ambiente == cfgEntity.AmbienteActivo
+                && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
+            ?? throw new InvalidOperationException(
+                $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
+        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+
+        // Construimos Parameters con solo los campos con valor (MinSalud tolera params opcionales).
+        var parameters = new List<object>();
+        if (!string.IsNullOrWhiteSpace(req.TaxIdentifier))
+            parameters.Add(new { name = "TaxIdentifier", valueString = req.TaxIdentifier });
+        if (!string.IsNullOrWhiteSpace(req.HealthcareProviderIdentifier))
+            parameters.Add(new { name = "HealthcareProviderIdentifier", valueString = req.HealthcareProviderIdentifier });
+        if (!string.IsNullOrWhiteSpace(req.Name))
+            parameters.Add(new { name = "name", valueString = req.Name });
+        if (parameters.Count == 0)
+        {
+            return new IhceCallResult(false, 0, null, null,
+                "Ingresa NIT, codigo de habilitacion o nombre para consultar la organizacion.", 0);
+        }
+
+        var json = JsonSerializer.Serialize(new { resourceType = "Parameters", parameter = parameters });
+        return await PostJsonAsync(url, apimSubskey, json, bearer, ct);
+    }
+
+    public async Task<IhceCallResult> ConsultarEapbAsync(ConsultaEapbRequest req, CancellationToken ct = default)
+    {
+        var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        var url = JoinUrl(urlBase, "/Organization/$consultar-eapb");
+
+        var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Ambiente == cfgEntity.AmbienteActivo
+                && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
+            ?? throw new InvalidOperationException(
+                $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
+        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+        {
+            return new IhceCallResult(false, 0, null, null, "Ingresa el nombre de la EAPB a consultar.", 0);
+        }
+
+        var payload = new
+        {
+            resourceType = "Parameters",
+            parameter = new object[]
+            {
+                new { name = "name", valueString = req.Name.Trim() }
+            }
+        };
+        var json = JsonSerializer.Serialize(payload);
+        return await PostJsonAsync(url, apimSubskey, json, bearer, ct);
+    }
+
+    /// <summary>
+    /// Reescribe el <c>bundle_json</c> del RdaEvento reemplazando los <c>id</c> locales de las
+    /// Organizations (REPS y PAYER-{codigo}) por los UUIDs FHIR reales que MinSalud tiene en su
+    /// directorio sandbox/prod. La primera vez que se envia contra una sede/EAPB, se consulta
+    /// <c>$consultar-organizacion</c> y <c>$consultar-eapb</c>; los uuids quedan cacheados en
+    /// memoria hasta que se reinicie el proceso.
+    /// </summary>
+    private async Task<string> ResolverOrganizationUuidsAsync(RdaEvento ev, string urlBase,
+        string apimSubskey, string bearer, CancellationToken ct)
+    {
+        var bundleJson = ev.BundleJson;
+
+        // ----- Sede prestadora (REPS) -----
+        var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.SucursalId == ev.SucursalId && c.Ambiente == ev.Ambiente, ct);
+        var reps = credencial?.CodigoHabilitacion;
+        if (!string.IsNullOrWhiteSpace(reps))
+        {
+            var sedeUuid = await ResolverOrgUuidAsync(
+                cacheKey: $"{ev.Ambiente}|REPS|{reps}",
+                urlPath: "/Organization/$consultar-organizacion",
+                payload: BuildOrgConsultaPayload(healthcareProviderIdentifier: reps),
+                urlBase: urlBase, apimSubskey: apimSubskey, bearer: bearer, ct: ct);
+            if (!string.IsNullOrEmpty(sedeUuid))
+            {
+                // Reemplazamos SOLO el REPS como valor de id/ref del recurso Organization de la
+                // sede. No tocamos los identifier.value (los mantenemos como REPS legibles).
+                bundleJson = ReemplazarOrgId(bundleJson, reps!, sedeUuid);
+                log.LogInformation("RDA {Id}: reemplazado id Organization sede REPS={Reps} -> uuid {Uuid}",
+                    ev.Id, reps, sedeUuid);
+            }
+            else
+            {
+                log.LogWarning("RDA {Id}: no se pudo resolver UUID FHIR para REPS {Reps}. Se envia con el id local.",
+                    ev.Id, reps);
+            }
+        }
+
+        // ----- Pagador (EAPB) -----
+        // El builder pone "PAYER-{codigo}" como id. Buscamos el nombre del pagador dentro del
+        // bundle para consultar $consultar-eapb por nombre.
+        var payerInfo = ExtraerPagadorDelBundle(bundleJson);
+        if (payerInfo is { LocalId: string localId, Name: string nombre } && !string.IsNullOrWhiteSpace(nombre))
+        {
+            var eapbUuid = await ResolverOrgUuidAsync(
+                cacheKey: $"{ev.Ambiente}|EAPB|{nombre.ToUpperInvariant()}",
+                urlPath: "/Organization/$consultar-eapb",
+                payload: BuildEapbConsultaPayload(nombre),
+                urlBase: urlBase, apimSubskey: apimSubskey, bearer: bearer, ct: ct);
+            if (!string.IsNullOrEmpty(eapbUuid))
+            {
+                bundleJson = ReemplazarOrgId(bundleJson, localId, eapbUuid);
+                log.LogInformation("RDA {Id}: reemplazado id EAPB {LocalId} -> uuid {Uuid} (nombre {Nombre})",
+                    ev.Id, localId, eapbUuid, nombre);
+            }
+            else
+            {
+                log.LogWarning("RDA {Id}: no se pudo resolver UUID FHIR para EAPB '{Nombre}'.", ev.Id, nombre);
+            }
+        }
+
+        return bundleJson;
+    }
+
+    private async Task<string?> ResolverOrgUuidAsync(string cacheKey, string urlPath, string payload,
+        string urlBase, string apimSubskey, string bearer, CancellationToken ct)
+    {
+        // Hit-cache o consulta.
+        if (_orgUuidCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+        await _orgUuidLock.WaitAsync(ct);
+        try
+        {
+            if (_orgUuidCache.TryGetValue(cacheKey, out cached)) { return cached; }
+            var url = JoinUrl(urlBase, urlPath);
+            var call = await PostJsonAsync(url, apimSubskey, payload, bearer, ct);
+            if (!call.Exito) { return null; }
+            var uuid = ExtraerPrimerUuidDeSearchset(call.ResponseBody);
+            if (!string.IsNullOrEmpty(uuid))
+            {
+                _orgUuidCache[cacheKey] = uuid;
+            }
+            return uuid;
+        }
+        finally { _orgUuidLock.Release(); }
+    }
+
+    /// <summary>Devuelve el id del primer Organization del Bundle searchset devuelto por MinSalud.</summary>
+    private static string? ExtraerPrimerUuidDeSearchset(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) { return null; }
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("entry", out var entries) ||
+                entries.ValueKind != JsonValueKind.Array) { return null; }
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("resource", out var res)) { continue; }
+                if (!res.TryGetProperty("resourceType", out var rt) ||
+                    rt.GetString() != "Organization") { continue; }
+                if (res.TryGetProperty("id", out var idProp) &&
+                    idProp.ValueKind == JsonValueKind.String)
+                {
+                    return idProp.GetString();
+                }
+            }
+        }
+        catch (JsonException) { /* body no-JSON */ }
+        return null;
+    }
+
+    private static string BuildOrgConsultaPayload(string? taxIdentifier = null,
+        string? healthcareProviderIdentifier = null, string? name = null)
+    {
+        var parameters = new List<object>();
+        if (!string.IsNullOrWhiteSpace(taxIdentifier))
+            parameters.Add(new { name = "TaxIdentifier", valueString = taxIdentifier });
+        if (!string.IsNullOrWhiteSpace(healthcareProviderIdentifier))
+            parameters.Add(new { name = "HealthcareProviderIdentifier", valueString = healthcareProviderIdentifier });
+        if (!string.IsNullOrWhiteSpace(name))
+            parameters.Add(new { name = "name", valueString = name });
+        return JsonSerializer.Serialize(new { resourceType = "Parameters", parameter = parameters });
+    }
+
+    private static string BuildEapbConsultaPayload(string name)
+        => JsonSerializer.Serialize(new
+        {
+            resourceType = "Parameters",
+            parameter = new object[] { new { name = "name", valueString = name } }
+        });
+
+    /// <summary>
+    /// Reemplaza <c>"id": "{viejo}"</c> en el recurso Organization y todas las references
+    /// del formato <c>"reference": "Organization/{viejo}"</c> y <c>"reference": "#{viejo}"</c>
+    /// por el UUID nuevo. Preserva los identifier.value (que siguen siendo REPS/EAPB legibles).
+    /// </summary>
+    private static string ReemplazarOrgId(string bundleJson, string idViejo, string idNuevo)
+    {
+        // Reemplazo textual estricto — evita tocar por accidente valores en identifier.value.
+        // El id aparece SOLO como valor de "id" en el recurso Organization y en "reference".
+        // Como los REPS pueden ser subcadenas de otros identifiers, usamos delimitadores.
+        var s = bundleJson;
+        s = s.Replace($"\"id\": \"{idViejo}\"", $"\"id\": \"{idNuevo}\"");
+        s = s.Replace($"\"reference\": \"Organization/{idViejo}\"", $"\"reference\": \"Organization/{idNuevo}\"");
+        s = s.Replace($"\"reference\": \"#{idViejo}\"", $"\"reference\": \"#{idNuevo}\"");
+        return s;
+    }
+
+    /// <summary>Busca la Organization con profile HealthBenefitPlanAdmin (pagador) y devuelve su id local + name.</summary>
+    private static (string LocalId, string Name)? ExtraerPagadorDelBundle(string bundleJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(bundleJson);
+            if (!doc.RootElement.TryGetProperty("entry", out var entries) ||
+                entries.ValueKind != JsonValueKind.Array) { return null; }
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("resource", out var res)) { continue; }
+                if (!res.TryGetProperty("resourceType", out var rt) ||
+                    rt.GetString() != "Organization") { continue; }
+                if (!res.TryGetProperty("meta", out var meta) ||
+                    !meta.TryGetProperty("profile", out var prof) ||
+                    prof.ValueKind != JsonValueKind.Array) { continue; }
+                var esPagador = false;
+                foreach (var p in prof.EnumerateArray())
+                {
+                    if (p.GetString()?.Contains("HealthBenefitPlan") == true) { esPagador = true; break; }
+                }
+                if (!esPagador) { continue; }
+                var id = res.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                var name = res.TryGetProperty("name", out var nProp) ? nProp.GetString() : null;
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                {
+                    return (id!, name!);
+                }
+            }
+        }
+        catch (JsonException) { /* bundle mal formado, ignoramos */ }
+        return null;
     }
 
     /// <summary>

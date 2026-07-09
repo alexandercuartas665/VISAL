@@ -16,11 +16,18 @@ public sealed class RdaConsoleService(
     public async Task<IReadOnlyList<RdaEventoRowDto>> ListarAsync(RdaConsoleFiltro filtro, CancellationToken ct = default)
     {
         // Join contra paciente, profesional y sucursal para sacar nombres legibles.
+        // Ademas hacemos un LEFT JOIN a interoperabilidad_credenciales_sede para
+        // saber POR FILA si (SucursalId, Ambiente) del evento tiene credencial usable
+        // (ClientId + ClientSecret no vacios) — asi la UI puede deshabilitar "Enviar al IHCE"
+        // antes de que el usuario lo clickee y lance excepcion tardia en el sender.
         var q = from e in db.RdaEventos.AsNoTracking()
                 join p in db.Pacientes.AsNoTracking() on e.PacienteId equals p.Id
                 join s in db.Sucursales.AsNoTracking() on e.SucursalId equals s.Id
                 join pr in db.Profesionales.AsNoTracking() on e.ProfesionalId equals pr.Id into prGroup
                 from pr in prGroup.DefaultIfEmpty()
+                join cr in db.InteroperabilidadCredencialesSede.AsNoTracking()
+                    on new { Sid = e.SucursalId, Amb = e.Ambiente } equals new { Sid = cr.SucursalId, Amb = cr.Ambiente } into crGroup
+                from cr in crGroup.DefaultIfEmpty()
                 select new
                 {
                     e.Id,
@@ -36,7 +43,10 @@ public sealed class RdaConsoleService(
                     e.FechaEnvio,
                     e.ReferenciaMinsalud,
                     e.BundleHash,
-                    e.TipoRda
+                    e.TipoRda,
+                    TieneCredencialSede = cr != null
+                        && !string.IsNullOrEmpty(cr.ClientId)
+                        && !string.IsNullOrEmpty(cr.ClientSecretCifrado)
                 };
 
         if (!string.IsNullOrWhiteSpace(filtro.Documento))
@@ -62,7 +72,12 @@ public sealed class RdaConsoleService(
             r.Id, r.FechaGeneracion, r.PacienteNombre, r.PacienteDocumento,
             r.ProfesionalNombre, r.SucursalNombre, r.Modalidad, r.Ambiente,
             r.Estado, r.Intentos, r.FechaEnvio, r.ReferenciaMinsalud, r.BundleHash,
-            r.TipoRda)).ToList();
+            r.TipoRda,
+            r.TieneCredencialSede,
+            r.TieneCredencialSede
+                ? null
+                : $"La sede {r.SucursalNombre} no tiene credenciales configuradas para el ambiente {r.Ambiente}. Configuralas en Configuracion de Interoperabilidad."
+            )).ToList();
     }
 
     public async Task<RdaEventoDetailDto?> ObtenerAsync(Guid id, CancellationToken ct = default)

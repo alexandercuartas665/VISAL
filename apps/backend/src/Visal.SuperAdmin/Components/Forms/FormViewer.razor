@@ -905,11 +905,15 @@ else
         switch (node.FieldType)
         {
             case "textarea":
+                // El disenador puede configurar cuantas filas mostrar; por
+                // defecto 3 (comportamiento historico). Se acota entre 1 y 30
+                // para evitar valores absurdos que rompan el layout.
+                var taRows = Math.Clamp(node.Rows ?? 3, 1, 30);
                 if (node.EnableVoice && !ro)
                 {
                     var voiceId = $"voice-{Math.Abs(key.GetHashCode())}-{node.Id}";
                     <div class="fv-voice-wrap">
-                        <textarea id="@voiceId" class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
+                        <textarea id="@voiceId" class="form-control form-control-sm" rows="@taRows" placeholder="@node.Placeholder"
                                   disabled="@ro" value="@val"
                                   @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
                         <button type="button" class="fv-voice-btn" data-voice-target="@voiceId" title="Dictar por voz (Whisper)">&#127908;</button>
@@ -917,10 +921,15 @@ else
                 }
                 else
                 {
-                    <textarea class="form-control form-control-sm" rows="3" placeholder="@node.Placeholder"
+                    <textarea class="form-control form-control-sm" rows="@taRows" placeholder="@node.Placeholder"
                               disabled="@ro" value="@val"
                               @onchange="e => SetValue(key, e.Value?.ToString())"></textarea>
                 }
+                break;
+            case "datetime":
+                <input type="datetime-local" class="form-control form-control-sm"
+                       disabled="@ro" value="@val"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "number":
                 <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"
@@ -1078,6 +1087,11 @@ else
                 break;
             case "date":
                 <input type="date" class="form-control form-control-sm" disabled="@ro" value="@val"
+                       placeholder="@ph"
+                       @onchange="e => setCell(e.Value?.ToString())" />
+                break;
+            case "datetime":
+                <input type="datetime-local" class="form-control form-control-sm" disabled="@ro" value="@val"
                        placeholder="@ph"
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;

@@ -910,6 +910,9 @@ else
         }
         var key = n.Name ?? $"fld:{n.Id}";
         var val = vals.TryGetValue(key, out var vv) ? vv : null;
+        // Reusamos FormatCellForPrint para date/datetime y dejamos otros tipos
+        // (textarea, text, etc.) sin transformar.
+        var fieldDisplay = FormatCellForPrint(val, n.FieldType);
         <div class="pack-cell" style="grid-column: span @span;">
             <div class="pack-label">@n.Label</div>
             @if (IsImageUrl(val))
@@ -918,7 +921,7 @@ else
             }
             else
             {
-                <div class="pack-value">@(val ?? "")</div>
+                <div class="pack-value">@(fieldDisplay ?? "")</div>
             }
         </div>
     };
@@ -956,10 +959,24 @@ else
     private static string? FormatCellForPrint(string? raw, string? fieldType)
     {
         if (string.IsNullOrWhiteSpace(raw)) { return raw; }
-        if (!string.Equals(fieldType, "date", StringComparison.OrdinalIgnoreCase)) { return raw; }
-        if (DateOnly.TryParseExact(raw, "yyyy-MM-dd", out var d))
+        if (string.Equals(fieldType, "date", StringComparison.OrdinalIgnoreCase))
         {
-            return d.ToString("dd/MM/yyyy");
+            if (DateOnly.TryParseExact(raw, "yyyy-MM-dd", out var d))
+            {
+                return d.ToString("dd/MM/yyyy");
+            }
+            return raw;
+        }
+        if (string.Equals(fieldType, "datetime", StringComparison.OrdinalIgnoreCase))
+        {
+            // <input type="datetime-local"> guarda como "2026-07-09T15:30" (sin
+            // zona horaria). Reformateamos a "09/07/2026 15:30" para impresion.
+            if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeLocal, out var dt))
+            {
+                return dt.ToString("dd/MM/yyyy HH:mm");
+            }
+            return raw;
         }
         return raw;
     }

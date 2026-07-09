@@ -73,9 +73,18 @@ public sealed class FormNode
     public string? TextAlign { get; set; }
 
     // ── Campo ──
-    /// <summary>text | number | email | date | textarea | select | autocomplete | calculated | table.</summary>
+    /// <summary>text | number | email | date | datetime | textarea | select | autocomplete | calculated | table.</summary>
     [JsonPropertyName("fieldType")]
     public string? FieldType { get; set; }
+
+    /// <summary>
+    /// Solo para fieldType = "textarea". Numero de filas (rows) que muestra
+    /// visualmente el textarea. Default null => 3 filas (comportamiento
+    /// historico). Rango razonable 1..30; el evaluador no impone limite duro,
+    /// pero el disenador de UI si.
+    /// </summary>
+    [JsonPropertyName("rows")]
+    public int? Rows { get; set; }
 
     // ── Tabla repetible (fieldType = "table") ──
     [JsonPropertyName("columns")]

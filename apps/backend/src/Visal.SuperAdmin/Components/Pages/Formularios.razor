@@ -326,6 +326,7 @@
                                         <option value="text">Texto</option>
                                         <option value="number">Numero</option>
                                         <option value="date">Fecha</option>
+                                        <option value="datetime">Fecha y hora</option>
                                         <option value="select">Lista</option>
                                         <option value="autocomplete">Autocompletar</option>
                                     </select>
@@ -506,6 +507,12 @@
                        El visor mostrara un boton flotante para iniciar la transcripcion. *@
                     @if (_selected.FieldType == "textarea")
                     {
+                        <div class="fb-prop">
+                            <label>Filas visibles</label>
+                            <input class="fb-input" type="number" min="1" max="30" step="1"
+                                   placeholder="3 (default)" @bind="_selected.Rows" @bind:event="oninput" />
+                            <div class="fb-hint">Numero de lineas que muestra el area de texto. Default 3.</div>
+                        </div>
                         <label class="fb-check"><input type="checkbox" @bind="_selected.EnableVoice" /> &#127908; Permitir dictado por voz (Whisper)</label>
                     }
 
@@ -971,6 +978,7 @@
         ["textarea"] = "Area de texto",
         ["number"] = "Numero",
         ["date"] = "Fecha",
+        ["datetime"] = "Fecha y hora",
         ["email"] = "Email",
         ["select"] = "Lista",
         ["autocomplete"] = "Autocompletar",

@@ -132,7 +132,8 @@
                         </div>
                         <div class="ase-f"><label>Estado</label>
                             <select class="form-select form-select-sm" @bind="_estado">
-                                <option value="">Seleccione Elemento</option><option>ACTIVO</option><option>INACTIVO</option>
+                                <option value="">Seleccione Elemento</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.Estado)) { <option value="@c.Nombre">@c.Nombre</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Clasificacion Paciente</label>

@@ -491,7 +491,16 @@ public sealed class DatabaseSeeder
             (Visal.Domain.Enums.CatalogoPacienteTipo.Regimen, "CON", "CONTRIBUTIVO"),
             (Visal.Domain.Enums.CatalogoPacienteTipo.Regimen, "SUB", "SUBSIDIADO"),
             (Visal.Domain.Enums.CatalogoPacienteTipo.Regimen, "PAR", "PARTICULAR"),
-            (Visal.Domain.Enums.CatalogoPacienteTipo.Regimen, "ESP", "ESPECIAL")
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Regimen, "ESP", "ESPECIAL"),
+
+            // ===== ESTADO PACIENTE =====
+            // El campo Paciente.Estado es string, se guarda el Nombre del catalogo.
+            // Los valores por defecto son los que estaban hardcodeados en Admision.razor.
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "ACT", "ACTIVO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "INA", "INACTIVO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "EGR", "EGRESADO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "FAL", "FALLECIDO"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "RET", "RETIRADO")
         };
 
         int agregados = 0;

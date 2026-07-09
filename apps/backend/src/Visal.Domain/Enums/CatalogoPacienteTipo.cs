@@ -25,5 +25,7 @@ public enum CatalogoPacienteTipo
     /// <summary>RIPS - Causa externa que motiva la atencion (accidente, violencia, enfermedad general, etc).</summary>
     RipsCausaExterna,
     /// <summary>Regimen de afiliacion del paciente (contributivo, subsidiado, particular, especial, etc).</summary>
-    Regimen
+    Regimen,
+    /// <summary>Estado operativo del paciente (activo, inactivo, egresado, fallecido, retirado, etc). Se guarda como Nombre en Paciente.Estado.</summary>
+    Estado
 }

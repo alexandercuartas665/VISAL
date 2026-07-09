@@ -1,3 +1,4 @@
+@implements IDisposable
 @using System.Security.Claims
 @using System.Text.Json
 @using Microsoft.Extensions.DependencyInjection
@@ -17,6 +18,7 @@
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject IPacienteService PacientesSvc
 @inject ICatalogoPacienteService CatPacSvc
 @inject ITenantAdminService TenantsSvc
 @inject IServiceScopeFactory ScopeFactory
@@ -29,6 +31,10 @@
    No tiene @page: no es ruta independiente.
 *@
 
+@* CascadingValue expone _acompSelector a HcDocumentos y HcEscalas para que
+   antes de crear un consentimiento/evolucion/escala pregunten cual acompanante
+   firma (cuando el paciente tiene 2+ contactos). Ver AcompananteSelectorContext.cs *@
+<CascadingValue Value="_acompSelector" IsFixed="true">
 <div class="hc-grid @(_pacienteColapsado ? "paciente-colapsado" : "") @(_chatColapsado ? "chat-colapsado" : "")">
 
     @* =========== SIDEBAR IZQUIERDO: filtros + lista historias =========== *@
@@ -217,6 +223,23 @@
                 }
             </div>
             @if (_imprimirMsg is not null) { <div class="hc-info-msg">@_imprimirMsg</div> }
+
+            @* Chip con el acompanante activo (elegido para firmar los consentimientos
+               / evoluciones / escalas del paciente actual). Solo se muestra cuando ya
+               se resolvio y no es "sin acompanante". Boton "Cambiar" limpia el estado
+               para que el proximo Iniciar vuelva a preguntar. *@
+            @if (_acompSelector.OrdenActivo.HasValue && _acompSelector.OrdenActivo.Value > 0
+                 && !string.IsNullOrWhiteSpace(_acompSelector.EtiquetaActivo))
+            {
+                <div class="hc-acomp-chip" title="Este acompanante se usara al iniciar consentimientos, evoluciones y escalas de este paciente.">
+                    <span class="hc-acomp-chip-ico">&#128101;</span>
+                    <span class="hc-acomp-chip-lbl">Firma acompanante:</span>
+                    <span class="hc-acomp-chip-val">@_acompSelector.EtiquetaActivo</span>
+                    <button type="button" class="hc-acomp-chip-cambiar" @onclick="() => _acompSelector.Reset()">
+                        Cambiar
+                    </button>
+                </div>
+            }
 
             @* Datos RIPS de la HC seleccionada (Res. 202/2021). Se muestran como
                chips debajo de la barra de acciones cuando la HC ya se creo. *@
@@ -431,6 +454,16 @@
         </div>
     </div>
 </div>
+</CascadingValue>
+
+@* Modal de seleccion del acompanante firmante. Se abre desde AcompananteSelectorContext
+   cuando un sub-tab (HcDocumentos / HcEscalas) llama ResolverAsync y el paciente tiene
+   2+ contactos. La eleccion queda memorizada por la vida del contexto (hasta que se
+   cambia de paciente o se pulsa "Cambiar" en el chip). *@
+<SelectorAcompananteModal IsOpen="_acompSelector.ModalVisible"
+                          Contactos="_acompSelector.Contactos"
+                          OnElegido="_acompSelector.Elegir"
+                          OnCancelado="_acompSelector.Cancelar" />
 
 @* ===== Modal IMPRIMIR (paquete) ===== *@
 @if (_showImprimirModal)
@@ -844,6 +877,23 @@
     .rips-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
     .rips-lbl { font-size: 12px; font-weight: 600; color: #334155; }
     .rips-req { color: #dc2626; margin-left: 2px; }
+
+    /* Chip del acompanante activo en el header de la HC. */
+    .hc-acomp-chip {
+        display: inline-flex; align-items: center; gap: 8px;
+        margin-top: 6px; padding: 5px 10px;
+        background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 20px;
+        font-size: 12px; color: #1e40af;
+    }
+    .hc-acomp-chip-ico { font-size: 14px; }
+    .hc-acomp-chip-lbl { font-weight: 600; }
+    .hc-acomp-chip-val { color: #1e3a8a; }
+    .hc-acomp-chip-cambiar {
+        margin-left: 4px; padding: 2px 8px;
+        background: transparent; border: 1px solid #93c5fd; border-radius: 12px;
+        font-size: 11px; color: #1d4ed8; cursor: pointer;
+    }
+    .hc-acomp-chip-cambiar:hover { background: #dbeafe; }
 </style>
 
 @code {
@@ -916,6 +966,15 @@
     /// volver a expandir. Combinada con chat colapsado, el modulo de historias usa
     /// todo el ancho disponible.</summary>
     private bool _pacienteColapsado;
+
+    /// <summary>Estado compartido de la seleccion de acompanante firmante.
+    /// Los sub-tabs (HcDocumentos, HcEscalas) lo consumen via CascadingParameter
+    /// y llaman ResolverAsync antes de aplicar el prefill de firmaAcompanante*.
+    /// El chip del header y el modal SelectorAcompananteModal se enganchan al
+    /// StateChanged de este objeto para refrescarse cuando la eleccion cambia.
+    /// Se resetea al cambiar PacienteContexto (ver OnParametersSetAsync).</summary>
+    private readonly AcompananteSelectorContext _acompSelector = new();
+    private Guid? _acompPacienteId;
 
     /// <summary>Devuelve (icono unicode, conteo de badge) para una etiqueta del menu.</summary>
     private (string icono, int badge) IconoYBadge(string tab) => tab switch
@@ -1067,6 +1126,11 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Suscribimos StateHasChanged al selector de acompanante para que el chip
+        // del header y el modal se re-rendericen cuando la eleccion cambia (o
+        // cuando el sub-tab dispara la apertura del modal via ResolverAsync).
+        _acompSelector.StateChanged += OnAcompStateChanged;
+
         // Serializar TODO el arranque del componente contra el DbContext scoped
         // del circuito Blazor. Sin esto, en prod se disparaba
         // InvalidOperationException "A second operation was started..." porque
@@ -1172,9 +1236,25 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // Si el modulo se re-usa con un paciente distinto sin recrearse, limpiamos
+        // la eleccion de acompanante (era del paciente anterior). Con paciente
+        // igual, mantenemos la eleccion.
+        var pacIdActual = PacienteActivo?.Id;
+        if (_acompPacienteId != pacIdActual)
+        {
+            _acompPacienteId = pacIdActual;
+            _acompSelector.Reset();
+        }
         // Cuando el modal cambia de paciente sin recrear el componente (raro pero
         // posible), re-evaluamos si hay HC en curso para auto-cargar.
         await AutoCargarHcEnCursoSiCorrespondeAsync();
+    }
+
+    private void OnAcompStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        _acompSelector.StateChanged -= OnAcompStateChanged;
     }
 
     private bool _autoCargaIntentada;

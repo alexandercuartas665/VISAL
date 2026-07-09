@@ -5,6 +5,7 @@
 @inject IDocumentoHcService DocSvc
 @inject IFormDefinitionService FormsSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject IPacienteService PacientesSvc
 @inject IJSRuntime JS
 
 @*
@@ -204,6 +205,13 @@ else
     /// profesional vinculado al tenant_user).</summary>
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    /// <summary>Selector de acompanante compartido con el modulo padre. Cuando el
+    /// schema tiene mapeos firmaAcompanante* y el paciente tiene 2+ contactos,
+    /// llamamos ResolverAsync antes de aplicar el prefill de firmas para pedir
+    /// al usuario cual firma. Se rellena desde HistoriasClinicasModulo via
+    /// CascadingValue.</summary>
+    [CascadingParameter] public AcompananteSelectorContext? AcompSelector { get; set; }
+
     private string _ultimoCargado = "";
     private List<DocumentoHcItemDto> _documentos = new();
     private List<DocumentoHcFormatoDto> _formatos = new();
@@ -345,11 +353,34 @@ else
                             }
                         }
                         FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
-                        // Acompanantes 1..4 desde los contactos de emergencia del paciente.
+                        // Acompanantes: si el formulario tiene mapeos firmaAcompanante* y el
+                        // paciente tiene 2+ contactos, preguntamos al usuario cual firma
+                        // (via el modal orquestado por el modulo padre AcompSelector). La
+                        // eleccion queda memorizada para todo el resto de documentos del
+                        // paciente en esta sesion (chip visible + boton Cambiar).
+                        var (cancelado, ordenElegido) = await ResolverAcompananteActivoAsync(rutas);
+                        if (cancelado)
+                        {
+                            _catalogoError = "Iniciar cancelado.";
+                            return;
+                        }
                         for (int i = 1; i <= 4; i++)
                         {
-                            var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(PacienteId!.Value, i);
-                            if (aUrl is null && aNombre is null && aParent is null) { break; }
+                            string? aUrl, aNombre, aParent;
+                            if (i == 1 && ordenElegido.HasValue)
+                            {
+                                if (ordenElegido.Value == 0) { continue; } // "sin acompanante"
+                                (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompanantePorOrdenAsync(PacienteId!.Value, ordenElegido.Value);
+                            }
+                            else
+                            {
+                                (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(PacienteId!.Value, i);
+                            }
+                            if (aUrl is null && aNombre is null && aParent is null)
+                            {
+                                if (i == 1 && ordenElegido.HasValue) { continue; }
+                                break;
+                            }
                             FirmasPrefillHelper.AplicarAcompanante(valores, i, aUrl, aNombre, aParent, rutas);
                         }
                     }
@@ -448,14 +479,52 @@ else
                 }
             }
             FirmasPrefillHelper.Aplicar(_visorValores, firmaPac, firmaProf, rutas);
+            // Al reabrir un documento ya guardado, respetamos el acompanante que
+            // el usuario haya elegido en esta sesion (si aplica). Si nunca eligio
+            // (OrdenActivo es null), usamos el N-esimo por Orden como fallback
+            // — comportamiento historico para documentos viejos.
+            int? ordenActivo = AcompSelector?.OrdenActivo;
             for (int i = 1; i <= 4; i++)
             {
-                var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
-                if (aUrl is null && aNombre is null && aParent is null) { break; }
+                string? aUrl, aNombre, aParent;
+                if (i == 1 && ordenActivo.HasValue)
+                {
+                    if (ordenActivo.Value == 0) { continue; }
+                    (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompanantePorOrdenAsync(Paciente.Id, ordenActivo.Value);
+                }
+                else
+                {
+                    (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
+                }
+                if (aUrl is null && aNombre is null && aParent is null)
+                {
+                    if (i == 1 && ordenActivo.HasValue) { continue; }
+                    break;
+                }
                 FirmasPrefillHelper.AplicarAcompanante(_visorValores, i, aUrl, aNombre, aParent, rutas);
             }
         }
         catch { /* firmas opcionales */ }
+    }
+
+    /// <summary>Orquesta la seleccion del acompanante firmante antes de crear un
+    /// documento. Devuelve (cancelado, ordenElegido). cancelado=true si el usuario
+    /// cerro el modal sin elegir. ordenElegido=null si no aplica preguntar (el
+    /// caller debe usar el comportamiento historico N-esimo por Orden). En caso
+    /// contrario, ordenElegido tiene el Orden del contacto elegido (>0) o 0 para
+    /// "sin acompanante / firma el paciente".</summary>
+    private async Task<(bool cancelado, int? orden)> ResolverAcompananteActivoAsync(PrefillRouteSet rutas)
+    {
+        if (AcompSelector is null) { return (false, null); }
+        if (!rutas.TieneMapeoAcompanante()) { return (false, null); }
+        if (PacienteId is not Guid pid) { return (false, null); }
+        IReadOnlyList<PacienteContactoEmergenciaDto> contactos;
+        try { contactos = await PacientesSvc.ListContactosEmergenciaAsync(pid); }
+        catch { return (false, null); } // si falla la query, seguimos con fallback
+        var elegido = await AcompSelector.ResolverAsync(contactos);
+        // null desde AcompSelector = usuario cancelo el modal (solo pasa con 2+ contactos).
+        if (elegido is null) { return (true, null); }
+        return (false, elegido);
     }
 
     private void CerrarVisor() { _visor = null; _visorSchema = null; _visorValores = new(); }

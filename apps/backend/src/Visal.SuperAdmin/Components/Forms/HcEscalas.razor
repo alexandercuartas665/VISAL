@@ -5,6 +5,7 @@
 @inject IEscalaService EscSvc
 @inject IFormDefinitionService FormsSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject IPacienteService PacientesSvc
 @inject IJSRuntime JS
 
 @*
@@ -193,6 +194,12 @@ else
     /// tenga ruta firmaProfesional configurada.</summary>
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    /// <summary>Selector de acompanante compartido con el modulo padre. Igual que
+    /// en HcDocumentos: cuando el formulario tiene mapeos firmaAcompanante* y el
+    /// paciente tiene 2+ contactos, se muestra el modal para elegir cual firma
+    /// antes de aplicar el prefill de firmas al iniciar la escala.</summary>
+    [CascadingParameter] public AcompananteSelectorContext? AcompSelector { get; set; }
+
     private Guid? _ultimoHcCargada;
     private List<EscalaItemDto> _escalas = new();
     private List<EscalaFormatoDto> _formatos = new();
@@ -322,10 +329,32 @@ else
                             }
                         }
                         FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+                        // Acompanantes: preguntar cual firma si aplica (2+ contactos).
+                        // Igual al patron de HcDocumentos: slot 1 respeta la eleccion
+                        // del usuario, slots 2..4 mantienen el N-esimo por Orden.
+                        var (cancelado, ordenElegido) = await ResolverAcompananteActivoAsync(rutas);
+                        if (cancelado)
+                        {
+                            _catalogoError = "Iniciar cancelado.";
+                            return;
+                        }
                         for (int i = 1; i <= 4; i++)
                         {
-                            var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
-                            if (aUrl is null && aNombre is null && aParent is null) { break; }
+                            string? aUrl, aNombre, aParent;
+                            if (i == 1 && ordenElegido.HasValue)
+                            {
+                                if (ordenElegido.Value == 0) { continue; }
+                                (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompanantePorOrdenAsync(Paciente.Id, ordenElegido.Value);
+                            }
+                            else
+                            {
+                                (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
+                            }
+                            if (aUrl is null && aNombre is null && aParent is null)
+                            {
+                                if (i == 1 && ordenElegido.HasValue) { continue; }
+                                break;
+                            }
                             FirmasPrefillHelper.AplicarAcompanante(valores, i, aUrl, aNombre, aParent, rutas);
                         }
                     }
@@ -422,14 +451,45 @@ else
                 }
             }
             FirmasPrefillHelper.Aplicar(_visorValores, firmaPac, firmaProf, rutas);
+            // Respeta la eleccion de acompanante activa. Si no se resolvio en esta
+            // sesion (escala vieja abierta directo), usa fallback N-esimo por Orden.
+            int? ordenActivo = AcompSelector?.OrdenActivo;
             for (int i = 1; i <= 4; i++)
             {
-                var (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
-                if (aUrl is null && aNombre is null && aParent is null) { break; }
+                string? aUrl, aNombre, aParent;
+                if (i == 1 && ordenActivo.HasValue)
+                {
+                    if (ordenActivo.Value == 0) { continue; }
+                    (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompanantePorOrdenAsync(Paciente.Id, ordenActivo.Value);
+                }
+                else
+                {
+                    (aUrl, aNombre, aParent) = await FirmaResolverSvc.ResolverAcompananteAsync(Paciente.Id, i);
+                }
+                if (aUrl is null && aNombre is null && aParent is null)
+                {
+                    if (i == 1 && ordenActivo.HasValue) { continue; }
+                    break;
+                }
                 FirmasPrefillHelper.AplicarAcompanante(_visorValores, i, aUrl, aNombre, aParent, rutas);
             }
         }
         catch { /* firmas opcionales */ }
+    }
+
+    /// <summary>Igual que en HcDocumentos. Devuelve (cancelado, orden). null en
+    /// orden significa que no aplica preguntar (usar comportamiento N-esimo).</summary>
+    private async Task<(bool cancelado, int? orden)> ResolverAcompananteActivoAsync(PrefillRouteSet rutas)
+    {
+        if (AcompSelector is null) { return (false, null); }
+        if (!rutas.TieneMapeoAcompanante()) { return (false, null); }
+        if (Paciente is null) { return (false, null); }
+        IReadOnlyList<PacienteContactoEmergenciaDto> contactos;
+        try { contactos = await PacientesSvc.ListContactosEmergenciaAsync(Paciente.Id); }
+        catch { return (false, null); }
+        var elegido = await AcompSelector.ResolverAsync(contactos);
+        if (elegido is null) { return (true, null); }
+        return (false, elegido);
     }
 
     private void CerrarVisor() { _visor = null; _visorSchema = null; _visorValores = new(); }

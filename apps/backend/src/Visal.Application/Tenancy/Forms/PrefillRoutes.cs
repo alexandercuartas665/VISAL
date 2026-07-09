@@ -21,6 +21,24 @@ public sealed class PrefillRouteSet
 
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
 
+    /// <summary>Devuelve true si al menos una ruta con SourceModule que empiece
+    /// con "firmaAcompanante" tiene mapeos activos (Source y Target no vacios).
+    /// La usan los modulos de HC para decidir si preguntar al usuario cual
+    /// acompanante firma cuando el paciente tiene varios contactos.</summary>
+    public bool TieneMapeoAcompanante()
+    {
+        foreach (var r in Routes)
+        {
+            if (r?.SourceModule is null) { continue; }
+            if (!r.SourceModule.StartsWith("firmaAcompanante", StringComparison.OrdinalIgnoreCase)) { continue; }
+            foreach (var m in r.Mappings)
+            {
+                if (!string.IsNullOrWhiteSpace(m.Source) && !string.IsNullOrWhiteSpace(m.Target)) { return true; }
+            }
+        }
+        return false;
+    }
+
     public static PrefillRouteSet FromJson(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) { return new PrefillRouteSet(); }

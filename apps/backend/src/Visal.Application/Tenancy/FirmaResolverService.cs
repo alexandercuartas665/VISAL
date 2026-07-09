@@ -103,4 +103,14 @@ public sealed class FirmaResolverService : IFirmaResolverService
         var c = contactos[indice1Based - 1];
         return (c.FirmaUrl, c.Nombre, c.Parentesco);
     }
+
+    public async Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompanantePorOrdenAsync(Guid pacienteId, int orden, CancellationToken ct = default)
+    {
+        if (pacienteId == Guid.Empty) { return (null, null, null); }
+        var c = await _db.PacienteContactosEmergencia.AsNoTracking()
+            .Where(x => x.PacienteId == pacienteId && x.Orden == orden)
+            .Select(x => new { x.FirmaUrl, x.Nombre, x.Parentesco })
+            .FirstOrDefaultAsync(ct);
+        return c is null ? (null, null, null) : (c.FirmaUrl, c.Nombre, c.Parentesco);
+    }
 }

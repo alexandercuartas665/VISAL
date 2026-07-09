@@ -1,0 +1,147 @@
+@using Visal.Application.Tenancy
+
+@*
+    Modal para elegir cual de los contactos de emergencia del paciente firma
+    el documento actual (consentimiento / evolucion / escala). Se muestra al
+    Iniciar un documento cuando:
+      - El formulario tiene mapeos a firmaAcompanante* (PrefillRouteSet.TieneMapeoAcompanante).
+      - El paciente tiene 2 o mas contactos.
+
+    Con 0 o 1 contactos NO se muestra: el flujo aplica directo (o no aplica
+    nada, respectivamente). El componente padre (HistoriasClinicasModulo) es
+    quien decide abrir este modal via IsOpen.
+
+    La eleccion se comunica via OnElegido (Orden del contacto, o 0 para
+    "Sin acompanante") o OnCancelado (aborta el Iniciar).
+*@
+
+@if (IsOpen)
+{
+    <div class="cie-backdrop" @onclick="OnCancelClick"></div>
+    <div class="cie-modal" style="width: 560px; max-width: 90vw;">
+        <div class="cie-modal-h">
+            <h3>&#128101; Firma del acompanante</h3>
+            <button class="cie-modal-close" @onclick="OnCancelClick" title="Cancelar">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <p style="font-size: 13px; color: #475569; margin-bottom: 12px;">
+                Este documento necesita firma de un acompanante y el paciente tiene
+                varios contactos de emergencia registrados. Selecciona cual firmara:
+            </p>
+
+            @if (Contactos is null || Contactos.Count == 0)
+            {
+                <div class="ase-empty" style="padding: 16px; text-align: center;">
+                    Este paciente no tiene contactos de emergencia registrados.
+                </div>
+            }
+            else
+            {
+                <div class="sa-lista">
+                    @foreach (var c in Contactos.OrderBy(x => x.Orden).ThenBy(x => x.Nombre))
+                    {
+                        <button type="button" class="sa-item" @onclick="() => OnPickClick(c.Orden)">
+                            <div class="sa-item-avatar">@Iniciales(c.Nombre)</div>
+                            <div class="sa-item-body">
+                                <div class="sa-item-nombre">@c.Nombre</div>
+                                <div class="sa-item-parent">
+                                    @(string.IsNullOrWhiteSpace(c.Parentesco) ? "(sin parentesco)" : c.Parentesco)
+                                    @if (!string.IsNullOrWhiteSpace(c.Telefono))
+                                    {
+                                        <span class="sa-item-tel"> &middot; @c.CodigoPais @c.Telefono</span>
+                                    }
+                                </div>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(c.FirmaUrl))
+                            {
+                                <div class="sa-item-tag sa-tag-firma">Firma OK</div>
+                            }
+                            else
+                            {
+                                <div class="sa-item-tag sa-tag-sin">Sin firma</div>
+                            }
+                        </button>
+                    }
+                </div>
+            }
+
+            <div class="sa-sin-acomp">
+                <button type="button" class="sa-sin-btn" @onclick="OnSinAcompClick">
+                    <span>&#128100; Sin acompanante / firma el paciente</span>
+                    <small>No se llenaran campos de acompanante en el documento.</small>
+                </button>
+            </div>
+        </div>
+        <div class="cie-modal-f">
+            <button class="btn btn-outline-secondary" @onclick="OnCancelClick">Cancelar</button>
+        </div>
+    </div>
+
+    <style>
+        .sa-lista { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+        .sa-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px;
+            background: #fff; cursor: pointer; text-align: left; width: 100%;
+            transition: border-color .12s, background .12s;
+        }
+        .sa-item:hover { border-color: #3b82f6; background: #f0f9ff; }
+        .sa-item-avatar {
+            width: 34px; height: 34px; border-radius: 50%;
+            background: #dbeafe; color: #1e40af; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; flex-shrink: 0;
+        }
+        .sa-item-body { flex: 1; min-width: 0; }
+        .sa-item-nombre { font-weight: 600; color: #0f172a; font-size: 13.5px; }
+        .sa-item-parent { color: #64748b; font-size: 12px; margin-top: 2px; }
+        .sa-item-tel { color: #94a3b8; }
+        .sa-item-tag {
+            padding: 3px 8px; border-radius: 999px; font-size: 10.5px;
+            font-weight: 600; flex-shrink: 0;
+        }
+        .sa-tag-firma { background: #dcfce7; color: #166534; }
+        .sa-tag-sin { background: #fef3c7; color: #92400e; }
+        .sa-sin-acomp {
+            margin-top: 8px; padding-top: 12px; border-top: 1px dashed #e2e8f0;
+        }
+        .sa-sin-btn {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+            padding: 10px 12px; border: 1px dashed #cbd5e1; border-radius: 8px;
+            background: transparent; cursor: pointer; width: 100%; text-align: left;
+        }
+        .sa-sin-btn:hover { border-color: #64748b; background: #f8fafc; }
+        .sa-sin-btn span { font-weight: 600; color: #334155; font-size: 13px; }
+        .sa-sin-btn small { color: #64748b; font-size: 11.5px; }
+    </style>
+}
+
+@code {
+    /// <summary>Controla si el modal esta visible. El padre lo alterna.</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>Contactos de emergencia del paciente actual. Deberia tener 2+
+    /// items; con 0 o 1 el padre NO deberia abrir el modal.</summary>
+    [Parameter] public IReadOnlyList<PacienteContactoEmergenciaDto>? Contactos { get; set; }
+
+    /// <summary>Se dispara con el Orden del contacto elegido, o 0 para
+    /// "Sin acompanante / firma el paciente". El padre debe cerrar el modal
+    /// y continuar el flujo de Iniciar con esta eleccion aplicada.</summary>
+    [Parameter] public EventCallback<int> OnElegido { get; set; }
+
+    /// <summary>Se dispara cuando el usuario cierra sin elegir. El padre debe
+    /// abortar el Iniciar (no crear el documento).</summary>
+    [Parameter] public EventCallback OnCancelado { get; set; }
+
+    private async Task OnPickClick(int orden) => await OnElegido.InvokeAsync(orden);
+    private async Task OnSinAcompClick() => await OnElegido.InvokeAsync(0);
+    private async Task OnCancelClick() => await OnCancelado.InvokeAsync();
+
+    private static string Iniciales(string nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) { return "?"; }
+        var parts = nombre.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1) { return parts[0][0].ToString().ToUpperInvariant(); }
+        return (parts[0][0].ToString() + parts[^1][0].ToString()).ToUpperInvariant();
+    }
+}

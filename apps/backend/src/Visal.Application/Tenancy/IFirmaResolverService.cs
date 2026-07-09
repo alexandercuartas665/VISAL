@@ -38,6 +38,14 @@ public interface IFirmaResolverService
     /// que la cantidad de contactos registrados.</summary>
     Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default);
 
+    /// <summary>Resuelve el contacto de emergencia cuyo Orden es exactamente el
+    /// que se pide. A diferencia de <see cref="ResolverAcompananteAsync"/>, no
+    /// usa el N-esimo por indice sino el contacto cuyo campo Orden coincide
+    /// (permite que el usuario elija cual acompanante firma un documento cuando
+    /// el paciente tiene varios). Devuelve todos null si no hay contacto con
+    /// ese Orden.</summary>
+    Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompanantePorOrdenAsync(Guid pacienteId, int orden, CancellationToken ct = default);
+
     /// <summary>
     /// Datos del profesional usados por el sistema-prefill: nombre, identificacion,
     /// registro medico y URL de firma. Se resuelve por (a) claim profesional_id

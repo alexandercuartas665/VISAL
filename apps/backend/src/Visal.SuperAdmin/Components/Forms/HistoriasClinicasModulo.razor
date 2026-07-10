@@ -624,6 +624,29 @@
                 </div>
             }
 
+            @if (_imprSeccionesOpcionales.Count > 0)
+            {
+                <div style="margin-top:14px; padding-top:10px; border-top:1px solid #e2e8f0;">
+                    <div style="font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">
+                        Secciones opcionales de la HC
+                    </div>
+                    <div style="font-size:12px; color:#64748b; margin-bottom:8px;">
+                        Estas secciones se imprimen solo si las seleccionas.
+                    </div>
+                    @foreach (var s in _imprSeccionesOpcionales)
+                    {
+                        <div class="hc-impr-opt">
+                            <label>
+                                <input type="checkbox"
+                                       checked="@_imprSeccionesOpcionalesSel.Contains(s.Id)"
+                                       @onchange="e => ToggleSeccionOpcional(s.Id, (bool)e.Value!)" />
+                                <span>@s.Label</span>
+                            </label>
+                        </div>
+                    }
+                </div>
+            }
+
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
                 <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarImprimir">Cancelar</button>
                 <button class="btn btn-primary btn-sm" @onclick="ConfirmarImprimirAsync">&#128424; Imprimir seleccion</button>
@@ -1135,6 +1158,11 @@
     private bool _imprIncluirCon;
     private bool _imprIncluirIns, _imprIncluirRem, _imprIncluirRxExt, _imprIncluirLabExt, _imprIncluirInsExt;
     private int _imprMedCount, _imprSrvCount, _imprIncCount, _imprCertCount, _imprEscCount, _imprEvoCount, _imprConCount;
+    /// <summary>Secciones del formato HC marcadas como PrintOptional en el schema.
+    /// Se cargan al abrir el modal de imprimir. El usuario decide cuales incluir
+    /// via _imprSeccionesOpcionalesSel (default: ninguna).</summary>
+    private List<(string Id, string Label)> _imprSeccionesOpcionales = new();
+    private HashSet<string> _imprSeccionesOpcionalesSel = new(StringComparer.OrdinalIgnoreCase);
     private int _imprInsCount, _imprRemCount, _imprRxExtCount, _imprLabExtCount, _imprInsExtCount;
 
     // ---- Modal RIPS obligatorio al iniciar HC ----
@@ -2213,6 +2241,20 @@
             _imprIncluirRxExt  = _imprRxExtCount  > 0;
             _imprIncluirLabExt = _imprLabExtCount > 0;
             _imprIncluirInsExt = _imprInsExtCount > 0;
+            // Cargar secciones opcionales del schema del formato HC (id + label).
+            // Default: ninguna marcada (el usuario debe elegir explicitamente).
+            _imprSeccionesOpcionales = new();
+            _imprSeccionesOpcionalesSel = new(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var det = await HcSvc.GetAsync(h.Id);
+                var sch = FormSchema.FromJson(det?.SchemaJson);
+                foreach (var n in sch.Children.Where(x => x.IsSection && x.PrintOptional))
+                {
+                    _imprSeccionesOpcionales.Add((n.Id, string.IsNullOrWhiteSpace(n.Label) ? "(sin titulo)" : n.Label!));
+                }
+            }
+            catch { /* si falla no bloqueamos el modal */ }
             _showImprimirModal = true;
             _imprimirMsg = null;
         }
@@ -2242,7 +2284,18 @@
         if (_imprIncluirCon)    { docs.Add("CON");    }
         if (docs.Count == 0) { _imprimirMsg = "Selecciona al menos un documento."; return; }
         _showImprimirModal = false;
-        await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{h.Id}?docs={string.Join(",", docs)}", "_blank");
+        var url = $"/imprimir-paquete/{h.Id}?docs={string.Join(",", docs)}";
+        if (_imprSeccionesOpcionalesSel.Count > 0)
+        {
+            url += $"&secs={string.Join(",", _imprSeccionesOpcionalesSel)}";
+        }
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    private void ToggleSeccionOpcional(string id, bool marcada)
+    {
+        if (marcada) { _imprSeccionesOpcionalesSel.Add(id); }
+        else { _imprSeccionesOpcionalesSel.Remove(id); }
     }
 
     private void CancelarImprimir() => _showImprimirModal = false;

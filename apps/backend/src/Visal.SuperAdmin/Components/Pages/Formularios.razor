@@ -261,6 +261,12 @@
             {
                 <div class="fb-props-title">Seccion</div>
                 <div class="fb-prop"><label>Titulo</label><input class="fb-input" @bind="_selected.Label" @bind:event="oninput" /></div>
+                <div class="fb-prop">
+                    <label class="fb-check" title="Cuando esta marcado, la seccion aparece como fila con checkbox en el modal de impresion. Default en el modal: desmarcado (el usuario elige si la incluye).">
+                        <input type="checkbox" @bind="_selected.PrintOptional" />
+                        Opcional al imprimir
+                    </label>
+                </div>
                 @RenderVisibleWhenPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar seccion</button>
             }
@@ -285,6 +291,7 @@
                     </select>
                 </div>
                 @RenderVisibleWhenPanel(_selected)
+                @RenderMoveCopyPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar texto</button>
             }
             else
@@ -574,6 +581,7 @@
                 }
 
                 @RenderVisibleWhenPanel(_selected)
+                @RenderMoveCopyPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">@(_selected.IsTable ? "Eliminar tabla" : "Eliminar campo")</button>
             }
         </aside>
@@ -2054,6 +2062,121 @@
 
     private RenderFragment RenderNode(FormNode n, List<FormNode> list) =>
         n.IsText ? RenderText(n, list) : (n.IsTable ? RenderTable(n, list) : RenderField(n, list));
+
+    // ────────────────────────────────────────────────────────────────────
+    // Mover / Copiar el nodo seleccionado hacia otra seccion del mismo
+    // formulario. La UI vive en el panel de propiedades del nodo (aplica a
+    // campos, tablas y bloques de texto — no a secciones, que ya se mueven
+    // con las flechas ↑↓ y se duplican con Duplicar seccion en otro flujo).
+    // Mover = quita del padre actual y lo mete al final de la seccion destino.
+    // Copiar = clona con IDs nuevos (recursivo) y lo agrega al final de la
+    // seccion destino. La seccion origen queda intacta.
+    // ────────────────────────────────────────────────────────────────────
+
+    /// <summary>Estado del dropdown "Enviar a seccion..." — id de la seccion elegida.</summary>
+    private string? _moveCopyTargetId;
+
+    private IEnumerable<FormNode> SeccionesDelFormulario()
+        => _schema.Children.Where(n => n.IsSection);
+
+    private FormNode? SeccionQueContiene(FormNode node)
+    {
+        foreach (var s in SeccionesDelFormulario())
+        {
+            if (s.Children is not null && s.Children.Contains(node)) { return s; }
+        }
+        return null;
+    }
+
+    private void MoverSeleccionadoA(string? destinoId)
+    {
+        if (_selected is null || string.IsNullOrEmpty(destinoId)) { return; }
+        var destino = SeccionesDelFormulario().FirstOrDefault(s => s.Id == destinoId);
+        if (destino is null) { return; }
+        var origen = SeccionQueContiene(_selected);
+        if (origen is null)
+        {
+            // Nodo suelto en la raiz: lo quitamos de ahi.
+            _schema.Children.Remove(_selected);
+        }
+        else
+        {
+            origen.Children!.Remove(_selected);
+        }
+        destino.Children ??= new();
+        destino.Children.Add(_selected);
+        _moveCopyTargetId = null;
+        _ok = $"Movido a '{destino.Label}'.";
+    }
+
+    private void CopiarSeleccionadoA(string? destinoId)
+    {
+        if (_selected is null || string.IsNullOrEmpty(destinoId)) { return; }
+        var destino = SeccionesDelFormulario().FirstOrDefault(s => s.Id == destinoId);
+        if (destino is null) { return; }
+        var copia = ClonarNodo(_selected);
+        destino.Children ??= new();
+        destino.Children.Add(copia);
+        _moveCopyTargetId = null;
+        _ok = $"Copia agregada a '{destino.Label}'.";
+    }
+
+    /// <summary>Clona un nodo con nuevos Ids (recursivo). Reusa el serializador
+    /// del schema para hacer una copia profunda, luego regenera Ids para que
+    /// no colisionen con el original ni entre si.</summary>
+    private static FormNode ClonarNodo(FormNode original)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(original, FormSchema.JsonOptions);
+        var copia = System.Text.Json.JsonSerializer.Deserialize<FormNode>(json, FormSchema.JsonOptions) ?? new FormNode();
+        RegenerarIds(copia);
+        return copia;
+    }
+
+    private static void RegenerarIds(FormNode node)
+    {
+        node.Id = Guid.NewGuid().ToString("N")[..8];
+        if (node.Children is not null)
+        {
+            foreach (var c in node.Children) { RegenerarIds(c); }
+        }
+        if (node.Columns is not null)
+        {
+            foreach (var col in node.Columns) { col.Id = Guid.NewGuid().ToString("N")[..8]; }
+        }
+    }
+
+    private RenderFragment RenderMoveCopyPanel(FormNode node) => __builder =>
+    {
+        // Solo mostramos el panel si hay al menos una seccion destino distinta
+        // de la que contiene al nodo. Sin secciones, no hay a donde moverlo.
+        var origenId = SeccionQueContiene(node)?.Id;
+        var destinos = SeccionesDelFormulario().Where(s => s.Id != origenId).ToList();
+        if (destinos.Count == 0) { return; }
+        <div class="fb-vw-panel">
+            <div class="fb-props-subtitle">Mover / Copiar a otra seccion</div>
+            <div class="fb-prop">
+                <label>Seccion destino</label>
+                <select class="fb-input" @bind="_moveCopyTargetId">
+                    <option value="">(Selecciona una seccion)</option>
+                    @foreach (var s in destinos)
+                    {
+                        <option value="@s.Id">@(string.IsNullOrWhiteSpace(s.Label) ? "Seccion" : s.Label)</option>
+                    }
+                </select>
+            </div>
+            <div class="fb-col-row">
+                <button class="fb-btn" disabled="@string.IsNullOrEmpty(_moveCopyTargetId)"
+                        @onclick="() => MoverSeleccionadoA(_moveCopyTargetId)">Mover</button>
+                <button class="fb-btn" disabled="@string.IsNullOrEmpty(_moveCopyTargetId)"
+                        @onclick="() => CopiarSeleccionadoA(_moveCopyTargetId)">Copiar</button>
+            </div>
+            <div class="fb-hint">
+                Mover = quita el @NodeKindLabel(node) de su ubicacion actual.
+                Copiar = duplica el @NodeKindLabel(node) al final de la seccion destino,
+                con nuevos identificadores internos.
+            </div>
+        </div>
+    };
 
     // ────────────────────────────────────────────────────────────────────
     // Panel "Mostrar solo cuando..." — visibilidad condicional del nodo.

@@ -508,6 +508,12 @@ else
     private List<string> _docs = new();
     private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc, _incluirEvo, _incluirCon;
     private bool _incluirIns, _incluirRxExt, _incluirLabExt, _incluirInsExt;
+
+    /// <summary>Ids de secciones opcionales que el usuario decidio INCLUIR en la
+    /// impresion (?secs=id1,id2). Default vacio: no incluir ninguna opcional.
+    /// El filtro solo aplica a nodos con Type="section" y PrintOptional=true; el
+    /// resto (secciones no opcionales, campos, tablas, textos) se muestra siempre.</summary>
+    private HashSet<string> _seccionesOpcionalesIncluidas = new(StringComparer.OrdinalIgnoreCase);
     private List<EscalaDetailDto> _escalasDetails = new();
     private List<DocumentoHcDetailDto> _evoDetails = new();
     private List<DocumentoHcDetailDto> _conDetails = new();
@@ -556,6 +562,14 @@ else
         _incluirRxExt  = _docs.Contains("RXEXT");
         _incluirLabExt = _docs.Contains("LABEXT");
         _incluirInsExt = _docs.Contains("INSEXT");
+
+        // Secciones opcionales incluidas por el usuario (?secs=). Vacio o ausente
+        // = no incluir ninguna. Case-insensitive por si el consumidor URL-encode
+        // varia el casing del id.
+        var rawSecs = query.TryGetValue("secs", out var vs) ? vs.ToString() : "";
+        _seccionesOpcionalesIncluidas = new HashSet<string>(
+            rawSecs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
 
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { _loading = false; return; }
@@ -815,6 +829,15 @@ else
         // Visibilidad condicional: si el nodo tiene VisibleWhen y no se cumple,
         // no se imprime (equivalente al FormViewer).
         if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, vals)) { return; }
+
+        // Seccion opcional al imprimir: si el disenador la marco como
+        // PrintOptional y el usuario NO la selecciono en el modal (?secs=), la
+        // omitimos. El default es "no imprimir opcionales" — el usuario debe
+        // marcarlas explicitamente.
+        if (n.IsSection && n.PrintOptional && !_seccionesOpcionalesIncluidas.Contains(n.Id))
+        {
+            return;
+        }
 
         if (n.IsText)
         {

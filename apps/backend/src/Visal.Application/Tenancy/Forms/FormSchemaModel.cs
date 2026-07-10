@@ -58,6 +58,16 @@ public sealed class FormNode
     [JsonPropertyName("children")]
     public List<FormNode>? Children { get; set; }
 
+    /// <summary>
+    /// Solo para Type = "section". Si true, la seccion aparece como fila con
+    /// checkbox en el modal de impresion del paquete. El default del checkbox
+    /// es DESmarcado — el usuario debe elegir explicitamente incluirla. Las
+    /// secciones no marcadas como opcionales se imprimen siempre (comportamiento
+    /// historico).
+    /// </summary>
+    [JsonPropertyName("printOptional")]
+    public bool PrintOptional { get; set; }
+
     // ── Bloque de texto (Type = "text") ──
     /// <summary>heading | subheading | paragraph.</summary>
     [JsonPropertyName("textStyle")]

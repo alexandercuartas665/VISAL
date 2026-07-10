@@ -61,6 +61,15 @@ public interface IDocumentoHcService
     Task<IReadOnlyList<DocumentoHcFormatoDto>> ListarFormatosDisponiblesAsync(
         Guid historiaId, string tipo, CancellationToken ct = default);
 
+    /// <summary>
+    /// Formatos disponibles por TipoFormulario global (FormDefinition.Tipo), sin
+    /// pasar por relaciones_formulario. Usado por la pestana Atenciones, que
+    /// lista TODOS los formatos con Tipo=ATENCION del tenant, no solo los
+    /// enlazados al formato de la HC.
+    /// </summary>
+    Task<IReadOnlyList<DocumentoHcFormatoDto>> ListarFormatosPorTipoFormularioAsync(
+        string tipoFormulario, CancellationToken ct = default);
+
     /// <summary>Documentos iniciados para una HC y un tipo, ordenados cronologicamente.</summary>
     Task<IReadOnlyList<DocumentoHcItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, string tipo, CancellationToken ct = default);

@@ -9,7 +9,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     private static string NormalizarTipo(string? tipo)
     {
         if (string.IsNullOrWhiteSpace(tipo))
-        { throw new InvalidOperationException("Tipo de documento es obligatorio (EVOLUCION o CONSENTIMIENTO)."); }
+        { throw new InvalidOperationException("Tipo de documento es obligatorio (EVOLUCION, CONSENTIMIENTO o ATENCION)."); }
         return tipo.Trim().ToUpperInvariant();
     }
 
@@ -41,6 +41,23 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
             .Where(r => r.Activo)
             .OrderBy(r => r.Nombre, StringComparer.OrdinalIgnoreCase)
             .Select(r => new DocumentoHcFormatoDto(r.Id, r.Codigo, r.Nombre, r.Version, r.Tipo, r.Activo, r.Observacion))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<DocumentoHcFormatoDto>> ListarFormatosPorTipoFormularioAsync(
+        string tipoFormulario, CancellationToken ct = default)
+    {
+        var t = NormalizarTipo(tipoFormulario);
+        // Todos los FormDefinition activos del tenant cuyo campo Tipo coincida
+        // (case-insensitive). Sin filtro por relaciones_formulario. El query filter
+        // por tenant lo aplica el DbContext.
+        var rows = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Activo && f.Tipo != null && f.Tipo.ToUpper() == t)
+            .Select(f => new { f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo })
+            .ToListAsync(ct);
+        return rows
+            .OrderBy(r => r.Nombre, StringComparer.OrdinalIgnoreCase)
+            .Select(r => new DocumentoHcFormatoDto(r.Id, r.Codigo, r.Nombre, r.Version, r.Tipo, r.Activo, null))
             .ToList();
     }
 
@@ -86,13 +103,24 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
         // Verificar que el formato destino esta relacionado con el origen (la HC) y
         // que la relacion sea del tipo correspondiente. Evita que la UI sortee la
         // configuracion enviando un FormDefId arbitrario.
-        var relOk = await db.RelacionesFormulario.AsNoTracking().AnyAsync(
-            r => r.FormularioOrigenId == hc.FormDefinitionId
-                 && r.FormularioDestinoId == req.FormDefinitionId
-                 && r.Activo
-                 && r.TipoRelacion == t, ct);
-        if (!relOk)
-        { throw new InvalidOperationException("El formato no esta configurado como " + t + " para esta historia."); }
+        // Excepcion: ATENCION lista formatos por TipoFormulario global, sin pasar
+        // por relaciones_formulario. Se valida solo que el formato exista y tenga
+        // Tipo = ATENCION (ya se cargo el `formato` mas arriba).
+        if (t == "ATENCION")
+        {
+            if (!string.Equals(formato.Tipo, "ATENCION", StringComparison.OrdinalIgnoreCase))
+            { throw new InvalidOperationException("El formato no es de tipo ATENCION."); }
+        }
+        else
+        {
+            var relOk = await db.RelacionesFormulario.AsNoTracking().AnyAsync(
+                r => r.FormularioOrigenId == hc.FormDefinitionId
+                     && r.FormularioDestinoId == req.FormDefinitionId
+                     && r.Activo
+                     && r.TipoRelacion == t, ct);
+            if (!relOk)
+            { throw new InvalidOperationException("El formato no esta configurado como " + t + " para esta historia."); }
+        }
 
         var entity = new HistoriaClinicaDocumento
         {

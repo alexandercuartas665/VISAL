@@ -114,9 +114,16 @@ else
             @if (_formatos.Count == 0)
             {
                 <div class="ase-empty">
-                    No hay formatos de <b>@TextoSing.ToLower()</b> configurados para esta historia.
-                    Crea la relacion en <b>Configuracion del sistema -> Relaciones de formularios</b>
-                    eligiendo como origen el formato de esta HC y como tipo "@Tipo".
+                    @if (AllFormatsMode)
+                    {
+                        <text>No hay formatos de <b>@TextoSing.ToLower()</b> disponibles. Crealos en <b>Configuracion del sistema -> Formularios</b> con Tipo "@Tipo".</text>
+                    }
+                    else
+                    {
+                        <text>No hay formatos de <b>@TextoSing.ToLower()</b> configurados para esta historia.
+                        Crea la relacion en <b>Configuracion del sistema -> Relaciones de formularios</b>
+                        eligiendo como origen el formato de esta HC y como tipo "@Tipo".</text>
+                    }
                 </div>
             }
             else
@@ -165,6 +172,7 @@ else
     .hc-doc-tipo { font-size: 10px; font-weight: 700; letter-spacing: .05em; padding: 2px 6px; border-radius: 4px; }
     .hc-doc-tipo-evolucion { background: #dbeafe; color: #1e40af; }
     .hc-doc-tipo-consentimiento { background: #fef3c7; color: #92400e; }
+    .hc-doc-tipo-atencion { background: #dcfce7; color: #166534; }
     .hc-doc-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
     .hc-doc-pill.ok { background: #d1fae5; color: #065f46; }
     .hc-doc-pill.abierta { background: #dbeafe; color: #1e40af; }
@@ -190,8 +198,16 @@ else
 </style>
 
 @code {
-    /// <summary>Tipo de documento: "EVOLUCION" o "CONSENTIMIENTO". Determina el filtrado de formatos y queries.</summary>
+    /// <summary>Tipo de documento: "EVOLUCION", "CONSENTIMIENTO" o "ATENCION". Determina el filtrado de formatos y queries.</summary>
     [Parameter, EditorRequired] public string Tipo { get; set; } = "EVOLUCION";
+    /// <summary>
+    /// Si true, el catalogo de formatos NO pasa por relaciones_formulario; en su lugar,
+    /// lista todos los FormDefinition activos con Tipo=<see cref="Tipo"/> del tenant.
+    /// Usado por la pestana Atenciones (que muestra todos los formatos ATENCION,
+    /// no solo los enlazados al formato de la HC). Default false = comportamiento
+    /// historico via relaciones_formulario.
+    /// </summary>
+    [Parameter] public bool AllFormatsMode { get; set; }
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public Guid? PacienteId { get; set; }
     /// <summary>Paciente activo de la HC. Si llega no-nulo, se aplica prefill al
@@ -232,10 +248,30 @@ else
     // -------- Helpers de UI -------- //
     private string TipoNorm => string.IsNullOrWhiteSpace(Tipo) ? "EVOLUCION" : Tipo.Trim().ToUpperInvariant();
     private bool EsEvolucion => TipoNorm == "EVOLUCION";
-    private bool EsFemenino => EsEvolucion; // "una evolucion" vs "un consentimiento"
-    private string TextoSing => EsEvolucion ? "Evolucion" : "Consentimiento";
-    private string TextoPlural => EsEvolucion ? "Evoluciones" : "Consentimientos";
-    private string IconoMini => EsEvolucion ? "\U0001F4DD" : "\U0001F4DC"; // memo / scroll
+    private bool EsAtencion => TipoNorm == "ATENCION";
+    // Femenino: "una evolucion", "una atencion"; "un consentimiento".
+    private bool EsFemenino => EsEvolucion || EsAtencion;
+    private string TextoSing => TipoNorm switch
+    {
+        "EVOLUCION" => "Evolucion",
+        "CONSENTIMIENTO" => "Consentimiento",
+        "ATENCION" => "Atencion",
+        _ => "Documento"
+    };
+    private string TextoPlural => TipoNorm switch
+    {
+        "EVOLUCION" => "Evoluciones",
+        "CONSENTIMIENTO" => "Consentimientos",
+        "ATENCION" => "Atenciones",
+        _ => "Documentos"
+    };
+    private string IconoMini => TipoNorm switch
+    {
+        "EVOLUCION" => "\U0001F4DD",       // memo
+        "CONSENTIMIENTO" => "\U0001F4DC",  // scroll
+        "ATENCION" => "\U0001FA7A",        // stethoscope
+        _ => "\U0001F4C4"
+    };
 
     protected override async Task OnParametersSetAsync()
     {
@@ -265,7 +301,15 @@ else
         if (HistoriaClinicaId is not Guid hid) { return; }
         _catalogoError = null;
         _seleccionFormatoId = null;
-        try { _formatos = (await DocSvc.ListarFormatosDisponiblesAsync(hid, TipoNorm)).ToList(); }
+        try
+        {
+            // AllFormatsMode = lista TODOS los formatos del tenant con Tipo=TipoNorm
+            // (usado por ATENCION). Modo historico: filtra por relaciones_formulario
+            // atadas al FormDefinition de la HC (EVOLUCION/CONSENTIMIENTO).
+            _formatos = AllFormatsMode
+                ? (await DocSvc.ListarFormatosPorTipoFormularioAsync(TipoNorm)).ToList()
+                : (await DocSvc.ListarFormatosDisponiblesAsync(hid, TipoNorm)).ToList();
+        }
         catch (Exception ex) { _catalogoError = ex.Message; _formatos = new(); }
         _catalogoAbierto = true;
     }

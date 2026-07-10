@@ -1,0 +1,26 @@
+{
+  "_comment": "Config de referencia para la tarea programada. NO se lee automaticamente por el script; los valores pasan por parametros de linea. Este archivo es solo para no olvidar los valores correctos entre corridas.",
+
+  "docker": {
+    "context": "visal-prod-remote",
+    "postgresContainer": "visal-postgres-prod",
+    "appContainer": "visal-app"
+  },
+
+  "paths": {
+    "destinationRoot": "D:\\Backups\\Visal",
+    "destinationRootFallback": "%TEMP%\\visal-backups",
+    "composeFile": "C:\\DesarrolloIA\\Visal\\deploy\\docker-prod\\docker-compose.yml",
+    "envFile": "C:\\DesarrolloIA\\Visal\\deploy\\docker-prod\\.env",
+    "encryptionKeyFile": "%USERPROFILE%\\.visal-backup.key"
+  },
+
+  "retention": {
+    "keepLast": 14
+  },
+
+  "schedule": {
+    "trigger": "diario 03:00",
+    "notes": "Configurar en Task Scheduler con -ExecutionPolicy Bypass"
+  }
+}

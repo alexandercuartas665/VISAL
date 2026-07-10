@@ -106,6 +106,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IDocumentoHcService, Tenancy.DocumentoHcService>();
         services.AddScoped<Tenancy.INotaMedicaService, Tenancy.NotaMedicaService>();
         services.AddScoped<Tenancy.IHcMenuConfigService, Tenancy.HcMenuConfigService>();
+        services.AddScoped<Tenancy.ICatalogoTipoServicioService, Tenancy.CatalogoTipoServicioService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         return services;
     }

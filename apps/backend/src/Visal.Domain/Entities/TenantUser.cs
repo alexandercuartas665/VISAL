@@ -36,15 +36,11 @@ public class TenantUser : TenantEntity
     public List<TenantUserSucursal> Sucursales { get; set; } = new();
 
     // ---------- Permisos de COORDINACION (modulo Coordinacion) ----------
-    // Estos flags determinan que tipos de servicios puede coordinar el usuario en la
-    // pagina /coordinacion. Un usuario puede ser coordinador de uno o varios modulos
-    // (terapias, enfermeria, consultas, equipos). Si todos estan en false, el usuario
-    // no puede coordinar nada (la pagina /coordinacion no le muestra solicitudes).
-
-    public bool CoordinaTerapias { get; set; }
-    public bool CoordinaEnfermeria { get; set; }
-    public bool CoordinaConsultas { get; set; }
-    public bool CoordinaEquipos { get; set; }
+    // Antes los tipos coordinados vivian aqui como 4 booleans hardcodeados
+    // (CoordinaTerapias/Consultas/Enfermeria/Equipos). Migraron a la tabla
+    // tenant_user_tipos_coordinados para soportar tipos dinamicos del
+    // catalogo (ver CatalogoTipoServicio). Ya no hay campos en esta entidad;
+    // consultar via IApplicationDbContext.TenantUserTiposCoordinados.
 
     /// <summary>
     /// Si este usuario representa a un profesional clinico (terapeuta, medico, etc.),

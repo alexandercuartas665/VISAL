@@ -6,6 +6,7 @@
 @inject IUsuarioAdminService Svc
 @inject IRolService RolesSvc
 @inject ISucursalService SucSvc
+@inject ICatalogoTipoServicioService TiposSvc
 @inject IJSRuntime JS
 
 <PageTitle>Administracion de Usuarios - Visal</PageTitle>
@@ -177,10 +178,23 @@
                     <div class="usu-perm-h">Habilita permisos granulares por modulo segun la configuracion general del sistema.</div>
                 </div>
                 <div class="usu-perm-list">
-                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaTerapias" /> <span class="usu-perm-lbl">COORDINADOR_TERAPIAS</span></label>
-                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaEnfermeria" /> <span class="usu-perm-lbl">COORDINADOR_ENFERMERIA</span></label>
-                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaConsultas" /> <span class="usu-perm-lbl">COORDINADOR_CONSULTAS</span></label>
-                    <label class="usu-perm-row"><input type="checkbox" @bind="sel.CoordinaEquipos" /> <span class="usu-perm-lbl">COORDINADOR_EQUIPOS</span></label>
+                    @if (_tiposCatalogo.Count == 0)
+                    {
+                        <div class="text-muted small">No hay tipos de servicio configurados. Crealos en Configuracion del Sistema &rarr; Tipos de servicio.</div>
+                    }
+                    else
+                    {
+                        @foreach (var t in _tiposCatalogo)
+                        {
+                            var codigo = t.Codigo;
+                            var marcado = sel.TiposCoordinados.Contains(codigo);
+                            <label class="usu-perm-row">
+                                <input type="checkbox" checked="@marcado"
+                                       @onchange="e => ToggleTipoCoord(sel, codigo, (bool)e.Value!)" />
+                                <span class="usu-perm-lbl">COORDINADOR_@codigo</span>
+                            </label>
+                        }
+                    }
                 </div>
                 <div class="ase-actions">
                     <button class="btn btn-primary btn-sm" @onclick="GuardarPermisosCoord" disabled="@_busy">@(_busy ? "Guardando..." : "Actualizar permisos del usuario")</button>
@@ -370,11 +384,13 @@
     private string _resetPwd = "";
     private string? _detalleError;
     private string? _detalleOk;
+    private List<CatalogoTipoServicioDto> _tiposCatalogo = new();
 
     protected override async Task OnInitializedAsync()
     {
         _roles = (await RolesSvc.ListAsync()).ToList();
         _sucursales = (await SucSvc.ListAsync()).ToList();
+        _tiposCatalogo = (await TiposSvc.ListarAsync()).ToList();
         await Load();
     }
 
@@ -516,8 +532,7 @@
         _detalleError = null; _detalleOk = null; _busy = true;
         try
         {
-            var req = new ActualizarPermisosCoordinacionRequest(
-                u.CoordinaTerapias, u.CoordinaEnfermeria, u.CoordinaConsultas, u.CoordinaEquipos);
+            var req = new ActualizarPermisosCoordinacionRequest(u.TiposCoordinados.ToList());
             var updated = await Svc.ActualizarPermisosCoordinacionAsync(u.Id, req, await Actor());
             if (updated is not null)
             {
@@ -528,6 +543,18 @@
         }
         catch (InvalidOperationException ex) { _detalleError = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private void ToggleTipoCoord(Row u, string codigo, bool marcado)
+    {
+        if (marcado)
+        {
+            if (!u.TiposCoordinados.Contains(codigo)) { u.TiposCoordinados.Add(codigo); }
+        }
+        else
+        {
+            u.TiposCoordinados.Remove(codigo);
+        }
     }
 
     private async Task Eliminar(Row u)
@@ -567,11 +594,8 @@
         public string? Ciudad { get; set; }
         public string? Direccion { get; set; }
         public bool Inhabilitado { get; set; }
-        // ----- Permisos de coordinacion (TenantUser) -----
-        public bool CoordinaTerapias { get; set; }
-        public bool CoordinaEnfermeria { get; set; }
-        public bool CoordinaConsultas { get; set; }
-        public bool CoordinaEquipos { get; set; }
+        // ----- Permisos de coordinacion (viven en tabla N:N tenant_user_tipos_coordinados) -----
+        public HashSet<string> TiposCoordinados { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public string Iniciales
         {
@@ -597,10 +621,7 @@
             PrimerApellido = d.PrimerApellido, SegundoApellido = d.SegundoApellido,
             Celular = d.Celular, Fijo = d.Fijo, Ciudad = d.Ciudad, Direccion = d.Direccion,
             Inhabilitado = string.Equals(d.Estado, "Blocked", StringComparison.OrdinalIgnoreCase),
-            CoordinaTerapias = d.CoordinaTerapias,
-            CoordinaEnfermeria = d.CoordinaEnfermeria,
-            CoordinaConsultas = d.CoordinaConsultas,
-            CoordinaEquipos = d.CoordinaEquipos
+            TiposCoordinados = new HashSet<string>(d.TiposCoordinados, StringComparer.OrdinalIgnoreCase)
         };
     }
 }

@@ -1,0 +1,220 @@
+@page "/config/tipos-servicio"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject ICatalogoTipoServicioService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Tipos de servicio - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Tipos de servicio</h1>
+        <small class="text-muted">
+            Catalogo de "modulos" o tipos que aparecen en el campo MODULO de los servicios de contrato
+            (Consulta, Terapia, Enfermeria, etc.). Es la fuente unica para asignacion, coordinacion,
+            permisos de usuario y Menu HC por servicio.
+        </small>
+    </div>
+    <button class="btn btn-primary" @onclick="Nuevo" disabled="@_busy">+ Nuevo tipo</button>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card">
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">Aun no hay tipos configurados.</div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:70px">Orden</th>
+                        <th style="width:180px">Codigo</th>
+                        <th>Nombre</th>
+                        <th style="width:90px" class="text-center">Activo</th>
+                        <th style="width:110px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        <tr class="@(r.Activo ? "" : "rf-row-inactiva")">
+                            <td>@r.Orden</td>
+                            <td><code>@r.Codigo</code></td>
+                            <td>@r.Nombre</td>
+                            <td class="text-center">
+                                @if (r.Activo) { <span class="badge bg-success">Activo</span> }
+                                else { <span class="badge bg-secondary">Apagado</span> }
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-link btn-sm" title="Editar" @onclick="() => Editar(r)">&#9998;</button>
+                                <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(r)">&#128465;</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ============= MODAL CREAR / EDITAR ============= *@
+@if (_modalOpen)
+{
+    <div class="cie-backdrop" @onclick="Cerrar"></div>
+    <div class="cie-modal" style="width:520px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>@(_editId is null ? "Nuevo tipo de servicio" : "Editar tipo de servicio")</h3>
+            <button class="cie-modal-close" @onclick="Cerrar">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Codigo * <small class="text-muted">(unico, MAYUSCULAS, sin tildes)</small></label>
+                    <input class="form-control form-control-sm mono" @bind="_fCodigo"
+                           placeholder="Ej: DIAGNOSTICO" style="text-transform:uppercase;" />
+                </div>
+                <div class="ase-f">
+                    <label>Nombre *</label>
+                    <input class="form-control form-control-sm" @bind="_fNombre"
+                           placeholder="Ej: Diagnostico por imagenes" />
+                </div>
+                <div class="ase-f">
+                    <label>Orden</label>
+                    <input type="number" class="form-control form-control-sm" @bind="_fOrden" min="0" />
+                </div>
+                <label class="ase-chk" style="margin-top:4px;">
+                    <input type="checkbox" @bind="_fActivo" /> <span>Activo</span>
+                </label>
+            </div>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Cerrar">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAsync" disabled="@_busy">
+                @(_editId is null ? "Crear" : "Guardar")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+    /* Modal styles copiados de RelacionesFormularios (los estilos scoped no
+       se comparten entre paginas). */
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        max-width: 95vw; max-height: 90vh; background: #fff;
+        border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25);
+        z-index: 1051; display: flex; flex-direction: column;
+    }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private List<CatalogoTipoServicioDto> _rows = new();
+
+    private bool _modalOpen;
+    private Guid? _editId;
+    private string _fCodigo = "";
+    private string _fNombre = "";
+    private int _fOrden = 100;
+    private bool _fActivo = true;
+    private string? _modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarAsync();
+        _loading = false;
+    }
+
+    private async Task CargarAsync()
+    {
+        try { _rows = (await Svc.ListarAsync(incluirInactivos: true)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void Nuevo()
+    {
+        _editId = null; _modalError = null;
+        _fCodigo = ""; _fNombre = "";
+        _fOrden = (_rows.Count == 0 ? 1 : _rows.Max(r => r.Orden) + 1);
+        _fActivo = true;
+        _modalOpen = true;
+    }
+
+    private void Editar(CatalogoTipoServicioDto r)
+    {
+        _editId = r.Id; _modalError = null;
+        _fCodigo = r.Codigo; _fNombre = r.Nombre; _fOrden = r.Orden; _fActivo = r.Activo;
+        _modalOpen = true;
+    }
+
+    private void Cerrar() => _modalOpen = false;
+
+    private async Task GuardarAsync()
+    {
+        _modalError = null;
+        if (string.IsNullOrWhiteSpace(_fCodigo)) { _modalError = "Codigo es obligatorio."; return; }
+        if (string.IsNullOrWhiteSpace(_fNombre)) { _modalError = "Nombre es obligatorio."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var actor = await ActorAsync();
+            var req = new GuardarTipoServicioRequest(_editId, _fCodigo, _fNombre, _fOrden, _fActivo);
+            await Svc.GuardarAsync(req, actor);
+            _ok = _editId is null ? "Tipo creado." : "Tipo actualizado.";
+            _modalOpen = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(CatalogoTipoServicioDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar el tipo '{r.Codigo}'?");
+        if (!ok) { return; }
+        _error = _ok = null; _busy = true;
+        try
+        {
+            await Svc.EliminarAsync(r.Id, await ActorAsync());
+            _ok = "Tipo eliminado.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+}

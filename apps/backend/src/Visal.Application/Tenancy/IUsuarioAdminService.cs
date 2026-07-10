@@ -9,8 +9,9 @@ public sealed record UsuarioDto(
     string? Documento, string? Username,
     string? PrimerNombre, string? SegundoNombre, string? PrimerApellido, string? SegundoApellido,
     string? Celular, string? Fijo, string? Ciudad, string? Direccion,
-    // Permisos de coordinacion (tenant-scoped, viven en TenantUser).
-    bool CoordinaTerapias, bool CoordinaEnfermeria, bool CoordinaConsultas, bool CoordinaEquipos);
+    // Codigos de tipos de servicio que el usuario puede coordinar (viven en la
+    // tabla N:N tenant_user_tipos_coordinados). Ej: ["CONSULTA","TERAPIA"].
+    IReadOnlyList<string> TiposCoordinados);
 
 public sealed record CrearUsuarioRequest(
     string Email, string? DisplayName, string Password, Guid? RolId,
@@ -23,9 +24,10 @@ public sealed record ActualizarPerfilUsuarioRequest(
     string? Celular, string? Fijo, string? Ciudad, string? Direccion,
     bool Inhabilitado);
 
-/// <summary>Payload para actualizar los 4 flags de permisos de coordinacion del usuario en este tenant.</summary>
+/// <summary>Payload para actualizar los codigos de tipos de servicio que el usuario
+/// puede coordinar en este tenant. La lista reemplaza (no acumula) la existente.</summary>
 public sealed record ActualizarPermisosCoordinacionRequest(
-    bool CoordinaTerapias, bool CoordinaEnfermeria, bool CoordinaConsultas, bool CoordinaEquipos);
+    IReadOnlyList<string> Codigos);
 
 public interface IUsuarioAdminService
 {

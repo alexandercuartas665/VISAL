@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Visal.Application.Tenancy
 @inject IHcMenuConfigService Svc
+@inject ICatalogoTipoServicioService TiposSvc
 
 <PageTitle>Menu HC por servicio - Visal</PageTitle>
 
@@ -30,25 +31,40 @@
             <table class="table table-sm align-middle cfg-menu-hc-tabla">
                 <thead>
                     <tr>
-                        <th style="min-width: 240px">Pestana</th>
+                        <th style="min-width: 200px">Pestana</th>
+                        <th style="width: 240px">Alias <small class="text-muted fw-normal">(nombre a mostrar)</small></th>
                         @foreach (var t in _tiposServicio)
                         {
-                            <th class="text-center" style="width:110px">@t</th>
+                            <th class="text-center" style="width:110px" title="@t.Nombre">@t.Codigo</th>
                         }
                     </tr>
                 </thead>
                 <tbody>
+                    @if (_tiposServicio.Count == 0)
+                    {
+                        <tr><td colspan="2" style="padding:24px;text-align:center;color:#64748b;">
+                            No hay tipos de servicio configurados. Crealos en
+                            <a href="/config/tipos-servicio">Configuracion del Sistema &rarr; Tipos de servicio</a>.
+                        </td></tr>
+                    }
                     @foreach (var p in _pestanas)
                     {
+                        var alias = _aliases.TryGetValue(p, out var a) ? a : "";
                         <tr>
                             <td><strong>@p</strong></td>
+                            <td>
+                                <input class="form-control form-control-sm cfg-menu-hc-alias"
+                                       value="@alias"
+                                       placeholder="@p"
+                                       @onchange="e => SaveAlias(p, (string?)e.Value)" />
+                            </td>
                             @foreach (var t in _tiposServicio)
                             {
-                                var val = EsVisible(t, p);
+                                var val = EsVisible(t.Codigo, p);
                                 <td class="text-center">
                                     <input type="checkbox" class="form-check-input"
                                            checked="@val"
-                                           @onchange="e => Toggle(t, p, (bool)e.Value!)" />
+                                           @onchange="e => Toggle(t.Codigo, p, (bool)e.Value!)" />
                                 </td>
                             }
                         </tr>
@@ -64,8 +80,10 @@
 </style>
 
 @code {
-    // Estos valores DEBEN coincidir con Asignacion.TipoServicio (derivado de servicios_contrato.Modulo).
-    private readonly string[] _tiposServicio = new[] { "CONSULTA", "TERAPIA", "ENFERMERIA", "EQUIPOS", "INSUMOS" };
+    // Los tipos se leen del catalogo dinamico (/config/tipos-servicio). Antes
+    // estaban hardcodeados aqui, lo que impedia agregar un tipo nuevo (ej.
+    // DIAGNOSTICO) sin tocar codigo.
+    private List<CatalogoTipoServicioDto> _tiposServicio = new();
 
     // Deben coincidir con el array _tabs de HistoriasClinicasModulo.razor.
     // La pestana "Historial" siempre es visible — no la ofrecemos para toggle.
@@ -79,6 +97,7 @@
     };
 
     private HashSet<string> _ocultos = new(); // "TIPO|PESTANA"
+    private Dictionary<string, string> _aliases = new(StringComparer.OrdinalIgnoreCase);
     private string? _msg;
     private string? _error;
 
@@ -88,10 +107,28 @@
     {
         try
         {
+            _tiposServicio = (await TiposSvc.ListarAsync()).ToList();
             var rows = await Svc.ListAsync();
             _ocultos = new HashSet<string>(
                 rows.Where(r => !r.Visible).Select(r => $"{r.TipoServicio}|{r.PestanaKey}"),
                 StringComparer.OrdinalIgnoreCase);
+            _aliases = await Svc.ObtenerAliasesAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task SaveAlias(string pestana, string? value)
+    {
+        _msg = _error = null;
+        try
+        {
+            await Svc.SaveAliasAsync(pestana, value);
+            var trimmed = value?.Trim();
+            if (string.IsNullOrEmpty(trimmed)) { _aliases.Remove(pestana); }
+            else { _aliases[pestana] = trimmed; }
+            _msg = string.IsNullOrEmpty(trimmed)
+                ? $"Alias de '{pestana}' eliminado."
+                : $"Alias de '{pestana}' guardado: '{trimmed}'.";
         }
         catch (Exception ex) { _error = ex.Message; }
     }

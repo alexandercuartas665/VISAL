@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710143016_AddCatalogoTiposServicio")]
+    partial class AddCatalogoTiposServicio
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2132,54 +2135,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_hc_menu_configs_tenant_id_tipo_servicio_pestana_key");
 
                     b.ToTable("hc_menu_configs", (string)null);
-                });
-
-            modelBuilder.Entity("Visal.Domain.Entities.HcPestanaAlias", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Alias")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)")
-                        .HasColumnName("alias");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("created_by");
-
-                    b.Property<string>("PestanaKey")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)")
-                        .HasColumnName("pestana_key");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<Guid?>("UpdatedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_hc_pestana_aliases");
-
-                    b.HasIndex("TenantId", "PestanaKey")
-                        .IsUnique()
-                        .HasDatabaseName("ix_hc_pestana_aliases_tenant_id_pestana_key");
-
-                    b.ToTable("hc_pestana_aliases", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.HistoriaClinica", b =>

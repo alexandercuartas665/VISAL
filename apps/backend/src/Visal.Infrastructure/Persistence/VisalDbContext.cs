@@ -85,6 +85,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
     public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
+    public DbSet<HcPestanaAlias> HcPestanaAliases => Set<HcPestanaAlias>();
+    public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
+    public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
     public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
@@ -818,6 +821,28 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.TipoServicio).HasMaxLength(40).IsRequired();
             b.Property(x => x.PestanaKey).HasMaxLength(80).IsRequired();
             b.HasIndex(x => new { x.TenantId, x.TipoServicio, x.PestanaKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<HcPestanaAlias>(b =>
+        {
+            b.Property(x => x.PestanaKey).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Alias).HasMaxLength(80);
+            b.HasIndex(x => new { x.TenantId, x.PestanaKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<CatalogoTipoServicio>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
+        });
+
+        modelBuilder.Entity<TenantUserTipoCoordinado>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.TenantUserId, x.Codigo }).IsUnique();
+            b.HasIndex(x => x.TenantUserId);
         });
 
         modelBuilder.Entity<FirmaPacienteRequest>(b =>

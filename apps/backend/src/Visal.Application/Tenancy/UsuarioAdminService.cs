@@ -30,6 +30,11 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         var pus = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters().Where(p => puIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
+        // Tipos coordinados por usuario (tabla N:N que reemplazo los 4 booleans).
+        var tipos = await _db.TenantUserTiposCoordinados.AsNoTracking().ToListAsync(ct);
+        var tiposByUser = tipos.GroupBy(t => t.TenantUserId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Codigo).OrderBy(c => c).ToList());
+
         return users
             .OrderBy(u => u.Email)
             .Select(u =>
@@ -37,6 +42,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
                 pus.TryGetValue(u.PlatformUserId, out var pu);
                 var sids = byUser.TryGetValue(u.Id, out var lst) ? lst : new List<Guid>();
                 var snames = sids.Where(id => sucs.ContainsKey(id)).Select(id => sucs[id]).OrderBy(n => n).ToList();
+                var tiposUsr = tiposByUser.TryGetValue(u.Id, out var tl) ? tl : (IReadOnlyList<string>)Array.Empty<string>();
                 return new UsuarioDto(u.Id, u.PlatformUserId, u.Email, pu?.DisplayName,
                     u.RolId, u.RolId is Guid rid && roles.TryGetValue(rid, out var rn) ? rn : null,
                     sids, snames,
@@ -44,7 +50,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
                     pu?.Documento, pu?.Username,
                     pu?.PrimerNombre, pu?.SegundoNombre, pu?.PrimerApellido, pu?.SegundoApellido,
                     pu?.Celular, pu?.Fijo, pu?.Ciudad, pu?.Direccion,
-                    u.CoordinaTerapias, u.CoordinaEnfermeria, u.CoordinaConsultas, u.CoordinaEquipos);
+                    tiposUsr);
             })
             .ToList();
     }
@@ -109,12 +115,30 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
 
     public async Task<UsuarioDto?> ActualizarPermisosCoordinacionAsync(Guid tenantUserId, ActualizarPermisosCoordinacionRequest req, Guid actor, CancellationToken ct = default)
     {
-        var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        var tu = await _db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return null; }
-        tu.CoordinaTerapias = req.CoordinaTerapias;
-        tu.CoordinaEnfermeria = req.CoordinaEnfermeria;
-        tu.CoordinaConsultas = req.CoordinaConsultas;
-        tu.CoordinaEquipos = req.CoordinaEquipos;
+        if (_tenant.TenantId is not Guid tid) { return null; }
+
+        // Reemplazar la lista completa: borrar los que ya no estan, agregar los nuevos.
+        var codigosNorm = (req.Codigos ?? Array.Empty<string>())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToUpperInvariant())
+            .Distinct()
+            .ToHashSet();
+        var actuales = await _db.TenantUserTiposCoordinados
+            .Where(x => x.TenantUserId == tenantUserId).ToListAsync(ct);
+        foreach (var fila in actuales.Where(a => !codigosNorm.Contains(a.Codigo)))
+        {
+            _db.TenantUserTiposCoordinados.Remove(fila);
+        }
+        var existentes = actuales.Select(a => a.Codigo).ToHashSet();
+        foreach (var cod in codigosNorm.Where(c => !existentes.Contains(c)))
+        {
+            _db.TenantUserTiposCoordinados.Add(new TenantUserTipoCoordinado
+            {
+                TenantId = tid, TenantUserId = tenantUserId, Codigo = cod
+            });
+        }
         await _db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tenantUserId);
     }
@@ -123,12 +147,13 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
     {
         var tu = await _db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
         if (tu is null) { return Array.Empty<string>(); }
-        var lista = new List<string>();
-        if (tu.CoordinaTerapias) { lista.Add("TERAPIAS"); }
-        if (tu.CoordinaEnfermeria) { lista.Add("ENFERMERIA"); }
-        if (tu.CoordinaConsultas) { lista.Add("CONSULTAS"); }
-        if (tu.CoordinaEquipos) { lista.Add("EQUIPOS"); }
-        return lista;
+        // La lista de tipos que puede coordinar el usuario vive en la tabla N:N
+        // tenant_user_tipos_coordinados (antes eran 4 booleans hardcodeados en
+        // tenant_users). Cada codigo apunta a CatalogoTipoServicio.Codigo.
+        return await _db.TenantUserTiposCoordinados.AsNoTracking()
+            .Where(x => x.TenantUserId == tu.Id)
+            .Select(x => x.Codigo)
+            .ToListAsync(ct);
     }
 
     public async Task<UsuarioDto?> CrearAsync(CrearUsuarioRequest req, Guid actor, CancellationToken ct = default)

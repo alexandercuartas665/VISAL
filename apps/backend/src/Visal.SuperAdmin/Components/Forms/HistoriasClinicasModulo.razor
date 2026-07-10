@@ -1060,13 +1060,26 @@
     /// Si aun no cargo el nombre del tenant (o el usuario es super admin)
     /// se muestra simplemente "Servicios".
     /// </summary>
-    private string EtiquetaTab(string tab) => tab switch
+    /// <summary>Aliases por pestana definidos por el admin en /config/menu-hc.
+    /// Prioridad: alias configurado por el admin > etiqueta especial (ej. Ordenes
+    /// servicios inyecta nombre de agencia) > clave por defecto.</summary>
+    private Dictionary<string, string> _aliasesPestanas = new(StringComparer.OrdinalIgnoreCase);
+
+    private string EtiquetaTab(string tab)
     {
-        "Ordenes servicios" => string.IsNullOrWhiteSpace(_tenantName)
-            ? "Servicios"
-            : $"Servicios {_tenantName}",
-        _ => tab
-    };
+        // El alias configurado gana siempre — el admin lo puso a mano.
+        if (_aliasesPestanas.TryGetValue(tab, out var alias) && !string.IsNullOrWhiteSpace(alias))
+        {
+            return alias;
+        }
+        return tab switch
+        {
+            "Ordenes servicios" => string.IsNullOrWhiteSpace(_tenantName)
+                ? "Servicios"
+                : $"Servicios {_tenantName}",
+            _ => tab
+        };
+    }
 
     /// <summary>Nombre de la agencia/tenant del usuario logueado. Se carga en
     /// OnInitializedAsync desde el mismo servicio que usa el NavMenu. Null si
@@ -1321,6 +1334,8 @@
         // re-usa para otro servicio.
         try { _pestanasOcultas = await MenuHcSvc.ObtenerPestanasOcultasAsync(TipoServicio); }
         catch { _pestanasOcultas = new(StringComparer.OrdinalIgnoreCase); }
+        try { _aliasesPestanas = await MenuHcSvc.ObtenerAliasesAsync(); }
+        catch { _aliasesPestanas = new(StringComparer.OrdinalIgnoreCase); }
         // Si la pestana seleccionada quedo oculta por config, saltamos a Historial.
         if (_pestanasOcultas.Contains(_tabSel)) { _tabSel = "Historial"; }
     }

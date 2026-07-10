@@ -1,0 +1,114 @@
+@page "/config/menu-hc"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@inject IHcMenuConfigService Svc
+
+<PageTitle>Menu HC por servicio - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion de la Entidad</div>
+        <h1 class="ase-title">Menu HC por tipo de servicio</h1>
+    </div>
+</div>
+
+<div class="ase-card">
+    <div class="ase-card-h">Visibilidad por servicio</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Elige que pestanas del modal de Historia Clinica se muestran al
+            profesional segun el <b>tipo de servicio contratado</b> de la asignacion
+            (Modulo del contrato). Todo esta visible por defecto; desmarca las que
+            no aplican para ese tipo. La configuracion se aplica en vivo.
+        </p>
+
+        @if (_msg is not null) { <div class="ase-ok">@_msg</div> }
+        @if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+        <div class="table-responsive">
+            <table class="table table-sm align-middle cfg-menu-hc-tabla">
+                <thead>
+                    <tr>
+                        <th style="min-width: 240px">Pestana</th>
+                        @foreach (var t in _tiposServicio)
+                        {
+                            <th class="text-center" style="width:110px">@t</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _pestanas)
+                    {
+                        <tr>
+                            <td><strong>@p</strong></td>
+                            @foreach (var t in _tiposServicio)
+                            {
+                                var val = EsVisible(t, p);
+                                <td class="text-center">
+                                    <input type="checkbox" class="form-check-input"
+                                           checked="@val"
+                                           @onchange="e => Toggle(t, p, (bool)e.Value!)" />
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .cfg-menu-hc-tabla th { text-transform: uppercase; font-size: 11px; color: #475569; }
+</style>
+
+@code {
+    // Estos valores DEBEN coincidir con Asignacion.TipoServicio (derivado de servicios_contrato.Modulo).
+    private readonly string[] _tiposServicio = new[] { "CONSULTA", "TERAPIA", "ENFERMERIA", "EQUIPOS", "INSUMOS" };
+
+    // Deben coincidir con el array _tabs de HistoriasClinicasModulo.razor.
+    // La pestana "Historial" siempre es visible — no la ofrecemos para toggle.
+    private readonly string[] _pestanas = new[]
+    {
+        "Escalas", "Evoluciones", "Consentimientos", "Atenciones",
+        "Documentos externos",
+        "Ordenes medicamento", "Ordenes servicios",
+        "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
+        "RX Imagenologia", "Laboratorios"
+    };
+
+    private HashSet<string> _ocultos = new(); // "TIPO|PESTANA"
+    private string? _msg;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await CargarAsync();
+
+    private async Task CargarAsync()
+    {
+        try
+        {
+            var rows = await Svc.ListAsync();
+            _ocultos = new HashSet<string>(
+                rows.Where(r => !r.Visible).Select(r => $"{r.TipoServicio}|{r.PestanaKey}"),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private bool EsVisible(string tipo, string pestana) => !_ocultos.Contains($"{tipo}|{pestana}");
+
+    private async Task Toggle(string tipo, string pestana, bool visible)
+    {
+        _msg = _error = null;
+        try
+        {
+            await Svc.SaveAsync(tipo, pestana, visible);
+            var key = $"{tipo}|{pestana}";
+            if (visible) { _ocultos.Remove(key); }
+            else { _ocultos.Add(key); }
+            _msg = visible ? $"'{pestana}' visible en {tipo}." : $"'{pestana}' oculta en {tipo}.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

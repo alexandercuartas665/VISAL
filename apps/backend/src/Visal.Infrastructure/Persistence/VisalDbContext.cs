@@ -84,6 +84,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas => Set<HistoriaClinicaOrdenExterna>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
+    public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
     public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
@@ -810,6 +811,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
             // Indice por historia clinica para la pestana "Documentos externos" del HC.
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
+        });
+
+        modelBuilder.Entity<HcMenuConfig>(b =>
+        {
+            b.Property(x => x.TipoServicio).HasMaxLength(40).IsRequired();
+            b.Property(x => x.PestanaKey).HasMaxLength(80).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.TipoServicio, x.PestanaKey }).IsUnique();
         });
 
         modelBuilder.Entity<FirmaPacienteRequest>(b =>

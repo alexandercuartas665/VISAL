@@ -74,6 +74,7 @@ public interface IApplicationDbContext
     DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas { get; }
     DbSet<NotaMedica> NotasMedicas { get; }
     DbSet<NotaMedicaDocumento> NotaMedicaDocumentos { get; }
+    DbSet<HcMenuConfig> HcMenuConfigs { get; }
     DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }
     DbSet<TipologiaArchivo> TipologiaArchivos { get; }
     DbSet<Cie11Config> Cie11Configs { get; }

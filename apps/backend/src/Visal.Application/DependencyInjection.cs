@@ -105,6 +105,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IEscalaService, Tenancy.EscalaService>();
         services.AddScoped<Tenancy.IDocumentoHcService, Tenancy.DocumentoHcService>();
         services.AddScoped<Tenancy.INotaMedicaService, Tenancy.NotaMedicaService>();
+        services.AddScoped<Tenancy.IHcMenuConfigService, Tenancy.HcMenuConfigService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         return services;
     }

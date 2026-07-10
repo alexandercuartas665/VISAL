@@ -18,6 +18,7 @@
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
 @inject INotaMedicaService NotaSvc
+@inject IHcMenuConfigService MenuHcSvc
 @inject IFirmaResolverService FirmaResolverSvc
 @inject IPacienteService PacientesSvc
 @inject ICatalogoPacienteService CatPacSvc
@@ -288,7 +289,7 @@
                     @if (_menuColapsado) { <span>&raquo;</span> } else { <span>&laquo;</span> <span class="hc-side-toggle-lbl">Menu</span> }
                 </button>
                 <nav class="hc-side-nav">
-                    @foreach (var t in _tabs)
+                    @foreach (var t in _tabs.Where(x => !_pestanasOcultas.Contains(x)))
                     {
                         var (icono, badge) = IconoYBadge(t);
                         var etiqueta = EtiquetaTab(t);
@@ -929,6 +930,19 @@
     /// </summary>
     [Parameter] public string? FormatoForzadoCodigo { get; set; }
 
+    /// <summary>
+    /// TipoServicio (CONSULTA/TERAPIA/ENFERMERIA/EQUIPOS/INSUMOS) del servicio
+    /// asignado. Cuando esta seteado, se carga la config /config/menu-hc y se
+    /// ocultan las pestanas marcadas como no visibles. Vacio = todas visibles.
+    /// Viene del contexto de la asignacion en /atencion.
+    /// </summary>
+    [Parameter] public string? TipoServicio { get; set; }
+
+    /// <summary>Set con los identificadores (PestanaKey) actualmente ocultos para
+    /// el TipoServicio activo. Se recarga al cambiar el parametro. Vacio =
+    /// mostrar todas.</summary>
+    private HashSet<string> _pestanasOcultas = new(StringComparer.OrdinalIgnoreCase);
+
     private DateOnly? _filFechaIni;
     private DateOnly? _filFechaFin;
     private string _filFormato = "";
@@ -1272,6 +1286,15 @@
         // Cuando el modal cambia de paciente sin recrear el componente (raro pero
         // posible), re-evaluamos si hay HC en curso para auto-cargar.
         await AutoCargarHcEnCursoSiCorrespondeAsync();
+
+        // Cargar visibilidad de pestanas segun TipoServicio (Modulo) del servicio
+        // asignado. Si TipoServicio es null/vacio, no aplicamos filtros (todo
+        // visible). Se recarga en cada cambio de parametro por si el modal se
+        // re-usa para otro servicio.
+        try { _pestanasOcultas = await MenuHcSvc.ObtenerPestanasOcultasAsync(TipoServicio); }
+        catch { _pestanasOcultas = new(StringComparer.OrdinalIgnoreCase); }
+        // Si la pestana seleccionada quedo oculta por config, saltamos a Historial.
+        if (_pestanasOcultas.Contains(_tabSel)) { _tabSel = "Historial"; }
     }
 
     private void OnAcompStateChanged() => InvokeAsync(StateHasChanged);

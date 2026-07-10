@@ -1080,6 +1080,29 @@ else
         }
         switch (effectiveType)
         {
+            case "textarea":
+                // Textarea multi-linea en la celda. Rows configurable por la
+                // columna (default 2, un pelo mas compacto que el top-level).
+                // Si la columna habilita voz, envolvemos en fv-voice-wrap para
+                // pintar el boton flotante (mismo id-scheme que top-level).
+                var cellRows = Math.Clamp(c.Rows ?? 2, 1, 30);
+                if (c.EnableVoice && !ro)
+                {
+                    var voiceId = $"voice-tbl-{Math.Abs(key.GetHashCode())}-{c.Id}";
+                    <div class="fv-voice-wrap">
+                        <textarea id="@voiceId" class="form-control form-control-sm" rows="@cellRows"
+                                  placeholder="@ph" disabled="@ro" value="@val"
+                                  @onchange="e => setCell(e.Value?.ToString())"></textarea>
+                        <button type="button" class="fv-voice-btn" data-voice-target="@voiceId" title="Dictar por voz">&#127908;</button>
+                    </div>
+                }
+                else
+                {
+                    <textarea class="form-control form-control-sm" rows="@cellRows"
+                              placeholder="@ph" disabled="@ro" value="@val"
+                              @onchange="e => setCell(e.Value?.ToString())"></textarea>
+                }
+                break;
             case "number":
                 <input type="number" class="form-control form-control-sm" disabled="@ro" value="@val"
                        placeholder="@ph"

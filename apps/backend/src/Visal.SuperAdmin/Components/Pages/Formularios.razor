@@ -324,6 +324,7 @@
                                     <input class="fb-input fb-mono" placeholder="nombre" @bind="col.Name" @bind:event="oninput" />
                                     <select class="fb-input" @bind="col.FieldType">
                                         <option value="text">Texto</option>
+                                        <option value="textarea">Area de texto</option>
                                         <option value="number">Numero</option>
                                         <option value="date">Fecha</option>
                                         <option value="datetime">Fecha y hora</option>
@@ -331,6 +332,21 @@
                                         <option value="autocomplete">Autocompletar</option>
                                     </select>
                                 </div>
+                                @if (col.FieldType == "textarea")
+                                {
+                                    <div class="fb-col-row">
+                                        <label class="fb-input" style="flex:1;display:flex;align-items:center;gap:6px;">
+                                            <span>Filas visibles</span>
+                                            <input type="number" class="fb-input" min="1" max="30" style="max-width:80px"
+                                                   value="@(col.Rows ?? 2)"
+                                                   @onchange="e => col.Rows = int.TryParse(e.Value?.ToString(), out var n) ? Math.Clamp(n, 1, 30) : (int?)null" />
+                                        </label>
+                                        <label class="fb-check">
+                                            <input type="checkbox" @bind="col.EnableVoice" />
+                                            Dictado por voz
+                                        </label>
+                                    </div>
+                                }
                                 @if (col.FieldType is "select" or "autocomplete")
                                 {
                                     <select class="fb-input" @bind="col.Catalog">

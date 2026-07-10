@@ -263,9 +263,26 @@ public sealed class FormColumn
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
-    /// <summary>text | number | date | select | autocomplete.</summary>
+    /// <summary>text | textarea | number | date | datetime | select | autocomplete.</summary>
     [JsonPropertyName("fieldType")]
     public string FieldType { get; set; } = "text";
+
+    /// <summary>
+    /// Solo para fieldType = "textarea". Numero de filas visibles del textarea
+    /// en cada celda. Default null => 2 filas (un poco mas compacto que el
+    /// top-level, que default a 3). Rango razonable 1..30; el disenador acota
+    /// el min/max, el viewer usa Math.Clamp defensivo.
+    /// </summary>
+    [JsonPropertyName("rows")]
+    public int? Rows { get; set; }
+
+    /// <summary>
+    /// Habilita dictado por voz en las celdas textarea de esta columna. Reusa
+    /// el mismo boton flotante que el top-level (Web Speech API en el
+    /// FormViewer). Solo tiene efecto cuando FieldType = "textarea".
+    /// </summary>
+    [JsonPropertyName("enableVoice")]
+    public bool EnableVoice { get; set; }
 
     [JsonPropertyName("catalog")]
     public string? Catalog { get; set; }

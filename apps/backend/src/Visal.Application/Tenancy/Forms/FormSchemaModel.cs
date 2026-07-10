@@ -159,6 +159,19 @@ public sealed class FormNode
     public Dictionary<string, List<string>>? SeedRowCellOptions { get; set; }
 
     /// <summary>
+    /// Filas seed marcadas como "fila titulo" (banner). Key = indice de fila
+    /// (como string). Value = alineacion del texto ("left"/"center"/"right",
+    /// por defecto "center"). Las filas presentes aqui se renderizan como
+    /// una unica celda con colspan a todo el ancho, en negrita y con la
+    /// alineacion elegida — sirven para separar secciones dentro de una
+    /// tabla larga (ej. "MEDICAMENTOS PRN" entre bloques). El texto sale
+    /// de la primera celda de SeedRows[i]. Las filas no listadas aqui se
+    /// comportan como hasta ahora (celdas normales).
+    /// </summary>
+    [JsonPropertyName("seedRowBanner")]
+    public Dictionary<string, string>? SeedRowBanner { get; set; }
+
+    /// <summary>
     /// Si true, oculta el boton "+ Agregar fila" para que la tabla quede limitada
     /// a las filas semilla. Por defecto false (permite agregar).
     /// </summary>

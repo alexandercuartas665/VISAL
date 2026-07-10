@@ -909,6 +909,21 @@ else
                             var idx = r;
                             var isSeed = r < seedCount;
                             var seedRow = isSeed ? n.SeedRows![r] : null;
+                            // Fila banner: colapsa columnas con estilo titulo (para impresion).
+                            var _pBannerAlign = isSeed && n.SeedRowBanner is not null
+                                && n.SeedRowBanner.TryGetValue(r.ToString(), out var _pba) ? _pba : null;
+                            if (_pBannerAlign is not null && seedRow is not null)
+                            {
+                                var _pText = seedRow.Count > 0 ? seedRow[0] ?? "" : "";
+                                var _pCols = (n.Columns?.Count ?? 0);
+                                var _pAlign = _pBannerAlign == "left" || _pBannerAlign == "right" ? _pBannerAlign : "center";
+                                <tr>
+                                    <td colspan="@_pCols" style="text-align:@_pAlign; font-weight:700; background:#eff6ff; color:#1e3a8a; padding:6px 10px; letter-spacing:.04em;">
+                                        @_pText
+                                    </td>
+                                </tr>
+                                continue;
+                            }
                             <tr>
                                 @{ var colIdx = 0; }
                                 @foreach (var col in n.Columns ?? new())

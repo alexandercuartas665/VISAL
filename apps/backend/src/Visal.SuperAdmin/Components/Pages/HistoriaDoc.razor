@@ -269,6 +269,21 @@ else
                     var idx = r;
                     var isSeed = r < seedCount;
                     var seedRow = isSeed ? n.SeedRows![r] : null;
+                    // Fila banner: colapsa columnas con estilo titulo (para impresion).
+                    var _hBannerAlign = isSeed && n.SeedRowBanner is not null
+                        && n.SeedRowBanner.TryGetValue(r.ToString(), out var _hba) ? _hba : null;
+                    if (_hBannerAlign is not null && seedRow is not null)
+                    {
+                        var _hText = seedRow.Count > 0 ? seedRow[0] ?? "" : "";
+                        var _hCols = (n.Columns?.Count ?? 0);
+                        var _hAlign = _hBannerAlign == "left" || _hBannerAlign == "right" ? _hBannerAlign : "center";
+                        <tr>
+                            <td colspan="@_hCols" style="text-align:@_hAlign; font-weight:700; background:#eff6ff; color:#1e3a8a; padding:6px 10px; letter-spacing:.04em;">
+                                @_hText
+                            </td>
+                        </tr>
+                        continue;
+                    }
                     <tr>
                         @{ var colIdx = 0; }
                         @foreach (var c in n.Columns ?? new())

@@ -487,11 +487,32 @@
                                     var seedRow = seedRows[r];
                                     while (seedRow.Count < cols2.Count) { seedRow.Add(null); }
                                     var firstLabel = !string.IsNullOrWhiteSpace(seedRow[0]) ? seedRow[0]! : $"(fila {r + 1})";
-                                    <div class="fb-seed-row">
+                                    var esBanner = _selected.SeedRowBanner?.ContainsKey(rowIdx.ToString()) ?? false;
+                                    var alineacion = esBanner
+                                        ? (_selected.SeedRowBanner!.TryGetValue(rowIdx.ToString(), out var _al) ? _al : "center")
+                                        : "center";
+                                    <div class="fb-seed-row @(esBanner ? "fb-seed-row-banner" : "")">
                                         <div class="fb-seed-row-h">
-                                            <span>@firstLabel</span>
-                                            <button class="fb-mini fb-mini-danger" title="Eliminar fila"
-                                                    @onclick="() => RemoveSeedRow(_selected, rowIdx)">×</button>
+                                            <span>@firstLabel @(esBanner ? "· TITULO" : "")</span>
+                                            <div style="display:flex;gap:6px;align-items:center;">
+                                                <label class="fb-check" title="Mostrar esta fila como titulo (colapsa columnas)">
+                                                    <input type="checkbox" checked="@esBanner"
+                                                           @onchange="e => ToggleSeedRowBanner(_selected, rowIdx, (bool)e.Value!)" />
+                                                    Titulo
+                                                </label>
+                                                @if (esBanner)
+                                                {
+                                                    <select class="fb-input" style="width:auto;padding:2px 6px;font-size:12px;"
+                                                            value="@alineacion"
+                                                            @onchange="e => SetSeedRowBannerAlign(_selected, rowIdx, e.Value?.ToString() ?? string.Empty)">
+                                                        <option value="left">Izq</option>
+                                                        <option value="center">Centro</option>
+                                                        <option value="right">Der</option>
+                                                    </select>
+                                                }
+                                                <button class="fb-mini fb-mini-danger" title="Eliminar fila"
+                                                        @onclick="() => RemoveSeedRow(_selected, rowIdx)">×</button>
+                                            </div>
                                         </div>
                                         @{ var colIdx2 = 0; }
                                         @foreach (var col in cols2)
@@ -1998,6 +2019,49 @@
             }
             table.SeedRowCellOptions = nuevo.Count == 0 ? null : nuevo;
         }
+
+        // Reindexar SeedRowBanner del mismo modo que SeedRowCellOptions.
+        if (table.SeedRowBanner is { Count: > 0 } banners)
+        {
+            var nuevoB = new Dictionary<string, string>();
+            foreach (var kv in banners)
+            {
+                if (!int.TryParse(kv.Key, out var r)) { nuevoB[kv.Key] = kv.Value; continue; }
+                if (r == rowIdx) { continue; }
+                var nuevaR = r > rowIdx ? r - 1 : r;
+                nuevoB[nuevaR.ToString()] = kv.Value;
+            }
+            table.SeedRowBanner = nuevoB.Count == 0 ? null : nuevoB;
+        }
+    }
+
+    /// <summary>Marca (o desmarca) la fila rowIdx como banner (fila titulo con
+    /// colspan a todo el ancho). Al activar, guarda la alineacion default
+    /// "center"; al desactivar, quita la entrada del diccionario.</summary>
+    private void ToggleSeedRowBanner(FormNode table, int rowIdx, bool activar)
+    {
+        var key = rowIdx.ToString();
+        if (activar)
+        {
+            table.SeedRowBanner ??= new Dictionary<string, string>();
+            if (!table.SeedRowBanner.ContainsKey(key)) { table.SeedRowBanner[key] = "center"; }
+        }
+        else if (table.SeedRowBanner is not null)
+        {
+            table.SeedRowBanner.Remove(key);
+            if (table.SeedRowBanner.Count == 0) { table.SeedRowBanner = null; }
+        }
+    }
+
+    /// <summary>Actualiza la alineacion del banner de una fila. Solo aplica si
+    /// la fila ya esta marcada como banner (via ToggleSeedRowBanner).</summary>
+    private void SetSeedRowBannerAlign(FormNode table, int rowIdx, string align)
+    {
+        if (table.SeedRowBanner is null) { return; }
+        var key = rowIdx.ToString();
+        if (!table.SeedRowBanner.ContainsKey(key)) { return; }
+        var norm = align == "left" || align == "right" || align == "center" ? align : "center";
+        table.SeedRowBanner[key] = norm;
     }
 
     /// <summary>Escribe el valor fijo de una celda seed. Vacio => null (celda

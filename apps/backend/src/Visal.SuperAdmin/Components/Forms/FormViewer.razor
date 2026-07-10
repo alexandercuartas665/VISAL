@@ -142,6 +142,22 @@ else
     }
     .fv-tbl-cell-off { background-color: #fafbfc; }
 
+    /* Fila banner (titulo de seccion dentro de la tabla): colapsa todas las
+       columnas en una sola celda, con estilo de subheading. Se usa para
+       separar bloques de filas prefill (ej. "MEDICAMENTOS PRN" entre lineas
+       de medicamentos regulares). */
+    .fv-tbl-banner-row td.fv-tbl-banner-cell {
+        background: #eff6ff;
+        font-weight: 700;
+        font-size: 12.5px;
+        color: #1e3a8a;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        padding: 8px 12px;
+        border-top: 2px solid #cbd5e1;
+        border-bottom: 1px solid #cbd5e1;
+    }
+
     /* Input + lupita para celdas autocomplete tipo CIE-11 */
     .fv-tbl-autocomp { display: flex; gap: 4px; align-items: stretch; }
     .fv-tbl-autocomp input { flex: 1; min-width: 0; }
@@ -748,6 +764,23 @@ else
                                 var idx = i;
                                 var isSeed = i < seedCount;
                                 var seedRow = isSeed ? node.SeedRows![i] : null;
+                                // Fila titulo (banner): colapsa todas las columnas en una sola celda
+                                // con texto centrado y en negrita. El texto sale de la primera celda
+                                // de SeedRows[i]. Solo aplica a filas seed marcadas en SeedRowBanner.
+                                var bannerAlign = isSeed && node.SeedRowBanner is not null
+                                    && node.SeedRowBanner.TryGetValue(i.ToString(), out var _ba) ? _ba : null;
+                                if (bannerAlign is not null && seedRow is not null)
+                                {
+                                    var _bannerText = seedRow.Count > 0 ? seedRow[0] ?? "" : "";
+                                    var _colSpan = (node.Columns?.Count ?? 0) + (node.LockRows ? 0 : 1);
+                                    var _align = bannerAlign == "left" || bannerAlign == "right" ? bannerAlign : "center";
+                                    <tr class="fv-tbl-banner-row">
+                                        <td colspan="@_colSpan" class="fv-tbl-banner-cell" style="text-align:@_align">
+                                            @_bannerText
+                                        </td>
+                                    </tr>
+                                    continue;
+                                }
                                 <tr class="@(isSeed ? "fv-tbl-seed-row" : "")">
                                     @if (node.Columns is not null)
                                     {

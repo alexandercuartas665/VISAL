@@ -22,6 +22,14 @@ public class NotaMedicaDocumento : TenantEntity
     /// tener que ir nota por nota.</summary>
     public Guid PacienteId { get; set; }
 
+    /// <summary>Historia clinica a la que pertenece el documento (nullable). Se
+    /// setea cuando el archivo se sube desde la pestana "Documentos externos"
+    /// del modal de HC, para agruparlos en la vista "Archivos de esta HC". Los
+    /// documentos legados atados solo a la nota o al paciente conservan null.
+    /// Los documentos con este campo tambien aparecen en la vista global del
+    /// paciente (via PacienteId).</summary>
+    public Guid? HistoriaClinicaId { get; set; }
+
     public string NombreOriginal { get; set; } = "";
 
     /// <summary>Ruta relativa servida por wwwroot (ej. /uploads/notas/{tid}/abc.pdf).</summary>

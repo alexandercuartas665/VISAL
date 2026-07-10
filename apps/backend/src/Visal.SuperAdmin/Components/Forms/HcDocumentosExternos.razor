@@ -1,0 +1,264 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject INotaMedicaService NotaSvc
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+
+@*
+   Documentos externos del paciente/HC. Repositorio central de adjuntos
+   (imagenes, PDFs, docs). Requiere HC cargada. Al subir, el archivo queda
+   atado a la HC actual + al paciente (dos IDs poblados). En la vista se
+   muestran dos agrupadores:
+     1) Archivos de esta HC — subidos aqui o desde otras notas de esta HC.
+     2) Documentos del paciente — todos los del paciente (incluyendo otras HCs).
+*@
+
+@if (HistoriaClinicaId is null || PacienteId is null)
+{
+    <div class="ase-empty hc-dxe-empty">
+        Necesitas una HC iniciada y un paciente para subir documentos externos.
+    </div>
+}
+else
+{
+    <div class="hc-dxe-cab">
+        <div>
+            <h6 class="hc-dxe-h">Documentos externos</h6>
+            <small class="text-muted">Sube archivos y adjuntalos a esta historia clinica. Se veran tambien en el historial del paciente.</small>
+        </div>
+        <div class="hc-dxe-uploader">
+            <label class="btn btn-primary btn-sm hc-dxe-btn" style="@(_subiendo ? "pointer-events:none;opacity:.7" : "")">
+                @(_subiendo ? "Subiendo..." : "+ Subir archivo")
+                <InputFile OnChange="OnFileSelected" class="hc-dxe-file-input"
+                           accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.docx,.xlsx,.pptx" />
+            </label>
+        </div>
+    </div>
+
+    @if (_msg is not null) { <div class="hc-info-msg">@_msg</div> }
+    @if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+    <div class="hc-dxe-cats">
+        <input type="text" class="form-control form-control-sm hc-dxe-cat-input"
+               placeholder="Categoria del proximo archivo (opcional, ej. Consentimiento firmado, Examen laboratorio, etc.)"
+               @bind="_categoria" @bind:event="oninput" />
+        <input type="text" class="form-control form-control-sm hc-dxe-cat-input"
+               placeholder="Notas del proximo archivo (opcional)"
+               @bind="_anotaciones" @bind:event="oninput" />
+    </div>
+
+    <h6 class="hc-dxe-grouper">Archivos de esta HC <span class="hc-dxe-count">@_docsHc.Count</span></h6>
+    @if (_docsHc.Count == 0)
+    {
+        <div class="ase-empty hc-dxe-empty">Aun no hay archivos externos en esta HC. Usa "+ Subir archivo" para agregar el primero.</div>
+    }
+    else
+    {
+        <div class="hc-dxe-grid">
+            @foreach (var d in _docsHc)
+            {
+                @RenderCard(d, esHc: true)
+            }
+        </div>
+    }
+
+    <h6 class="hc-dxe-grouper" style="margin-top:22px;">Documentos del paciente <span class="hc-dxe-count">@_docsPaciente.Count</span></h6>
+    @if (_docsPaciente.Count == 0)
+    {
+        <div class="ase-empty hc-dxe-empty">No hay documentos previos en el historial del paciente.</div>
+    }
+    else
+    {
+        <div class="hc-dxe-grid">
+            @foreach (var d in _docsPaciente)
+            {
+                @RenderCard(d, esHc: false)
+            }
+        </div>
+    }
+}
+
+<style>
+    .hc-dxe-cab { display: flex; justify-content: space-between; align-items: flex-start; padding: 4px 0 12px; gap: 12px; flex-wrap: wrap; }
+    .hc-dxe-h { margin: 0; font-weight: 700; color: #0f172a; font-size: 14px; }
+    .hc-dxe-empty { padding: 20px; text-align: center; color: #64748b; font-style: italic; background: #f8fafc; border-radius: 8px; }
+    .hc-dxe-btn { display: inline-flex; align-items: center; cursor: pointer; }
+    .hc-dxe-file-input { display: none; }
+    .hc-dxe-cats { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .hc-dxe-cat-input { flex: 1 1 260px; max-width: 480px; }
+    .hc-dxe-grouper { font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .04em; margin: 6px 0 8px; }
+    .hc-dxe-count { display: inline-block; background: #e2e8f0; color: #475569; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 4px; font-size: 11px; }
+    .hc-dxe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+    .hc-dxe-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .hc-dxe-card-h { display: flex; align-items: center; gap: 8px; }
+    .hc-dxe-icon { font-size: 22px; }
+    .hc-dxe-thumb { width: 100%; max-height: 100px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0; }
+    .hc-dxe-nombre { font-weight: 700; color: #0f172a; font-size: 13px; word-break: break-word; }
+    .hc-dxe-meta { font-size: 11px; color: #64748b; }
+    .hc-dxe-cat { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #eef2ff; color: #4338ca; text-transform: uppercase; letter-spacing: .04em; align-self: flex-start; }
+    .hc-dxe-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public Guid? PacienteId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private List<NotaDocumentoDto> _docsHc = new();
+    private List<DocumentoPacienteDto> _docsPaciente = new();
+    private bool _subiendo;
+    private string? _msg;
+    private string? _error;
+    private string? _categoria;
+    private string? _anotaciones;
+    private string _ultimoKey = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{HistoriaClinicaId}|{PacienteId}";
+        if (key == _ultimoKey) { return; }
+        _ultimoKey = key;
+        await RecargarAsync();
+    }
+
+    private async Task RecargarAsync()
+    {
+        _msg = _error = null;
+        try
+        {
+            if (HistoriaClinicaId is Guid hid)
+            {
+                _docsHc = (await NotaSvc.ListarDocumentosPorHistoriaAsync(hid)).ToList();
+            }
+            else
+            {
+                _docsHc = new();
+            }
+            if (PacienteId is Guid pid)
+            {
+                _docsPaciente = (await NotaSvc.ListarDocumentosPorPacienteAsync(pid)).ToList();
+            }
+            else
+            {
+                _docsPaciente = new();
+            }
+            if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_docsHc.Count); }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        if (HistoriaClinicaId is not Guid hid || PacienteId is not Guid pid)
+        {
+            _error = "Falta HC o paciente para subir el archivo.";
+            return;
+        }
+        _subiendo = true; _msg = _error = null;
+        try
+        {
+            var f = e.File;
+            var ext = Path.GetExtension(f.Name);
+            var nombreEnDisco = $"{Guid.NewGuid()}{ext}";
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "notas");
+            Directory.CreateDirectory(dir);
+            var rutaDisco = Path.Combine(dir, nombreEnDisco);
+            await using (var fs = File.Create(rutaDisco))
+            await using (var rs = f.OpenReadStream(20L * 1024 * 1024))
+            {
+                await rs.CopyToAsync(fs);
+            }
+            var rutaWeb = $"/uploads/notas/{nombreEnDisco}";
+
+            var dto = await NotaSvc.AdjuntarDocumentoHcAsync(new AdjuntarDocumentoHcRequest(
+                hid, pid, f.Name, rutaWeb, f.ContentType, f.Size,
+                string.IsNullOrWhiteSpace(_categoria) ? null : _categoria,
+                string.IsNullOrWhiteSpace(_anotaciones) ? null : _anotaciones), Guid.Empty);
+            _msg = $"'{dto.NombreOriginal}' subido.";
+            _categoria = ""; _anotaciones = "";
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = "No se pudo subir el archivo: " + ex.Message; }
+        finally { _subiendo = false; }
+    }
+
+    private async Task EliminarAsync(Guid docId, string nombre)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar '{nombre}'? No se puede deshacer.");
+        if (!ok) { return; }
+        try
+        {
+            await NotaSvc.EliminarDocumentoAsync(docId, Guid.Empty);
+            _msg = "Archivo eliminado.";
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private RenderFragment RenderCard(NotaDocumentoDto d, bool esHc) => __builder =>
+    {
+        <div class="hc-dxe-card">
+            @if (EsImagen(d.TipoMime, d.NombreOriginal))
+            {
+                <img class="hc-dxe-thumb" src="@d.RutaArchivo" alt="@d.NombreOriginal" />
+            }
+            else
+            {
+                <div class="hc-dxe-card-h">
+                    <span class="hc-dxe-icon">@IconoPara(d.NombreOriginal)</span>
+                    <span class="text-muted small">@(d.TipoMime ?? "archivo")</span>
+                </div>
+            }
+            <div class="hc-dxe-nombre" title="@d.NombreOriginal">@d.NombreOriginal</div>
+            <div class="hc-dxe-meta">
+                @FormatoTamano(d.Tamano) &middot; @(d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))
+            </div>
+            @if (!string.IsNullOrWhiteSpace(d.Categoria))
+            {
+                <span class="hc-dxe-cat">@d.Categoria</span>
+            }
+            <div class="hc-dxe-acts">
+                <a class="btn btn-outline-primary btn-sm" href="@d.RutaArchivo" target="_blank" rel="noopener">Abrir</a>
+                @if (esHc)
+                {
+                    <button class="btn btn-link btn-sm text-danger" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)" title="Eliminar">&#128465;</button>
+                }
+            </div>
+        </div>
+    };
+
+    // Sobrecarga: la lista global del paciente devuelve DocumentoPacienteDto — reutilizamos el mismo render.
+    private RenderFragment RenderCard(DocumentoPacienteDto d, bool esHc) => __builder =>
+    {
+        var proxy = new NotaDocumentoDto(d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
+            d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt);
+        @RenderCard(proxy, esHc)
+    };
+
+    private static bool EsImagen(string? mime, string nombre)
+    {
+        if (!string.IsNullOrEmpty(mime) && mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        var ext = Path.GetExtension(nombre).ToLowerInvariant();
+        return ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp";
+    }
+
+    private static string IconoPara(string nombre) => Path.GetExtension(nombre).ToLowerInvariant() switch
+    {
+        ".pdf" => "\U0001F4D5",
+        ".doc" or ".docx" => "\U0001F4D8",
+        ".xls" or ".xlsx" => "\U0001F4D7",
+        ".ppt" or ".pptx" => "\U0001F4D9",
+        ".zip" or ".rar" => "\U0001F5DC",
+        ".txt" or ".log" => "\U0001F4C4",
+        _ => "\U0001F4CE"
+    };
+
+    private static string FormatoTamano(long bytes)
+    {
+        if (bytes < 1024) { return bytes + " B"; }
+        double kb = bytes / 1024.0;
+        if (kb < 1024) { return kb.ToString("F1") + " KB"; }
+        double mb = kb / 1024.0;
+        return mb.ToString("F1") + " MB";
+    }
+}

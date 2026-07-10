@@ -17,6 +17,7 @@
 @inject IOrdenExternaService OrdExtSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
+@inject INotaMedicaService NotaSvc
 @inject IFirmaResolverService FirmaResolverSvc
 @inject IPacienteService PacientesSvc
 @inject ICatalogoPacienteService CatPacSvc
@@ -404,6 +405,12 @@
                                               Paciente="@PacienteActivo"
                                               EspecialistaNombre="@_historiaSel?.Especialista"
                                               OnCountChanged="@(c => _atCount = c)" />
+                            }
+                            else if (_tabSel == "Documentos externos")
+                            {
+                                <HcDocumentosExternos HistoriaClinicaId="@_historiaSel?.Id"
+                                                       PacienteId="@PacienteActivo?.Id"
+                                                       OnCountChanged="@(c => _docExtCount = c)" />
                             }
                             else if (_tabSel == "Ordenes medicamento")
                             {
@@ -934,6 +941,7 @@
 
     private readonly string[] _tabs = new[] {
         "Historial", "Escalas", "Evoluciones", "Consentimientos", "Atenciones",
+        "Documentos externos",
         "Ordenes medicamento", "Ordenes servicios",
         "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
         // Ordenes externas por tipo. "Ordenes servicios" arriba ya incluye tanto
@@ -994,6 +1002,7 @@
         "Evoluciones" => ("\U0001F4C8", _evoCount),            // chart up
         "Consentimientos" => ("✅", _conCount),            // check mark
         "Atenciones" => ("\U0001FA7A", _atCount),              // stethoscope
+        "Documentos externos" => ("\U0001F4CE", _docExtCount), // paperclip
         "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
         "Ordenes servicios" => ("\U0001F3E5", _servCount), // hospital
         "Insumos" => ("\U0001F4E6", _insCount),                // box
@@ -1070,6 +1079,8 @@
     private int _conCount;
     /// <summary>Conteo de atenciones diligenciadas para badge en la pestana "Atenciones".</summary>
     private int _atCount;
+    /// <summary>Conteo de documentos externos (con HistoriaClinicaId directo) para badge de la pestana "Documentos externos".</summary>
+    private int _docExtCount;
 
     // =================== AUTOGUARDADO HC HISTORIAL ===================
     /// <summary>Estado visible del autoguardado: limpio | sucio | guardando | guardado | error.</summary>
@@ -1449,6 +1460,7 @@
         _evoCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
         _conCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
         _atCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "ATENCION");
+        _docExtCount = (await NotaSvc.ListarDocumentosPorHistoriaAsync(h.Id)).Count;
         // Ordenes externas (RX / Lab / Insumos externos): el servicio no tiene
         // ContarPorHistoria por tipo, listamos y contamos — es una sola query
         // COUNT por cada tipo, mismo costo.

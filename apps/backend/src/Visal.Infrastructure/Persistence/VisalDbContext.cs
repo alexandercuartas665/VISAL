@@ -808,6 +808,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.NotaMedicaId });
             // Indice por paciente para que el tab "Documentos" de Admision liste rapido.
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
+            // Indice por historia clinica para la pestana "Documentos externos" del HC.
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
         });
 
         modelBuilder.Entity<FirmaPacienteRequest>(b =>

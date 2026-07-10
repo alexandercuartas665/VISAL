@@ -306,6 +306,50 @@ public sealed class NotaMedicaService(
             entity.Anotaciones, entity.CreatedAt);
     }
 
+    public async Task<IReadOnlyList<NotaDocumentoDto>> ListarDocumentosPorHistoriaAsync(
+        Guid historiaId, CancellationToken ct = default)
+    {
+        return await db.NotaMedicaDocumentos.AsNoTracking()
+            .Where(d => d.HistoriaClinicaId == historiaId)
+            .OrderByDescending(d => d.CreatedAt)
+            .Select(d => new NotaDocumentoDto(
+                d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
+                d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
+                d.Anotaciones, d.CreatedAt))
+            .ToListAsync(ct);
+    }
+
+    public async Task<NotaDocumentoDto> AdjuntarDocumentoHcAsync(
+        AdjuntarDocumentoHcRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        // Valida que la HC exista y pertenezca al paciente. La validacion cruzada
+        // evita que un actor con acceso al tenant pueda enlazar un documento a una
+        // HC de otro paciente pasando IDs arbitrarios.
+        var hcExiste = await db.HistoriasClinicas.AsNoTracking()
+            .AnyAsync(h => h.Id == req.HistoriaClinicaId && h.PacienteId == req.PacienteId, ct);
+        if (!hcExiste) { throw new InvalidOperationException("Historia clinica no encontrada o no coincide con el paciente."); }
+        var entity = new NotaMedicaDocumento
+        {
+            TenantId = tid,
+            NotaMedicaId = null,
+            HistoriaClinicaId = req.HistoriaClinicaId,
+            PacienteId = req.PacienteId,
+            NombreOriginal = req.NombreOriginal,
+            RutaArchivo = req.RutaArchivo,
+            TipoMime = req.TipoMime,
+            Tamano = req.Tamano,
+            Categoria = req.Categoria,
+            Anotaciones = req.Anotaciones
+        };
+        db.NotaMedicaDocumentos.Add(entity);
+        await db.SaveChangesAsync(ct);
+        return new NotaDocumentoDto(
+            entity.Id, entity.NotaMedicaId, entity.NombreOriginal, entity.RutaArchivo,
+            entity.TipoMime, entity.Tamano, entity.Categoria, entity.TipoTerapia, entity.Mes,
+            entity.Anotaciones, entity.CreatedAt);
+    }
+
     public async Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actor, CancellationToken ct = default)
     {
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);

@@ -91,6 +91,22 @@ public sealed record AdjuntarDocumentoRequest(
     string? Anotaciones);
 
 /// <summary>
+/// Request para subir un documento externo asociado directamente a una HC
+/// (sin nota medica de por medio). Usado por la pestana "Documentos externos"
+/// del modal de HC. El documento queda ligado a HistoriaClinicaId + PacienteId
+/// para aparecer en ambas vistas: "Archivos de esta HC" y "Documentos del paciente".
+/// </summary>
+public sealed record AdjuntarDocumentoHcRequest(
+    Guid HistoriaClinicaId,
+    Guid PacienteId,
+    string NombreOriginal,
+    string RutaArchivo,
+    string? TipoMime,
+    long Tamano,
+    string? Categoria,
+    string? Anotaciones);
+
+/// <summary>
 /// Resultado de la validacion previa antes de abrir el modulo de notas.
 /// Ok=false significa que el profesional debe primero crear / renovar la HC
 /// del paciente para el formato que pide el servicio. HistoriaId es el id
@@ -146,6 +162,15 @@ public interface INotaMedicaService
 
     Task<NotaDocumentoDto> AdjuntarDocumentoAsync(
         AdjuntarDocumentoRequest req, Guid actorUserId, CancellationToken ct = default);
+
+    /// <summary>Documentos externos atados directamente a una HC (via HistoriaClinicaId
+    /// no null). Los subidos desde la pestana "Documentos externos" del modal de HC.</summary>
+    Task<IReadOnlyList<NotaDocumentoDto>> ListarDocumentosPorHistoriaAsync(
+        Guid historiaId, CancellationToken ct = default);
+
+    /// <summary>Sube un documento externo asociado a la HC + paciente. No requiere nota.</summary>
+    Task<NotaDocumentoDto> AdjuntarDocumentoHcAsync(
+        AdjuntarDocumentoHcRequest req, Guid actorUserId, CancellationToken ct = default);
 
     Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actorUserId, CancellationToken ct = default);
 }

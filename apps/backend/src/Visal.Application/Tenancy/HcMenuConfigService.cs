@@ -62,7 +62,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
     {
         return await db.HcPestanaAliases.AsNoTracking()
             .OrderBy(x => x.PestanaKey)
-            .Select(x => new HcPestanaAliasDto(x.PestanaKey, x.Alias))
+            .Select(x => new HcPestanaAliasDto(x.PestanaKey, x.Alias, x.Orden))
             .ToListAsync(ct);
     }
 
@@ -75,6 +75,15 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
         return rows.ToDictionary(r => r.PestanaKey, r => r.Alias!, StringComparer.OrdinalIgnoreCase);
     }
 
+    public async Task<Dictionary<string, int>> ObtenerOrdenesAsync(CancellationToken ct = default)
+    {
+        var rows = await db.HcPestanaAliases.AsNoTracking()
+            .Where(x => x.Orden != null)
+            .Select(x => new { x.PestanaKey, x.Orden })
+            .ToListAsync(ct);
+        return rows.ToDictionary(r => r.PestanaKey, r => r.Orden!.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
     public async Task SaveAliasAsync(string pestanaKey, string? alias, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
@@ -82,17 +91,36 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
         if (string.IsNullOrEmpty(p)) { return; }
         var trimmed = alias?.Trim();
         var row = await db.HcPestanaAliases.FirstOrDefaultAsync(x => x.PestanaKey == p, ct);
-        if (string.IsNullOrEmpty(trimmed))
-        {
-            // Vacio -> vuelve al nombre por defecto: borrar la fila.
-            if (row is not null) { db.HcPestanaAliases.Remove(row); await db.SaveChangesAsync(ct); }
-            return;
-        }
         if (row is null)
         {
+            if (string.IsNullOrEmpty(trimmed)) { return; }
             db.HcPestanaAliases.Add(new HcPestanaAlias { TenantId = tid, PestanaKey = p, Alias = trimmed });
         }
-        else { row.Alias = trimmed; }
+        else
+        {
+            row.Alias = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+            // Si la fila queda sin alias Y sin orden, la borramos para no ensuciar la tabla.
+            if (row.Alias is null && row.Orden is null) { db.HcPestanaAliases.Remove(row); }
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveOrdenAsync(string pestanaKey, int? orden, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        var p = NormPestana(pestanaKey);
+        if (string.IsNullOrEmpty(p)) { return; }
+        var row = await db.HcPestanaAliases.FirstOrDefaultAsync(x => x.PestanaKey == p, ct);
+        if (row is null)
+        {
+            if (orden is null) { return; }
+            db.HcPestanaAliases.Add(new HcPestanaAlias { TenantId = tid, PestanaKey = p, Orden = orden });
+        }
+        else
+        {
+            row.Orden = orden;
+            if (row.Alias is null && row.Orden is null) { db.HcPestanaAliases.Remove(row); }
+        }
         await db.SaveChangesAsync(ct);
     }
 }

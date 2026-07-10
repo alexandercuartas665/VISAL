@@ -86,6 +86,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
     public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
     public DbSet<HcPestanaAlias> HcPestanaAliases => Set<HcPestanaAlias>();
+    public DbSet<AtencionColumnaConfig> AtencionColumnaConfigs => Set<AtencionColumnaConfig>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -828,6 +829,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.PestanaKey).HasMaxLength(80).IsRequired();
             b.Property(x => x.Alias).HasMaxLength(80);
             b.HasIndex(x => new { x.TenantId, x.PestanaKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<AtencionColumnaConfig>(b =>
+        {
+            b.Property(x => x.ColumnaKey).HasMaxLength(60).IsRequired();
+            b.Property(x => x.Alias).HasMaxLength(80);
+            b.HasIndex(x => new { x.TenantId, x.ColumnaKey }).IsUnique();
         });
 
         modelBuilder.Entity<CatalogoTipoServicio>(b =>

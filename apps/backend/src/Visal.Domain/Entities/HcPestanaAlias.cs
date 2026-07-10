@@ -21,4 +21,9 @@ public class HcPestanaAlias : TenantEntity
     /// <summary>Etiqueta que la UI muestra al usuario. Si esta vacia o null
     /// se cae al nombre por defecto de la pestana.</summary>
     public string? Alias { get; set; }
+
+    /// <summary>Posicion de la pestana en el menu lateral (menor primero).
+    /// Cuando es null la UI usa el orden hardcodeado del array _tabs de
+    /// HistoriasClinicasModulo.razor. Un valor override gana sobre ese default.</summary>
+    public int? Orden { get; set; }
 }

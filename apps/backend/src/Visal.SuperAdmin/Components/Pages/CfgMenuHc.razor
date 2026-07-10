@@ -31,6 +31,7 @@
             <table class="table table-sm align-middle cfg-menu-hc-tabla">
                 <thead>
                     <tr>
+                        <th style="width:80px" class="text-center">Orden</th>
                         <th style="min-width: 200px">Pestana</th>
                         <th style="width: 240px">Alias <small class="text-muted fw-normal">(nombre a mostrar)</small></th>
                         @foreach (var t in _tiposServicio)
@@ -42,15 +43,23 @@
                 <tbody>
                     @if (_tiposServicio.Count == 0)
                     {
-                        <tr><td colspan="2" style="padding:24px;text-align:center;color:#64748b;">
+                        <tr><td colspan="3" style="padding:24px;text-align:center;color:#64748b;">
                             No hay tipos de servicio configurados. Crealos en
                             <a href="/config/tipos-servicio">Configuracion del Sistema &rarr; Tipos de servicio</a>.
                         </td></tr>
                     }
-                    @foreach (var p in _pestanas)
+                    @foreach (var (p, idxDefault) in _pestanasOrdenadas)
                     {
                         var alias = _aliases.TryGetValue(p, out var a) ? a : "";
+                        var ordenActual = _ordenes.TryGetValue(p, out var o) ? o.ToString() : "";
                         <tr>
+                            <td class="text-center">
+                                <input class="form-control form-control-sm text-center" type="number"
+                                       value="@ordenActual"
+                                       placeholder="@idxDefault"
+                                       style="width:64px;margin:0 auto;"
+                                       @onchange="e => SaveOrden(p, (string?)e.Value)" />
+                            </td>
                             <td><strong>@p</strong></td>
                             <td>
                                 <input class="form-control form-control-sm cfg-menu-hc-alias"
@@ -98,8 +107,19 @@
 
     private HashSet<string> _ocultos = new(); // "TIPO|PESTANA"
     private Dictionary<string, string> _aliases = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, int> _ordenes = new(StringComparer.OrdinalIgnoreCase);
     private string? _msg;
     private string? _error;
+
+    /// <summary>Pestanas ordenadas por: (Orden configurado ASC) luego (indice default
+    /// del array _pestanas ASC como tie-breaker). El segundo componente idxDefault se
+    /// pasa al input como placeholder para que el admin sepa el orden implicito
+    /// cuando no ha configurado nada.</summary>
+    private IEnumerable<(string Pestana, int IdxDefault)> _pestanasOrdenadas =>
+        _pestanas
+            .Select((p, i) => (Pestana: p, IdxDefault: i + 1))
+            .OrderBy(x => _ordenes.TryGetValue(x.Pestana, out var o) ? o : x.IdxDefault)
+            .ThenBy(x => x.IdxDefault);
 
     protected override async Task OnInitializedAsync() => await CargarAsync();
 
@@ -113,6 +133,23 @@
                 rows.Where(r => !r.Visible).Select(r => $"{r.TipoServicio}|{r.PestanaKey}"),
                 StringComparer.OrdinalIgnoreCase);
             _aliases = await Svc.ObtenerAliasesAsync();
+            _ordenes = await Svc.ObtenerOrdenesAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task SaveOrden(string pestana, string? value)
+    {
+        _msg = _error = null;
+        try
+        {
+            int? orden = null;
+            if (!string.IsNullOrWhiteSpace(value) && int.TryParse(value.Trim(), out var n)) { orden = n; }
+            await Svc.SaveOrdenAsync(pestana, orden);
+            if (orden is int o) { _ordenes[pestana] = o; } else { _ordenes.Remove(pestana); }
+            _msg = orden is null
+                ? $"Orden de '{pestana}' restablecido al default."
+                : $"Orden de '{pestana}' = {orden}.";
         }
         catch (Exception ex) { _error = ex.Message; }
     }

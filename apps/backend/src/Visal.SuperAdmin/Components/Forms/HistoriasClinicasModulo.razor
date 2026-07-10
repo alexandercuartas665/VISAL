@@ -289,7 +289,7 @@
                     @if (_menuColapsado) { <span>&raquo;</span> } else { <span>&laquo;</span> <span class="hc-side-toggle-lbl">Menu</span> }
                 </button>
                 <nav class="hc-side-nav">
-                    @foreach (var t in _tabs.Where(x => !_pestanasOcultas.Contains(x)))
+                    @foreach (var t in TabsOrdenadas())
                     {
                         var (icono, badge) = IconoYBadge(t);
                         var etiqueta = EtiquetaTab(t);
@@ -1065,6 +1065,22 @@
     /// servicios inyecta nombre de agencia) > clave por defecto.</summary>
     private Dictionary<string, string> _aliasesPestanas = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Orden explicito por pestana. Cuando una pestana no aparece aca
+    /// usa su posicion en el array _tabs como fallback.</summary>
+    private Dictionary<string, int> _ordenesPestanas = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Pestanas visibles ordenadas por (Orden configurado ASC, indice
+    /// original ASC). Se aplica al menu lateral del modal HC.</summary>
+    private IEnumerable<string> TabsOrdenadas()
+    {
+        return _tabs
+            .Select((tab, idx) => (tab, idx))
+            .Where(x => !_pestanasOcultas.Contains(x.tab))
+            .OrderBy(x => _ordenesPestanas.TryGetValue(x.tab, out var o) ? o : x.idx + 1)
+            .ThenBy(x => x.idx)
+            .Select(x => x.tab);
+    }
+
     private string EtiquetaTab(string tab)
     {
         // El alias configurado gana siempre — el admin lo puso a mano.
@@ -1336,6 +1352,8 @@
         catch { _pestanasOcultas = new(StringComparer.OrdinalIgnoreCase); }
         try { _aliasesPestanas = await MenuHcSvc.ObtenerAliasesAsync(); }
         catch { _aliasesPestanas = new(StringComparer.OrdinalIgnoreCase); }
+        try { _ordenesPestanas = await MenuHcSvc.ObtenerOrdenesAsync(); }
+        catch { _ordenesPestanas = new(StringComparer.OrdinalIgnoreCase); }
         // Si la pestana seleccionada quedo oculta por config, saltamos a Historial.
         if (_pestanasOcultas.Contains(_tabSel)) { _tabSel = "Historial"; }
     }

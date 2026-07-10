@@ -8,6 +8,8 @@
 @inject IAsignacionService AsigSvc
 @inject IHistoriaClinicaService HcSvc
 @inject INotaMedicaService NotaSvc
+@inject IAtencionColumnaConfigService ColSvc
+@inject IJSRuntime JS
 
 <PageTitle>Mis Servicios Asignados - Visal</PageTitle>
 
@@ -52,7 +54,15 @@ else
             <label class="ase-chk"><input type="checkbox" @bind="_mostrarVencidas" @bind:after="Cargar" /> <span>Mostrar notas vencidas</span></label>
         </div>
 
-        <div class="at-grid-h">MIS SERVICIOS ASIGNADOS (@_visibles.Count)</div>
+        <div class="at-grid-h">
+            <span>MIS SERVICIOS ASIGNADOS (@_visibles.Count)</span>
+            @if (_esAdmin)
+            {
+                <button class="btn btn-outline-secondary btn-sm at-cfg-btn" @onclick="AbrirConfigColumnas" title="Configurar columnas (visibles, orden, alias)">
+                    &#9881; Columnas
+                </button>
+            }
+        </div>
         <div class="at-grid-wrap">
             @if (_visibles.Count == 0)
             {
@@ -63,54 +73,78 @@ else
                 <table class="table table-sm at-tbl">
                     <thead>
                         <tr>
-                            <th></th>
-                            <th>Historia Medica</th>
-                            <th>Notas</th>
-                            <th>CodInt</th>
-                            <th>CodAsig</th>
-                            <th>FechaAsig</th>
-                            <th>Orden</th>
-                            <th>Tipo</th>
-                            <th>SessionNo</th>
-                            <th>Completado</th>
-                            <th>TipoDocPac</th>
-                            <th>NoDocPac</th>
-                            <th>NomPaciente</th>
-                            <th>FecNota</th>
+                            @foreach (var col in _columnasVisibles)
+                            {
+                                <th>@((MarkupString)col.Titulo)</th>
+                            }
                         </tr>
                     </thead>
                     <tbody>
                         @foreach (var s in _visibles)
                         {
                             <tr class="@(s.Completado ? "at-row-done" : "")">
-                                <td><input type="checkbox" disabled="@s.Completado" /></td>
-                                <td>
-                                    <button class="btn btn-outline-secondary btn-sm" title="Abrir Historias Clinicas del paciente"
-                                            @onclick="() => AbrirHistoria(s)">&#9998;</button>
-                                </td>
-                                <td>
-                                    <button class="btn btn-outline-primary btn-sm" title="Abrir Notas Medicas (registrar atencion)"
-                                            @onclick="() => AbrirNotas(s)" disabled="@s.Completado">&#9998;</button>
-                                </td>
-                                <td class="mono">@s.CodigoAsignacionInterna</td>
-                                <td class="mono">@s.CodigoAutorizacion</td>
-                                <td>@s.FechaAsignacion.ToString("dd/MM/yyyy")</td>
-                                <td class="text-center">@s.Orden</td>
-                                <td>@s.TipoServicio</td>
-                                <td class="text-center">@s.SessionNo</td>
-                                <td>
-                                    @if (s.Completado) { <span class="at-pill-done">COMPLETO</span> }
-                                    else { <span class="at-pill-no">NO</span> }
-                                </td>
-                                <td class="mono">@s.TipoDocPaciente</td>
-                                <td class="mono">@s.NumeroDocPaciente</td>
-                                <td>@s.NombrePaciente</td>
-                                <td>@(s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "")</td>
+                                @foreach (var col in _columnasVisibles)
+                                {
+                                    @RenderCelda(col.Key, s)
+                                }
                             </tr>
                         }
                     </tbody>
                 </table>
             }
+        </div>
+    </div>
+}
+
+@* ===== Modal: Configurar columnas de la tabla ===== *@
+@if (_showConfigCols)
+{
+    <div class="usu-modal-backdrop" @onclick="CerrarConfigColumnas"></div>
+    <div class="usu-modal">
+        <div class="usu-modal-h">
+            <h3>Configurar columnas</h3>
+            <button class="usu-modal-close" @onclick="CerrarConfigColumnas">&times;</button>
+        </div>
+        <div class="usu-modal-body">
+            <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
+                Aplica a todos los usuarios del tenant. Deja Alias vacio para usar el titulo por defecto,
+                y Orden vacio para dejar el orden por defecto. Deja Visible desmarcado para ocultarla.
+            </p>
+            <table class="table table-sm at-cfg-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:60px;">Visible</th>
+                        <th>Columna</th>
+                        <th style="width:180px;">Alias (opcional)</th>
+                        <th style="width:100px;">Orden</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (var i = 0; i < _cfgEdicion.Count; i++)
+                    {
+                        var idx = i;
+                        var row = _cfgEdicion[idx];
+                        <tr>
+                            <td class="text-center">
+                                <input type="checkbox" @bind="row.Visible" />
+                            </td>
+                            <td>@row.TituloDefault</td>
+                            <td>
+                                <input type="text" class="form-control form-control-sm" @bind="row.Alias" placeholder="@row.TituloDefault" />
+                            </td>
+                            <td>
+                                <input type="number" class="form-control form-control-sm" @bind="row.Orden" min="1" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="usu-modal-f">
+            <button class="btn btn-outline-secondary" @onclick="CerrarConfigColumnas">Cancelar</button>
+            <button class="btn btn-primary" @onclick="GuardarConfigColumnas" disabled="@_cfgGuardando">
+                @(_cfgGuardando ? "Guardando..." : "Guardar")
+            </button>
         </div>
     </div>
 }
@@ -146,7 +180,7 @@ else
     <div class="at-fs-modal">
         <div class="at-fs-h">
             <div>
-                <h3>Notas Medicas - Sesion @sel.SessionNo / @sel.CantidadTotal</h3>
+                <h3>Notas Medicas - Sesion @sel.NumeroSesionMostrar / @sel.TotalSesionesAsignacion</h3>
                 <small>@sel.NombrePaciente - @sel.TipoDocPaciente @sel.NumeroDocPaciente - @sel.NombreServicio</small>
             </div>
             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarNotas">&#10006; Cerrar</button>
@@ -221,11 +255,13 @@ else
     .at-filtros .ase-f-wide { grid-column: span 2; }
     .at-filtros label { font-size: 11px; color: #475569; font-weight: 600; text-transform: uppercase; }
     .ase-chk { display: inline-flex; align-items: center; gap: 6px; padding: 6px 0; font-size: 13px; }
-    .at-grid-h { padding: 12px 14px; font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid #e2e8f0; background: #f1f5f9; }
+    .at-grid-h { padding: 10px 14px; font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid #e2e8f0; background: #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
+    .at-cfg-btn { text-transform: none; font-weight: 600; letter-spacing: 0; }
     .at-grid-wrap { overflow: auto; background: #fff; max-height: 600px; }
     .at-tbl { margin: 0; font-size: 12px; min-width: 100%; }
-    .at-tbl thead th { position: sticky; top: 0; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 700; border-bottom: 1px solid #cbd5e1; white-space: nowrap; padding: 8px 10px; }
+    .at-tbl thead th { position: sticky; top: 0; z-index: 3; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 700; border-bottom: 1px solid #cbd5e1; white-space: nowrap; padding: 8px 10px; text-align: center; line-height: 1.15; }
     .at-tbl td { vertical-align: middle; padding: 8px 10px; }
+    .at-cfg-tbl input[type="text"], .at-cfg-tbl input[type="number"] { font-size: 12px; padding: 4px 6px; }
     .at-row-done { opacity: 0.6; background: #f8fafc; }
     .at-pill-done { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .at-pill-no { background: #fef3c7; color: #92400e; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
@@ -270,7 +306,7 @@ else
         .at-fs-body-with-chat.wa-colapsado { grid-template-columns: minmax(0, 1fr) 44px 360px; }
     }
     .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
-    .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
+    .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
     .usu-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
     .usu-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
     .usu-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
@@ -352,7 +388,15 @@ else
             // profesional. Lo usamos para distinguir "no vinculado" de
             // "vinculado sin turnos" cuando _todos.Count == 0.
             _tieneProfesionalVinculado = !string.IsNullOrEmpty(st.User.FindFirst("profesional_id")?.Value);
+            // Admin: Owner o rol Administrador. Solo admin ve el boton "Columnas".
+            var rol = st.User.FindFirst(ClaimTypes.Role)?.Value ?? "";
+            var tenantRole = st.User.FindFirst("tenant_role")?.Value ?? "";
+            _esAdmin = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(rol, "Administrador", StringComparison.OrdinalIgnoreCase);
             _todos = (await Svc.GetMisServiciosAsync(puId, incluirCompletados: _mostrarVencidas)).ToList();
+            // Config de columnas (overrides del tenant). Nulos = usar default.
+            try { _configColumnas = (await ColSvc.ListarAsync()).ToList(); }
+            catch { _configColumnas = new(); }
             // Llenar header con el primer registro (todos comparten profesional).
             if (_todos.Count > 0)
             {
@@ -412,4 +456,225 @@ else
     }
 
     private void CerrarHistoria() { _showHistoriaSel = null; _pacienteCtx = null; }
+
+    // ===== Config de columnas de la tabla MIS SERVICIOS ASIGNADOS =====
+    // Nivel tenant: el admin decide que columnas se ven, con que alias y en que orden.
+    // Cada usuario del tenant ve exactamente la misma configuracion.
+
+    private bool _esAdmin;
+
+    /// <summary>
+    /// Config default de columnas. El orden aqui es el orden por defecto.
+    /// El "TituloHtml" permite forzar saltos de linea (por ejemplo "HISTORIA
+    /// MEDICA" en 2 lineas para que la columna sea mas angosta).
+    /// </summary>
+    private sealed record ColDef(string Key, string TituloDefault, string TituloHtml, int OrdenDefault);
+    private static readonly ColDef[] _columnasDefault = new[]
+    {
+        new ColDef("chk",           "",                "",                                       1),
+        new ColDef("historia",      "Historia Medica", "Historia<br/>Medica",                     2),
+        new ColDef("notas",         "Notas",           "Notas",                                   3),
+        new ColDef("cod_int",       "CodInt",          "CodInt",                                  4),
+        new ColDef("cod_asig",      "CodAsig",         "CodAsig",                                 5),
+        new ColDef("fec_asig",      "FechaAsig",       "Fecha<br/>Asig",                          6),
+        new ColDef("orden",         "Orden",           "Orden",                                   7),
+        new ColDef("tipo",          "Tipo",            "Tipo",                                    8),
+        new ColDef("session_no",    "SessionNo",       "Sesion",                                  9),
+        new ColDef("completado",    "Completado",     "Completado",                              10),
+        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        11),
+        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                12),
+        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                13),
+        new ColDef("profesional",   "Profesional",     "Profesional",                             14),
+        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          15),
+    };
+
+    private List<AtencionColumnaConfigDto> _configColumnas = new();
+
+    /// <summary>Columnas visibles ya mezcladas con overrides y ordenadas.</summary>
+    private IReadOnlyList<(string Key, string Titulo)> _columnasVisibles
+    {
+        get
+        {
+            var cfgDict = _configColumnas.ToDictionary(c => c.ColumnaKey, c => c);
+            var items = _columnasDefault.Select(d =>
+            {
+                cfgDict.TryGetValue(d.Key, out var ov);
+                var visible = ov?.Visible ?? true;
+                var titulo = string.IsNullOrWhiteSpace(ov?.Alias) ? d.TituloHtml : System.Net.WebUtility.HtmlEncode(ov!.Alias!);
+                var orden = ov?.Orden ?? d.OrdenDefault;
+                return new { d.Key, Titulo = titulo, Visible = visible, Orden = orden };
+            });
+            return items.Where(x => x.Visible).OrderBy(x => x.Orden).Select(x => (x.Key, x.Titulo)).ToList();
+        }
+    }
+
+    /// <summary>Render de la celda de la fila segun el key de la columna.</summary>
+    private RenderFragment RenderCelda(string key, MiServicioAsignadoDto s) => __b =>
+    {
+        var seq = 0;
+        switch (key)
+        {
+            case "chk":
+                __b.OpenElement(seq++, "td");
+                __b.OpenElement(seq++, "input");
+                __b.AddAttribute(seq++, "type", "checkbox");
+                __b.AddAttribute(seq++, "disabled", s.Completado);
+                __b.CloseElement();
+                __b.CloseElement();
+                break;
+            case "historia":
+                __b.OpenElement(seq++, "td");
+                __b.OpenElement(seq++, "button");
+                __b.AddAttribute(seq++, "class", "btn btn-outline-secondary btn-sm");
+                __b.AddAttribute(seq++, "title", "Abrir Historias Clinicas del paciente");
+                __b.AddAttribute(seq++, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => AbrirHistoria(s)));
+                __b.AddMarkupContent(seq++, "&#9998;");
+                __b.CloseElement();
+                __b.CloseElement();
+                break;
+            case "notas":
+                __b.OpenElement(seq++, "td");
+                __b.OpenElement(seq++, "button");
+                __b.AddAttribute(seq++, "class", "btn btn-outline-primary btn-sm");
+                __b.AddAttribute(seq++, "title", "Abrir Notas Medicas (registrar atencion)");
+                __b.AddAttribute(seq++, "disabled", s.Completado);
+                __b.AddAttribute(seq++, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => AbrirNotas(s)));
+                __b.AddMarkupContent(seq++, "&#9998;");
+                __b.CloseElement();
+                __b.CloseElement();
+                break;
+            case "cod_int":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, s.CodigoAsignacionInterna);
+                __b.CloseElement();
+                break;
+            case "cod_asig":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, s.CodigoAutorizacion);
+                __b.CloseElement();
+                break;
+            case "fec_asig":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.FechaAsignacion.ToString("dd/MM/yyyy"));
+                __b.CloseElement();
+                break;
+            case "orden":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "text-center");
+                __b.AddContent(seq++, s.Orden);
+                __b.CloseElement();
+                break;
+            case "tipo":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.TipoServicio);
+                __b.CloseElement();
+                break;
+            case "session_no":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "text-center");
+                __b.AddContent(seq++, s.NumeroSesionMostrar);
+                __b.CloseElement();
+                break;
+            case "completado":
+                __b.OpenElement(seq++, "td");
+                __b.OpenElement(seq++, "span");
+                __b.AddAttribute(seq++, "class", s.Completado ? "at-pill-done" : "at-pill-no");
+                __b.AddContent(seq++, s.Completado ? "COMPLETO" : "NO");
+                __b.CloseElement();
+                __b.CloseElement();
+                break;
+            case "tipo_doc_pac":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, s.TipoDocPaciente);
+                __b.CloseElement();
+                break;
+            case "no_doc_pac":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, s.NumeroDocPaciente);
+                __b.CloseElement();
+                break;
+            case "nom_paciente":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.NombrePaciente);
+                __b.CloseElement();
+                break;
+            case "profesional":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.NombreProfesional);
+                __b.CloseElement();
+                break;
+            case "fec_nota":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "");
+                __b.CloseElement();
+                break;
+            default:
+                __b.OpenElement(seq++, "td");
+                __b.CloseElement();
+                break;
+        }
+    };
+
+    // ===== Modal configurar columnas =====
+
+    private bool _showConfigCols;
+    private bool _cfgGuardando;
+
+    private sealed class CfgFila
+    {
+        public string Key { get; set; } = "";
+        public string TituloDefault { get; set; } = "";
+        public bool Visible { get; set; } = true;
+        public string? Alias { get; set; }
+        public int? Orden { get; set; }
+    }
+    private List<CfgFila> _cfgEdicion = new();
+
+    private void AbrirConfigColumnas()
+    {
+        var cfgDict = _configColumnas.ToDictionary(c => c.ColumnaKey, c => c);
+        _cfgEdicion = _columnasDefault.Select(d =>
+        {
+            cfgDict.TryGetValue(d.Key, out var ov);
+            return new CfgFila
+            {
+                Key = d.Key,
+                TituloDefault = d.TituloDefault,
+                Visible = ov?.Visible ?? true,
+                Alias = ov?.Alias,
+                Orden = ov?.Orden ?? d.OrdenDefault
+            };
+        }).OrderBy(x => x.Orden ?? int.MaxValue).ToList();
+        _showConfigCols = true;
+    }
+
+    private void CerrarConfigColumnas()
+    {
+        _showConfigCols = false;
+    }
+
+    private async Task GuardarConfigColumnas()
+    {
+        if (_cfgGuardando) { return; }
+        _cfgGuardando = true;
+        try
+        {
+            var reqs = _cfgEdicion.Select(f => new GuardarAtencionColumnaRequest(
+                f.Key,
+                f.Visible,
+                string.IsNullOrWhiteSpace(f.Alias) ? null : f.Alias.Trim(),
+                f.Orden)).ToList();
+            await ColSvc.GuardarLoteAsync(reqs);
+            // Recargar overrides para que _columnasVisibles refleje inmediato.
+            _configColumnas = (await ColSvc.ListarAsync()).ToList();
+            _showConfigCols = false;
+            _ok = "Configuracion guardada.";
+        }
+        catch (Exception ex) { _error = "Error guardando columnas: " + ex.Message; }
+        finally { _cfgGuardando = false; }
+    }
 }

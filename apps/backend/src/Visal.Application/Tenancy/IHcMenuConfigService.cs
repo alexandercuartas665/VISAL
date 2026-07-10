@@ -2,8 +2,8 @@ namespace Visal.Application.Tenancy;
 
 public sealed record HcMenuConfigDto(string TipoServicio, string PestanaKey, bool Visible);
 
-/// <summary>Alias personalizado que un tenant le pone a una pestana del menu HC.</summary>
-public sealed record HcPestanaAliasDto(string PestanaKey, string? Alias);
+/// <summary>Alias + orden personalizado que un tenant le pone a una pestana del menu HC.</summary>
+public sealed record HcPestanaAliasDto(string PestanaKey, string? Alias, int? Orden);
 
 /// <summary>
 /// Gestiona la visibilidad de pestanas del modal HC por TipoServicio.
@@ -33,4 +33,12 @@ public interface IHcMenuConfigService
     /// <summary>Guarda el alias de una pestana. Si el alias es null o solo espacios,
     /// borra la fila (la UI vuelve al nombre por defecto).</summary>
     Task SaveAliasAsync(string pestanaKey, string? alias, CancellationToken ct = default);
+
+    /// <summary>Diccionario PestanaKey -> Orden para lookup rapido al renderizar.
+    /// Solo incluye pestanas con orden definido; el resto usa el orden por defecto.</summary>
+    Task<Dictionary<string, int>> ObtenerOrdenesAsync(CancellationToken ct = default);
+
+    /// <summary>Guarda el orden de una pestana. Null borra el override (la UI vuelve
+    /// al orden por defecto). Si la pestana no tenia fila (sin alias) la crea vacia.</summary>
+    Task SaveOrdenAsync(string pestanaKey, int? orden, CancellationToken ct = default);
 }

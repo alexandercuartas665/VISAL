@@ -76,6 +76,7 @@ public interface IApplicationDbContext
     DbSet<NotaMedicaDocumento> NotaMedicaDocumentos { get; }
     DbSet<HcMenuConfig> HcMenuConfigs { get; }
     DbSet<HcPestanaAlias> HcPestanaAliases { get; }
+    DbSet<AtencionColumnaConfig> AtencionColumnaConfigs { get; }
     DbSet<CatalogoTipoServicio> CatalogosTipoServicio { get; }
     DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados { get; }
     DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }

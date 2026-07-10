@@ -7,6 +7,9 @@ namespace Visal.Application.Tenancy;
 /// </summary>
 public sealed record MiServicioAsignadoDto(
     Guid AsignacionTurnoId, Guid AsignacionId,
+    // SessionNo interno del turno (siempre 1..Cantidad). Se usa como clave para
+    // guardar la sesion en AsignacionTurnoSesion — NO cambiar. Con el diseno
+    // actual (task #147) cada turno tiene Cantidad=1 asi que SessionNo=1 siempre.
     int SessionNo, int CantidadTotal,
     string TipoServicio, string NombreServicio, string CodigoAsignacionInterna, string CodigoAutorizacion,
     DateOnly FechaAsignacion, int Orden,
@@ -16,7 +19,16 @@ public sealed record MiServicioAsignadoDto(
     // configuro para este servicio - viaja desde ServicioContrato.Historia ->
     // Asignacion.FormatoHistoria. El profesional NO lo elige: lo usamos para
     // forzar el formato al iniciar la HC desde /atencion.
-    string? FormatoHistoria = null);
+    string? FormatoHistoria = null,
+    // Numero de sesion GLOBAL por asignacion (1..N). Solo para mostrar en la UI:
+    // si una asignacion tiene 3 turnos, sus filas se ven como 1, 2, 3 aunque el
+    // SessionNo interno de cada turno sea 1. Se calcula ordenando turnos por
+    // CreatedAt asc y sumando Cantidad acumulada.
+    int NumeroSesionMostrar = 1,
+    int TotalSesionesAsignacion = 1,
+    // Nombre del profesional asignado al turno. Vacio si el turno todavia no tiene
+    // profesional asignado en Coordinacion.
+    string NombreProfesional = "");
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

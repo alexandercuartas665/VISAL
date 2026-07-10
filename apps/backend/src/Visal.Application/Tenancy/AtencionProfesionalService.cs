@@ -53,6 +53,17 @@ public sealed class AtencionProfesionalService(
             .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto, p.TipoDocumento })
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
+        // Profesionales asignados a los turnos (Id -> Nombre). Solo los turnos con
+        // ProfesionalId asignado (los pendientes en Coordinacion vienen con null).
+        var profIds = turnos.Where(t => t.ProfesionalId != Guid.Empty).Select(t => t.ProfesionalId).Distinct().ToList();
+        var profs = profIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await db.Profesionales.AsNoTracking()
+                .Where(p => profIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.PrimerNombre, p.PrimerApellido })
+                .ToListAsync(ct))
+                .ToDictionary(p => p.Id, p => ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim());
+
         // Sesiones ya registradas.
         var sesiones = await db.AsignacionTurnoSesiones.AsNoTracking()
             .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
@@ -67,18 +78,36 @@ public sealed class AtencionProfesionalService(
             .Select((a, idx) => new { a.Id, Orden = idx + 1 })
             .ToDictionary(x => x.Id, x => x.Orden);
 
+        // Total de sesiones por asignacion = suma(Cantidad) de todos sus turnos.
+        // Se muestra al lado del NumeroSesionMostrar como "sesion 1 / 3".
+        var totalPorAsignacion = turnos
+            .GroupBy(t => t.AsignacionId)
+            .ToDictionary(g => g.Key, g => g.Sum(t => t.Cantidad));
+
+        // Contador GLOBAL de sesion por asignacion — incrementa a medida que
+        // recorremos los turnos ordenados por CreatedAt asc. Cada fila expandida
+        // (n=1..Cantidad) toma el siguiente numero. Esto corrige el bug de que 2
+        // turnos con Cantidad=1 mostraban ambos SessionNo=1 (cada uno era la
+        // sesion #1 de SU turno pero no de la asignacion completa).
+        var contadorPorAsignacion = new Dictionary<Guid, int>();
+
         var result = new List<MiServicioAsignadoDto>();
         foreach (var t in turnos)
         {
             if (!asigDict.TryGetValue(t.AsignacionId, out var a)) { continue; }
             pacs.TryGetValue(a.PacienteId, out var p);
             var sesionesT = sesionesDict.TryGetValue(t.Id, out var dict) ? dict : new Dictionary<int, AsignacionTurnoSesion>();
+            var totalAsig = totalPorAsignacion.TryGetValue(t.AsignacionId, out var tot) ? tot : t.Cantidad;
 
             for (int n = 1; n <= t.Cantidad; n++)
             {
                 var sesion = sesionesT.TryGetValue(n, out var s) ? s : null;
                 var completado = sesion is not null;
                 if (!incluirCompletados && completado) { continue; }
+
+                // Incremento del numero de sesion GLOBAL por asignacion.
+                var nGlobal = contadorPorAsignacion.TryGetValue(t.AsignacionId, out var c) ? c + 1 : 1;
+                contadorPorAsignacion[t.AsignacionId] = nGlobal;
 
                 result.Add(new MiServicioAsignadoDto(
                     t.Id, a.Id,
@@ -95,7 +124,10 @@ public sealed class AtencionProfesionalService(
                     a.PacienteId,
                     completado,
                     sesion?.FechaAtencion,
-                    a.FormatoHistoria));
+                    a.FormatoHistoria,
+                    nGlobal,
+                    totalAsig,
+                    profs.TryGetValue(t.ProfesionalId, out var np) ? np : ""));
             }
         }
         return result;

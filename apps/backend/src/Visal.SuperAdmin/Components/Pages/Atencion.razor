@@ -486,13 +486,14 @@ else
         new ColDef("fec_asig",      "FechaAsig",       "Fecha<br/>Asig",                          6),
         new ColDef("orden",         "Orden",           "Orden",                                   7),
         new ColDef("tipo",          "Tipo",            "Tipo",                                    8),
-        new ColDef("session_no",    "SessionNo",       "Sesion",                                  9),
-        new ColDef("completado",    "Completado",     "Completado",                              10),
-        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        11),
-        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                12),
-        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                13),
-        new ColDef("profesional",   "Profesional",     "Profesional",                             14),
-        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          15),
+        new ColDef("servicio",      "Servicio",        "Servicio",                                9),
+        new ColDef("session_no",    "SessionNo",       "Sesion",                                 10),
+        new ColDef("completado",    "Completado",     "Completado",                              11),
+        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        12),
+        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                13),
+        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                14),
+        new ColDef("profesional",   "Profesional",     "Profesional",                             15),
+        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          16),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -576,6 +577,11 @@ else
             case "tipo":
                 __b.OpenElement(seq++, "td");
                 __b.AddContent(seq++, s.TipoServicio);
+                __b.CloseElement();
+                break;
+            case "servicio":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.NombreServicio);
                 __b.CloseElement();
                 break;
             case "session_no":

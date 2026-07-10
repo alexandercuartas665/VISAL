@@ -233,21 +233,41 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
     }
 
     /// <summary>Si existe TenantUser con ProfesionalId=<paramref name="profesionalId"/>,
-    /// llama a UsuarioAdminService.AsignarAsync para replicarle rol + sedes (traduciendo
-    /// nombres de sedes a IDs de Sucursal). Preserva el flag EsGlobal actual del usuario.</summary>
+    /// sincroniza al PlatformUser vinculado los datos personales del profesional
+    /// (documento, nombres, apellidos, celular, ciudad, display) y llama a
+    /// UsuarioAdminService.AsignarAsync para replicarle rol + sedes. Preserva
+    /// el flag EsGlobal actual del usuario. Asi el operador no tiene que ir a
+    /// /cfg-usuarios a poner al dia los datos cuando cambia algo del profesional.</summary>
     private async Task PropagarAlUsuarioVinculadoAsync(Guid profesionalId, Guid? rolId, IReadOnlyList<string> nombresSedes, Guid actor, CancellationToken ct)
     {
         var tu = await _db.TenantUsers.AsNoTracking().IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.ProfesionalId == profesionalId, ct);
         if (tu is null) { return; }
 
-        // Preservar EsGlobal del PlatformUser: AsignarAsync lo puede escribir y no
-        // queremos degradar accidentalmente un usuario global cuando el operador
-        // solo esta editando el profesional.
-        var esGlobal = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters()
-            .Where(pu => pu.Id == tu.PlatformUserId)
-            .Select(pu => pu.EsGlobal)
-            .FirstOrDefaultAsync(ct);
+        // Cargar el profesional actualizado (ya persistido en el Save previo)
+        // para copiar sus datos al PlatformUser vinculado.
+        var prof = await _db.Profesionales.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == profesionalId, ct);
+
+        // Sincronizar datos personales del PlatformUser desde el profesional.
+        // El correo NO se toca aqui — es identidad de login y se edita solo
+        // desde /cfg-usuarios (el usuario loguea con documento, no con correo,
+        // pero cambiar el correo puede romper flujos de recuperacion).
+        var pu = await _db.PlatformUsers.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == tu.PlatformUserId, ct);
+        var esGlobal = pu?.EsGlobal ?? false;
+        if (pu is not null && prof is not null)
+        {
+            pu.Documento = prof.NumeroDocumento;
+            pu.PrimerNombre = prof.PrimerNombre;
+            pu.SegundoNombre = prof.SegundoNombre;
+            pu.PrimerApellido = prof.PrimerApellido;
+            pu.SegundoApellido = prof.SegundoApellido;
+            pu.DisplayName = prof.NombreCompleto;
+            pu.Celular = prof.Celular;
+            pu.Ciudad = prof.Ciudad;
+            await _db.SaveChangesAsync(ct);
+        }
 
         // Traducir nombres de sedes a IDs. Sedes que no matcheen se ignoran.
         Guid[] sucursalIds = Array.Empty<Guid>();

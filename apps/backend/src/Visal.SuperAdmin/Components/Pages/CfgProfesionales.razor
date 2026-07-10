@@ -473,8 +473,11 @@ else
                         @if (esActualizacion)
                         {
                             <span>
-                                Al guardar se actualizan: <strong>rol</strong>, <strong>clave</strong> (si la cambias) y las
-                                <strong>sedes</strong> asignadas arriba en el card "Sedes de atencion".
+                                Al guardar se sincronizan al usuario los <strong>datos personales</strong>
+                                (documento, nombre, apellidos, celular, ciudad) y se actualizan
+                                <strong>rol</strong>, <strong>clave</strong> (si la cambias) y
+                                <strong>sedes</strong> asignadas arriba en "Sedes de atencion".
+                                El correo no se cambia — el login es con documento.
                             </span>
                         }
                         else
@@ -669,8 +672,8 @@ else
             // Refrescar estado + UI.
             _usuarioVinculado = (await UsuSvc.ListAsync()).FirstOrDefault(u => u.Id == _usuarioVinculado.Id);
             _ok = string.IsNullOrEmpty(_nuevoPwd)
-                ? $"Usuario '{_usuarioVinculado?.Email}' actualizado: rol y sedes."
-                : $"Usuario '{_usuarioVinculado?.Email}' actualizado: rol, sedes y clave.";
+                ? $"Usuario '{_usuarioVinculado?.Email}' actualizado: datos personales, rol y sedes."
+                : $"Usuario '{_usuarioVinculado?.Email}' actualizado: datos personales, rol, sedes y clave.";
             _showCrearUsuModal = false;
         }
         catch (InvalidOperationException ex) { _modalError = ex.Message; }

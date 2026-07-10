@@ -116,8 +116,10 @@ else
             @if (_formatos.Count == 0)
             {
                 <div class="ase-empty">
-                    No hay formatos de tipo <b>escala</b> activos. Crealos en el modulo de Formularios con
-                    tipo "ESCALAS".
+                    No hay escalas configuradas para esta historia. Un administrador debe crear la
+                    relacion en <b>Configuracion del Sistema &rarr; Relaciones de formularios</b>
+                    eligiendo como origen el formato de esta HC, como destino el formato de la escala,
+                    y como tipo <b>ESCALA</b>.
                 </div>
             }
             else
@@ -243,8 +245,16 @@ else
     {
         _catalogoError = null;
         _seleccionFormatoId = null;
-        try { _formatos = (await EscSvc.ListarFormatosAsync()).ToList(); }
-        catch (Exception ex) { _catalogoError = ex.Message; _formatos = new(); }
+        if (HistoriaClinicaId is not Guid hid)
+        {
+            _catalogoError = "Falta historia clinica.";
+            _formatos = new();
+        }
+        else
+        {
+            try { _formatos = (await EscSvc.ListarFormatosDisponiblesAsync(hid)).ToList(); }
+            catch (Exception ex) { _catalogoError = ex.Message; _formatos = new(); }
+        }
         _catalogoAbierto = true;
     }
 

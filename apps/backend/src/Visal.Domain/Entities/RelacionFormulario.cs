@@ -25,8 +25,9 @@ public class RelacionFormulario : TenantEntity
     /// Categoria de la relacion para que el sistema sepa con que proposito usarla:
     /// "EVOLUCION" cuando el destino es una nota de evolucion derivada del origen,
     /// "CONSENTIMIENTO" cuando es un consentimiento informado que se sugiere al
-    /// abrir el origen. Valor libre — el modelo no obliga a usar estas dos cadenas
-    /// pero la UI ofrece el dropdown.
+    /// abrir el origen, "ESCALA" cuando el destino es una escala clinica (Braden,
+    /// Norton, Barthel, etc.) que se sugiere al trabajar con la HC. Valor libre —
+    /// el modelo no obliga a usar estas cadenas pero la UI ofrece el dropdown.
     /// </summary>
     public string? TipoRelacion { get; set; }
 

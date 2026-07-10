@@ -6,17 +6,32 @@ namespace Visal.Application.Tenancy;
 
 public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenant) : IEscalaService
 {
-    public async Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosDisponiblesAsync(
+        Guid historiaId, CancellationToken ct = default)
     {
-        // Materializamos primero para poder filtrar por substring case-insensitive
-        // de forma estable y luego mapear al DTO (evita el problema clasico de
-        // OrderBy sobre props de un record proyectado por joins).
-        var rows = await db.FormDefinitions.AsNoTracking()
-            .Where(f => f.Activo && f.Tipo != null)
-            .Select(f => new { f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo })
+        // Resolvemos el FormDefinitionId del formato de la HC padre; sin el no hay
+        // forma de saber que escalas se sugieren para esta HC.
+        var hc = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == historiaId)
+            .Select(h => new { h.FormDefinitionId })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("Historia clinica no encontrada.");
+
+        // Join relaciones_formulario -> FormDefinitions destino. Materializamos
+        // antes del OrderBy porque EF Core 9 no traduce OrderBy sobre propiedades
+        // de un record DTO proyectado desde joins.
+        var rows = await db.RelacionesFormulario.AsNoTracking()
+            .Where(r => r.FormularioOrigenId == hc.FormDefinitionId
+                        && r.Activo
+                        && r.TipoRelacion != null
+                        && r.TipoRelacion == "ESCALA")
+            .Join(db.FormDefinitions.AsNoTracking(), r => r.FormularioDestinoId, f => f.Id, (r, f) => new
+            {
+                f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo
+            })
             .ToListAsync(ct);
         return rows
-            .Where(r => r.Tipo!.Contains("escala", StringComparison.OrdinalIgnoreCase))
+            .Where(r => r.Activo)
             .OrderBy(r => r.Nombre, StringComparer.OrdinalIgnoreCase)
             .Select(r => new EscalaFormatoDto(r.Id, r.Codigo, r.Nombre, r.Version, r.Tipo, r.Activo))
             .ToList();
@@ -59,6 +74,17 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
         var formato = await db.FormDefinitions.AsNoTracking()
             .FirstOrDefaultAsync(f => f.Id == req.FormDefinitionId, ct)
             ?? throw new InvalidOperationException("Formato de escala no encontrado.");
+
+        // Verificar que el formato destino esta configurado como ESCALA para el
+        // formato de esta HC. Evita que la UI sortee la configuracion enviando
+        // un FormDefId arbitrario del catalogo.
+        var relOk = await db.RelacionesFormulario.AsNoTracking().AnyAsync(
+            r => r.FormularioOrigenId == hc.FormDefinitionId
+                 && r.FormularioDestinoId == req.FormDefinitionId
+                 && r.Activo
+                 && r.TipoRelacion == "ESCALA", ct);
+        if (!relOk)
+        { throw new InvalidOperationException("El formato no esta configurado como ESCALA para esta historia."); }
 
         var entity = new HistoriaClinicaEscala
         {

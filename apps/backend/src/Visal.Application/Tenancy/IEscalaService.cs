@@ -42,8 +42,13 @@ public sealed record IniciarEscalaRequest(
 
 public interface IEscalaService
 {
-    /// <summary>Catalogo de formatos cuyo Tipo contiene "escala". Solo activos.</summary>
-    Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Formatos de escala disponibles para una HC dada. Se resuelven desde
+    /// <c>relaciones_formulario</c> donde origen = FormDefinitionId de la HC y
+    /// TipoRelacion = "ESCALA". Solo formatos destino activos y relaciones activas.
+    /// </summary>
+    Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosDisponiblesAsync(
+        Guid historiaId, CancellationToken ct = default);
 
     /// <summary>Escalas iniciadas para una HC, ordenadas cronologicamente.</summary>
     Task<IReadOnlyList<EscalaItemDto>> ListarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default);

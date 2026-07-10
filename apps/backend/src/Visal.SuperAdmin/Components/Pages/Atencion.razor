@@ -107,16 +107,16 @@ else
         </div>
         <div class="usu-modal-body">
             <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
-                Aplica a todos los usuarios del tenant. Deja Alias vacio para usar el titulo por defecto,
-                y Orden vacio para dejar el orden por defecto. Deja Visible desmarcado para ocultarla.
+                Aplica a todos los usuarios del tenant. Usa las flechas para reordenar las columnas.
+                Deja Alias vacio para usar el titulo por defecto. Desmarca Visible para ocultarla.
             </p>
             <table class="table table-sm at-cfg-tbl">
                 <thead>
                     <tr>
+                        <th style="width:70px;">Mover</th>
                         <th style="width:60px;">Visible</th>
                         <th>Columna</th>
-                        <th style="width:180px;">Alias (opcional)</th>
-                        <th style="width:100px;">Orden</th>
+                        <th style="width:200px;">Alias (opcional)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -125,15 +125,18 @@ else
                         var idx = i;
                         var row = _cfgEdicion[idx];
                         <tr>
+                            <td class="text-center at-mov-cell">
+                                <button type="button" class="btn btn-sm at-mov-btn" title="Subir"
+                                        disabled="@(idx == 0)" @onclick="() => MoverArriba(idx)">&#9650;</button>
+                                <button type="button" class="btn btn-sm at-mov-btn" title="Bajar"
+                                        disabled="@(idx == _cfgEdicion.Count - 1)" @onclick="() => MoverAbajo(idx)">&#9660;</button>
+                            </td>
                             <td class="text-center">
                                 <input type="checkbox" @bind="row.Visible" />
                             </td>
                             <td>@row.TituloDefault</td>
                             <td>
                                 <input type="text" class="form-control form-control-sm" @bind="row.Alias" placeholder="@row.TituloDefault" />
-                            </td>
-                            <td>
-                                <input type="number" class="form-control form-control-sm" @bind="row.Orden" min="1" />
                             </td>
                         </tr>
                     }
@@ -262,6 +265,10 @@ else
     .at-tbl thead th { position: sticky; top: 0; z-index: 3; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 700; border-bottom: 1px solid #cbd5e1; white-space: nowrap; padding: 8px 10px; text-align: center; line-height: 1.15; }
     .at-tbl td { vertical-align: middle; padding: 8px 10px; }
     .at-cfg-tbl input[type="text"], .at-cfg-tbl input[type="number"] { font-size: 12px; padding: 4px 6px; }
+    .at-mov-cell { white-space: nowrap; }
+    .at-mov-btn { background: #f1f5f9; border: 1px solid #cbd5e1; color: #334155; padding: 2px 6px; font-size: 10px; line-height: 1; margin: 0 1px; }
+    .at-mov-btn:hover:not(:disabled) { background: #dbeafe; border-color: #1565c0; color: #1565c0; }
+    .at-mov-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .at-row-done { opacity: 0.6; background: #f8fafc; }
     .at-pill-done { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .at-pill-no { background: #fef3c7; color: #92400e; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
@@ -657,12 +664,28 @@ else
         _showConfigCols = false;
     }
 
+    private void MoverArriba(int idx)
+    {
+        if (idx <= 0 || idx >= _cfgEdicion.Count) { return; }
+        (_cfgEdicion[idx - 1], _cfgEdicion[idx]) = (_cfgEdicion[idx], _cfgEdicion[idx - 1]);
+    }
+
+    private void MoverAbajo(int idx)
+    {
+        if (idx < 0 || idx >= _cfgEdicion.Count - 1) { return; }
+        (_cfgEdicion[idx + 1], _cfgEdicion[idx]) = (_cfgEdicion[idx], _cfgEdicion[idx + 1]);
+    }
+
     private async Task GuardarConfigColumnas()
     {
         if (_cfgGuardando) { return; }
         _cfgGuardando = true;
         try
         {
+            // El orden se toma de la posicion actual en la lista tras el drag con
+            // flechas. Asi el usuario no pisa numeros a mano y el orden es siempre
+            // consistente con lo que ve en el modal.
+            for (var i = 0; i < _cfgEdicion.Count; i++) { _cfgEdicion[i].Orden = i + 1; }
             var reqs = _cfgEdicion.Select(f => new GuardarAtencionColumnaRequest(
                 f.Key,
                 f.Visible,

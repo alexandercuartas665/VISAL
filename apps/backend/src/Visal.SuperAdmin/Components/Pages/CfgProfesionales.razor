@@ -234,7 +234,20 @@ else
                     <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@_busy">Guardar profesional</button>
                     @if (_id is not null)
                     {
-                        <button class="btn btn-outline-success btn-sm" @onclick="OpenCrearUsuario" title="Crear usuario de login para este profesional">&#128100; Crear usuario</button>
+                        @if (_usuarioVinculado is not null)
+                        {
+                            <button class="btn btn-outline-primary btn-sm" @onclick="OpenCrearUsuario"
+                                    title="Actualizar rol / clave / sedes del usuario vinculado a este profesional">
+                                &#9998; Editar usuario
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-success btn-sm" @onclick="OpenCrearUsuario"
+                                    title="Crear usuario de login para este profesional">
+                                &#128100; Crear usuario
+                            </button>
+                        }
                         @if (!_confirmingDelete)
                         {
                             <button class="btn btn-outline-danger btn-sm" @onclick="StartConfirmDelete">Eliminar</button>

@@ -213,6 +213,7 @@ public sealed class FormDefinitionSnapshotTests : IAsyncLifetime
     {
         public Guid? TenantId { get; } = tenantId;
         public Guid? UserId { get; } = userId;
+        public Guid? SucursalId => null;
     }
 
     private sealed class NullAuditWriter : IAuditWriter

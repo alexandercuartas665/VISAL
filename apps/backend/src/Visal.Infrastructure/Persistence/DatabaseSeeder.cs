@@ -523,6 +523,54 @@ public sealed class DatabaseSeeder
         _logger.LogInformation("Catalogos Paciente: {N} items por defecto (de {T} en lista maestra).", agregados, items.Length);
     }
 
+    /// <summary>
+    /// Siembra los 6 tipos de turno base (Capa 6 - Gestion de Turnos) para el tenant
+    /// demo si no los tiene. Colores identicos a los hardcoded del legacy vis_admturnos
+    /// para que la migracion de plantillas antiguas mantenga la paleta familiar.
+    ///
+    /// Codigos: M, T, N, D, DN, L. Editables por tenant desde /config/tipos-turno
+    /// (fase posterior). Idempotente por (TenantId, Codigo).
+    /// </summary>
+    public async Task EnsureTiposTurnoDefaultAsync(CancellationToken cancellationToken = default)
+    {
+        var tenant = await _db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Kind == TenantKind.Demo, cancellationToken);
+        if (tenant is null) { return; }
+
+        (string codigo, string etiqueta, decimal horas, string fondo, string texto, string borde, int orden)[] items =
+        {
+            ("M",  "Manana",    8m,  "#FEF9C3", "#713F12", "#FCD34D", 1),
+            ("T",  "Tarde",     8m,  "#DBEAFE", "#1E40AF", "#60A5FA", 2),
+            ("N",  "Noche",     8m,  "#1E1B4B", "#C7D2FE", "#4338CA", 3),
+            ("D",  "Dia",       8m,  "#D1FAE5", "#065F46", "#34D399", 4),
+            ("DN", "Dia-Noche", 12m, "#EDE9FE", "#4C1D95", "#8B5CF6", 5),
+            ("L",  "Libre",     0m,  "#F3F4F6", "#6B7280", "#D1D5DB", 6)
+        };
+
+        int agregados = 0;
+        foreach (var (codigo, etiqueta, horas, fondo, texto, borde, orden) in items)
+        {
+            var existe = await _db.TiposTurno.IgnoreQueryFilters()
+                .AnyAsync(t => t.TenantId == tenant.Id && t.Codigo == codigo, cancellationToken);
+            if (existe) { continue; }
+            _db.TiposTurno.Add(new TipoTurno
+            {
+                TenantId = tenant.Id,
+                Codigo = codigo,
+                Etiqueta = etiqueta,
+                HorasDefault = horas,
+                ColorFondo = fondo,
+                ColorTexto = texto,
+                ColorBorde = borde,
+                Orden = orden,
+                Activo = true
+            });
+            agregados++;
+        }
+        if (agregados > 0) { await _db.SaveChangesAsync(cancellationToken); }
+        _logger.LogInformation("Tipos de Turno: {N} tipos sembrados en tenant demo (de {T} base).", agregados, items.Length);
+    }
+
     // Configura el cliente WHO ICD-11 API en el tenant demo si no existe. Las credenciales
     // las proporciono el cliente y son las del entorno PRODUCCION del sistema legacy Visal.
     public async Task EnsureCie11ConfigAsync(CancellationToken cancellationToken = default)

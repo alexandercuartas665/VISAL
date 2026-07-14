@@ -102,5 +102,6 @@ public sealed class TenantIsolationTests : IAsyncLifetime
     {
         public Guid? TenantId { get; } = tenantId;
         public Guid? UserId { get; } = userId;
+        public Guid? SucursalId => null;
     }
 }

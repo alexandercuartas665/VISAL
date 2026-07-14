@@ -87,6 +87,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
     public DbSet<HcPestanaAlias> HcPestanaAliases => Set<HcPestanaAlias>();
     public DbSet<AtencionColumnaConfig> AtencionColumnaConfigs => Set<AtencionColumnaConfig>();
+    public DbSet<TurnoProgramacion> TurnoProgramaciones => Set<TurnoProgramacion>();
+    public DbSet<TipoTurno> TiposTurno => Set<TipoTurno>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -836,6 +838,32 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ColumnaKey).HasMaxLength(60).IsRequired();
             b.Property(x => x.Alias).HasMaxLength(80);
             b.HasIndex(x => new { x.TenantId, x.ColumnaKey }).IsUnique();
+        });
+
+        // Capa 6 - Gestion de Turnos.
+        modelBuilder.Entity<TurnoProgramacion>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Descripcion).HasMaxLength(500);
+            // jsonb en Postgres para permitir queries y validacion nativa.
+            b.Property(x => x.GridDataJson).HasColumnType("jsonb").IsRequired();
+            // Query filter global tenant lo aplica el metodo generico ApplyTenantFilter mas abajo;
+            // aca solo indices operativos.
+            b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Anio, x.Mes });
+            // Unicidad: no dos programaciones con mismo nombre para el mismo (tenant, sede, anio, mes).
+            b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Anio, x.Mes, x.Nombre }).IsUnique();
+        });
+
+        modelBuilder.Entity<TipoTurno>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(8).IsRequired();
+            b.Property(x => x.Etiqueta).HasMaxLength(40).IsRequired();
+            b.Property(x => x.HorasDefault).HasColumnType("numeric(4,1)");
+            b.Property(x => x.ColorFondo).HasMaxLength(9).IsRequired();
+            b.Property(x => x.ColorTexto).HasMaxLength(9).IsRequired();
+            b.Property(x => x.ColorBorde).HasMaxLength(9).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
         });
 
         modelBuilder.Entity<CatalogoTipoServicio>(b =>

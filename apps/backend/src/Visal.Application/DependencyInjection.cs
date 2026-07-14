@@ -108,6 +108,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IHcMenuConfigService, Tenancy.HcMenuConfigService>();
         services.AddScoped<Tenancy.ICatalogoTipoServicioService, Tenancy.CatalogoTipoServicioService>();
         services.AddScoped<Tenancy.IAtencionColumnaConfigService, Tenancy.AtencionColumnaConfigService>();
+        services.AddScoped<Tenancy.Turnos.ITurnoProgramacionService, Tenancy.Turnos.TurnoProgramacionService>();
+        services.AddScoped<Tenancy.Turnos.ITipoTurnoService, Tenancy.Turnos.TipoTurnoService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         return services;
     }

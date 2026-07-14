@@ -25,15 +25,49 @@
 <div class="ase-grid">
     <!-- Lista de aseguradoras -->
     <div class="ase-card ase-list">
-        <div class="ase-card-h">Aseguradoras (@_aseguradoras.Count)</div>
-        @foreach (var a in _aseguradoras)
+        @{
+            var _filtroNorm = (_filtro ?? string.Empty).Trim();
+            var _lista = string.IsNullOrEmpty(_filtroNorm)
+                ? _aseguradoras
+                : _aseguradoras.Where(x =>
+                        (x.Nombre ?? "").Contains(_filtroNorm, StringComparison.OrdinalIgnoreCase)
+                     || (x.Codigo ?? "").Contains(_filtroNorm, StringComparison.OrdinalIgnoreCase)
+                     || (x.Tipo ?? "").Contains(_filtroNorm, StringComparison.OrdinalIgnoreCase)
+                     || (x.Nit ?? "").Contains(_filtroNorm, StringComparison.OrdinalIgnoreCase)
+                  ).ToList();
+        }
+        <div class="ase-card-h">
+            Aseguradoras (@_lista.Count@(_lista.Count != _aseguradoras.Count ? $" / {_aseguradoras.Count}" : ""))
+        </div>
+        <div style="padding:6px 10px;position:sticky;top:0;background:#fff;z-index:1;border-bottom:1px solid #f1f5f9;">
+            <div style="position:relative;">
+                <input class="form-control form-control-sm" style="padding-right:26px;"
+                       placeholder="Buscar por nombre, codigo, tipo o NIT..."
+                       @bind="_filtro" @bind:event="oninput" />
+                @if (!string.IsNullOrEmpty(_filtroNorm))
+                {
+                    <button type="button"
+                            @onclick="() => _filtro = string.Empty"
+                            style="position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#94a3b8;font-size:16px;line-height:1;cursor:pointer;"
+                            title="Limpiar filtro">&times;</button>
+                }
+            </div>
+        </div>
+        @foreach (var a in _lista)
         {
             <button class="ase-li @(a.Id == _aseId ? "sel" : "")" @onclick="() => SelectAseguradora(a.Id)">
                 <div class="ase-li-name">@a.Nombre</div>
                 <div class="ase-li-sub">@a.Codigo &middot; @a.Tipo &middot; @a.Contratos contrato(s)</div>
             </button>
         }
-        @if (_aseguradoras.Count == 0) { <div class="ase-empty">Sin aseguradoras. Crea una nueva.</div> }
+        @if (_aseguradoras.Count == 0)
+        {
+            <div class="ase-empty">Sin aseguradoras. Crea una nueva.</div>
+        }
+        else if (_lista.Count == 0)
+        {
+            <div class="ase-empty">Sin coincidencias para "@_filtroNorm".</div>
+        }
     </div>
 
     <!-- Detalle -->

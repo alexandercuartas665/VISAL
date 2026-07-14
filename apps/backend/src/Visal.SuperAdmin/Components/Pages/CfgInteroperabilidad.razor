@@ -24,6 +24,28 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
+<div class="ase-card" style="background:#eff6ff;border-left:4px solid #1d4ed8;">
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 14px;">
+        <div style="font-size:20px;line-height:1;">&#128274;</div>
+        <div style="flex:1;">
+            <div style="font-weight:600;color:#1e3a8a;margin-bottom:2px;">Portal de credenciales MinSalud IHCE</div>
+            <div style="font-size:13px;color:#334155;">
+                La <b>APIMsubskey</b>, el <b>Client ID</b> y el <b>Client Secret</b> se generan y renuevan en el portal oficial de MinSalud.
+                Ingresa con tu usuario habilitado y copia los valores aqui.
+            </div>
+            <div style="margin-top:6px;">
+                <a href="https://ihcecol.sispro.gov.co/AdminTokens/account/login" target="_blank" rel="noopener noreferrer"
+                   class="btn btn-primary btn-sm" style="text-decoration:none;">
+                    Abrir portal AdminTokens IHCE &rarr;
+                </a>
+                <span style="font-size:12px;color:#64748b;margin-left:8px;font-family:ui-monospace,Menlo,monospace;">
+                    ihcecol.sispro.gov.co/AdminTokens
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
 @* ===================== Parametros del API IHCE ===================== *@
 <div class="ase-card">
     <div class="ase-card-h">Parametros del API IHCE</div>

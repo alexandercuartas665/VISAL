@@ -157,17 +157,7 @@ else
             </div>
         }
 
-        @* ============ PIE: firma del especialista ============ *@
-        <div class="doc-footer">
-            <div class="doc-firma">
-                <div class="doc-firma-line">@(_hc.EspecialistaNombre ?? "Especialista")</div>
-                <div class="doc-firma-rol">Firma del profesional tratante</div>
-            </div>
-            <div class="doc-firma">
-                <div class="doc-firma-line">@(_paciente?.NombreCompleto ?? "Paciente")</div>
-                <div class="doc-firma-rol">Firma del paciente / acudiente</div>
-            </div>
-        </div>
+        @* Footer con firmas retirado — el formulario define sus propias secciones de firma. *@
     </div>
 }
 

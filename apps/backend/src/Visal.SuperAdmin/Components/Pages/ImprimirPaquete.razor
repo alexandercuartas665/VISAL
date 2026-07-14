@@ -804,19 +804,13 @@ else
         </div>
     };
 
-    private RenderFragment RenderFirma(string? nombreProf, string rol) => __builder =>
-    {
-        <div class="pack-footer">
-            <div class="pack-firma">
-                <div class="pack-firma-line">@(nombreProf ?? "Especialista")</div>
-                <div class="pack-firma-rol">@rol</div>
-            </div>
-            <div class="pack-firma">
-                <div class="pack-firma-line">@(_paciente?.NombreCompleto ?? "Paciente")</div>
-                <div class="pack-firma-rol">Recibido por paciente / acudiente</div>
-            </div>
-        </div>
-    };
+    // Footer con firma retirado a peticion del cliente: el formulario define sus
+    // propias secciones de firma (paciente / acompanantes / profesional) via
+    // rutas de prefill. Ver historial: el helper solia agregar un bloque hardcoded
+    // "Firma del profesional tratante" + "Recibido por paciente / acudiente"
+    // despues de cada documento del paquete. Se dejo el helper como no-op para
+    // no tocar los ~13 sitios que lo invocan.
+    private RenderFragment RenderFirma(string? nombreProf, string rol) => __builder => { };
 
     // Render de un nodo del primer nivel del schema.
     // - Si es bloque de texto: una fila completa con el contenido.

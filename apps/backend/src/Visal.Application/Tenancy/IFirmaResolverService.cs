@@ -60,9 +60,14 @@ public interface IFirmaResolverService
 }
 
 /// <summary>Datos que la ruta sistema (usuario logueado) puede consumir del
-/// profesional vinculado al usuario.</summary>
+/// profesional vinculado al usuario. Tambien lo consume la ruta "profesional"
+/// (ProfesionalPrefillHelper) para que un formulario mapeado a esa fuente
+/// reciba los datos del doctor logueado al iniciar la HC / Escala / Evolucion.</summary>
 public sealed record PrefillProfesionalDatosDto(
     string? Nombre,
     string? Identificacion,
     string? RegistroMedico,
-    string? FirmaUrl);
+    string? FirmaUrl,
+    string? Ciudad = null,
+    string? Celular = null,
+    string? TipoProfesional = null);

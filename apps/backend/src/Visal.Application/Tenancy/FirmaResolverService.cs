@@ -87,7 +87,9 @@ public sealed class FirmaResolverService : IFirmaResolverService
         return await _db.Profesionales.AsNoTracking()
             .Where(pp => pp.Id == gid)
             .Select(pp => new PrefillProfesionalDatosDto(
-                pp.NombreCompleto, pp.NumeroDocumento, pp.RegistroMedico, pp.FirmaUrl))
+                pp.NombreCompleto, pp.NumeroDocumento, pp.RegistroMedico, pp.FirmaUrl,
+                pp.Ciudad, pp.Celular,
+                pp.TipoProfesional != null ? pp.TipoProfesional.Nombre : null))
             .FirstOrDefaultAsync(ct);
     }
 

@@ -2035,6 +2035,12 @@
                 UsuarioRegistroMedico: datosProf?.RegistroMedico,
                 UsuarioFirmaUrl: datosProf?.FirmaUrl);
             SistemaPrefillHelper.Aplicar(_valores, sistemaCtx, _prefillRoutesActual);
+            // Ruta "profesional" (mismo dato del doctor logueado, con las keys
+            // nativas del profesional: nombreCompleto, numeroDocumento,
+            // registroMedico, ciudad, celular, tipoProfesional). Los formularios
+            // que configuraron esta fuente en el modal Rutas de prefill se
+            // rellenan aqui; sin este llamado esas rutas quedaban huerfanas.
+            ProfesionalPrefillHelper.Aplicar(_valores, datosProf, _prefillRoutesActual);
         }
         catch { /* el prefill de sistema es best-effort */ }
 

@@ -1,8 +1,692 @@
 @page "/cfg-turnos"
 @attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Globalization
+@using System.Security.Claims
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Turnos
+@inject ITurnoProgramacionService Svc
+@inject ITipoTurnoService TiposSvc
+@inject ISucursalService Sucursales
+@inject ICatalogoTipoServicioService TiposServicio
+@inject IJSRuntime JS
 
-<PageTitle>Configuracion de Turnos - Visal</PageTitle>
+<PageTitle>Programaciones de turnos - Visal</PageTitle>
 
-<ModulePlaceholder Eyebrow="Configuracion del Sistema"
-                   Title="Configuracion de Turnos"
-                   Description="Parametrizacion de turnos y franjas horarias." />
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Programaciones de turnos</h1>
+        <small class="text-muted">
+            Plantillas mensuales tipo rotacion (Manana / Tarde / Noche / Descanso).
+            Se aplican luego en Coordinacion para asignar profesionales a turnos individuales.
+        </small>
+    </div>
+    <button class="btn btn-primary" @onclick="Nueva" disabled="@_busy">+ Nueva programacion</button>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card" style="padding:14px;">
+    <div class="row g-2 align-items-end mb-2">
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">Anio</label>
+            <select class="form-select form-select-sm" @bind="_filtroAnio" @bind:after="CargarAsync">
+                <option value="0">Todos</option>
+                @foreach (var a in _aniosDisponibles)
+                {
+                    <option value="@a">@a</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">Mes</label>
+            <select class="form-select form-select-sm" @bind="_filtroMes" @bind:after="CargarAsync">
+                <option value="0">Todos</option>
+                @for (var m = 1; m <= 12; m++)
+                {
+                    <option value="@m">@NombreMes(m)</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted mb-1">Sede</label>
+            <select class="form-select form-select-sm" @bind="_filtroSucursalStr" @bind:after="CargarAsync">
+                <option value="">Todas</option>
+                <option value="null">(Sin sede)</option>
+                @foreach (var s in _sucursales)
+                {
+                    <option value="@s.Id">@s.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted mb-1">Tipo de servicio</label>
+            <select class="form-select form-select-sm" @bind="_filtroTipoServicioStr" @bind:after="CargarAsync">
+                <option value="">Todos</option>
+                <option value="null">(Sin tipo)</option>
+                @foreach (var t in _tiposServicio)
+                {
+                    <option value="@t.Id">@t.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2 text-end">
+            <label class="ase-chk" style="margin-top:8px;">
+                <input type="checkbox" @bind="_soloActivas" @bind:after="CargarAsync" />
+                <span>Solo activas</span>
+            </label>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">No hay programaciones que coincidan con el filtro.</div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl align-middle">
+                <thead>
+                    <tr>
+                        <th style="width:70px">Anio</th>
+                        <th style="width:110px">Mes</th>
+                        <th>Nombre</th>
+                        <th>Sede</th>
+                        <th>Tipo de servicio</th>
+                        <th class="text-center" style="width:90px">Turnos</th>
+                        <th class="text-center" style="width:90px">Estado</th>
+                        <th style="width:190px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        <tr class="@(r.Activa ? "" : "rf-row-inactiva")">
+                            <td>@r.Anio</td>
+                            <td>@NombreMes(r.Mes)</td>
+                            <td><strong>@r.Nombre</strong></td>
+                            <td>@(r.SucursalNombre ?? "-")</td>
+                            <td>@(r.TipoServicioNombre ?? "-")</td>
+                            <td class="text-center">@r.CantidadTurnos</td>
+                            <td class="text-center">
+                                @if (r.Activa) { <span class="badge bg-success">Activa</span> }
+                                else { <span class="badge bg-secondary">Inactiva</span> }
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-link btn-sm" title="Editar" @onclick="() => EditarAsync(r.Id)">&#9998;</button>
+                                <button class="btn btn-link btn-sm" title="Duplicar" @onclick="() => DuplicarAsync(r)">&#128203;</button>
+                                @if (r.Activa)
+                                {
+                                    <button class="btn btn-link btn-sm text-warning" title="Desactivar" @onclick="() => DesactivarAsync(r)">&#9210;</button>
+                                }
+                                <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(r)">&#128465;</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ============= EDITOR MODAL ============= *@
+@if (_modalOpen)
+{
+    <div class="cie-backdrop" @onclick="Cerrar"></div>
+    <div class="cie-modal turnos-modal">
+        <div class="cie-modal-h">
+            <h3>@(_editId is null ? "Nueva programacion" : "Editar programacion")</h3>
+            <button class="cie-modal-close" @onclick="Cerrar">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="row g-2 mb-2">
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Nombre *</label>
+                    <input class="form-control form-control-sm" @bind="_fNombre"
+                           placeholder="Ej: Rotacion Enfermeria" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Anio *</label>
+                    <input type="number" class="form-control form-control-sm" @bind="_fAnio" min="2024" max="2100" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Mes *</label>
+                    <select class="form-select form-select-sm" @bind="_fMes">
+                        @for (var m = 1; m <= 12; m++)
+                        {
+                            <option value="@m">@NombreMes(m)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Sede</label>
+                    <select class="form-select form-select-sm" @bind="_fSucursalStr">
+                        <option value="">(Sin sede especifica)</option>
+                        @foreach (var s in _sucursales)
+                        {
+                            <option value="@s.Id">@s.Nombre</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Tipo de servicio</label>
+                    <select class="form-select form-select-sm" @bind="_fTipoServicioStr">
+                        <option value="">(Sin tipo especifico)</option>
+                        @foreach (var t in _tiposServicio)
+                        {
+                            <option value="@t.Id">@t.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small mb-1">Descripcion</label>
+                    <input class="form-control form-control-sm" @bind="_fDescripcion"
+                           placeholder="Notas opcionales de esta programacion" />
+                </div>
+                <div class="col-md-2">
+                    <label class="ase-chk" style="margin-top:24px;">
+                        <input type="checkbox" @bind="_fActiva" /> <span>Activa</span>
+                    </label>
+                </div>
+            </div>
+
+            @* Editor de grid *@
+            <div class="tgrid-wrap">
+                @* Sidebar de tipos (brocha) *@
+                <div class="tgrid-side">
+                    <div class="small text-muted mb-2">Brocha activa</div>
+                    <div class="tgrid-brocha">
+                        @if (_brocha is null)
+                        {
+                            <span class="text-muted small">(ninguna)</span>
+                        }
+                        else if (_brocha == "__ERASER__")
+                        {
+                            <span class="badge bg-dark">BORRAR</span>
+                        }
+                        else
+                        {
+                            var t = _tiposMap.GetValueOrDefault(_brocha);
+                            if (t is not null)
+                            {
+                                <span class="tgrid-chip" style="background:@t.ColorFondo;color:@t.ColorTexto;border-color:@t.ColorBorde;">
+                                    @t.Codigo @($" ({t.HorasDefault.ToString("0.#")}h)")
+                                </span>
+                            }
+                        }
+                    </div>
+                    <hr class="my-2" />
+                    <div class="small text-muted mb-1">Tipos de turno</div>
+                    <div class="tgrid-tipos">
+                        @foreach (var t in _tipos)
+                        {
+                            <button type="button"
+                                    class="tgrid-tipo @(("__="+_brocha) == ("__="+t.Codigo) ? "sel" : "")"
+                                    style="background:@t.ColorFondo;color:@t.ColorTexto;border-color:@t.ColorBorde;"
+                                    title="@t.Etiqueta (@t.HorasDefault.ToString("0.#")h)"
+                                    @onclick="() => _brocha = t.Codigo">
+                                <strong>@t.Codigo</strong>
+                                <div class="tgrid-tipo-lbl">@t.Etiqueta</div>
+                            </button>
+                        }
+                        <button type="button" class="tgrid-tipo eraser @(_brocha == "__ERASER__" ? "sel" : "")"
+                                @onclick='() => _brocha = "__ERASER__"'>
+                            <strong>&#9003;</strong>
+                            <div class="tgrid-tipo-lbl">Borrar</div>
+                        </button>
+                    </div>
+                    <hr class="my-2" />
+                    <div class="small text-muted">
+                        Total horas mes: <strong>@TotalHorasMes().ToString("0.#")</strong>h<br />
+                        Turnos: <strong>@_grid.Turnos.Count</strong> / @GridDataModel.MaxTurnos
+                    </div>
+                </div>
+
+                @* Grid principal: turnos x dias *@
+                <div class="tgrid-main">
+                    <div class="tgrid-toolbar">
+                        <button class="btn btn-outline-primary btn-sm"
+                                disabled="@(_grid.Turnos.Count >= GridDataModel.MaxTurnos)"
+                                @onclick="AgregarTurno">+ Agregar turno</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarTodo">Limpiar todo</button>
+                        <span class="text-muted small ms-2">
+                            Elegi una brocha del panel izquierdo y hace click en las celdas para pintar.
+                        </span>
+                    </div>
+                    <div class="tgrid-scroll">
+                        <table class="tgrid">
+                            <thead>
+                                <tr>
+                                    <th class="tgrid-hcol">Turno</th>
+                                    @for (var d = 1; d <= DiasEnMes(); d++)
+                                    {
+                                        var di = d;
+                                        var dow = DayOfWeekEs(_fAnio, _fMes, di);
+                                        var esFinde = dow == "sab" || dow == "dom";
+                                        <th class="tgrid-hday @(esFinde ? "finde" : "")">
+                                            <div class="tgrid-day-num">@di</div>
+                                            <div class="tgrid-day-dow">@dow</div>
+                                        </th>
+                                    }
+                                    <th class="tgrid-hact"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (var iT = 0; iT < _grid.Turnos.Count; iT++)
+                                {
+                                    var idx = iT;
+                                    var turno = _grid.Turnos[idx];
+                                    <tr>
+                                        <th class="tgrid-hrow">
+                                            <input class="form-control form-control-sm"
+                                                   value="@turno"
+                                                   @onchange="@((ChangeEventArgs e) => RenombrarTurno(idx, e.Value?.ToString() ?? turno))" />
+                                        </th>
+                                        @for (var d = 1; d <= DiasEnMes(); d++)
+                                        {
+                                            var dia = d;
+                                            var key = dia.ToString();
+                                            _grid.Dias.TryGetValue(turno, out var celdas);
+                                            GridCell? celda = null;
+                                            if (celdas is not null && celdas.TryGetValue(key, out var c)) { celda = c; }
+                                            var tp = celda is not null ? _tiposMap.GetValueOrDefault(celda.Tipo) : null;
+                                            var style = tp is not null
+                                                ? $"background:{tp.ColorFondo};color:{tp.ColorTexto};border-color:{tp.ColorBorde};"
+                                                : "";
+                                            <td class="tgrid-cell"
+                                                style="@style"
+                                                title="@(celda is not null ? $"{celda.Tipo} ({celda.Horas:0.#}h)" : "")"
+                                                @onclick="() => PintarCelda(turno, dia)">
+                                                @(celda is not null ? celda.Tipo : "")
+                                            </td>
+                                        }
+                                        <th class="tgrid-hact">
+                                            <button class="btn btn-link btn-sm text-danger p-0"
+                                                    title="Eliminar turno"
+                                                    disabled="@(_grid.Turnos.Count <= GridDataModel.MinTurnos)"
+                                                    @onclick="() => EliminarTurno(idx)">&#128465;</button>
+                                        </th>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Cerrar">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAsync" disabled="@_busy">
+                @(_editId is null ? "Crear" : "Guardar")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
+
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        max-width: 95vw; max-height: 92vh; background: #fff;
+        border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25);
+        z-index: 1051; display: flex; flex-direction: column;
+    }
+    .turnos-modal { width: 1400px; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+
+    /* ---- Editor de grid ---- */
+    .tgrid-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: flex-start; }
+    .tgrid-side { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; background: #f8fafc; position: sticky; top: 0; }
+    .tgrid-brocha { min-height: 32px; display: flex; align-items: center; }
+    .tgrid-chip { display: inline-block; padding: 4px 10px; border: 1px solid; border-radius: 999px; font-weight: 700; font-size: 12px; }
+    .tgrid-tipos { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .tgrid-tipo { border: 1px solid; border-radius: 8px; padding: 6px 4px; cursor: pointer; text-align: center; font-size: 12px; }
+    .tgrid-tipo.sel { outline: 2px solid #2563eb; outline-offset: 1px; }
+    .tgrid-tipo.eraser { grid-column: 1 / span 2; background: #fff; color: #374151; border-color: #cbd5e1; }
+    .tgrid-tipo-lbl { font-size: 10px; line-height: 1.1; margin-top: 2px; opacity: .85; }
+
+    .tgrid-main { min-width: 0; }
+    .tgrid-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .tgrid-scroll { overflow: auto; max-height: 55vh; border: 1px solid #e2e8f0; border-radius: 8px; }
+    table.tgrid { border-collapse: separate; border-spacing: 0; width: max-content; }
+    table.tgrid th, table.tgrid td { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 0; }
+    table.tgrid thead th { background: #f1f5f9; position: sticky; top: 0; z-index: 2; }
+    table.tgrid .tgrid-hcol { min-width: 160px; text-align: left; padding: 6px 8px; font-weight: 600; }
+    table.tgrid .tgrid-hday { min-width: 34px; text-align: center; padding: 4px 2px; font-weight: 600; }
+    table.tgrid .tgrid-hday.finde { background: #e0e7ff; }
+    table.tgrid .tgrid-day-num { font-size: 12px; }
+    table.tgrid .tgrid-day-dow { font-size: 9px; color: #64748b; text-transform: uppercase; }
+    table.tgrid .tgrid-hact { min-width: 34px; text-align: center; background: #f1f5f9; }
+    table.tgrid .tgrid-hrow { position: sticky; left: 0; background: #fff; z-index: 1; padding: 3px; min-width: 160px; }
+    table.tgrid .tgrid-hrow input { min-width: 150px; }
+    table.tgrid .tgrid-cell {
+        min-width: 34px; height: 34px; text-align: center; cursor: pointer;
+        font-weight: 700; font-size: 11px; user-select: none;
+        border: 1px solid #e2e8f0;
+    }
+    table.tgrid .tgrid-cell:hover { outline: 2px solid #2563eb; outline-offset: -2px; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    // Filtros
+    private int _filtroAnio = DateTime.Today.Year;
+    private int _filtroMes = 0;
+    private string _filtroSucursalStr = "";
+    private string _filtroTipoServicioStr = "";
+    private bool _soloActivas = true;
+
+    // Data
+    private List<TurnoProgramacionDto> _rows = new();
+    private List<TipoTurnoDto> _tipos = new();
+    private Dictionary<string, TipoTurnoDto> _tiposMap = new();
+    private List<SucursalDto> _sucursales = new();
+    private List<CatalogoTipoServicioDto> _tiposServicio = new();
+    private int[] _aniosDisponibles = Array.Empty<int>();
+
+    // Modal
+    private bool _modalOpen;
+    private Guid? _editId;
+    private string _fNombre = "";
+    private int _fAnio = DateTime.Today.Year;
+    private int _fMes = DateTime.Today.Month;
+    private string _fSucursalStr = "";
+    private string _fTipoServicioStr = "";
+    private string _fDescripcion = "";
+    private bool _fActiva = true;
+    private GridDataModel _grid = GridDataModel.FromJson(null);
+    private string? _brocha;
+    private string? _modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _tipos = (await TiposSvc.ListarAsync()).ToList();
+            _tiposMap = _tipos.ToDictionary(t => t.Codigo, t => t, StringComparer.Ordinal);
+            _sucursales = (await Sucursales.ListAsync(soloActivas: false)).ToList();
+            _tiposServicio = (await TiposServicio.ListarAsync()).ToList();
+            var hoy = DateTime.Today.Year;
+            _aniosDisponibles = new[] { hoy - 1, hoy, hoy + 1 };
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task CargarAsync()
+    {
+        _error = null;
+        try
+        {
+            Guid? suc = null;
+            bool sucFilter = false;
+            if (_filtroSucursalStr == "null") { sucFilter = true; suc = null; }
+            else if (Guid.TryParse(_filtroSucursalStr, out var g)) { sucFilter = true; suc = g; }
+
+            Guid? tipo = null;
+            bool tipoFilter = false;
+            if (_filtroTipoServicioStr == "null") { tipoFilter = true; tipo = null; }
+            else if (Guid.TryParse(_filtroTipoServicioStr, out var g2)) { tipoFilter = true; tipo = g2; }
+
+            var all = await Svc.ListarAsync(
+                sucursalId: null, tipoServicioId: null,
+                anio: _filtroAnio == 0 ? null : _filtroAnio,
+                mes: _filtroMes == 0 ? null : _filtroMes,
+                soloActivas: _soloActivas);
+
+            // Filtro cliente por sucursal / tipoServicio: el service listar recibe
+            // Guid?, no distingue "sin filtro" de "explicito null", asi que hacemos
+            // el drill-down aca.
+            IEnumerable<TurnoProgramacionDto> q = all;
+            if (sucFilter) { q = q.Where(r => r.SucursalId == suc); }
+            if (tipoFilter) { q = q.Where(r => r.TipoServicioId == tipo); }
+            _rows = q.OrderByDescending(r => r.Anio).ThenByDescending(r => r.Mes).ThenBy(r => r.Nombre).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void Nueva()
+    {
+        _editId = null; _modalError = null;
+        _fNombre = "";
+        _fAnio = DateTime.Today.Year;
+        _fMes = DateTime.Today.Month;
+        _fSucursalStr = "";
+        _fTipoServicioStr = "";
+        _fDescripcion = "";
+        _fActiva = true;
+        _grid = GridDataModel.FromJson(null);
+        _brocha = _tipos.FirstOrDefault()?.Codigo;
+        _modalOpen = true;
+    }
+
+    private async Task EditarAsync(Guid id)
+    {
+        _modalError = null;
+        try
+        {
+            var d = await Svc.ObtenerAsync(id);
+            if (d is null) { _error = "Programacion no encontrada."; return; }
+            _editId = id;
+            _fNombre = d.Nombre;
+            _fAnio = d.Anio; _fMes = d.Mes;
+            _fSucursalStr = d.SucursalId?.ToString() ?? "";
+            _fTipoServicioStr = d.TipoServicioId?.ToString() ?? "";
+            _fDescripcion = d.Descripcion ?? "";
+            _fActiva = d.Activa;
+            _grid = GridDataModel.FromJson(d.GridDataJson);
+            _brocha = _tipos.FirstOrDefault()?.Codigo;
+            _modalOpen = true;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void Cerrar() => _modalOpen = false;
+
+    private async Task GuardarAsync()
+    {
+        _modalError = null;
+        if (string.IsNullOrWhiteSpace(_fNombre)) { _modalError = "El nombre es obligatorio."; return; }
+        if (_fMes < 1 || _fMes > 12) { _modalError = "Mes fuera de rango."; return; }
+        if (_fAnio < 2024 || _fAnio > 2100) { _modalError = "Anio fuera de rango."; return; }
+
+        Guid? suc = Guid.TryParse(_fSucursalStr, out var gs) ? gs : (Guid?)null;
+        Guid? tsv = Guid.TryParse(_fTipoServicioStr, out var gt) ? gt : (Guid?)null;
+        var json = _grid.ToJson();
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var actor = await ActorAsync();
+            if (_editId is null)
+            {
+                await Svc.CrearAsync(new CrearTurnoProgramacionCmd(
+                    suc, tsv, _fNombre.Trim(), _fAnio, _fMes,
+                    string.IsNullOrWhiteSpace(_fDescripcion) ? null : _fDescripcion.Trim(),
+                    json), actor);
+                _ok = "Programacion creada.";
+            }
+            else
+            {
+                await Svc.ActualizarAsync(_editId.Value, new ActualizarTurnoProgramacionCmd(
+                    suc, tsv, _fNombre.Trim(), _fAnio, _fMes,
+                    string.IsNullOrWhiteSpace(_fDescripcion) ? null : _fDescripcion.Trim(),
+                    json, _fActiva), actor);
+                _ok = "Programacion actualizada.";
+            }
+            _modalOpen = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DuplicarAsync(TurnoProgramacionDto r)
+    {
+        var mesStr = await JS.InvokeAsync<string>("prompt",
+            $"Duplicar '{r.Nombre}' a que mes? (1-12)", (r.Mes + 1 > 12 ? 1 : r.Mes + 1).ToString());
+        if (string.IsNullOrWhiteSpace(mesStr) || !int.TryParse(mesStr, out var m) || m < 1 || m > 12)
+        { return; }
+        var anioStr = await JS.InvokeAsync<string>("prompt",
+            "A que anio?", (m == 1 && r.Mes == 12 ? r.Anio + 1 : r.Anio).ToString());
+        if (string.IsNullOrWhiteSpace(anioStr) || !int.TryParse(anioStr, out var a)) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.DuplicarAsync(r.Id, a, m, await ActorAsync());
+            _ok = "Programacion duplicada.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DesactivarAsync(TurnoProgramacionDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Desactivar la programacion '{r.Nombre}'? Se puede reactivar editandola.");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.DesactivarAsync(r.Id, await ActorAsync());
+            _ok = "Programacion desactivada.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(TurnoProgramacionDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar definitivamente '{r.Nombre}'? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.EliminarAsync(r.Id, await ActorAsync());
+            _ok = "Programacion eliminada.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ---- Editor ----
+    private int DiasEnMes() => DateTime.DaysInMonth(_fAnio, _fMes);
+
+    private void AgregarTurno()
+    {
+        if (_grid.Turnos.Count >= GridDataModel.MaxTurnos) { return; }
+        var i = _grid.Turnos.Count + 1;
+        string nombre;
+        do { nombre = $"Turno {i}"; i++; } while (_grid.Turnos.Contains(nombre));
+        _grid.Turnos.Add(nombre);
+        _grid.Dias[nombre] = new Dictionary<string, GridCell>();
+    }
+
+    private void EliminarTurno(int idx)
+    {
+        if (_grid.Turnos.Count <= GridDataModel.MinTurnos) { return; }
+        var t = _grid.Turnos[idx];
+        _grid.Turnos.RemoveAt(idx);
+        _grid.Dias.Remove(t);
+    }
+
+    private void RenombrarTurno(int idx, string nuevo)
+    {
+        nuevo = (nuevo ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(nuevo)) { return; }
+        var anterior = _grid.Turnos[idx];
+        if (nuevo == anterior) { return; }
+        if (_grid.Turnos.Contains(nuevo)) { return; } // silencioso: no duplicar
+        _grid.Turnos[idx] = nuevo;
+        if (_grid.Dias.Remove(anterior, out var celdas))
+        {
+            _grid.Dias[nuevo] = celdas;
+        }
+    }
+
+    private void PintarCelda(string turno, int dia)
+    {
+        if (_brocha is null) { return; }
+        if (!_grid.Dias.TryGetValue(turno, out var celdas))
+        {
+            celdas = new Dictionary<string, GridCell>();
+            _grid.Dias[turno] = celdas;
+        }
+        var key = dia.ToString();
+        if (_brocha == "__ERASER__")
+        {
+            celdas.Remove(key);
+            return;
+        }
+        var t = _tiposMap.GetValueOrDefault(_brocha);
+        if (t is null) { return; }
+        celdas[key] = new GridCell(t.Codigo, t.HorasDefault);
+    }
+
+    private void LimpiarTodo()
+    {
+        foreach (var t in _grid.Turnos) { _grid.Dias[t] = new Dictionary<string, GridCell>(); }
+    }
+
+    private decimal TotalHorasMes()
+    {
+        var total = 0m;
+        var dias = DiasEnMes();
+        for (var d = 1; d <= dias; d++) { total += _grid.HorasDelDia(d); }
+        return total;
+    }
+
+    // ---- helpers ----
+    private static readonly string[] _meses = new[]
+    {
+        "Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"
+    };
+    private static string NombreMes(int m) => (m >= 1 && m <= 12) ? _meses[m - 1] : "?";
+
+    private static string DayOfWeekEs(int anio, int mes, int dia)
+    {
+        var dt = new DateTime(anio, mes, dia);
+        return dt.DayOfWeek switch
+        {
+            DayOfWeek.Monday => "lun",
+            DayOfWeek.Tuesday => "mar",
+            DayOfWeek.Wednesday => "mie",
+            DayOfWeek.Thursday => "jue",
+            DayOfWeek.Friday => "vie",
+            DayOfWeek.Saturday => "sab",
+            _ => "dom",
+        };
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+}

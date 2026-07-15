@@ -73,6 +73,29 @@
     </div>
 </div>
 
+@* ===== Configuracion de turnos ===== *@
+<div class="ase-card">
+    <div class="ase-card-h">Configuracion de turnos</div>
+    <div class="ase-form">
+        <div class="ase-f">
+            <label class="ase-chk">
+                <input type="checkbox" @bind="_bloquearOverload" />
+                <span>Bloquear guardado cuando un dia supere 24 h sumando todos los turnos</span>
+            </label>
+            <div class="ase-input-row" style="margin-top:6px;">
+                <button class="btn btn-primary btn-sm" @onclick="SaveOverload" disabled="@_busyOverload">
+                    @(_busyOverload ? "Guardando..." : "Guardar")
+                </button>
+            </div>
+            <small class="text-muted">
+                Con el toggle apagado (default) el editor de programaciones solo muestra un aviso visual;
+                con el toggle encendido el servicio rechaza el guardado si algun dia acumula mas de 24 h
+                de reloj entre todos los turnos apilados.
+            </small>
+        </div>
+    </div>
+</div>
+
 <style>
     .ase-input-row { display: flex; gap: 6px; align-items: center; }
     .ase-input-row > input { max-width: 120px; }
@@ -84,11 +107,14 @@
     private string? _error, _ok;
     private int _mesesHC = 3;
     private bool _busyClinica;
+    private bool _bloquearOverload;
+    private bool _busyOverload;
 
     protected override async Task OnInitializedAsync()
     {
         await Load();
         _mesesHC = await ClinicaSvc.GetMesesValidezHistoriaClinicaAsync();
+        _bloquearOverload = await ClinicaSvc.GetBloquearOverloadTurnosAsync();
     }
     private async Task Load() => _items = (await Svc.ListAsync()).Select(Row.From).ToList();
 
@@ -102,6 +128,20 @@
         }
         catch (InvalidOperationException ex) { _error = ex.Message; }
         finally { _busyClinica = false; }
+    }
+
+    private async Task SaveOverload()
+    {
+        _error = _ok = null; _busyOverload = true;
+        try
+        {
+            await ClinicaSvc.SetBloquearOverloadTurnosAsync(_bloquearOverload, await Actor());
+            _ok = _bloquearOverload
+                ? "Bloqueo de overload activado: las programaciones con dias > 24h no podran guardarse."
+                : "Bloqueo de overload desactivado: se permite guardar aunque un dia supere 24h.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busyOverload = false; }
     }
     private void Add() => _items.Add(new Row { Activo = true });
 

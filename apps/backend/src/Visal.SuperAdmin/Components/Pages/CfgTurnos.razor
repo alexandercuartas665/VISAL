@@ -225,12 +225,17 @@
                         }
                     </div>
                     <hr class="my-2" />
-                    <div class="small text-muted mb-1">Tipos de turno</div>
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <div class="small text-muted">Tipos de turno</div>
+                        <button type="button" class="btn btn-link btn-sm p-0"
+                                title="Gestionar tipos de turno"
+                                @onclick="AbrirGestorTipos">&#9881; Gestionar</button>
+                    </div>
                     @if (_tipos.Count == 0)
                     {
                         <div class="ase-empty small" style="padding:8px 4px;">
                             No hay tipos configurados.
-                            <a href="/cfg-tipos-turno">Crear tipos &rarr;</a>
+                            <button type="button" class="btn btn-link btn-sm p-0" @onclick="AbrirGestorTipos">Crear tipos &rarr;</button>
                         </div>
                     }
                     <div class="tgrid-tipos">
@@ -341,6 +346,141 @@
     </div>
 }
 
+@* ============= GESTOR DE TIPOS ============= *@
+@if (_tiposModalOpen)
+{
+    <div class="cie-backdrop" @onclick="CerrarGestorTipos"></div>
+    <div class="cie-modal" style="width:900px; max-width:95vw; z-index:1060;">
+        <div class="cie-modal-h">
+            <h3>Tipos de turno</h3>
+            <button class="cie-modal-close" @onclick="CerrarGestorTipos">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            @if (_ttError is not null) { <div class="text-danger small mb-2">@_ttError</div> }
+            @if (_ttOk is not null) { <div class="text-success small mb-2">@_ttOk</div> }
+
+            @if (_ttFormOpen)
+            {
+                <div class="tt-form-card">
+                    <div class="row g-2">
+                        <div class="col-3">
+                            <label class="form-label small mb-1">Codigo *</label>
+                            <input class="form-control form-control-sm mono" @bind="_ttCodigo" maxlength="8"
+                                   style="text-transform:uppercase;" placeholder="Ej: M" />
+                        </div>
+                        <div class="col-5">
+                            <label class="form-label small mb-1">Etiqueta *</label>
+                            <input class="form-control form-control-sm" @bind="_ttEtiqueta" maxlength="40" placeholder="Ej: Manana" />
+                        </div>
+                        <div class="col-2">
+                            <label class="form-label small mb-1">Horas</label>
+                            <input type="number" class="form-control form-control-sm" @bind="_ttHoras" step="0.5" min="0" max="24" />
+                        </div>
+                        <div class="col-2">
+                            <label class="form-label small mb-1">Orden</label>
+                            <input type="number" class="form-control form-control-sm" @bind="_ttOrden" min="0" />
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-3">
+                            <label class="form-label small mb-1">Fondo</label>
+                            <input class="form-control form-control-sm mono" @bind="_ttBg" placeholder="#FEF9C3" />
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label small mb-1">Texto</label>
+                            <input class="form-control form-control-sm mono" @bind="_ttFg" placeholder="#713F12" />
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label small mb-1">Borde</label>
+                            <input class="form-control form-control-sm mono" @bind="_ttBd" placeholder="#FCD34D" />
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label small mb-1">Preview</label>
+                            <div>
+                                <span class="tgrid-chip" style="background:@_ttBg;color:@_ttFg;border-color:@_ttBd;">
+                                    @(string.IsNullOrWhiteSpace(_ttCodigo) ? "??" : _ttCodigo.ToUpperInvariant())
+                                    @(string.IsNullOrWhiteSpace(_ttEtiqueta) ? "" : _ttEtiqueta)
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-2">
+                        <label class="ase-chk">
+                            <input type="checkbox" @bind="_ttActivo" /> <span>Activo</span>
+                        </label>
+                        <div class="ms-auto">
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarFormTipo">Cancelar</button>
+                            <button class="btn btn-primary btn-sm" @onclick="GuardarTipoAsync" disabled="@_ttBusy">
+                                @(_ttEditId is null ? "Crear" : "Guardar")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <hr />
+            }
+
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <div class="small text-muted">@_tiposFull.Count tipos configurados</div>
+                @if (!_ttFormOpen)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="NuevoTipo">+ Nuevo tipo</button>
+                }
+            </div>
+
+            @if (_tiposFull.Count == 0)
+            {
+                <div class="ase-empty" style="padding:24px;">Aun no hay tipos. Crea el primero.</div>
+            }
+            else
+            {
+                <div class="med-tbl-wrap">
+                    <table class="table table-sm med-tbl align-middle">
+                        <thead>
+                            <tr>
+                                <th style="width:60px">Orden</th>
+                                <th style="width:90px">Codigo</th>
+                                <th>Etiqueta</th>
+                                <th style="width:70px" class="text-end">Horas</th>
+                                <th style="width:150px">Preview</th>
+                                <th style="width:80px" class="text-center">Activo</th>
+                                <th style="width:100px"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _tiposFull)
+                            {
+                                <tr class="@(r.Activo ? "" : "rf-row-inactiva")">
+                                    <td>@r.Orden</td>
+                                    <td><code>@r.Codigo</code></td>
+                                    <td>@r.Etiqueta</td>
+                                    <td class="text-end">@r.HorasDefault.ToString("0.#")</td>
+                                    <td>
+                                        <span class="tgrid-chip"
+                                              style="background:@r.ColorFondo;color:@r.ColorTexto;border-color:@r.ColorBorde;">
+                                            @r.Codigo @r.Etiqueta
+                                        </span>
+                                    </td>
+                                    <td class="text-center">
+                                        @if (r.Activo) { <span class="badge bg-success">Activo</span> }
+                                        else { <span class="badge bg-secondary">Apagado</span> }
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-link btn-sm" title="Editar" @onclick="() => EditarTipo(r)">&#9998;</button>
+                                        <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarTipoAsync(r)">&#128465;</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarGestorTipos">Cerrar</button>
+        </div>
+    </div>
+}
+
 <style>
     .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
 
@@ -389,6 +529,11 @@
         border: 1px solid #e2e8f0;
     }
     table.tgrid .tgrid-cell:hover { outline: 2px solid #2563eb; outline-offset: -2px; }
+
+    /* ---- Gestor de tipos ---- */
+    .tt-form-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:8px; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
 </style>
 
 @code {
@@ -413,6 +558,23 @@
     private List<SucursalDto> _sucursales = new();
     private List<CatalogoTipoServicioDto> _tiposServicio = new();
     private int[] _aniosDisponibles = Array.Empty<int>();
+
+    // Gestor de tipos (modal secundario embebido)
+    private bool _tiposModalOpen;
+    private bool _ttFormOpen;
+    private Guid? _ttEditId;
+    private string _ttCodigo = "";
+    private string _ttEtiqueta = "";
+    private decimal _ttHoras = 8m;
+    private string _ttBg = "#FEF9C3";
+    private string _ttFg = "#713F12";
+    private string _ttBd = "#FCD34D";
+    private int _ttOrden = 100;
+    private bool _ttActivo = true;
+    private bool _ttBusy;
+    private string? _ttError;
+    private string? _ttOk;
+    private List<TipoTurnoDto> _tiposFull = new(); // incluye inactivos para el gestor
 
     // Modal
     private bool _modalOpen;
@@ -695,5 +857,87 @@
         if (AuthState is null) { return Guid.Empty; }
         var st = await AuthState;
         return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+
+    // ---- Gestor de tipos ----
+
+    private async Task AbrirGestorTipos()
+    {
+        _ttError = _ttOk = null;
+        _ttFormOpen = false;
+        _tiposFull = (await TiposSvc.ListarAsync(incluirInactivos: true)).ToList();
+        _tiposModalOpen = true;
+    }
+
+    private void CerrarGestorTipos() => _tiposModalOpen = false;
+
+    private void NuevoTipo()
+    {
+        _ttEditId = null; _ttError = _ttOk = null;
+        _ttCodigo = ""; _ttEtiqueta = ""; _ttHoras = 8m;
+        _ttBg = "#FEF9C3"; _ttFg = "#713F12"; _ttBd = "#FCD34D";
+        _ttOrden = (_tiposFull.Count == 0 ? 1 : _tiposFull.Max(r => r.Orden) + 1);
+        _ttActivo = true;
+        _ttFormOpen = true;
+    }
+
+    private void EditarTipo(TipoTurnoDto r)
+    {
+        _ttEditId = r.Id; _ttError = _ttOk = null;
+        _ttCodigo = r.Codigo; _ttEtiqueta = r.Etiqueta; _ttHoras = r.HorasDefault;
+        _ttBg = r.ColorFondo; _ttFg = r.ColorTexto; _ttBd = r.ColorBorde;
+        _ttOrden = r.Orden; _ttActivo = r.Activo;
+        _ttFormOpen = true;
+    }
+
+    private void CancelarFormTipo() { _ttFormOpen = false; _ttError = null; }
+
+    private async Task GuardarTipoAsync()
+    {
+        _ttError = _ttOk = null; _ttBusy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            var cmd = new GuardarTipoTurnoCmd(
+                _ttEditId, _ttCodigo, _ttEtiqueta, _ttHoras,
+                _ttBg, _ttFg, _ttBd, _ttOrden, _ttActivo);
+            await TiposSvc.GuardarAsync(cmd, actor);
+            _ttOk = _ttEditId is null ? "Tipo creado." : "Tipo actualizado.";
+            _ttFormOpen = false;
+            await RecargarTiposAsync();
+        }
+        catch (Exception ex) { _ttError = ex.Message; }
+        finally { _ttBusy = false; }
+    }
+
+    private async Task EliminarTipoAsync(TipoTurnoDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eliminar el tipo '{r.Codigo}'? Si esta usado en alguna programacion, la celda quedara sin color hasta que reasignes otro tipo.");
+        if (!ok) { return; }
+        _ttError = _ttOk = null; _ttBusy = true;
+        try
+        {
+            await TiposSvc.EliminarAsync(r.Id, await ActorAsync());
+            _ttOk = "Tipo eliminado.";
+            await RecargarTiposAsync();
+        }
+        catch (Exception ex) { _ttError = ex.Message; }
+        finally { _ttBusy = false; }
+    }
+
+    /// <summary>Recarga la lista completa (para la tabla del gestor) y la lista
+    /// activa (para el sidebar del editor), y refresca _tiposMap para que las
+    /// celdas ya pintadas conserven los nuevos colores en vivo.</summary>
+    private async Task RecargarTiposAsync()
+    {
+        _tiposFull = (await TiposSvc.ListarAsync(incluirInactivos: true)).ToList();
+        _tipos = _tiposFull.Where(t => t.Activo).OrderBy(t => t.Orden).ThenBy(t => t.Codigo).ToList();
+        _tiposMap = _tipos.ToDictionary(t => t.Codigo, t => t, StringComparer.Ordinal);
+        // Si la brocha activa apuntaba a un codigo que ya no existe, la limpiamos.
+        if (_brocha is not null && _brocha != "__ERASER__" && !_tiposMap.ContainsKey(_brocha))
+        {
+            _brocha = null;
+        }
     }
 }

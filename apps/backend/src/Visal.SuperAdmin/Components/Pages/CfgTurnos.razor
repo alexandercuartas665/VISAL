@@ -226,6 +226,13 @@
                     </div>
                     <hr class="my-2" />
                     <div class="small text-muted mb-1">Tipos de turno</div>
+                    @if (_tipos.Count == 0)
+                    {
+                        <div class="ase-empty small" style="padding:8px 4px;">
+                            No hay tipos configurados.
+                            <a href="/cfg-tipos-turno">Crear tipos &rarr;</a>
+                        </div>
+                    }
                     <div class="tgrid-tipos">
                         @foreach (var t in _tipos)
                         {

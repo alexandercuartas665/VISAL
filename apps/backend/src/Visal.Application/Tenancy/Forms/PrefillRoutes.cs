@@ -110,6 +110,41 @@ public sealed class PrefillFieldMap
     /// </summary>
     [JsonPropertyName("columnMappings")]
     public Dictionary<string, string>? ColumnMappings { get; set; }
+
+    /// <summary>
+    /// Filtro opcional de categorias a incluir cuando el <see cref="Source"/> es
+    /// la sub-ruta compuesta <c>historiaMedica / todo.lista_completa</c>. Cada
+    /// entrada es un codigo de categoria (ver <see cref="PrefillCategoriasHm.Codigos"/>).
+    /// Cuando es null o vacia, el helper incluye TODAS las categorias por default.
+    /// Se ignora si Source es cualquier otra cosa.
+    /// </summary>
+    [JsonPropertyName("includeCategories")]
+    public List<string>? IncludeCategories { get; set; }
+}
+
+/// <summary>
+/// Catalogo de categorias que puede incluir la sub-ruta compuesta
+/// <c>historiaMedica / todo.lista_completa</c>. El codigo es lo que se persiste
+/// en <see cref="PrefillFieldMap.IncludeCategories"/>; el titulo es el heading
+/// que aparece en el textarea al concatenar los bloques.
+/// El orden aca es el orden en que se emiten los bloques en el textarea.
+/// </summary>
+public static class PrefillCategoriasHm
+{
+    public static readonly (string Codigo, string Titulo)[] Todas = new[]
+    {
+        ("medicamentos", "MEDICAMENTOS"),
+        ("ordenes_servicio", "SERVICIOS"),
+        ("insumos", "INSUMOS"),
+        ("remisiones", "REMISIONES"),
+        ("rx_imagenologia", "RX IMAGENOLOGIA"),
+        ("laboratorios", "LABORATORIOS"),
+        ("insumos_externos", "INSUMOS EXTERNOS"),
+        ("incapacidades", "INCAPACIDADES"),
+        ("certificaciones", "CERTIFICACIONES")
+    };
+
+    public static readonly string[] Codigos = Todas.Select(t => t.Codigo).ToArray();
 }
 
 /// <summary>Catalogo de campos disponibles por modulo origen para alimentar el dropdown del modal.</summary>
@@ -157,6 +192,10 @@ public static class PrefillSourceCatalog
         // marcados aqui se vuelven readonly en el FormViewer.
         ["historiaMedica"] = new[]
         {
+            // Sub-ruta COMPUESTA: concatena las N categorias marcadas en
+            // PrefillFieldMap.IncludeCategories (todas por default) en un solo
+            // textarea con heading por bloque. Bloques vacios se omiten.
+            "todo.lista_completa",
             "medicamentos.lista_numerada",
             "remisiones.lista_numerada",
             "incapacidades.lista_numerada",

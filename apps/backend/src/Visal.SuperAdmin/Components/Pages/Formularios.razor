@@ -665,7 +665,7 @@
                             @foreach (var m in route.Mappings)
                             {
                                 <div class="pr-map-row">
-                                    <select class="pr-sel" @bind="m.Source">
+                                    <select class="pr-sel" @bind="m.Source" @bind:after="() => OnSourceChanged(m)">
                                         <option value="">Selecciona...</option>
                                         @foreach (var s in sourceFields) { <option value="@s">@s</option> }
                                     </select>
@@ -696,6 +696,27 @@
                                                 </select>
                                             </div>
                                         }
+                                    </div>
+                                }
+                                @* Sub-ruta compuesta: el textarea destino recibe la
+                                   concatenacion de N categorias marcadas. Todas por default. *@
+                                @if (string.Equals(m.Source, "todo.lista_completa", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <div class="pr-col-map">
+                                        <div class="pr-col-map-h">
+                                            Categorias a incluir en el textarea destino (todas marcadas = todo lo de la HC). Los bloques vacios se omiten.
+                                        </div>
+                                        <div class="pr-cat-chks">
+                                            @foreach (var (codigo, titulo) in Visal.Application.Tenancy.Forms.PrefillCategoriasHm.Todas)
+                                            {
+                                                <label class="pr-cat-chk">
+                                                    <input type="checkbox"
+                                                           checked="@IsCategoriaIncluida(m, codigo)"
+                                                           @onchange="e => ToggleCategoria(m, codigo, (bool)(e.Value ?? false))" />
+                                                    <span>@titulo</span>
+                                                </label>
+                                            }
+                                        </div>
                                     </div>
                                 }
                             }
@@ -865,6 +886,9 @@
     .pr-col-map-row { display: grid; grid-template-columns: 1fr 20px 1fr; gap: 6px; align-items: center; margin-bottom: 4px; }
     .pr-col-map-label { font-size: 12px; color: #1f2937; }
     .pr-col-map-label small { color: #6b7280; font-size: 10.5px; margin-left: 4px; }
+    .pr-cat-chks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; }
+    .pr-cat-chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #1f2937; cursor: pointer; }
+    .pr-cat-chk input { margin: 0; }
     .pr-col-sel { background: #fff; }
 
     /* Modal Exportar JSON (Rutas de prefill opcionales) */
@@ -1177,6 +1201,44 @@
     private void OnTargetChanged(PrefillFieldMap m)
     {
         if (GetTableNode(m.Target) is null) { m.ColumnMappings = null; }
+    }
+
+    /// <summary>Cuando el usuario cambia el source, limpia IncludeCategories si
+    /// el nuevo source no es la sub-ruta compuesta. Reduce ruido en el JSON.</summary>
+    private void OnSourceChanged(PrefillFieldMap m)
+    {
+        if (!string.Equals(m.Source, "todo.lista_completa", StringComparison.OrdinalIgnoreCase))
+        {
+            m.IncludeCategories = null;
+        }
+    }
+
+    /// <summary>true = categoria incluida. Si IncludeCategories es null (default),
+    /// se consideran TODAS incluidas — es la semantica del helper.</summary>
+    private bool IsCategoriaIncluida(PrefillFieldMap m, string codigo)
+        => m.IncludeCategories is null
+           || m.IncludeCategories.Contains(codigo, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Al marcar/desmarcar un checkbox de categoria, materializa la lista
+    /// (deja de ser "null = todas") para que el estado quede explicito. Si al final
+    /// quedan las 9 activas, colapsa a null para no persistir ruido.</summary>
+    private void ToggleCategoria(PrefillFieldMap m, string codigo, bool activo)
+    {
+        m.IncludeCategories ??= Visal.Application.Tenancy.Forms.PrefillCategoriasHm.Codigos.ToList();
+        if (activo)
+        {
+            if (!m.IncludeCategories.Contains(codigo, StringComparer.OrdinalIgnoreCase))
+            { m.IncludeCategories.Add(codigo); }
+        }
+        else
+        {
+            m.IncludeCategories.RemoveAll(c => string.Equals(c, codigo, StringComparison.OrdinalIgnoreCase));
+        }
+        // Colapsa a null cuando estan todas: default limpio en la BD.
+        if (m.IncludeCategories.Count == Visal.Application.Tenancy.Forms.PrefillCategoriasHm.Codigos.Length)
+        {
+            m.IncludeCategories = null;
+        }
     }
 
     /// <summary>Devuelve el FormNode de tipo tabla cuyo Name = targetName, o null.</summary>

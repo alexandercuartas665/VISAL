@@ -16,6 +16,7 @@ public static class HistoriaMedicaPrefillHelper
     /// <summary>Catalogo de campos disponibles bajo sourceModule = "historiaMedica".</summary>
     public static readonly string[] CamposDisponibles = new[]
     {
+        "todo.lista_completa",
         "medicamentos.lista_numerada",
         "remisiones.lista_numerada",
         "incapacidades.lista_numerada",
@@ -70,6 +71,49 @@ public static class HistoriaMedicaPrefillHelper
             ["laboratorios.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.Laboratorios),
             ["insumos_externos.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.InsumosExternos)
         };
+    }
+
+    /// <summary>
+    /// Concatena en un solo string las categorias marcadas (o TODAS si categorias
+    /// es null/vacia), cada una con su heading en mayusculas + salto doble entre
+    /// bloques. Los bloques vacios se omiten para que el textarea quede limpio.
+    /// Es la implementacion de la sub-ruta compuesta <c>todo.lista_completa</c>.
+    /// El orden viene fijo desde <see cref="PrefillCategoriasHm.Todas"/> — el
+    /// usuario no lo altera desde el modal.
+    /// </summary>
+    public static string ListaCompleta(HmFuentes fuentes, IEnumerable<string>? categorias)
+    {
+        var contenidoPorCodigo = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["medicamentos"] = ListaNumeradaMedicamentos(fuentes.Medicamentos),
+            ["ordenes_servicio"] = ListaNumeradaOrdenesServicio(fuentes.OrdenesServicio),
+            ["insumos"] = ListaNumeradaInsumos(fuentes.Insumos),
+            ["remisiones"] = ListaNumeradaRemisiones(fuentes.Remisiones),
+            ["rx_imagenologia"] = ListaNumeradaOrdenExterna(fuentes.RxImagenologia),
+            ["laboratorios"] = ListaNumeradaOrdenExterna(fuentes.Laboratorios),
+            ["insumos_externos"] = ListaNumeradaOrdenExterna(fuentes.InsumosExternos),
+            ["incapacidades"] = ListaNumeradaIncapacidades(fuentes.Incapacidades),
+            ["certificaciones"] = ListaNumeradaCertificaciones(fuentes.Certificaciones)
+        };
+
+        HashSet<string>? filtro = null;
+        if (categorias is not null)
+        {
+            filtro = new HashSet<string>(categorias.Where(c => !string.IsNullOrWhiteSpace(c)),
+                StringComparer.OrdinalIgnoreCase);
+            if (filtro.Count == 0) { filtro = null; } // vacio == todas (default)
+        }
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var (codigo, titulo) in PrefillCategoriasHm.Todas)
+        {
+            if (filtro is not null && !filtro.Contains(codigo)) { continue; }
+            if (!contenidoPorCodigo.TryGetValue(codigo, out var contenido)) { continue; }
+            if (string.IsNullOrWhiteSpace(contenido)) { continue; } // bloque vacio: omitir
+            if (sb.Length > 0) { sb.Append("\n\n"); }
+            sb.Append(titulo).Append('\n').Append(contenido);
+        }
+        return sb.ToString();
     }
 
     public static string ListaNumeradaMedicamentos(IReadOnlyList<OrdenMedicamentoItemDto> items)
@@ -217,6 +261,19 @@ public static class HistoriaMedicaPrefillHelper
 
             FormNode? targetNode = null;
             nodosPorName.TryGetValue(m.Target, out targetNode);
+
+            // Sub-ruta compuesta: solo aplica a textareas/text, no a tablas
+            // (una tabla no tiene forma coherente de recibir 9 categorias
+            // concatenadas — el usuario deberia mapear cada categoria por
+            // separado a su columna, si algun dia surge ese caso).
+            if (string.Equals(m.Source, "todo.lista_completa", StringComparison.OrdinalIgnoreCase))
+            {
+                if (targetNode is { IsTable: true }) { continue; }
+                var v = ListaCompleta(fuentes, m.IncludeCategories);
+                valores[m.Target] = v;
+                readOnly.Add(m.Target);
+                continue;
+            }
 
             if (targetNode is { IsTable: true, Columns: { Count: > 0 } cols })
             {

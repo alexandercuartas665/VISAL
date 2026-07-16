@@ -634,4 +634,40 @@ public sealed class IhceSenderService(
             body = call.ResponseBody,
             elapsedMs = call.ElapsedMs
         }, new JsonSerializerOptions { WriteIndented = true });
+
+    public async Task<IpPublicaResult> ConsultarIpPublicaAsync(CancellationToken ct = default)
+    {
+        var errores = new List<string>();
+        var client = http.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(8);
+
+        async Task<string?> ConsultarAsync(string nombre, string url, Func<string, string?> parse)
+        {
+            try
+            {
+                var body = await client.GetStringAsync(url, ct);
+                var ip = parse(body)?.Trim();
+                return string.IsNullOrWhiteSpace(ip) ? null : ip;
+            }
+            catch (Exception ex) { errores.Add($"{nombre}: {ex.Message}"); return null; }
+        }
+
+        var ipify = await ConsultarAsync("ipify", "https://api.ipify.org?format=json", b =>
+        {
+            try { using var d = JsonDocument.Parse(b); return d.RootElement.GetProperty("ip").GetString(); }
+            catch { return null; }
+        });
+        var ifconfig = await ConsultarAsync("ifconfig.me", "https://ifconfig.me/ip", b => b);
+        var amazon = await ConsultarAsync("checkip.amazonaws", "https://checkip.amazonaws.com/", b => b);
+
+        var todas = new[] { ipify, ifconfig, amazon }.Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!.Trim()).ToList();
+        // Consensus: la IP que aparece en al menos 2 servicios.
+        string? consensus = todas.GroupBy(x => x)
+            .Where(g => g.Count() >= 2).OrderByDescending(g => g.Count())
+            .Select(g => g.Key).FirstOrDefault()
+            ?? todas.FirstOrDefault();
+
+        return new IpPublicaResult(ipify, ifconfig, amazon, consensus, errores);
+    }
 }

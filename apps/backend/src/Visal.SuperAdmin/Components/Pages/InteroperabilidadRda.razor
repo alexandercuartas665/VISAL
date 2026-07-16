@@ -33,6 +33,35 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
+<div style="background:#f0f9ff;border:1px solid #7dd3fc;padding:10px 14px;border-radius:8px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <b style="font-size:13px;">IP publica de salida:</b>
+    <button class="btn btn-outline-primary btn-sm" @onclick="ConsultarIpAsync" disabled="@_ipBusy">
+        @(_ipBusy ? "Consultando..." : (_ipResult is null ? "Consultar" : "Reconsultar"))
+    </button>
+    @if (_ipResult is not null)
+    {
+        <code style="font-size:14px;font-family:monospace;background:#0d1117;color:#e6edf3;padding:4px 10px;border-radius:6px;user-select:all;">
+            @(_ipResult.Consensus ?? "sin respuesta")
+        </code>
+        <small style="color:#666;">
+            (ipify: <code>@(_ipResult.Ipify ?? "-")</code>,
+            ifconfig: <code>@(_ipResult.Ifconfig ?? "-")</code>,
+            amazon: <code>@(_ipResult.Amazon ?? "-")</code>)
+        </small>
+        @if (_ipResult.Errores.Count > 0)
+        {
+            <small style="color:#c0392b;">Errores: @string.Join(" | ", _ipResult.Errores)</small>
+        }
+    }
+    else
+    {
+        <small style="color:#666;">
+            Sirve para verificar la IP que MinSalud ve al recibir los envios.
+            Requerido para whitelist del APIM sandbox.
+        </small>
+    }
+</div>
+
 @{
     var sedesSinCred = _rows
         .Where(r => !r.TieneCredencialSede
@@ -462,6 +491,18 @@
     // ----- Envio al IHCE -----
     private Guid? _enviandoId;
     private EnvioRdaResultado? _envioResult;
+
+    // ----- Diagnostico IP publica -----
+    private bool _ipBusy;
+    private IpPublicaResult? _ipResult;
+
+    private async Task ConsultarIpAsync()
+    {
+        _ipBusy = true; _error = null;
+        try { _ipResult = await Sender.ConsultarIpPublicaAsync(); }
+        catch (Exception ex) { _error = "No se pudo consultar la IP: " + ex.Message; }
+        finally { _ipBusy = false; }
+    }
 
     // ----- Probador de servicios IHCE -----
     private string _probadorTipoDoc = "CC";

@@ -31,7 +31,10 @@ public sealed class RdaConsultaBuilderService(
     private const string ProfileBase = "https://fhir.minsalud.gov.co/rda/StructureDefinition";
     private const string CodeSystemBase = "https://fhir.minsalud.gov.co/rda/CodeSystem";
     private const string NamingSystemBase = "https://fhir.minsalud.gov.co/rda/NamingSystem";
-    private const string ReVps = "http://co.fhir.guide/NamingSystem/REPS";
+    // NamingSystems oficiales del IG RDA MinSalud (Manual IHCE v01.1 seccion 5.3).
+    // NO usar la guia comunitaria http://co.fhir.guide — MinSalud espera su propio namespace.
+    private const string RepsSystem = "https://fhir.minsalud.gov.co/rda/NamingSystem/REPS";
+    private const string DianSystem = "https://fhir.minsalud.gov.co/rda/NamingSystem/DIAN";
     private const string LoincSystem = "http://loinc.org";
     private const string V2Terminology = "http://terminology.hl7.org/CodeSystem/v2-0203";
 
@@ -416,7 +419,7 @@ public sealed class RdaConsultaBuilderService(
         loc.Identifier.Add(new Identifier
         {
             Use = Identifier.IdentifierUse.Official,
-            System = ReVps,
+            System = RepsSystem,
             Value = locationId
         });
         return loc;
@@ -784,6 +787,7 @@ public sealed class RdaConsultaBuilderService(
             ElementId = "TaxIdentifier-0",
             Use = Identifier.IdentifierUse.Official,
             Type = taxType,
+            System = DianSystem,
             Value = string.IsNullOrWhiteSpace(tenantE.TaxId) ? "Desconocido" : tenantE.TaxId
         });
         var prnType = new CodeableConcept();
@@ -795,7 +799,7 @@ public sealed class RdaConsultaBuilderService(
             ElementId = "HealthcareProviderIdentifier-0",
             Use = Identifier.IdentifierUse.Official,
             Type = prnType,
-            System = ReVps,
+            System = RepsSystem,
             Value = codigoRep
         });
         return o;

@@ -88,4 +88,21 @@ public interface IIhceSenderService
     /// endpoint del Postman oficial acepta busqueda por nombre.
     /// </summary>
     Task<IhceCallResult> ConsultarEapbAsync(ConsultaEapbRequest req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Consulta la IP publica de salida del server que estara enviando los RDAs a MinSalud.
+    /// Util para verificar si la IP esta whitelisteada en el APIM sandbox. Consulta 3 servicios
+    /// para redundancia (ipify + ifconfig + amazon).
+    /// </summary>
+    Task<IpPublicaResult> ConsultarIpPublicaAsync(CancellationToken ct = default);
 }
+
+/// <summary>
+/// Resultado de consultar la IP publica del server backend contra varios "what is my IP".
+/// </summary>
+public sealed record IpPublicaResult(
+    string? Ipify,
+    string? Ifconfig,
+    string? Amazon,
+    string? Consensus,
+    List<string> Errores);

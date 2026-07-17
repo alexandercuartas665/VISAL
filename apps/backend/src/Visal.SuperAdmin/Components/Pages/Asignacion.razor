@@ -253,6 +253,10 @@
                             <div class="asg-cart-meta">Codigo: <code>@(c.Servicio.Codigo ?? "-")</code></div>
                             <div class="asg-cart-meta">
                                 Cantidad: <strong>@c.Cantidad</strong>
+                                @if (c.Cantidad == 0 && c.PaqueteCodigo is not null)
+                                {
+                                    <span class="asg-pkg-opt-tag" title="Servicio del paquete marcado como no aplica">no aplica</span>
+                                }
                             </div>
                             @if (!string.IsNullOrWhiteSpace(c.Observaciones))
                             {
@@ -995,6 +999,12 @@ else
 
     // Carrito.
     private List<CartItem> _carrito = new();
+    // Cache de codigos de servicio por paquete_codigo. Se llena al agregar el
+    // primer chip de cada paquete al carrito; se usa en Guardar para validar
+    // que TODOS los servicios del paquete esten representados (con cualquier
+    // cantidad, incluido 0). Se limpia al vaciar el carrito o al guardar.
+    private Dictionary<string, HashSet<string>> _paqueteServiciosCache =
+        new(StringComparer.OrdinalIgnoreCase);
     private string? _autorizacion;
     private DateOnly? _fechaInicio = DateOnly.FromDateTime(DateTime.Now);
     private DateOnly? _fechaFinal;
@@ -1222,7 +1232,12 @@ else
         // Mismo orden de validaciones que ctrAsignaciones.PrepararServicio() (empty_field por campo).
         if (_paciente is null) { _error = "Debe indicar una identificacion de paciente."; return; }
         if (string.IsNullOrWhiteSpace(_paciente.NombreCompleto)) { _error = "Debe indicar un nombre de paciente."; return; }
-        if (_cantidad < 1) { _error = "Debe indicar cantidad de servicios."; return; }
+        // Cantidad>=1 es obligatoria en el flujo normal. En flujo de paquete permitimos
+        // Cantidad=0 (placeholder para servicios del paquete que el coordinador incluyo
+        // en la revision pero decidio no aplicar).
+        var esServicioDePaqueteCheck = _servicioSel?.PaqueteId is not null;
+        if (_cantidad < 0) { _error = "La cantidad no puede ser negativa."; return; }
+        if (_cantidad < 1 && !esServicioDePaqueteCheck) { _error = "Debe indicar cantidad de servicios."; return; }
         if (string.IsNullOrWhiteSpace(_contratoIdSel)) { _error = "Debe seleccionar un contrato."; return; }
         if (string.IsNullOrWhiteSpace(_moduloSel)) { _error = "Debe seleccionar un tipo de servicio (modulo)."; return; }
         if (string.IsNullOrWhiteSpace(_autorizacion)) { _error = "Debe indicar un Numero de Orden / Autorizacion."; return; }
@@ -1258,13 +1273,21 @@ else
             else
             {
                 paqueteInstanciaId = Guid.NewGuid();
-                // Traer solo el precio del paquete (no expandimos items).
+                // Traer el precio del paquete y cachear la lista de codigos que trae
+                // el paquete (para validar completitud al Guardar).
                 try
                 {
                     var pkgId = _servicioSel.PaqueteId!.Value;
                     var contratoCodigo = _contratoSel?.CodigoContrato ?? "";
                     var expansion = await Svc.ObtenerPaqueteExpansionAsync(pkgId, contratoCodigo);
                     paqueteValor = expansion?.Precio;
+                    if (expansion is not null && paqueteCodigo is not null)
+                    {
+                        _paqueteServiciosCache[paqueteCodigo] = expansion.Items
+                            .Select(i => i.CodigoServicio)
+                            .Where(c => !string.IsNullOrWhiteSpace(c))
+                            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    }
                 }
                 catch { paqueteValor = null; }
             }
@@ -1299,7 +1322,11 @@ else
     {
         _carrito = _carrito.Where(c => !c.Seleccionado).ToList();
     }
-    private void LimpiarCarrito() => _carrito = new();
+    private void LimpiarCarrito()
+    {
+        _carrito = new();
+        _paqueteServiciosCache.Clear();
+    }
 
     // ---- Menu ⋮ de cada tarjeta del historico (col 2: "Ultimo servicios agregados") ----
 
@@ -1498,8 +1525,46 @@ else
                 return;
             }
 
-            // Solo enviamos chips con Cantidad > 0 (guard defensivo; los chips
-            // agregados manualmente siempre traen la Cantidad del form).
+            // Paquete: exigimos que TODOS los servicios del paquete esten
+            // representados en el carrito (con Cantidad >= 0). El coordinador
+            // debe agregar cada servicio del paquete y marcar con Cantidad=0
+            // los que no aplican. Si faltan servicios, bloqueamos.
+            foreach (var g in _carrito.Where(c => c.PaqueteCodigo is not null)
+                                       .GroupBy(c => c.PaqueteCodigo!))
+            {
+                if (!_paqueteServiciosCache.TryGetValue(g.Key, out var esperados)) { continue; }
+                var enCarrito = g.Select(c => c.Servicio.Codigo)
+                                 .Where(c => !string.IsNullOrWhiteSpace(c))
+                                 .Select(c => c!)
+                                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var faltantes = esperados.Where(c => !enCarrito.Contains(c)).ToList();
+                if (faltantes.Count > 0)
+                {
+                    var muestra = string.Join(", ", faltantes.Take(5));
+                    var extra = faltantes.Count > 5 ? $" y {faltantes.Count - 5} mas" : "";
+                    _error = $"Paquete {g.Key}: agrega TODOS los servicios del paquete antes de guardar. " +
+                             $"Marca con Cantidad=0 los que no apliquen. Faltantes: {muestra}{extra}.";
+                    return;
+                }
+            }
+
+            // Re-anclar el paquete_valor_pactado al PRIMER chip con Cantidad>0
+            // de cada instancia (si el chip que originalmente lo llevaba quedo
+            // con Cantidad=0, el valor salta al siguiente chip valido). Sin
+            // esto perderiamos el valor cuando el filtro Cantidad>0 lo excluya.
+            foreach (var g in _carrito.Where(c => c.PaqueteInstanciaId is not null)
+                                       .GroupBy(c => c.PaqueteInstanciaId!.Value))
+            {
+                var valor = g.Select(c => c.PaqueteValorPactado).FirstOrDefault(v => v is not null);
+                if (valor is null) { continue; }
+                foreach (var chip in g) { chip.PaqueteValorPactado = null; }
+                var ancla = g.FirstOrDefault(c => c.Cantidad > 0);
+                if (ancla is not null) { ancla.PaqueteValorPactado = valor; }
+            }
+
+            // Solo enviamos chips con Cantidad > 0. Los chips con Cantidad=0
+            // (opcionales del paquete que el coordinador decidio no aplicar)
+            // son placeholders de UI que ya sirvieron para pasar la validacion.
             var items = _carrito
                 .Where(c => c.Cantidad > 0)
                 .Select(c => new AsignacionItemRequest(
@@ -1529,6 +1594,7 @@ else
             var r = await Svc.CrearLoteAsync(req, await Actor());
             _ok = $"Lote guardado: {r.CantidadServicios} servicio(s) asignados.";
             _carrito = new();
+            _paqueteServiciosCache.Clear();
             LimpiarPdf();
             LimpiarPago();
             _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();

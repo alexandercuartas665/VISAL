@@ -2,7 +2,13 @@ namespace Visal.Application.Tenancy;
 
 /// <summary>Sugerencia del autocompletado al buscar en el catalogo de servicios
 /// de los contratos de aseguradoras. Lo que se muestra al usuario es la
-/// Descripcion; lo que viaja a la orden es el CodigoServicio.</summary>
+/// Descripcion; lo que viaja a la orden es el CodigoServicio.
+///
+/// Cuando el termino de busqueda coincide EXACTO con el codigo de un Paquete,
+/// la busqueda antepone las N filas del detalle del paquete (marcadas con
+/// <see cref="PaqueteCodigo"/> != null) para que el profesional pueda elegir
+/// cuales de los servicios del paquete quiere ordenar. El resto de los
+/// resultados son los del catalogo normal.</summary>
 public sealed record ServicioSugerenciaDto(
     Guid Id,
     string? CodigoServicio,
@@ -10,7 +16,8 @@ public sealed record ServicioSugerenciaDto(
     string? Modulo,
     string? Especialidad,
     string? Contrato,
-    string? Aseguradora);
+    string? Aseguradora,
+    string? PaqueteCodigo = null);
 
 /// <summary>Fila de la orden a servicios de una HC.</summary>
 public sealed record OrdenServicioItemDto(

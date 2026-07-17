@@ -646,6 +646,32 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<IReadOnlyList<PaqueteAsignadoDto>> ListarPaquetesDelPacienteAsync(
+        Guid pacienteId, CancellationToken ct = default)
+    {
+        // Agrupamos por PaqueteInstanciaId — cada lote es un "paquete asignado".
+        // Traemos totalServicios (COUNT), el valor pactado (SUM ya que solo una fila lo lleva)
+        // y la fecha de creacion mas temprana del lote para orden descendente.
+        // OrderBy client-side: EF Core no traduce OrderByDescending sobre propiedad
+        // de DTO despues del Select.
+        var filas = await db.Asignaciones.AsNoTracking()
+            .Where(a => a.PacienteId == pacienteId && a.PaqueteInstanciaId != null && a.PaqueteCodigo != null)
+            .GroupBy(a => new { InstanciaId = a.PaqueteInstanciaId!.Value, Codigo = a.PaqueteCodigo! })
+            .Select(g => new
+            {
+                g.Key.InstanciaId,
+                g.Key.Codigo,
+                Total = g.Count(),
+                Valor = g.Sum(x => x.PaqueteValorPactado),
+                CreadoEn = g.Min(x => x.CreatedAt)
+            })
+            .ToListAsync(ct);
+        return filas
+            .OrderByDescending(x => x.CreadoEn)
+            .Select(x => new PaqueteAsignadoDto(x.InstanciaId, x.Codigo, x.Total, x.Valor, x.CreadoEn))
+            .ToList();
+    }
+
     public async Task<PaqueteExpansionDto?> ObtenerPaqueteExpansionAsync(
         Guid paqueteId, string contratoCodigo, CancellationToken ct = default)
     {

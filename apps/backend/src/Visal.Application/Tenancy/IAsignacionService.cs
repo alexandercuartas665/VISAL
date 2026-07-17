@@ -200,6 +200,15 @@ public enum AsignacionEstadoFiltro
 /// <summary>Tarifa del ServicioContrato consultada por (contratoCodigo, codigoServicio).</summary>
 public sealed record TarifaServicioDto(decimal? Tarifa);
 
+/// <summary>Grupo de asignaciones que comparten <c>PaqueteInstanciaId</c> (un lote
+/// aplicado en /asignacion). <c>TotalServicios</c> cuenta las asignaciones del lote,
+/// <c>ValorPactado</c> es el valor del paquete tomado del unico registro que lo lleva.
+/// Alimenta el banner "Este paciente fue programado con paquete" en la HC.</summary>
+public sealed record PaqueteAsignadoDto(
+    Guid PaqueteInstanciaId, string PaqueteCodigo,
+    int TotalServicios, decimal? ValorPactado,
+    DateTimeOffset CreadoEn);
+
 /// <summary>Detalle de un servicio dentro de un paquete al aplicarlo en /asignacion.
 /// Cada servicio del paquete se convierte en un chip del carrito con estos datos.
 /// <c>NombreServicio</c> se resuelve buscando el <c>Codigo</c> primero en
@@ -360,6 +369,11 @@ public interface IAsignacionService
     /// tarifas heredadas de <c>ServicioContrato</c> cuando el servicio existe en el
     /// contrato pactado. Si el servicio no esta en el contrato, la tarifa queda null.</param>
     Task<PaqueteExpansionDto?> ObtenerPaqueteExpansionAsync(Guid paqueteId, string contratoCodigo, CancellationToken ct = default);
+
+    /// <summary>Devuelve los paquetes con los que el paciente esta programado
+    /// (grupos distintos por PaqueteInstanciaId). Alimenta el banner de alerta
+    /// en el modulo Historias Medicas — "Este paciente fue programado con paquete PKG-XXX".</summary>
+    Task<IReadOnlyList<PaqueteAsignadoDto>> ListarPaquetesDelPacienteAsync(Guid pacienteId, CancellationToken ct = default);
 
     /// <summary>
     /// Persiste los turnos de coordinacion del servicio. Valida que la suma de Cantidad

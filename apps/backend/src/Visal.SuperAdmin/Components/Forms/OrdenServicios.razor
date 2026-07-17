@@ -46,8 +46,15 @@ else
                     <div class="os-suggest">
                         @foreach (var s in _sugerencias)
                         {
-                            <button class="os-suggest-item" @onclick="() => SeleccionarSugerencia(s)">
-                                <div class="os-suggest-nm">@s.Descripcion</div>
+                            <button class="os-suggest-item @(s.PaqueteCodigo is null ? "" : "os-suggest-pkg")"
+                                    @onclick="() => SeleccionarSugerencia(s)">
+                                <div class="os-suggest-nm">
+                                    @s.Descripcion
+                                    @if (s.PaqueteCodigo is not null)
+                                    {
+                                        <span class="os-suggest-pkg-tag" title="Servicio del paquete @s.PaqueteCodigo">Del paquete @s.PaqueteCodigo</span>
+                                    }
+                                </div>
                                 <div class="os-suggest-meta">
                                     @if (!string.IsNullOrWhiteSpace(s.CodigoServicio)) { <span class="os-suggest-cod">@s.CodigoServicio</span> }
                                     @if (!string.IsNullOrWhiteSpace(s.Modulo)) { <span>&middot; @s.Modulo</span> }
@@ -172,6 +179,14 @@ else
     .os-suggest-item { display:block; width:100%; text-align:left; padding:10px 12px; border:0; background:transparent; cursor:pointer; border-bottom:1px solid #f1f5f9; }
     .os-suggest-item:hover { background:#eff6ff; }
     .os-suggest-item:last-child { border-bottom:0; }
+    /* PQ7: sugerencias que vienen del paquete van con acento amarillo para que
+       el profesional entienda que provienen del catalogo del paquete pactado. */
+    .os-suggest-item.os-suggest-pkg { background: #fefce8; border-left: 3px solid #d97706; }
+    .os-suggest-item.os-suggest-pkg:hover { background: #fef3c7; }
+    .os-suggest-pkg-tag { display: inline-block; margin-left: 8px; padding: 1px 8px;
+                          background: #d97706; color: #fff; border-radius: 999px;
+                          font-size: 10px; font-weight: 700; letter-spacing: .03em;
+                          text-transform: uppercase; vertical-align: middle; }
     .os-suggest-nm { font-size:13px; font-weight:700; color:#0f172a; margin-bottom:2px; }
     .os-suggest-meta { font-size:11px; color:#64748b; display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
     .os-suggest-cod { background:#1565c0; color:#fff; padding:1px 7px; border-radius:4px; font-family:'JetBrains Mono','Consolas',monospace; font-weight:700; }

@@ -96,6 +96,35 @@
             </div>
         }
 
+        @* PQ7: banner de alerta cuando el paciente tiene asignaciones con paquete.
+           Muestra un chip por PaqueteInstanciaId (grupo de servicios aplicado en el mismo
+           lote de /asignacion). El profesional los ve al entrar a la HC y sabe que este
+           paciente fue programado con un paquete comercial. *@
+        @if (_paquetesPaciente.Count > 0)
+        {
+            <div class="hc-paquete-banner">
+                <div class="hc-paquete-banner-h">
+                    <span class="hc-paquete-icon">&#128230;</span>
+                    Este paciente fue programado con paquete
+                </div>
+                @foreach (var pk in _paquetesPaciente)
+                {
+                    <div class="hc-paquete-chip">
+                        <span class="hc-paquete-cod">@pk.PaqueteCodigo</span>
+                        <span class="hc-paquete-meta">@pk.TotalServicios servicio(s)</span>
+                        @if (pk.ValorPactado is decimal vp)
+                        {
+                            <span class="hc-paquete-valor">$ @vp.ToString("N0")</span>
+                        }
+                    </div>
+                }
+                <small class="text-muted d-block mt-1">
+                    Al ordenar servicios en la HC, puedes escribir el codigo del paquete en el buscador
+                    para ver los servicios que trae — decides cuales agregar.
+                </small>
+            </div>
+        }
+
         <div class="ase-card">
             <div class="ase-card-h">Filtros de busqueda</div>
             <div class="ase-form hc-form">
@@ -884,6 +913,22 @@
     .hc-forzado-card { border-left: 3px solid #f59e0b; }
     .hc-forzado-name { font-size: 13px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
 
+    /* PQ7: banner de alerta de paquete en la columna del paciente. */
+    .hc-paquete-banner { margin: 10px 0; padding: 10px 12px; background: #fef3c7;
+                         border: 1px solid #fbbf24; border-left: 3px solid #d97706;
+                         border-radius: 8px; }
+    .hc-paquete-banner-h { display: flex; align-items: center; gap: 6px; font-size: 12.5px;
+                           font-weight: 700; color: #78350f; text-transform: uppercase;
+                           letter-spacing: .03em; margin-bottom: 6px; }
+    .hc-paquete-icon { font-size: 15px; }
+    .hc-paquete-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+                       background: #fff; border: 1px solid #fcd34d; border-radius: 6px;
+                       font-size: 12px; margin-bottom: 4px; }
+    .hc-paquete-cod { font-family: 'JetBrains Mono','Consolas',monospace; font-weight: 700;
+                      background: #d97706; color: #fff; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+    .hc-paquete-meta { color: #78350f; }
+    .hc-paquete-valor { margin-left: auto; color: #166534; font-weight: 700; }
+
     /* Opcion del modal "Imprimir paquete": checkbox + label + sub-texto. */
     .hc-impr-opt { padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 8px; background: #fff; }
     .hc-impr-opt label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #0f172a; margin: 0; }
@@ -1209,6 +1254,9 @@
     private string? _ripsError;
 
     private PacienteAsignacionDto? _paciente;
+    // PQ7: paquetes con los que el paciente esta programado (banner en HC).
+    private List<PaqueteAsignadoDto> _paquetesPaciente = new();
+    private Guid? _ultimoPacienteIdPaquete;
 
     private bool _showPacModal;
     private string _modalDoc = "";
@@ -1343,6 +1391,26 @@
         // Cuando el modal cambia de paciente sin recrear el componente (raro pero
         // posible), re-evaluamos si hay HC en curso para auto-cargar.
         await AutoCargarHcEnCursoSiCorrespondeAsync();
+
+        // PQ7: recargar paquetes del paciente cuando cambia (banner de alerta).
+        // Serializado por _dbLock para evitar la concurrencia de DbContext con otras
+        // queries que fire OnParametersSetAsync (autosave, prefill, MenuHc, etc.).
+        if (_ultimoPacienteIdPaquete != pacIdActual)
+        {
+            _ultimoPacienteIdPaquete = pacIdActual;
+            _paquetesPaciente = new();
+            if (pacIdActual is Guid pid)
+            {
+                try
+                {
+                    await LockedAsync(async () =>
+                    {
+                        _paquetesPaciente = (await AsigSvc.ListarPaquetesDelPacienteAsync(pid)).ToList();
+                    });
+                }
+                catch { _paquetesPaciente = new(); }
+            }
+        }
 
         // Cargar visibilidad de pestanas segun TipoServicio (Modulo) del servicio
         // asignado. Si TipoServicio es null/vacio, no aplicamos filtros (todo

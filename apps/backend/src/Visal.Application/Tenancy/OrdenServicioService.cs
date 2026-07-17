@@ -22,6 +22,69 @@ public sealed class OrdenServicioService(
         if (take <= 0) { take = 12; }
         if (take > 50) { take = 50; }
 
+        // PQ7: si el termino coincide con el codigo de un Paquete activo, anteponer
+        // los servicios del paquete como sugerencias. El profesional puede tomar
+        // los que quiera — la eleccion es libre (no automatica). Los servicios del
+        // paquete se resuelven contra ServicioContrato del mismo tenant para
+        // heredar tarifa/modulo/aseguradora; si no aparecen ahi, caen al catalogo
+        // global de referencia.
+        var paquetes = await db.Paquetes.AsNoTracking()
+            .Where(p => p.Activo && p.Codigo.ToLower() == t)
+            .Select(p => new { p.Id, p.Codigo, p.Nombre })
+            .ToListAsync(ct);
+        var paqueteHints = new List<ServicioSugerenciaDto>();
+        if (paquetes.Count > 0)
+        {
+            var pkg = paquetes[0];
+            var codigos = await db.PaqueteServicios.AsNoTracking()
+                .Where(x => x.PaqueteId == pkg.Id)
+                .OrderBy(x => x.Codigo)
+                .Select(x => x.Codigo)
+                .ToListAsync(ct);
+            if (codigos.Count > 0)
+            {
+                // Resolver contra ServicioContrato primero (para heredar tarifa/aseguradora/modulo).
+                var scHits = await (
+                    from s in db.ServiciosContrato.AsNoTracking().Where(s => codigos.Contains(s.CodigoServicio!))
+                    join c in db.ContratosAseguradora.AsNoTracking() on s.ContratoId equals c.Id into cj
+                    from c in cj.DefaultIfEmpty()
+                    join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id into aj
+                    from a in aj.DefaultIfEmpty()
+                    select new
+                    {
+                        s.Id, s.CodigoServicio,
+                        Descripcion = s.Descripcion ?? "(sin descripcion)",
+                        s.Modulo, s.Especialidad,
+                        Contrato = c != null ? c.CodigoContrato : null,
+                        Aseguradora = a != null ? a.Nombre : null
+                    })
+                    .ToListAsync(ct);
+                var codigosResueltos = new HashSet<string>(scHits.Select(x => x.CodigoServicio!), StringComparer.OrdinalIgnoreCase);
+                foreach (var h in scHits)
+                {
+                    paqueteHints.Add(new ServicioSugerenciaDto(
+                        h.Id, h.CodigoServicio, h.Descripcion,
+                        h.Modulo, h.Especialidad, h.Contrato, h.Aseguradora,
+                        pkg.Codigo));
+                }
+                var faltantes = codigos.Except(codigosResueltos, StringComparer.OrdinalIgnoreCase).ToList();
+                if (faltantes.Count > 0)
+                {
+                    var catHits = await db.CatalogosServicioReferencia.AsNoTracking()
+                        .Where(c => faltantes.Contains(c.Codigo) && c.Activo)
+                        .Select(c => new { c.Codigo, c.Nombre })
+                        .ToListAsync(ct);
+                    foreach (var c in catHits)
+                    {
+                        paqueteHints.Add(new ServicioSugerenciaDto(
+                            Guid.Empty, c.Codigo, c.Nombre,
+                            "EXTERNO", null, null, "Externo (catalogo)",
+                            pkg.Codigo));
+                    }
+                }
+            }
+        }
+
         // Buscamos contra Descripcion + CodigoServicio + CodigoInterno del catalogo
         // de servicios de contratos. La query filtra por tenant via el global filter
         // de EF (ServicioContrato hereda de TenantEntity).
@@ -42,7 +105,8 @@ public sealed class OrdenServicioService(
                     s.Id, s.CodigoServicio, s.Descripcion ?? "(sin descripcion)",
                     s.Modulo, s.Especialidad,
                     c != null ? c.CodigoContrato : null,
-                    a != null ? a.Nombre : null);
+                    a != null ? a.Nombre : null,
+                    null);
 
         var propios = await q.Take(take).ToListAsync(ct);
 
@@ -57,9 +121,11 @@ public sealed class OrdenServicioService(
             .Take(Math.Max(1, take - propios.Count))
             .Select(c => new ServicioSugerenciaDto(
                 Guid.Empty, c.Codigo, c.Nombre,
-                "EXTERNO", null, null, "Externo (CUPS)"))
+                "EXTERNO", null, null, "Externo (CUPS)", null))
             .ToListAsync(ct);
-        return propios.Concat(externos).ToList();
+        // PaqueteHints van AL PRINCIPIO para que salten a la vista cuando el
+        // profesional escribe exactamente el codigo del paquete.
+        return paqueteHints.Concat(propios).Concat(externos).ToList();
     }
 
     public async Task<IReadOnlyList<OrdenServicioItemDto>> ListarPorHistoriaAsync(

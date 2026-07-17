@@ -168,32 +168,6 @@
 
                     @if (_solicitudSel is AsignacionPendienteDto s)
                     {
-                        @* Toggle Manual / Aplicar programacion. Solo aplica a servicios de rotacion
-                           (Enfermeria, etc) donde tiene sentido usar una plantilla mensual. Igual
-                           lo mostramos siempre; si el modo Programacion no encuentra plantillas
-                           elegibles, el modal se lo dira. *@
-                        <div class="cd-mode-toggle">
-                            <button class="cd-mode-tab @(!_modoProgramacion ? "sel" : "")"
-                                    @onclick="() => _modoProgramacion = false">Manual</button>
-                            <button class="cd-mode-tab @(_modoProgramacion ? "sel" : "")"
-                                    @onclick="() => _modoProgramacion = true">Aplicar programacion</button>
-                        </div>
-
-                        @if (_modoProgramacion)
-                        {
-                            <div class="cd-prog-panel">
-                                <p class="text-muted small mb-2">
-                                    Aplica una plantilla mensual (rotacion tipo M / T / N / DN / L)
-                                    creada en <a href="cfg-turnos">/cfg-turnos</a>. Se generan turnos
-                                    automaticamente para el mes con la programacion elegida.
-                                </p>
-                                <button class="btn btn-primary" @onclick="AbrirModalProgramacion" disabled="@_progBusy">
-                                    Elegir programacion...
-                                </button>
-                            </div>
-                        }
-                        else
-                        {
                         <div class="ase-form cd-rform">
                             <div class="ase-f"><label>No Orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.CodigoAutorizacion" /></div>
                             <div class="ase-f"><label>Fecha Orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.CreadoEn.LocalDateTime.ToString("dd/MM/yyyy")" /></div>
@@ -262,18 +236,32 @@
                             </div>
                         </div>
 
-                        }
-                        @* Carrito de turnos en memoria - lista lo que esta listo para guardar. *@
-                        @if (!_modoProgramacion && _carritoTurnos.Count > 0)
+                        @* Carrito de turnos en memoria - lista lo que esta listo para guardar.
+                           Los turnos con TurnoProgramacionId llevan badge "Programacion" y muestran
+                           "N sesion(es)" en vez de "N turno(s)". *@
+                        @if (_carritoTurnos.Count > 0)
                         {
                             <div class="cd-turnos-list">
                                 <div class="cd-turnos-h">Turnos a guardar (@_carritoTurnos.Count)</div>
                                 @foreach (var ct in _carritoTurnos)
                                 {
                                     <div class="cd-turno-row">
-                                        <div class="cd-turno-prof">@ct.ProfesionalNombre</div>
+                                        <div class="cd-turno-prof">
+                                            @ct.ProfesionalNombre
+                                            @if (ct.TurnoProgramacionId is not null)
+                                            {
+                                                <span class="cd-turno-badge" title="Turno generado desde una programacion mensual">Programacion</span>
+                                            }
+                                        </div>
                                         <div class="cd-turno-meta">
-                                            <span class="asg-pill">@ct.Cantidad turno(s)</span>
+                                            @if (ct.TurnoProgramacionId is not null)
+                                            {
+                                                <span class="asg-pill">@ct.SesionesEstimadas sesion(es)</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="asg-pill">@ct.Cantidad turno(s)</span>
+                                            }
                                             @if (ct.HorasPorTurno is decimal hpt) { <span>@hpt h/turno</span> }
                                             @if (ct.FechaInicio is DateOnly fi) { <span>desde @fi.ToString("dd MMM")</span> }
                                         </div>
@@ -283,15 +271,16 @@
                             </div>
                         }
 
-                        @if (!_modoProgramacion)
-                        {
-                            <div class="cd-asignar">
-                                <button class="btn btn-primary" @onclick="AsignarServicio"
-                                        disabled="@(_busy || _carritoTurnos.Count == 0)">
-                                    @(_busy ? "Guardando..." : "Asignar el servicio")
-                                </button>
-                            </div>
-                        }
+                        <div class="cd-asignar">
+                            <button class="btn btn-outline-primary" @onclick="AbrirModalProgramacion" disabled="@(_progBusy || _busy)"
+                                    title="Genera turnos con base en una programacion mensual (rotacion M/T/N/DN/L). Los turnos aparecen abajo listos para revisar antes de guardar.">
+                                Programar
+                            </button>
+                            <button class="btn btn-primary" @onclick="AsignarServicio"
+                                    disabled="@(_busy || _carritoTurnos.Count == 0)">
+                                @(_busy ? "Guardando..." : "Asignar el servicio")
+                            </button>
+                        </div>
                     }
                     else
                     {
@@ -511,7 +500,6 @@ else
     .cd-blue input, .cd-blue textarea, .cd-blue select { background: #dbeafe !important; }
     .cd-blue input:read-only { background: #bfdbfe !important; }
     .cd-help { color: #94a3b8; font-size: 11px; font-style: italic; }
-    .cd-asignar { padding: 14px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; }
     .cd-empty-right { padding: 60px 30px; text-align: center; color: #94a3b8; }
 
     /* Carrito de turnos en memoria */
@@ -524,10 +512,14 @@ else
     .cd-turno-meta { display: flex; gap: 8px; font-size: 11px; color: #475569; align-items: center; }
     .asg-pill { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px; }
     .cd-turno-rm { color: #b91c1c; font-size: 18px; line-height: 1; padding: 0 4px; text-decoration: none; }
-    .cd-mode-toggle { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
-    .cd-mode-tab { border: none; background: #fff; color: #475569; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .cd-mode-tab.sel { background: #2563eb; color: white; }
-    .cd-prog-panel { padding: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; }
+    /* Badge que marca los CartTurno que vienen de una programacion mensual
+       (boton "Programar"). Se muestra al lado del nombre del profesional. */
+    .cd-turno-badge { display: inline-block; margin-left: 8px; padding: 1px 8px;
+                      background: #fef3c7; color: #92400e; border-radius: 999px;
+                      font-size: 10px; font-weight: 700; letter-spacing: .03em;
+                      text-transform: uppercase; vertical-align: middle; }
+    .cd-asignar { padding: 14px; border-top: 1px solid #e2e8f0; display: flex;
+                  justify-content: flex-end; gap: 8px; }
     /* Modal overlay reusable — mismos estilos que CfgTurnos pero locales a Coordinacion:
        los estilos de un componente Blazor solo estan en el DOM cuando ese componente
        esta montado, y CfgTurnos no lo esta en /coordinacion. Sin esto, .cie-modal no
@@ -742,8 +734,10 @@ else
     private bool _busy;
     private string? _error, _ok;
 
-    // Modo Aplicar programacion (toggle Manual vs Programacion).
-    private bool _modoProgramacion;
+    // Modal Aplicar programacion. Se abre desde el boton "Programar" junto a
+    // "Asignar el servicio". El modal no persiste — al confirmar, agrega
+    // CartTurno sinteticos con TurnoProgramacionId + fila + diaArranque; la
+    // persistencia real ocurre al pulsar "Asignar el servicio".
     private bool _progOpen;
     private bool _progBusy;
     private string? _progError;
@@ -903,7 +897,8 @@ else
             var req = new AsignarServicioRequest(
                 _solicitudSel.Id,
                 _carritoTurnos.Select(c => new TurnoCoordinadoRequest(
-                    c.ProfesionalId, c.Cantidad, c.HorasPorTurno, c.FechaInicio, c.MesAsignar, c.Tarifa)).ToList());
+                    c.ProfesionalId, c.Cantidad, c.HorasPorTurno, c.FechaInicio, c.MesAsignar, c.Tarifa,
+                    c.TurnoProgramacionId, c.TurnoRowNombre, c.DiaArranque)).ToList());
             var n = await Svc.AsignarServicioAsync(req, Guid.Empty);
             _ok = $"Servicio coordinado: {n} turno(s) guardados.";
             // Refrescar grilla y limpiar panel.
@@ -984,7 +979,12 @@ else
         else { _progProfPorFila.Remove(fila); }
     }
 
-    private async Task AplicarProgramacionAsync()
+    /// <summary>Aplica la programacion: en vez de persistir al backend, genera CartTurno
+    /// sinteticos (uno por fila del grid con profesional) y los agrega al carrito. El
+    /// coordinador puede revisarlos y pulsar "Asignar el servicio" para guardarlos. Politica
+    /// "reemplazar una a la vez": borra cualquier CartTurno de programacion previa antes
+    /// de agregar los nuevos.</summary>
+    private void AplicarProgramacionAsync()
     {
         if (_progSelId is not Guid pid || _solicitudSel is null) { return; }
         if (_progProfPorFila.Count == 0)
@@ -992,18 +992,74 @@ else
             _progError = "Asigna al menos un profesional a una fila del grid antes de programar.";
             return;
         }
-        _progBusy = true; _progError = null;
+        var prog = _progList.FirstOrDefault(p => p.Id == pid);
+        if (prog is null)
+        {
+            _progError = "Programacion no encontrada en la lista cargada.";
+            return;
+        }
+        int diasEnMes = DateTime.DaysInMonth(prog.Anio, prog.Mes);
+        if (_progDiaArranque < 1 || _progDiaArranque > diasEnMes)
+        {
+            _progError = $"Dia de arranque fuera del mes ({diasEnMes} dias).";
+            return;
+        }
+        _progError = null;
+
+        // Politica: reemplazar programacion previa. Borrar CartTurno con TurnoProgramacionId.
+        _carritoTurnos.RemoveAll(c => c.TurnoProgramacionId is not null);
+
+        var fechaInicioProg = new DateOnly(prog.Anio, prog.Mes, _progDiaArranque);
+        foreach (var kv in _progProfPorFila)
+        {
+            var fila = kv.Key;
+            var profId = kv.Value;
+            var prof = _especialistas.FirstOrDefault(e => e.Id == profId);
+            int sesiones = ContarSesionesEnFila(prog.GridDataJson, fila, _progDiaArranque, diasEnMes);
+            _carritoTurnos.Add(new CartTurno
+            {
+                ProfesionalId = profId,
+                ProfesionalNombre = prof?.NombreCompleto ?? "?",
+                Cantidad = 1,
+                HorasPorTurno = null,
+                FechaInicio = fechaInicioProg,
+                MesAsignar = (short)prog.Mes,
+                Tarifa = _tarifa,
+                TurnoProgramacionId = pid,
+                TurnoRowNombre = fila,
+                DiaArranque = _progDiaArranque,
+                SesionesEstimadas = sesiones
+            });
+        }
+        _ok = $"Programacion cargada al carrito: {_progProfPorFila.Count} fila(s). Revisa y pulsa 'Asignar el servicio' para guardar.";
+        CerrarModalProgramacion();
+    }
+
+    /// <summary>Cuenta cuantas celdas pintadas hay en la fila del grid a partir del dia de
+    /// arranque. Debe coincidir con la logica de <c>AsignacionService.CrearTurnoDesdeGrid</c>
+    /// para que el chip del carrito muestre el numero real de sesiones que se generaran.</summary>
+    private static int ContarSesionesEnFila(string gridJson, string rowNombre, int diaArranque, int diasEnMes)
+    {
         try
         {
-            var req = new AplicarProgramacionRequest(_solicitudSel.Id, pid, _progDiaArranque, _progProfPorFila);
-            var res = await Svc.AplicarProgramacionAsync(req, Guid.Empty);
-            _ok = $"Programacion aplicada: {res.TurnosCreados} turno(s) profesional, {res.SesionesCreadas} sesion(es), {res.SesionesDescanso} descanso(s).";
-            CerrarModalProgramacion();
-            await Cargar();
+            var root = System.Text.Json.JsonDocument.Parse(gridJson).RootElement;
+            if (!root.TryGetProperty("dias", out var diasProp)
+                || diasProp.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !diasProp.TryGetProperty(rowNombre, out var celdasRow)
+                || celdasRow.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return 0;
+            }
+            int n = 0;
+            for (int d = diaArranque; d <= diasEnMes; d++)
+            {
+                if (!celdasRow.TryGetProperty(d.ToString(), out var celda)) { continue; }
+                var tipo = celda.TryGetProperty("tipo", out var t) ? t.GetString() : null;
+                if (!string.IsNullOrEmpty(tipo)) { n++; }
+            }
+            return n;
         }
-        catch (InvalidOperationException ex) { _progError = ex.Message; }
-        catch (Exception ex) { _progError = "Error tecnico: " + ex.Message; }
-        finally { _progBusy = false; }
+        catch { return 0; }
     }
 
     private sealed class CartTurno
@@ -1015,6 +1071,15 @@ else
         public DateOnly? FechaInicio { get; set; }
         public short? MesAsignar { get; set; }
         public decimal? Tarifa { get; set; }
+
+        /// <summary>Cuando el turno viene del modal "Programar", lleva la referencia
+        /// a la TurnoProgramacion y la fila del grid. Al hacer "Asignar el servicio"
+        /// se envian al backend y este genera las sesiones desde el grid.</summary>
+        public Guid? TurnoProgramacionId { get; set; }
+        public string? TurnoRowNombre { get; set; }
+        public int? DiaArranque { get; set; }
+        /// <summary>Sesiones aproximadas que se van a generar. Solo display.</summary>
+        public int SesionesEstimadas { get; set; }
     }
 
     private static string MesNombre(int m) => m switch

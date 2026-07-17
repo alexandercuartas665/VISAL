@@ -95,11 +95,21 @@ public sealed record AsignacionPendienteDto(
 /// <summary>Profesional disponible para asignar al servicio (alimenta "Seleccione Medico Especialista").</summary>
 public sealed record EspecialistaDto(Guid Id, string NumeroDocumento, string NombreCompleto, string? TipoProfesional);
 
-/// <summary>Turno coordinado: que profesional atendera cuantos turnos.</summary>
+/// <summary>Turno coordinado: que profesional atendera cuantos turnos.
+///
+/// Cuando <paramref name="TurnoProgramacionId"/> viene con valor, este turno
+/// proviene del modal "Programar": el servicio va a generar sesiones con
+/// tipo/horas del grid de esa programacion en vez del flujo manual (sesiones
+/// vacias que se crean al atender). <paramref name="TurnoRowNombre"/> identifica
+/// la fila del grid (ej. "Turno 1") y <paramref name="DiaArranque"/> el dia
+/// del mes desde el que se materializan las sesiones.</summary>
 public sealed record TurnoCoordinadoRequest(
     Guid ProfesionalId, int Cantidad, decimal? HorasPorTurno,
     DateOnly? FechaInicio, short? MesAsignar,
-    decimal? Tarifa = null);
+    decimal? Tarifa = null,
+    Guid? TurnoProgramacionId = null,
+    string? TurnoRowNombre = null,
+    int? DiaArranque = null);
 
 /// <summary>Turno ya guardado para una asignacion.</summary>
 public sealed record TurnoCoordinadoDto(

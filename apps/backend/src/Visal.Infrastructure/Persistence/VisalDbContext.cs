@@ -98,6 +98,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
     public DbSet<Paquete> Paquetes => Set<Paquete>();
+    public DbSet<PaqueteServicio> PaqueteServicios => Set<PaqueteServicio>();
     public DbSet<CuotaCopago> CuotasCopagos => Set<CuotaCopago>();
     public DbSet<TipoProfesional> TiposProfesional => Set<TipoProfesional>();
     public DbSet<SubCategoriaProfesional> SubCategoriasProfesional => Set<SubCategoriaProfesional>();
@@ -1026,7 +1027,24 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
             b.Property(x => x.Nombre).HasMaxLength(500).IsRequired();
+            b.Property(x => x.Precio).HasPrecision(14, 2);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+        });
+
+        modelBuilder.Entity<PaqueteServicio>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(60).IsRequired();
+            b.HasOne(x => x.Paquete)
+                .WithMany(p => p.Servicios)
+                .HasForeignKey(x => x.PaqueteId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.CatalogoServicioReferencia)
+                .WithMany()
+                .HasForeignKey(x => x.CatalogoServicioReferenciaId)
+                .OnDelete(DeleteBehavior.SetNull);
+            // Un codigo no puede repetirse dentro de un paquete (para subir cantidad, se
+            // edita la fila existente en vez de agregar duplicados).
+            b.HasIndex(x => new { x.TenantId, x.PaqueteId, x.Codigo }).IsUnique();
         });
 
         modelBuilder.Entity<CuotaCopago>(b =>

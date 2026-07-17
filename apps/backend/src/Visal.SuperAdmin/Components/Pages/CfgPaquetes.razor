@@ -12,7 +12,8 @@
         <div class="cat-eyebrow">Configuracion del Sistema</div>
         <h1 class="cat-title">Paquetes</h1>
         <p class="cat-sub">Paquetes comerciales (ej. <em>ATENCION INTEGRAL DE PACIENTE AGUDO BAJA COMPLEJIDAD PROGRAMA EXTENSION HOSPITALARIA (POR DIA)</em> con codigo <code>E890167</code>).
-            Se pueden asociar (opcionalmente) a los servicios de un contrato en Entidades Aseguradoras y se usan para filtrar la parrilla de Asignacion.</p>
+            Se pueden asociar (opcionalmente) a los servicios de un contrato en Entidades Aseguradoras y se usan para filtrar la parrilla de Asignacion.
+            Cada paquete puede definir un <strong>precio</strong> y un <strong>detalle de servicios</strong> que se expanden en /asignacion cuando se elige el paquete.</p>
     </div>
     <div class="d-flex gap-2">
         <input type="text" class="form-control form-control-sm" placeholder="Buscar codigo o nombre..." @bind="_filtro" @bind:event="oninput" @bind:after="ReloadAsync" style="min-width:220px;" />
@@ -36,8 +37,10 @@
         <table class="table table-sm align-middle">
             <thead>
                 <tr>
-                    <th style="width:180px">Codigo</th>
+                    <th style="width:40px"></th>
+                    <th style="width:160px">Codigo</th>
                     <th>Nombre</th>
+                    <th style="width:140px">Precio</th>
                     <th style="width:80px">Activo</th>
                     <th style="width:140px"></th>
                 </tr>
@@ -46,8 +49,19 @@
                 @foreach (var it in _items)
                 {
                     <tr>
+                        <td class="text-center">
+                            @if (it.Id is Guid)
+                            {
+                                <button class="btn btn-link btn-sm p-0" title="Ver servicios del paquete"
+                                        @onclick="() => ToggleExpandirAsync(it)">
+                                    @(it.Expandido ? "▼" : "▶")
+                                </button>
+                            }
+                        </td>
                         <td><input class="form-control form-control-sm fb-mono" @bind="it.Codigo" maxlength="40" placeholder="E890167" /></td>
                         <td><input class="form-control form-control-sm" @bind="it.Nombre" maxlength="500" placeholder="Nombre del paquete" /></td>
+                        <td><input type="number" min="0" step="0.01" class="form-control form-control-sm text-end"
+                                   @bind="it.Precio" placeholder="0.00" /></td>
                         <td class="text-center"><input type="checkbox" class="form-check-input" @bind="it.Activo" /></td>
                         <td class="cat-actions">
                             <button class="btn btn-primary btn-sm" @onclick="() => SaveAsync(it)" title="Guardar">&#10003;</button>
@@ -57,6 +71,97 @@
                             }
                         </td>
                     </tr>
+                    @if (it.Expandido && it.Id is Guid pid)
+                    {
+                        <tr class="pkg-detalle-row">
+                            <td></td>
+                            <td colspan="5">
+                                <div class="pkg-detalle">
+                                    <div class="pkg-detalle-h">Servicios del paquete (@it.Servicios.Count)</div>
+
+                                    @* Autocomplete + cantidad + agregar *@
+                                    <div class="pkg-add-row">
+                                        <div class="pkg-add-search">
+                                            <input type="text" class="form-control form-control-sm"
+                                                   placeholder="Busca por codigo o nombre en el catalogo..."
+                                                   value="@it.BuscarText"
+                                                   @oninput="e => OnBuscarInput(it, e)" />
+                                            @if (it.Sugerencias.Count > 0)
+                                            {
+                                                <div class="pkg-sugerencias">
+                                                    @foreach (var s in it.Sugerencias)
+                                                    {
+                                                        <div class="pkg-sugerencia" @onclick="() => ElegirSugerencia(it, s)">
+                                                            <span class="fb-mono">@s.Codigo</span>
+                                                            <span class="pkg-sug-nombre">@s.Nombre</span>
+                                                            <span class="pkg-sug-tipo">@s.Tipo</span>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                        <input type="number" min="1" class="form-control form-control-sm pkg-cantidad"
+                                               @bind="it.NuevoCantidad" placeholder="Cant" />
+                                        <button class="btn btn-outline-primary btn-sm"
+                                                @onclick="() => AgregarServicioAsync(it)"
+                                                disabled="@(string.IsNullOrWhiteSpace(it.BuscarText) || it.NuevoCantidad <= 0)">
+                                            Agregar
+                                        </button>
+                                    </div>
+
+                                    @* Tabla de servicios ya agregados *@
+                                    @if (it.Servicios.Count == 0)
+                                    {
+                                        <div class="text-muted" style="font-size:12px;padding:8px 0;">
+                                            Este paquete aun no tiene servicios asociados.
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <table class="table table-sm pkg-servicios-tbl">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width:180px">Codigo</th>
+                                                    <th>Nombre (del catalogo)</th>
+                                                    <th style="width:100px">Cantidad</th>
+                                                    <th style="width:50px"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var s in it.Servicios)
+                                                {
+                                                    <tr>
+                                                        <td class="fb-mono">@s.Codigo</td>
+                                                        <td>
+                                                            @if (s.Nombre is null)
+                                                            {
+                                                                <span class="text-muted fst-italic">(codigo suelto, no en catalogo)</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span>@s.Nombre</span>
+                                                            }
+                                                        </td>
+                                                        <td>
+                                                            <input type="number" min="1" class="form-control form-control-sm text-end"
+                                                                   value="@s.Cantidad"
+                                                                   @onchange="e => ActualizarCantidadAsync(it, s, e)" />
+                                                        </td>
+                                                        <td class="text-center">
+                                                            <button class="btn btn-outline-danger btn-sm"
+                                                                    title="Quitar" @onclick="() => QuitarServicioAsync(it, s)">
+                                                                &times;
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
                 }
             </tbody>
         </table>
@@ -66,18 +171,48 @@
     }
 </div>
 
+<style>
+    .pkg-detalle-row td { background: #f8fafc; }
+    .pkg-detalle { padding: 10px 14px; }
+    .pkg-detalle-h { font-size: 12px; font-weight: 700; color: #1e40af;
+                     text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .pkg-add-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+    .pkg-add-search { position: relative; flex: 1; }
+    .pkg-cantidad { max-width: 90px; }
+    .pkg-sugerencias { position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+                       background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+                       max-height: 220px; overflow-y: auto; box-shadow: 0 4px 12px rgba(15,23,42,.1); }
+    .pkg-sugerencia { display: grid; grid-template-columns: 120px 1fr 100px; gap: 8px;
+                      padding: 6px 10px; cursor: pointer; font-size: 12px;
+                      border-bottom: 1px solid #f1f5f9; align-items: center; }
+    .pkg-sugerencia:hover { background: #eff6ff; }
+    .pkg-sug-nombre { color: #0f172a; }
+    .pkg-sug-tipo { color: #64748b; font-size: 11px; text-align: right; }
+    .pkg-servicios-tbl thead th { background: #eff6ff; color: #1e40af; font-size: 11px; font-weight: 700; }
+</style>
+
 @code {
     private List<Item> _items = new();
     private string? _error, _ok;
     private string _filtro = "";
+    private System.Threading.CancellationTokenSource? _buscarCts;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
     private async Task ReloadAsync()
     {
+        var expandidosIds = _items.Where(x => x.Expandido && x.Id is Guid).Select(x => x.Id!.Value).ToHashSet();
         _items = (await Svc.ListarAsync(_filtro, soloActivos: false))
-            .Select(p => new Item { Id = p.Id, Codigo = p.Codigo, Nombre = p.Nombre, Activo = p.Activo })
+            .Select(p => new Item {
+                Id = p.Id, Codigo = p.Codigo, Nombre = p.Nombre, Activo = p.Activo, Precio = p.Precio,
+                Expandido = expandidosIds.Contains(p.Id)
+            })
             .ToList();
+        // Refrescar detalle de los que estaban expandidos.
+        foreach (var it in _items.Where(x => x.Expandido && x.Id is Guid))
+        {
+            it.Servicios = (await Svc.ListarServiciosAsync(it.Id!.Value)).ToList();
+        }
     }
 
     private void Add()
@@ -95,9 +230,12 @@
         }
         try
         {
-            var saved = await Svc.SaveAsync(new SavePaqueteRequest(it.Id, it.Codigo.Trim(), it.Nombre.Trim(), it.Activo), Guid.Empty);
+            var saved = await Svc.SaveAsync(
+                new SavePaqueteRequest(it.Id, it.Codigo.Trim(), it.Nombre.Trim(), it.Activo, it.Precio),
+                Guid.Empty);
             if (saved is null) { _error = "No se pudo guardar."; return; }
             it.Id = saved.Id;
+            it.Precio = saved.Precio;
             _ok = $"Paquete '{saved.Codigo}' guardado.";
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -116,11 +254,126 @@
         catch (Exception ex) { _error = ex.Message; }
     }
 
+    private async Task ToggleExpandirAsync(Item it)
+    {
+        if (it.Id is not Guid id) { return; }
+        it.Expandido = !it.Expandido;
+        if (it.Expandido)
+        {
+            try { it.Servicios = (await Svc.ListarServiciosAsync(id)).ToList(); }
+            catch (Exception ex) { _error = ex.Message; }
+        }
+    }
+
+    private async Task OnBuscarInput(Item it, ChangeEventArgs e)
+    {
+        it.BuscarText = e.Value?.ToString() ?? "";
+        it.SugerenciaElegida = null; // el usuario esta escribiendo, invalida cualquier eleccion previa
+        _buscarCts?.Cancel();
+        _buscarCts = new System.Threading.CancellationTokenSource();
+        var ct = _buscarCts.Token;
+        try
+        {
+            await Task.Delay(200, ct);
+            if (ct.IsCancellationRequested) { return; }
+            if (it.BuscarText.Trim().Length < 2)
+            {
+                it.Sugerencias = new();
+                StateHasChanged();
+                return;
+            }
+            it.Sugerencias = (await Svc.BuscarCatalogoAsync(it.BuscarText, 15, ct)).ToList();
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { /* superseded */ }
+    }
+
+    private void ElegirSugerencia(Item it, CatalogoServicioAutocompleteDto s)
+    {
+        it.SugerenciaElegida = s;
+        it.BuscarText = $"{s.Codigo} - {s.Nombre}";
+        it.Sugerencias = new();
+    }
+
+    private async Task AgregarServicioAsync(Item it)
+    {
+        _error = _ok = null;
+        if (it.Id is not Guid pid) { return; }
+        try
+        {
+            // Si el usuario eligio del autocomplete usamos el codigo/id del catalogo.
+            // Si escribio texto libre (sin elegir), tomamos lo que hay como codigo tal cual.
+            string codigo;
+            Guid? catId;
+            if (it.SugerenciaElegida is CatalogoServicioAutocompleteDto s)
+            {
+                codigo = s.Codigo;
+                catId = s.Id;
+            }
+            else
+            {
+                codigo = it.BuscarText.Trim();
+                catId = null;
+            }
+            if (string.IsNullOrWhiteSpace(codigo))
+            {
+                _error = "Elige un servicio del catalogo o escribe un codigo.";
+                return;
+            }
+            var svc = await Svc.AgregarServicioAsync(
+                new AgregarPaqueteServicioRequest(pid, codigo, it.NuevoCantidad, catId), Guid.Empty);
+            it.Servicios.Add(svc);
+            it.Servicios = it.Servicios.OrderBy(x => x.Codigo).ToList();
+            it.BuscarText = ""; it.SugerenciaElegida = null; it.NuevoCantidad = 1;
+            _ok = $"Servicio '{svc.Codigo}' agregado al paquete.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task ActualizarCantidadAsync(Item it, PaqueteServicioDto s, ChangeEventArgs e)
+    {
+        _error = _ok = null;
+        if (!int.TryParse(e.Value?.ToString(), out var cant) || cant <= 0)
+        {
+            _error = "La cantidad debe ser un entero mayor a cero.";
+            return;
+        }
+        try
+        {
+            var upd = await Svc.ActualizarCantidadServicioAsync(s.Id, cant, Guid.Empty);
+            if (upd is null) { _error = "Servicio no encontrado."; return; }
+            var idx = it.Servicios.FindIndex(x => x.Id == s.Id);
+            if (idx >= 0) { it.Servicios[idx] = upd; }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task QuitarServicioAsync(Item it, PaqueteServicioDto s)
+    {
+        _error = _ok = null;
+        try
+        {
+            await Svc.QuitarServicioAsync(s.Id, Guid.Empty);
+            it.Servicios.RemoveAll(x => x.Id == s.Id);
+            _ok = $"Servicio '{s.Codigo}' quitado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
     private sealed class Item
     {
         public Guid? Id { get; set; }
         public string Codigo { get; set; } = "";
         public string Nombre { get; set; } = "";
         public bool Activo { get; set; } = true;
+        public decimal? Precio { get; set; }
+
+        // Estado UI del detalle expandible.
+        public bool Expandido { get; set; }
+        public List<PaqueteServicioDto> Servicios { get; set; } = new();
+        public string BuscarText { get; set; } = "";
+        public List<CatalogoServicioAutocompleteDto> Sugerencias { get; set; } = new();
+        public CatalogoServicioAutocompleteDto? SugerenciaElegida { get; set; }
+        public int NuevoCantidad { get; set; } = 1;
     }
 }

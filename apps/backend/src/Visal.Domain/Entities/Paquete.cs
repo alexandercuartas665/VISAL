@@ -14,4 +14,16 @@ public class Paquete : TenantEntity
     public string Codigo { get; set; } = null!;
     public string Nombre { get; set; } = null!;
     public bool Activo { get; set; } = true;
+
+    /// <summary>Precio pactado del paquete completo. Al aplicar el paquete en /asignacion,
+    /// este valor se copia al primer servicio del lote con cantidad > 0 (PaqueteValorPactado
+    /// en Asignacion). Los demas servicios del mismo lote quedan con valor null porque uno
+    /// solo debe llevar el monto del paquete para no duplicar facturacion. Editable por el
+    /// coordinador antes de guardar. numeric.</summary>
+    public decimal? Precio { get; set; }
+
+    /// <summary>Servicios que componen el paquete. Al elegir un ServicioContrato con
+    /// PaqueteId != null en /asignacion, estos servicios se expanden al carrito para que
+    /// el coordinador los revise y guarde en bloque.</summary>
+    public List<PaqueteServicio> Servicios { get; set; } = new();
 }

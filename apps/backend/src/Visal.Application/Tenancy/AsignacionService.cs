@@ -674,39 +674,116 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 $"La suma de turnos ({totalProyectado}) supera la cantidad del servicio ({asig.Cantidad}).");
         }
 
+        // Turnos con TurnoProgramacionId requieren cargar el grid una vez para
+        // materializar las sesiones. Cacheamos por id para no re-parsear varias veces.
+        var progIds = req.Turnos
+            .Where(x => x.TurnoProgramacionId is Guid)
+            .Select(x => x.TurnoProgramacionId!.Value)
+            .Distinct().ToList();
+        var progsMap = progIds.Count == 0
+            ? new Dictionary<Guid, TurnoProgramacion>()
+            : await db.TurnoProgramaciones.AsNoTracking()
+                .Where(p => progIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p, ct);
+
         // Insertar los nuevos turnos. Modelo de negocio: cada turno individual produce
-        // UN registro independiente en asignacion_turnos. Si el coordinador pide
-        // "Carlos: 2 turnos" en el carrito, se materializa como 2 filas con Cantidad=1
-        // cada una. Esto permite que cada turno tenga su propia HC, sus propias notas,
-        // su propia tarifa (negociable a posteriori) y su propia trazabilidad en
-        // facturacion. La columna Cantidad queda como 1 por convencion para turnos
-        // nuevos (las viejas con Cantidad>1 se respetan por compatibilidad).
+        // UN registro independiente en asignacion_turnos. Los turnos que traen
+        // TurnoProgramacionId materializan sesiones con tipo/horas del grid;
+        // el resto se guardan como turnos vacios (flujo manual).
         foreach (var t in req.Turnos)
         {
-            for (int i = 0; i < t.Cantidad; i++)
+            if (t.TurnoProgramacionId is Guid progId && !string.IsNullOrWhiteSpace(t.TurnoRowNombre))
             {
-                db.AsignacionTurnos.Add(new AsignacionTurno
+                if (!progsMap.TryGetValue(progId, out var prog))
                 {
-                    TenantId = tid,
-                    AsignacionId = req.AsignacionId,
-                    ProfesionalId = t.ProfesionalId,
-                    Cantidad = 1,
-                    HorasPorTurno = t.HorasPorTurno,
-                    FechaInicio = t.FechaInicio,
-                    MesAsignar = t.MesAsignar,
-                    Tarifa = t.Tarifa
-                });
+                    throw new InvalidOperationException("Programacion no encontrada al guardar.");
+                }
+                var diaArranque = t.DiaArranque ?? 1;
+                CrearTurnoDesdeGrid(prog, req.AsignacionId, t.ProfesionalId, t.TurnoRowNombre!, diaArranque, tid, t.Tarifa);
+            }
+            else
+            {
+                for (int i = 0; i < t.Cantidad; i++)
+                {
+                    db.AsignacionTurnos.Add(new AsignacionTurno
+                    {
+                        TenantId = tid,
+                        AsignacionId = req.AsignacionId,
+                        ProfesionalId = t.ProfesionalId,
+                        Cantidad = 1,
+                        HorasPorTurno = t.HorasPorTurno,
+                        FechaInicio = t.FechaInicio,
+                        MesAsignar = t.MesAsignar,
+                        Tarifa = t.Tarifa
+                    });
+                }
             }
         }
 
-        // Si la suma total iguala la cantidad del servicio, marcar como Asignado.
-        if (totalProyectado == asig.Cantidad)
+        // Si la suma total iguala la cantidad del servicio, o si se aplico una
+        // programacion (que ignora Cantidad por decision explicita), marcar
+        // como Asignado.
+        if (totalProyectado == asig.Cantidad || progIds.Count > 0)
         {
             asig.Estado = AsignacionEstado.Asignado;
         }
 
         await db.SaveChangesAsync(ct);
         return req.Turnos.Count;
+    }
+
+    /// <summary>Materializa un asignacion_turno + sus sesiones desde una fila del
+    /// grid de una TurnoProgramacion. Se usa desde AsignarServicioAsync (via carrito
+    /// con turnos de programacion). Muta el DbContext; el SaveChanges lo llama el
+    /// caller.</summary>
+    private void CrearTurnoDesdeGrid(
+        TurnoProgramacion prog, Guid asignacionId, Guid profesionalId, string rowNombre,
+        int diaArranque, Guid tid, decimal? tarifa)
+    {
+        var grid = System.Text.Json.JsonDocument.Parse(prog.GridDataJson).RootElement;
+        int diasEnMes = DateTime.DaysInMonth(prog.Anio, prog.Mes);
+        if (diaArranque < 1 || diaArranque > diasEnMes)
+        {
+            throw new InvalidOperationException($"Dia de arranque fuera del mes ({diasEnMes} dias).");
+        }
+
+        var at = new AsignacionTurno
+        {
+            TenantId = tid,
+            AsignacionId = asignacionId,
+            ProfesionalId = profesionalId,
+            Cantidad = 1,
+            MesAsignar = (short)prog.Mes,
+            FechaInicio = new DateOnly(prog.Anio, prog.Mes, diaArranque),
+            TurnoProgramacionId = prog.Id,
+            TurnoRowNombre = rowNombre,
+            Tarifa = tarifa
+        };
+        db.AsignacionTurnos.Add(at);
+
+        if (grid.TryGetProperty("dias", out var diasProp)
+            && diasProp.ValueKind == System.Text.Json.JsonValueKind.Object
+            && diasProp.TryGetProperty(rowNombre, out var celdasRow)
+            && celdasRow.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            int sessionNo = 1;
+            for (int d = diaArranque; d <= diasEnMes; d++)
+            {
+                if (!celdasRow.TryGetProperty(d.ToString(), out var celda)) { continue; }
+                string? tipoCodigo = celda.TryGetProperty("tipo", out var t) ? t.GetString() : null;
+                decimal? horas = celda.TryGetProperty("horas", out var h) && h.TryGetDecimal(out var hv) ? hv : (decimal?)null;
+                if (string.IsNullOrEmpty(tipoCodigo)) { continue; }
+                db.AsignacionTurnoSesiones.Add(new AsignacionTurnoSesion
+                {
+                    TenantId = tid,
+                    AsignacionTurno = at,
+                    SessionNo = sessionNo++,
+                    FechaAtencion = new DateOnly(prog.Anio, prog.Mes, d),
+                    TipoTurnoCodigo = tipoCodigo,
+                    Horas = horas
+                });
+            }
+        }
     }
 
     // ---------------- Aplicar programacion (Turnos) ----------------

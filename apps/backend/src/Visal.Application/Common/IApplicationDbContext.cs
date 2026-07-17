@@ -78,6 +78,7 @@ public interface IApplicationDbContext
     DbSet<HcPestanaAlias> HcPestanaAliases { get; }
     DbSet<AtencionColumnaConfig> AtencionColumnaConfigs { get; }
     DbSet<TurnoProgramacion> TurnoProgramaciones { get; }
+    DbSet<TurnoProgramacionSucursal> TurnoProgramacionSucursales { get; }
     DbSet<TipoTurno> TiposTurno { get; }
     DbSet<CatalogoTipoServicio> CatalogosTipoServicio { get; }
     DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados { get; }

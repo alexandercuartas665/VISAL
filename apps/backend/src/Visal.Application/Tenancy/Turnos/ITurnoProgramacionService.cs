@@ -4,8 +4,8 @@ namespace Visal.Application.Tenancy.Turnos;
 /// del GridDataJson para pintarlo sin cargar el JSON completo en la UI.</summary>
 public sealed record TurnoProgramacionDto(
     Guid Id,
-    Guid? SucursalId,
-    string? SucursalNombre,
+    IReadOnlyList<Guid> SucursalIds,
+    IReadOnlyList<string> SucursalNombres,
     Guid? TipoServicioId,
     string? TipoServicioNombre,
     string Nombre,
@@ -18,7 +18,7 @@ public sealed record TurnoProgramacionDto(
 /// descripcion opcional.</summary>
 public sealed record TurnoProgramacionDetailDto(
     Guid Id,
-    Guid? SucursalId,
+    IReadOnlyList<Guid> SucursalIds,
     Guid? TipoServicioId,
     string Nombre,
     int Anio,
@@ -28,7 +28,7 @@ public sealed record TurnoProgramacionDetailDto(
     bool Activa);
 
 public sealed record CrearTurnoProgramacionCmd(
-    Guid? SucursalId,
+    IReadOnlyList<Guid> SucursalIds,
     Guid? TipoServicioId,
     string Nombre,
     int Anio,
@@ -37,7 +37,7 @@ public sealed record CrearTurnoProgramacionCmd(
     string GridDataJson);
 
 public sealed record ActualizarTurnoProgramacionCmd(
-    Guid? SucursalId,
+    IReadOnlyList<Guid> SucursalIds,
     Guid? TipoServicioId,
     string Nombre,
     int Anio,
@@ -49,7 +49,8 @@ public sealed record ActualizarTurnoProgramacionCmd(
 /// <summary>
 /// CRUD + duplicar de <see cref="Visal.Domain.Entities.TurnoProgramacion"/>. Reglas
 /// duras (min/max turnos, unicidad de nombre, overload 24h/dia si el tenant lo
-/// habilita) se aplican aca en el servicio, no en la UI.
+/// habilita) se aplican aca en el servicio, no en la UI. Ademas: se exige al menos
+/// UNA sucursal vinculada al crear o actualizar.
 /// </summary>
 public interface ITurnoProgramacionService
 {
@@ -64,8 +65,7 @@ public interface ITurnoProgramacionService
     Task ActualizarAsync(Guid id, ActualizarTurnoProgramacionCmd cmd, Guid actor, CancellationToken ct = default);
 
     /// <summary>Clona la programacion cambiando destino {anio, mes}. El nombre se
-    /// preserva — la unicidad esta por (tenant, sede, anio, mes, nombre) asi que puede
-    /// convivir la original y la copia en meses distintos.</summary>
+    /// preserva y las sedes vinculadas tambien.</summary>
     Task<Guid> DuplicarAsync(Guid id, int nuevoAnio, int nuevoMes, Guid actor, CancellationToken ct = default);
 
     /// <summary>Soft-disable. Se mantiene la fila para preservar historial.</summary>

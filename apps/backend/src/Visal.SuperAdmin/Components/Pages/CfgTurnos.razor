@@ -112,7 +112,7 @@
                             <td>@r.Anio</td>
                             <td>@NombreMes(r.Mes)</td>
                             <td><strong>@r.Nombre</strong></td>
-                            <td>@(r.SucursalNombre ?? "-")</td>
+                            <td>@FormatSucursales(r.SucursalNombres)</td>
                             <td>@(r.TipoServicioNombre ?? "-")</td>
                             <td class="text-center">@r.CantidadTurnos</td>
                             <td class="text-center">
@@ -166,14 +166,25 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label small mb-1">Sede</label>
-                    <select class="form-select form-select-sm" @bind="_fSucursalStr">
-                        <option value="">(Sin sede especifica)</option>
-                        @foreach (var s in _sucursales)
+                    <label class="form-label small mb-1">Sedes * <span class="text-muted">(marca al menos una)</span></label>
+                    <div class="border rounded p-2" style="max-height: 140px; overflow-y: auto; background: #f8fafc;">
+                        @if (_sucursales.Count == 0)
                         {
-                            <option value="@s.Id">@s.Nombre</option>
+                            <div class="small text-muted">Sin sedes activas en el tenant.</div>
                         }
-                    </select>
+                        else
+                        {
+                            @foreach (var s in _sucursales)
+                            {
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="checkbox" id="tp-suc-@s.Id"
+                                           checked="@_fSucursalIds.Contains(s.Id)"
+                                           @onchange="e => ToggleSucursal(s.Id, e)" />
+                                    <label class="form-check-label small" for="tp-suc-@s.Id">@s.Nombre</label>
+                                </div>
+                            }
+                        }
+                    </div>
                 </div>
             </div>
             <div class="row g-2 mb-2">
@@ -585,7 +596,7 @@
     private string _fNombre = "";
     private int _fAnio = DateTime.Today.Year;
     private int _fMes = DateTime.Today.Month;
-    private string _fSucursalStr = "";
+    private HashSet<Guid> _fSucursalIds = new();
     private string _fTipoServicioStr = "";
     private string _fDescripcion = "";
     private bool _fActiva = true;
@@ -634,7 +645,15 @@
             // Guid?, no distingue "sin filtro" de "explicito null", asi que hacemos
             // el drill-down aca.
             IEnumerable<TurnoProgramacionDto> q = all;
-            if (sucFilter) { q = q.Where(r => r.SucursalId == suc); }
+            // Sede N:N: la programacion aplica si contiene la sede seleccionada. Cuando
+            // se filtra por "sin sede" (valor "null"), no aplica ninguna porque la regla
+            // exige al menos una sede — retornamos vacio.
+            if (sucFilter)
+            {
+                q = suc is Guid sedeId
+                    ? q.Where(r => r.SucursalIds.Contains(sedeId))
+                    : Array.Empty<TurnoProgramacionDto>();
+            }
             if (tipoFilter) { q = q.Where(r => r.TipoServicioId == tipo); }
             _rows = q.OrderByDescending(r => r.Anio).ThenByDescending(r => r.Mes).ThenBy(r => r.Nombre).ToList();
         }
@@ -647,13 +666,28 @@
         _fNombre = "";
         _fAnio = DateTime.Today.Year;
         _fMes = DateTime.Today.Month;
-        _fSucursalStr = "";
+        _fSucursalIds = new();
         _fTipoServicioStr = "";
         _fDescripcion = "";
         _fActiva = true;
         _grid = GridDataModel.FromJson(null);
         _brocha = _tipos.FirstOrDefault()?.Codigo;
         _modalOpen = true;
+    }
+
+    private void ToggleSucursal(Guid id, ChangeEventArgs e)
+    {
+        if (e.Value is bool b && b) { _fSucursalIds.Add(id); }
+        else { _fSucursalIds.Remove(id); }
+    }
+
+    /// <summary>Etiqueta compacta para la columna Sede de la tabla.</summary>
+    private static string FormatSucursales(IReadOnlyList<string> nombres)
+    {
+        if (nombres.Count == 0) { return "-"; }
+        if (nombres.Count == 1) { return nombres[0]; }
+        if (nombres.Count == 2) { return $"{nombres[0]}, {nombres[1]}"; }
+        return $"{nombres.Count} sedes";
     }
 
     private async Task EditarAsync(Guid id)
@@ -666,7 +700,7 @@
             _editId = id;
             _fNombre = d.Nombre;
             _fAnio = d.Anio; _fMes = d.Mes;
-            _fSucursalStr = d.SucursalId?.ToString() ?? "";
+            _fSucursalIds = d.SucursalIds.ToHashSet();
             _fTipoServicioStr = d.TipoServicioId?.ToString() ?? "";
             _fDescripcion = d.Descripcion ?? "";
             _fActiva = d.Activa;
@@ -686,9 +720,10 @@
         if (_fMes < 1 || _fMes > 12) { _modalError = "Mes fuera de rango."; return; }
         if (_fAnio < 2024 || _fAnio > 2100) { _modalError = "Anio fuera de rango."; return; }
 
-        Guid? suc = Guid.TryParse(_fSucursalStr, out var gs) ? gs : (Guid?)null;
+        if (_fSucursalIds.Count == 0) { _modalError = "Debes seleccionar al menos una sede."; return; }
         Guid? tsv = Guid.TryParse(_fTipoServicioStr, out var gt) ? gt : (Guid?)null;
         var json = _grid.ToJson();
+        var sucIds = _fSucursalIds.ToList();
         _busy = true; _error = _ok = null;
         try
         {
@@ -696,7 +731,7 @@
             if (_editId is null)
             {
                 await Svc.CrearAsync(new CrearTurnoProgramacionCmd(
-                    suc, tsv, _fNombre.Trim(), _fAnio, _fMes,
+                    sucIds, tsv, _fNombre.Trim(), _fAnio, _fMes,
                     string.IsNullOrWhiteSpace(_fDescripcion) ? null : _fDescripcion.Trim(),
                     json), actor);
                 _ok = "Programacion creada.";
@@ -704,7 +739,7 @@
             else
             {
                 await Svc.ActualizarAsync(_editId.Value, new ActualizarTurnoProgramacionCmd(
-                    suc, tsv, _fNombre.Trim(), _fAnio, _fMes,
+                    sucIds, tsv, _fNombre.Trim(), _fAnio, _fMes,
                     string.IsNullOrWhiteSpace(_fDescripcion) ? null : _fDescripcion.Trim(),
                     json, _fActiva), actor);
                 _ok = "Programacion actualizada.";

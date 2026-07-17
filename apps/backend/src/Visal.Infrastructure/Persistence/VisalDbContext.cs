@@ -88,6 +88,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HcPestanaAlias> HcPestanaAliases => Set<HcPestanaAlias>();
     public DbSet<AtencionColumnaConfig> AtencionColumnaConfigs => Set<AtencionColumnaConfig>();
     public DbSet<TurnoProgramacion> TurnoProgramaciones => Set<TurnoProgramacion>();
+    public DbSet<TurnoProgramacionSucursal> TurnoProgramacionSucursales => Set<TurnoProgramacionSucursal>();
     public DbSet<TipoTurno> TiposTurno => Set<TipoTurno>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
@@ -847,11 +848,28 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Descripcion).HasMaxLength(500);
             // jsonb en Postgres para permitir queries y validacion nativa.
             b.Property(x => x.GridDataJson).HasColumnType("jsonb").IsRequired();
-            // Query filter global tenant lo aplica el metodo generico ApplyTenantFilter mas abajo;
-            // aca solo indices operativos.
-            b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Anio, x.Mes });
-            // Unicidad: no dos programaciones con mismo nombre para el mismo (tenant, sede, anio, mes).
-            b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Anio, x.Mes, x.Nombre }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Anio, x.Mes });
+            // Unicidad: no dos programaciones con mismo nombre para el mismo (tenant, anio, mes).
+            // La sede salio de la unica porque ahora es N:N (una programacion puede aplicar a
+            // varias sedes) y no podemos usarla como discriminador.
+            b.HasIndex(x => new { x.TenantId, x.Anio, x.Mes, x.Nombre }).IsUnique();
+            // Nav collection a la tabla puente.
+            b.HasMany(x => x.Sucursales)
+                .WithOne(x => x.TurnoProgramacion!)
+                .HasForeignKey(x => x.TurnoProgramacionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TurnoProgramacionSucursal>(b =>
+        {
+            b.HasOne(x => x.Sucursal)
+                .WithMany()
+                .HasForeignKey(x => x.SucursalId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Id es la PK (heredada de BaseEntity). El par (TurnoProgramacionId,
+            // SucursalId) va como indice unico para evitar duplicados en el N:N.
+            b.HasIndex(x => new { x.TurnoProgramacionId, x.SucursalId }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.SucursalId });
         });
 
         modelBuilder.Entity<TipoTurno>(b =>

@@ -9,17 +9,20 @@ namespace Visal.Domain.Entities;
 /// se persiste como JSON en <see cref="GridDataJson"/> — mismo formato
 /// que el legacy vis_admturnos para poder importar si aparece BD real.
 ///
-/// Tenant-scoped (regla del proyecto). Puede aplicar a una sede concreta
-/// o a todo el tenant (SucursalId = null). Puede opcionalmente filtrarse
+/// Tenant-scoped (regla del proyecto). Se vincula a UNA o MAS sedes via la
+/// entidad relacion <see cref="TurnoProgramacionSucursal"/>; una programacion
+/// SIN sedes vinculadas no es elegible en ningun /coordinacion (regla dura:
+/// obliga a elegir explicitamente donde aplica). Puede opcionalmente filtrarse
 /// por TipoServicio (ej. Rotacion Enfermeria de Enero) — null = todos.
 ///
 /// Unicidad: no puede haber dos programaciones con el mismo Nombre para
-/// el mismo (Tenant, Sucursal, Anio, Mes).
+/// el mismo (Tenant, Anio, Mes) — la unicidad ya no depende de sede porque
+/// las sedes son N:N.
 /// </summary>
 public class TurnoProgramacion : TenantEntity
 {
-    /// <summary>Sede donde aplica. null = global del tenant.</summary>
-    public Guid? SucursalId { get; set; }
+    /// <summary>Sedes donde aplica. Al menos una obligatoria (regla del servicio).</summary>
+    public List<TurnoProgramacionSucursal> Sucursales { get; set; } = new();
 
     /// <summary>Tipo de servicio al que aplica (CONSULTA/TERAPIA/EQUIPOS/ENFERMERIA).
     /// null = aplica a todos los tipos. Filtra a que profesionales se puede asignar

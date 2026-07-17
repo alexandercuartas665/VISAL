@@ -24,6 +24,8 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
 
     private Guid _tenantA;
     private Guid _tenantB;
+    private Guid _sucA;
+    private Guid _sucB;
 
     public async Task InitializeAsync()
     {
@@ -32,8 +34,14 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         await ctx.Database.MigrateAsync();
         _tenantA = Guid.CreateVersion7();
         _tenantB = Guid.CreateVersion7();
+        _sucA = Guid.CreateVersion7();
+        _sucB = Guid.CreateVersion7();
         ctx.Tenants.Add(new Tenant { Id = _tenantA, Name = "Agencia A" });
         ctx.Tenants.Add(new Tenant { Id = _tenantB, Name = "Agencia B" });
+        // Cada tenant necesita al menos 1 sucursal — la regla dura de
+        // TurnoProgramacion exige >=1 sede al crear.
+        ctx.Sucursales.Add(new Sucursal { Id = _sucA, TenantId = _tenantA, Nombre = "Sede A", Activa = true });
+        ctx.Sucursales.Add(new Sucursal { Id = _sucB, TenantId = _tenantB, Nombre = "Sede B", Activa = true });
         await ctx.SaveChangesAsync();
     }
 
@@ -45,13 +53,13 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         var svc = CreateService(_tenantA);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.CrearAsync(new CrearTurnoProgramacionCmd(
-                SucursalId: null, TipoServicioId: null,
+                SucursalIds: new[] { _sucA }, TipoServicioId: null,
                 Nombre: "   ", Anio: 2026, Mes: 1,
                 Descripcion: null, GridDataJson: GridUnTurno()), actor: Guid.Empty, default));
     }
 
     [Fact]
-    public async Task Crear_NombreDuplicadoMismoPeriodoYSede_Falla()
+    public async Task Crear_NombreDuplicadoMismoPeriodo_Falla()
     {
         var svc = CreateService(_tenantA);
         await svc.CrearAsync(NuevaCmd("Rotacion A", 2026, 1), Guid.Empty, default);
@@ -80,7 +88,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         var json = $"{{\"turnos\":[{turnos}],\"dias\":{{}}}}";
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.CrearAsync(new CrearTurnoProgramacionCmd(
-                null, null, "Rotacion", 2026, 1, null, json), Guid.Empty, default));
+                new[] { _sucA }, null, "Rotacion", 2026, 1, null, json), Guid.Empty, default));
         Assert.Contains("Maximo 7", ex.Message);
     }
 
@@ -93,7 +101,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         // dejar la grilla huerfana. Asi que este caso debe pasar con 1 turno,
         // no fallar. Verificamos que crea OK con exactamente 1 turno.
         var id = await svc.CrearAsync(new CrearTurnoProgramacionCmd(
-            null, null, "Rot Vacia", 2026, 1, null, json), Guid.Empty, default);
+            new[] { _sucA }, null, "Rot Vacia", 2026, 1, null, json), Guid.Empty, default);
         var det = await svc.ObtenerAsync(id, default);
         var g = GridDataModel.FromJson(det!.GridDataJson);
         Assert.Single(g.Turnos);
@@ -109,7 +117,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
             + "\"T2\":{\"1\":{\"tipo\":\"DN\",\"horas\":12}},"
             + "\"T3\":{\"1\":{\"tipo\":\"DN\",\"horas\":12}}}}";
         var id = await svc.CrearAsync(new CrearTurnoProgramacionCmd(
-            null, null, "Rot Overload", 2026, 1, null, json), Guid.Empty, default);
+            new[] { _sucA }, null, "Rot Overload", 2026, 1, null, json), Guid.Empty, default);
         Assert.NotEqual(Guid.Empty, id);
     }
 
@@ -134,7 +142,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
             + "\"T3\":{\"1\":{\"tipo\":\"DN\",\"horas\":12}}}}";
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.CrearAsync(new CrearTurnoProgramacionCmd(
-                null, null, "Rot Overload", 2026, 1, null, json), Guid.Empty, default));
+                new[] { _sucA }, null, "Rot Overload", 2026, 1, null, json), Guid.Empty, default));
         Assert.Contains("supera 24h", ex.Message);
     }
 
@@ -155,7 +163,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         var svcB = CreateService(_tenantB);
 
         await svcA.CrearAsync(NuevaCmd("Rot A", 2026, 1), Guid.Empty, default);
-        await svcB.CrearAsync(NuevaCmd("Rot B", 2026, 1), Guid.Empty, default);
+        await svcB.CrearAsync(NuevaCmd("Rot B", 2026, 1, _sucB), Guid.Empty, default);
 
         var listA = await svcA.ListarAsync(null, null, null, null, false, default);
         var listB = await svcB.ListarAsync(null, null, null, null, false, default);
@@ -174,7 +182,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         var svcB = CreateService(_tenantB);
         await svcA.CrearAsync(NuevaCmd("Rotacion A", 2026, 1), Guid.Empty, default);
         // Esto debe pasar (otro tenant).
-        var id = await svcB.CrearAsync(NuevaCmd("Rotacion A", 2026, 1), Guid.Empty, default);
+        var id = await svcB.CrearAsync(NuevaCmd("Rotacion A", 2026, 1, _sucB), Guid.Empty, default);
         Assert.NotEqual(Guid.Empty, id);
     }
 
@@ -186,7 +194,7 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
             + "\"Manana\":{\"1\":{\"tipo\":\"M\",\"horas\":8}},"
             + "\"Tarde\":{\"1\":{\"tipo\":\"T\",\"horas\":8}}}}";
         var origen = await svc.CrearAsync(new CrearTurnoProgramacionCmd(
-            null, null, "Rotacion X", 2026, 1, null, json), Guid.Empty, default);
+            new[] { _sucA }, null, "Rotacion X", 2026, 1, null, json), Guid.Empty, default);
 
         var copia = await svc.DuplicarAsync(origen, 2026, 2, Guid.Empty, default);
         var det = await svc.ObtenerAsync(copia, default);
@@ -250,8 +258,8 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
     // Helpers
     private static string GridUnTurno() => "{\"turnos\":[\"Turno 1\"],\"dias\":{\"Turno 1\":{}}}";
 
-    private static CrearTurnoProgramacionCmd NuevaCmd(string nombre, int anio, int mes) =>
-        new(SucursalId: null, TipoServicioId: null,
+    private CrearTurnoProgramacionCmd NuevaCmd(string nombre, int anio, int mes, Guid? sucursalId = null) =>
+        new(SucursalIds: new[] { sucursalId ?? _sucA }, TipoServicioId: null,
             Nombre: nombre, Anio: anio, Mes: mes,
             Descripcion: null, GridDataJson: GridUnTurno());
 

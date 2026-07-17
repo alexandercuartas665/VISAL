@@ -720,9 +720,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
         if (asig is null) { return Array.Empty<TurnoProgramacionCardDto>(); }
 
-        // Filtrar por (Anio, Mes) de la asignacion. Sede y TipoServicio se filtran
-        // en memoria porque el nombre viene de otras tablas y queremos matching flexible
-        // (una programacion global "Sin sede" tambien aplica a cualquier sede).
+        // Filtrar por (Anio, Mes) de la asignacion. Sede N:N y TipoServicio se filtran
+        // en memoria porque el nombre viene de otras tablas y queremos matching flexible.
         int? anio = asig.AnioServicio is short a ? a : null;
         int? mes = asig.MesVigencia is short m ? m : null;
 
@@ -730,10 +729,12 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (anio is int ay) { q = q.Where(p => p.Anio == ay); }
         if (mes is int mv) { q = q.Where(p => p.Mes == mv); }
 
-        var raw = await q.OrderBy(p => p.Nombre).ToListAsync(ct);
+        var raw = await q
+            .Include(p => p.Sucursales)
+            .OrderBy(p => p.Nombre).ToListAsync(ct);
 
-        // Resolver nombre de sede y tipo servicio del catalogo.
-        var sedeIds = raw.Where(p => p.SucursalId.HasValue).Select(p => p.SucursalId!.Value).Distinct().ToList();
+        // Resolver nombres de sedes vinculadas (todas las N:N presentes).
+        var sedeIds = raw.SelectMany(p => p.Sucursales.Select(s => s.SucursalId)).Distinct().ToList();
         var sedesMap = await db.Sucursales.AsNoTracking()
             .Where(s => sedeIds.Contains(s.Id))
             .Select(s => new { s.Id, s.Nombre })
@@ -745,8 +746,19 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Select(t => new { t.Id, t.Codigo })
             .ToDictionaryAsync(t => t.Id, t => t.Codigo, ct);
 
-        // Filtro final: TipoServicio de la programacion debe casar con el de la asignacion
-        // (o ser null = "todos los tipos"). Sede idem.
+        // Sede de la asignacion (para filtrar N:N). asig.Sucursal es un string
+        // (varchar 40) — buscamos el Id resolviendo por nombre. Si el paciente no
+        // tiene sede en la asignacion, no filtramos por sede.
+        Guid? asigSedeId = null;
+        if (!string.IsNullOrWhiteSpace(asig.Sucursal))
+        {
+            var s = asig.Sucursal.Trim();
+            var suc = await db.Sucursales.AsNoTracking()
+                .Where(x => x.Nombre == s).Select(x => (Guid?)x.Id)
+                .FirstOrDefaultAsync(ct);
+            asigSedeId = suc;
+        }
+
         var asigTipo = asig.TipoServicio?.ToUpperInvariant();
 
         var result = new List<TurnoProgramacionCardDto>();
@@ -758,10 +770,26 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             {
                 continue;
             }
-            var sede = p.SucursalId is Guid sid ? sedesMap.GetValueOrDefault(sid) : null;
+            // Regla dura N:N: la programacion es elegible si su lista de sedes
+            // contiene la sede de la asignacion. Si la asignacion no tiene sede
+            // resuelta, permitimos cualquier programacion (fallback conservador).
+            if (asigSedeId is Guid aSid && !p.Sucursales.Any(s => s.SucursalId == aSid))
+            {
+                continue;
+            }
+            var nombresSedes = p.Sucursales
+                .Select(s => sedesMap.TryGetValue(s.SucursalId, out var n) ? n : "?")
+                .OrderBy(n => n).ToList();
+            var sedeNombreDisplay = nombresSedes.Count switch
+            {
+                0 => null,
+                1 => nombresSedes[0],
+                2 => $"{nombresSedes[0]}, {nombresSedes[1]}",
+                _ => $"{nombresSedes.Count} sedes"
+            };
             int numTurnos = ContarTurnosEnGrid(p.GridDataJson);
             result.Add(new TurnoProgramacionCardDto(
-                p.Id, p.Nombre, p.Anio, p.Mes, sede, tipo, numTurnos, p.GridDataJson));
+                p.Id, p.Nombre, p.Anio, p.Mes, sedeNombreDisplay, tipo, numTurnos, p.GridDataJson));
         }
         return result;
     }

@@ -112,10 +112,6 @@
                     <div class="hc-paquete-chip">
                         <span class="hc-paquete-cod">@pk.PaqueteCodigo</span>
                         <span class="hc-paquete-meta">@pk.TotalServicios servicio(s)</span>
-                        @if (pk.ValorPactado is decimal vp)
-                        {
-                            <span class="hc-paquete-valor">$ @vp.ToString("N0")</span>
-                        }
                     </div>
                 }
                 <small class="text-muted d-block mt-1">

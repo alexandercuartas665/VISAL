@@ -528,7 +528,22 @@ else
     .cd-mode-tab { border: none; background: #fff; color: #475569; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
     .cd-mode-tab.sel { background: #2563eb; color: white; }
     .cd-prog-panel { padding: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; }
-    .cd-prog-modal { max-width: 900px; }
+    /* Modal overlay reusable — mismos estilos que CfgTurnos pero locales a Coordinacion:
+       los estilos de un componente Blazor solo estan en el DOM cuando ese componente
+       esta montado, y CfgTurnos no lo esta en /coordinacion. Sin esto, .cie-modal no
+       lleva position:fixed y el modal se renderiza al fondo de la pagina. */
+    .cie-modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        max-width: 95vw; max-height: 92vh; background: #fff;
+        border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25);
+        z-index: 1051; display: flex; flex-direction: column;
+    }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+    .cd-prog-modal { width: 900px; max-width: 95vw; }
     .cd-prog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 10px 0; }
     .cd-prog-card { border: 2px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; cursor: pointer; background: #fff; }
     .cd-prog-card:hover { border-color: #93c5fd; }

@@ -1,0 +1,14 @@
+CONECTAR A LA MAQUINA POR SSH
+ssh -i $HOME\.ssh\id_ed25519_visal root@10.0.0.3
+
+
+LO DE ERRORES ULTIMOS 
+docker exec visal-app sh -c 'grep -A 15 "\[ERR\]" /app/logs/visal-'"$(date -u +%Y%m%d)"'.log | tail -100'
+
+
+COPIAR A MI MAQUINA 
+# En el server:
+docker cp visal-app:/app/logs/visal-$(date -u +%Y%m%d).log /tmp/visal-hoy.log
+exit
+# En tu Windows:
+scp -i $HOME\.ssh\id_ed25519_visal root@10.0.0.3:/tmp/visal-hoy.log C:\temp\visal-hoy.log

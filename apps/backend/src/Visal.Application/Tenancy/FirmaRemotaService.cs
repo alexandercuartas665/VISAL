@@ -500,10 +500,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 .FirstOrDefaultAsync(ct);
         }
 
-        var tenantName = await _db.Tenants.IgnoreQueryFilters()
+        var tenantInfo = await _db.Tenants.IgnoreQueryFilters()
             .Where(t => t.Id == req.TenantId)
-            .Select(t => t.Name)
+            .Select(t => new { t.Name, t.LogoUrl })
             .FirstOrDefaultAsync(ct);
+        var tenantName = tenantInfo?.Name;
+        var tenantLogo = tenantInfo?.LogoUrl;
 
         // Rol y nombre del firmante real. Si es pariente, leemos parentesco + nombre
         // del contacto (con fallback al NombreContacto guardado en el request).
@@ -534,7 +536,8 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             req.ExpiresAt,
             req.Status,
             nombreSig,
-            rolSig);
+            rolSig,
+            tenantLogo);
     }
 
     public async Task<bool> GuardarFirmaPorTokenAsync(string token, string imageDataUrl, CancellationToken ct = default)

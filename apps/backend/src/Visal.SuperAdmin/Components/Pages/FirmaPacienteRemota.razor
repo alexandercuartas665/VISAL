@@ -14,6 +14,10 @@
 <div class="fp-shell">
     <div class="fp-card">
         <div class="fp-brand">
+            @if (!string.IsNullOrWhiteSpace(_req?.LogoTenantUrl))
+            {
+                <img src="@_req.LogoTenantUrl" class="fp-brand-logo" alt="" />
+            }
             <div class="fp-brand-name">@(_req?.NombreTenant ?? "IPS Visal RT")</div>
             <div class="fp-brand-sub">Confirmacion de atencion</div>
             @if (_req is not null && !string.IsNullOrWhiteSpace(_req.RolSignatario))
@@ -115,6 +119,7 @@
     .fp-shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
     .fp-card { width: 100%; max-width: 480px; background: white; border-radius: 14px; box-shadow: 0 8px 30px rgba(15,23,42,.12); padding: 22px 22px 18px; }
     .fp-brand { text-align: center; padding-bottom: 14px; border-bottom: 1px solid #e2e8f0; margin-bottom: 18px; }
+    .fp-brand-logo { max-height: 56px; max-width: 200px; object-fit: contain; margin: 0 auto 10px; display: block; }
     .fp-brand-name { font-weight: 800; font-size: 18px; color: #0b5b54; letter-spacing: .02em; }
     .fp-brand-sub { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .14em; font-weight: 600; margin-top: 4px; }
     .fp-msg p { font-size: 14px; line-height: 1.5; margin: 0 0 10px; color: #334155; }

@@ -134,9 +134,16 @@ foreach ($id in $ids) {
         elseif ($img -match 'redis') {
             $out = Join-Path $dayFolder "$safe-dump.rdb"
             Write-Log "  -> SAVE + copia de dump.rdb"
-            docker exec $id sh -c 'redis-cli SAVE > /dev/null 2>&1 || true'
-            # Ubicacion tipica del rdb dentro del contenedor
-            docker cp "${id}:/data/dump.rdb" $out 2>$null
+            # docker cp escribe "Successfully copied ..." a STDOUT y con
+            # $ErrorActionPreference=Stop PowerShell lo trata como excepcion
+            # aunque el archivo si se haya copiado. Envolvemos en try/catch
+            # y decidimos por la existencia del archivo, no por el error.
+            try {
+                docker exec $id sh -c 'redis-cli SAVE > /dev/null 2>&1 || true' *> $null
+                docker cp "${id}:/data/dump.rdb" $out *> $null
+            } catch {
+                # Silenciamos: verificamos abajo por existencia real del archivo.
+            }
             if (Test-Path $out) {
                 $size = [math]::Round((Get-Item $out).Length/1MB, 2)
                 Write-Log "  OK -> $safe-dump.rdb ($size MB)"

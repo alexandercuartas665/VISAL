@@ -53,7 +53,10 @@ public sealed record FirmaRequestPublicDto(
     string? NombreSignatario = null,
     /// <summary>Rol del firmante: "PACIENTE" o el parentesco del contacto
     /// (MADRE, PADRE, ACUDIENTE, etc). Se muestra como "Firmo como: {rol}".</summary>
-    string? RolSignatario = null);
+    string? RolSignatario = null,
+    /// <summary>URL del logo del tenant (tenants.logo_url). Si viene con valor,
+    /// la pagina publica lo pinta arriba del nombre. Null si el tenant no cargo logo.</summary>
+    string? LogoTenantUrl = null);
 
 /// <summary>
 /// Servicio de solicitud y captura de firma remota del paciente. Genera un token

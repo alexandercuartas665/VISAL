@@ -37,4 +37,15 @@ public class AsignacionTurno : TenantEntity
     /// al momento de coordinarlo, pero el coordinador puede ajustarla manualmente
     /// (por descuento, tarifa especial, etc.). Persiste el valor final.</summary>
     public decimal? Tarifa { get; set; }
+
+    /// <summary>Programacion de turnos (TurnoProgramacion) desde la que se genero
+    /// este turno. Null cuando se creo manualmente en el modo clasico de Coordinacion.
+    /// Se usa para rastrear que rotacion originaron las sesiones y poder mostrarlo
+    /// en reportes / auditoria.</summary>
+    public Guid? TurnoProgramacionId { get; set; }
+    public TurnoProgramacion? TurnoProgramacion { get; set; }
+
+    /// <summary>Nombre de la fila del grid de la programacion que cubre este profesional.
+    /// Ej: "Turno 1", "Turno 2". Solo relevante cuando TurnoProgramacionId != null.</summary>
+    public string? TurnoRowNombre { get; set; }
 }

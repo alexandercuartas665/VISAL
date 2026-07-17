@@ -708,4 +708,423 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         await db.SaveChangesAsync(ct);
         return req.Turnos.Count;
     }
+
+    // ---------------- Aplicar programacion (Turnos) ----------------
+
+    public async Task<IReadOnlyList<TurnoProgramacionCardDto>> ListarProgramacionesElegiblesAsync(
+        Guid asignacionId, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return Array.Empty<TurnoProgramacionCardDto>(); }
+
+        var asig = await db.Asignaciones.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
+        if (asig is null) { return Array.Empty<TurnoProgramacionCardDto>(); }
+
+        // Filtrar por (Anio, Mes) de la asignacion. Sede y TipoServicio se filtran
+        // en memoria porque el nombre viene de otras tablas y queremos matching flexible
+        // (una programacion global "Sin sede" tambien aplica a cualquier sede).
+        int? anio = asig.AnioServicio is short a ? a : null;
+        int? mes = asig.MesVigencia is short m ? m : null;
+
+        var q = db.TurnoProgramaciones.AsNoTracking().Where(p => p.Activa);
+        if (anio is int ay) { q = q.Where(p => p.Anio == ay); }
+        if (mes is int mv) { q = q.Where(p => p.Mes == mv); }
+
+        var raw = await q.OrderBy(p => p.Nombre).ToListAsync(ct);
+
+        // Resolver nombre de sede y tipo servicio del catalogo.
+        var sedeIds = raw.Where(p => p.SucursalId.HasValue).Select(p => p.SucursalId!.Value).Distinct().ToList();
+        var sedesMap = await db.Sucursales.AsNoTracking()
+            .Where(s => sedeIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Nombre })
+            .ToDictionaryAsync(s => s.Id, s => s.Nombre, ct);
+
+        var tipoIds = raw.Where(p => p.TipoServicioId.HasValue).Select(p => p.TipoServicioId!.Value).Distinct().ToList();
+        var tiposMap = await db.CatalogosTipoServicio.AsNoTracking()
+            .Where(t => tipoIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.Codigo })
+            .ToDictionaryAsync(t => t.Id, t => t.Codigo, ct);
+
+        // Filtro final: TipoServicio de la programacion debe casar con el de la asignacion
+        // (o ser null = "todos los tipos"). Sede idem.
+        var asigTipo = asig.TipoServicio?.ToUpperInvariant();
+
+        var result = new List<TurnoProgramacionCardDto>();
+        foreach (var p in raw)
+        {
+            var tipo = p.TipoServicioId is Guid tsid ? tiposMap.GetValueOrDefault(tsid) : null;
+            if (!string.IsNullOrEmpty(tipo) && !string.IsNullOrEmpty(asigTipo)
+                && !string.Equals(tipo, asigTipo, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var sede = p.SucursalId is Guid sid ? sedesMap.GetValueOrDefault(sid) : null;
+            int numTurnos = ContarTurnosEnGrid(p.GridDataJson);
+            result.Add(new TurnoProgramacionCardDto(
+                p.Id, p.Nombre, p.Anio, p.Mes, sede, tipo, numTurnos, p.GridDataJson));
+        }
+        return result;
+    }
+
+    public async Task<AplicarProgramacionResult> AplicarProgramacionAsync(
+        AplicarProgramacionRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        if (req.DiaArranque < 1 || req.DiaArranque > 31)
+        {
+            throw new InvalidOperationException("El dia de arranque debe estar entre 1 y 31.");
+        }
+        if (req.ProfesionalPorFila is null || req.ProfesionalPorFila.Count == 0)
+        {
+            throw new InvalidOperationException("Debe asignar al menos un profesional a una fila.");
+        }
+
+        var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == req.AsignacionId, ct)
+            ?? throw new InvalidOperationException("Asignacion no encontrada.");
+        var prog = await db.TurnoProgramaciones.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == req.ProgramacionId, ct)
+            ?? throw new InvalidOperationException("Programacion no encontrada.");
+
+        var grid = System.Text.Json.JsonDocument.Parse(prog.GridDataJson).RootElement;
+        var turnos = grid.TryGetProperty("turnos", out var tArr) && tArr.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? tArr.EnumerateArray().Select(x => x.GetString() ?? "").Where(s => s.Length > 0).ToList()
+            : new List<string>();
+        if (turnos.Count == 0) { throw new InvalidOperationException("La programacion no tiene turnos configurados."); }
+
+        int diasEnMes = DateTime.DaysInMonth(prog.Anio, prog.Mes);
+        if (req.DiaArranque > diasEnMes)
+        {
+            throw new InvalidOperationException($"El dia de arranque supera los dias del mes ({diasEnMes}).");
+        }
+
+        var diasProp = grid.TryGetProperty("dias", out var dObj) && dObj.ValueKind == System.Text.Json.JsonValueKind.Object
+            ? dObj : default;
+
+        int turnosCreados = 0, sesionesCreadas = 0, sesionesDescanso = 0;
+
+        foreach (var rowNombre in turnos)
+        {
+            if (!req.ProfesionalPorFila.TryGetValue(rowNombre, out var profId) || profId == Guid.Empty)
+            {
+                // Fila sin profesional asignado: se salta (no obligamos a cubrir todas).
+                continue;
+            }
+
+            var at = new AsignacionTurno
+            {
+                TenantId = tid,
+                AsignacionId = req.AsignacionId,
+                ProfesionalId = profId,
+                Cantidad = 1,
+                MesAsignar = (short)prog.Mes,
+                FechaInicio = new DateOnly(prog.Anio, prog.Mes, req.DiaArranque),
+                TurnoProgramacionId = prog.Id,
+                TurnoRowNombre = rowNombre
+            };
+            db.AsignacionTurnos.Add(at);
+            turnosCreados++;
+
+            if (diasProp.ValueKind == System.Text.Json.JsonValueKind.Object
+                && diasProp.TryGetProperty(rowNombre, out var celdasRow)
+                && celdasRow.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                int sessionNo = 1;
+                for (int d = req.DiaArranque; d <= diasEnMes; d++)
+                {
+                    if (!celdasRow.TryGetProperty(d.ToString(), out var celda)) { continue; }
+                    string? tipoCodigo = celda.TryGetProperty("tipo", out var t) ? t.GetString() : null;
+                    decimal? horas = celda.TryGetProperty("horas", out var h) && h.TryGetDecimal(out var hv) ? hv : (decimal?)null;
+                    if (string.IsNullOrEmpty(tipoCodigo)) { continue; }
+                    db.AsignacionTurnoSesiones.Add(new AsignacionTurnoSesion
+                    {
+                        TenantId = tid,
+                        AsignacionTurno = at,
+                        SessionNo = sessionNo++,
+                        FechaAtencion = new DateOnly(prog.Anio, prog.Mes, d),
+                        TipoTurnoCodigo = tipoCodigo,
+                        Horas = horas
+                    });
+                    if (string.Equals(tipoCodigo, "L", StringComparison.OrdinalIgnoreCase)) { sesionesDescanso++; }
+                    else { sesionesCreadas++; }
+                }
+            }
+        }
+
+        if (turnosCreados == 0)
+        {
+            throw new InvalidOperationException("Debe asignar al menos un profesional a alguna fila del grid.");
+        }
+
+        // Al aplicar programacion consideramos la asignacion Asignada aunque el # de
+        // sesiones supere Cantidad — el usuario decidio ignorar el limite explicitamente.
+        asig.Estado = AsignacionEstado.Asignado;
+
+        await db.SaveChangesAsync(ct);
+        return new AplicarProgramacionResult(turnosCreados, sesionesCreadas, sesionesDescanso);
+    }
+
+    private static int ContarTurnosEnGrid(string gridJson)
+    {
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(gridJson);
+            if (doc.RootElement.TryGetProperty("turnos", out var arr) &&
+                arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                return arr.GetArrayLength();
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    public async Task<IReadOnlyList<AsignacionTableroKanbanDto>> ListarTableroKanbanAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        int anio, int? mesVigencia = null,
+        string? documentoPaciente = null,
+        string? sucursalNombre = null,
+        CancellationToken ct = default)
+    {
+        if (modulosPermitidos is null || modulosPermitidos.Count == 0)
+        {
+            return Array.Empty<AsignacionTableroKanbanDto>();
+        }
+
+        var permisos = modulosPermitidos.Select(m => m.ToUpperInvariant()).ToList();
+
+        var q = db.Asignaciones.AsNoTracking()
+            .Where(a => a.AnioServicio == (short)anio)
+            .Where(a => (a.Modulo != null && permisos.Contains(a.Modulo.ToUpper()))
+                     || permisos.Contains(a.TipoServicio.ToUpper()));
+
+        if (mesVigencia is int mv && mv >= 1 && mv <= 12) { q = q.Where(a => a.MesVigencia == (short)mv); }
+        if (!string.IsNullOrWhiteSpace(documentoPaciente))
+        {
+            var d = documentoPaciente.Trim();
+            q = q.Where(a => a.Paciente != null && a.Paciente.NumeroDocumento.Contains(d));
+        }
+        if (!string.IsNullOrWhiteSpace(sucursalNombre))
+        {
+            var s = sucursalNombre.Trim();
+            q = q.Where(a => a.Sucursal == s);
+        }
+
+        var asigs = await q.OrderByDescending(a => a.CreatedAt).Take(500).ToListAsync(ct);
+        if (asigs.Count == 0) { return Array.Empty<AsignacionTableroKanbanDto>(); }
+
+        var asigIds = asigs.Select(a => a.Id).ToList();
+        var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
+
+        var pacs = await db.Pacientes.AsNoTracking()
+            .Where(p => pacIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto })
+            .ToDictionaryAsync(p => p.Id, p => p, ct);
+
+        // Turnos por asignacion: cantidad + profesional_id.
+        var turnosData = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => asigIds.Contains(t.AsignacionId))
+            .Select(t => new { t.Id, t.AsignacionId, t.ProfesionalId, t.Cantidad })
+            .ToListAsync(ct);
+
+        var turnoIds = turnosData.Select(t => t.Id).ToList();
+
+        // Sesiones por asignacion_turno_id.
+        var sesionesData = await db.AsignacionTurnoSesiones.AsNoTracking()
+            .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
+            .Select(s => new { s.AsignacionTurnoId, s.TipoTurnoCodigo })
+            .ToListAsync(ct);
+
+        // Notas por asignacion_turno_id.
+        var notasData = await db.NotasMedicas.AsNoTracking()
+            .Where(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId.Value))
+            .Select(n => new { AsignacionTurnoId = n.AsignacionTurnoId!.Value, n.Estado })
+            .ToListAsync(ct);
+
+        // Profesionales para mostrar en la card (max 2 nombres + "...").
+        var profIds = turnosData.Select(t => t.ProfesionalId).Distinct().ToList();
+        var profs = await db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .Select(p => new { p.Id, Nombre = ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim() })
+            .ToDictionaryAsync(p => p.Id, p => p.Nombre, ct);
+
+        // Agrupar por asignacion.
+        var turnosPorAsig = turnosData.GroupBy(t => t.AsignacionId).ToDictionary(g => g.Key, g => g.ToList());
+        var sesionesPorTurno = sesionesData.GroupBy(s => s.AsignacionTurnoId).ToDictionary(g => g.Key, g => g.ToList());
+        var notasPorTurno = notasData.GroupBy(n => n.AsignacionTurnoId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var result = new List<AsignacionTableroKanbanDto>(asigs.Count);
+        foreach (var a in asigs)
+        {
+            pacs.TryGetValue(a.PacienteId, out var p);
+            turnosPorAsig.TryGetValue(a.Id, out var turnos);
+
+            int turnosCount = turnos?.Count ?? 0;
+            int sesionesTotales = 0, notasCreadas = 0, notasDefinitivas = 0;
+            var especialistas = new List<string>();
+
+            if (turnos != null)
+            {
+                foreach (var t in turnos)
+                {
+                    if (sesionesPorTurno.TryGetValue(t.Id, out var ss)) { sesionesTotales += ss.Count; }
+                    if (notasPorTurno.TryGetValue(t.Id, out var ns))
+                    {
+                        notasCreadas += ns.Count;
+                        notasDefinitivas += ns.Count(n => n.Estado == NotaMedicaEstado.Definitivo);
+                    }
+                    if (profs.TryGetValue(t.ProfesionalId, out var nom) && !string.IsNullOrWhiteSpace(nom))
+                    {
+                        if (!especialistas.Contains(nom)) { especialistas.Add(nom); }
+                    }
+                }
+            }
+
+            // "Total esperado" para determinar Terminado = suma de Cantidad de los turnos.
+            // Si hay sesiones creadas up-front (Aplicar Programacion), usamos ese conteo.
+            int totalEsperado = sesionesTotales > 0 ? sesionesTotales : (turnos?.Sum(t => t.Cantidad) ?? 0);
+
+            var estado = CalcularEstadoTablero(turnosCount, sesionesTotales, notasCreadas, notasDefinitivas, totalEsperado);
+
+            string? espNombres = especialistas.Count switch
+            {
+                0 => null,
+                1 => especialistas[0],
+                2 => $"{especialistas[0]}, {especialistas[1]}",
+                _ => $"{especialistas[0]}, {especialistas[1]} + {especialistas.Count - 2}"
+            };
+
+            result.Add(new AsignacionTableroKanbanDto(
+                a.Id, estado,
+                p?.NombreCompleto ?? "?", p?.NumeroDocumento ?? "",
+                a.NombreServicio, a.TipoServicio, a.ContratoCodigo,
+                a.Cantidad, sesionesTotales, notasDefinitivas,
+                turnosCount, espNombres,
+                a.FechaInicio, a.FechaFinal));
+        }
+        return result;
+    }
+
+    private static EstadoTablero CalcularEstadoTablero(
+        int turnosCount, int sesionesTotales, int notasCreadas, int notasDefinitivas, int totalEsperado)
+    {
+        // Sin turnos = viene de /asignacion pero nadie le puso profesional aun.
+        if (turnosCount == 0) { return EstadoTablero.Asignado; }
+        if (totalEsperado > 0 && notasDefinitivas >= totalEsperado) { return EstadoTablero.Terminado; }
+        if (notasDefinitivas > 0) { return EstadoTablero.EnProgreso; }
+        if (notasCreadas > 0) { return EstadoTablero.Atendido; }
+        if (sesionesTotales > 0) { return EstadoTablero.Programado; }
+        return EstadoTablero.Coordinado;
+    }
+
+    public async Task<IReadOnlyList<SesionCalendarioDto>> ListarTableroCalendarioAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        int anio, int mes,
+        string? sucursalNombre = null,
+        CancellationToken ct = default)
+    {
+        if (modulosPermitidos is null || modulosPermitidos.Count == 0)
+        {
+            return Array.Empty<SesionCalendarioDto>();
+        }
+
+        var permisos = modulosPermitidos.Select(m => m.ToUpperInvariant()).ToList();
+
+        // Rango del mes.
+        var desde = new DateOnly(anio, mes, 1);
+        var hasta = desde.AddMonths(1).AddDays(-1);
+
+        // Asignaciones cuyos turnos tienen sesiones en el mes + modulo permitido + (opcional) sede.
+        var asigsQ = db.Asignaciones.AsNoTracking()
+            .Where(a => (a.Modulo != null && permisos.Contains(a.Modulo.ToUpper()))
+                     || permisos.Contains(a.TipoServicio.ToUpper()));
+        if (!string.IsNullOrWhiteSpace(sucursalNombre))
+        {
+            var s = sucursalNombre.Trim();
+            asigsQ = asigsQ.Where(a => a.Sucursal == s);
+        }
+
+        var asigs = await asigsQ.Select(a => new { a.Id, a.PacienteId, a.NombreServicio }).ToListAsync(ct);
+        if (asigs.Count == 0) { return Array.Empty<SesionCalendarioDto>(); }
+
+        var asigIds = asigs.Select(a => a.Id).ToList();
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => asigIds.Contains(t.AsignacionId))
+            .Select(t => new { t.Id, t.AsignacionId, t.ProfesionalId, t.Cantidad })
+            .ToListAsync(ct);
+
+        var turnoIds = turnos.Select(t => t.Id).ToList();
+        var sesiones = await db.AsignacionTurnoSesiones.AsNoTracking()
+            .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
+            .Where(s => s.FechaAtencion >= desde && s.FechaAtencion <= hasta)
+            .Select(s => new
+            {
+                s.Id, s.AsignacionTurnoId, s.SessionNo, s.FechaAtencion,
+                s.TipoTurnoCodigo, s.Horas
+            })
+            .ToListAsync(ct);
+
+        if (sesiones.Count == 0) { return Array.Empty<SesionCalendarioDto>(); }
+
+        // Notas por (turno, session_no).
+        var notas = await db.NotasMedicas.AsNoTracking()
+            .Where(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId.Value))
+            .Where(n => n.FechaNota >= desde && n.FechaNota <= hasta)
+            .Select(n => new { AsignacionTurnoId = n.AsignacionTurnoId!.Value, n.SessionNo, n.Estado })
+            .ToListAsync(ct);
+
+        // Notas por asignacion_turno_id para calcular estado agregado del turno.
+        var notasPorTurno = notas.GroupBy(n => n.AsignacionTurnoId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
+        var pacs = await db.Pacientes.AsNoTracking()
+            .Where(p => pacIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NombreCompleto })
+            .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+
+        var profIds = turnos.Select(t => t.ProfesionalId).Distinct().ToList();
+        var profs = await db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .Select(p => new { p.Id, Nombre = ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim() })
+            .ToDictionaryAsync(p => p.Id, p => p.Nombre, ct);
+
+        var asigDict = asigs.ToDictionary(a => a.Id, a => a);
+        var turnoDict = turnos.ToDictionary(t => t.Id, t => t);
+
+        var result = new List<SesionCalendarioDto>(sesiones.Count);
+        foreach (var s in sesiones)
+        {
+            if (!turnoDict.TryGetValue(s.AsignacionTurnoId, out var t)) { continue; }
+            if (!asigDict.TryGetValue(t.AsignacionId, out var a)) { continue; }
+
+            pacs.TryGetValue(a.PacienteId, out var pacNom);
+            profs.TryGetValue(t.ProfesionalId, out var profNom);
+
+            // Estado por sesion: si tiene nota Definitivo -> Terminado (para pintar verde).
+            // Si tiene nota Parcial -> Atendido. Si no tiene nota -> Programado.
+            bool tieneNota = false, notaDefinitiva = false;
+            if (notasPorTurno.TryGetValue(t.Id, out var ns))
+            {
+                var propia = ns.FirstOrDefault(n => n.SessionNo == s.SessionNo);
+                if (propia != null)
+                {
+                    tieneNota = true;
+                    notaDefinitiva = propia.Estado == NotaMedicaEstado.Definitivo;
+                }
+            }
+            var estado = notaDefinitiva ? EstadoTablero.Terminado
+                        : tieneNota ? EstadoTablero.Atendido
+                        : EstadoTablero.Programado;
+
+            result.Add(new SesionCalendarioDto(
+                s.Id, s.FechaAtencion,
+                s.AsignacionTurnoId, t.AsignacionId,
+                estado,
+                pacNom ?? "?",
+                string.IsNullOrWhiteSpace(profNom) ? "?" : profNom!,
+                a.NombreServicio,
+                s.TipoTurnoCodigo, s.Horas,
+                s.SessionNo, tieneNota, notaDefinitiva));
+        }
+        return result;
+    }
 }

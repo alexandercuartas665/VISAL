@@ -23,9 +23,9 @@
 <div class="cd-tabs">
     @foreach (var t in _tabs)
     {
-        <button class="cd-tab @(t == _tabSel ? "sel" : "") @(t == "Solicitudes" ? "" : "muted")"
-                @onclick="() => _tabSel = t" disabled="@(t != "Solicitudes")"
-                title="@(t != "Solicitudes" ? "Pendiente de implementacion" : "")">
+        <button class="cd-tab @(t == _tabSel ? "sel" : "") @(_tabsActivos.Contains(t) ? "" : "muted")"
+                @onclick="() => OnTabSeleccionado(t)" disabled="@(!_tabsActivos.Contains(t))"
+                title="@(_tabsActivos.Contains(t) ? "" : "Pendiente de implementacion")">
             @t
         </button>
     }
@@ -168,6 +168,32 @@
 
                     @if (_solicitudSel is AsignacionPendienteDto s)
                     {
+                        @* Toggle Manual / Aplicar programacion. Solo aplica a servicios de rotacion
+                           (Enfermeria, etc) donde tiene sentido usar una plantilla mensual. Igual
+                           lo mostramos siempre; si el modo Programacion no encuentra plantillas
+                           elegibles, el modal se lo dira. *@
+                        <div class="cd-mode-toggle">
+                            <button class="cd-mode-tab @(!_modoProgramacion ? "sel" : "")"
+                                    @onclick="() => _modoProgramacion = false">Manual</button>
+                            <button class="cd-mode-tab @(_modoProgramacion ? "sel" : "")"
+                                    @onclick="() => _modoProgramacion = true">Aplicar programacion</button>
+                        </div>
+
+                        @if (_modoProgramacion)
+                        {
+                            <div class="cd-prog-panel">
+                                <p class="text-muted small mb-2">
+                                    Aplica una plantilla mensual (rotacion tipo M / T / N / DN / L)
+                                    creada en <a href="cfg-turnos">/cfg-turnos</a>. Se generan turnos
+                                    automaticamente para el mes con la programacion elegida.
+                                </p>
+                                <button class="btn btn-primary" @onclick="AbrirModalProgramacion" disabled="@_progBusy">
+                                    Elegir programacion...
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
                         <div class="ase-form cd-rform">
                             <div class="ase-f"><label>No Orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.CodigoAutorizacion" /></div>
                             <div class="ase-f"><label>Fecha Orden</label><input class="form-control form-control-sm asg-ro" readonly value="@s.CreadoEn.LocalDateTime.ToString("dd/MM/yyyy")" /></div>
@@ -236,8 +262,9 @@
                             </div>
                         </div>
 
+                        }
                         @* Carrito de turnos en memoria - lista lo que esta listo para guardar. *@
-                        @if (_carritoTurnos.Count > 0)
+                        @if (!_modoProgramacion && _carritoTurnos.Count > 0)
                         {
                             <div class="cd-turnos-list">
                                 <div class="cd-turnos-h">Turnos a guardar (@_carritoTurnos.Count)</div>
@@ -256,12 +283,15 @@
                             </div>
                         }
 
-                        <div class="cd-asignar">
-                            <button class="btn btn-primary" @onclick="AsignarServicio"
-                                    disabled="@(_busy || _carritoTurnos.Count == 0)">
-                                @(_busy ? "Guardando..." : "Asignar el servicio")
-                            </button>
-                        </div>
+                        @if (!_modoProgramacion)
+                        {
+                            <div class="cd-asignar">
+                                <button class="btn btn-primary" @onclick="AsignarServicio"
+                                        disabled="@(_busy || _carritoTurnos.Count == 0)">
+                                    @(_busy ? "Guardando..." : "Asignar el servicio")
+                                </button>
+                            </div>
+                        }
                     }
                     else
                     {
@@ -272,6 +302,153 @@
                 </div>
             </div>
 
+        </div>
+    }
+}
+else if (_tabSel == "Kanban")
+{
+    @if (_modulos.Count == 0)
+    {
+        <div class="ase-card"><div class="ase-empty cd-no-perm">Sin permisos de coordinacion.</div></div>
+    }
+    else
+    {
+        <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-form cd-form">
+                <div class="ase-f">
+                    <label>Periodo</label>
+                    <select class="form-select form-select-sm" @bind="_anio">
+                        @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Mes Vigente</label>
+                    <select class="form-select form-select-sm" @bind="_mes">
+                        <option value="0">(Todos)</option>
+                        @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Documento paciente</label>
+                    <input class="form-control form-control-sm mono" @bind="_doc" placeholder="..." />
+                </div>
+                <div class="ase-f ase-f-wide cd-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="CargarKanban" disabled="@_busy">
+                        @(_busy ? "Cargando..." : "Cargar tablero")
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="cd-kb">
+            @foreach (var col in _kbColumnas)
+            {
+                var items = _kbCards.Where(k => k.Estado == col.Estado).ToList();
+                <div class="cd-kb-col">
+                    <div class="cd-kb-col-h" style="background:@col.Bg;color:@col.Fg;">
+                        <span>@col.Titulo</span>
+                        <span class="cd-kb-cnt">@items.Count</span>
+                    </div>
+                    <div class="cd-kb-col-body">
+                        @if (items.Count == 0)
+                        {
+                            <div class="cd-kb-empty">Sin tarjetas</div>
+                        }
+                        else
+                        {
+                            @foreach (var k in items)
+                            {
+                                <div class="cd-kb-card" @onclick="() => AbrirDetalleKanban(k)">
+                                    <div class="cd-kb-card-tit">@k.PacienteNombre</div>
+                                    <div class="cd-kb-card-doc">@k.PacienteTipoOrDoc</div>
+                                    <div class="cd-kb-card-svc">@k.NombreServicio</div>
+                                    <div class="cd-kb-card-badges">
+                                        <span class="cd-kb-badge">@k.TipoServicio</span>
+                                        @if (!string.IsNullOrWhiteSpace(k.EspecialistasNombres))
+                                        {
+                                            <span class="cd-kb-badge cd-kb-badge-esp" title="@k.EspecialistasNombres">@k.EspecialistasNombres</span>
+                                        }
+                                    </div>
+                                    <div class="cd-kb-card-prog">
+                                        @if (k.SesionesTotales > 0)
+                                        {
+                                            <span>Sesiones @k.NotasDefinitivas / @k.SesionesTotales</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Turnos coordinados: @k.TurnosCoordinados / @k.Cantidad</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else if (_tabSel == "Calendario")
+{
+    @if (_modulos.Count == 0)
+    {
+        <div class="ase-card"><div class="ase-empty cd-no-perm">Sin permisos de coordinacion.</div></div>
+    }
+    else
+    {
+        <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-form cd-form">
+                <div class="ase-f">
+                    <label>Periodo</label>
+                    <select class="form-select form-select-sm" @bind="_anio">
+                        @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Mes</label>
+                    <select class="form-select form-select-sm" @bind="_mesCalendario">
+                        @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                    </select>
+                </div>
+                <div class="ase-f ase-f-wide cd-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="CargarCalendario" disabled="@_busy">
+                        @(_busy ? "Cargando..." : "Cargar calendario")
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="cd-cal">
+            <div class="cd-cal-head">
+                @foreach (var d in new[] { "Lun","Mar","Mie","Jue","Vie","Sab","Dom" })
+                {
+                    <div class="cd-cal-dw">@d</div>
+                }
+            </div>
+            <div class="cd-cal-grid">
+                @foreach (var dia in _calDias)
+                {
+                    var chipsDia = _calChips.Where(c => c.Fecha == dia).ToList();
+                    <div class="cd-cal-cell @(dia.Month != _mesCalendario ? "cd-cal-oth" : "")">
+                        <div class="cd-cal-num">@dia.Day</div>
+                        @foreach (var c in chipsDia)
+                        {
+                            <div class="cd-cal-chip cd-cal-@(c.Estado.ToString().ToLower())"
+                                 title="@($"{c.PacienteNombre} - {c.NombreServicio} - {c.ProfesionalNombre} - {c.TipoTurnoCodigo} {c.Horas}h")">
+                                @(string.IsNullOrEmpty(c.TipoTurnoCodigo) ? "?" : c.TipoTurnoCodigo) @c.PacienteNombre
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="cd-cal-legend">
+                @foreach (var col in _kbColumnas)
+                {
+                    <div class="cd-cal-lg"><span class="cd-cal-lg-sw cd-cal-@col.Estado.ToString().ToLower()"></span>@col.Titulo</div>
+                }
+            </div>
         </div>
     }
 }
@@ -347,13 +524,135 @@ else
     .cd-turno-meta { display: flex; gap: 8px; font-size: 11px; color: #475569; align-items: center; }
     .asg-pill { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px; }
     .cd-turno-rm { color: #b91c1c; font-size: 18px; line-height: 1; padding: 0 4px; text-decoration: none; }
+    .cd-mode-toggle { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+    .cd-mode-tab { border: none; background: #fff; color: #475569; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .cd-mode-tab.sel { background: #2563eb; color: white; }
+    .cd-prog-panel { padding: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; }
+    .cd-prog-modal { max-width: 900px; }
+    .cd-prog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 10px 0; }
+    .cd-prog-card { border: 2px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; cursor: pointer; background: #fff; }
+    .cd-prog-card:hover { border-color: #93c5fd; }
+    .cd-prog-card.sel { border-color: #2563eb; background: #eff6ff; }
+    .cd-prog-card-title { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+    .cd-prog-card-meta { font-size: 11px; color: #64748b; }
+    .cd-prog-row-picker { display: grid; grid-template-columns: 120px 1fr; gap: 8px; align-items: center; margin-bottom: 6px; }
+
+    /* ============ KANBAN ============ */
+    .cd-kb { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 14px; align-items: start; }
+    .cd-kb-col { display: flex; flex-direction: column; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; min-height: 200px; }
+    .cd-kb-col-h { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 12px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+    .cd-kb-cnt { background: rgba(255,255,255,.35); padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+    .cd-kb-col-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; max-height: 720px; overflow-y: auto; }
+    .cd-kb-empty { padding: 20px 10px; text-align: center; color: #94a3b8; font-size: 11px; font-style: italic; }
+    .cd-kb-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; cursor: pointer; transition: transform .1s, box-shadow .1s; }
+    .cd-kb-card:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(15,23,42,.08); border-color: #93c5fd; }
+    .cd-kb-card-tit { font-weight: 700; font-size: 12.5px; color: #0f172a; line-height: 1.2; }
+    .cd-kb-card-doc { font-size: 10.5px; color: #64748b; margin-top: 2px; }
+    .cd-kb-card-svc { font-size: 11px; color: #334155; margin-top: 6px; line-height: 1.25; }
+    .cd-kb-card-badges { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+    .cd-kb-badge { background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+    .cd-kb-badge-esp { background: #f1f5f9; color: #475569; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cd-kb-card-prog { margin-top: 6px; font-size: 10.5px; color: #16a34a; font-weight: 600; }
+
+    /* ============ CALENDARIO ============ */
+    .cd-cal { margin-top: 14px; }
+    .cd-cal-head { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
+    .cd-cal-dw { text-align: center; font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: .03em; text-transform: uppercase; padding: 6px 0; background: #f1f5f9; border-radius: 4px; }
+    .cd-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .cd-cal-cell { background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; min-height: 100px; padding: 4px; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+    .cd-cal-oth { background: #f8fafc; opacity: .5; }
+    .cd-cal-num { font-size: 11px; font-weight: 700; color: #475569; margin-bottom: 2px; }
+    .cd-cal-chip { font-size: 10px; padding: 2px 5px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+    .cd-cal-asignado { background: #fee2e2; color: #991b1b; }
+    .cd-cal-coordinado { background: #e0e7ff; color: #3730a3; }
+    .cd-cal-programado { background: #fef3c7; color: #92400e; }
+    .cd-cal-atendido { background: #dbeafe; color: #1d4ed8; }
+    .cd-cal-enprogreso { background: #fde68a; color: #92400e; }
+    .cd-cal-terminado { background: #dcfce7; color: #166534; }
+    .cd-cal-legend { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
+    .cd-cal-lg { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #475569; }
+    .cd-cal-lg-sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
 </style>
+
+@* ============ Modal Aplicar programacion ============ *@
+@if (_progOpen)
+{
+    <div class="cie-modal-overlay" @onclick="CerrarModalProgramacion"></div>
+    <div class="cie-modal cd-prog-modal">
+        <div class="cie-modal-h">
+            <div>Aplicar programacion @(_solicitudSel is not null ? "- " + _solicitudSel.PacienteNombre : "")</div>
+            <button class="cie-modal-close" @onclick="CerrarModalProgramacion">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            @if (_progList.Count == 0)
+            {
+                <div class="ase-empty">
+                    No hay programaciones activas para el (anio, mes, sede, tipo servicio)
+                    de esta solicitud. Crea una en <a href="cfg-turnos" target="_blank">/cfg-turnos</a>.
+                </div>
+            }
+            else
+            {
+                <div class="small text-muted mb-1">1. Elige la programacion a aplicar:</div>
+                <div class="cd-prog-grid">
+                    @foreach (var p in _progList)
+                    {
+                        <div class="cd-prog-card @(p.Id == _progSelId ? "sel" : "")"
+                             @onclick="() => SeleccionarProgramacion(p)">
+                            <div class="cd-prog-card-title">@p.Nombre</div>
+                            <div class="cd-prog-card-meta">
+                                @MesNombre(p.Mes) @p.Anio ·
+                                @(p.SedeNombre ?? "Sin sede") ·
+                                @(p.TipoServicio ?? "Todos") ·
+                                @p.NumTurnos turno(s)
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                @if (_progSelId is Guid && _progFilas.Count > 0)
+                {
+                    <hr />
+                    <div class="small text-muted mb-1">2. Dia de arranque (dentro del mes de la programacion):</div>
+                    <input type="number" min="1" max="31" class="form-control form-control-sm" style="max-width:120px"
+                           @bind="_progDiaArranque" />
+
+                    <div class="small text-muted mt-3 mb-1">3. Asigna un profesional a cada fila del grid:</div>
+                    @foreach (var fila in _progFilas)
+                    {
+                        <div class="cd-prog-row-picker">
+                            <div>@fila</div>
+                            <select class="form-select form-select-sm"
+                                    value="@(_progProfPorFila.GetValueOrDefault(fila) is Guid gp ? gp.ToString() : "")"
+                                    @onchange="e => SetProfesionalFila(fila, e.Value?.ToString())">
+                                <option value="">-- Elegir profesional --</option>
+                                @foreach (var e in _especialistas)
+                                {
+                                    <option value="@e.Id">@e.NombreCompleto</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                }
+            }
+            @if (_progError is not null) { <div class="text-danger small mt-2">@_progError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModalProgramacion">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="AplicarProgramacionAsync"
+                    disabled="@(_progBusy || _progSelId is null || _progProfPorFila.Count == 0)">
+                @(_progBusy ? "Aplicando..." : "Programar")
+            </button>
+        </div>
+    </div>
+}
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private readonly string[] _tabs = new[] { "Solicitudes", "Modificacion", "Consultas Historicas", "Documentos Externos", "RIPS", "Historias" };
+    private readonly string[] _tabs = new[] { "Solicitudes", "Kanban", "Calendario", "Modificacion", "Consultas Historicas", "Documentos Externos", "RIPS", "Historias" };
     private string _tabSel = "Solicitudes";
+    private static readonly HashSet<string> _tabsActivos = new(StringComparer.OrdinalIgnoreCase) { "Solicitudes", "Kanban", "Calendario" };
 
     // Permisos del usuario logueado (que modulos puede coordinar).
     private List<string> _modulos = new();
@@ -375,6 +674,31 @@ else
 
     private List<AsignacionPendienteDto> _pendientes = new();
     private AsignacionPendienteDto? _solicitudSel;
+
+    // ============ Tablero Kanban ============
+    private List<KanbanCardVm> _kbCards = new();
+    private readonly List<KanbanColumnaVm> _kbColumnas = new()
+    {
+        new(EstadoTablero.Asignado, "Asignado", "#fee2e2", "#991b1b"),
+        new(EstadoTablero.Coordinado, "Coordinado", "#e0e7ff", "#3730a3"),
+        new(EstadoTablero.Programado, "Programado", "#fef3c7", "#92400e"),
+        new(EstadoTablero.Atendido, "Atendido", "#dbeafe", "#1d4ed8"),
+        new(EstadoTablero.EnProgreso, "En progreso", "#fde68a", "#92400e"),
+        new(EstadoTablero.Terminado, "Terminado", "#dcfce7", "#166534"),
+    };
+
+    // ============ Tablero Calendario ============
+    private int _mesCalendario = DateTime.Now.Month;
+    private List<SesionCalendarioDto> _calChips = new();
+    private List<DateOnly> _calDias = new();
+
+    private sealed record KanbanColumnaVm(EstadoTablero Estado, string Titulo, string Bg, string Fg);
+    private sealed record KanbanCardVm(
+        Guid Id, EstadoTablero Estado,
+        string PacienteNombre, string PacienteTipoOrDoc,
+        string NombreServicio, string TipoServicio,
+        int Cantidad, int SesionesTotales, int NotasDefinitivas,
+        int TurnosCoordinados, string? EspecialistasNombres);
 
     // Panel derecho (coordinacion - editable).
     private string _idProfAsig = "";
@@ -402,6 +726,17 @@ else
 
     private bool _busy;
     private string? _error, _ok;
+
+    // Modo Aplicar programacion (toggle Manual vs Programacion).
+    private bool _modoProgramacion;
+    private bool _progOpen;
+    private bool _progBusy;
+    private string? _progError;
+    private List<TurnoProgramacionCardDto> _progList = new();
+    private Guid? _progSelId;
+    private List<string> _progFilas = new();
+    private Dictionary<string, Guid> _progProfPorFila = new();
+    private int _progDiaArranque = 1;
 
     protected override async Task OnInitializedAsync()
     {
@@ -575,6 +910,85 @@ else
         _idProfAsig = ""; _profesionalPred = "";
         _especialistas = new(); _especialistaSel = ""; _turnosAAgregarN = 1;
         _carritoTurnos = new(); _turnosGuardados = new();
+        CerrarModalProgramacion();
+    }
+
+    // ---------------- Modal Aplicar programacion ----------------
+
+    private async Task AbrirModalProgramacion()
+    {
+        if (_solicitudSel is null) { return; }
+        _progError = null;
+        _progBusy = true;
+        try
+        {
+            _progList = (await Svc.ListarProgramacionesElegiblesAsync(_solicitudSel.Id)).ToList();
+            _progSelId = null;
+            _progFilas = new();
+            _progProfPorFila = new();
+            _progDiaArranque = 1;
+            _progOpen = true;
+        }
+        catch (Exception ex) { _progError = ex.Message; _progOpen = true; }
+        finally { _progBusy = false; }
+    }
+
+    private void CerrarModalProgramacion()
+    {
+        _progOpen = false;
+        _progSelId = null;
+        _progFilas = new();
+        _progProfPorFila = new();
+        _progError = null;
+    }
+
+    private void SeleccionarProgramacion(TurnoProgramacionCardDto p)
+    {
+        _progSelId = p.Id;
+        _progError = null;
+        // Extraer las filas del grid JSON para armar los pickers de profesional.
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(p.GridDataJson);
+            if (doc.RootElement.TryGetProperty("turnos", out var arr) &&
+                arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                _progFilas = arr.EnumerateArray()
+                    .Select(x => x.GetString() ?? "")
+                    .Where(s => s.Length > 0)
+                    .ToList();
+            }
+        }
+        catch { _progFilas = new(); }
+        _progProfPorFila = new();
+    }
+
+    private void SetProfesionalFila(string fila, string? profIdRaw)
+    {
+        if (Guid.TryParse(profIdRaw, out var pid)) { _progProfPorFila[fila] = pid; }
+        else { _progProfPorFila.Remove(fila); }
+    }
+
+    private async Task AplicarProgramacionAsync()
+    {
+        if (_progSelId is not Guid pid || _solicitudSel is null) { return; }
+        if (_progProfPorFila.Count == 0)
+        {
+            _progError = "Asigna al menos un profesional a una fila del grid antes de programar.";
+            return;
+        }
+        _progBusy = true; _progError = null;
+        try
+        {
+            var req = new AplicarProgramacionRequest(_solicitudSel.Id, pid, _progDiaArranque, _progProfPorFila);
+            var res = await Svc.AplicarProgramacionAsync(req, Guid.Empty);
+            _ok = $"Programacion aplicada: {res.TurnosCreados} turno(s) profesional, {res.SesionesCreadas} sesion(es), {res.SesionesDescanso} descanso(s).";
+            CerrarModalProgramacion();
+            await Cargar();
+        }
+        catch (InvalidOperationException ex) { _progError = ex.Message; }
+        catch (Exception ex) { _progError = "Error tecnico: " + ex.Message; }
+        finally { _progBusy = false; }
     }
 
     private sealed class CartTurno
@@ -609,5 +1023,75 @@ else
         if (p.TurnosCoordinados > 0 && p.TurnosCoordinados < p.Cantidad)
         { return ($"Parcial ({p.TurnosCoordinados}/{p.Cantidad})", "cd-est-parcial"); }
         return ("Pendiente", "cd-est-pendiente");
+    }
+
+    // ============ Handlers Tablero ============
+    private async Task OnTabSeleccionado(string tab)
+    {
+        if (!_tabsActivos.Contains(tab)) { return; }
+        _tabSel = tab;
+        _error = null; _ok = null;
+        if (tab == "Kanban" && _kbCards.Count == 0) { await CargarKanban(); }
+        else if (tab == "Calendario" && _calChips.Count == 0) { await CargarCalendario(); }
+    }
+
+    private async Task CargarKanban()
+    {
+        if (_modulos.Count == 0) { return; }
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            int? mes = _mes == 0 ? null : _mes;
+            var raw = await Svc.ListarTableroKanbanAsync(_modulos, _anio, mes,
+                string.IsNullOrWhiteSpace(_doc) ? null : _doc.Trim(),
+                _miSucursalNombre);
+            _kbCards = raw.Select(x => new KanbanCardVm(
+                x.Id, x.Estado,
+                x.PacienteNombre, $"{x.PacienteDocumento}",
+                x.NombreServicio, x.TipoServicio,
+                x.Cantidad, x.SesionesTotales, x.NotasDefinitivas,
+                x.TurnosCoordinados, x.EspecialistasNombres)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task CargarCalendario()
+    {
+        if (_modulos.Count == 0) { return; }
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var raw = await Svc.ListarTableroCalendarioAsync(_modulos, _anio, _mesCalendario, _miSucursalNombre);
+            _calChips = raw.ToList();
+            _calDias = BuildCalendarioDias(_anio, _mesCalendario);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Genera la lista de dias del mes rellenando los slots vacios al inicio y fin
+    /// para completar semanas Lunes..Domingo. Los dias de otros meses van con opacity baja.</summary>
+    private static List<DateOnly> BuildCalendarioDias(int anio, int mes)
+    {
+        var first = new DateOnly(anio, mes, 1);
+        var last = first.AddMonths(1).AddDays(-1);
+        // Alinear al lunes: DayOfWeek.Monday = 1, Sunday = 0.
+        int prepend = ((int)first.DayOfWeek + 6) % 7;
+        int append = 6 - ((int)last.DayOfWeek + 6) % 7;
+        var lista = new List<DateOnly>();
+        for (int i = prepend; i > 0; i--) { lista.Add(first.AddDays(-i)); }
+        for (var d = first; d <= last; d = d.AddDays(1)) { lista.Add(d); }
+        for (int i = 1; i <= append; i++) { lista.Add(last.AddDays(i)); }
+        return lista;
+    }
+
+    private void AbrirDetalleKanban(KanbanCardVm k)
+    {
+        // Por ahora solo cambia a la vista Solicitudes y selecciona la asignacion
+        // para que el coordinador pueda actuar con el panel derecho.
+        _tabSel = "Solicitudes";
+        var pend = _pendientes.FirstOrDefault(p => p.Id == k.Id);
+        if (pend != null) { _ = CargarSolicitud(pend); }
     }
 }

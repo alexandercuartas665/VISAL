@@ -322,6 +322,9 @@
                                             </td>
                                         }
                                         <th class="tgrid-hact">
+                                            <button class="btn btn-link btn-sm text-primary p-0 me-2"
+                                                    title="Replicar patron hasta fin de mes: toma la secuencia contigua desde el dia 1 y la repite. No sobrescribe celdas ya pintadas mas alla del patron."
+                                                    @onclick="() => ReplicarPatronDeFila(turno)">&#128260;</button>
                                             <button class="btn btn-link btn-sm text-danger p-0"
                                                     title="Eliminar turno"
                                                     disabled="@(_grid.Turnos.Count <= GridDataModel.MinTurnos)"
@@ -820,6 +823,45 @@
     private void LimpiarTodo()
     {
         foreach (var t in _grid.Turnos) { _grid.Dias[t] = new Dictionary<string, GridCell>(); }
+    }
+
+    /// <summary>
+    /// Toma la secuencia contigua de celdas pintadas desde el dia 1 de la fila
+    /// como "patron" y la repite hasta el fin del mes. NO sobrescribe celdas que
+    /// el usuario haya pintado manualmente mas alla del patron: solo llena huecos.
+    /// Si el usuario pinto dia 1=D, dia 2=N, el patron es [D,N] y desde el dia 3
+    /// se auto-llena D,N,D,N... hasta el ultimo dia del mes. Si el dia 15 ya estaba
+    /// pintado con "L" manualmente, se conserva "L".
+    /// </summary>
+    private void ReplicarPatronDeFila(string turno)
+    {
+        _modalError = null;
+        if (!_grid.Dias.TryGetValue(turno, out var celdas) || celdas.Count == 0)
+        {
+            _modalError = $"La fila \"{turno}\" no tiene celdas pintadas. Pinta al menos el dia 1 para definir el patron.";
+            return;
+        }
+        var diasEnMes = DiasEnMes();
+        // Detectar patron: bloque contiguo desde el dia 1.
+        var patron = new List<GridCell>();
+        for (var d = 1; d <= diasEnMes; d++)
+        {
+            if (celdas.TryGetValue(d.ToString(), out var c)) { patron.Add(c); }
+            else { break; }
+        }
+        if (patron.Count == 0)
+        {
+            _modalError = $"El patron debe empezar en el dia 1. Pinta la celda del dia 1 primero.";
+            return;
+        }
+        // Replicar preservando lo manual.
+        for (var d = patron.Count + 1; d <= diasEnMes; d++)
+        {
+            var k = d.ToString();
+            if (celdas.ContainsKey(k)) { continue; }
+            var idx = (d - 1) % patron.Count;
+            celdas[k] = patron[idx];
+        }
     }
 
     private decimal TotalHorasMes()

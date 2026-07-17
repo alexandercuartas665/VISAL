@@ -112,6 +112,73 @@ public sealed record TurnoCoordinadoDto(
 public sealed record AsignarServicioRequest(
     Guid AsignacionId, IReadOnlyList<TurnoCoordinadoRequest> Turnos);
 
+/// <summary>Vista compacta de una TurnoProgramacion para el modal "Aplicar programacion"
+/// en Coordinacion. Muestra lo minimo para elegir cual usar.</summary>
+public sealed record TurnoProgramacionCardDto(
+    Guid Id, string Nombre, int Anio, int Mes, string? SedeNombre, string? TipoServicio,
+    int NumTurnos, string GridDataJson);
+
+/// <summary>Payload para aplicar una TurnoProgramacion a una asignacion:
+/// crea 1 asignacion_turno por cada fila del grid (con su profesional) y
+/// N asignacion_turno_sesiones (una por celda pintada, incluidas las Libres).</summary>
+public sealed record AplicarProgramacionRequest(
+    Guid AsignacionId, Guid ProgramacionId, int DiaArranque,
+    IReadOnlyDictionary<string, Guid> ProfesionalPorFila);
+
+/// <summary>Resultado del apply: cuantas filas de asignacion_turno se crearon
+/// y cuantas sesiones se materializaron. Sirve para el toast de confirmacion.</summary>
+public sealed record AplicarProgramacionResult(
+    int TurnosCreados, int SesionesCreadas, int SesionesDescanso);
+
+/// <summary>Estados derivados del tablero de Coordinacion. Se calculan a partir de la
+/// asignacion + sus turnos + sesiones + notas medicas ligadas. No hay drag and drop:
+/// la tarjeta se mueve sola cuando cambia el estado en BD.</summary>
+public enum EstadoTablero
+{
+    /// <summary>Asignacion creada (viene de /asignacion) sin ningun turno todavia:
+    /// el coordinador aun no ha tocado el servicio.</summary>
+    Asignado = 0,
+    /// <summary>Tiene asignacion_turnos con profesional, sin sesiones creadas todavia.</summary>
+    Coordinado = 1,
+    /// <summary>Al menos una sesion con fecha_atencion; sin notas medicas creadas aun.</summary>
+    Programado = 2,
+    /// <summary>Al menos una nota medica creada, ninguna cerrada (Definitivo).</summary>
+    Atendido = 3,
+    /// <summary>Al menos una nota Definitivo, pero no todas las esperadas.</summary>
+    EnProgreso = 4,
+    /// <summary>Todas las sesiones esperadas tienen nota Definitivo.</summary>
+    Terminado = 5
+}
+
+/// <summary>Tarjeta del Kanban: una por asignacion. Incluye contadores para el badge
+/// de progreso (X/Y sesiones o notas cerradas) y datos de identificacion. El estado
+/// viene calculado del backend.</summary>
+public sealed record AsignacionTableroKanbanDto(
+    Guid Id, EstadoTablero Estado,
+    string PacienteNombre, string PacienteDocumento,
+    string NombreServicio, string TipoServicio,
+    string ContratoCodigo,
+    int Cantidad,
+    int SesionesTotales, int NotasDefinitivas,
+    int TurnosCoordinados,
+    string? EspecialistasNombres,
+    DateOnly FechaInicio, DateOnly? FechaFinal);
+
+/// <summary>Chip del calendario: una sesion en un dia especifico. Incluye el estado
+/// derivado del turno + paciente/profesional/servicio para el tooltip. El color se
+/// deriva del estado por CSS.</summary>
+public sealed record SesionCalendarioDto(
+    Guid Id, DateOnly Fecha,
+    Guid AsignacionTurnoId, Guid AsignacionId,
+    EstadoTablero Estado,
+    string PacienteNombre,
+    string ProfesionalNombre,
+    string NombreServicio,
+    string? TipoTurnoCodigo,
+    decimal? Horas,
+    int SessionNo,
+    bool TieneNota, bool NotaDefinitiva);
+
 /// <summary>Filtro de estado para el grid de Coordinacion. Equivale al cmbEstado del legacy.</summary>
 public enum AsignacionEstadoFiltro
 {
@@ -251,4 +318,36 @@ public interface IAsignacionService
     /// profesional distinto.
     /// </summary>
     Task<int> AsignarServicioAsync(AsignarServicioRequest req, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Lista las TurnoProgramacion elegibles para una asignacion, filtrando por
+    /// (Anio, Mes, Sede, TipoServicio) de la asignacion. Se muestran como tarjetas en el
+    /// modal "Aplicar programacion" del modulo Coordinacion.</summary>
+    Task<IReadOnlyList<TurnoProgramacionCardDto>> ListarProgramacionesElegiblesAsync(
+        Guid asignacionId, CancellationToken ct = default);
+
+    /// <summary>Aplica una TurnoProgramacion al servicio: para cada fila del grid crea
+    /// 1 asignacion_turno con el profesional elegido, y una asignacion_turno_sesion por
+    /// cada celda con tipo desde DiaArranque hasta el fin del mes de la programacion.
+    /// Las celdas L (Libre) se materializan con horas=0 como sesiones de descanso.</summary>
+    Task<AplicarProgramacionResult> AplicarProgramacionAsync(
+        AplicarProgramacionRequest req, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Lista las asignaciones para el tablero Kanban. Cada card lleva su estado
+    /// derivado (Coordinado/Programado/Atendido/EnProgreso/Terminado). Los filtros son los
+    /// mismos que la vista de Solicitudes; la vista Kanban ignora el filtro Estado.</summary>
+    Task<IReadOnlyList<AsignacionTableroKanbanDto>> ListarTableroKanbanAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        int anio, int? mesVigencia = null,
+        string? documentoPaciente = null,
+        string? sucursalNombre = null,
+        CancellationToken ct = default);
+
+    /// <summary>Lista las sesiones del mes para la vista Calendario. Cada chip lleva su
+    /// estado, paciente, profesional, servicio, tipo turno y horas. La UI agrupa por
+    /// fecha para pintar la grilla del mes.</summary>
+    Task<IReadOnlyList<SesionCalendarioDto>> ListarTableroCalendarioAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        int anio, int mes,
+        string? sucursalNombre = null,
+        CancellationToken ct = default);
 }

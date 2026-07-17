@@ -23,4 +23,13 @@ public class AsignacionTurnoSesion : TenantEntity
     public DateOnly FechaAtencion { get; set; }
 
     public string? NotaTexto { get; set; }
+
+    /// <summary>Codigo de tipo de turno (M/T/N/D/DN/L o el que el tenant agregue)
+    /// que le correspondio a esta sesion segun la programacion aplicada. Null cuando
+    /// el turno se creo manualmente sin usar programacion.</summary>
+    public string? TipoTurnoCodigo { get; set; }
+
+    /// <summary>Horas trabajadas en la sesion. Cuando viene de una programacion
+    /// se toma de la celda del grid (una L=0h, un DN=24h, etc). Null cuando no aplica.</summary>
+    public decimal? Horas { get; set; }
 }

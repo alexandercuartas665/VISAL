@@ -165,10 +165,52 @@ public sealed class FormDefinitionService : IFormDefinitionService
         foreach (var f in forms)
         {
             revisados++;
+            var res = ProcesarAutoEnlazarPacienteForm(f, tid, actorUserId);
+            if (res.MapeosAgregados == 0) { sinCambios++; continue; }
+            actualizados++;
+            mapeosAgregados += res.MapeosAgregados;
+        }
 
+        if (actualizados > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        return new AutoEnlazarPacienteResultDto(revisados, actualizados, mapeosAgregados, sinCambios);
+    }
+
+    public async Task<AutoEnlazarPacienteResultDto?> AutoEnlazarPacienteEnFormAsync(
+        Guid formDefinitionId, Guid actorUserId, CancellationToken cancellationToken = default)
+    {
+        if (_tenantContext.TenantId is not Guid tid)
+        {
+            throw new InvalidOperationException("Sin tenant activo.");
+        }
+
+        var f = await _db.FormDefinitions
+            .Where(x => x.TenantId == tid && x.Id == formDefinitionId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (f is null) { return null; }
+
+        var res = ProcesarAutoEnlazarPacienteForm(f, tid, actorUserId);
+        if (res.MapeosAgregados > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            return new AutoEnlazarPacienteResultDto(1, 1, res.MapeosAgregados, 0);
+        }
+        return new AutoEnlazarPacienteResultDto(1, 0, 0, 1);
+    }
+
+    /// <summary>Aplica la heuristica de auto-enlazar a UN FormDefinition y muta su
+    /// PrefillRoutesJson en memoria. NO llama a SaveChangesAsync — el caller decide
+    /// cuando persistir. Devuelve cuantos mapeos se agregaron.</summary>
+    private (int MapeosAgregados, int TargetsPreexistentes) ProcesarAutoEnlazarPacienteForm(
+        FormDefinition f, Guid tid, Guid actorUserId)
+    {
+        {
             // Names presentes en el schema (recursivo por secciones).
             var names = ExtraerNamesDelSchema(f.SchemaJson);
-            if (names.Count == 0) { sinCambios++; continue; }
+            if (names.Count == 0) { return (0, 0); }
 
             // Cargamos las rutas actuales (puede ser null o vacio).
             var routes = ParsePrefillRoutes(f.PrefillRoutesJson);
@@ -299,7 +341,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 agregadosEnEsteForm++;
             }
 
-            if (agregadosEnEsteForm == 0) { sinCambios++; continue; }
+            if (agregadosEnEsteForm == 0) { return (0, targetsExistentes.Count); }
 
             // Aseguramos que las rutas tengan los arrays actualizados.
             ruta["mappings"] = mappingsArr;
@@ -314,19 +356,11 @@ public sealed class FormDefinitionService : IFormDefinitionService
             var nuevoJson = new JsonObject { ["routes"] = routes }.ToJsonString();
             f.PrefillRoutesJson = nuevoJson;
 
-            mapeosAgregados += agregadosEnEsteForm;
-            actualizados++;
-
             _audit.Write(actorUserId, "form-definition.auto-enlazar-paciente", nameof(FormDefinition), f.Id,
                 previousValue: null, newValue: new { f.Codigo, agregados = agregadosEnEsteForm }, tenantId: tid);
-        }
 
-        if (actualizados > 0)
-        {
-            await _db.SaveChangesAsync(cancellationToken);
+            return (agregadosEnEsteForm, targetsExistentes.Count);
         }
-
-        return new AutoEnlazarPacienteResultDto(revisados, actualizados, mapeosAgregados, sinCambios);
     }
 
     /// <summary>Asegura que exista la ruta con el sourceModule indicado en el array de

@@ -71,6 +71,13 @@ public interface IFormDefinitionService
     /// </summary>
     Task<AutoEnlazarPacienteResultDto> AutoEnlazarPacienteEnTodosAsync(Guid actorUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Como <see cref="AutoEnlazarPacienteEnTodosAsync"/> pero limitado a UN formulario
+    /// del tenant. Preserva los mapeos manuales existentes. Devuelve null si el
+    /// formulario no existe o no pertenece al tenant activo.
+    /// </summary>
+    Task<AutoEnlazarPacienteResultDto?> AutoEnlazarPacienteEnFormAsync(Guid formDefinitionId, Guid actorUserId, CancellationToken cancellationToken = default);
+
     /// <summary>Bytes UTF-8 con el JSON de exportacion del formulario. Incluye
     /// codigo, tipo, schema deserializado y opcionalmente las rutas de prefill.
     /// Cuando <paramref name="incluirRutasPrefill"/> es false, el JSON exportado

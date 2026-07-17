@@ -62,8 +62,8 @@
                 <button class="fb-btn" @onclick="ImportarJsonClickAsync" disabled="@_busy"
                         title="Crea un formulario a partir de un JSON exportado. Si el codigo ya existe puedes elegir sobrescribir o crear una copia con sufijo.">&#128228; Importar JSON</button>
                 <InputFile id="fbImportJsonInput" OnChange="OnImportJsonFileAsync" accept=".json,application/json" style="display:none" />
-                <button class="fb-btn" @onclick="AutoEnlazarPacienteAsync" disabled="@_busy"
-                        title="Recorre todos los formularios e infiere mapeos prefill desde el modulo Paciente segun el nombre/etiqueta de cada campo. No sobrescribe mapeos existentes.">&#128279; Auto-enlazar Paciente</button>
+                <button class="fb-btn" @onclick="AutoEnlazarPacienteAsync" disabled="@(_busy || _currentId is null)"
+                        title="Infiere mapeos prefill del modulo Paciente/HistoriaMedica/Firmas/Sistema/Contrato para los campos de este formulario segun su nombre y etiqueta. No sobrescribe mapeos existentes.">&#128279; Auto-enlazar Paciente</button>
                 <button class="fb-btn" @onclick="NewForm">Nuevo</button>
                 <button class="fb-btn fb-btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_busy ? "Guardando..." : "Guardar")</button>
             </div>
@@ -1358,22 +1358,31 @@
     /// </summary>
     private async Task AutoEnlazarPacienteAsync()
     {
+        if (_currentId is not Guid id)
+        {
+            _error = "Selecciona un formulario antes de auto-enlazar.";
+            return;
+        }
+        var label = string.IsNullOrWhiteSpace(_nombre) ? _codigo : _nombre;
         var ok = await JS.InvokeAsync<bool>("confirm",
-            "Auto-enlazar campos Paciente en TODOS los formularios? Esto agrega mapeos prefill inferidos del nombre/etiqueta de cada campo. Los mapeos que ya existen no se modifican.");
+            $"Auto-enlazar campos Paciente en \"{label}\"? Agrega mapeos prefill inferidos del nombre/etiqueta de cada campo. Los mapeos que ya existen no se modifican.");
         if (!ok) { return; }
         _busy = true; _error = _ok = null;
         try
         {
-            var r = await FormsSvc.AutoEnlazarPacienteEnTodosAsync(await ActorAsync());
-            _ok = $"Listo. {r.FormulariosRevisados} revisados, {r.FormulariosActualizados} actualizados (+{r.MapeosAgregados} mapeos), {r.FormulariosSinCambios} sin cambios.";
-            // Si el form actual fue uno de los actualizados, recargar sus rutas en memoria.
-            if (_currentId is Guid id)
+            var r = await FormsSvc.AutoEnlazarPacienteEnFormAsync(id, await ActorAsync());
+            if (r is null)
             {
-                var detail = await FormsSvc.GetAsync(id);
-                if (detail is not null)
-                {
-                    _prefillRoutes = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
-                }
+                _error = "No se encontro el formulario.";
+                return;
+            }
+            _ok = r.MapeosAgregados > 0
+                ? $"Listo. Se agregaron {r.MapeosAgregados} mapeos."
+                : "Sin cambios: el formulario ya tenia todos los mapeos posibles.";
+            var detail = await FormsSvc.GetAsync(id);
+            if (detail is not null)
+            {
+                _prefillRoutes = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
             }
         }
         catch (Exception ex) { _error = "No se pudo auto-enlazar: " + ex.Message; }

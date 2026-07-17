@@ -1191,11 +1191,14 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ValorPagoSugerido).HasPrecision(14, 2);
             b.Property(x => x.ValorPagoReal).HasPrecision(14, 2);
             b.Property(x => x.Estado).HasMaxLength(30).IsRequired();
+            b.Property(x => x.PaqueteCodigo).HasMaxLength(40);
+            b.Property(x => x.PaqueteValorPactado).HasPrecision(14, 2);
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasCheckConstraint("ck_asignaciones_cantidad", "cantidad > 0");
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
             b.HasIndex(x => new { x.TenantId, x.Estado, x.MesVigencia, x.AnioServicio });
             b.HasIndex(x => x.LoteId);
+            b.HasIndex(x => x.PaqueteInstanciaId);
         });
 
         modelBuilder.Entity<Cie11Config>(b =>

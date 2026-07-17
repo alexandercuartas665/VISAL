@@ -236,12 +236,37 @@
                 @if (_carrito.Count == 0) { <div class="ase-empty">Sin servicios en el lote.</div> }
                 @foreach (var c in _carrito)
                 {
-                    <div class="asg-cart-row">
+                    <div class="asg-cart-row @(c.PaqueteInstanciaId is null ? "" : "asg-cart-pkg") @(c.Cantidad == 0 ? "asg-cart-opt" : "")">
                         <input type="checkbox" @bind="c.Seleccionado" />
                         <div class="asg-cart-info">
-                            <div class="asg-cart-nm">@c.NombreServicio</div>
+                            <div class="asg-cart-nm">
+                                @c.NombreServicio
+                                @if (c.PaqueteCodigo is not null)
+                                {
+                                    <span class="asg-pkg-badge" title="Servicio del paquete @c.PaqueteCodigo">Paquete @c.PaqueteCodigo</span>
+                                }
+                                @if (c.PaqueteValorPactado is decimal vp)
+                                {
+                                    <span class="asg-pkg-valor" title="Este registro lleva el valor pactado del paquete">$ @vp.ToString("N0")</span>
+                                }
+                            </div>
                             <div class="asg-cart-meta">Codigo: <code>@(c.Servicio.Codigo ?? "-")</code></div>
-                            <div class="asg-cart-meta">Cantidad: <strong>@c.Cantidad</strong></div>
+                            <div class="asg-cart-meta">
+                                Cantidad:
+                                @if (c.PaqueteInstanciaId is null)
+                                {
+                                    <strong>@c.Cantidad</strong>
+                                }
+                                else
+                                {
+                                    @* En modo paquete: cantidad editable inline para permitir marcar opcionales
+                                       con cero sin quitar el chip. *@
+                                    <input type="number" min="0" step="1" value="@c.Cantidad"
+                                           @onchange="e => OnCantidadPaqueteCambio(c, e)"
+                                           class="form-control form-control-sm asg-pkg-cant" />
+                                    @if (c.Cantidad == 0) { <span class="asg-pkg-opt-tag">opcional</span> }
+                                }
+                            </div>
                             @if (!string.IsNullOrWhiteSpace(c.Observaciones))
                             {
                                 <div class="asg-cart-meta asg-cart-obs">Obs: @c.Observaciones</div>
@@ -756,6 +781,20 @@ else
     .asg-tar { color: #1565c0; font-weight: 600; }
     .asg-historico, .asg-carrito { max-height: 480px; overflow: auto; }
     .asg-hist, .asg-cart-row { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; background: #fff; }
+    /* PQ5: chips que provienen de un paquete van con borde azul y fondo suave para
+       leerse como grupo. Los que estan en Cantidad=0 (opcionales excluidos) van con
+       opacidad reducida — se ven pero se entiende que no se van a persistir. */
+    .asg-cart-row.asg-cart-pkg { border-color: #93c5fd; background: #eff6ff; }
+    .asg-cart-row.asg-cart-opt { opacity: .55; }
+    .asg-pkg-badge { display: inline-block; margin-left: 8px; padding: 1px 8px;
+                     background: #dbeafe; color: #1e40af; border-radius: 999px;
+                     font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
+    .asg-pkg-valor { display: inline-block; margin-left: 8px; padding: 1px 8px;
+                     background: #dcfce7; color: #166534; border-radius: 999px;
+                     font-size: 11px; font-weight: 700; }
+    .asg-pkg-cant { display: inline-block; width: 70px; margin-left: 4px; }
+    .asg-pkg-opt-tag { margin-left: 8px; padding: 1px 8px; background: #fef3c7;
+                       color: #92400e; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
     .asg-hist-h { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
     .asg-hist-menu-wrap { position:relative; }
     .asg-hist-menu-btn { background:transparent; border:0; font-size:18px; line-height:1; color:#64748b; padding:0 6px; cursor:pointer; border-radius:4px; }
@@ -1190,7 +1229,7 @@ else
     }
 
     // Equivalente a Linkbutton2_Click → PrepararServicio() del legacy. Valida todos los campos antes de agregar al carrito.
-    private void Agregar()
+    private async Task Agregar()
     {
         _error = null; _ok = null;
         // Mismo orden de validaciones que ctrAsignaciones.PrepararServicio() (empty_field por campo).
@@ -1207,6 +1246,73 @@ else
         if (!short.TryParse(_anio, out var anio) || anio < 2000 || anio > 2100) { _error = "Debe seleccionar un anio del servicio."; return; }
         if (_servicioSel is null) { _error = "Debe seleccionar un servicio de la grilla."; return; }
         if (string.IsNullOrWhiteSpace(_paciente.Sede)) { _error = "El paciente no tiene una sede asignada, consulta el paciente."; return; }
+
+        // PQ5: si el servicio elegido pertenece a un paquete, expandir el paquete
+        // completo al carrito con la misma programacion (fechas, autorizacion, obs).
+        // Todos los chips comparten una PaqueteInstanciaId nueva; el usuario podra
+        // ajustar cantidades y marcar opcionales con Cantidad=0.
+        if (_servicioSel.PaqueteId is Guid pkgId && _contratoSel is not null)
+        {
+            try
+            {
+                var expansion = await Svc.ObtenerPaqueteExpansionAsync(pkgId, _contratoSel.CodigoContrato);
+                if (expansion is not null && expansion.Items.Count > 0)
+                {
+                    var instanciaId = Guid.NewGuid();
+                    var yaAsignoValor = false;
+                    foreach (var it in expansion.Items)
+                    {
+                        // Servicio "sintetico" para el chip. Reutilizamos el mismo shape que el
+                        // servicio ancla; para los servicios que existen en ServicioContrato
+                        // usamos el Id real (para heredar la tarifa despues); si no, dejamos
+                        // el codigo como identificador.
+                        var svcChip = new ServicioCatalogoDto(
+                            it.ServicioContratoId ?? _servicioSel.Id, // fallback al Id del ancla si no existe en contrato
+                            it.CodigoServicio, it.NombreServicio,
+                            it.Modulo, null, it.Tarifa,
+                            null, null, null, null,
+                            pkgId, expansion.PaqueteCodigo);
+
+                        // El primer item (por orden del backend) sirve como ancla del valor
+                        // pactado. Al enviar, el backend re-valida y lo puede saltar al
+                        // siguiente si este quedo con Cantidad=0.
+                        decimal? valor = null;
+                        if (!yaAsignoValor && it.Cantidad > 0 && expansion.Precio is not null)
+                        {
+                            valor = expansion.Precio;
+                            yaAsignoValor = true;
+                        }
+                        _carrito.Add(new CartItem
+                        {
+                            Servicio = svcChip,
+                            TipoServicio = it.Modulo ?? _servicioSel.Modulo ?? "(sin modulo)",
+                            Modulo = it.Modulo ?? _servicioSel.Modulo,
+                            Cantidad = it.Cantidad,
+                            Autorizacion = _autorizacion?.Trim(),
+                            FechaInicio = fi,
+                            FechaFinal = ff,
+                            Anio = anio,
+                            MesVigencia = (short)_mesVig,
+                            MesFinal = (short)_mesFin,
+                            Observaciones = _obs?.Trim(),
+                            PaqueteInstanciaId = instanciaId,
+                            PaqueteCodigo = expansion.PaqueteCodigo,
+                            PaqueteValorPactado = valor
+                        });
+                    }
+                    _servicioSel = null;
+                    _cantidad = 1;
+                    _ok = $"Paquete '{expansion.PaqueteCodigo}' expandido al lote ({expansion.Items.Count} servicios). Ajusta cantidades a 0 para los opcionales antes de guardar.";
+                    return;
+                }
+                // Si el paquete no tiene items configurados, seguimos con el flujo simple.
+            }
+            catch (Exception ex)
+            {
+                _error = "Error al expandir el paquete: " + ex.Message;
+                return;
+            }
+        }
 
         _carrito.Add(new CartItem
         {
@@ -1233,6 +1339,29 @@ else
         _carrito = _carrito.Where(c => !c.Seleccionado).ToList();
     }
     private void LimpiarCarrito() => _carrito = new();
+
+    /// <summary>Al editar la cantidad de un chip del paquete, mantenemos la regla del
+    /// "primer chip con Cantidad>0 lleva el valor pactado". Si el chip que estaba
+    /// llevando el valor pasa a 0, el valor salta al siguiente disponible. Si un chip
+    /// que estaba en 0 sube de nuevo y no hay otro con valor asignado, este lo recibe.</summary>
+    private void OnCantidadPaqueteCambio(CartItem c, ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var v) || v < 0) { v = 0; }
+        c.Cantidad = v;
+        if (c.PaqueteInstanciaId is not Guid pid) { return; }
+
+        var chipsPkg = _carrito.Where(x => x.PaqueteInstanciaId == pid).ToList();
+        if (chipsPkg.Count == 0) { return; }
+
+        // Precio del paquete: lo tomamos del primer chip que hoy tenga PaqueteValorPactado
+        // o el de otro chip del mismo lote (todos comparten el mismo Precio.Origen).
+        var precio = chipsPkg.Select(x => x.PaqueteValorPactado).FirstOrDefault(x => x is not null);
+
+        // Reset y reasignar al primer chip con Cantidad>0 del lote.
+        foreach (var chip in chipsPkg) { chip.PaqueteValorPactado = null; }
+        var ancla = chipsPkg.FirstOrDefault(x => x.Cantidad > 0);
+        if (ancla is not null && precio is not null) { ancla.PaqueteValorPactado = precio; }
+    }
 
     // ---- Menu ⋮ de cada tarjeta del historico (col 2: "Ultimo servicios agregados") ----
 
@@ -1431,23 +1560,31 @@ else
                 return;
             }
 
-            var items = _carrito.Select(c => new AsignacionItemRequest(
-                c.Servicio.Id.ToString(),
-                c.Servicio.Descripcion,
-                c.TipoServicio,
-                c.Modulo,
-                c.Cantidad,
-                c.Autorizacion,
-                c.Anio,
-                c.MesVigencia,
-                c.MesFinal,
-                c.FechaInicio,
-                c.FechaFinal,
-                c.Observaciones,
-                // Copiamos el campo HISTORIA del servicio del contrato a la asignacion
-                // para que el profesional NO tenga que elegir formato en /atencion -
-                // el servicio ya dice que formato de HC corresponde.
-                c.Servicio.Historia)).ToList();
+            // PQ5: los chips de paquete con Cantidad=0 se descartan al enviar
+            // (son los opcionales que el usuario decidio no aplicar). El backend
+            // aplica la regla del valor sobre lo que llega.
+            var items = _carrito
+                .Where(c => c.Cantidad > 0)
+                .Select(c => new AsignacionItemRequest(
+                    c.Servicio.Id.ToString(),
+                    c.Servicio.Descripcion,
+                    c.TipoServicio,
+                    c.Modulo,
+                    c.Cantidad,
+                    c.Autorizacion,
+                    c.Anio,
+                    c.MesVigencia,
+                    c.MesFinal,
+                    c.FechaInicio,
+                    c.FechaFinal,
+                    c.Observaciones,
+                    // Copiamos el campo HISTORIA del servicio del contrato a la asignacion
+                    // para que el profesional NO tenga que elegir formato en /atencion -
+                    // el servicio ya dice que formato de HC corresponde.
+                    c.Servicio.Historia,
+                    c.PaqueteInstanciaId,
+                    c.PaqueteCodigo,
+                    c.PaqueteValorPactado)).ToList();
 
             var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items,
                 _pdfAutorizacionUrl,
@@ -1545,5 +1682,14 @@ else
         public string? Observaciones { get; set; }
         public string NombreServicio => Servicio.Descripcion;
         public bool Seleccionado { get; set; }
+
+        // ---- Trazabilidad de paquete (PQ5) ----
+        // Cuando el usuario elige un servicio ancla con PaqueteId != null, el sistema
+        // expande los N servicios del paquete al carrito. Todos comparten
+        // PaqueteInstanciaId + PaqueteCodigo; solo el primero con Cantidad>0 lleva el
+        // PaqueteValorPactado (regla aplicada al momento de enviar).
+        public Guid? PaqueteInstanciaId { get; set; }
+        public string? PaqueteCodigo { get; set; }
+        public decimal? PaqueteValorPactado { get; set; }
     }
 }

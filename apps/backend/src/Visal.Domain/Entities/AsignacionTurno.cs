@@ -48,4 +48,20 @@ public class AsignacionTurno : TenantEntity
     /// <summary>Nombre de la fila del grid de la programacion que cubre este profesional.
     /// Ej: "Turno 1", "Turno 2". Solo relevante cuando TurnoProgramacionId != null.</summary>
     public string? TurnoRowNombre { get; set; }
+
+    // ---------------- Trazabilidad de paquete (denormalizado desde Asignacion) ----------------
+    // Copiados en <c>AsignacionService.AsignarServicioAsync</c> desde la Asignacion padre
+    // para permitir reportes GROUP BY paquete_instancia_id sin JOIN.
+
+    /// <summary>Guid heredado de <see cref="Asignacion.PaqueteInstanciaId"/>. Todas las
+    /// filas de asignacion_turnos que provienen del mismo lote de paquete comparten este id.</summary>
+    public Guid? PaqueteInstanciaId { get; set; }
+
+    /// <summary>Codigo del paquete (snapshot) heredado de la Asignacion padre.</summary>
+    public string? PaqueteCodigo { get; set; }
+
+    /// <summary>Valor pactado del paquete. SOLO una fila del mismo PaqueteInstanciaId
+    /// lo lleva (la que corresponde a la Asignacion que fue "primera con Cantidad>0"
+    /// al aplicar el paquete). El resto queda null.</summary>
+    public decimal? PaqueteValorPactado { get; set; }
 }

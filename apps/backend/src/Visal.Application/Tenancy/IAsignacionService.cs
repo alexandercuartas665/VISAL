@@ -200,13 +200,40 @@ public enum AsignacionEstadoFiltro
 /// <summary>Tarifa del ServicioContrato consultada por (contratoCodigo, codigoServicio).</summary>
 public sealed record TarifaServicioDto(decimal? Tarifa);
 
-/// <summary>Item del carrito que se envia al guardar el lote.</summary>
+/// <summary>Detalle de un servicio dentro de un paquete al aplicarlo en /asignacion.
+/// Cada servicio del paquete se convierte en un chip del carrito con estos datos.
+/// <c>NombreServicio</c> se resuelve buscando el <c>Codigo</c> primero en
+/// <c>ServicioContrato</c> del mismo contrato (para heredar la tarifa y el modulo)
+/// y si no aparece, en el catalogo global; de ultimo cae al codigo suelto.</summary>
+public sealed record PaqueteExpansionItemDto(
+    string CodigoServicio, string NombreServicio,
+    string TipoServicio, string? Modulo,
+    int Cantidad,
+    Guid? ServicioContratoId, decimal? Tarifa);
+
+/// <summary>Retorno de <see cref="IAsignacionService.ObtenerPaqueteExpansionAsync"/>.
+/// Trae el precio del paquete + los N servicios ya materializados para pintarlos
+/// como chips en el carrito. El frontend genera el Guid del lote y lo stampa en
+/// cada chip antes de guardar.</summary>
+public sealed record PaqueteExpansionDto(
+    Guid PaqueteId, string PaqueteCodigo, string PaqueteNombre,
+    decimal? Precio,
+    IReadOnlyList<PaqueteExpansionItemDto> Items);
+
+/// <summary>Item del carrito que se envia al guardar el lote. Cuando el item viene
+/// de aplicar un paquete, los 3 campos <c>Paquete*</c> viajan iguales para todo el
+/// lote — el frontend los genera al elegir el servicio ancla y los stampa en cada
+/// chip expandido. <c>PaqueteValorPactado</c> viaja SOLO en el primer chip con
+/// <c>Cantidad > 0</c> (regla de una sola fila con el valor).</summary>
 public sealed record AsignacionItemRequest(
     string ServicioId, string NombreServicio, string TipoServicio, string? Modulo,
     int Cantidad, string? CodigoAutorizacion,
     short? AnioServicio, short MesVigencia, short? MesFinal,
     DateOnly FechaInicio, DateOnly? FechaFinal,
-    string? Observaciones, string? FormatoHistoria);
+    string? Observaciones, string? FormatoHistoria,
+    Guid? PaqueteInstanciaId = null,
+    string? PaqueteCodigo = null,
+    decimal? PaqueteValorPactado = null);
 
 public sealed record CrearLoteRequest(
     Guid PacienteId, string ContratoCodigo, string Sucursal,
@@ -320,6 +347,19 @@ public interface IAsignacionService
     /// de coordinacion. Devuelve null si no se encuentra el servicio o el contrato.
     /// </summary>
     Task<decimal?> ObtenerTarifaServicioAsync(string contratoCodigo, string codigoServicio, CancellationToken ct = default);
+
+    /// <summary>
+    /// Devuelve la definicion de un paquete listo para expandir en el carrito de /asignacion:
+    /// precio + N servicios con nombres, cantidades y tarifas resueltas. El frontend
+    /// stampa el Guid del lote y los agrega al carrito como chips independientes. Solo
+    /// se resuelven los nombres/tarifas — el frontend decide cual chip lleva el valor
+    /// (regla: el primero con Cantidad>0 en orden de carrito).
+    /// </summary>
+    /// <param name="paqueteId">Id del paquete a expandir.</param>
+    /// <param name="contratoCodigo">Codigo del contrato del paciente, para resolver
+    /// tarifas heredadas de <c>ServicioContrato</c> cuando el servicio existe en el
+    /// contrato pactado. Si el servicio no esta en el contrato, la tarifa queda null.</param>
+    Task<PaqueteExpansionDto?> ObtenerPaqueteExpansionAsync(Guid paqueteId, string contratoCodigo, CancellationToken ct = default);
 
     /// <summary>
     /// Persiste los turnos de coordinacion del servicio. Valida que la suma de Cantidad

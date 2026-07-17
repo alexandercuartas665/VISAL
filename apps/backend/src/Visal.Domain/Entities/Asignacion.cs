@@ -69,4 +69,23 @@ public class Asignacion : TenantEntity
     public decimal? ValorPagoReal { get; set; }
 
     public AsignacionEstado Estado { get; set; } = AsignacionEstado.Pendiente;
+
+    // ---------------- Trazabilidad de paquete ----------------
+    // Cuando la asignacion nace de aplicar un paquete en el flujo /asignacion,
+    // estos tres campos vinculan la fila con las hermanas del mismo paquete:
+
+    /// <summary>Guid unico que agrupa TODAS las asignaciones creadas al aplicar un mismo
+    /// paquete a un paciente. Se genera en el frontend al elegir el servicio ancla; se
+    /// stampa igual en todos los chips expandidos del carrito. Luego /coordinacion lo
+    /// hereda a asignacion_turnos para poder GROUP BY paquete_instancia_id.</summary>
+    public Guid? PaqueteInstanciaId { get; set; }
+
+    /// <summary>Codigo del paquete de origen (snapshot). Se guarda por conveniencia
+    /// para reportes y filtros — evita un JOIN a paquetes cada vez que se muestra el chip.</summary>
+    public string? PaqueteCodigo { get; set; }
+
+    /// <summary>Valor pactado del paquete completo. SOLO una fila del mismo
+    /// <see cref="PaqueteInstanciaId"/> lleva el valor (la primera con Cantidad>0 en el
+    /// orden de agregado); el resto queda null. Copiado de <c>Paquete.Precio</c> al aplicar.</summary>
+    public decimal? PaqueteValorPactado { get; set; }
 }

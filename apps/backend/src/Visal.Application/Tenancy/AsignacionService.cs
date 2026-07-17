@@ -253,8 +253,25 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 $"El contrato {req.ContratoCodigo} exige adjuntar el PDF de autorizacion antes de guardar.");
         }
 
+        // Defensa server-side de la regla "una sola fila lleva el valor pactado":
+        // El frontend YA arma el request con el valor solo en el primer chip con
+        // Cantidad>0 por PaqueteInstanciaId. Aqui re-validamos y forzamos la regla
+        // por si algun cliente enviase datos inconsistentes (bug o UI vieja).
+        var yaAsignadoValor = new HashSet<Guid>();
         foreach (var it in req.Items)
         {
+            var valorPactado = it.PaqueteValorPactado;
+            if (it.PaqueteInstanciaId is Guid pid)
+            {
+                if (yaAsignadoValor.Contains(pid) || it.Cantidad <= 0)
+                {
+                    valorPactado = null; // solo el primero con Cantidad>0 conserva el valor
+                }
+                else if (valorPactado is not null)
+                {
+                    yaAsignadoValor.Add(pid);
+                }
+            }
             db.Asignaciones.Add(new Asignacion
             {
                 TenantId = tid,
@@ -280,7 +297,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 CategoriaCopago = req.CategoriaCopago,
                 ValorPagoSugerido = req.ValorPagoSugerido,
                 ValorPagoReal = req.ValorPagoReal,
-                Estado = AsignacionEstado.Pendiente
+                Estado = AsignacionEstado.Pendiente,
+                PaqueteInstanciaId = it.PaqueteInstanciaId,
+                PaqueteCodigo = it.PaqueteCodigo,
+                PaqueteValorPactado = valorPactado
             });
         }
         await db.SaveChangesAsync(ct);
@@ -626,6 +646,73 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<PaqueteExpansionDto?> ObtenerPaqueteExpansionAsync(
+        Guid paqueteId, string contratoCodigo, CancellationToken ct = default)
+    {
+        var pkg = await db.Paquetes.AsNoTracking().FirstOrDefaultAsync(p => p.Id == paqueteId, ct);
+        if (pkg is null) { return null; }
+
+        var codigos = await db.PaqueteServicios.AsNoTracking()
+            .Where(x => x.PaqueteId == paqueteId)
+            .OrderBy(x => x.Codigo)
+            .Select(x => new { x.Codigo, x.Cantidad, x.CatalogoServicioReferenciaId })
+            .ToListAsync(ct);
+        if (codigos.Count == 0)
+        {
+            return new PaqueteExpansionDto(pkg.Id, pkg.Codigo, pkg.Nombre, pkg.Precio, Array.Empty<PaqueteExpansionItemDto>());
+        }
+
+        // Resolver nombres y tarifas contra ServicioContrato del mismo contrato PRIMERO
+        // (asi heredamos tarifa + modulo pactados) y contra el catalogo global despues.
+        var codigosSet = codigos.Select(x => x.Codigo).ToList();
+        var svcContratoDict = await db.ServiciosContrato.AsNoTracking()
+            .Join(db.ContratosAseguradora.AsNoTracking(), s => s.ContratoId, c => c.Id, (s, c) => new { s, c })
+            .Where(x => x.c.CodigoContrato == contratoCodigo && codigosSet.Contains(x.s.CodigoServicio!))
+            .Select(x => new { x.s.Id, x.s.CodigoServicio, x.s.Descripcion, x.s.Modulo, x.s.Tarifa })
+            .ToListAsync(ct);
+        var scByCodigo = svcContratoDict
+            .GroupBy(x => x.CodigoServicio!)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var faltantes = codigosSet.Except(scByCodigo.Keys).ToList();
+        var catByCodigo = new Dictionary<string, string>();
+        if (faltantes.Count > 0)
+        {
+            catByCodigo = await db.CatalogosServicioReferencia.AsNoTracking()
+                .Where(c => faltantes.Contains(c.Codigo))
+                .Select(c => new { c.Codigo, c.Nombre })
+                .ToDictionaryAsync(x => x.Codigo, x => x.Nombre, ct);
+        }
+
+        var items = new List<PaqueteExpansionItemDto>();
+        foreach (var s in codigos)
+        {
+            if (scByCodigo.TryGetValue(s.Codigo, out var sc))
+            {
+                items.Add(new PaqueteExpansionItemDto(
+                    s.Codigo,
+                    sc.Descripcion ?? s.Codigo,
+                    sc.Modulo ?? "",
+                    sc.Modulo,
+                    s.Cantidad,
+                    sc.Id,
+                    sc.Tarifa));
+            }
+            else
+            {
+                items.Add(new PaqueteExpansionItemDto(
+                    s.Codigo,
+                    catByCodigo.TryGetValue(s.Codigo, out var n) ? n : s.Codigo,
+                    "",
+                    null,
+                    s.Cantidad,
+                    null,
+                    null));
+            }
+        }
+        return new PaqueteExpansionDto(pkg.Id, pkg.Codigo, pkg.Nombre, pkg.Precio, items);
+    }
+
     public async Task<IReadOnlyList<TurnoCoordinadoDto>> ListarTurnosAsync(Guid asignacionId, CancellationToken ct = default)
     {
         var turnos = await db.AsignacionTurnos.AsNoTracking()
@@ -699,7 +786,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                     throw new InvalidOperationException("Programacion no encontrada al guardar.");
                 }
                 var diaArranque = t.DiaArranque ?? 1;
-                CrearTurnoDesdeGrid(prog, req.AsignacionId, t.ProfesionalId, t.TurnoRowNombre!, diaArranque, tid, t.Tarifa);
+                CrearTurnoDesdeGrid(prog, asig, t.ProfesionalId, t.TurnoRowNombre!, diaArranque, tid, t.Tarifa);
             }
             else
             {
@@ -714,7 +801,12 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                         HorasPorTurno = t.HorasPorTurno,
                         FechaInicio = t.FechaInicio,
                         MesAsignar = t.MesAsignar,
-                        Tarifa = t.Tarifa
+                        Tarifa = t.Tarifa,
+                        // PQ6: denormalizar campos de paquete desde la Asignacion
+                        // para poder GROUP BY paquete_instancia_id en reportes.
+                        PaqueteInstanciaId = asig.PaqueteInstanciaId,
+                        PaqueteCodigo = asig.PaqueteCodigo,
+                        PaqueteValorPactado = asig.PaqueteValorPactado
                     });
                 }
             }
@@ -737,7 +829,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     /// con turnos de programacion). Muta el DbContext; el SaveChanges lo llama el
     /// caller.</summary>
     private void CrearTurnoDesdeGrid(
-        TurnoProgramacion prog, Guid asignacionId, Guid profesionalId, string rowNombre,
+        TurnoProgramacion prog, Asignacion asig, Guid profesionalId, string rowNombre,
         int diaArranque, Guid tid, decimal? tarifa)
     {
         var grid = System.Text.Json.JsonDocument.Parse(prog.GridDataJson).RootElement;
@@ -750,14 +842,18 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var at = new AsignacionTurno
         {
             TenantId = tid,
-            AsignacionId = asignacionId,
+            AsignacionId = asig.Id,
             ProfesionalId = profesionalId,
             Cantidad = 1,
             MesAsignar = (short)prog.Mes,
             FechaInicio = new DateOnly(prog.Anio, prog.Mes, diaArranque),
             TurnoProgramacionId = prog.Id,
             TurnoRowNombre = rowNombre,
-            Tarifa = tarifa
+            Tarifa = tarifa,
+            // PQ6: denormalizar campos de paquete desde la Asignacion.
+            PaqueteInstanciaId = asig.PaqueteInstanciaId,
+            PaqueteCodigo = asig.PaqueteCodigo,
+            PaqueteValorPactado = asig.PaqueteValorPactado
         };
         db.AsignacionTurnos.Add(at);
 
@@ -934,7 +1030,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 MesAsignar = (short)prog.Mes,
                 FechaInicio = new DateOnly(prog.Anio, prog.Mes, req.DiaArranque),
                 TurnoProgramacionId = prog.Id,
-                TurnoRowNombre = rowNombre
+                TurnoRowNombre = rowNombre,
+                // PQ6: denormalizar campos de paquete desde la Asignacion.
+                PaqueteInstanciaId = asig.PaqueteInstanciaId,
+                PaqueteCodigo = asig.PaqueteCodigo,
+                PaqueteValorPactado = asig.PaqueteValorPactado
             };
             db.AsignacionTurnos.Add(at);
             turnosCreados++;

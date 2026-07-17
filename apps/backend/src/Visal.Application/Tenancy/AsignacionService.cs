@@ -753,10 +753,18 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (!string.IsNullOrWhiteSpace(asig.Sucursal))
         {
             var s = asig.Sucursal.Trim();
-            var suc = await db.Sucursales.AsNoTracking()
-                .Where(x => x.Nombre == s).Select(x => (Guid?)x.Id)
-                .FirstOrDefaultAsync(ct);
-            asigSedeId = suc;
+            // Matching tolerante: exacto primero, luego contains bidireccional
+            // (para casos legacy donde asignacion tiene "CALI" y sucursal es
+            // "SANTIAGO DE CALI"). Todo case-insensitive.
+            var todas = await db.Sucursales.AsNoTracking()
+                .Select(x => new { x.Id, x.Nombre })
+                .ToListAsync(ct);
+            var exact = todas.FirstOrDefault(x =>
+                string.Equals(x.Nombre, s, StringComparison.OrdinalIgnoreCase));
+            asigSedeId = exact?.Id
+                ?? todas.FirstOrDefault(x =>
+                    x.Nombre.Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || s.Contains(x.Nombre, StringComparison.OrdinalIgnoreCase))?.Id;
         }
 
         var asigTipo = asig.TipoServicio?.ToUpperInvariant();
@@ -765,8 +773,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         foreach (var p in raw)
         {
             var tipo = p.TipoServicioId is Guid tsid ? tiposMap.GetValueOrDefault(tsid) : null;
+            // Matching tolerante de tipo: normaliza plural/singular
+            // ("TERAPIAS" == "TERAPIA", "CONSULTAS" == "CONSULTA", etc.).
             if (!string.IsNullOrEmpty(tipo) && !string.IsNullOrEmpty(asigTipo)
-                && !string.Equals(tipo, asigTipo, StringComparison.OrdinalIgnoreCase))
+                && !TiposCoinciden(tipo, asigTipo))
             {
                 continue;
             }
@@ -889,6 +899,21 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
         await db.SaveChangesAsync(ct);
         return new AplicarProgramacionResult(turnosCreados, sesionesCreadas, sesionesDescanso);
+    }
+
+    /// <summary>Compara dos codigos de tipo de servicio tolerando plural/singular.
+    /// Ejemplos: "TERAPIA" == "TERAPIAS", "CONSULTA" == "CONSULTAS". Case-insensitive.
+    /// Sirve para asignaciones legacy con datos plurales que el catalogo tiene en
+    /// singular (o viceversa).</summary>
+    private static bool TiposCoinciden(string a, string b)
+    {
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) { return true; }
+        var au = a.ToUpperInvariant();
+        var bu = b.ToUpperInvariant();
+        // Normaliza terminacion "S" para comparar plural/singular.
+        var aSing = au.EndsWith('S') ? au[..^1] : au;
+        var bSing = bu.EndsWith('S') ? bu[..^1] : bu;
+        return string.Equals(aSing, bSing, StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ContarTurnosEnGrid(string gridJson)

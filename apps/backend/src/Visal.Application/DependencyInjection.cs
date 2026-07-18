@@ -111,6 +111,9 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.Turnos.ITurnoProgramacionService, Tenancy.Turnos.TurnoProgramacionService>();
         services.AddScoped<Tenancy.Turnos.ITipoTurnoService, Tenancy.Turnos.TipoTurnoService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
+        // Facturacion — motor generico de snapshots. Los builders por tipo se
+        // registran junto con el tipo (Fase 5 en adelante) con AddScoped<ISnapshotBuilder, XxxBuilder>.
+        services.AddScoped<Facturacion.IFacturacionSnapshotService, Facturacion.FacturacionSnapshotService>();
         return services;
     }
 }

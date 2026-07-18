@@ -37,6 +37,12 @@ public static class ModuloCatalogo
         new("cfg-interoperabilidad", "Interoperabilidad", "Configuracion de la Entidad"),
         new("cfg-roles", "Roles y Permisos", "Configuracion de la Entidad"),
         new("cfg-usuarios", "Administracion de Usuarios", "Configuracion de la Entidad"),
+        // Facturacion (Capa 07): snapshots transaccionales para radicacion EPS.
+        // Permite generar, ver y descargar. Owner/Admin y SuperAdmin lo tienen implicito.
+        new("facturacion.snapshots", "Facturacion - Snapshots Transaccionales", "Facturacion"),
+        // Permite archivar snapshots con motivo obligatorio. Requiere adicional a
+        // "facturacion.snapshots". Por defecto solo Owner + Admin del tenant.
+        new("facturacion.snapshots.archivar", "Facturacion - Archivar snapshots", "Facturacion"),
     };
 }
 

@@ -92,6 +92,8 @@ public interface IApplicationDbContext
     DbSet<InteroperabilidadConfig> InteroperabilidadConfigs { get; }
     DbSet<InteroperabilidadCredencialSede> InteroperabilidadCredencialesSede { get; }
     DbSet<RdaEvento> RdaEventos { get; }
+    DbSet<FacturacionSnapshot> FacturacionSnapshots { get; }
+    DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }
     DbSet<TenantSubscription> TenantSubscriptions { get; }

@@ -123,6 +123,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<InteroperabilidadConfig> InteroperabilidadConfigs => Set<InteroperabilidadConfig>();
     public DbSet<InteroperabilidadCredencialSede> InteroperabilidadCredencialesSede => Set<InteroperabilidadCredencialSede>();
     public DbSet<RdaEvento> RdaEventos => Set<RdaEvento>();
+    public DbSet<FacturacionSnapshot> FacturacionSnapshots => Set<FacturacionSnapshot>();
+    public DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas => Set<FacturacionSnapshotFila>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -157,6 +159,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<ModalidadRdaIhce>().HaveConversion<string>().HaveMaxLength(30);
         configurationBuilder.Properties<EstadoRdaEvento>().HaveConversion<string>().HaveMaxLength(20);
         configurationBuilder.Properties<TipoRdaIhce>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<TipoSnapshot>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<EstadoSnapshot>().HaveConversion<string>().HaveMaxLength(40);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1290,6 +1294,39 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.BundleHash }).IsUnique();
             // Feed de la lista en /interoperabilidad/rda (Ola 4): ultimos eventos por estado.
             b.HasIndex(x => new { x.TenantId, x.Estado, x.FechaGeneracion });
+        });
+
+        modelBuilder.Entity<FacturacionSnapshot>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
+            b.Property(x => x.MotivoArchivado).HasMaxLength(1000);
+            b.Property(x => x.ErrorMensaje).HasMaxLength(4000);
+            // Filtros del snapshot como jsonb — permite index gin/consultas futuras y
+            // el motor no necesita saber la forma concreta por tipo.
+            b.Property(x => x.FiltrosJson).HasColumnType("jsonb").IsRequired();
+
+            // Listado principal en /facturacion-clinica/snapshots: tab Vigentes/Archivados
+            // ordenado por CreatedAt DESC.
+            b.HasIndex(x => new { x.TenantId, x.Estado, x.CreatedAt });
+            // Filtro por Tipo en la misma pagina.
+            b.HasIndex(x => new { x.TenantId, x.Tipo, x.Estado });
+        });
+
+        modelBuilder.Entity<FacturacionSnapshotFila>(b =>
+        {
+            // El corazon del motor: cada fila del snapshot se persiste con su carga
+            // como jsonb. Consultas de la UI hacen LIMIT/OFFSET y opcionalmente
+            // WHERE DatosJson::text ILIKE '%buscar%' — barato para N por debajo de
+            // 100k filas por snapshot.
+            b.Property(x => x.DatosJson).HasColumnType("jsonb").IsRequired();
+
+            b.HasOne(x => x.Snapshot).WithMany(x => x.Filas)
+                .HasForeignKey(x => x.SnapshotId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Orden natural + paginacion server-side. Unico por snapshot para que
+            // el builder pueda re-emitir la misma numeracion si retry.
+            b.HasIndex(x => new { x.SnapshotId, x.NumeroFila }).IsUnique();
         });
     }
 

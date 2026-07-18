@@ -1,0 +1,257 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Visal.Application.Common;
+using Visal.Application.Facturacion;
+using Visal.Domain.Enums;
+using Visal.Infrastructure.Persistence;
+using Xunit;
+
+namespace Visal.Application.Tests.Facturacion;
+
+/// <summary>
+/// Tests unitarios del motor generico de snapshots.
+///
+/// Backend: EF Core InMemory. jsonb se degrada a string plano en InMemory pero
+/// el servicio serializa/deserializa manualmente, asi que la semantica se
+/// preserva. Global query filter por TenantId aplica en InMemory igual que en Postgres.
+/// </summary>
+public sealed class FacturacionSnapshotServiceTests
+{
+    private static readonly Guid TenantA = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid TenantB = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid Actor = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+    private static (VisalDbContext ctx, FakeTenantContext tenant) Db(Guid tenantId, string? dbName = null)
+    {
+        var name = dbName ?? Guid.NewGuid().ToString();
+        var opts = new DbContextOptionsBuilder<VisalDbContext>()
+            .UseInMemoryDatabase(name)
+            // El motor jsonb no existe en InMemory; ignoramos el warning cuando setea
+            // HasColumnType("jsonb") — el string almacena igual.
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        var tenant = new FakeTenantContext { TenantId = tenantId, UserId = Actor };
+        return (new VisalDbContext(opts, tenant), tenant);
+    }
+
+    [Fact]
+    public async Task GenerarAsync_ConBuilderQueEmite3Filas_TerminaVigenteYPersistePrompt()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var builder = new BuilderFake(
+            TipoSnapshot.RelacionFacturas,
+            new[] { "Col1", "Col2" },
+            new IReadOnlyDictionary<string, object?>[]
+            {
+                new Dictionary<string, object?> { ["Col1"] = "a", ["Col2"] = 1L },
+                new Dictionary<string, object?> { ["Col1"] = "b", ["Col2"] = 2L },
+                new Dictionary<string, object?> { ["Col1"] = "c", ["Col2"] = 3L }
+            });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(
+            new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "ASMET Junio", "{\"foo\":1}"),
+            Actor);
+
+        var snap = await ctx.FacturacionSnapshots.SingleAsync(x => x.Id == id);
+        Assert.Equal(EstadoSnapshot.Vigente, snap.Estado);
+        Assert.Equal(3, snap.TotalFilas);
+        Assert.Equal("ASMET Junio", snap.Nombre);
+        Assert.NotNull(snap.FechaEjecucionFin);
+        Assert.Null(snap.ErrorMensaje);
+
+        var filas = await ctx.FacturacionSnapshotFilas.Where(x => x.SnapshotId == id).ToListAsync();
+        Assert.Equal(3, filas.Count);
+        Assert.Equal(new[] { 1, 2, 3 }, filas.OrderBy(x => x.NumeroFila).Select(x => x.NumeroFila));
+    }
+
+    [Fact]
+    public async Task GenerarAsync_SinBuilderRegistrado_LanzaInvalidOperation()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var svc = new FacturacionSnapshotService(ctx, tenant, Array.Empty<ISnapshotBuilder>());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor));
+    }
+
+    [Fact]
+    public async Task GenerarAsync_BuilderQueLanza_QuedaFallidoConMensaje()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var builder = new BuilderQueLanza(TipoSnapshot.RelacionFacturas, "boom!");
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { (ISnapshotBuilder)builder });
+
+        var id = await svc.GenerarAsync(
+            new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, null, "{}"),
+            Actor);
+
+        var snap = await ctx.FacturacionSnapshots.SingleAsync(x => x.Id == id);
+        Assert.Equal(EstadoSnapshot.Fallido, snap.Estado);
+        Assert.Equal("boom!", snap.ErrorMensaje);
+        // El nombre debe haberse auto-generado.
+        Assert.StartsWith(TipoSnapshot.RelacionFacturas.ToString(), snap.Nombre);
+    }
+
+    [Fact]
+    public async Task ListarAsync_FiltraPorEstadoYTipo()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (ctx, tenant) = Db(TenantA, dbName);
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
+            new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = "y" } });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var idVigente = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "v", "{}"), Actor);
+        var idArchivar = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "a", "{}"), Actor);
+        await svc.ArchivarAsync(idArchivar, "motivo prueba", Actor);
+
+        var vigentes = await svc.ListarAsync(EstadoSnapshot.Vigente);
+        var archivados = await svc.ListarAsync(EstadoSnapshot.Archivado);
+
+        Assert.Single(vigentes);
+        Assert.Equal(idVigente, vigentes[0].Id);
+        Assert.Single(archivados);
+        Assert.Equal(idArchivar, archivados[0].Id);
+    }
+
+    [Fact]
+    public async Task ArchivarAsync_MotivoMenorA10Chars_Lanza()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
+            new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = 1L } });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.ArchivarAsync(id, "corto", Actor));
+
+        var snap = await ctx.FacturacionSnapshots.SingleAsync(x => x.Id == id);
+        Assert.Equal(EstadoSnapshot.Vigente, snap.Estado);
+    }
+
+    [Fact]
+    public async Task ArchivarAsync_SnapshotNoVigente_Lanza()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var builder = new BuilderQueLanza(TipoSnapshot.RelacionFacturas, "boom");
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { (ISnapshotBuilder)builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.ArchivarAsync(id, "no aplica al fallido", Actor));
+    }
+
+    [Fact]
+    public async Task ListarFilasAsync_PaginacionYBusquedaFuncionan()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "Nombre" },
+            Enumerable.Range(1, 10)
+                .Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["Nombre"] = $"paciente{i}" })
+                .ToArray());
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+
+        var page1 = await svc.ListarFilasAsync(id, pagina: 1, tamanoPagina: 4);
+        Assert.Equal(10, page1.Total);
+        Assert.Equal(4, page1.Items.Count);
+        Assert.Equal("paciente1", page1.Items[0]["Nombre"]);
+
+        var page3 = await svc.ListarFilasAsync(id, pagina: 3, tamanoPagina: 4);
+        Assert.Equal(2, page3.Items.Count);
+        Assert.Equal("paciente9", page3.Items[0]["Nombre"]);
+
+        var busqueda = await svc.ListarFilasAsync(id, 1, 50, buscar: "paciente5");
+        Assert.Single(busqueda.Items);
+    }
+
+    [Fact]
+    public async Task AislamientoTenant_SnapshotDeTenantANoEsVisibleDesdeTenantB()
+    {
+        // Comparten el mismo store InMemory pero usan tenants distintos.
+        var dbName = Guid.NewGuid().ToString();
+        var (ctxA, tenantA) = Db(TenantA, dbName);
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
+            new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = "solo A" } });
+        var svcA = new FacturacionSnapshotService(ctxA, tenantA, new[] { builder });
+
+        var idA = await svcA.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "A", "{}"), Actor);
+
+        // Ahora el mismo store visto desde tenant B.
+        var (ctxB, tenantB) = Db(TenantB, dbName);
+        var svcB = new FacturacionSnapshotService(ctxB, tenantB, new[] { builder });
+
+        var listaB = await svcB.ListarAsync(EstadoSnapshot.Vigente);
+        Assert.Empty(listaB);
+
+        var detalleDesdeB = await svcB.ObtenerAsync(idA);
+        Assert.Null(detalleDesdeB);
+
+        var filasDesdeB = await svcB.ListarFilasAsync(idA, 1, 10);
+        Assert.Empty(filasDesdeB.Items);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svcB.ArchivarAsync(idA, "intento cross-tenant no autorizado", Actor));
+    }
+
+    // ---- Fakes ----
+
+    private sealed class FakeTenantContext : ITenantContext
+    {
+        public Guid? TenantId { get; set; }
+        public Guid? UserId { get; set; }
+        public Guid? SucursalId { get; set; }
+    }
+
+    private sealed class BuilderFake : ISnapshotBuilder
+    {
+        private readonly IReadOnlyList<IReadOnlyDictionary<string, object?>> _filas;
+        public BuilderFake(TipoSnapshot tipo, IReadOnlyList<string> cols,
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> filas)
+        {
+            TipoAplicable = tipo;
+            Columnas = cols;
+            _filas = filas;
+        }
+        public TipoSnapshot TipoAplicable { get; }
+        public IReadOnlyList<string> Columnas { get; }
+        public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
+            string filtrosJson,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            foreach (var f in _filas)
+            {
+                await Task.Yield();
+                yield return f;
+            }
+        }
+    }
+
+    private sealed class BuilderQueLanza : ISnapshotBuilder
+    {
+        private readonly string _msg;
+        public BuilderQueLanza(TipoSnapshot tipo, string msg)
+        {
+            TipoAplicable = tipo;
+            _msg = msg;
+        }
+        public TipoSnapshot TipoAplicable { get; }
+        public IReadOnlyList<string> Columnas { get; } = Array.Empty<string>();
+#pragma warning disable CS1998
+        public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
+            string filtrosJson,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            throw new InvalidOperationException(_msg);
+            yield break;
+        }
+#pragma warning restore CS1998
+    }
+}

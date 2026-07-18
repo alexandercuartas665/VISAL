@@ -19,4 +19,12 @@ public class Sucursal : TenantEntity
     /// (ej. IBAGUE lo exige, otras sedes no). Default false.
     /// </summary>
     public bool MipresObligatorio { get; set; }
+
+    /// <summary>
+    /// Codigo de habilitacion REPS de la sede ante MinSalud (12 digitos numericos).
+    /// Se factura por sede prestadora — el snapshot Relacion de Facturas lo pide
+    /// como columna 4. NO confundir con InteroperabilidadCredencialSede.CodigoHabilitacion
+    /// (aquel es por sede+ambiente para OAuth IHCE).
+    /// </summary>
+    public string? CodigoHabilitacion { get; set; }
 }

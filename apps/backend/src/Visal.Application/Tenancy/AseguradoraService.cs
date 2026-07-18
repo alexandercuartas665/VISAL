@@ -29,7 +29,7 @@ public sealed class AseguradoraService : IAseguradoraService
     {
         return await _db.Aseguradoras.AsNoTracking().Where(a => a.Id == id)
             .Select(a => new AseguradoraDetailDto(a.Id, a.Codigo, a.Tipo, a.Nombre, a.CodigoMovilidad,
-                a.Nit, a.Regimen, a.CodInt, a.Descripcion))
+                a.Nit, a.Regimen, a.CodInt, a.Descripcion, a.CorreoFacturacion))
             .FirstOrDefaultAsync(ct);
     }
 
@@ -71,10 +71,12 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.Regimen = req.Regimen?.Trim();
         entity.CodInt = req.CodInt?.Trim();
         entity.Descripcion = req.Descripcion?.Trim();
+        entity.CorreoFacturacion = req.CorreoFacturacion?.Trim();
 
         await _db.SaveChangesAsync(ct);
         return new AseguradoraDetailDto(entity.Id, entity.Codigo, entity.Tipo, entity.Nombre,
-            entity.CodigoMovilidad, entity.Nit, entity.Regimen, entity.CodInt, entity.Descripcion);
+            entity.CodigoMovilidad, entity.Nit, entity.Regimen, entity.CodInt, entity.Descripcion,
+            entity.CorreoFacturacion);
     }
 
     public async Task<bool> DeleteAseguradoraAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -157,7 +159,8 @@ public sealed class AseguradoraService : IAseguradoraService
                 s.PaqueteId,
                 s.PaqueteId != null ? _db.Paquetes.Where(p => p.Id == s.PaqueteId).Select(p => p.Codigo).FirstOrDefault() : null,
                 s.CodigoServicio, s.CodigoInterno,
-                s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones))
+                s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
+                s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal))
             .ToListAsync(ct);
     }
 
@@ -189,6 +192,14 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.Modalidad = req.Modalidad?.Trim();
         entity.Clasificacion = req.Clasificacion?.Trim();
         entity.Observaciones = req.Observaciones?.Trim();
+        // RIPS Res 2275 + ValorTotal (Fase 4 Facturacion).
+        entity.Finalidad = req.Finalidad?.Trim();
+        entity.CausaExterna = req.CausaExterna?.Trim();
+        entity.ModalidadAtencion = req.ModalidadAtencion?.Trim();
+        entity.ViaIngreso = req.ViaIngreso?.Trim();
+        entity.GrupoServicios = req.GrupoServicios?.Trim();
+        entity.Servicios = req.Servicios?.Trim();
+        entity.ValorTotal = req.ValorTotal;
 
         await _db.SaveChangesAsync(ct);
         var paqueteCod = entity.PaqueteId is Guid pid
@@ -197,7 +208,8 @@ public sealed class AseguradoraService : IAseguradoraService
         return new ServicioDto(entity.Id, entity.ContratoId, entity.Sede, entity.Historia,
             entity.PaqueteId, paqueteCod,
             entity.CodigoServicio, entity.CodigoInterno,
-            entity.Descripcion, entity.Tarifa, entity.Modulo, entity.Especialidad, entity.Modalidad, entity.Clasificacion, entity.Observaciones);
+            entity.Descripcion, entity.Tarifa, entity.Modulo, entity.Especialidad, entity.Modalidad, entity.Clasificacion, entity.Observaciones,
+            entity.Finalidad, entity.CausaExterna, entity.ModalidadAtencion, entity.ViaIngreso, entity.GrupoServicios, entity.Servicios, entity.ValorTotal);
     }
 
     public async Task<bool> DeleteServicioAsync(Guid id, Guid actor, CancellationToken ct = default)

@@ -1,7 +1,10 @@
 namespace Visal.Application.Tenancy;
 
-/// <summary>Vista compacta del paquete en el listado.</summary>
-public sealed record PaqueteDto(Guid Id, string Codigo, string Nombre, bool Activo, decimal? Precio);
+/// <summary>Vista compacta del paquete en el listado. <c>CupsRepresentativoServicioId</c>
+/// identifica cual PaqueteServicio va como CUPS al facturar el paquete (Fase 4 Facturacion).
+/// Nullable — si no se ha marcado, el builder cae al primer servicio ordenado por codigo.</summary>
+public sealed record PaqueteDto(Guid Id, string Codigo, string Nombre, bool Activo, decimal? Precio,
+    Guid? CupsRepresentativoServicioId);
 
 /// <summary>Servicio dentro del detalle de un paquete. <c>Nombre</c> viene por JOIN
 /// al catalogo de servicios de referencia. Si el catalogo no existe, viene null.</summary>
@@ -55,4 +58,10 @@ public interface IPaqueteService
     /// <summary>Busca en el catalogo global de servicios de referencia por codigo o nombre.
     /// Alimenta el autocomplete del editor del paquete. Solo activos.</summary>
     Task<IReadOnlyList<CatalogoServicioAutocompleteDto>> BuscarCatalogoAsync(string filtro, int limite = 20, CancellationToken ct = default);
+
+    /// <summary>Marca (o desmarca con null) el PaqueteServicio que va como CUPS
+    /// representativo al facturar el paquete. Solo un servicio por paquete puede ser
+    /// representativo — actualiza <see cref="Paquete.CupsRepresentativoServicioId"/>.
+    /// Devuelve el paquete actualizado o null si no existe.</summary>
+    Task<PaqueteDto?> MarcarRepresentativoAsync(Guid paqueteId, Guid? paqueteServicioId, Guid actor, CancellationToken ct = default);
 }

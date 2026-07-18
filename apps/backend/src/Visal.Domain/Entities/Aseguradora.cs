@@ -16,4 +16,6 @@ public class Aseguradora : TenantEntity
     public string? Regimen { get; set; }
     public string? CodInt { get; set; }
     public string? Descripcion { get; set; }
+    /// <summary>Correo destino para radicar facturas ante la EPS (Fase 4 Facturacion).</summary>
+    public string? CorreoFacturacion { get; set; }
 }

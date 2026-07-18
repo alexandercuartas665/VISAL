@@ -4,11 +4,13 @@ public sealed record AseguradoraDto(Guid Id, string Codigo, string Tipo, string 
 
 public sealed record AseguradoraDetailDto(
     Guid Id, string Codigo, string Tipo, string Nombre, string? CodigoMovilidad,
-    string? Nit, string? Regimen, string? CodInt, string? Descripcion);
+    string? Nit, string? Regimen, string? CodInt, string? Descripcion,
+    string? CorreoFacturacion);
 
 public sealed record SaveAseguradoraRequest(
     Guid? Id, string Codigo, string Tipo, string Nombre, string? CodigoMovilidad,
-    string? Nit, string? Regimen, string? CodInt, string? Descripcion);
+    string? Nit, string? Regimen, string? CodInt, string? Descripcion,
+    string? CorreoFacturacion);
 
 public sealed record ContratoDto(
     Guid Id, Guid AseguradoraId, string CodigoContrato, DateOnly? FechaInicial,
@@ -23,14 +25,20 @@ public sealed record ServicioDto(
     Guid? PaqueteId, string? PaqueteCodigo,
     string? CodigoServicio,
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
-    string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
+    string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones,
+    // RIPS Res 2275 + ValorTotal (Fase 4 Facturacion).
+    string? Finalidad, string? CausaExterna, string? ModalidadAtencion,
+    string? ViaIngreso, string? GrupoServicios, string? Servicios, decimal? ValorTotal);
 
 public sealed record SaveServicioRequest(
     Guid? Id, Guid ContratoId, string? Sede, string? Historia,
     Guid? PaqueteId,
     string? CodigoServicio,
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
-    string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
+    string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones,
+    string? Finalidad = null, string? CausaExterna = null, string? ModalidadAtencion = null,
+    string? ViaIngreso = null, string? GrupoServicios = null, string? Servicios = null,
+    decimal? ValorTotal = null);
 
 /// <summary>Fila de servicio leida del Excel de carga (Hoja1). El campo PaqueteCodigo
 /// es opcional; si viene y matchea un Paquete existente por codigo, se enlaza.</summary>

@@ -16,14 +16,14 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
             q = q.Where(p => p.Codigo.ToLower().Contains(f) || p.Nombre.ToLower().Contains(f));
         }
         return await q.OrderBy(p => p.Codigo)
-            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio))
+            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId))
             .ToListAsync(ct);
     }
 
     public async Task<PaqueteDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
         return await db.Paquetes.AsNoTracking().Where(p => p.Id == id)
-            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio))
+            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId))
             .FirstOrDefaultAsync(ct);
     }
 
@@ -67,7 +67,8 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
         entity.Precio = req.Precio;
 
         await db.SaveChangesAsync(ct);
-        return new PaqueteDto(entity.Id, entity.Codigo, entity.Nombre, entity.Activo, entity.Precio);
+        return new PaqueteDto(entity.Id, entity.Codigo, entity.Nombre, entity.Activo, entity.Precio,
+            entity.CupsRepresentativoServicioId);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -211,5 +212,24 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
             .Take(limite)
             .Select(c => new CatalogoServicioAutocompleteDto(c.Id, c.Codigo, c.Nombre, c.Tipo.ToString()))
             .ToListAsync(ct);
+    }
+
+    public async Task<PaqueteDto?> MarcarRepresentativoAsync(Guid paqueteId, Guid? paqueteServicioId, Guid actor, CancellationToken ct = default)
+    {
+        var paquete = await db.Paquetes.FirstOrDefaultAsync(p => p.Id == paqueteId, ct);
+        if (paquete is null) { return null; }
+        if (paqueteServicioId is Guid sid)
+        {
+            // Validar que el PaqueteServicio pertenezca a este paquete.
+            var pertenece = await db.PaqueteServicios.AnyAsync(s => s.Id == sid && s.PaqueteId == paqueteId, ct);
+            if (!pertenece)
+            {
+                throw new InvalidOperationException("El servicio no pertenece a este paquete.");
+            }
+        }
+        paquete.CupsRepresentativoServicioId = paqueteServicioId;
+        await db.SaveChangesAsync(ct);
+        return new PaqueteDto(paquete.Id, paquete.Codigo, paquete.Nombre, paquete.Activo, paquete.Precio,
+            paquete.CupsRepresentativoServicioId);
     }
 }

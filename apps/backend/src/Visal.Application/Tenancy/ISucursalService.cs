@@ -8,7 +8,8 @@ public sealed record SucursalDto(
     string? Ciudad,
     string? Telefono,
     bool Activo,
-    bool MipresObligatorio);
+    bool MipresObligatorio,
+    string? CodigoHabilitacion);
 
 public sealed record SaveSucursalRequest(
     Guid? Id,
@@ -18,7 +19,8 @@ public sealed record SaveSucursalRequest(
     string? Ciudad,
     string? Telefono,
     bool Activo,
-    bool MipresObligatorio);
+    bool MipresObligatorio,
+    string? CodigoHabilitacion = null);
 
 public interface ISucursalService
 {

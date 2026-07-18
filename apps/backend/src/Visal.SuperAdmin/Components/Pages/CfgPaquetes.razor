@@ -121,6 +121,7 @@
                                         <table class="table table-sm pkg-servicios-tbl">
                                             <thead>
                                                 <tr>
+                                                    <th style="width:60px" title="CUPS representativo para facturacion (Fase 4)">Repr.</th>
                                                     <th style="width:180px">Codigo</th>
                                                     <th>Nombre (del catalogo)</th>
                                                     <th style="width:100px">Cantidad</th>
@@ -131,6 +132,13 @@
                                                 @foreach (var s in it.Servicios)
                                                 {
                                                     <tr>
+                                                        <td class="text-center">
+                                                            <input type="radio" class="form-check-input"
+                                                                   name="@($"repr-{it.Id}")"
+                                                                   checked="@(it.CupsRepresentativoServicioId == s.Id)"
+                                                                   @onchange="() => MarcarRepresentativoAsync(it, s)"
+                                                                   title="Este CUPS se usa como representativo al facturar el paquete." />
+                                                        </td>
                                                         <td class="fb-mono">@s.Codigo</td>
                                                         <td>
                                                             @if (s.Nombre is null)
@@ -205,6 +213,7 @@
         _items = (await Svc.ListarAsync(_filtro, soloActivos: false))
             .Select(p => new Item {
                 Id = p.Id, Codigo = p.Codigo, Nombre = p.Nombre, Activo = p.Activo, Precio = p.Precio,
+                CupsRepresentativoServicioId = p.CupsRepresentativoServicioId,
                 Expandido = expandidosIds.Contains(p.Id)
             })
             .ToList();
@@ -355,7 +364,26 @@
         {
             await Svc.QuitarServicioAsync(s.Id, Guid.Empty);
             it.Servicios.RemoveAll(x => x.Id == s.Id);
+            // Si el que quitamos era el representativo, limpiar el flag local
+            // (backend ya lo hizo por ON DELETE SET NULL).
+            if (it.CupsRepresentativoServicioId == s.Id) { it.CupsRepresentativoServicioId = null; }
             _ok = $"Servicio '{s.Codigo}' quitado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task MarcarRepresentativoAsync(Item it, PaqueteServicioDto s)
+    {
+        if (it.Id is not Guid pid) { return; }
+        _error = _ok = null;
+        try
+        {
+            var upd = await Svc.MarcarRepresentativoAsync(pid, s.Id, Guid.Empty);
+            if (upd is not null)
+            {
+                it.CupsRepresentativoServicioId = upd.CupsRepresentativoServicioId;
+                _ok = $"CUPS representativo: {s.Codigo}.";
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
     }
@@ -367,6 +395,9 @@
         public string Nombre { get; set; } = "";
         public bool Activo { get; set; } = true;
         public decimal? Precio { get; set; }
+        /// <summary>PaqueteServicio.Id marcado como representativo para facturacion.
+        /// Nullable — si no se marca, el builder cae al primero por codigo.</summary>
+        public Guid? CupsRepresentativoServicioId { get; set; }
 
         // Estado UI del detalle expandible.
         public bool Expandido { get; set; }

@@ -26,4 +26,16 @@ public class Paquete : TenantEntity
     /// PaqueteId != null en /asignacion, estos servicios se expanden al carrito para que
     /// el coordinador los revise y guarde en bloque.</summary>
     public List<PaqueteServicio> Servicios { get; set; } = new();
+
+    /// <summary>
+    /// FK opcional al <see cref="PaqueteServicio"/> "representativo" para facturacion.
+    /// Cuando el paquete se factura, el snapshot de Relacion de Facturas emite UNA sola
+    /// fila con el CUPS + descripcion + Cantidad del servicio marcado aqui, y
+    /// <c>Valor Unitario = Paquete.Precio</c>. Los demas servicios del paquete no
+    /// generan fila propia. Nullable — si el paquete aun no tiene representativo,
+    /// el builder cae a "primer PaqueteServicio.OrderBy(Codigo)" como fallback.
+    /// <c>ON DELETE SET NULL</c>.
+    /// </summary>
+    public Guid? CupsRepresentativoServicioId { get; set; }
+    public PaqueteServicio? CupsRepresentativoServicio { get; set; }
 }

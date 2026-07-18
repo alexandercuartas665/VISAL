@@ -96,6 +96,9 @@
                         </select>
                     </div>
                     <div class="ase-f"><label>CodInt</label><input class="form-control form-control-sm" @bind="_aCodInt" /></div>
+                    <div class="ase-f ase-f-wide"><label title="Correo destino para radicar la factura (Fase 4 Facturacion).">Correo facturacion</label>
+                        <input class="form-control form-control-sm" type="email" @bind="_aCorreoFac" placeholder="facturacion@eps.com" />
+                    </div>
                     <div class="ase-f ase-f-full"><label>Descripcion</label><textarea class="form-control form-control-sm" rows="2" @bind="_aDesc"></textarea></div>
                 </div>
                 <div class="ase-actions">
@@ -199,6 +202,9 @@
                                             <td><input class="form-control form-control-sm" @bind="s.Sede" /></td>
                                             <td class="ase-row-actions">
                                                 <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => SaveServicio(s)">&#10003;</button>
+                                                <button class="btn @(TieneRips(s) ? "btn-info" : "btn-outline-info") btn-sm"
+                                                        title="RIPS Res 2275 + Valor Total (Facturacion)"
+                                                        @onclick="() => AbrirRips(s)">RIPS</button>
                                                 @if (s.Id is not null)
                                                 {
                                                     <button class="btn btn-outline-danger btn-sm" title="Eliminar" @onclick="() => DeleteServicio(s)">&times;</button>
@@ -217,6 +223,51 @@
     </div>
 </div>
 
+@* ============ Modal RIPS Res 2275 + Valor Total (Fase 4 Facturacion) ============ *@
+@if (_ripsOpen && _ripsEdit is not null)
+{
+    <div class="sn-modal-back" @onclick="CerrarRips">
+        <div class="sn-modal sn-modal-md" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Servicio del contrato</div>
+                    <h3>Codigos RIPS (Res 2275) + Valor Total</h3>
+                    <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+                        Usados por el snapshot Relacion de Facturas al radicar ante la EPS.
+                    </div>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarRips">&times;</button>
+            </div>
+            <div class="sn-modal-body">
+                <div class="rips-grid">
+                    <div><label>Finalidad</label><input class="form-control form-control-sm mono" maxlength="10" @bind="_ripsEdit.Finalidad" placeholder="17" /></div>
+                    <div><label>Causa Externa</label><input class="form-control form-control-sm mono" maxlength="10" @bind="_ripsEdit.CausaExterna" placeholder="38" /></div>
+                    <div><label>Modalidad Atencion</label><input class="form-control form-control-sm mono" maxlength="10" @bind="_ripsEdit.ModalidadAtencion" placeholder="02" /></div>
+                    <div><label>Via Ingreso</label><input class="form-control form-control-sm mono" maxlength="10" @bind="_ripsEdit.ViaIngreso" placeholder="03" /></div>
+                    <div><label>Grupo Servicios</label><input class="form-control form-control-sm mono" maxlength="10" @bind="_ripsEdit.GrupoServicios" placeholder="07" /></div>
+                    <div><label>Servicios (REPS)</label><input class="form-control form-control-sm mono" maxlength="10" @bind="_ripsEdit.Servicios" placeholder="312" /></div>
+                    <div class="rips-span2"><label>Valor Total (pactado con la aseguradora)</label>
+                        <input class="form-control form-control-sm" type="number" step="0.01" @bind="_ripsEdit.ValorTotal" placeholder="Deja vacio para usar Tarifa" />
+                    </div>
+                </div>
+            </div>
+            <div class="sn-modal-f">
+                <small class="text-muted">Los codigos son strings MinSalud — spec §5.10.</small>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarRips">Cancelar</button>
+                    <button class="btn btn-primary btn-sm ms-2" @onclick="GuardarRips">Guardar RIPS</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .rips-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+    .rips-grid label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+    .rips-span2 { grid-column:1 / -1; }
+</style>
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -224,7 +275,7 @@
     private bool _showForm;
     private Guid? _aseId;
     private string _aCodigo = "", _aTipo = "EPS", _aNombre = "";
-    private string? _aMov, _aNit, _aRegimen, _aCodInt, _aDesc;
+    private string? _aMov, _aNit, _aRegimen, _aCodInt, _aDesc, _aCorreoFac;
 
     private List<ContratoEdit> _contratos = new();
     private Guid? _contratoId;
@@ -247,7 +298,7 @@
     private void NewAseguradora()
     {
         _aseId = null; _aCodigo = ""; _aTipo = "EPS"; _aNombre = "";
-        _aMov = _aNit = _aRegimen = _aCodInt = _aDesc = null;
+        _aMov = _aNit = _aRegimen = _aCodInt = _aDesc = _aCorreoFac = null;
         _contratos = new(); _contratoId = null; _servicios = new();
         _showForm = true; _error = _ok = null;
     }
@@ -257,7 +308,7 @@
         var d = await Svc.GetAseguradoraAsync(id);
         if (d is null) { return; }
         _aseId = d.Id; _aCodigo = d.Codigo; _aTipo = d.Tipo; _aNombre = d.Nombre;
-        _aMov = d.CodigoMovilidad; _aNit = d.Nit; _aRegimen = d.Regimen; _aCodInt = d.CodInt; _aDesc = d.Descripcion;
+        _aMov = d.CodigoMovilidad; _aNit = d.Nit; _aRegimen = d.Regimen; _aCodInt = d.CodInt; _aDesc = d.Descripcion; _aCorreoFac = d.CorreoFacturacion;
         _showForm = true; _error = _ok = null;
         _contratoId = null; _servicios = new();
         await LoadContratos();
@@ -268,7 +319,7 @@
         _error = _ok = null; _busy = true;
         try
         {
-            var req = new SaveAseguradoraRequest(_aseId, _aCodigo, _aTipo, _aNombre, _aMov, _aNit, _aRegimen, _aCodInt, _aDesc);
+            var req = new SaveAseguradoraRequest(_aseId, _aCodigo, _aTipo, _aNombre, _aMov, _aNit, _aRegimen, _aCodInt, _aDesc, _aCorreoFac);
             var saved = await Svc.SaveAseguradoraAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             _aseId = saved.Id;
@@ -364,7 +415,8 @@
         {
             var req = new SaveServicioRequest(s.Id, _contratoId!.Value, s.Sede, s.Historia, s.PaqueteId,
                 s.CodigoServicio, s.CodigoInterno,
-                s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones);
+                s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
+                s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal);
             var saved = await Svc.SaveServicioAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar el servicio."; return; }
             s.Id = saved.Id;
@@ -377,6 +429,55 @@
     {
         if (s.Id is Guid id) { await Svc.DeleteServicioAsync(id, await Actor()); }
         await LoadServicios();
+    }
+
+    // ---- Modal RIPS ----
+
+    private bool _ripsOpen;
+    private ServicioEdit? _ripsEdit;
+    private ServicioEdit? _ripsTarget;
+
+    private static bool TieneRips(ServicioEdit s)
+        => !string.IsNullOrEmpty(s.Finalidad) || !string.IsNullOrEmpty(s.CausaExterna)
+        || !string.IsNullOrEmpty(s.ModalidadAtencion) || !string.IsNullOrEmpty(s.ViaIngreso)
+        || !string.IsNullOrEmpty(s.GrupoServicios) || !string.IsNullOrEmpty(s.Servicios)
+        || s.ValorTotal is not null;
+
+    private void AbrirRips(ServicioEdit s)
+    {
+        _ripsTarget = s;
+        // Copia editable — no mutamos la fila hasta guardar.
+        _ripsEdit = new ServicioEdit
+        {
+            Finalidad = s.Finalidad, CausaExterna = s.CausaExterna,
+            ModalidadAtencion = s.ModalidadAtencion, ViaIngreso = s.ViaIngreso,
+            GrupoServicios = s.GrupoServicios, Servicios = s.Servicios,
+            ValorTotal = s.ValorTotal
+        };
+        _ripsOpen = true;
+    }
+
+    private void CerrarRips()
+    {
+        _ripsOpen = false;
+        _ripsEdit = null;
+        _ripsTarget = null;
+    }
+
+    private async Task GuardarRips()
+    {
+        if (_ripsTarget is null || _ripsEdit is null) { return; }
+        _ripsTarget.Finalidad = _ripsEdit.Finalidad?.Trim();
+        _ripsTarget.CausaExterna = _ripsEdit.CausaExterna?.Trim();
+        _ripsTarget.ModalidadAtencion = _ripsEdit.ModalidadAtencion?.Trim();
+        _ripsTarget.ViaIngreso = _ripsEdit.ViaIngreso?.Trim();
+        _ripsTarget.GrupoServicios = _ripsEdit.GrupoServicios?.Trim();
+        _ripsTarget.Servicios = _ripsEdit.Servicios?.Trim();
+        _ripsTarget.ValorTotal = _ripsEdit.ValorTotal;
+        // Persistir. Si el servicio aun no existe (fila nueva), Save lo crea con
+        // los RIPS ya incluidos.
+        await SaveServicio(_ripsTarget);
+        CerrarRips();
     }
 
     private async Task OnImportExcel(InputFileChangeEventArgs e)
@@ -543,12 +644,23 @@
         public string? Modalidad { get; set; }
         public string? Clasificacion { get; set; }
         public string? Observaciones { get; set; }
+        // Fase 4 Facturacion: RIPS Res 2275 + ValorTotal.
+        public string? Finalidad { get; set; }
+        public string? CausaExterna { get; set; }
+        public string? ModalidadAtencion { get; set; }
+        public string? ViaIngreso { get; set; }
+        public string? GrupoServicios { get; set; }
+        public string? Servicios { get; set; }
+        public decimal? ValorTotal { get; set; }
         public static ServicioEdit From(ServicioDto d) => new()
         {
             Id = d.Id, Sede = d.Sede, Historia = d.Historia, PaqueteId = d.PaqueteId,
             CodigoServicio = d.CodigoServicio, CodigoInterno = d.CodigoInterno,
             Descripcion = d.Descripcion, Tarifa = d.Tarifa, Modulo = d.Modulo, Especialidad = d.Especialidad,
-            Modalidad = d.Modalidad, Clasificacion = d.Clasificacion, Observaciones = d.Observaciones
+            Modalidad = d.Modalidad, Clasificacion = d.Clasificacion, Observaciones = d.Observaciones,
+            Finalidad = d.Finalidad, CausaExterna = d.CausaExterna, ModalidadAtencion = d.ModalidadAtencion,
+            ViaIngreso = d.ViaIngreso, GrupoServicios = d.GrupoServicios, Servicios = d.Servicios,
+            ValorTotal = d.ValorTotal
         };
     }
 }

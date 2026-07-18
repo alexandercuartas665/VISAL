@@ -24,7 +24,7 @@
     </div>
     <div class="table-responsive">
         <table class="table table-sm align-middle">
-            <thead><tr><th>Codigo</th><th>Nombre</th><th>Ciudad</th><th>Direccion</th><th>Telefono</th><th>Activa</th><th title="Exige codigo MIPRES al entregar medicamentos e insumos">MIPRES obligatorio</th><th></th></tr></thead>
+            <thead><tr><th>Codigo</th><th>Nombre</th><th>Ciudad</th><th>Direccion</th><th>Telefono</th><th title="Codigo de habilitacion REPS de la sede (Fase 4 Facturacion, 12 digitos)">Cod. habilitacion</th><th>Activa</th><th title="Exige codigo MIPRES al entregar medicamentos e insumos">MIPRES obligatorio</th><th></th></tr></thead>
             <tbody>
                 @foreach (var s in _items)
                 {
@@ -34,6 +34,7 @@
                         <td><input class="form-control form-control-sm" @bind="s.Ciudad" /></td>
                         <td><input class="form-control form-control-sm" @bind="s.Direccion" /></td>
                         <td><input class="form-control form-control-sm" style="width:120px" @bind="s.Telefono" /></td>
+                        <td><input class="form-control form-control-sm mono" style="width:140px" maxlength="20" @bind="s.CodigoHabilitacion" placeholder="730010353101" /></td>
                         <td class="text-center"><input type="checkbox" class="form-check-input" @bind="s.Activo" /></td>
                         <td class="text-center" title="Cuando esta marcado, la HC bloquea Agregar medicamentos/insumos sin URL MIPRES">
                             <input type="checkbox" class="form-check-input" @bind="s.MipresObligatorio" />
@@ -150,7 +151,7 @@
         _error = _ok = null;
         try
         {
-            var saved = await Svc.SaveAsync(new SaveSucursalRequest(r.Id, r.Codigo, r.Nombre, r.Direccion, r.Ciudad, r.Telefono, r.Activo, r.MipresObligatorio), await Actor());
+            var saved = await Svc.SaveAsync(new SaveSucursalRequest(r.Id, r.Codigo, r.Nombre, r.Direccion, r.Ciudad, r.Telefono, r.Activo, r.MipresObligatorio, r.CodigoHabilitacion), await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             r.Id = saved.Id; _ok = "Sucursal guardada.";
         }
@@ -180,6 +181,7 @@
         public string? Telefono { get; set; }
         public bool Activo { get; set; } = true;
         public bool MipresObligatorio { get; set; }
-        public static Row From(SucursalDto d) => new() { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Direccion = d.Direccion, Ciudad = d.Ciudad, Telefono = d.Telefono, Activo = d.Activo, MipresObligatorio = d.MipresObligatorio };
+        public string? CodigoHabilitacion { get; set; }
+        public static Row From(SucursalDto d) => new() { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Direccion = d.Direccion, Ciudad = d.Ciudad, Telefono = d.Telefono, Activo = d.Activo, MipresObligatorio = d.MipresObligatorio, CodigoHabilitacion = d.CodigoHabilitacion };
     }
 }

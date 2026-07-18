@@ -953,6 +953,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Regimen).HasMaxLength(40);
             b.Property(x => x.CodInt).HasMaxLength(20);
             b.Property(x => x.Descripcion).HasMaxLength(1000);
+            b.Property(x => x.CorreoFacturacion).HasMaxLength(200);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
         });
 
@@ -1021,6 +1022,14 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Modalidad).HasMaxLength(80);
             b.Property(x => x.Clasificacion).HasMaxLength(80);
             b.Property(x => x.Observaciones).HasMaxLength(1000);
+            // Codigos RIPS Res 2275 — string directo (spec Facturacion §5.10).
+            b.Property(x => x.Finalidad).HasMaxLength(10);
+            b.Property(x => x.CausaExterna).HasMaxLength(10);
+            b.Property(x => x.ModalidadAtencion).HasMaxLength(10);
+            b.Property(x => x.ViaIngreso).HasMaxLength(10);
+            b.Property(x => x.GrupoServicios).HasMaxLength(10);
+            b.Property(x => x.Servicios).HasMaxLength(10);
+            b.Property(x => x.ValorTotal).HasPrecision(14, 2);
             b.HasOne(x => x.Contrato).WithMany().HasForeignKey(x => x.ContratoId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.Paquete).WithMany().HasForeignKey(x => x.PaqueteId).OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.ContratoId });
@@ -1032,6 +1041,11 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
             b.Property(x => x.Nombre).HasMaxLength(500).IsRequired();
             b.Property(x => x.Precio).HasPrecision(14, 2);
+            // FK opcional al PaqueteServicio representativo para facturacion (spec §5.9).
+            b.HasOne(x => x.CupsRepresentativoServicio)
+                .WithMany()
+                .HasForeignKey(x => x.CupsRepresentativoServicioId)
+                .OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
         });
 
@@ -1081,6 +1095,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Direccion).HasMaxLength(300);
             b.Property(x => x.Ciudad).HasMaxLength(120);
             b.Property(x => x.Telefono).HasMaxLength(40);
+            b.Property(x => x.CodigoHabilitacion).HasMaxLength(20);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
         });
 

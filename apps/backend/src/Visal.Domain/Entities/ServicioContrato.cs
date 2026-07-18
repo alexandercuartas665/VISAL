@@ -26,4 +26,22 @@ public class ServicioContrato : TenantEntity
     public string? Modalidad { get; set; }
     public string? Clasificacion { get; set; }
     public string? Observaciones { get; set; }
+
+    // ---- RIPS Res 2275 (Fase 4 Facturacion) ----
+    // Guardados como codigo MinSalud directo (string). Doc: 07. Facturacion §5.10.
+
+    /// <summary>Codigo RIPS Finalidad (ej. 17 = terapeutica).</summary>
+    public string? Finalidad { get; set; }
+    /// <summary>Codigo RIPS Causa externa (ej. 38 = enfermedad general).</summary>
+    public string? CausaExterna { get; set; }
+    /// <summary>Codigo RIPS Modalidad atencion (ej. 02 = extramural domiciliaria).</summary>
+    public string? ModalidadAtencion { get; set; }
+    /// <summary>Codigo RIPS Via de ingreso al servicio de salud (ej. 03).</summary>
+    public string? ViaIngreso { get; set; }
+    /// <summary>Codigo MinSalud Grupo de servicios (ej. 07 = terapias).</summary>
+    public string? GrupoServicios { get; set; }
+    /// <summary>Codigo REPS del servicio (ej. 312 = atencion domiciliaria).</summary>
+    public string? Servicios { get; set; }
+    /// <summary>Valor Total del servicio segun contrato (Tarifa * cantidad tope). Nullable — si no se define, el builder cae a Tarifa.</summary>
+    public decimal? ValorTotal { get; set; }
 }

@@ -1,6 +1,13 @@
 # Add-PPFO51-Braden.ps1
-# Carga PP-FO-51 ESCALA DE BRADEN (tipo=ESCALAS) siguiendo el patron de
-# PP-FO-59 Norton (select por dominio + suma + cases). 6 subescalas.
+# Carga PP-FO-51 ESCALA DE BRADEN (tipo=ESCALAS) usando el patron de
+# PP-FO-59 Norton (select por dominio + sum + cases). 6 subescalas.
+# Segun docx real:
+#   - Rangos de interpretacion son 3 (Alto/Moderado/Bajo). El docx solapa
+#     19-23 y >=19 en la 4ta fila; se ignora ese solape y se mantiene el
+#     rango 19-23 = Riesgo Bajo con texto de la 3ra fila.
+#   - Se agrega campo calculado 'Intervencion Recomendada' con el texto
+#     exacto del docx segun el rango del puntaje total (usa cases(),
+#     patron que ya funciona en Norton).
 # Header con logo Visal RT.
 
 [CmdletBinding()]
@@ -27,7 +34,6 @@ function SelDominio([string]$label, [string]$name, $options) {
     }
 }
 
-# ========== Header con logo ==========
 $header = @{
     campos = @(
         @{ id=newId; label="No Historia" },
@@ -40,20 +46,18 @@ $header = @{
     institucion = ""
 }
 
-# ========== DATOS DEL PACIENTE ==========
 $secDatos = @{
     id = newId; type = "section"; label = "DATOS DEL PACIENTE"
     children = @(
-        (Field "Nombre del paciente" "nombre_paciente"   "text" 8 @{ required=$true }),
-        (Field "Tipo y N° Identificación" "identificacion" "text" 4 @{ required=$true }),
-        (Field "Fecha de nacimiento" "fecha_nacimiento" "date" 4),
-        (Field "Edad (auto)" "edad" "calculated" 2 @{ formula = "edad(fecha_nacimiento)" }),
-        (Field "Fecha de atención" "fecha_atencion" "date" 3 @{ required=$true }),
-        (Field "Hora de atención"  "hora_atencion"  "text" 3)
+        (Field "Nombre del paciente"      "nombre_paciente"    "text" 8 @{ required=$true }),
+        (Field "Tipo y N° Identificación" "identificacion"    "text" 4 @{ required=$true }),
+        (Field "Fecha de nacimiento"      "fecha_nacimiento"  "date" 4),
+        (Field "Edad (auto)"              "edad"              "calculated" 2 @{ formula = "edad(fecha_nacimiento)" }),
+        (Field "Fecha de atención"        "fecha_atencion"    "date" 3 @{ required=$true }),
+        (Field "Hora de atención"         "hora_atencion"     "text" 3)
     )
 }
 
-# ========== INDICE DE BRADEN ==========
 $secBraden = @{
     id = newId; type = "section"; label = "INDICE DE BRADEN"
     children = @(
@@ -96,7 +100,11 @@ $secBraden = @{
     )
 }
 
-# ========== RESULTADO ==========
+# Textos de intervencion (docx literal)
+$intAlto      = "Implementar plan intensivo de prevención de úlceras por presión (cambios de posición frecuentes, cuidado de la piel, superficies especiales si aplica)."
+$intModerado  = "Implementar medidas de prevención y seguimiento periódico del estado de la piel."
+$intBajo      = "Mantener cuidados básicos de enfermería y vigilancia del estado de la piel."
+
 $secResultado = @{
     id = newId; type = "section"; label = "RESULTADO"
     children = @(
@@ -104,31 +112,31 @@ $secResultado = @{
             formula = "sum(braden_percepcion, braden_humedad, braden_actividad, braden_movilidad, braden_nutricion, braden_friccion)"
         }),
         (Field "Nivel de riesgo (automatico)" "braden_nivel" "calculated" 8 @{
-            formula = 'cases(braden_total, "6-12=RIESGO ALTO;13-14=RIESGO MODERADO;15-18=RIESGO BAJO;19-23=SIN RIESGO")'
+            formula = 'cases(braden_total, "6-12=RIESGO ALTO;13-18=RIESGO MODERADO;19-23=RIESGO BAJO")'
         }),
-        (SH "Referencias: <=12 Riesgo alto | 13-14 Moderado | 15-18 Bajo | >=19 Sin riesgo"),
-        (Field "Interpretación / Plan de intervención" "interpretacion" "textarea" 12 @{ enableVoice=$true; rows=3 })
+        (Field "Intervención recomendada (automatica)" "braden_intervencion" "calculated" 12 @{
+            formula = "cases(braden_total, `"6-12=$intAlto;13-18=$intModerado;19-23=$intBajo`")"
+        }),
+        (SH "Referencias: <=12 Riesgo alto | 13-18 Moderado | 19-23 Bajo"),
+        (Field "Interpretación / Plan de intervención (manual)" "interpretacion" "textarea" 12 @{ enableVoice=$true; rows=3 })
     )
 }
 
-# ========== FIRMA ==========
 $secFirma = @{
     id = newId; type = "section"; label = "OBSERVACIONES Y FIRMA"
     children = @(
         (Field "Observaciones del profesional" "observaciones" "textarea" 12 @{ enableVoice=$true; rows=3 }),
-        (Field "Nombre del profesional" "profesional_nombre" "text" 8),
-        (Field "Registro profesional" "profesional_registro" "text" 4),
-        (Field "Firma del profesional (URL)" "firma_profesional" "text" 12)
+        (Field "Nombre del profesional"        "profesional_nombre"    "text" 8),
+        (Field "Registro profesional"          "profesional_registro"  "text" 4),
+        (Field "Firma del profesional (URL)"   "firma_profesional"     "text" 12)
     )
 }
 
-# ========== Ensamblar ==========
 $schema = @{
     header = $header
     children = @($secDatos, $secBraden, $secResultado, $secFirma)
 }
 
-# ========== UPSERT ==========
 $json = ($schema | ConvertTo-Json -Depth 40 -Compress)
 $jsonSql = $json.Replace("'","''")
 $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss.fffzzz")

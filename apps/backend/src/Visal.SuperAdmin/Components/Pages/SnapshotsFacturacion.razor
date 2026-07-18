@@ -4,9 +4,12 @@
 @using System.Security.Claims
 @using System.Text.Json
 @using Visal.Application.Facturacion
+@using Visal.Application.Tenancy
 @using Visal.Domain.Enums
 @inject IFacturacionSnapshotService Svc
 @inject IEnumerable<ISnapshotBuilder> Builders
+@inject IAseguradoraService AseSvc
+@inject ISucursalService SucSvc
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
 
@@ -198,24 +201,63 @@
                         <label>Nombre * <small class="text-muted">(para identificarlo en el listado)</small></label>
                         <input class="form-control form-control-sm" @bind="_nuevoNombre" placeholder="ASMET SALUD - Junio 2026" />
                     </div>
-                    <div class="ase-f">
-                        <label>Filtros del snapshot</label>
-                        <div class="sn-filtros-slot">
-                            @* Fase 2 rendered placeholder — el componente de filtros por
-                               tipo (SnapshotFiltrosRelacionFacturas.razor, etc.) se
-                               inserta aca en Fase 5. Por ahora el usuario captura el
-                               JSON de filtros en crudo para poder ejercitar el motor. *@
+                    @if (_nuevoTipo == TipoSnapshot.RelacionFacturas)
+                    {
+                        <div class="ase-f">
+                            <label>Aseguradora *</label>
+                            <select class="form-select form-select-sm" @bind="_relAseguradoraId">
+                                <option value="">-- Selecciona --</option>
+                                @foreach (var a in _relAseguradoras)
+                                {
+                                    <option value="@a.Id">@a.Nombre @(string.IsNullOrEmpty(a.Nit) ? "" : $"({a.Nit})")</option>
+                                }
+                            </select>
+                            <small class="text-muted d-block mt-1">
+                                1 snapshot = 1 aseguradora = 1 Excel. Para multi-EPS, genera un snapshot por cada una.
+                            </small>
+                        </div>
+                        <div class="ase-f">
+                            <label>Sucursales <small class="text-muted">(opcional — vacio = todas las del tenant)</small></label>
+                            <div class="sn-multi">
+                                @foreach (var s in _relSucursales)
+                                {
+                                    <label class="sn-multi-chip">
+                                        <input type="checkbox"
+                                               checked="@_relSucursalIds.Contains(s.Id)"
+                                               @onchange="e => ToggleSucursal(s.Id, (bool)(e.Value ?? false))" />
+                                        <span>@s.Nombre</span>
+                                    </label>
+                                }
+                                @if (_relSucursales.Count == 0)
+                                {
+                                    <span class="text-muted">Sin sucursales activas.</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="ase-f" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div>
+                                <label>Fecha inicio *</label>
+                                <input type="date" class="form-control form-control-sm" @bind="_relFechaInicio" />
+                            </div>
+                            <div>
+                                <label>Fecha fin *</label>
+                                <input type="date" class="form-control form-control-sm" @bind="_relFechaFin" />
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="ase-f">
+                            <label>Filtros del snapshot (JSON)</label>
                             <textarea class="form-control form-control-sm" rows="4"
                                       style="font-family:'JetBrains Mono','Consolas',monospace;font-size:12px;"
                                       @bind="_nuevoFiltrosJson"
-                                      placeholder='{"aseguradoraIds":[],"fechaInicio":"2026-06-01","fechaFin":"2026-06-30"}'></textarea>
+                                      placeholder='{"fechaInicio":"2026-06-01","fechaFin":"2026-06-30"}'></textarea>
                             <small class="text-muted d-block mt-1">
-                                Cada tipo interpreta su propia forma. En Fase 5 se agrega un
-                                formulario visual por tipo (multi-select de aseguradoras,
-                                sedes, rango de fechas, etc.).
+                                Este tipo aun no tiene formulario visual — captura el JSON de filtros a mano.
                             </small>
                         </div>
-                    </div>
+                    }
                 </div>
             </div>
             <div class="sn-modal-f">
@@ -422,6 +464,12 @@
     .sn-vertabla thead .sn-vt-freeze { z-index:3; background:#eff6ff; }
     .sn-vertabla tbody tr:nth-child(even) td:not(.sn-vt-freeze) { background:#fafbfc; }
     .sn-vertabla tbody tr:nth-child(even) td.sn-vt-freeze { background:#fafbfc; }
+
+    /* F4b: multi-check de sucursales en el modal Nuevo. */
+    .sn-multi { display:flex; flex-wrap:wrap; gap:6px; padding:8px; border:1px solid var(--border); border-radius:6px; background:#fafbfc; max-height:120px; overflow-y:auto; }
+    .sn-multi-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:14px; background:white; border:1px solid var(--border); font-size:12px; cursor:pointer; user-select:none; margin:0; }
+    .sn-multi-chip:hover { background:#eff6ff; border-color:#93c5fd; }
+    .sn-multi-chip input { margin:0; cursor:pointer; }
 </style>
 
 @code {
@@ -449,6 +497,14 @@
     private string _nuevoFiltrosJson = "{}";
     private bool _generando;
     private string? _nuevoErr;
+
+    // Filtros visuales Relacion de Facturas (F4b).
+    private List<AseguradoraDto> _relAseguradoras = new();
+    private List<SucursalDto> _relSucursales = new();
+    private string _relAseguradoraId = "";
+    private HashSet<Guid> _relSucursalIds = new();
+    private DateOnly? _relFechaInicio;
+    private DateOnly? _relFechaFin;
 
     // Modal Ver.
     private bool _showVer;
@@ -535,14 +591,29 @@
 
     // ---- Modal Nuevo ----
 
-    private void AbrirNuevo()
+    private async Task AbrirNuevo()
     {
         if (_tiposDisponibles.Count == 0) { return; }
         _nuevoTipo = _tiposDisponibles[0];
         _nuevoNombre = "";
         _nuevoFiltrosJson = "{}";
         _nuevoErr = null;
+        // Precarga catalogos para el formulario visual del tipo Relacion de Facturas.
+        // El motor filtra por tenant activo — lo que aparece aca ya esta scoped.
+        _relAseguradoras = (await AseSvc.ListAseguradorasAsync()).OrderBy(a => a.Nombre).ToList();
+        _relSucursales = (await SucSvc.ListAsync(soloActivas: true)).OrderBy(s => s.Nombre).ToList();
+        _relAseguradoraId = "";
+        _relSucursalIds = new();
+        var hoy = DateOnly.FromDateTime(DateTime.Today);
+        _relFechaInicio = new DateOnly(hoy.Year, hoy.Month, 1);
+        _relFechaFin = hoy;
         _showNuevo = true;
+    }
+
+    private void ToggleSucursal(Guid id, bool selected)
+    {
+        if (selected) { _relSucursalIds.Add(id); }
+        else { _relSucursalIds.Remove(id); }
     }
 
     private void CerrarNuevo()
@@ -559,17 +630,49 @@
             _nuevoErr = "El nombre es obligatorio.";
             return;
         }
-        try { using var _ = JsonDocument.Parse(_nuevoFiltrosJson); }
-        catch (Exception ex)
+
+        string filtrosJson;
+        if (_nuevoTipo == TipoSnapshot.RelacionFacturas)
         {
-            _nuevoErr = "Los filtros no son JSON valido: " + ex.Message;
-            return;
+            // Validaciones spec §2.
+            if (!Guid.TryParse(_relAseguradoraId, out var aseg))
+            {
+                _nuevoErr = "Selecciona la aseguradora."; return;
+            }
+            if (_relFechaInicio is null || _relFechaFin is null)
+            {
+                _nuevoErr = "Las fechas de inicio y fin son obligatorias."; return;
+            }
+            if (_relFechaFin < _relFechaInicio)
+            {
+                _nuevoErr = "La fecha fin debe ser mayor o igual a la fecha inicio."; return;
+            }
+            // Armar el JSON exacto que el builder espera (ver
+            // SnapshotRelacionFacturasBuilder.ParsearFiltros).
+            var payload = new
+            {
+                aseguradoraId = aseg.ToString(),
+                sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
+                fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
+                fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
+            };
+            filtrosJson = JsonSerializer.Serialize(payload);
+        }
+        else
+        {
+            try { using var _ = JsonDocument.Parse(_nuevoFiltrosJson); }
+            catch (Exception ex)
+            {
+                _nuevoErr = "Los filtros no son JSON valido: " + ex.Message;
+                return;
+            }
+            filtrosJson = _nuevoFiltrosJson.Trim();
         }
 
         _generando = true;
         try
         {
-            var cmd = new GenerarSnapshotCmd(_nuevoTipo, _nuevoNombre.Trim(), _nuevoFiltrosJson.Trim());
+            var cmd = new GenerarSnapshotCmd(_nuevoTipo, _nuevoNombre.Trim(), filtrosJson);
             var id = await Svc.GenerarAsync(cmd, _actorId);
             _showNuevo = false;
             _ok = $"Snapshot generado: {_nuevoNombre.Trim()}.";

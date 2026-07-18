@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
@@ -243,4 +245,174 @@ public sealed class FacturacionSnapshotService(
 
     private static string Truncate(string s, int max) =>
         string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max];
+
+    // ---- Export ----
+
+    public async Task<ArchivoExportado?> ExportarExcelAsync(Guid id, CancellationToken ct = default)
+    {
+        var ctx = await CargarParaExportAsync(id, ct);
+        if (ctx is null) { return null; }
+
+        using var wb = new XLWorkbook();
+        // Nombre de hoja: limpiar chars invalidos + tope 31 chars (limite Excel).
+        var hoja = wb.Worksheets.Add(SanitizarNombreHoja(ctx.Snapshot.Nombre));
+
+        // Headers exactos del builder. Respetar tildes y demas — el formato lo
+        // impone la EPS/MinSalud, no lo estandarizamos.
+        for (var c = 0; c < ctx.Columnas.Count; c++)
+        {
+            var cell = hoja.Cell(1, c + 1);
+            cell.Value = ctx.Columnas[c];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#dbeafe");
+            cell.Style.Alignment.WrapText = false;
+        }
+
+        // Filas. Iteramos por lotes para no cargar todo en memoria de golpe.
+        var row = 2;
+        await foreach (var fila in IterarFilasAsync(id, ct))
+        {
+            for (var c = 0; c < ctx.Columnas.Count; c++)
+            {
+                var col = ctx.Columnas[c];
+                if (!fila.TryGetValue(col, out var val) || val is null) { continue; }
+                var cell = hoja.Cell(row, c + 1);
+                switch (val)
+                {
+                    case long lv: cell.Value = lv; break;
+                    case int iv: cell.Value = iv; break;
+                    case decimal dv: cell.Value = dv; break;
+                    case double db: cell.Value = db; break;
+                    case bool bv: cell.Value = bv; break;
+                    default: cell.Value = val.ToString(); break;
+                }
+            }
+            row++;
+        }
+
+        // Ajuste automatico de ancho — comodo para el usuario que abre el .xlsx.
+        hoja.Columns().AdjustToContents(1, Math.Max(1, row - 1));
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return new ArchivoExportado(
+            ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".xlsx");
+    }
+
+    public async Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default)
+    {
+        var ctx = await CargarParaExportAsync(id, ct);
+        if (ctx is null) { return null; }
+
+        var sb = new StringBuilder();
+        // Cabecera exacta del builder.
+        sb.AppendLine(string.Join(';', ctx.Columnas.Select(EscaparCsv)));
+
+        await foreach (var fila in IterarFilasAsync(id, ct))
+        {
+            var partes = new string[ctx.Columnas.Count];
+            for (var c = 0; c < ctx.Columnas.Count; c++)
+            {
+                var col = ctx.Columnas[c];
+                var val = fila.TryGetValue(col, out var v) && v is not null ? v.ToString() ?? "" : "";
+                partes[c] = EscaparCsv(val);
+            }
+            sb.AppendLine(string.Join(';', partes));
+        }
+
+        // UTF-8 con BOM para que Excel Colombia lo abra bien de un doble-click.
+        // Encoding.UTF8.GetBytes NO emite el preamble; hay que anteponerlo a mano.
+        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+        var preamble = utf8.GetPreamble();
+        var cuerpo = utf8.GetBytes(sb.ToString());
+        var bytes = new byte[preamble.Length + cuerpo.Length];
+        Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
+        Buffer.BlockCopy(cuerpo, 0, bytes, preamble.Length, cuerpo.Length);
+        return new ArchivoExportado(
+            bytes,
+            "text/csv; charset=utf-8",
+            SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".csv");
+    }
+
+    /// <summary>Contexto compartido de los dos exportadores.</summary>
+    private sealed record CtxExport(FacturacionSnapshot Snapshot, IReadOnlyList<string> Columnas);
+
+    private async Task<CtxExport?> CargarParaExportAsync(Guid id, CancellationToken ct)
+    {
+        var snap = await db.FacturacionSnapshots.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (snap is null) { return null; }
+
+        // El builder puede haber dejado de estar registrado (upgrade sin rebuild):
+        // en ese caso caemos a inferir columnas desde la primera fila. Cubre
+        // snapshots historicos con nuevas versiones del builder.
+        var builder = builders.FirstOrDefault(b => b.TipoAplicable == snap.Tipo);
+        IReadOnlyList<string> columnas = builder?.Columnas ?? Array.Empty<string>();
+        if (columnas.Count == 0)
+        {
+            var primera = await db.FacturacionSnapshotFilas.AsNoTracking()
+                .Where(x => x.SnapshotId == id)
+                .OrderBy(x => x.NumeroFila)
+                .Select(x => x.DatosJson).FirstOrDefaultAsync(ct);
+            if (primera is not null)
+            {
+                using var doc = JsonDocument.Parse(primera);
+                columnas = doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+            }
+        }
+
+        return new CtxExport(snap, columnas);
+    }
+
+    /// <summary>Streamea las filas del snapshot en orden natural para no cargarlas todas en memoria.</summary>
+    private async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> IterarFilasAsync(
+        Guid id,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        const int Batch = 500;
+        var offset = 0;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var lote = await db.FacturacionSnapshotFilas.AsNoTracking()
+                .Where(x => x.SnapshotId == id)
+                .OrderBy(x => x.NumeroFila)
+                .Skip(offset).Take(Batch)
+                .Select(x => x.DatosJson).ToListAsync(ct);
+            if (lote.Count == 0) { yield break; }
+            foreach (var json in lote) { yield return Deserializar(json); }
+            offset += lote.Count;
+            if (lote.Count < Batch) { yield break; }
+        }
+    }
+
+    /// <summary>Escape RFC 4180-ish para el separador ; y encoding CO.</summary>
+    private static string EscaparCsv(string s)
+    {
+        if (s is null) { return string.Empty; }
+        var necesita = s.Contains(';') || s.Contains('"') || s.Contains('\n') || s.Contains('\r');
+        if (!necesita) { return s; }
+        return "\"" + s.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static string SanitizarNombreArchivo(string s)
+    {
+        var invalidos = Path.GetInvalidFileNameChars();
+        var limpio = new StringBuilder(s.Length);
+        foreach (var ch in s) { limpio.Append(invalidos.Contains(ch) ? '_' : ch); }
+        var r = limpio.ToString().Trim();
+        return string.IsNullOrWhiteSpace(r) ? "snapshot" : r;
+    }
+
+    private static string SanitizarNombreHoja(string s)
+    {
+        // Excel: 31 chars max, sin  : \ / ? * [ ]
+        var proh = new[] { ':', '\\', '/', '?', '*', '[', ']' };
+        var sb = new StringBuilder(s.Length);
+        foreach (var ch in s) { sb.Append(proh.Contains(ch) ? '_' : ch); }
+        var r = sb.ToString().Trim();
+        if (string.IsNullOrEmpty(r)) { r = "snapshot"; }
+        return r.Length > 31 ? r[..31] : r;
+    }
 }

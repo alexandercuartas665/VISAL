@@ -173,6 +173,101 @@ public sealed class FacturacionSnapshotServiceTests
     }
 
     [Fact]
+    public async Task ExportarExcelAsync_HeadersExactosYFilasCorrectas()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        // Header con tildes y otro caracter raro para verificar que se preserva.
+        var cols = new[] { "Consecutivo Factura", "Identificación", "Descripción del procedimiento (Factura)" };
+        var filas = new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?> { ["Consecutivo Factura"] = null, ["Identificación"] = "2245956", ["Descripción del procedimiento (Factura)"] = "ATENCION DOMICILIARIA" },
+            new Dictionary<string, object?> { ["Consecutivo Factura"] = null, ["Identificación"] = "104578855", ["Descripción del procedimiento (Factura)"] = "TERAPIA FISICA" }
+        };
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "ASMET Junio", "{}"), Actor);
+        var archivo = await svc.ExportarExcelAsync(id);
+
+        Assert.NotNull(archivo);
+        Assert.EndsWith(".xlsx", archivo!.NombreArchivo);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", archivo.MimeType);
+
+        // Re-abrir el xlsx y validar headers + filas.
+        using var ms = new MemoryStream(archivo.Contenido);
+        using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+        var hoja = wb.Worksheets.First();
+        Assert.Equal("Consecutivo Factura", hoja.Cell(1, 1).GetString());
+        Assert.Equal("Identificación", hoja.Cell(1, 2).GetString());
+        Assert.Equal("Descripción del procedimiento (Factura)", hoja.Cell(1, 3).GetString());
+        Assert.Equal("2245956", hoja.Cell(2, 2).GetString());
+        Assert.Equal("104578855", hoja.Cell(3, 2).GetString());
+    }
+
+    [Fact]
+    public async Task ExportarCsvAsync_UsaSeparadorPuntoComaYUtf8Bom()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var cols = new[] { "Col1", "Col2" };
+        var filas = new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?> { ["Col1"] = "a; con punto y coma", ["Col2"] = "linea normal" },
+            new Dictionary<string, object?> { ["Col1"] = "sin escape", ["Col2"] = 42L }
+        };
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+        var archivo = await svc.ExportarCsvAsync(id);
+
+        Assert.NotNull(archivo);
+        Assert.EndsWith(".csv", archivo!.NombreArchivo);
+
+        // BOM UTF-8: EF BB BF.
+        Assert.True(archivo.Contenido.Length >= 3);
+        Assert.Equal(0xEF, archivo.Contenido[0]);
+        Assert.Equal(0xBB, archivo.Contenido[1]);
+        Assert.Equal(0xBF, archivo.Contenido[2]);
+
+        var texto = System.Text.Encoding.UTF8.GetString(archivo.Contenido);
+        // Los ; dentro de un valor se escapan con comillas.
+        Assert.Contains("Col1;Col2", texto);
+        Assert.Contains("\"a; con punto y coma\";linea normal", texto);
+        Assert.Contains("sin escape;42", texto);
+    }
+
+    [Fact]
+    public async Task ExportarAsync_SnapshotInexistente_DevuelveNull()
+    {
+        var (ctx, tenant) = Db(TenantA);
+        var svc = new FacturacionSnapshotService(ctx, tenant, Array.Empty<ISnapshotBuilder>());
+
+        var xlsx = await svc.ExportarExcelAsync(Guid.NewGuid());
+        var csv = await svc.ExportarCsvAsync(Guid.NewGuid());
+
+        Assert.Null(xlsx);
+        Assert.Null(csv);
+    }
+
+    [Fact]
+    public async Task ExportarAsync_SnapshotDeOtroTenant_DevuelveNull()
+    {
+        // Reproduce que aislamiento tenant se aplica tambien en el export.
+        var dbName = Guid.NewGuid().ToString();
+        var (ctxA, tenantA) = Db(TenantA, dbName);
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
+            new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = "solo A" } });
+        var svcA = new FacturacionSnapshotService(ctxA, tenantA, new[] { builder });
+        var idA = await svcA.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "A", "{}"), Actor);
+
+        var (ctxB, tenantB) = Db(TenantB, dbName);
+        var svcB = new FacturacionSnapshotService(ctxB, tenantB, new[] { builder });
+
+        Assert.Null(await svcB.ExportarExcelAsync(idA));
+        Assert.Null(await svcB.ExportarCsvAsync(idA));
+    }
+
+    [Fact]
     public async Task AislamientoTenant_SnapshotDeTenantANoEsVisibleDesdeTenantB()
     {
         // Comparten el mismo store InMemory pero usan tenants distintos.

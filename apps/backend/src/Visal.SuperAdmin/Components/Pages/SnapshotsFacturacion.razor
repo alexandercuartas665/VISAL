@@ -144,6 +144,17 @@
                                 <button class="btn btn-outline-primary btn-sm"
                                         disabled="@(s.Estado != EstadoSnapshot.Vigente && s.Estado != EstadoSnapshot.Archivado)"
                                         @onclick="() => AbrirVer(s.Id)" title="Ver contenido del snapshot">Ver</button>
+                                @if (s.Estado == EstadoSnapshot.Vigente || s.Estado == EstadoSnapshot.Archivado)
+                                {
+                                    <a class="btn btn-outline-success btn-sm ms-1"
+                                       href="@($"/facturacion-clinica/snapshots/{s.Id}/download?formato=xlsx")"
+                                       target="_blank" rel="noopener"
+                                       title="Descargar Excel">xlsx</a>
+                                    <a class="btn btn-outline-secondary btn-sm ms-1"
+                                       href="@($"/facturacion-clinica/snapshots/{s.Id}/download?formato=csv")"
+                                       target="_blank" rel="noopener"
+                                       title="Descargar CSV">csv</a>
+                                }
                                 @if (_tab == Tab.Vigentes && s.Estado == EstadoSnapshot.Vigente && _puedeArchivar)
                                 {
                                     <button class="btn btn-outline-danger btn-sm ms-1"
@@ -304,9 +315,14 @@
                 }
             </div>
             <div class="sn-modal-f">
-                <small class="text-muted">
-                    Descarga Excel/CSV disponible en Fase 3.
-                </small>
+                <div class="d-flex gap-2">
+                    <a class="btn btn-success btn-sm"
+                       href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=xlsx")"
+                       target="_blank" rel="noopener">Descargar Excel</a>
+                    <a class="btn btn-outline-success btn-sm"
+                       href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=csv")"
+                       target="_blank" rel="noopener">Descargar CSV</a>
+                </div>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVer">Cerrar</button>
             </div>
         </div>

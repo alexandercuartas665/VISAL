@@ -1115,6 +1115,26 @@ app.MapPost("/api/firma/{token}/submit", async (
     return ok ? Results.Ok(new { ok = true }) : Results.BadRequest(new { ok = false, error = "Solicitud invalida, ya cerrada o expirada." });
 }).AllowAnonymous().DisableAntiforgery();
 
+// Descarga de snapshots de facturacion: xlsx o csv. El tenant se aplica dentro
+// del servicio via query filter global — un intento de descargar un snapshot de
+// otro tenant devuelve 404.
+app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
+    Guid id,
+    string? formato,
+    Visal.Application.Facturacion.IFacturacionSnapshotService svc,
+    CancellationToken ct) =>
+{
+    var fmt = (formato ?? "xlsx").ToLowerInvariant();
+    Visal.Application.Facturacion.ArchivoExportado? archivo = fmt switch
+    {
+        "xlsx" => await svc.ExportarExcelAsync(id, ct),
+        "csv"  => await svc.ExportarCsvAsync(id, ct),
+        _ => null
+    };
+    if (archivo is null) { return Results.NotFound(); }
+    return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
 try
 {
     app.Run();

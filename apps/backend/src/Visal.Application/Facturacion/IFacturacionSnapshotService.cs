@@ -90,4 +90,23 @@ public interface IFacturacionSnapshotService
     /// Falla si el snapshot no esta Vigente.
     /// </summary>
     Task ArchivarAsync(Guid id, string motivo, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Exporta el snapshot en xlsx. Los headers respetan EXACTAMENTE los nombres del
+    /// builder (incluyendo tildes rotas del template original). Devuelve null si el
+    /// snapshot no existe o no es del tenant activo.
+    /// </summary>
+    Task<ArchivoExportado?> ExportarExcelAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Exporta el snapshot en CSV con separador ; y encoding UTF-8 con BOM (para que
+    /// Excel Colombia lo abra bien). Devuelve null si no existe o no es del tenant.
+    /// </summary>
+    Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Archivo binario producto de un export. La capa de presentacion lo devuelve al cliente
+/// via Results.File.
+/// </summary>
+public sealed record ArchivoExportado(byte[] Contenido, string MimeType, string NombreArchivo);

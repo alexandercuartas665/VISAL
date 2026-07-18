@@ -1,0 +1,684 @@
+@page "/facturacion-clinica/snapshots"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using System.Text.Json
+@using Visal.Application.Facturacion
+@using Visal.Domain.Enums
+@inject IFacturacionSnapshotService Svc
+@inject IEnumerable<ISnapshotBuilder> Builders
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+
+@*
+   Modulo generico de snapshots de facturacion (Capa 07).
+   Ruta: /facturacion-clinica/snapshots  (la ruta /facturacion ya la ocupa el
+   modulo SaaS de la plataforma).
+
+   Filosofia (ver doc "1. Motor de Snapshots"):
+   - Snapshot = instantanea inmutable, no reporte.
+   - Nunca DELETE. Solo Archivar con motivo obligatorio (min 10 chars).
+   - El motor sirve a N tipos; cada tipo trae su ISnapshotBuilder + sus filtros.
+     En Fase 2 el motor solo lista tipos con builder registrado.
+*@
+
+<PageTitle>Snapshots Transaccionales - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Facturacion</div>
+        <h1 class="ase-title">Snapshots Transaccionales</h1>
+        <p class="ase-sub" style="margin:4px 0 0;color:var(--muted);font-size:13px;">
+            Instantaneas de datos para radicar facturas a la EPS. Se archivan con
+            motivo pero nunca se eliminan.
+        </p>
+    </div>
+    <div style="display:flex;gap:8px;">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@_cargando">
+            @(_cargando ? "..." : "Refrescar")
+        </button>
+        <button class="btn btn-primary btn-sm" @onclick="AbrirNuevo" disabled="@(_tiposDisponibles.Count == 0)">
+            + Nuevo snapshot
+        </button>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@if (_tiposDisponibles.Count == 0)
+{
+    <div class="ase-alert" style="background:#fff7e6;border-color:#ffd591;color:#7a4f01;">
+        <b>Aun no hay ningun tipo de snapshot habilitado.</b>
+        Los tipos aparecen a medida que se registran sus builders (Fase 5+).
+        Puedes ver el listado historico pero no puedes generar nuevos hasta entonces.
+    </div>
+}
+
+<div class="ase-card sn-card">
+    <div class="sn-tabs">
+        <button class="sn-tab @(_tab == Tab.Vigentes ? "sel" : "")" @onclick="() => CambiarTab(Tab.Vigentes)">
+            Vigentes @if (_conteoVigentes >= 0) { <span class="sn-tab-count">(@_conteoVigentes)</span> }
+        </button>
+        <button class="sn-tab @(_tab == Tab.Archivados ? "sel" : "")" @onclick="() => CambiarTab(Tab.Archivados)">
+            Archivados @if (_conteoArchivados >= 0) { <span class="sn-tab-count">(@_conteoArchivados)</span> }
+        </button>
+    </div>
+
+    <div class="sn-filtros">
+        <div class="sn-f">
+            <label>Tipo</label>
+            <select class="form-select form-select-sm" @bind="_filtroTipo" @bind:after="CargarLista">
+                <option value="">(Todos)</option>
+                @foreach (var t in Enum.GetValues<TipoSnapshot>())
+                {
+                    <option value="@t">@t</option>
+                }
+            </select>
+        </div>
+        <div class="sn-f">
+            <label>Fecha desde</label>
+            <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" @bind:after="CargarLista" />
+        </div>
+        <div class="sn-f">
+            <label>Fecha hasta</label>
+            <input type="date" class="form-control form-control-sm" @bind="_filtroHasta" @bind:after="CargarLista" />
+        </div>
+    </div>
+
+    @if (_cargando)
+    {
+        <div class="sn-empty">Cargando...</div>
+    }
+    else if (_lista.Count == 0)
+    {
+        <div class="sn-empty">
+            @if (_tab == Tab.Vigentes) { <span>No hay snapshots vigentes.</span> }
+            else { <span>No hay snapshots archivados.</span> }
+        </div>
+    }
+    else
+    {
+        <div class="sn-tabla-wrap">
+            <table class="table table-sm sn-tabla">
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Tipo</th>
+                        <th>Estado</th>
+                        <th>Inicio</th>
+                        <th>Tardo</th>
+                        <th class="sn-th-num">Filas</th>
+                        @if (_tab == Tab.Archivados)
+                        {
+                            <th>Motivo archivado</th>
+                            <th>Fecha archivo</th>
+                        }
+                        <th class="sn-th-acc">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _lista)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@s.Nombre</strong>
+                                @if (s.Estado == EstadoSnapshot.Fallido && s.ErrorMensaje is not null)
+                                {
+                                    <div class="sn-error-inline" title="@s.ErrorMensaje">Error: @Truncar(s.ErrorMensaje, 80)</div>
+                                }
+                            </td>
+                            <td><span class="sn-tag">@s.Tipo</span></td>
+                            <td>
+                                <span class="sn-estado sn-estado-@(s.Estado.ToString().ToLower())">@s.Estado</span>
+                            </td>
+                            <td class="sn-mono">@s.FechaEjecucionInicio.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td class="sn-mono">@FormatearDuracion(s.DuracionMs)</td>
+                            <td class="sn-td-num">@s.TotalFilas</td>
+                            @if (_tab == Tab.Archivados)
+                            {
+                                <td class="sn-truncate" title="@s.MotivoArchivado">@Truncar(s.MotivoArchivado, 60)</td>
+                                <td class="sn-mono">@(s.FechaArchivado?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                            }
+                            <td class="sn-td-acc">
+                                <button class="btn btn-outline-primary btn-sm"
+                                        disabled="@(s.Estado != EstadoSnapshot.Vigente && s.Estado != EstadoSnapshot.Archivado)"
+                                        @onclick="() => AbrirVer(s.Id)" title="Ver contenido del snapshot">Ver</button>
+                                @if (_tab == Tab.Vigentes && s.Estado == EstadoSnapshot.Vigente && _puedeArchivar)
+                                {
+                                    <button class="btn btn-outline-danger btn-sm ms-1"
+                                            @onclick="() => AbrirArchivar(s.Id, s.Nombre)"
+                                            title="Archivar con motivo">Archivar</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ============ Modal + Nuevo snapshot ============ *@
+@if (_showNuevo)
+{
+    <div class="sn-modal-back" @onclick="CerrarNuevo">
+        <div class="sn-modal sn-modal-md" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Facturacion</div>
+                    <h3>Nuevo Snapshot</h3>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarNuevo">&times;</button>
+            </div>
+            <div class="sn-modal-b">
+                @if (_nuevoErr is not null) { <div class="ase-alert">@_nuevoErr</div> }
+                <div class="ase-form" style="display:grid;gap:12px;">
+                    <div class="ase-f">
+                        <label>Tipo *</label>
+                        <select class="form-select form-select-sm" @bind="_nuevoTipo">
+                            @foreach (var t in _tiposDisponibles)
+                            {
+                                <option value="@t">@t</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="ase-f">
+                        <label>Nombre * <small class="text-muted">(para identificarlo en el listado)</small></label>
+                        <input class="form-control form-control-sm" @bind="_nuevoNombre" placeholder="ASMET SALUD - Junio 2026" />
+                    </div>
+                    <div class="ase-f">
+                        <label>Filtros del snapshot</label>
+                        <div class="sn-filtros-slot">
+                            @* Fase 2 rendered placeholder — el componente de filtros por
+                               tipo (SnapshotFiltrosRelacionFacturas.razor, etc.) se
+                               inserta aca en Fase 5. Por ahora el usuario captura el
+                               JSON de filtros en crudo para poder ejercitar el motor. *@
+                            <textarea class="form-control form-control-sm" rows="4"
+                                      style="font-family:'JetBrains Mono','Consolas',monospace;font-size:12px;"
+                                      @bind="_nuevoFiltrosJson"
+                                      placeholder='{"aseguradoraIds":[],"fechaInicio":"2026-06-01","fechaFin":"2026-06-30"}'></textarea>
+                            <small class="text-muted d-block mt-1">
+                                Cada tipo interpreta su propia forma. En Fase 5 se agrega un
+                                formulario visual por tipo (multi-select de aseguradoras,
+                                sedes, rango de fechas, etc.).
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sn-modal-f">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarNuevo">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="ConfirmarNuevo" disabled="@_generando">
+                    @(_generando ? "Generando..." : "Generar")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ============ Modal Ver snapshot ============ *@
+@if (_showVer && _verDetalle is not null)
+{
+    <div class="sn-modal-back" @onclick="CerrarVer">
+        <div class="sn-modal sn-modal-xl" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">@_verDetalle.Metadata.Tipo</div>
+                    <h3>@_verDetalle.Metadata.Nombre <small class="text-muted">(@_verDetalle.Metadata.TotalFilas filas)</small></h3>
+                    <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+                        Estado: <b>@_verDetalle.Metadata.Estado</b>
+                        &middot; Generado @_verDetalle.Metadata.FechaEjecucionInicio.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                        @if (_verDetalle.Metadata.DuracionMs is int d) { <span> &middot; Tardo @FormatearDuracion(d)</span> }
+                    </div>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarVer">&times;</button>
+            </div>
+            <div class="sn-modal-controls">
+                <div class="sn-modal-controls-l">
+                    <label>Buscar</label>
+                    <input class="form-control form-control-sm" style="width:220px;"
+                           placeholder="texto libre..." @bind="_verBuscar" @bind:event="oninput" @onkeyup="OnBuscarKey" />
+                    <label>Fijar hasta col</label>
+                    <select class="form-select form-select-sm" style="width:70px;" @bind="_verFijar" @bind:after="StateHasChanged">
+                        <option value="0">0</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+                <div class="sn-modal-controls-r">
+                    <span class="sn-page-info">Pagina @_verPagina / @_verTotalPaginas &middot; @_verTotal filas</span>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina - 1)" disabled="@(_verPagina <= 1)">&lt;</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina + 1)" disabled="@(_verPagina >= _verTotalPaginas)">&gt;</button>
+                </div>
+            </div>
+            <div class="sn-modal-b sn-modal-b-tabla">
+                @if (_verCargando)
+                {
+                    <div class="sn-empty">Cargando...</div>
+                }
+                else if (_verFilas.Count == 0)
+                {
+                    <div class="sn-empty">No hay filas para mostrar.</div>
+                }
+                else
+                {
+                    <div class="sn-vertabla-wrap">
+                        <table class="sn-vertabla">
+                            <thead>
+                                <tr>
+                                    @for (var i = 0; i < _verDetalle.Columnas.Count; i++)
+                                    {
+                                        var col = _verDetalle.Columnas[i];
+                                        var idx = i;
+                                        <th class="@(idx < _verFijar ? "sn-vt-freeze" : "")"
+                                            style="@(idx < _verFijar ? $"left:{idx * 160}px;" : "")"
+                                            @onclick="() => Ordenar(col)">
+                                            @col
+                                            @if (_verOrden == col) { <span>@(_verOrdenDesc ? " v" : " ^")</span> }
+                                        </th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var fila in _verFilas)
+                                {
+                                    <tr>
+                                        @for (var i = 0; i < _verDetalle.Columnas.Count; i++)
+                                        {
+                                            var col = _verDetalle.Columnas[i];
+                                            var idx = i;
+                                            var val = fila.TryGetValue(col, out var v) ? v?.ToString() ?? "" : "";
+                                            <td class="@(idx < _verFijar ? "sn-vt-freeze" : "")"
+                                                style="@(idx < _verFijar ? $"left:{idx * 160}px;" : "")"
+                                                title="@val">@val</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+            <div class="sn-modal-f">
+                <small class="text-muted">
+                    Descarga Excel/CSV disponible en Fase 3.
+                </small>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVer">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ============ Modal Archivar ============ *@
+@if (_showArchivar)
+{
+    <div class="sn-modal-back" @onclick="CerrarArchivar">
+        <div class="sn-modal sn-modal-sm" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Archivar</div>
+                    <h3>@_archivarNombre</h3>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarArchivar">&times;</button>
+            </div>
+            <div class="sn-modal-b">
+                @if (_archivarErr is not null) { <div class="ase-alert">@_archivarErr</div> }
+                <p style="font-size:13px;">
+                    El snapshot queda archivado pero <b>no se elimina</b>. Sigue consultable
+                    en la tab Archivados con el motivo capturado.
+                </p>
+                <div class="ase-f">
+                    <label>Motivo del archivado * <small class="text-muted">(min 10 caracteres)</small></label>
+                    <textarea class="form-control form-control-sm" rows="4"
+                              @bind="_archivarMotivo"
+                              placeholder="Ej: Se regenero con filtros corregidos y este quedo obsoleto..."></textarea>
+                </div>
+            </div>
+            <div class="sn-modal-f">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivar">Cancelar</button>
+                <button class="btn btn-danger btn-sm" @onclick="ConfirmarArchivar" disabled="@_archivando">
+                    @(_archivando ? "Archivando..." : "Archivar")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .sn-card { padding:0; overflow:hidden; }
+    .sn-tabs { display:flex; border-bottom:1px solid var(--border); }
+    .sn-tab { background:transparent; border:0; padding:12px 20px; font-size:13px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; }
+    .sn-tab:hover { color:var(--body); }
+    .sn-tab.sel { color:var(--primary); border-bottom-color:var(--primary); font-weight:600; }
+    .sn-tab-count { color:var(--muted); font-weight:400; }
+
+    .sn-filtros { display:flex; gap:12px; padding:14px 18px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+    .sn-f { display:flex; flex-direction:column; gap:4px; min-width:160px; }
+    .sn-f label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+
+    .sn-empty { padding:40px; text-align:center; color:var(--muted); font-size:14px; }
+    .sn-tabla-wrap { overflow:auto; }
+    .sn-tabla { margin:0; }
+    .sn-tabla th { background:#f8fafc; font-size:12px; text-transform:uppercase; letter-spacing:0.4px; color:#334155; padding:10px 12px; border-bottom:1px solid var(--border); }
+    .sn-tabla td { padding:10px 12px; vertical-align:middle; font-size:13px; }
+    .sn-th-num, .sn-td-num { text-align:right; }
+    .sn-th-acc, .sn-td-acc { white-space:nowrap; }
+    .sn-mono { font-family:'JetBrains Mono','Consolas',monospace; font-size:12px; color:#475569; }
+    .sn-truncate { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sn-error-inline { color:#c0392b; font-size:12px; margin-top:2px; }
+
+    .sn-tag { background:#eff6ff; color:#1e40af; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+    .sn-estado { padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; }
+    .sn-estado-ejecutando { background:#fef3c7; color:#92400e; }
+    .sn-estado-vigente { background:#dcfce7; color:#166534; }
+    .sn-estado-archivado { background:#e2e8f0; color:#475569; }
+    .sn-estado-fallido { background:#fee2e2; color:#991b1b; }
+
+    /* Modal */
+    .sn-modal-back { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:1050; display:flex; align-items:center; justify-content:center; padding:16px; }
+    .sn-modal { background:white; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,0.3); display:flex; flex-direction:column; width:100%; overflow:hidden; }
+    .sn-modal-sm { max-width:520px; }
+    .sn-modal-md { max-width:720px; }
+    .sn-modal-xl { max-width:96vw; max-height:92vh; }
+    .sn-modal-h { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:flex-start; }
+    .sn-modal-h h3 { margin:0; font-size:18px; font-weight:600; }
+    .sn-modal-eyebrow { font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); margin-bottom:2px; }
+    .sn-modal-x { background:transparent; border:0; font-size:24px; color:var(--muted); cursor:pointer; padding:0 4px; }
+    .sn-modal-b { padding:18px 20px; overflow:auto; flex:1; }
+    .sn-modal-b-tabla { padding:0; }
+    .sn-modal-f { padding:12px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+    .sn-modal-controls { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); background:#f8fafc; flex-wrap:wrap; }
+    .sn-modal-controls-l, .sn-modal-controls-r { display:flex; align-items:center; gap:8px; }
+    .sn-modal-controls label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+    .sn-page-info { font-size:12px; color:var(--muted); margin-right:8px; }
+
+    /* Tabla del modal grande: sticky header + freeze cols */
+    .sn-vertabla-wrap { overflow:auto; max-height:calc(92vh - 220px); }
+    .sn-vertabla { border-collapse:separate; border-spacing:0; font-size:12px; width:auto; min-width:100%; }
+    .sn-vertabla th, .sn-vertabla td { padding:6px 10px; border-right:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; min-width:140px; max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sn-vertabla th { position:sticky; top:0; z-index:2; background:#eff6ff; font-weight:600; color:#1e3a8a; text-transform:none; letter-spacing:0; cursor:pointer; user-select:none; }
+    .sn-vertabla th:hover { background:#dbeafe; }
+    .sn-vt-freeze { position:sticky; background:white; z-index:1; }
+    .sn-vertabla thead .sn-vt-freeze { z-index:3; background:#eff6ff; }
+    .sn-vertabla tbody tr:nth-child(even) td:not(.sn-vt-freeze) { background:#fafbfc; }
+    .sn-vertabla tbody tr:nth-child(even) td.sn-vt-freeze { background:#fafbfc; }
+</style>
+
+@code {
+    private enum Tab { Vigentes, Archivados }
+
+    private Tab _tab = Tab.Vigentes;
+    private bool _cargando;
+    private string? _error;
+    private string? _ok;
+    private List<FacturacionSnapshotDto> _lista = new();
+    private int _conteoVigentes = -1;
+    private int _conteoArchivados = -1;
+    private List<TipoSnapshot> _tiposDisponibles = new();
+    private bool _puedeArchivar;
+
+    // Filtros del listado.
+    private string _filtroTipo = "";
+    private DateOnly? _filtroDesde;
+    private DateOnly? _filtroHasta;
+
+    // Modal Nuevo.
+    private bool _showNuevo;
+    private TipoSnapshot _nuevoTipo = TipoSnapshot.RelacionFacturas;
+    private string _nuevoNombre = "";
+    private string _nuevoFiltrosJson = "{}";
+    private bool _generando;
+    private string? _nuevoErr;
+
+    // Modal Ver.
+    private bool _showVer;
+    private bool _verCargando;
+    private FacturacionSnapshotDetalleDto? _verDetalle;
+    private List<IReadOnlyDictionary<string, object?>> _verFilas = new();
+    private Guid _verSnapshotId;
+    private int _verPagina = 1;
+    private const int VerTamano = 50;
+    private int _verTotal;
+    private int _verTotalPaginas = 1;
+    private string _verBuscar = "";
+    private int _verFijar = 0;
+    private string? _verOrden;
+    private bool _verOrdenDesc;
+    private CancellationTokenSource? _verBuscarCts;
+
+    // Modal Archivar.
+    private bool _showArchivar;
+    private Guid _archivarId;
+    private string _archivarNombre = "";
+    private string _archivarMotivo = "";
+    private bool _archivando;
+    private string? _archivarErr;
+
+    // Usuario / permisos.
+    private Guid _actorId;
+    private bool _esAdminAgencia;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tiposDisponibles = Builders.Select(b => b.TipoAplicable).Distinct().ToList();
+        await ResolverPermisosAsync();
+        await CargarLista();
+    }
+
+    private async Task ResolverPermisosAsync()
+    {
+        if (AuthState is null) { return; }
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value ?? state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(sub, out var g)) { _actorId = g; }
+
+        var isPlatformOperator = state.User.FindFirst("platform_role") is not null;
+        var rol = state.User.FindFirst("tenant_role")?.Value ?? "";
+        _esAdminAgencia = isPlatformOperator
+            || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase)
+            || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase);
+
+        var perms = state.User.FindFirst("perms")?.Value;
+        var tienePermArchivar = !string.IsNullOrEmpty(perms)
+            && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(p => string.Equals(p.Trim(), "facturacion.snapshots.archivar", StringComparison.OrdinalIgnoreCase));
+        _puedeArchivar = _esAdminAgencia || tienePermArchivar;
+    }
+
+    private async Task CargarLista()
+    {
+        _cargando = true; _error = null; _ok = null;
+        try
+        {
+            var estado = _tab == Tab.Vigentes ? EstadoSnapshot.Vigente : EstadoSnapshot.Archivado;
+            TipoSnapshot? tipo = null;
+            if (!string.IsNullOrWhiteSpace(_filtroTipo) && Enum.TryParse<TipoSnapshot>(_filtroTipo, out var t)) { tipo = t; }
+            var filtros = new FiltrosListaSnapshotDto(null, _filtroDesde, _filtroHasta);
+            _lista = (await Svc.ListarAsync(estado, tipo, filtros)).ToList();
+
+            // Refrescamos ambos contadores en paralelo para el tab.
+            var vigCount = await Svc.ListarAsync(EstadoSnapshot.Vigente, null, null);
+            var arcCount = await Svc.ListarAsync(EstadoSnapshot.Archivado, null, null);
+            _conteoVigentes = vigCount.Count;
+            _conteoArchivados = arcCount.Count;
+        }
+        catch (Exception ex) { _error = "Error al listar snapshots: " + ex.Message; }
+        finally { _cargando = false; }
+    }
+
+    private async Task CambiarTab(Tab t)
+    {
+        if (_tab == t) { return; }
+        _tab = t;
+        await CargarLista();
+    }
+
+    // ---- Modal Nuevo ----
+
+    private void AbrirNuevo()
+    {
+        if (_tiposDisponibles.Count == 0) { return; }
+        _nuevoTipo = _tiposDisponibles[0];
+        _nuevoNombre = "";
+        _nuevoFiltrosJson = "{}";
+        _nuevoErr = null;
+        _showNuevo = true;
+    }
+
+    private void CerrarNuevo()
+    {
+        if (_generando) { return; }
+        _showNuevo = false;
+    }
+
+    private async Task ConfirmarNuevo()
+    {
+        _nuevoErr = null;
+        if (string.IsNullOrWhiteSpace(_nuevoNombre))
+        {
+            _nuevoErr = "El nombre es obligatorio.";
+            return;
+        }
+        try { using var _ = JsonDocument.Parse(_nuevoFiltrosJson); }
+        catch (Exception ex)
+        {
+            _nuevoErr = "Los filtros no son JSON valido: " + ex.Message;
+            return;
+        }
+
+        _generando = true;
+        try
+        {
+            var cmd = new GenerarSnapshotCmd(_nuevoTipo, _nuevoNombre.Trim(), _nuevoFiltrosJson.Trim());
+            var id = await Svc.GenerarAsync(cmd, _actorId);
+            _showNuevo = false;
+            _ok = $"Snapshot generado: {_nuevoNombre.Trim()}.";
+            await CargarLista();
+            // Abrir directo al modal de detalle asi el usuario ve lo que produjo.
+            await AbrirVer(id);
+        }
+        catch (Exception ex) { _nuevoErr = ex.Message; }
+        finally { _generando = false; }
+    }
+
+    // ---- Modal Ver ----
+
+    private async Task AbrirVer(Guid id)
+    {
+        _verSnapshotId = id;
+        _verPagina = 1;
+        _verBuscar = "";
+        _verOrden = null;
+        _verOrdenDesc = false;
+        _verFijar = 0;
+        _showVer = true;
+        _verCargando = true;
+        try
+        {
+            _verDetalle = await Svc.ObtenerAsync(id);
+            await CargarPaginaVer();
+        }
+        catch (Exception ex) { _error = "Error al abrir snapshot: " + ex.Message; _showVer = false; }
+        finally { _verCargando = false; }
+    }
+
+    private async Task CargarPaginaVer()
+    {
+        if (_verDetalle is null) { return; }
+        _verCargando = true;
+        try
+        {
+            var buscar = string.IsNullOrWhiteSpace(_verBuscar) ? null : _verBuscar.Trim();
+            var page = await Svc.ListarFilasAsync(_verSnapshotId, _verPagina, VerTamano,
+                _verOrden, _verOrdenDesc, buscar);
+            _verFilas = page.Items.ToList();
+            _verTotal = page.Total;
+            _verTotalPaginas = Math.Max(1, (int)Math.Ceiling(_verTotal / (double)VerTamano));
+        }
+        finally { _verCargando = false; }
+    }
+
+    private void CerrarVer() => _showVer = false;
+
+    private async Task IrPagina(int p)
+    {
+        if (p < 1 || p > _verTotalPaginas) { return; }
+        _verPagina = p;
+        await CargarPaginaVer();
+    }
+
+    private async Task Ordenar(string col)
+    {
+        if (_verOrden == col) { _verOrdenDesc = !_verOrdenDesc; }
+        else { _verOrden = col; _verOrdenDesc = false; }
+        await CargarPaginaVer();
+    }
+
+    private async Task OnBuscarKey(KeyboardEventArgs e)
+    {
+        // Debounce simple para no consultar en cada tecla.
+        _verBuscarCts?.Cancel();
+        _verBuscarCts = new CancellationTokenSource();
+        var ct = _verBuscarCts.Token;
+        try
+        {
+            await Task.Delay(300, ct);
+            if (ct.IsCancellationRequested) { return; }
+            _verPagina = 1;
+            await CargarPaginaVer();
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    // ---- Modal Archivar ----
+
+    private void AbrirArchivar(Guid id, string nombre)
+    {
+        _archivarId = id;
+        _archivarNombre = nombre;
+        _archivarMotivo = "";
+        _archivarErr = null;
+        _showArchivar = true;
+    }
+
+    private void CerrarArchivar()
+    {
+        if (_archivando) { return; }
+        _showArchivar = false;
+    }
+
+    private async Task ConfirmarArchivar()
+    {
+        _archivarErr = null;
+        _archivando = true;
+        try
+        {
+            await Svc.ArchivarAsync(_archivarId, _archivarMotivo, _actorId);
+            _showArchivar = false;
+            _ok = $"Snapshot '{_archivarNombre}' archivado.";
+            await CargarLista();
+        }
+        catch (Exception ex) { _archivarErr = ex.Message; }
+        finally { _archivando = false; }
+    }
+
+    // ---- Helpers ----
+
+    private static string Truncar(string? s, int max) =>
+        string.IsNullOrEmpty(s) || s.Length <= max ? (s ?? "") : s[..max] + "...";
+
+    private static string FormatearDuracion(int? ms)
+    {
+        if (ms is not int m) { return "-"; }
+        if (m < 1000) { return $"{m}ms"; }
+        if (m < 60000) { return $"{m / 1000.0:0.0}s"; }
+        var mins = m / 60000;
+        var secs = (m % 60000) / 1000;
+        return $"{mins}m {secs}s";
+    }
+}

@@ -205,6 +205,106 @@ public sealed class FacturacionSnapshotServiceTests
     }
 
     [Fact]
+    public async Task ExportarExcelAsync_FormatoFechaYHoraSePreservanComoTexto()
+    {
+        // Spec §Fase 4C: las fechas deben quedar como "YYYY-MM-DD" y las horas
+        // como "HH:MM:SS". El builder ya las emite formateadas — este test
+        // garantiza que el pipeline generar->persistir->exportar no altera el
+        // string original (por ejemplo, ClosedXML no debe re-interpretar como
+        // fecha nativa y cambiar el formato).
+        var (ctx, tenant) = Db(TenantA);
+        var cols = new[] { "Fecha de Nacimiento", "Fecha suministro de tecnologia", "Hora" };
+        var filas = new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["Fecha de Nacimiento"] = "1985-04-12",
+                ["Fecha suministro de tecnologia"] = "2026-06-15",
+                ["Hora"] = "14:35:22"
+            }
+        };
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+        var archivo = await svc.ExportarExcelAsync(id);
+
+        using var ms = new MemoryStream(archivo!.Contenido);
+        using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+        var hoja = wb.Worksheets.First();
+        Assert.Equal("1985-04-12", hoja.Cell(2, 1).GetString());
+        Assert.Equal("2026-06-15", hoja.Cell(2, 2).GetString());
+        Assert.Equal("14:35:22", hoja.Cell(2, 3).GetString());
+    }
+
+    [Fact]
+    public async Task ExportarExcelAsync_NumerosSinFormatoDeMoneda()
+    {
+        // Spec §Fase 4C: "Numeros: enteros sin formato de moneda". Los decimales
+        // deben aparecer como numero plano en la celda, sin simbolo $ ni miles.
+        var (ctx, tenant) = Db(TenantA);
+        var cols = new[] { "Cantidad", "Valor Unitario", "Valor Total" };
+        var filas = new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["Cantidad"] = 1L,
+                ["Valor Unitario"] = 145000m,
+                ["Valor Total"] = 145000m
+            }
+        };
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+        var archivo = await svc.ExportarExcelAsync(id);
+
+        using var ms = new MemoryStream(archivo!.Contenido);
+        using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+        var hoja = wb.Worksheets.First();
+
+        // Las celdas son numericas — el DataType lo confirma.
+        Assert.Equal(ClosedXML.Excel.XLDataType.Number, hoja.Cell(2, 1).DataType);
+        Assert.Equal(ClosedXML.Excel.XLDataType.Number, hoja.Cell(2, 2).DataType);
+        Assert.Equal(1d, hoja.Cell(2, 1).GetDouble());
+        Assert.Equal(145000d, hoja.Cell(2, 2).GetDouble());
+        // Formato de numero por default de ClosedXML — cadena vacia = "General",
+        // que es lo que exige el spec (sin moneda, sin miles, sin decimales fijos).
+        Assert.True(string.IsNullOrEmpty(hoja.Cell(2, 2).Style.NumberFormat.Format));
+    }
+
+    [Fact]
+    public async Task ExportarExcelAsync_ColumnasNulasQuedanVaciasNoCero()
+    {
+        // Spec §4 col 1/2/6: Consecutivo Factura, Orden, Archivo json quedan
+        // vacios en el snapshot (se llenan en un proceso posterior). El export
+        // no debe escribir 0 ni cadena "null" — la celda debe quedar realmente vacia.
+        var (ctx, tenant) = Db(TenantA);
+        var cols = new[] { "Consecutivo Factura", "Orden", "Contrato" };
+        var filas = new IReadOnlyDictionary<string, object?>[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["Consecutivo Factura"] = null,
+                ["Orden"] = null,
+                ["Contrato"] = "TOL-004-26-P"
+            }
+        };
+        var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+
+        var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
+        var archivo = await svc.ExportarExcelAsync(id);
+
+        using var ms = new MemoryStream(archivo!.Contenido);
+        using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+        var hoja = wb.Worksheets.First();
+        Assert.True(hoja.Cell(2, 1).IsEmpty());
+        Assert.True(hoja.Cell(2, 2).IsEmpty());
+        Assert.Equal("TOL-004-26-P", hoja.Cell(2, 3).GetString());
+    }
+
+    [Fact]
     public async Task ExportarCsvAsync_UsaSeparadorPuntoComaYUtf8Bom()
     {
         var (ctx, tenant) = Db(TenantA);

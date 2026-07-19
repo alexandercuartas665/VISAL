@@ -168,12 +168,13 @@ else
 
         <div class="at-grid-h">
             <span>MIS SERVICIOS ASIGNADOS (@_visibles.Count)</span>
-            @if (_esAdmin)
-            {
-                <button class="btn btn-outline-secondary btn-sm at-cfg-btn" @onclick="AbrirConfigColumnas" title="Configurar columnas (visibles, orden, alias)">
-                    &#9881; Columnas
-                </button>
-            }
+            @* El boton "Columnas" abre el modal para elegir columnas visibles,
+               orden y alias. Antes estaba gated a admin, pero el config aplica
+               a todo el tenant (no es per-user), asi que cualquier usuario del
+               tenant que entra a /atencion debe poder abrirlo. *@
+            <button class="btn btn-outline-secondary btn-sm at-cfg-btn" @onclick="AbrirConfigColumnas" title="Configurar columnas (visibles, orden, alias)">
+                &#9881; Columnas
+            </button>
         </div>
         <div class="at-grid-wrap">
             @if (_visibles.Count == 0)

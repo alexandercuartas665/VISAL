@@ -48,10 +48,122 @@ else
         <div class="ase-form at-filtros">
             <div class="ase-f"><label>Profesional</label><input class="form-control form-control-sm asg-ro" readonly value="@_nombreProf" /></div>
             <div class="ase-f"><label>Especialidad</label><input class="form-control form-control-sm asg-ro" readonly value="@_especialidad" /></div>
-            <div class="ase-f ase-f-wide"><label>Paciente</label>
-                <input class="form-control form-control-sm" placeholder="BUSQUEDA DE PACIENTE POR IDENTIFICACION" @bind="_filtroPac" @oninput="OnFiltroChanged" />
+        </div>
+
+        @* Toolbar de filtros al estilo pipeline CUBOT: busqueda + orden + boton
+           Filtros con popover de chips. Los chips son multi-select por dimension
+           (tipo servicio, estado, servicio, profesional, paquete, fecha). El
+           estado vive en memoria — no se persiste. *@
+        <div class="at-fbar">
+            <div class="at-fbar-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input placeholder="Buscar paciente por documento o nombre..." @bind="_filtroPac" @bind:event="oninput" />
+                @if (!string.IsNullOrEmpty(_filtroPac))
+                {
+                    <button class="at-fbar-search-clear" @onclick="() => _filtroPac = string.Empty" title="Limpiar">&times;</button>
+                }
             </div>
-            <label class="ase-chk"><input type="checkbox" @bind="_mostrarVencidas" @bind:after="Cargar" /> <span>Mostrar notas vencidas</span></label>
+            <div class="at-fbar-sort">
+                <span class="at-fbar-sort-lbl">Ordenar:</span>
+                <select @bind="_sortBy">
+                    <option value="recent">Mas recientes primero</option>
+                    <option value="oldest">Mas antiguos primero</option>
+                    <option value="paciente">Paciente (A-Z)</option>
+                    <option value="servicio">Servicio (A-Z)</option>
+                    <option value="profesional">Profesional (A-Z)</option>
+                </select>
+            </div>
+            <div class="at-fbar-filt-anchor">
+                <button class="btn btn-outline-secondary @(FiltrosActivos ? "at-fbar-filt-on" : "")" @onclick="() => _filtrosOpen = !_filtrosOpen">
+                    Filtros@(FiltrosActivos ? $" ({CuentaFiltrosActivos})" : "")
+                </button>
+                @if (_filtrosOpen)
+                {
+                    <div class="at-fbar-filters">
+                        <div class="at-fbar-filters-head">
+                            <span>Filtros avanzados</span>
+                            <button class="at-fbar-link" @onclick="LimpiarFiltros">Limpiar</button>
+                        </div>
+
+                        <div class="at-fbar-filt-group">
+                            <div class="at-fbar-filt-lbl">Tipo de servicio</div>
+                            <div class="at-fbar-chips">
+                                @foreach (var t in TiposServicioDisponibles)
+                                {
+                                    <button class="at-fbar-fchip @(_filTipos.Contains(t) ? "on" : "")" @onclick="() => ToggleTipo(t)">@t</button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="at-fbar-filt-group">
+                            <div class="at-fbar-filt-lbl">Estado</div>
+                            <div class="at-fbar-chips">
+                                <button class="at-fbar-fchip @(_filEstado == "pendientes" ? "on" : "")" @onclick='() => SetEstado("pendientes")'>Pendientes</button>
+                                <button class="at-fbar-fchip @(_filEstado == "completados" ? "on" : "")" @onclick='() => SetEstado("completados")'>Completados</button>
+                            </div>
+                            <label class="at-fbar-toggle" style="margin-top:6px;">
+                                <input type="checkbox" checked="@_mostrarVencidas" @onchange="OnVencidasChanged" />
+                                <span>Mostrar notas vencidas</span>
+                            </label>
+                        </div>
+
+                        @if (ServiciosDisponibles.Count > 0)
+                        {
+                            <div class="at-fbar-filt-group">
+                                <div class="at-fbar-filt-lbl">Servicio</div>
+                                <div class="at-fbar-chips">
+                                    @foreach (var s in ServiciosDisponibles)
+                                    {
+                                        <button class="at-fbar-fchip @(_filServicios.Contains(s) ? "on" : "")" @onclick="() => ToggleServicio(s)">@s</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (_esAdmin && ProfesionalesDisponibles.Count > 0)
+                        {
+                            <div class="at-fbar-filt-group">
+                                <div class="at-fbar-filt-lbl">Profesional</div>
+                                <div class="at-fbar-chips">
+                                    @foreach (var p in ProfesionalesDisponibles)
+                                    {
+                                        <button class="at-fbar-fchip @(_filProfesionales.Contains(p) ? "on" : "")" @onclick="() => ToggleProfesional(p)">@p</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="at-fbar-filt-group">
+                            <div class="at-fbar-filt-lbl">Paquete</div>
+                            <div class="at-fbar-chips">
+                                <button class="at-fbar-fchip @(_filPaquete == "con" ? "on" : "")" @onclick='() => SetPaquete("con")'>Con paquete</button>
+                                <button class="at-fbar-fchip @(_filPaquete == "sin" ? "on" : "")" @onclick='() => SetPaquete("sin")'>Sin paquete</button>
+                                @foreach (var c in PaquetesCodigosDisponibles)
+                                {
+                                    <button class="at-fbar-fchip @(_filPaquetesCodigos.Contains(c) ? "on" : "")" @onclick="() => TogglePaqueteCodigo(c)">@c</button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="at-fbar-filt-group">
+                            <div class="at-fbar-filt-lbl">Fecha asignacion</div>
+                            <div class="at-fbar-chips">
+                                <button class="at-fbar-fchip @(_filFecha == "hoy" ? "on" : "")" @onclick='() => SetFecha("hoy")'>Hoy</button>
+                                <button class="at-fbar-fchip @(_filFecha == "7d" ? "on" : "")" @onclick='() => SetFecha("7d")'>Ultimos 7 dias</button>
+                                <button class="at-fbar-fchip @(_filFecha == "30d" ? "on" : "")" @onclick='() => SetFecha("30d")'>Ultimos 30 dias</button>
+                                <button class="at-fbar-fchip @(_filFecha == "rango" ? "on" : "")" @onclick='() => SetFecha("rango")'>Rango...</button>
+                            </div>
+                            @if (_filFecha == "rango")
+                            {
+                                <div style="display:flex;gap:8px;margin-top:8px;">
+                                    <input type="date" class="form-control form-control-sm" @bind="_filFechaDesde" />
+                                    <input type="date" class="form-control form-control-sm" @bind="_filFechaHasta" />
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
         </div>
 
         <div class="at-grid-h">
@@ -259,6 +371,32 @@ else
     .at-filtros .ase-f-wide { grid-column: span 2; }
     .at-filtros label { font-size: 11px; color: #475569; font-weight: 600; text-transform: uppercase; }
     .ase-chk { display: inline-flex; align-items: center; gap: 6px; padding: 6px 0; font-size: 13px; }
+
+    /* Toolbar de filtros al estilo pipeline CUBOT: busqueda + orden + boton
+       Filtros con popover de chips. Renombrados de .pl-* a .at-fbar-* para
+       no chocar con la nomenclatura del pipeline si algun dia se ports. */
+    .at-fbar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; flex-wrap: wrap; border-top: 1px solid #e2e8f0; background: #fff; }
+    .at-fbar-search { position: relative; flex: 1; min-width: 240px; display: flex; align-items: center; }
+    .at-fbar-search svg { position: absolute; left: 12px; width: 16px; height: 16px; color: #94a3b8; }
+    .at-fbar-search input { width: 100%; padding: 9px 32px 9px 36px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; font-size: 13px; }
+    .at-fbar-search input:focus { border-color: #1565c0; outline: none; }
+    .at-fbar-search-clear { position: absolute; right: 8px; border: none; background: none; font-size: 18px; line-height: 1; color: #94a3b8; cursor: pointer; }
+    .at-fbar-sort { display: flex; align-items: center; gap: 6px; }
+    .at-fbar-sort-lbl { font-size: 12px; color: #64748b; }
+    .at-fbar-sort select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; background: #fff; max-width: 230px; }
+    .at-fbar-filt-anchor { position: relative; flex-shrink: 0; }
+    .btn.at-fbar-filt-on { border-color: #1565c0; color: #1565c0; }
+    .at-fbar-filters { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: 620px; max-width: 88vw; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; padding: 16px 18px; box-shadow: 0 20px 60px rgba(15,23,42,.18); }
+    .at-fbar-filters-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .at-fbar-filters-head > span { font-weight: 700; font-size: 13px; color: #0f172a; }
+    .at-fbar-link { border: none; background: none; color: #1565c0; font-size: 12px; cursor: pointer; }
+    .at-fbar-filt-group { margin-bottom: 12px; }
+    .at-fbar-filt-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: #64748b; margin-bottom: 7px; }
+    .at-fbar-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .at-fbar-fchip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; border: 1px solid #cbd5e1; background: #fff; font-size: 12px; cursor: pointer; color: #334155; }
+    .at-fbar-fchip:hover { border-color: #1565c0; }
+    .at-fbar-fchip.on { background: #dbeafe; border-color: #1565c0; color: #1565c0; font-weight: 600; }
+    .at-fbar-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; color: #334155; }
     .at-grid-h { padding: 10px 14px; font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid #e2e8f0; background: #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
     .at-cfg-btn { text-transform: none; font-weight: 600; letter-spacing: 0; }
     .at-grid-wrap { overflow: auto; background: #fff; max-height: 600px; }
@@ -329,6 +467,24 @@ else
     private string _filtroPac = "";
     private bool _mostrarVencidas = true;
 
+    // Estado del toolbar de filtros (portado del pipeline CUBOT). Solo vive en
+    // memoria de la sesion; si el usuario recarga la pagina, se pierde.
+    private bool _filtrosOpen;
+    private string _sortBy = "recent";
+    private HashSet<string> _filTipos = new(StringComparer.OrdinalIgnoreCase);
+    private string _filEstado = "";              // "" = ambos, "pendientes", "completados"
+    private HashSet<string> _filServicios = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _filProfesionales = new(StringComparer.OrdinalIgnoreCase);
+    private string _filPaquete = "";             // "" = ambos, "con", "sin"
+    private HashSet<string> _filPaquetesCodigos = new(StringComparer.OrdinalIgnoreCase);
+    private string _filFecha = "";               // "" | "hoy" | "7d" | "30d" | "rango"
+    private DateOnly? _filFechaDesde, _filFechaHasta;
+
+    private static readonly string[] TiposServicioDisponibles = new[] { "CONSULTA", "TERAPIA", "ENFERMERIA", "EQUIPOS", "INSUMOS" };
+    private List<string> ServiciosDisponibles => _todos.Select(x => x.NombreServicio).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
+    private List<string> ProfesionalesDisponibles => _todos.Select(x => x.NombreProfesional).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
+    private List<string> PaquetesCodigosDisponibles => _todos.Where(x => !string.IsNullOrWhiteSpace(x.PaqueteCodigo)).Select(x => x.PaqueteCodigo!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
+
     private string _nombreProf = "";
     private string _especialidad = "";
     private bool? _modulos;
@@ -373,10 +529,98 @@ else
 
     private string? _error, _ok;
 
-    private List<MiServicioAsignadoDto> _visibles => string.IsNullOrWhiteSpace(_filtroPac)
-        ? _todos
-        : _todos.Where(s => s.NumeroDocPaciente.Contains(_filtroPac.Trim(), StringComparison.OrdinalIgnoreCase)
-                          || s.NombrePaciente.Contains(_filtroPac.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+    /// <summary>Filas visibles: pasa <see cref="_todos"/> por el pipeline de
+    /// filtros configurado en la toolbar y despues aplica el orden elegido.
+    /// Recomputa en cada render (client-side, sin round-trip).</summary>
+    private List<MiServicioAsignadoDto> _visibles
+    {
+        get
+        {
+            IEnumerable<MiServicioAsignadoDto> q = _todos;
+
+            if (!string.IsNullOrWhiteSpace(_filtroPac))
+            {
+                var t = _filtroPac.Trim();
+                q = q.Where(s => s.NumeroDocPaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
+                              || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase));
+            }
+            if (_filTipos.Count > 0) { q = q.Where(s => _filTipos.Contains(s.TipoServicio)); }
+            if (_filEstado == "pendientes") { q = q.Where(s => !s.Completado); }
+            else if (_filEstado == "completados") { q = q.Where(s => s.Completado); }
+            if (_filServicios.Count > 0) { q = q.Where(s => _filServicios.Contains(s.NombreServicio)); }
+            if (_filProfesionales.Count > 0) { q = q.Where(s => _filProfesionales.Contains(s.NombreProfesional)); }
+            if (_filPaquete == "con") { q = q.Where(s => !string.IsNullOrWhiteSpace(s.PaqueteCodigo)); }
+            else if (_filPaquete == "sin") { q = q.Where(s => string.IsNullOrWhiteSpace(s.PaqueteCodigo)); }
+            if (_filPaquetesCodigos.Count > 0) { q = q.Where(s => s.PaqueteCodigo != null && _filPaquetesCodigos.Contains(s.PaqueteCodigo)); }
+            var hoy = DateOnly.FromDateTime(DateTime.Today);
+            if (_filFecha == "hoy") { q = q.Where(s => s.FechaAsignacion == hoy); }
+            else if (_filFecha == "7d") { var d = hoy.AddDays(-7); q = q.Where(s => s.FechaAsignacion >= d); }
+            else if (_filFecha == "30d") { var d = hoy.AddDays(-30); q = q.Where(s => s.FechaAsignacion >= d); }
+            else if (_filFecha == "rango")
+            {
+                if (_filFechaDesde is DateOnly d1) { q = q.Where(s => s.FechaAsignacion >= d1); }
+                if (_filFechaHasta is DateOnly d2) { q = q.Where(s => s.FechaAsignacion <= d2); }
+            }
+
+            q = _sortBy switch
+            {
+                "oldest"      => q.OrderBy(s => s.FechaAsignacion).ThenBy(s => s.NombrePaciente),
+                "paciente"    => q.OrderBy(s => s.NombrePaciente, StringComparer.OrdinalIgnoreCase),
+                "servicio"    => q.OrderBy(s => s.NombreServicio, StringComparer.OrdinalIgnoreCase),
+                "profesional" => q.OrderBy(s => s.NombreProfesional, StringComparer.OrdinalIgnoreCase),
+                _             => q.OrderByDescending(s => s.FechaAsignacion).ThenBy(s => s.NombrePaciente),
+            };
+            return q.ToList();
+        }
+    }
+
+    private bool FiltrosActivos => _filTipos.Count > 0 || !string.IsNullOrEmpty(_filEstado)
+                                   || _filServicios.Count > 0 || _filProfesionales.Count > 0
+                                   || !string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0
+                                   || !string.IsNullOrEmpty(_filFecha) || !_mostrarVencidas;
+
+    private int CuentaFiltrosActivos
+    {
+        get
+        {
+            var n = 0;
+            if (_filTipos.Count > 0) { n++; }
+            if (!string.IsNullOrEmpty(_filEstado)) { n++; }
+            if (_filServicios.Count > 0) { n++; }
+            if (_filProfesionales.Count > 0) { n++; }
+            if (!string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0) { n++; }
+            if (!string.IsNullOrEmpty(_filFecha)) { n++; }
+            if (!_mostrarVencidas) { n++; }
+            return n;
+        }
+    }
+
+    private void ToggleTipo(string t) { if (!_filTipos.Add(t)) { _filTipos.Remove(t); } }
+    private void ToggleServicio(string s) { if (!_filServicios.Add(s)) { _filServicios.Remove(s); } }
+    private void ToggleProfesional(string p) { if (!_filProfesionales.Add(p)) { _filProfesionales.Remove(p); } }
+    private void TogglePaqueteCodigo(string c) { if (!_filPaquetesCodigos.Add(c)) { _filPaquetesCodigos.Remove(c); } }
+    private void SetEstado(string v) => _filEstado = _filEstado == v ? "" : v;
+    private void SetPaquete(string v) => _filPaquete = _filPaquete == v ? "" : v;
+    private void SetFecha(string v) => _filFecha = _filFecha == v ? "" : v;
+
+    private async Task OnVencidasChanged(ChangeEventArgs e)
+    {
+        _mostrarVencidas = e.Value is bool b && b;
+        await Cargar();
+    }
+
+    private void LimpiarFiltros()
+    {
+        _filTipos.Clear();
+        _filServicios.Clear();
+        _filProfesionales.Clear();
+        _filPaquetesCodigos.Clear();
+        _filEstado = "";
+        _filPaquete = "";
+        _filFecha = "";
+        _filFechaDesde = _filFechaHasta = null;
+        _filtroPac = "";
+    }
 
     protected override async Task OnInitializedAsync() => await Cargar();
 
@@ -419,8 +663,6 @@ else
         }
         catch (Exception ex) { _error = "Error: " + ex.Message; }
     }
-
-    private void OnFiltroChanged(ChangeEventArgs e) => _filtroPac = e.Value?.ToString() ?? "";
 
     private async Task AbrirNotas(MiServicioAsignadoDto s)
     {

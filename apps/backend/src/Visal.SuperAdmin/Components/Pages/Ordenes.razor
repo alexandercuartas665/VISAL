@@ -1,10 +1,15 @@
 @page "/ordenes"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Components.Authorization
 @using Visal.Application.Tenancy
+@using Visal.Application.Revision
+@using Visal.Domain.Entities
 @inject IOrdenesClinicasService OcSvc
+@inject IRevisionKanbanService KanbanSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthProvider
 
 @*
    Modulo "Ordenes Clinicas". Vista de consulta + reimpresion (sin edicion).
@@ -24,10 +29,237 @@
     <div>
         <div class="ase-eyebrow">Operacion Clinica</div>
         <h1 class="ase-title">Ordenes Clinicas</h1>
-        <small class="text-muted">Consulta y reimpresion de historias clinicas. Las abiertas aparecen listadas pero no se pueden consultar ni imprimir.</small>
+        <small class="text-muted">Consulta, revision y reimpresion de historias clinicas.</small>
     </div>
 </div>
 
+@* Tabs secundarios de /ordenes — Ola 2 Capa 08 Revision Clinica.
+   Lista: vista original con 2 columnas nuevas (Estado revision + Pre-revision agente).
+   Kanban: tablero drag&drop de 4 columnas para el ciclo de revision (RC2c).
+   Archivo: HCs con revision terminal (ArchivadaOk / Inactivada) (RC2d). *@
+<div class="oc-tabs" role="tablist">
+    <button type="button" class="oc-tab @(_tabActivo == "lista" ? "activo" : "")"
+            @onclick='() => SeleccionarTab("lista")'>Lista</button>
+    <button type="button" class="oc-tab @(_tabActivo == "kanban" ? "activo" : "")"
+            @onclick='() => SeleccionarTab("kanban")'>Kanban revision</button>
+    <button type="button" class="oc-tab @(_tabActivo == "archivo" ? "activo" : "")"
+            @onclick='() => SeleccionarTab("archivo")'>Archivo</button>
+</div>
+
+@if (_tabActivo == "kanban")
+{
+    <div class="ase-card">
+        @if (_board is null)
+        {
+            <div class="ase-empty" style="padding:24px;">Cargando tablero...</div>
+        }
+        else
+        {
+            @* KPIs del header *@
+            <div class="oc-kpis">
+                <div class="oc-kpi"><span class="oc-kpi-n">@_board.Kpis.TotalCards</span> Total</div>
+                <div class="oc-kpi oc-kpi-a"><span class="oc-kpi-n">@_board.Kpis.Abiertas</span> Abiertas</div>
+                <div class="oc-kpi oc-kpi-c"><span class="oc-kpi-n">@_board.Kpis.Cerradas</span> Cerradas</div>
+                <div class="oc-kpi oc-kpi-r"><span class="oc-kpi-n">@_board.Kpis.Rechazadas</span> Rechazadas</div>
+                <div class="oc-kpi oc-kpi-ap"><span class="oc-kpi-n">@_board.Kpis.Aprobadas</span> Aprobadas</div>
+                @if (_board.Kpis.PorcentajeRechazadas is double p)
+                {
+                    <div class="oc-kpi"><span class="oc-kpi-n">@p.ToString("0")%</span> Tasa rechazo</div>
+                }
+                @if (_board.Kpis.TiempoMedioEnCerradas is TimeSpan ts && ts.TotalMinutes > 0)
+                {
+                    <div class="oc-kpi" title="Tiempo promedio que las HCs pasan en la columna Cerradas antes de ser tomadas">
+                        <span class="oc-kpi-n">@FormatearDuracion(ts)</span> T. medio Cerradas
+                    </div>
+                }
+                <div class="oc-kpi-actions">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="RefrescarKanban" disabled="@_cargandoKanban">
+                        @(_cargandoKanban ? "Recargando..." : "🔄 Recargar")
+                    </button>
+                </div>
+            </div>
+
+            @if (_kanbanError is not null)
+            {
+                <div class="oc-kanban-err">@_kanbanError</div>
+            }
+
+            @* 4 columnas del tablero *@
+            <div class="oc-kb-board">
+                @foreach (var col in new[] { RevisionKanbanColumna.Abiertas, RevisionKanbanColumna.Cerradas,
+                                             RevisionKanbanColumna.Rechazadas, RevisionKanbanColumna.Aprobadas })
+                {
+                    var cards = _board.Cards.Where(c => c.Columna == col).ToList();
+                    <div class="oc-kb-col oc-kb-col-@(col.ToString().ToLower())"
+                         ondragover="event.preventDefault();"
+                         @ondrop="() => OnDropColumnaAsync(col)">
+                        <div class="oc-kb-colh">
+                            <span>@ColumnaLabel(col)</span>
+                            <span class="oc-kb-count">@cards.Count</span>
+                        </div>
+                        <div class="oc-kb-cards">
+                            @foreach (var card in cards)
+                            {
+                                <div class="oc-kb-card"
+                                     draggable="true"
+                                     @ondragstart="() => OnDragStart(card)"
+                                     @ondragend="OnDragEnd"
+                                     title="@(card.UltimoMotivo ?? card.UltimoResumenAgente ?? "")">
+                                    <div class="oc-kb-p">@card.PacienteNombre</div>
+                                    <div class="oc-kb-fm">@card.FormatoNombre</div>
+                                    <div class="oc-kb-meta">
+                                        <span>📅 @(card.FechaCierre?.ToLocalTime().ToString("dd/MM/yy") ?? card.FechaApertura.ToLocalTime().ToString("dd/MM/yy"))</span>
+                                        @if (card.EspecialistaNombre is not null)
+                                        {
+                                            <span>👤 @card.EspecialistaNombre</span>
+                                        }
+                                    </div>
+                                    <div class="oc-kb-badges">
+                                        @if (card.Iteracion > 1)
+                                        {
+                                            <span class="oc-kb-badge oc-kb-badge-iter" title="Iteracion actual">iter @card.Iteracion</span>
+                                        }
+                                        @if (card.EstadoAgente is RevisionResultado ea)
+                                        {
+                                            var (agTxt, agCls, _) = AgenteBadge(ea);
+                                            <span class="oc-kb-badge @agCls" title="Veredicto del agente IA">@agTxt</span>
+                                        }
+                                    </div>
+                                    @if (col == RevisionKanbanColumna.Aprobadas)
+                                    {
+                                        <div class="oc-kb-card-actions">
+                                            <button class="btn btn-sm btn-outline-success"
+                                                    @onclick="() => AbrirModalArchivar(card)"
+                                                    title="Archivar con permiso final (ArchivarOk / Inactivar)">
+                                                📦 Archivar
+                                            </button>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            @if (cards.Count == 0)
+                            {
+                                <div class="oc-kb-empty">Sin cards</div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+else if (_tabActivo == "archivo")
+{
+    <div class="ase-card">
+        <div class="oc-filtros" style="grid-template-columns:1.5fr 1fr 1fr 1fr auto;">
+            <div class="oc-f oc-f-wide">
+                <label>Paciente</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Nombre o documento..."
+                       @bind="_archPaciente" @bind:event="oninput" />
+            </div>
+            <div class="oc-f">
+                <label>Sabor</label>
+                <select class="form-select form-select-sm" @bind="_archSabor">
+                    <option value="">(Todos)</option>
+                    <option value="ArchivadaOk">Archivadas OK</option>
+                    <option value="Inactivada">Inactivadas</option>
+                </select>
+            </div>
+            <div class="oc-f">
+                <label>Fecha desde</label>
+                <input type="date" class="form-control form-control-sm" @bind="_archDesde" />
+            </div>
+            <div class="oc-f">
+                <label>Fecha hasta</label>
+                <input type="date" class="form-control form-control-sm" @bind="_archHasta" />
+            </div>
+            <div class="oc-f oc-f-acts">
+                <button class="btn btn-primary btn-sm" @onclick="RefrescarArchivo" disabled="@_cargandoArchivo">
+                    @(_cargandoArchivo ? "Cargando..." : "🔍 Buscar")
+                </button>
+            </div>
+        </div>
+
+        @if (_kanbanError is not null)
+        {
+            <div class="oc-kanban-err">@_kanbanError</div>
+        }
+
+        <div class="oc-grid-h">
+            Archivo de revisiones (@_archivo.Count)
+        </div>
+
+        @if (_cargandoArchivo && _archivo.Count == 0)
+        {
+            <div class="ase-empty" style="padding:20px;">Cargando...</div>
+        }
+        else if (_archivo.Count == 0)
+        {
+            <div class="ase-empty" style="padding:30px;">
+                No hay revisiones archivadas. Los ciclos terminales aparecen aca.
+            </div>
+        }
+        else
+        {
+            <div class="oc-tbl-wrap">
+                <table class="table table-sm oc-tbl">
+                    <thead>
+                        <tr>
+                            <th style="min-width:220px">Paciente</th>
+                            <th style="width:160px">Documento</th>
+                            <th>Formato HC</th>
+                            <th style="width:180px">Especialista</th>
+                            <th class="text-center" style="width:130px">Sabor</th>
+                            <th class="text-center" style="width:150px">Fecha archivo</th>
+                            <th class="text-center" style="width:80px">Iter</th>
+                            <th style="min-width:220px">Motivo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in _archivo)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="oc-pname">@a.PacienteNombre</div>
+                                </td>
+                                <td class="mono">@a.PacienteTipoDoc @a.PacienteDoc</td>
+                                <td>@a.FormatoNombre</td>
+                                <td>@(a.EspecialistaNombre ?? "-")</td>
+                                <td class="text-center">
+                                    @if (a.Sabor == RevisionEstadoAgregado.ArchivadaOk)
+                                    {
+                                        <span class="oc-rv-chip oc-rv-arch" title="Archivada OK">📦 OK</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="oc-rv-chip oc-rv-inac" title="Inactivada">⊘ Inactivada</span>
+                                    }
+                                </td>
+                                <td class="text-center">
+                                    @a.FechaArchivo.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                                </td>
+                                <td class="text-center">@a.IteracionesTotales</td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(a.Motivo))
+                                    {
+                                        <div class="oc-arch-motivo">@a.Motivo</div>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+else
+{
 <div class="ase-card">
     <div class="oc-filtros">
         <div class="oc-f oc-f-wide">
@@ -103,7 +335,9 @@
                         <th class="text-center" style="width:110px">Estado</th>
                         <th class="text-center" style="width:130px">Fecha</th>
                         <th class="text-center" style="width:320px">Documentos</th>
-                        <th class="text-end" style="width:220px"></th>
+                        <th class="text-center" style="width:130px" title="Estado del ciclo de revision (Capa 08)">Revision</th>
+                        <th class="text-center" style="width:130px" title="Ultimo veredicto del agente IA">Pre-revision agente</th>
+                        <th class="text-end" style="width:280px"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -158,6 +392,29 @@
                                     @if (r.ConsentimientosCount > 0){ <span class="oc-pill oc-pill-con"  title="@r.ConsentimientosCount consentimiento(s)">CON @r.ConsentimientosCount</span> }
                                 </div>
                             </td>
+                            <td class="text-center">
+                                @{
+                                    var (chipTxt, chipCls, chipTitle) = ChipRevisionEstado(r);
+                                }
+                                <span class="oc-rv-chip @chipCls" title="@chipTitle">@chipTxt</span>
+                                @if (r.RevisionIteracion is int it && it > 1)
+                                {
+                                    <div class="oc-rv-iter" title="Iteracion actual del ciclo">iter @it</div>
+                                }
+                            </td>
+                            <td class="text-center">
+                                @{
+                                    var (aChipTxt, aChipCls, aChipTitle) = ChipAgente(r);
+                                }
+                                @if (aChipTxt is not null)
+                                {
+                                    <span class="oc-ag-chip @aChipCls" title="@aChipTitle">@aChipTxt</span>
+                                }
+                                else
+                                {
+                                    <span class="oc-rv-chip oc-rv-none" title="El agente IA aun no ha revisado esta HC">—</span>
+                                }
+                            </td>
                             <td class="text-end">
                                 @if (cerrada)
                                 {
@@ -165,6 +422,8 @@
                                             @onclick="() => Consultar(r)">👁 Consultar</button>
                                     <button class="btn btn-primary btn-sm ms-1" title="Elegir documentos a imprimir"
                                             @onclick="() => AbrirModalImprimir(r)">🖨 Imprimir</button>
+                                    <button class="btn btn-outline-primary btn-sm ms-1" title="Abrir la revision de esta HC (bitacora + aprobar/rechazar)"
+                                            @onclick="() => AbrirRevision(r)">🔍 Revision</button>
                                 }
                                 else
                                 {
@@ -172,6 +431,8 @@
                                             title="No se puede consultar hasta que la HC este cerrada definitivamente">👁 Consultar</button>
                                     <button class="btn btn-primary btn-sm ms-1" disabled
                                             title="No se puede imprimir hasta que la HC este cerrada definitivamente">🖨 Imprimir</button>
+                                    <button class="btn btn-outline-primary btn-sm ms-1" disabled
+                                            title="La HC debe estar cerrada para entrar al ciclo de revision">🔍 Revision</button>
                                 }
                             </td>
                         </tr>
@@ -181,6 +442,96 @@
         </div>
     }
 </div>
+}
+
+@* =========================================================================
+   Modal "Motivo de rechazo": aparece al hacer drop en Rechazadas o al
+   confirmar rechazo desde una card. Motivo es obligatorio.
+   ========================================================================= *@
+@if (_showRechazoModal && _cardEnAccion is not null)
+{
+    <div class="oc-backdrop" @onclick="CerrarRechazoModal"></div>
+    <div class="oc-modal" style="width:520px;">
+        <div class="oc-modal-h">
+            <h3>Rechazar revision</h3>
+            <button class="oc-modal-close" @onclick="CerrarRechazoModal">&times;</button>
+        </div>
+        <div class="oc-modal-body">
+            <div class="oc-modal-meta">
+                <div><b>Paciente:</b> @_cardEnAccion.PacienteNombre</div>
+                <div><b>Formato HC:</b> @_cardEnAccion.FormatoNombre</div>
+            </div>
+            <label class="oc-form-lbl">Motivo <span style="color:#dc2626">*</span></label>
+            <textarea class="form-control" rows="4" placeholder="Explica por que se rechaza esta HC..."
+                      @bind="_rechazoMotivo"></textarea>
+            <label class="oc-form-lbl mt-2">Nota adicional (opcional)</label>
+            <textarea class="form-control" rows="2" @bind="_rechazoNota"></textarea>
+        </div>
+        <div class="oc-modal-foot">
+            @if (_kanbanError is not null)
+            {
+                <div class="oc-modal-err">@_kanbanError</div>
+            }
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarRechazoModal">Cancelar</button>
+            <button class="btn btn-danger btn-sm" @onclick="ConfirmarRechazoAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_rechazoMotivo) || _procesando)">
+                @(_procesando ? "Rechazando..." : "Rechazar")
+            </button>
+        </div>
+    </div>
+}
+
+@* =========================================================================
+   Modal "Archivar" — solo para cards Aprobadas. Radios OK / Inactivar.
+   ========================================================================= *@
+@if (_showArchivarModal && _cardEnAccion is not null && _cardEnAccion.RevisionId is Guid archivarRid)
+{
+    <div class="oc-backdrop" @onclick="CerrarArchivarModal"></div>
+    <div class="oc-modal" style="width:520px;">
+        <div class="oc-modal-h">
+            <h3>📦 Archivar revision</h3>
+            <button class="oc-modal-close" @onclick="CerrarArchivarModal">&times;</button>
+        </div>
+        <div class="oc-modal-body">
+            <div class="oc-modal-meta">
+                <div><b>Paciente:</b> @_cardEnAccion.PacienteNombre</div>
+                <div><b>Formato HC:</b> @_cardEnAccion.FormatoNombre</div>
+            </div>
+            <p class="oc-modal-lead">Elige el sabor de archivo. Ambos sacan la HC del Kanban al tab Archivo.</p>
+            <div class="oc-arch-opt">
+                <label>
+                    <input type="radio" name="arch-sabor" value="ok" checked="@(_archivarSabor == ArchivarSabor.Ok)"
+                           @onchange='() => _archivarSabor = ArchivarSabor.Ok' />
+                    <b>Archivar OK</b> — la revision quedo aprobada sin novedades.
+                </label>
+            </div>
+            <div class="oc-arch-opt">
+                <label>
+                    <input type="radio" name="arch-sabor" value="in" checked="@(_archivarSabor == ArchivarSabor.Inactivar)"
+                           @onchange='() => _archivarSabor = ArchivarSabor.Inactivar' />
+                    <b>Inactivar</b> — la HC no debe conservarse (duplicada, error de captura).
+                </label>
+            </div>
+            <label class="oc-form-lbl mt-2">
+                Motivo @if (_archivarSabor == ArchivarSabor.Inactivar) { <span style="color:#dc2626">*</span> }
+            </label>
+            <textarea class="form-control" rows="3"
+                      placeholder="@(_archivarSabor == ArchivarSabor.Inactivar ? "Explica por que se inactiva..." : "Nota opcional...")"
+                      @bind="_archivarMotivo"></textarea>
+        </div>
+        <div class="oc-modal-foot">
+            @if (_kanbanError is not null)
+            {
+                <div class="oc-modal-err">@_kanbanError</div>
+            }
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivarModal">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="() => ConfirmarArchivarAsync(archivarRid)"
+                    disabled="@(_procesando || (_archivarSabor == ArchivarSabor.Inactivar && string.IsNullOrWhiteSpace(_archivarMotivo)))">
+                @(_procesando ? "Archivando..." : "Confirmar")
+            </button>
+        </div>
+    </div>
+}
 
 @* =========================================================================
    Modal "Elegir documentos a imprimir": checkboxes por tipo de documento.
@@ -382,9 +733,106 @@
     .oc-impr-opt em { color:#64748b; font-style:normal; font-size:11.5px; margin-left:6px; }
     .oc-modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:12px 18px; border-top:1px solid #e5e7eb; background:#fafbfc; border-radius:0 0 10px 10px; align-items:center; }
     .oc-modal-err { color:#991b1b; font-size:12px; margin-right:auto; }
+
+    /* Tabs secundarios (Ola 2 Capa 08) */
+    .oc-tabs { display:flex; gap:2px; border-bottom:2px solid #e2e8f0; margin-bottom:12px; }
+    .oc-tab { background:none; border:none; padding:10px 18px; font-size:13px; font-weight:600; color:#64748b; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .15s; }
+    .oc-tab:hover { color:#1565c0; }
+    .oc-tab.activo { color:#1565c0; border-bottom-color:#1565c0; }
+
+    /* Chip Estado revision (columna nueva Ola 2) */
+    .oc-rv-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oc-rv-none { background:#f1f5f9; color:#94a3b8; }
+    .oc-rv-sinrev { background:#e5e7eb; color:#475569; }
+    .oc-rv-prerev { background:#dbeafe; color:#1e40af; }
+    .oc-rv-enrev { background:#fef3c7; color:#92400e; }
+    .oc-rv-aprob { background:#d1fae5; color:#065f46; }
+    .oc-rv-rech { background:#fee2e2; color:#991b1b; }
+    .oc-rv-arch { background:#a7f3d0; color:#064e3b; }
+    .oc-rv-inac { background:#374151; color:#f9fafb; }
+    .oc-rv-iter { font-size:10px; color:#64748b; margin-top:2px; font-weight:500; }
+
+    /* Chip pre-revision agente */
+    .oc-ag-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .oc-ag-neutral { background:#e0e7ff; color:#3730a3; }
+    .oc-ag-aprob { background:#d1fae5; color:#065f46; }
+    .oc-ag-rech { background:#fee2e2; color:#991b1b; }
+
+    /* Tablero Kanban (Ola 2 RC2c) — KPIs + 4 columnas + cards con drag&drop */
+    .oc-kpis { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid #e5e7eb; }
+    .oc-kpi { display:flex; align-items:center; gap:6px; padding:6px 12px; background:#f1f5f9; border-radius:8px; font-size:12px; font-weight:600; color:#334155; }
+    .oc-kpi-n { font-size:16px; font-weight:800; color:#0f172a; }
+    .oc-kpi-a { background:#fef3c7; color:#92400e; } .oc-kpi-a .oc-kpi-n { color:#78350f; }
+    .oc-kpi-c { background:#dbeafe; color:#1e40af; } .oc-kpi-c .oc-kpi-n { color:#1e3a8a; }
+    .oc-kpi-r { background:#fee2e2; color:#991b1b; } .oc-kpi-r .oc-kpi-n { color:#7f1d1d; }
+    .oc-kpi-ap { background:#d1fae5; color:#065f46; } .oc-kpi-ap .oc-kpi-n { color:#064e3b; }
+    .oc-kpi-actions { margin-left:auto; }
+
+    .oc-kanban-err { background:#fef2f2; color:#991b1b; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; font-weight:500; border:1px solid #fecaca; }
+
+    .oc-kb-board { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
+    .oc-kb-col { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; min-height:360px; display:flex; flex-direction:column; }
+    .oc-kb-col-abiertas { border-top:3px solid #f59e0b; }
+    .oc-kb-col-cerradas { border-top:3px solid #3b82f6; }
+    .oc-kb-col-rechazadas { border-top:3px solid #ef4444; }
+    .oc-kb-col-aprobadas { border-top:3px solid #10b981; }
+    .oc-kb-colh { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding:0 4px; font-size:13px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:.3px; }
+    .oc-kb-count { background:#e2e8f0; color:#475569; font-size:11px; padding:2px 8px; border-radius:999px; font-weight:800; }
+    .oc-kb-cards { display:flex; flex-direction:column; gap:8px; flex:1; }
+    .oc-kb-empty { text-align:center; color:#94a3b8; font-size:12px; font-style:italic; padding:20px; }
+    .oc-kb-card { background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:10px; cursor:grab; box-shadow:0 1px 2px rgba(0,0,0,.03); transition:all .1s; }
+    .oc-kb-card:hover { box-shadow:0 2px 6px rgba(0,0,0,.08); transform:translateY(-1px); }
+    .oc-kb-card:active { cursor:grabbing; }
+    .oc-kb-p { font-weight:700; font-size:13px; color:#0f172a; line-height:1.3; margin-bottom:2px; }
+    .oc-kb-fm { font-size:11px; color:#64748b; margin-bottom:6px; }
+    .oc-kb-meta { font-size:11px; color:#475569; display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+    .oc-kb-badges { display:flex; flex-wrap:wrap; gap:4px; }
+    .oc-kb-badge { font-size:10px; padding:2px 7px; border-radius:999px; font-weight:700; }
+    .oc-kb-badge-iter { background:#fef3c7; color:#92400e; }
+    .oc-kb-badge-ag-ok { background:#d1fae5; color:#065f46; }
+    .oc-kb-badge-ag-rej { background:#fee2e2; color:#991b1b; }
+    .oc-kb-badge-ag-neu { background:#e0e7ff; color:#3730a3; }
+    .oc-kb-card-actions { margin-top:8px; padding-top:8px; border-top:1px dashed #e5e7eb; }
+
+    /* Modal archivar helpers */
+    .oc-form-lbl { display:block; font-size:12px; font-weight:600; color:#334155; margin-bottom:4px; }
+    .oc-arch-opt { padding:10px 12px; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:8px; }
+    .oc-arch-opt label { display:flex; gap:8px; align-items:flex-start; cursor:pointer; margin:0; font-size:13px; color:#334155; }
+    .oc-arch-opt input[type=radio] { margin-top:4px; }
+    .oc-arch-motivo { font-size:12px; color:#334155; line-height:1.4; max-height:60px; overflow:hidden; text-overflow:ellipsis; }
 </style>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    // Tab secundario activo — "lista", "kanban" o "archivo". Ver Ola 2 Capa 08.
+    private string _tabActivo = "lista";
+
+    // ── Estado del tablero Kanban (Ola 2 Capa 08) ────────────────────────
+    private RevisionKanbanBoardDto? _board;
+    private bool _cargandoKanban;
+    private bool _procesando;
+    private string? _kanbanError;
+    private RevisionKanbanCardDto? _cardArrastrada;
+    private RevisionKanbanCardDto? _cardEnAccion;
+    private bool _showRechazoModal;
+    private string _rechazoMotivo = "";
+    private string _rechazoNota = "";
+    private bool _showArchivarModal;
+    private ArchivarSabor _archivarSabor = ArchivarSabor.Ok;
+    private string _archivarMotivo = "";
+    private bool _puedeRevisar;
+    private bool _puedeAprobarFinal;
+    private Guid _actorId;
+
+    // ── Estado del tab Archivo (RC2d) ────────────────────────────────────
+    private List<RevisionArchivoItemDto> _archivo = new();
+    private bool _cargandoArchivo;
+    private string _archPaciente = "";
+    private string _archSabor = ""; // "", "ArchivadaOk", "Inactivada"
+    private DateTime? _archDesde;
+    private DateTime? _archHasta;
+
     private string _filtroPaciente = "";
     private DateTime? _desde;
     private DateTime? _hasta;
@@ -403,7 +851,41 @@
     protected override async Task OnInitializedAsync()
     {
         _especialistas = (await OcSvc.ListarEspecialistasAsync()).ToList();
+        await ResolverPermisosAsync();
         await Buscar();
+    }
+
+    /// <summary>
+    /// Determina si el usuario puede revisar / aprobar final del ciclo Kanban.
+    /// Sigue el mismo patron que Admision.ResolverPuedeReabrirAsync: Owner/Admin
+    /// del tenant y SuperAdmin de plataforma tienen ambos permisos implicitos.
+    /// </summary>
+    private async Task ResolverPermisosAsync()
+    {
+        if (AuthState is null) { _puedeRevisar = false; _puedeAprobarFinal = false; return; }
+        try
+        {
+            var state = await AuthState;
+            var tenantRole = state.User.FindFirst("tenant_role")?.Value;
+            var platformRole = state.User.FindFirst("platform_role")?.Value;
+            var esAdminTenant = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase);
+            var esSuperAdmin = string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+            var perms = (state.User.FindFirst("perms")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var implicito = esAdminTenant || esSuperAdmin;
+            _puedeRevisar = implicito || perms.Contains("historias.revisar");
+            _puedeAprobarFinal = implicito || perms.Contains("historias.revisar.aprobar_final");
+            var uidStr = state.User.FindFirst("user_id")?.Value
+                        ?? state.User.FindFirst("sub")?.Value;
+            _actorId = Guid.TryParse(uidStr, out var uid) ? uid : Guid.Empty;
+        }
+        catch
+        {
+            _puedeRevisar = false; _puedeAprobarFinal = false;
+        }
     }
 
     private async Task Buscar()
@@ -501,6 +983,269 @@
         _showImprimirModal = false;
         _rowSel = null;
         await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    /// <summary>Cambia entre los 3 tabs secundarios (Ola 2). El tab Lista es el default.</summary>
+    private async Task SeleccionarTab(string tab)
+    {
+        _tabActivo = tab;
+        _kanbanError = null;
+        if (tab == "kanban" && _board is null)
+        {
+            await RefrescarKanban();
+        }
+        else if (tab == "archivo" && _archivo.Count == 0)
+        {
+            await RefrescarArchivo();
+        }
+    }
+
+    /// <summary>Carga el listado del tab Archivo con los filtros actuales.</summary>
+    private async Task RefrescarArchivo()
+    {
+        if (_cargandoArchivo) { return; }
+        _cargandoArchivo = true;
+        _kanbanError = null;
+        try
+        {
+            RevisionEstadoAgregado? saborFiltro = _archSabor switch
+            {
+                "ArchivadaOk" => RevisionEstadoAgregado.ArchivadaOk,
+                "Inactivada" => RevisionEstadoAgregado.Inactivada,
+                _ => null,
+            };
+            var filtro = new RevisionArchivoFiltro(
+                PacienteTexto: string.IsNullOrWhiteSpace(_archPaciente) ? null : _archPaciente.Trim(),
+                Sabor: saborFiltro,
+                FechaDesde: _archDesde is DateTime d1 ? DateOnly.FromDateTime(d1) : null,
+                FechaHasta: _archHasta is DateTime d2 ? DateOnly.FromDateTime(d2) : null);
+            _archivo = (await KanbanSvc.GetArchivoAsync(filtro)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _kanbanError = "No se pudo cargar el archivo: " + ex.Message;
+        }
+        finally { _cargandoArchivo = false; }
+    }
+
+    // ── Kanban: carga + drag&drop + acciones ─────────────────────────────
+
+    private async Task RefrescarKanban()
+    {
+        if (_cargandoKanban) { return; }
+        _cargandoKanban = true;
+        _kanbanError = null;
+        try
+        {
+            _board = await KanbanSvc.GetBoardAsync();
+        }
+        catch (Exception ex)
+        {
+            _kanbanError = "No se pudo cargar el tablero: " + ex.Message;
+        }
+        finally { _cargandoKanban = false; }
+    }
+
+    private void OnDragStart(RevisionKanbanCardDto card)
+    {
+        _cardArrastrada = card;
+        _kanbanError = null;
+    }
+
+    private void OnDragEnd()
+    {
+        _cardArrastrada = null;
+    }
+
+    /// <summary>Ejecuta el drop en la columna destino, con validacion de permisos y motivo.</summary>
+    private async Task OnDropColumnaAsync(RevisionKanbanColumna destino)
+    {
+        var card = _cardArrastrada;
+        if (card is null) { return; }
+        _cardArrastrada = null;
+
+        if (card.Columna == destino) { return; }
+        if (destino == RevisionKanbanColumna.Abiertas)
+        {
+            _kanbanError = "No se puede mover una revision a Abiertas — esa columna refleja HCs abiertas por el profesional.";
+            return;
+        }
+        if (!_puedeRevisar)
+        {
+            _kanbanError = "No tienes permiso historias.revisar para mover cards.";
+            return;
+        }
+
+        if (card.RevisionId is null)
+        {
+            // La HC aun no entra al ciclo — la creamos on-demand para permitir el drag.
+            var rev = await KanbanSvc.SolicitarSiFaltaAsync(card.HistoriaClinicaId, _actorId);
+            card = card with { RevisionId = rev.Id };
+        }
+
+        // Rechazar exige motivo — abrimos modal.
+        if (destino == RevisionKanbanColumna.Rechazadas)
+        {
+            _cardEnAccion = card;
+            _rechazoMotivo = "";
+            _rechazoNota = "";
+            _showRechazoModal = true;
+            return;
+        }
+
+        await EjecutarMoverCardAsync(card, destino, motivo: null, nota: null);
+    }
+
+    private async Task EjecutarMoverCardAsync(RevisionKanbanCardDto card, RevisionKanbanColumna destino, string? motivo, string? nota)
+    {
+        if (card.RevisionId is null) { return; }
+        _procesando = true;
+        _kanbanError = null;
+        try
+        {
+            await KanbanSvc.MoverCardAsync(
+                new MoverCardCmd(card.RevisionId.Value, destino, _actorId, motivo, nota),
+                tienePermisoRevisar: _puedeRevisar);
+            await RefrescarKanban();
+        }
+        catch (Exception ex)
+        {
+            _kanbanError = ex.Message;
+        }
+        finally { _procesando = false; }
+    }
+
+    private void CerrarRechazoModal()
+    {
+        _showRechazoModal = false;
+        _cardEnAccion = null;
+        _rechazoMotivo = "";
+        _rechazoNota = "";
+    }
+
+    private async Task ConfirmarRechazoAsync()
+    {
+        if (_cardEnAccion is null || string.IsNullOrWhiteSpace(_rechazoMotivo)) { return; }
+        var card = _cardEnAccion;
+        var motivo = _rechazoMotivo;
+        var nota = string.IsNullOrWhiteSpace(_rechazoNota) ? null : _rechazoNota;
+        CerrarRechazoModal();
+        await EjecutarMoverCardAsync(card, RevisionKanbanColumna.Rechazadas, motivo, nota);
+    }
+
+    private void AbrirModalArchivar(RevisionKanbanCardDto card)
+    {
+        if (!_puedeAprobarFinal)
+        {
+            _kanbanError = "No tienes permiso historias.revisar.aprobar_final para archivar.";
+            return;
+        }
+        _cardEnAccion = card;
+        _archivarSabor = ArchivarSabor.Ok;
+        _archivarMotivo = "";
+        _showArchivarModal = true;
+    }
+
+    private void CerrarArchivarModal()
+    {
+        _showArchivarModal = false;
+        _cardEnAccion = null;
+        _archivarMotivo = "";
+    }
+
+    private async Task ConfirmarArchivarAsync(Guid revisionId)
+    {
+        if (_archivarSabor == ArchivarSabor.Inactivar && string.IsNullOrWhiteSpace(_archivarMotivo)) { return; }
+        _procesando = true;
+        _kanbanError = null;
+        try
+        {
+            await KanbanSvc.ArchivarAsync(
+                new ArchivarKanbanCmd(revisionId, _archivarSabor, _actorId,
+                    string.IsNullOrWhiteSpace(_archivarMotivo) ? null : _archivarMotivo),
+                tienePermisoFinal: _puedeAprobarFinal);
+            CerrarArchivarModal();
+            await RefrescarKanban();
+        }
+        catch (Exception ex)
+        {
+            _kanbanError = ex.Message;
+        }
+        finally { _procesando = false; }
+    }
+
+    private static string ColumnaLabel(RevisionKanbanColumna col) => col switch
+    {
+        RevisionKanbanColumna.Abiertas => "Abiertas",
+        RevisionKanbanColumna.Cerradas => "Cerradas",
+        RevisionKanbanColumna.Rechazadas => "Rechazadas",
+        RevisionKanbanColumna.Aprobadas => "Aprobadas",
+        _ => col.ToString(),
+    };
+
+    private static (string txt, string cls, string title) AgenteBadge(RevisionResultado r) => r switch
+    {
+        RevisionResultado.Aprobado => ("IA ✓", "oc-kb-badge-ag-ok", "Agente sugiere aprobar"),
+        RevisionResultado.Rechazado => ("IA ✗", "oc-kb-badge-ag-rej", "Agente sugiere rechazar"),
+        RevisionResultado.Neutral => ("IA ~", "oc-kb-badge-ag-neu", "Agente sin veredicto claro"),
+        _ => ("", "", ""),
+    };
+
+    private static string FormatearDuracion(TimeSpan t)
+    {
+        if (t.TotalDays >= 1) { return $"{(int)t.TotalDays}d {t.Hours}h"; }
+        if (t.TotalHours >= 1) { return $"{(int)t.TotalHours}h {t.Minutes}m"; }
+        return $"{(int)t.TotalMinutes}m";
+    }
+
+    /// <summary>Abre el modal HC en la tab Revision (Ola 2). Por ahora navega a /atencion?hc=id con hash — se cablea en RC2e.</summary>
+    private async Task AbrirRevision(OrdenClinicaItemDto r)
+    {
+        // RC2e cableara este boton para abrir el modal HC directamente en la tab
+        // Revision. Por ahora dejamos un fallback que abre la HC en modo consulta.
+        await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{r.HistoriaClinicaId}?docs=HC#revision", "_blank");
+    }
+
+    /// <summary>Pinta el chip de estado de revision. Devuelve texto, clase CSS y title del tooltip.</summary>
+    private static (string txt, string cls, string title) ChipRevisionEstado(OrdenClinicaItemDto r)
+    {
+        if (r.RevisionEstado is null)
+        {
+            // HC sin revision — depende del estado clinico.
+            return string.Equals(r.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase)
+                ? ("Sin solicitar", "oc-rv-none", "HC cerrada pero aun no entra al ciclo de revision")
+                : ("—", "oc-rv-none", "HC abierta — el ciclo de revision empieza al cerrar");
+        }
+        return r.RevisionEstado switch
+        {
+            RevisionEstadoAgregado.SinRevisar => ("Sin revisar", "oc-rv-sinrev", "Revision solicitada, aun sin revisor"),
+            RevisionEstadoAgregado.PreRevision => ("Pre-revision", "oc-rv-prerev", "El agente IA ya opino — falta revisor humano"),
+            RevisionEstadoAgregado.EnRevision => ("En revision", "oc-rv-enrev", "Un revisor humano tomo esta HC"),
+            RevisionEstadoAgregado.Aprobada => ("Aprobada", "oc-rv-aprob", "Aprobada por el revisor"),
+            RevisionEstadoAgregado.Rechazada => ("Rechazada", "oc-rv-rech", "Rechazada — espera reenvio del profesional"),
+            RevisionEstadoAgregado.ArchivadaOk => ("Archivada", "oc-rv-arch", "Ciclo cerrado — archivada OK"),
+            RevisionEstadoAgregado.Inactivada => ("Inactivada", "oc-rv-inac", "Revision inactivada — captura invalida"),
+            _ => ("—", "oc-rv-none", ""),
+        };
+    }
+
+    /// <summary>Pinta el chip del veredicto del agente IA. Devuelve null cuando aun no corrio.</summary>
+    private static (string? txt, string cls, string title) ChipAgente(OrdenClinicaItemDto r)
+    {
+        if (r.RevisionAgente is null)
+        {
+            return (null, "", "");
+        }
+        var resumen = string.IsNullOrWhiteSpace(r.RevisionAgenteResumen)
+            ? "Sin resumen"
+            : (r.RevisionAgenteResumen.Length > 240 ? r.RevisionAgenteResumen[..240] + "..." : r.RevisionAgenteResumen);
+        return r.RevisionAgente switch
+        {
+            RevisionResultado.Aprobado => ("IA: aprobar", "oc-ag-aprob", resumen),
+            RevisionResultado.Rechazado => ("IA: rechazar", "oc-ag-rech", resumen),
+            RevisionResultado.Neutral => ("IA: neutral", "oc-ag-neutral", resumen),
+            _ => (null, "", ""),
+        };
     }
 
     /// <summary>Construye la query de docs incluyendo TODOS los tipos con count > 0. Uso por Consultar.</summary>

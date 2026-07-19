@@ -125,6 +125,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<RdaEvento> RdaEventos => Set<RdaEvento>();
     public DbSet<FacturacionSnapshot> FacturacionSnapshots => Set<FacturacionSnapshot>();
     public DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas => Set<FacturacionSnapshotFila>();
+    public DbSet<RevisionClinica> RevisionesClinica => Set<RevisionClinica>();
+    public DbSet<RevisionClinicaEvento> RevisionClinicaEventos => Set<RevisionClinicaEvento>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -161,6 +163,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<TipoRdaIhce>().HaveConversion<string>().HaveMaxLength(20);
         configurationBuilder.Properties<TipoSnapshot>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<EstadoSnapshot>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<RevisionEstadoAgregado>().HaveConversion<string>().HaveMaxLength(30);
+        configurationBuilder.Properties<RevisionTipoEvento>().HaveConversion<string>().HaveMaxLength(30);
+        configurationBuilder.Properties<RevisionResultado>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<RevisionActorTipo>().HaveConversion<string>().HaveMaxLength(20);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1342,6 +1348,34 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Orden natural + paginacion server-side. Unico por snapshot para que
             // el builder pueda re-emitir la misma numeracion si retry.
             b.HasIndex(x => new { x.SnapshotId, x.NumeroFila }).IsUnique();
+        });
+
+        modelBuilder.Entity<RevisionClinica>(b =>
+        {
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId).OnDelete(DeleteBehavior.Restrict);
+
+            // UNIQUE por HC dentro del tenant: una sola revision viva por HC.
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId }).IsUnique();
+
+            // Feed de /ordenes tab Kanban y contador por columna. El estado agregado
+            // se cachea en la cabecera para no scannear la bitacora en cada refresh.
+            b.HasIndex(x => new { x.TenantId, x.EstadoAgregado, x.UltimaAccionEn });
+        });
+
+        modelBuilder.Entity<RevisionClinicaEvento>(b =>
+        {
+            b.Property(x => x.ActorAgenteCodigo).HasMaxLength(60);
+            b.Property(x => x.Motivo).HasMaxLength(1000);
+            b.Property(x => x.Nota).HasMaxLength(4000);
+            // Payload estructurado opcional en jsonb; el agente lo puede indexar despues.
+            b.Property(x => x.PayloadJson).HasColumnType("jsonb");
+
+            b.HasOne(x => x.RevisionClinica).WithMany(x => x.Eventos)
+                .HasForeignKey(x => x.RevisionClinicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Feed de la bitacora del modal HC — orden cronologico descendente.
+            b.HasIndex(x => new { x.RevisionClinicaId, x.OcurridoEn });
         });
     }
 

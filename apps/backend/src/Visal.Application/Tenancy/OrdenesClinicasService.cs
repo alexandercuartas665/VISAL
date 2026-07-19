@@ -36,9 +36,15 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             q = q.Where(h => h.EspecialistaNombre != null && h.EspecialistaNombre.ToLower().Contains(esp));
         }
 
+        // LEFT JOIN a `revisiones_clinica` para traer el estado agregado + veredicto
+        // agente sin romper filas de HCs que aun no entraron al ciclo (Capa 08 Ola 2).
         var joined = q
             .Join(db.Pacientes.AsNoTracking(), h => h.PacienteId, p => p.Id, (h, p) => new { h, p })
-            .Join(db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id, (x, f) => new { x.h, x.p, f });
+            .Join(db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id, (x, f) => new { x.h, x.p, f })
+            .GroupJoin(db.RevisionesClinica.AsNoTracking(),
+                x => x.h.Id, r => r.HistoriaClinicaId,
+                (x, rs) => new { x.h, x.p, x.f, rs })
+            .SelectMany(x => x.rs.DefaultIfEmpty(), (x, r) => new { x.h, x.p, x.f, r });
 
         if (!string.IsNullOrWhiteSpace(filtro.PacienteTexto))
         {
@@ -60,7 +66,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             {
                 Hc = x.h,
                 Pa = x.p,
-                Fo = x.f
+                Fo = x.f,
+                Rv = x.r
             })
             .ToListAsync(ct);
 
@@ -139,6 +146,28 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             .Where(x => x.Tipo == "CONSENTIMIENTO")
             .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
 
+        // Capa 08 Ola 2 — resumen del ultimo veredicto del agente por revision.
+        // Solo se trae el ultimo evento tipo `PreRevisionAgente` de cada revision:
+        // sirve para popular el tooltip del chip "Pre-revision agente" en el grid.
+        var revisionIds = rows.Where(r => r.Rv != null).Select(r => r.Rv!.Id).ToList();
+        var agenteResumenes = new Dictionary<Guid, string?>();
+        if (revisionIds.Count > 0)
+        {
+            var eventosAgente = await db.RevisionClinicaEventos.AsNoTracking()
+                .Where(e => revisionIds.Contains(e.RevisionClinicaId)
+                            && e.Tipo == RevisionTipoEvento.PreRevisionAgente)
+                .GroupBy(e => e.RevisionClinicaId)
+                .Select(g => new
+                {
+                    RevisionClinicaId = g.Key,
+                    Ultimo = g.OrderByDescending(x => x.OcurridoEn).First()
+                })
+                .ToListAsync(ct);
+            agenteResumenes = eventosAgente.ToDictionary(
+                x => x.RevisionClinicaId,
+                x => x.Ultimo.Nota ?? x.Ultimo.Motivo);
+        }
+
         return rows.Select(r => new OrdenClinicaItemDto(
             r.Hc.Id,
             r.Pa.Id,
@@ -161,7 +190,12 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             insExt.GetValueOrDefault(r.Hc.Id, 0),
             esc.GetValueOrDefault(r.Hc.Id, 0),
             evo.GetValueOrDefault(r.Hc.Id, 0),
-            con.GetValueOrDefault(r.Hc.Id, 0)
+            con.GetValueOrDefault(r.Hc.Id, 0),
+            r.Rv?.Id,
+            r.Rv?.EstadoAgregado,
+            r.Rv?.EstadoAgente,
+            r.Rv?.IteracionActual,
+            r.Rv is null ? null : agenteResumenes.GetValueOrDefault(r.Rv.Id)
         )).ToList();
     }
 

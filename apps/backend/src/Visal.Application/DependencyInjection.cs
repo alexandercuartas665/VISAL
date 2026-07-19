@@ -2,6 +2,7 @@ using Visal.Application.Admin;
 using Visal.Application.Auth;
 using Visal.Application.Common;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Visal.Application;
 
@@ -9,6 +10,8 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        // TimeProvider centralizado — permite fakeal en tests sin cambiar produccion.
+        services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IMiPerfilService, MiPerfilService>();
         services.AddScoped<IAuditWriter, AuditWriter>();
@@ -114,6 +117,10 @@ public static class DependencyInjection
         // Facturacion — motor generico de snapshots + builders por tipo.
         services.AddScoped<Facturacion.IFacturacionSnapshotService, Facturacion.FacturacionSnapshotService>();
         services.AddScoped<Facturacion.ISnapshotBuilder, Facturacion.Builders.SnapshotRelacionFacturasBuilder>();
+        // Revision Clinica (Capa 08) — motor del ciclo con bitacora append-only.
+        services.AddScoped<Revision.IRevisionClinicaService, Revision.RevisionClinicaService>();
+        // Tablero Kanban + tab Archivo del modulo /ordenes (Ola 2).
+        services.AddScoped<Revision.IRevisionKanbanService, Revision.RevisionKanbanService>();
         return services;
     }
 }

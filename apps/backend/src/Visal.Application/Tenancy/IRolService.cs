@@ -19,6 +19,12 @@ public static class ModuloCatalogo
         // roles tenant Owner/Admin y el SuperAdmin de plataforma tienen este
         // permiso implicitamente aunque el rol no lo tenga marcado.
         new("historias.reabrir", "Historias Clinicas - Reabrir HC cerrada", "Operacion Clinica"),
+        // Revision Clinica (Capa 08): habilita el flujo de revision de HCs cerradas.
+        // Sin este permiso, el usuario no ve el tab Kanban ni puede aprobar/rechazar.
+        new("historias.revisar", "Historias Clinicas - Revisar HC cerradas", "Operacion Clinica"),
+        // Permiso final: cerrar el ciclo con ArchivadoOk o Inactivacion. Se pide adicional a
+        // historias.revisar. Owner/Admin del tenant y SuperAdmin lo tienen implicito.
+        new("historias.revisar.aprobar_final", "Historias Clinicas - Archivar/Inactivar revision aprobada", "Operacion Clinica"),
         new("notas", "Notas Medicas", "Operacion Clinica"),
         new("ordenes", "Ordenes Clinicas", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),

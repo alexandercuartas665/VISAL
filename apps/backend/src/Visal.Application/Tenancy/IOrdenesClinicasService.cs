@@ -1,3 +1,5 @@
+using Visal.Domain.Entities;
+
 namespace Visal.Application.Tenancy;
 
 /// <summary>Item del listado de "Ordenes Clinicas" — una HC con su paciente y conteos de ordenes.</summary>
@@ -23,7 +25,18 @@ public sealed record OrdenClinicaItemDto(
     int InsExtCount = 0,
     int EscalasCount = 0,
     int EvolucionesCount = 0,
-    int ConsentimientosCount = 0);
+    int ConsentimientosCount = 0,
+    // ── Capa 08: Revision Clinica (Ola 2) ────────────────────────────────
+    /// <summary>Id de la revision viva cuando existe; null si la HC nunca entro al ciclo.</summary>
+    Guid? RevisionId = null,
+    /// <summary>Estado agregado de la revision. Null cuando no hay revision (HC abierta o cerrada sin solicitud).</summary>
+    RevisionEstadoAgregado? RevisionEstado = null,
+    /// <summary>Ultimo veredicto emitido por el agente IA. Null si el agente aun no corrio.</summary>
+    RevisionResultado? RevisionAgente = null,
+    /// <summary>Iteracion actual del ciclo. 1 al inicio; aumenta por cada reenvio tras rechazo.</summary>
+    int? RevisionIteracion = null,
+    /// <summary>Ultima nota o motivo del agente — resumen para el tooltip del chip pre-revision.</summary>
+    string? RevisionAgenteResumen = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

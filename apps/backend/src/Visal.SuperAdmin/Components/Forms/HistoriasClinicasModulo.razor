@@ -436,6 +436,14 @@
                                                        PacienteId="@PacienteActivo?.Id"
                                                        OnCountChanged="@(c => _docExtCount = c)" />
                             }
+                            else if (_tabSel == "Revision")
+                            {
+                                @* Capa 08 Ola 2 — bitacora del ciclo de revision.
+                                   Requiere HC cerrada; el panel muestra un placeholder
+                                   cuando la HC aun esta abierta y otro cuando no hay revision. *@
+                                <HcRevisionPanel HistoriaClinicaId="@_historiaSel?.Id"
+                                                 HcCerrada="@(string.Equals(_historiaSel?.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase))" />
+                            }
                             else if (_tabSel == "Ordenes medicamento")
                             {
                                 <OrdenMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
@@ -1026,6 +1034,7 @@
 
     private readonly string[] _tabs = new[] {
         "Historial", "Escalas", "Evoluciones", "Consentimientos", "Atenciones",
+        "Revision", // Capa 08 Ola 2 — bitacora del ciclo de revision de la HC.
         "Documentos externos",
         "Ordenes medicamento", "Ordenes servicios",
         "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
@@ -1087,6 +1096,7 @@
         "Evoluciones" => ("\U0001F4C8", _evoCount),            // chart up
         "Consentimientos" => ("✅", _conCount),            // check mark
         "Atenciones" => ("\U0001FA7A", _atCount),              // stethoscope
+        "Revision" => ("\U0001F50D", 0),                       // magnifying glass — bitacora Capa 08
         "Documentos externos" => ("\U0001F4CE", _docExtCount), // paperclip
         "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
         "Ordenes servicios" => ("\U0001F3E5", _servCount), // hospital

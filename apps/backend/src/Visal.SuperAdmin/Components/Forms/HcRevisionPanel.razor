@@ -1,0 +1,425 @@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Components.Authorization
+@using Visal.Application.Revision
+@using Visal.Domain.Entities
+@inject IRevisionClinicaService RevisionSvc
+@inject IRevisionKanbanService KanbanSvc
+@inject AuthenticationStateProvider AuthProvider
+
+@*
+   Panel de revision embebido en el menu lateral del modal HC (task #131).
+   Muestra:
+     - Bitacora vertical de eventos ordenados por OcurridoEn desc.
+     - Boton "Enviar a revision" cuando la HC esta cerrada y aun no tiene RevisionClinica.
+     - Botones "Aprobar" / "Rechazar" con textareas para revisores autorizados.
+
+   No expone drag&drop (eso es responsabilidad del tab Kanban de /ordenes).
+*@
+
+@if (HistoriaClinicaId is null)
+{
+    <div class="rev-empty">Selecciona una HC para ver su revision.</div>
+}
+else if (HcCerrada is false)
+{
+    <div class="rev-empty">
+        La HC debe estar cerrada antes de entrar al ciclo de revision.
+        <div class="rev-empty-sub">El profesional debe pulsar "Guardar definitivamente" para dispararlo.</div>
+    </div>
+}
+else if (_cargando && _revision is null)
+{
+    <div class="rev-empty">Cargando...</div>
+}
+else if (_revision is null)
+{
+    <div class="rev-panel">
+        <div class="rev-empty">
+            Esta HC aun no tiene solicitud de revision.
+            <div class="rev-empty-sub">Puedes iniciar el ciclo enviandola a la cola de revision.</div>
+        </div>
+        @if (_error is not null)
+        {
+            <div class="rev-err">@_error</div>
+        }
+        <div class="rev-actions">
+            <button class="btn btn-primary" @onclick="EnviarARevisionAsync" disabled="@_procesando">
+                @(_procesando ? "Enviando..." : "🔍 Enviar a revision")
+            </button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="rev-panel">
+        <div class="rev-header">
+            <div class="rev-h-info">
+                <div class="rev-h-l">Estado</div>
+                <div>
+                    @{
+                        var (chip, cls) = ChipEstado(_revision.EstadoAgregado);
+                    }
+                    <span class="rev-chip @cls">@chip</span>
+                    <span class="rev-iter">Iteracion @_revision.IteracionActual</span>
+                </div>
+            </div>
+            @if (_revision.EstadoAgente is RevisionResultado ag)
+            {
+                <div class="rev-h-info">
+                    <div class="rev-h-l">Agente IA</div>
+                    <span class="rev-chip @AgenteCls(ag)">@AgenteTxt(ag)</span>
+                </div>
+            }
+            <div class="rev-h-info">
+                <div class="rev-h-l">Ultima accion</div>
+                <div>@_revision.UltimaAccionEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+            </div>
+        </div>
+
+        @if (_error is not null)
+        {
+            <div class="rev-err">@_error</div>
+        }
+
+        @* Acciones humanas: aprobar / rechazar. Solo si el revisor tiene permiso
+           y el estado permite decidir (Cerradas o EnRevision no-terminal). *@
+        @if (_puedeRevisar && PuedeDecidir(_revision.EstadoAgregado))
+        {
+            <div class="rev-decidir">
+                <div class="rev-decidir-hdr">Emitir veredicto</div>
+                <label class="rev-lbl">Nota / Motivo</label>
+                <textarea class="form-control" rows="3" @bind="_notaVeredicto"
+                          placeholder="Motivo obligatorio para rechazar; opcional para aprobar."></textarea>
+                <div class="rev-decidir-acts">
+                    <button class="btn btn-outline-danger btn-sm" @onclick="RechazarAsync"
+                            disabled="@(_procesando || string.IsNullOrWhiteSpace(_notaVeredicto))">
+                        ✗ Rechazar
+                    </button>
+                    <button class="btn btn-success btn-sm" @onclick="AprobarAsync" disabled="@_procesando">
+                        ✓ Aprobar
+                    </button>
+                </div>
+            </div>
+        }
+        else if (_revision.EstadoAgregado == RevisionEstadoAgregado.Aprobada && _puedeAprobarFinal)
+        {
+            <div class="rev-decidir">
+                <div class="rev-decidir-hdr">Cerrar el ciclo</div>
+                <div class="rev-decidir-desc">
+                    La revision quedo <b>Aprobada</b>. Puedes archivarla desde el tab Kanban de <a href="/ordenes" target="_blank">Ordenes Clinicas</a>.
+                </div>
+            </div>
+        }
+
+        <div class="rev-timeline-h">Bitacora (@_eventos.Count)</div>
+        <div class="rev-timeline">
+            @foreach (var e in _eventos)
+            {
+                var (icono, evtCls) = IconoEvento(e.Tipo);
+                <div class="rev-evt @evtCls">
+                    <div class="rev-evt-icono">@icono</div>
+                    <div class="rev-evt-body">
+                        <div class="rev-evt-hdr">
+                            <b>@LabelEvento(e.Tipo)</b>
+                            <span class="rev-evt-iter">iter @e.Iteracion</span>
+                            <span class="rev-evt-fecha">@e.OcurridoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                        </div>
+                        <div class="rev-evt-actor">@ActorLabel(e)</div>
+                        @if (!string.IsNullOrWhiteSpace(e.Motivo))
+                        {
+                            <div class="rev-evt-motivo"><b>Motivo:</b> @e.Motivo</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(e.Nota))
+                        {
+                            <div class="rev-evt-nota">@e.Nota</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .rev-empty { text-align:center; color:#64748b; padding:36px 20px; font-size:14px; }
+    .rev-empty-sub { color:#94a3b8; font-size:12px; margin-top:6px; }
+    .rev-panel { padding:8px 4px; }
+    .rev-actions { display:flex; justify-content:center; margin-top:12px; }
+    .rev-header { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:12px 16px; display:flex; gap:24px; flex-wrap:wrap; margin-bottom:14px; }
+    .rev-h-info { display:flex; flex-direction:column; gap:4px; }
+    .rev-h-l { font-size:10px; text-transform:uppercase; color:#64748b; font-weight:700; letter-spacing:.3px; }
+    .rev-iter { margin-left:8px; font-size:11px; color:#64748b; }
+    .rev-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .rev-chip-sinrev { background:#e5e7eb; color:#475569; }
+    .rev-chip-prerev { background:#dbeafe; color:#1e40af; }
+    .rev-chip-enrev { background:#fef3c7; color:#92400e; }
+    .rev-chip-aprob { background:#d1fae5; color:#065f46; }
+    .rev-chip-rech { background:#fee2e2; color:#991b1b; }
+    .rev-chip-arch { background:#a7f3d0; color:#064e3b; }
+    .rev-chip-inac { background:#374151; color:#f9fafb; }
+    .rev-chip-neutral { background:#e0e7ff; color:#3730a3; }
+    .rev-err { background:#fef2f2; color:#991b1b; padding:10px 14px; border-radius:6px; margin:8px 0; font-size:13px; border:1px solid #fecaca; }
+
+    .rev-decidir { background:#fefce8; border:1px solid #fde68a; border-radius:8px; padding:14px 16px; margin-bottom:14px; }
+    .rev-decidir-hdr { font-size:13px; font-weight:700; color:#78350f; margin-bottom:8px; }
+    .rev-decidir-desc { font-size:12px; color:#334155; }
+    .rev-lbl { display:block; font-size:11px; font-weight:600; color:#334155; margin-bottom:4px; }
+    .rev-decidir-acts { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
+
+    .rev-timeline-h { font-size:13px; font-weight:700; color:#0f172a; margin:10px 4px 8px; padding:6px 0 4px; border-bottom:1px solid #e5e7eb; }
+    .rev-timeline { display:flex; flex-direction:column; gap:8px; }
+    .rev-evt { display:flex; gap:10px; padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-left:3px solid #94a3b8; border-radius:6px; }
+    .rev-evt-solicitud { border-left-color:#3b82f6; }
+    .rev-evt-agente { border-left-color:#6366f1; background:#eef2ff; }
+    .rev-evt-asignacion { border-left-color:#0891b2; }
+    .rev-evt-aprobado { border-left-color:#10b981; background:#f0fdf4; }
+    .rev-evt-rechazado { border-left-color:#ef4444; background:#fef2f2; }
+    .rev-evt-reenvio { border-left-color:#8b5cf6; }
+    .rev-evt-terminal { border-left-color:#0f172a; }
+    .rev-evt-icono { font-size:20px; line-height:1; padding-top:2px; }
+    .rev-evt-body { flex:1; font-size:12px; }
+    .rev-evt-hdr { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+    .rev-evt-iter { font-size:10px; padding:1px 6px; background:#e2e8f0; color:#475569; border-radius:999px; font-weight:600; }
+    .rev-evt-fecha { margin-left:auto; color:#94a3b8; font-size:11px; }
+    .rev-evt-actor { color:#64748b; font-size:11px; margin-bottom:3px; }
+    .rev-evt-motivo { color:#334155; margin-top:3px; }
+    .rev-evt-nota { color:#475569; margin-top:3px; font-style:italic; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+
+    /// <summary>Indica si la HC esta clinicamente cerrada — condicion previa para revisar.</summary>
+    [Parameter] public bool HcCerrada { get; set; }
+
+    /// <summary>Callback cuando el estado cambia (aprobar/rechazar/enviar) — para que el padre refresque badges.</summary>
+    [Parameter] public EventCallback OnEstadoCambio { get; set; }
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private RevisionClinicaDto? _revision;
+    private List<RevisionEventoDto> _eventos = new();
+    private bool _cargando;
+    private bool _procesando;
+    private string? _error;
+    private string _notaVeredicto = "";
+    private bool _puedeRevisar;
+    private bool _puedeAprobarFinal;
+    private Guid _actorId;
+    private Guid? _hcCargadaId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolverPermisosAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _hcCargadaId)
+        {
+            _hcCargadaId = HistoriaClinicaId;
+            _revision = null;
+            _eventos.Clear();
+            _error = null;
+            _notaVeredicto = "";
+            if (HistoriaClinicaId is Guid hcId)
+            {
+                await RecargarAsync(hcId);
+            }
+        }
+    }
+
+    private async Task ResolverPermisosAsync()
+    {
+        if (AuthState is null) { _puedeRevisar = false; _puedeAprobarFinal = false; return; }
+        try
+        {
+            var state = await AuthState;
+            var tenantRole = state.User.FindFirst("tenant_role")?.Value;
+            var platformRole = state.User.FindFirst("platform_role")?.Value;
+            var esAdminTenant = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase);
+            var esSuperAdmin = string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+            var perms = (state.User.FindFirst("perms")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var implicito = esAdminTenant || esSuperAdmin;
+            _puedeRevisar = implicito || perms.Contains("historias.revisar");
+            _puedeAprobarFinal = implicito || perms.Contains("historias.revisar.aprobar_final");
+            var uidStr = state.User.FindFirst("user_id")?.Value ?? state.User.FindFirst("sub")?.Value;
+            _actorId = Guid.TryParse(uidStr, out var uid) ? uid : Guid.Empty;
+        }
+        catch { }
+    }
+
+    private async Task RecargarAsync(Guid hcId)
+    {
+        _cargando = true;
+        _error = null;
+        try
+        {
+            _revision = await RevisionSvc.GetPorHistoriaAsync(hcId);
+            if (_revision is not null)
+            {
+                _eventos = (await RevisionSvc.ListarEventosAsync(_revision.Id))
+                    .OrderByDescending(e => e.OcurridoEn)
+                    .ThenByDescending(e => e.Iteracion)
+                    .ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = "No se pudo cargar la revision: " + ex.Message;
+        }
+        finally { _cargando = false; }
+    }
+
+    private async Task EnviarARevisionAsync()
+    {
+        if (HistoriaClinicaId is not Guid hcId) { return; }
+        _procesando = true;
+        _error = null;
+        try
+        {
+            var rev = await KanbanSvc.SolicitarSiFaltaAsync(hcId, _actorId);
+            _revision = rev;
+            await RecargarAsync(hcId);
+            if (OnEstadoCambio.HasDelegate) { await OnEstadoCambio.InvokeAsync(); }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _procesando = false; }
+    }
+
+    private async Task AprobarAsync()
+    {
+        if (_revision is null) { return; }
+        _procesando = true;
+        _error = null;
+        try
+        {
+            // Si no estamos EnRevision aun, tomar primero.
+            if (_revision.EstadoAgregado != RevisionEstadoAgregado.EnRevision)
+            {
+                await RevisionSvc.AsignarRevisorAsync(
+                    new AsignarRevisorCmd(_revision.Id, _actorId, false, null));
+            }
+            await RevisionSvc.AprobarAsync(
+                new AprobarCmd(_revision.Id, _actorId,
+                    string.IsNullOrWhiteSpace(_notaVeredicto) ? null : _notaVeredicto));
+            _notaVeredicto = "";
+            if (HistoriaClinicaId is Guid hc) { await RecargarAsync(hc); }
+            if (OnEstadoCambio.HasDelegate) { await OnEstadoCambio.InvokeAsync(); }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _procesando = false; }
+    }
+
+    private async Task RechazarAsync()
+    {
+        if (_revision is null || string.IsNullOrWhiteSpace(_notaVeredicto)) { return; }
+        _procesando = true;
+        _error = null;
+        try
+        {
+            if (_revision.EstadoAgregado != RevisionEstadoAgregado.EnRevision)
+            {
+                await RevisionSvc.AsignarRevisorAsync(
+                    new AsignarRevisorCmd(_revision.Id, _actorId, false, null));
+            }
+            await RevisionSvc.RechazarAsync(
+                new RechazarCmd(_revision.Id, _actorId, _notaVeredicto, null));
+            _notaVeredicto = "";
+            if (HistoriaClinicaId is Guid hc) { await RecargarAsync(hc); }
+            if (OnEstadoCambio.HasDelegate) { await OnEstadoCambio.InvokeAsync(); }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally { _procesando = false; }
+    }
+
+    // ---- Helpers ----
+
+    private static bool PuedeDecidir(RevisionEstadoAgregado e) => e switch
+    {
+        RevisionEstadoAgregado.SinRevisar => true,
+        RevisionEstadoAgregado.PreRevision => true,
+        RevisionEstadoAgregado.EnRevision => true,
+        RevisionEstadoAgregado.Rechazada => true, // permite re-decidir tras un reenvio
+        _ => false,
+    };
+
+    private static (string, string) ChipEstado(RevisionEstadoAgregado e) => e switch
+    {
+        RevisionEstadoAgregado.SinRevisar => ("Sin revisar", "rev-chip-sinrev"),
+        RevisionEstadoAgregado.PreRevision => ("Pre-revision", "rev-chip-prerev"),
+        RevisionEstadoAgregado.EnRevision => ("En revision", "rev-chip-enrev"),
+        RevisionEstadoAgregado.Aprobada => ("Aprobada", "rev-chip-aprob"),
+        RevisionEstadoAgregado.Rechazada => ("Rechazada", "rev-chip-rech"),
+        RevisionEstadoAgregado.ArchivadaOk => ("Archivada", "rev-chip-arch"),
+        RevisionEstadoAgregado.Inactivada => ("Inactivada", "rev-chip-inac"),
+        _ => (e.ToString(), "rev-chip-neutral"),
+    };
+
+    private static string AgenteTxt(RevisionResultado r) => r switch
+    {
+        RevisionResultado.Aprobado => "Sugiere aprobar",
+        RevisionResultado.Rechazado => "Sugiere rechazar",
+        RevisionResultado.Neutral => "Neutral",
+        _ => r.ToString(),
+    };
+
+    private static string AgenteCls(RevisionResultado r) => r switch
+    {
+        RevisionResultado.Aprobado => "rev-chip-aprob",
+        RevisionResultado.Rechazado => "rev-chip-rech",
+        RevisionResultado.Neutral => "rev-chip-neutral",
+        _ => "rev-chip-neutral",
+    };
+
+    private static string LabelEvento(RevisionTipoEvento t) => t switch
+    {
+        RevisionTipoEvento.SolicitudCreada => "Ciclo abierto",
+        RevisionTipoEvento.PreRevisionAgente => "Pre-revision del agente IA",
+        RevisionTipoEvento.AsignacionRevisor => "Revisor asignado",
+        RevisionTipoEvento.AsignacionAutomatica => "Asignacion automatica",
+        RevisionTipoEvento.Aprobado => "Aprobada",
+        RevisionTipoEvento.Rechazado => "Rechazada",
+        RevisionTipoEvento.Reenvio => "Reenvio tras rechazo",
+        RevisionTipoEvento.Rectificacion => "Rectificacion",
+        RevisionTipoEvento.ArchivadoOk => "Archivada OK",
+        RevisionTipoEvento.Inactivacion => "Inactivada",
+        _ => t.ToString(),
+    };
+
+    private static (string icono, string cls) IconoEvento(RevisionTipoEvento t) => t switch
+    {
+        RevisionTipoEvento.SolicitudCreada => ("🔍", "rev-evt-solicitud"),
+        RevisionTipoEvento.PreRevisionAgente => ("🤖", "rev-evt-agente"),
+        RevisionTipoEvento.AsignacionRevisor => ("👤", "rev-evt-asignacion"),
+        RevisionTipoEvento.AsignacionAutomatica => ("⚙", "rev-evt-asignacion"),
+        RevisionTipoEvento.Aprobado => ("✅", "rev-evt-aprobado"),
+        RevisionTipoEvento.Rechazado => ("❌", "rev-evt-rechazado"),
+        RevisionTipoEvento.Reenvio => ("↩", "rev-evt-reenvio"),
+        RevisionTipoEvento.Rectificacion => ("⟳", "rev-evt-reenvio"),
+        RevisionTipoEvento.ArchivadoOk => ("📦", "rev-evt-terminal"),
+        RevisionTipoEvento.Inactivacion => ("⊘", "rev-evt-terminal"),
+        _ => ("•", ""),
+    };
+
+    private static string ActorLabel(RevisionEventoDto e) => e.ActorTipo switch
+    {
+        RevisionActorTipo.Humano => $"Revisor: {e.ActorUsuarioId?.ToString()[..8] ?? "?"}",
+        RevisionActorTipo.Agente => $"Agente IA: {e.ActorAgenteCodigo ?? "?"}",
+        RevisionActorTipo.Sistema => "Sistema (automatico)",
+        _ => "-",
+    };
+}

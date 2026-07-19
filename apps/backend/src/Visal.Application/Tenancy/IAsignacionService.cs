@@ -209,6 +209,13 @@ public sealed record PaqueteAsignadoDto(
     int TotalServicios, decimal? ValorPactado,
     DateTimeOffset CreadoEn);
 
+/// <summary>Paquete de UNA asignacion especifica (no todos los del paciente). Alimenta
+/// el banner de la HC en /atencion: solo aparece cuando el servicio que el profesional
+/// esta atendiendo nacio de aplicar un paquete. Incluye <c>PaqueteNombre</c> (resuelto
+/// via JOIN a Paquete por codigo) para que el banner sea autoexplicativo.</summary>
+public sealed record PaqueteDeServicioDto(
+    Guid PaqueteInstanciaId, string PaqueteCodigo, string PaqueteNombre);
+
 /// <summary>Detalle de un servicio dentro de un paquete al aplicarlo en /asignacion.
 /// Cada servicio del paquete se convierte en un chip del carrito con estos datos.
 /// <c>NombreServicio</c> se resuelve buscando el <c>Codigo</c> primero en
@@ -374,6 +381,12 @@ public interface IAsignacionService
     /// (grupos distintos por PaqueteInstanciaId). Alimenta el banner de alerta
     /// en el modulo Historias Medicas — "Este paciente fue programado con paquete PKG-XXX".</summary>
     Task<IReadOnlyList<PaqueteAsignadoDto>> ListarPaquetesDelPacienteAsync(Guid pacienteId, CancellationToken ct = default);
+
+    /// <summary>Devuelve el paquete de la asignacion indicada, o <c>null</c> si la asignacion
+    /// no viene de un paquete. Se usa para pintar el banner "Este servicio hace parte del
+    /// paquete X" en la HC — reemplaza al listado por paciente que genera falsos positivos.
+    /// </summary>
+    Task<PaqueteDeServicioDto?> GetPaqueteDeLaAsignacionAsync(Guid asignacionId, CancellationToken ct = default);
 
     /// <summary>
     /// Persiste los turnos de coordinacion del servicio. Valida que la suma de Cantidad

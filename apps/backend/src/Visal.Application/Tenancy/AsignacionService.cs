@@ -672,6 +672,24 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .ToList();
     }
 
+    public async Task<PaqueteDeServicioDto?> GetPaqueteDeLaAsignacionAsync(
+        Guid asignacionId, CancellationToken ct = default)
+    {
+        var datos = await db.Asignaciones.AsNoTracking()
+            .Where(a => a.Id == asignacionId
+                     && a.PaqueteInstanciaId != null
+                     && a.PaqueteCodigo != null)
+            .Select(a => new { InstanciaId = a.PaqueteInstanciaId!.Value, Codigo = a.PaqueteCodigo! })
+            .FirstOrDefaultAsync(ct);
+        if (datos is null) { return null; }
+
+        var nombre = await db.Paquetes.AsNoTracking()
+            .Where(p => p.Codigo == datos.Codigo)
+            .Select(p => p.Nombre)
+            .FirstOrDefaultAsync(ct);
+        return new PaqueteDeServicioDto(datos.InstanciaId, datos.Codigo, nombre ?? datos.Codigo);
+    }
+
     public async Task<PaqueteExpansionDto?> ObtenerPaqueteExpansionAsync(
         Guid paqueteId, string contratoCodigo, CancellationToken ct = default)
     {

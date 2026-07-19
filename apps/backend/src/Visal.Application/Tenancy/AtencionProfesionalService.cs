@@ -64,6 +64,19 @@ public sealed class AtencionProfesionalService(
                 .ToListAsync(ct))
                 .ToDictionary(p => p.Id, p => ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim());
 
+        // Nombre del paquete (por Codigo) para las asignaciones que nacieron de aplicar
+        // un paquete. Codigo esta denormalizado en Asignacion.PaqueteCodigo; el Nombre
+        // vive solo en la entidad Paquete asi que se resuelve con un JOIN por codigo.
+        var paqueteCodigos = asigs.Where(a => a.PaqueteCodigo != null).Select(a => a.PaqueteCodigo!).Distinct().ToList();
+        var paqueteNombres = paqueteCodigos.Count == 0
+            ? new Dictionary<string, string>()
+            : (await db.Paquetes.AsNoTracking()
+                .Where(p => paqueteCodigos.Contains(p.Codigo))
+                .Select(p => new { p.Codigo, p.Nombre })
+                .ToListAsync(ct))
+                .GroupBy(p => p.Codigo)
+                .ToDictionary(g => g.Key, g => g.First().Nombre);
+
         // Sesiones ya registradas.
         var sesiones = await db.AsignacionTurnoSesiones.AsNoTracking()
             .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
@@ -127,7 +140,9 @@ public sealed class AtencionProfesionalService(
                     a.FormatoHistoria,
                     nGlobal,
                     totalAsig,
-                    profs.TryGetValue(t.ProfesionalId, out var np) ? np : ""));
+                    profs.TryGetValue(t.ProfesionalId, out var np) ? np : "",
+                    a.PaqueteCodigo,
+                    a.PaqueteCodigo != null && paqueteNombres.TryGetValue(a.PaqueteCodigo, out var pn) ? pn : null));
             }
         }
         return result;

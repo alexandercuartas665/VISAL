@@ -171,7 +171,8 @@ else
                usamos para todas las historias nuevas que inicie desde aqui. *@
             <HistoriasClinicasModulo PacienteContexto="@_pacienteCtx"
                                      FormatoForzadoCodigo="@hs.FormatoHistoria"
-                                     TipoServicio="@hs.TipoServicio" />
+                                     TipoServicio="@hs.TipoServicio"
+                                     AsignacionId="@hs.AsignacionId" />
         </div>
     </div>
 }
@@ -487,13 +488,15 @@ else
         new ColDef("orden",         "Orden",           "Orden",                                   7),
         new ColDef("tipo",          "Tipo",            "Tipo",                                    8),
         new ColDef("servicio",      "Servicio",        "Servicio",                                9),
-        new ColDef("session_no",    "SessionNo",       "Sesion",                                 10),
-        new ColDef("completado",    "Completado",     "Completado",                              11),
-        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        12),
-        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                13),
-        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                14),
-        new ColDef("profesional",   "Profesional",     "Profesional",                             15),
-        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          16),
+        new ColDef("pkg_cod",       "PaqueteCod",      "Paquete<br/>Cod",                        10),
+        new ColDef("pkg_nom",       "PaqueteNombre",   "Paquete<br/>Nombre",                     11),
+        new ColDef("session_no",    "SessionNo",       "Sesion",                                 12),
+        new ColDef("completado",    "Completado",     "Completado",                              13),
+        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        14),
+        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                15),
+        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                16),
+        new ColDef("profesional",   "Profesional",     "Profesional",                             17),
+        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          18),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -582,6 +585,17 @@ else
             case "servicio":
                 __b.OpenElement(seq++, "td");
                 __b.AddContent(seq++, s.NombreServicio);
+                __b.CloseElement();
+                break;
+            case "pkg_cod":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, s.PaqueteCodigo);
+                __b.CloseElement();
+                break;
+            case "pkg_nom":
+                __b.OpenElement(seq++, "td");
+                __b.AddContent(seq++, s.PaqueteNombre);
                 __b.CloseElement();
                 break;
             case "session_no":

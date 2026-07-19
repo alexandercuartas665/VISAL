@@ -28,7 +28,12 @@ public sealed record MiServicioAsignadoDto(
     int TotalSesionesAsignacion = 1,
     // Nombre del profesional asignado al turno. Vacio si el turno todavia no tiene
     // profesional asignado en Coordinacion.
-    string NombreProfesional = "");
+    string NombreProfesional = "",
+    // Snapshot del paquete de origen si el servicio nacio de aplicar un paquete al
+    // paciente. Codigo se denormaliza en Asignacion.PaqueteCodigo; Nombre se resuelve
+    // por JOIN a Paquete via PaqueteCodigo. Nulos cuando el servicio no viene de paquete.
+    string? PaqueteCodigo = null,
+    string? PaqueteNombre = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

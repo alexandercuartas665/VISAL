@@ -96,24 +96,22 @@
             </div>
         }
 
-        @* PQ7: banner de alerta cuando el paciente tiene asignaciones con paquete.
-           Muestra un chip por PaqueteInstanciaId (grupo de servicios aplicado en el mismo
-           lote de /asignacion). El profesional los ve al entrar a la HC y sabe que este
-           paciente fue programado con un paquete comercial. *@
-        @if (_paquetesPaciente.Count > 0)
+        @* Banner de paquete: se muestra SOLO cuando el servicio (AsignacionId) que
+           el profesional viene a atender nacio de aplicar un paquete comercial.
+           Se acabo el falso positivo de mostrar "este paciente fue programado con
+           paquete" en HCs de servicios sueltos porque el paciente tuvo un paquete
+           en otro momento. *@
+        @if (_paqueteDeAsignacion is PaqueteDeServicioDto pk)
         {
             <div class="hc-paquete-banner">
                 <div class="hc-paquete-banner-h">
                     <span class="hc-paquete-icon">&#128230;</span>
-                    Este paciente fue programado con paquete
+                    Este servicio hace parte del paquete
                 </div>
-                @foreach (var pk in _paquetesPaciente)
-                {
-                    <div class="hc-paquete-chip">
-                        <span class="hc-paquete-cod">@pk.PaqueteCodigo</span>
-                        <span class="hc-paquete-meta">@pk.TotalServicios servicio(s)</span>
-                    </div>
-                }
+                <div class="hc-paquete-chip">
+                    <span class="hc-paquete-cod">@pk.PaqueteCodigo</span>
+                    <span class="hc-paquete-meta">@pk.PaqueteNombre</span>
+                </div>
                 <small class="text-muted d-block mt-1">
                     Al ordenar servicios en la HC, puedes escribir el codigo del paquete en el buscador
                     para ver los servicios que trae — decides cuales agregar.
@@ -1002,6 +1000,15 @@
     /// </summary>
     [Parameter] public string? TipoServicio { get; set; }
 
+    /// <summary>
+    /// Asignacion (servicio especifico) que el profesional viene a atender. Cuando
+    /// esta seteada, el banner "Este servicio hace parte del paquete X" se muestra
+    /// SOLO si esta asignacion nacio de aplicar un paquete — no se contamina con
+    /// paquetes de otros servicios del mismo paciente. Cuando es null, no se pinta
+    /// banner (el modulo puede abrirse fuera de /atencion, p. ej. /admision).
+    /// </summary>
+    [Parameter] public Guid? AsignacionId { get; set; }
+
     /// <summary>Set con los identificadores (PestanaKey) actualmente ocultos para
     /// el TipoServicio activo. Se recarga al cambiar el parametro. Vacio =
     /// mostrar todas.</summary>
@@ -1250,9 +1257,14 @@
     private string? _ripsError;
 
     private PacienteAsignacionDto? _paciente;
-    // PQ7: paquetes con los que el paciente esta programado (banner en HC).
-    private List<PaqueteAsignadoDto> _paquetesPaciente = new();
-    private Guid? _ultimoPacienteIdPaquete;
+    // Paquete de la ASIGNACION que el profesional viene a atender (viene de /atencion
+    // como parametro AsignacionId). Es null cuando el modulo se abre fuera de una
+    // asignacion o cuando la asignacion no nacio de un paquete. El banner "Este
+    // servicio hace parte del paquete X" se pinta solo con esta variable — antes
+    // se listaban TODOS los paquetes del paciente y el mensaje aparecia en HCs
+    // de servicios que no eran de paquete.
+    private PaqueteDeServicioDto? _paqueteDeAsignacion;
+    private Guid? _ultimaAsignacionIdPaquete;
 
     private bool _showPacModal;
     private string _modalDoc = "";
@@ -1388,23 +1400,25 @@
         // posible), re-evaluamos si hay HC en curso para auto-cargar.
         await AutoCargarHcEnCursoSiCorrespondeAsync();
 
-        // PQ7: recargar paquetes del paciente cuando cambia (banner de alerta).
-        // Serializado por _dbLock para evitar la concurrencia de DbContext con otras
-        // queries que fire OnParametersSetAsync (autosave, prefill, MenuHc, etc.).
-        if (_ultimoPacienteIdPaquete != pacIdActual)
+        // Cargar el paquete de la asignacion activa (para el banner). Solo consulta
+        // cuando cambia AsignacionId. Sin AsignacionId (modulo abierto fuera de
+        // /atencion) no se pinta banner. Serializado por _dbLock para evitar la
+        // concurrencia de DbContext con otras queries de OnParametersSetAsync
+        // (autosave, prefill, MenuHc, etc.).
+        if (_ultimaAsignacionIdPaquete != AsignacionId)
         {
-            _ultimoPacienteIdPaquete = pacIdActual;
-            _paquetesPaciente = new();
-            if (pacIdActual is Guid pid)
+            _ultimaAsignacionIdPaquete = AsignacionId;
+            _paqueteDeAsignacion = null;
+            if (AsignacionId is Guid aid)
             {
                 try
                 {
                     await LockedAsync(async () =>
                     {
-                        _paquetesPaciente = (await AsigSvc.ListarPaquetesDelPacienteAsync(pid)).ToList();
+                        _paqueteDeAsignacion = await AsigSvc.GetPaqueteDeLaAsignacionAsync(aid);
                     });
                 }
-                catch { _paquetesPaciente = new(); }
+                catch { _paqueteDeAsignacion = null; }
             }
         }
 

@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
 @using Visal.Application.Tenancy
+@using Visal.Domain.Entities
 @using Visal.SuperAdmin.Components.Forms
 @inject IAtencionProfesionalService Svc
 @inject IAsignacionService AsigSvc
@@ -459,6 +460,17 @@ else
     .usu-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
     .usu-modal-body { padding: 18px; overflow: auto; }
     .usu-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Chip columna Revision (Ola 3 Capa 08) */
+    .at-rv-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+    .at-rv-none   { background:#f1f5f9; color:#94a3b8; }
+    .at-rv-sinrev { background:#e5e7eb; color:#475569; }
+    .at-rv-prerev { background:#dbeafe; color:#1e40af; }
+    .at-rv-enrev  { background:#fef3c7; color:#92400e; }
+    .at-rv-aprob  { background:#d1fae5; color:#065f46; }
+    .at-rv-rech   { background:#fee2e2; color:#991b1b; cursor:help; }
+    .at-rv-arch   { background:#a7f3d0; color:#064e3b; }
+    .at-rv-inac   { background:#374151; color:#f9fafb; }
 </style>
 
 @code {
@@ -740,6 +752,8 @@ else
         new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                16),
         new ColDef("profesional",   "Profesional",     "Profesional",                             17),
         new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          18),
+        // Capa 08 Ola 3 — chip del estado del ciclo de revision de la HC del paciente.
+        new ColDef("revision_estado","Revision",        "Revision",                                19),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -882,12 +896,55 @@ else
                 __b.AddContent(seq++, s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "");
                 __b.CloseElement();
                 break;
+            case "revision_estado":
+                {
+                    // Capa 08 Ola 3 — chip del ciclo de revision. Rojo lleva tooltip con
+                    // el motivo del ultimo rechazo (viene resuelto en el service).
+                    var (txt, cls, tip) = ChipRevisionAt(s);
+                    __b.OpenElement(seq++, "td");
+                    __b.AddAttribute(seq++, "class", "text-center");
+                    __b.OpenElement(seq++, "span");
+                    __b.AddAttribute(seq++, "class", "at-rv-chip " + cls);
+                    if (!string.IsNullOrWhiteSpace(tip)) { __b.AddAttribute(seq++, "title", tip); }
+                    __b.AddContent(seq++, txt);
+                    __b.CloseElement();
+                    __b.CloseElement();
+                }
+                break;
             default:
                 __b.OpenElement(seq++, "td");
                 __b.CloseElement();
                 break;
         }
     };
+
+    /// <summary>
+    /// Chip de la columna Revision (Capa 08 Ola 3). Devuelve texto, clase CSS y tooltip.
+    /// Segun el plan: gris (Sin/Sin solicitar) / azul (Pre-revision) / amarillo (En revision)
+    /// / verde (Aprobada) / rojo (Rechazada con tooltip motivo) / verde oscuro (ArchivadaOk)
+    /// / negro (Inactivada).
+    /// </summary>
+    private static (string txt, string cls, string title) ChipRevisionAt(MiServicioAsignadoDto s)
+    {
+        if (s.RevisionEstado is null)
+        {
+            return ("—", "at-rv-none", "HC del paciente aun no entra al ciclo de revision");
+        }
+        return s.RevisionEstado switch
+        {
+            RevisionEstadoAgregado.SinRevisar => ("Sin revisar", "at-rv-sinrev", "Revision solicitada, aun sin revisor"),
+            RevisionEstadoAgregado.PreRevision => ("Pre-revision", "at-rv-prerev", "El agente IA ya opino — falta revisor humano"),
+            RevisionEstadoAgregado.EnRevision => ("En revision", "at-rv-enrev", "Un revisor humano tomo esta HC"),
+            RevisionEstadoAgregado.Aprobada => ("Aprobada", "at-rv-aprob", "Aprobada por el revisor"),
+            RevisionEstadoAgregado.Rechazada => ("Rechazada", "at-rv-rech",
+                string.IsNullOrWhiteSpace(s.RevisionMotivoRechazo)
+                    ? "Rechazada — espera reenvio"
+                    : "Rechazada: " + s.RevisionMotivoRechazo),
+            RevisionEstadoAgregado.ArchivadaOk => ("Archivada", "at-rv-arch", "Ciclo cerrado — archivada OK"),
+            RevisionEstadoAgregado.Inactivada => ("Inactivada", "at-rv-inac", "Revision inactivada — captura invalida"),
+            _ => ("—", "at-rv-none", ""),
+        };
+    }
 
     // ===== Modal configurar columnas =====
 

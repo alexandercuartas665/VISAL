@@ -1,3 +1,5 @@
+using Visal.Domain.Entities;
+
 namespace Visal.Application.Tenancy;
 
 /// <summary>
@@ -33,7 +35,20 @@ public sealed record MiServicioAsignadoDto(
     // paciente. Codigo se denormaliza en Asignacion.PaqueteCodigo; Nombre se resuelve
     // por JOIN a Paquete via PaqueteCodigo. Nulos cuando el servicio no viene de paquete.
     string? PaqueteCodigo = null,
-    string? PaqueteNombre = null);
+    string? PaqueteNombre = null,
+    // ── Capa 08: Revision Clinica (Ola 3) ────────────────────────────────
+    /// <summary>Estado del ciclo de revision de la HC del paciente asociada a este servicio.</summary>
+    /// <remarks>
+    /// La HC no vive en 1:1 con el turno — se resuelve como la HC mas reciente del
+    /// paciente en el mismo formato (Asignacion.FormatoHistoria) tocada por este
+    /// profesional. Null significa "sin revision" (HC abierta, sin cerrar, o
+    /// cerrada pero no enviada al ciclo).
+    /// </remarks>
+    RevisionEstadoAgregado? RevisionEstado = null,
+    /// <summary>Timestamp de la ultima accion del ciclo — para orden secundario en el grid.</summary>
+    DateTimeOffset? RevisionUltimaAccionEn = null,
+    /// <summary>Motivo del ultimo rechazo — tooltip del chip rojo.</summary>
+    string? RevisionMotivoRechazo = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

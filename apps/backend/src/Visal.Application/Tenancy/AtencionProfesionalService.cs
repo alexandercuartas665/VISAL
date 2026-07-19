@@ -85,6 +85,53 @@ public sealed class AtencionProfesionalService(
             .GroupBy(s => s.AsignacionTurnoId)
             .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.SessionNo));
 
+        // Capa 08 Ola 3 — Chip de revision por fila del grid.
+        // Para cada paciente traemos la HC MAS RECIENTE (Abierta o Cerrada) y su
+        // revision viva (si existe). El chip resume el estado del ciclo — util
+        // para que el profesional vea de un vistazo cuales HCs suyas ya fueron
+        // aprobadas/rechazadas por el revisor. Terminales (ArchivadaOk/Inactivada)
+        // se dejan pasar tambien para que el rojo/verde/negro se refleje incluso
+        // despues de archivar.
+        var hcsPacientes = pacIds.Count == 0
+            ? new List<HistoriaClinica>()
+            : await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => pacIds.Contains(h.PacienteId)
+                            && h.Estado != HistoriaClinicaEstado.Inactiva)
+                .ToListAsync(ct);
+        // Escogemos la HC mas reciente por paciente (por FechaCierre o FechaApertura como fallback).
+        var hcMasRecientePorPaciente = hcsPacientes
+            .GroupBy(h => h.PacienteId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(h => h.FechaCierre ?? h.FechaApertura).First());
+        var hcIds = hcMasRecientePorPaciente.Values.Select(h => h.Id).ToList();
+
+        var revisionesDic = hcIds.Count == 0
+            ? new Dictionary<Guid, RevisionClinica>()
+            : (await db.RevisionesClinica.AsNoTracking()
+                .Where(r => hcIds.Contains(r.HistoriaClinicaId))
+                .ToListAsync(ct))
+                .ToDictionary(r => r.HistoriaClinicaId);
+
+        // Ultimo motivo de rechazo por revision — solo poblado si estado es Rechazada.
+        var revisionesRechazadas = revisionesDic.Values
+            .Where(r => r.EstadoAgregado == RevisionEstadoAgregado.Rechazada)
+            .Select(r => r.Id)
+            .ToList();
+        var motivosDic = revisionesRechazadas.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : (await db.RevisionClinicaEventos.AsNoTracking()
+                .Where(e => revisionesRechazadas.Contains(e.RevisionClinicaId)
+                            && e.Tipo == RevisionTipoEvento.Rechazado)
+                .GroupBy(e => e.RevisionClinicaId)
+                .Select(g => new
+                {
+                    Rid = g.Key,
+                    Motivo = g.OrderByDescending(x => x.OcurridoEn).First().Motivo
+                })
+                .ToListAsync(ct))
+                .ToDictionary(x => x.Rid, x => x.Motivo);
+
         // Orden corrido para la columna "Orden" del grid, ordenado por created_at de la asignacion madre.
         var ordenMap = asigs
             .OrderByDescending(a => a.CreatedAt)
@@ -122,6 +169,21 @@ public sealed class AtencionProfesionalService(
                 var nGlobal = contadorPorAsignacion.TryGetValue(t.AsignacionId, out var c) ? c + 1 : 1;
                 contadorPorAsignacion[t.AsignacionId] = nGlobal;
 
+                // Capa 08 Ola 3 — resolver chip de revision para esta fila del grid.
+                RevisionEstadoAgregado? revEstado = null;
+                DateTimeOffset? revUltima = null;
+                string? revMotivo = null;
+                if (hcMasRecientePorPaciente.TryGetValue(a.PacienteId, out var hcRel)
+                    && revisionesDic.TryGetValue(hcRel.Id, out var rev))
+                {
+                    revEstado = rev.EstadoAgregado;
+                    revUltima = rev.UltimaAccionEn;
+                    if (rev.EstadoAgregado == RevisionEstadoAgregado.Rechazada)
+                    {
+                        motivosDic.TryGetValue(rev.Id, out revMotivo);
+                    }
+                }
+
                 result.Add(new MiServicioAsignadoDto(
                     t.Id, a.Id,
                     n, t.Cantidad,
@@ -142,7 +204,10 @@ public sealed class AtencionProfesionalService(
                     totalAsig,
                     profs.TryGetValue(t.ProfesionalId, out var np) ? np : "",
                     a.PaqueteCodigo,
-                    a.PaqueteCodigo != null && paqueteNombres.TryGetValue(a.PaqueteCodigo, out var pn) ? pn : null));
+                    a.PaqueteCodigo != null && paqueteNombres.TryGetValue(a.PaqueteCodigo, out var pn) ? pn : null,
+                    revEstado,
+                    revUltima,
+                    revMotivo));
             }
         }
         return result;

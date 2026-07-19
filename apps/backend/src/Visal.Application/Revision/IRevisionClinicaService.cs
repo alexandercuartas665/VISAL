@@ -46,6 +46,19 @@ public sealed record VeredictoAgenteCmd(
 /// <summary>Comando aprobar humano. <c>Nota</c> opcional. Cierra la iteracion.</summary>
 public sealed record AprobarCmd(Guid RevisionClinicaId, Guid RevisorUsuarioId, string? Nota);
 
+/// <summary>
+/// Comando de adopcion automatica del veredicto del agente (Ola 6 RC6c). Actor
+/// <see cref="RevisionActorTipo.Sistema"/>. <c>AgenteCodigo</c> identifica el
+/// agente cuyo veredicto se esta adoptando; <c>Confianza</c> queda registrada
+/// en el payload para auditoria.
+/// </summary>
+public sealed record AprobarPorSistemaCmd(
+    Guid RevisionClinicaId,
+    string AgenteCodigo,
+    decimal Confianza,
+    decimal UmbralConfianza,
+    string? Nota);
+
 /// <summary>Comando rechazar humano. <c>Motivo</c> obligatorio.</summary>
 public sealed record RechazarCmd(Guid RevisionClinicaId, Guid RevisorUsuarioId, string Motivo, string? Nota);
 
@@ -75,6 +88,14 @@ public interface IRevisionClinicaService
     Task<RevisionClinicaDto> AsignarRevisorAsync(AsignarRevisorCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto> RegistrarVeredictoAgenteAsync(VeredictoAgenteCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto> AprobarAsync(AprobarCmd cmd, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adopcion automatica del veredicto de un agente IA. Escribe un evento
+    /// <c>Aprobado</c> con <c>ActorTipo=Sistema</c> y detalles del veredicto
+    /// en <c>PayloadJson</c> para auditoria. Usa el mismo validador de
+    /// transiciones que <see cref="AprobarAsync"/>.
+    /// </summary>
+    Task<RevisionClinicaDto> AprobarPorSistemaAsync(AprobarPorSistemaCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto> RechazarAsync(RechazarCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto> ReenviarAsync(ReenviarCmd cmd, CancellationToken ct = default);
 

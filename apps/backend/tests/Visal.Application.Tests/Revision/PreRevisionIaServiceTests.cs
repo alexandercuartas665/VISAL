@@ -136,7 +136,7 @@ public sealed class PreRevisionIaServiceTests
         var usage = new AiUsageService(db, tenant);
         var protector = new FakeSecretProtector();
         var tools = new RevisionMcpToolsService(db);
-        var policy = new RevisionPolicyService(db, tenant);
+        var policy = new RevisionPolicyService(db, tenant, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
         var aiClient = new FakeAiClient(aiResponse);
         var svc = new PreRevisionIaService(db, aiClient, usage, protector, tools, revisionSvc, policy);
 

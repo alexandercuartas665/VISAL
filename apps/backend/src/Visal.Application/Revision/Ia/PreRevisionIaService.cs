@@ -95,7 +95,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             new("user", "Analiza la siguiente Historia Clinica y emite tu veredicto. Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
         };
 
-        var result = await _client.CompleteAsync(agent.Provider, apiKey, providerCfg.BaseUrl, model, systemPrompt, turns, ct);
+        var result = await CompleteWithRetryAsync(agent, apiKey, providerCfg.BaseUrl, model, systemPrompt, turns, ct);
 
         await _usage.RecordAsync(agent.Id, agent.Provider, model, result.InputTokens, result.OutputTokens, "revision", result.Ok, ct);
 
@@ -128,19 +128,109 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             new VeredictoAgenteCmd(revisionClinicaId, IPreRevisionIaService.AgenteNombre, parsed.Resultado, parsed.Nota, payloadJson),
             ct);
 
+        // Ola 6 RC6c — Adopcion automatica del veredicto agente.
+        // Reglas: solo aplica si (a) la policy del tenant lo permite explicitamente,
+        // (b) el veredicto es Aprobado, (c) la confianza es >= umbral configurado.
+        // Cualquier fallo aqui NO invalida el veredicto ya registrado — la HC queda
+        // con el evento PreRevisionAgente y el revisor humano puede decidir.
+        if (policy.AdopcionAutomaticaAgente
+            && parsed.Resultado == RevisionResultado.Aprobado
+            && parsed.Confianza >= policy.UmbralConfianza)
+        {
+            try
+            {
+                await _revision.AprobarPorSistemaAsync(new AprobarPorSistemaCmd(
+                    revisionClinicaId,
+                    IPreRevisionIaService.AgenteNombre,
+                    parsed.Confianza,
+                    policy.UmbralConfianza,
+                    "Adopcion automatica por confianza >= umbral."), ct);
+            }
+            catch { /* Silencio: el veredicto quedo grabado, la adopcion es best-effort. */ }
+        }
+
         return new PreRevisionIaResult(true, parsed.Resultado, parsed.Confianza, parsed.Nota, parsed.Hallazgos, null, result.InputTokens, result.OutputTokens);
+    }
+
+    /// <summary>
+    /// Envuelve <see cref="IAiProviderClient.CompleteAsync"/> con retry+backoff
+    /// exponencial (Ola 6 RC6b). Reintenta hasta 3 veces con delays 400ms/1200ms
+    /// ante fallos transitorios: exception del cliente HTTP, timeouts, y errores
+    /// del provider con mensaje que sugiere transitorio (429/5xx). Un
+    /// <see cref="AiChatResult"/> con <c>Ok=false</c> pero motivo permanente
+    /// (401/403, "invalid api key", "unauthorized") NO se reintenta.
+    /// </summary>
+    private async Task<AiChatResult> CompleteWithRetryAsync(
+        AiAgent agent, string apiKey, string? baseUrl, string model,
+        string systemPrompt, IReadOnlyList<AiChatTurn> turns, CancellationToken ct)
+    {
+        var delays = new[] { TimeSpan.FromMilliseconds(400), TimeSpan.FromMilliseconds(1200) };
+        AiChatResult? last = null;
+        Exception? lastEx = null;
+
+        for (var intento = 0; intento <= delays.Length; intento++)
+        {
+            try
+            {
+                var r = await _client.CompleteAsync(agent.Provider, apiKey, baseUrl, model, systemPrompt, turns, ct);
+                if (r.Ok) { return r; }
+                last = r;
+                if (!EsErrorTransitorio(r.Error)) { return r; }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                lastEx = ex;
+            }
+
+            if (intento < delays.Length)
+            {
+                try { await Task.Delay(delays[intento], ct); }
+                catch (OperationCanceledException) { throw; }
+            }
+        }
+
+        // Se agotaron los intentos: devolvemos el ultimo estado conocido.
+        if (last is not null) { return last; }
+        return new AiChatResult(false, null, lastEx?.Message ?? "El proveedor no respondio tras varios intentos.");
+    }
+
+    private static bool EsErrorTransitorio(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) { return true; }
+        var low = error.ToLowerInvariant();
+        // No reintentamos si la config del provider es la que esta mal — reintentarlo
+        // solo quema tokens y hace ruido en el log.
+        if (low.Contains("unauthorized") || low.Contains("401")
+            || low.Contains("forbidden") || low.Contains("403")
+            || low.Contains("invalid api key") || low.Contains("api key")) { return false; }
+        return low.Contains("timeout") || low.Contains("timed out")
+            || low.Contains("429") || low.Contains("rate limit")
+            || low.Contains("500") || low.Contains("502") || low.Contains("503") || low.Contains("504")
+            || low.Contains("transient") || low.Contains("temporarily");
     }
 
     private async Task<IReadOnlyList<string>> ResolveAllowedToolsAsync(Guid agentId, CancellationToken ct)
     {
-        var body = await _db.AiAgentPrompts.AsNoTracking()
-            .Where(p => p.AgentId == agentId && p.Name == AllowedToolsPromptName)
-            .Select(p => p.Body)
+        // Ola 6 RC6d — leer primero de la columna dedicada `AiAgent.AllowedToolsCsv`.
+        // Si esta null/vacia, fallback al `AiAgentPrompt` legacy (compat retro).
+        // Si tampoco existe, se usan las 9 tools por defecto.
+        var csv = await _db.AiAgents.AsNoTracking()
+            .Where(a => a.Id == agentId)
+            .Select(a => a.AllowedToolsCsv)
             .FirstOrDefaultAsync(ct);
 
-        if (string.IsNullOrWhiteSpace(body)) { return RevisionMcpToolNames.Todas; }
+        if (string.IsNullOrWhiteSpace(csv))
+        {
+            csv = await _db.AiAgentPrompts.AsNoTracking()
+                .Where(p => p.AgentId == agentId && p.Name == AllowedToolsPromptName)
+                .Select(p => p.Body)
+                .FirstOrDefaultAsync(ct);
+        }
 
-        var raw = body!.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (string.IsNullOrWhiteSpace(csv)) { return RevisionMcpToolNames.Todas; }
+
+        var raw = csv!.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var valid = raw.Where(x => RevisionMcpToolNames.Todas.Contains(x)).Distinct().ToList();
         return valid.Count == 0 ? Array.Empty<string>() : valid;
     }

@@ -12,6 +12,10 @@ public static class DependencyInjection
     {
         // TimeProvider centralizado — permite fakeal en tests sin cambiar produccion.
         services.TryAddSingleton(TimeProvider.System);
+        // Ola 6 (RC6a): cache in-memory para services que leen singletons por tenant
+        // (RevisionPolicy, y en futuro otras policies). TryAdd para no romper otras
+        // pilas que ya registran el suyo (SuperAdmin/Api).
+        services.AddMemoryCache();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IMiPerfilService, MiPerfilService>();
         services.AddScoped<IAuditWriter, AuditWriter>();

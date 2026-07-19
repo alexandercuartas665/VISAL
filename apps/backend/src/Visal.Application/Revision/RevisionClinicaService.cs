@@ -177,6 +177,44 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         return ToDto(revision);
     }
 
+    public async Task<RevisionClinicaDto> AprobarPorSistemaAsync(AprobarPorSistemaCmd cmd, CancellationToken ct = default)
+    {
+        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+
+        if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Aprobada))
+        {
+            throw new InvalidOperationException(
+                $"Transicion invalida: no se puede aprobar por sistema desde {revision.EstadoAgregado}.");
+        }
+
+        var payload = new
+        {
+            adopcion = "automatica",
+            agente = cmd.AgenteCodigo,
+            confianza = cmd.Confianza,
+            umbral = cmd.UmbralConfianza,
+        };
+        var payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
+
+        AppendEvento(revision, new RevisionClinicaEvento
+        {
+            TenantId = tenantId,
+            Tipo = RevisionTipoEvento.Aprobado,
+            Resultado = RevisionResultado.Aprobado,
+            ActorTipo = RevisionActorTipo.Sistema,
+            ActorAgenteCodigo = cmd.AgenteCodigo,
+            Nota = cmd.Nota,
+            PayloadJson = payloadJson,
+            OcurridoEn = now,
+        });
+
+        revision.EstadoAgregado = RevisionEstadoAgregado.Aprobada;
+        revision.UltimaAccionEn = now;
+
+        await _db.SaveChangesAsync(ct);
+        return ToDto(revision);
+    }
+
     public async Task<RevisionClinicaDto> RechazarAsync(RechazarCmd cmd, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(cmd.Motivo))

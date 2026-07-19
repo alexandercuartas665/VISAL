@@ -26,4 +26,13 @@ public class AiAgent : TenantEntity
     public bool IsActive { get; set; }
 
     public int SortOrder { get; set; }
+
+    /// <summary>
+    /// Allow-list de tools MCP que el agente puede invocar, en CSV. Cuando el
+    /// agente es <c>REVISOR CLINICO IA</c> (Capa 08 Ola 6), el orquestador filtra
+    /// la lista de tools contra este valor. <c>null</c> o vacio = todas las
+    /// tools estandar del agente (fallback conservador). Ver
+    /// <c>Visal.Application.Revision.Ia.RevisionMcpToolNames</c>.
+    /// </summary>
+    public string? AllowedToolsCsv { get; set; }
 }

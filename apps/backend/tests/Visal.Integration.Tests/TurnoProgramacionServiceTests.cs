@@ -40,8 +40,8 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
         ctx.Tenants.Add(new Tenant { Id = _tenantB, Name = "Agencia B" });
         // Cada tenant necesita al menos 1 sucursal — la regla dura de
         // TurnoProgramacion exige >=1 sede al crear.
-        ctx.Sucursales.Add(new Sucursal { Id = _sucA, TenantId = _tenantA, Nombre = "Sede A", Activa = true });
-        ctx.Sucursales.Add(new Sucursal { Id = _sucB, TenantId = _tenantB, Nombre = "Sede B", Activa = true });
+        ctx.Sucursales.Add(new Sucursal { Id = _sucA, TenantId = _tenantA, Nombre = "Sede A", Activo = true });
+        ctx.Sucursales.Add(new Sucursal { Id = _sucB, TenantId = _tenantB, Nombre = "Sede B", Activo = true });
         await ctx.SaveChangesAsync();
     }
 

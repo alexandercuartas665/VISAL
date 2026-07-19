@@ -136,6 +136,12 @@ public sealed class AutomationService : IAutomationService
     public async Task<int> SeedDefaultsAsync(CancellationToken cancellationToken = default)
     {
         if (_tenantContext.TenantId is not Guid tenantId) { return 0; }
+
+        // Sembramos el agente REVISOR CLINICO IA si aun no existe, incluso si el tenant
+        // ya tiene automatizaciones. El agente lo consume el orquestador de Capa 08 aunque
+        // no se dispare desde una AutomationRule.
+        var revisorId = await EnsureRevisorClinicoAgenteAsync(tenantId, cancellationToken);
+
         if (await _db.AutomationRules.AnyAsync(cancellationToken)) { return 0; }
 
         var seed = new List<AutomationRule>
@@ -150,11 +156,41 @@ public sealed class AutomationService : IAutomationService
             new() { TenantId = tenantId, SortOrder = 3, IsActive = false, Name = "Cotizacion aprobada -> pago",
                 Trigger = AutomationTrigger.StageEntered, Action = AutomationAction.GenerateWompiLink },
             new() { TenantId = tenantId, SortOrder = 4, IsActive = false, Name = "Revisar notas medicas con IA",
-                Trigger = AutomationTrigger.LeadCreated, Action = AutomationAction.ReviewMedicalNotesWithAi }
+                Trigger = AutomationTrigger.LeadCreated, Action = AutomationAction.ReviewMedicalNotesWithAi },
+            new() { TenantId = tenantId, SortOrder = 5, IsActive = false, Name = "Pre-revision IA de Historia Clinica",
+                Trigger = AutomationTrigger.LeadCreated, Action = AutomationAction.ReviewClinicalHistoryWithAi,
+                AiAgentId = revisorId },
         };
         _db.AutomationRules.AddRange(seed);
         await _db.SaveChangesAsync(cancellationToken);
         return seed.Count;
+    }
+
+    /// <summary>
+    /// Asegura que exista el agente <c>REVISOR CLINICO IA</c> para el tenant. Idempotente:
+    /// si ya existe devuelve su Id; si no, lo crea con el system prompt canonico y lo deja
+    /// apagado (el operador lo enciende manualmente cuando confirme el proveedor de IA).
+    /// </summary>
+    private async Task<Guid> EnsureRevisorClinicoAgenteAsync(Guid tenantId, CancellationToken ct)
+    {
+        var existente = await _db.AiAgents.AsNoTracking()
+            .Where(a => a.Name == Revision.Ia.IPreRevisionIaService.AgenteNombre)
+            .Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
+        if (existente is Guid id) { return id; }
+
+        var agente = new AiAgent
+        {
+            TenantId = tenantId,
+            Name = Revision.Ia.IPreRevisionIaService.AgenteNombre,
+            Role = "revisor-clinico",
+            Provider = AiProvider.Claude,
+            SystemPrompt = "Actuas como un medico revisor con estandares colombianos. Tu unico output es JSON con {resultado, confianza, nota, hallazgos}. Basate SOLO en el contexto entregado. No inventes datos ni prescribas conductas.",
+            IsActive = false,
+            SortOrder = 10,
+        };
+        _db.AiAgents.Add(agente);
+        await _db.SaveChangesAsync(ct);
+        return agente.Id;
     }
 
     private static void Apply(AutomationRule rule, SaveAutomationRuleRequest r)
@@ -171,12 +207,14 @@ public sealed class AutomationService : IAutomationService
         rule.ShiftName = r.ShiftName?.Trim();
         // Solo conservamos AiAgentId cuando la accion realmente lo usa, asi evitamos
         // referencias huerfanas si el usuario cambia de accion sin limpiar el dropdown.
-        rule.AiAgentId = r.Action == AutomationAction.ReviewMedicalNotesWithAi ? r.AiAgentId : null;
-        // Los flags de auto-revision solo aplican a la accion IA: si la accion cambia,
-        // los apagamos para evitar configuracion fantasma.
-        var esIa = r.Action == AutomationAction.ReviewMedicalNotesWithAi;
-        rule.RevisarAlGuardarParcial = esIa && r.RevisarAlGuardarParcial;
-        rule.RevisarAlGuardarDefinitivo = esIa && r.RevisarAlGuardarDefinitivo;
+        var accionUsaIa = r.Action == AutomationAction.ReviewMedicalNotesWithAi
+                       || r.Action == AutomationAction.ReviewClinicalHistoryWithAi;
+        rule.AiAgentId = accionUsaIa ? r.AiAgentId : null;
+        // Los flags de auto-revision solo aplican a la accion IA de notas medicas.
+        // Para HC (Capa 08), el disparo automatico vive en RevisionPolicy, no en la regla.
+        var esIaNotas = r.Action == AutomationAction.ReviewMedicalNotesWithAi;
+        rule.RevisarAlGuardarParcial = esIaNotas && r.RevisarAlGuardarParcial;
+        rule.RevisarAlGuardarDefinitivo = esIaNotas && r.RevisarAlGuardarDefinitivo;
     }
 
     private static AutomationRuleDto Map(AutomationRule r) =>

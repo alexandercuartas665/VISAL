@@ -123,6 +123,10 @@ public static class DependencyInjection
         services.AddScoped<Revision.IRevisionKanbanService, Revision.RevisionKanbanService>();
         // Policy singleton por tenant que controla el trigger automatico (Ola 4).
         services.AddScoped<Revision.IRevisionPolicyService, Revision.RevisionPolicyService>();
+        // Tools MCP de solo lectura para el agente REVISOR CLINICO IA (Ola 5).
+        services.AddScoped<Revision.Ia.IRevisionMcpToolsService, Revision.Ia.RevisionMcpToolsService>();
+        // Orquestador del agente REVISOR CLINICO IA (Ola 5).
+        services.AddScoped<Revision.Ia.IPreRevisionIaService, Revision.Ia.PreRevisionIaService>();
         return services;
     }
 }

@@ -7,6 +7,7 @@
 @using Visal.Domain.Entities
 @inject IOrdenesClinicasService OcSvc
 @inject IRevisionKanbanService KanbanSvc
+@inject Visal.Application.Revision.Ia.IPreRevisionIaService PreIaSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthProvider
@@ -132,6 +133,18 @@
                                                     @onclick="() => AbrirModalArchivar(card)"
                                                     title="Archivar con permiso final (ArchivarOk / Inactivar)">
                                                 📦 Archivar
+                                            </button>
+                                        </div>
+                                    }
+                                    else if (_puedeRevisar
+                                             && (col == RevisionKanbanColumna.Cerradas || col == RevisionKanbanColumna.Rechazadas))
+                                    {
+                                        <div class="oc-kb-card-actions">
+                                            <button class="btn btn-sm btn-outline-primary"
+                                                    @onclick="() => EjecutarPreRevisionIa(card)"
+                                                    disabled="@_procesando"
+                                                    title="Ejecutar REVISOR CLINICO IA sobre esta HC (registra veredicto en la bitacora)">
+                                                🤖 Pre-revision IA
                                             </button>
                                         </div>
                                     }
@@ -1029,6 +1042,33 @@ else
     }
 
     // ── Kanban: carga + drag&drop + acciones ─────────────────────────────
+
+    /// <summary>
+    /// Ejecuta la pre-revision IA sobre la HC del card. Si la card aun no tiene ciclo,
+    /// lo abre on-demand (idempotente). Persiste un evento `PreRevisionAgente` en la
+    /// bitacora sin cambiar el estado agregado — el reviewer humano sigue decidiendo.
+    /// </summary>
+    private async Task EjecutarPreRevisionIa(RevisionKanbanCardDto card)
+    {
+        if (_procesando) { return; }
+        _procesando = true;
+        _kanbanError = null;
+        try
+        {
+            var revisionId = card.RevisionId ?? (await KanbanSvc.SolicitarSiFaltaAsync(card.HistoriaClinicaId, _actorId)).Id;
+            var res = await PreIaSvc.EjecutarAsync(revisionId);
+            if (!res.Ok)
+            {
+                _kanbanError = "Pre-revision IA: " + (res.Error ?? "error desconocido");
+            }
+            await RefrescarKanban();
+        }
+        catch (Exception ex)
+        {
+            _kanbanError = "Pre-revision IA fallo: " + ex.Message;
+        }
+        finally { _procesando = false; }
+    }
 
     private async Task RefrescarKanban()
     {

@@ -45,5 +45,12 @@ public enum AutomationAction
     /// para que revise calidad, ortografia, completitud y coherencia clinica.
     /// El agente concreto se selecciona en la regla (AutomationRule.AiAgentId).
     /// </summary>
-    ReviewMedicalNotesWithAi
+    ReviewMedicalNotesWithAi,
+
+    /// <summary>
+    /// Ejecuta el agente REVISOR CLINICO IA sobre la Historia Clinica del ciclo
+    /// de revision (Capa 08). Ver <c>IPreRevisionIaService</c>. Emite un evento
+    /// <c>PreRevisionAgente</c> en la bitacora sin cambiar el estado agregado.
+    /// </summary>
+    ReviewClinicalHistoryWithAi
 }

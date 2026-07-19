@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Application.Revision;
+using Visal.Application.Revision.Ia;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -10,7 +11,8 @@ public sealed class HistoriaClinicaService(
     ITenantContext tenant,
     IAuditWriter audit,
     IRevisionPolicyService revPolicy,
-    IRevisionKanbanService kanban) : IHistoriaClinicaService
+    IRevisionKanbanService kanban,
+    IPreRevisionIaService preRevisionIa) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -174,7 +176,27 @@ public sealed class HistoriaClinicaService(
             var policy = await revPolicy.GetAsync(ct);
             if (policy.AutoTriggerCierre)
             {
-                await kanban.SolicitarSiFaltaAsync(e.Id, actor, ct);
+                var rev = await kanban.SolicitarSiFaltaAsync(e.Id, actor, ct);
+
+                // Capa 08 Ola 5 — trigger automatico IA. Se ejecuta solo si el operador
+                // encendio `PreRevisionIAAutoTrigger` en la policy. Si el orquestador
+                // falla (sin cupo, agente apagado, provider caido) NO revertimos el
+                // cierre — la HC ya quedo firmada y el motivo clinico es prioritario.
+                if (policy.PreRevisionIAAutoTrigger)
+                {
+                    try
+                    {
+                        await preRevisionIa.EjecutarAsync(rev.Id, ct);
+                    }
+                    catch (Exception iaEx)
+                    {
+                        audit.Write(actor, "historia-clinica.prerevision-ia-fail", nameof(HistoriaClinica), e.Id,
+                            previousValue: null,
+                            newValue: new { revisionId = rev.Id, error = iaEx.Message, exceptionType = iaEx.GetType().Name },
+                            tenantId: e.TenantId);
+                        await db.SaveChangesAsync(ct);
+                    }
+                }
             }
         }
         catch (Exception ex)

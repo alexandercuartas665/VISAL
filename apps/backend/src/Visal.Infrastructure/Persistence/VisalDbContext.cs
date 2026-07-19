@@ -127,6 +127,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas => Set<FacturacionSnapshotFila>();
     public DbSet<RevisionClinica> RevisionesClinica => Set<RevisionClinica>();
     public DbSet<RevisionClinicaEvento> RevisionClinicaEventos => Set<RevisionClinicaEvento>();
+    public DbSet<RevisionPolicy> RevisionPolicies => Set<RevisionPolicy>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -1376,6 +1377,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
             // Feed de la bitacora del modal HC — orden cronologico descendente.
             b.HasIndex(x => new { x.RevisionClinicaId, x.OcurridoEn });
+        });
+
+        modelBuilder.Entity<RevisionPolicy>(b =>
+        {
+            b.Property(x => x.UmbralConfianza).HasPrecision(4, 3);
+            // Singleton por tenant — una fila max por TenantId.
+            b.HasIndex(x => x.TenantId).IsUnique();
         });
     }
 

@@ -121,6 +121,8 @@ public static class DependencyInjection
         services.AddScoped<Revision.IRevisionClinicaService, Revision.RevisionClinicaService>();
         // Tablero Kanban + tab Archivo del modulo /ordenes (Ola 2).
         services.AddScoped<Revision.IRevisionKanbanService, Revision.RevisionKanbanService>();
+        // Policy singleton por tenant que controla el trigger automatico (Ola 4).
+        services.AddScoped<Revision.IRevisionPolicyService, Revision.RevisionPolicyService>();
         return services;
     }
 }

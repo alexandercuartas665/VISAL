@@ -1,10 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Revision;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IHistoriaClinicaService
+public sealed class HistoriaClinicaService(
+    IApplicationDbContext db,
+    ITenantContext tenant,
+    IAuditWriter audit,
+    IRevisionPolicyService revPolicy,
+    IRevisionKanbanService kanban) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -152,6 +158,34 @@ public sealed class HistoriaClinicaService(IApplicationDbContext db, ITenantCont
             newValue: new { estado = e.Estado.ToString(), fechaCierre = e.FechaCierre, pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
             tenantId: e.TenantId);
         await db.SaveChangesAsync(ct);
+
+        // Capa 08 Ola 4 — trigger automatico del ciclo de revision al cerrar la HC.
+        // Solo si el tenant tiene `AutoTriggerCierre = true` en `RevisionPolicy`.
+        // El default es false, asi que ningun tenant existente ve cambios sin haberlo
+        // activado explicitamente. El boton "Enviar a revision" en el modal HC sigue
+        // como fallback manual — SolicitarSiFaltaAsync es idempotente.
+        //
+        // Si el trigger falla (BD, tenant sin policy, servicio caido), NO revertimos
+        // el cierre — la HC ya quedo cerrada y el motivo clinico es prioritario.
+        // Se registra en auditoria como evento aparte para que el operador pueda
+        // reintentarlo manualmente desde el modal HC.
+        try
+        {
+            var policy = await revPolicy.GetAsync(ct);
+            if (policy.AutoTriggerCierre)
+            {
+                await kanban.SolicitarSiFaltaAsync(e.Id, actor, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            audit.Write(actor, "historia-clinica.trigger-revision-fail", nameof(HistoriaClinica), e.Id,
+                previousValue: null,
+                newValue: new { error = ex.Message, exceptionType = ex.GetType().Name },
+                tenantId: e.TenantId);
+            await db.SaveChangesAsync(ct);
+        }
+
         return true;
     }
 

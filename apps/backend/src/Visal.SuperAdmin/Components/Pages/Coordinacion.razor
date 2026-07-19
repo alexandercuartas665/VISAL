@@ -23,9 +23,7 @@
 <div class="cd-tabs">
     @foreach (var t in _tabs)
     {
-        <button class="cd-tab @(t == _tabSel ? "sel" : "") @(_tabsActivos.Contains(t) ? "" : "muted")"
-                @onclick="() => OnTabSeleccionado(t)" disabled="@(!_tabsActivos.Contains(t))"
-                title="@(_tabsActivos.Contains(t) ? "" : "Pendiente de implementacion")">
+        <button class="cd-tab @(t == _tabSel ? "sel" : "")" @onclick="() => OnTabSeleccionado(t)">
             @t
         </button>
     }
@@ -441,18 +439,11 @@ else if (_tabSel == "Calendario")
         </div>
     }
 }
-else
-{
-    <div class="ase-card">
-        <div class="ase-empty">Tab '@_tabSel' pendiente de implementacion.</div>
-    </div>
-}
 
 <style>
     .cd-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 14px; }
     .cd-tab { padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 13px; font-weight: 600; cursor: pointer; }
     .cd-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
-    .cd-tab.muted { color: #94a3b8; cursor: not-allowed; }
     .cd-no-perm { padding: 30px; color: #64748b; }
     .cd-no-perm code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
 
@@ -657,9 +648,8 @@ else
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private readonly string[] _tabs = new[] { "Solicitudes", "Kanban", "Calendario", "Modificacion", "Consultas Historicas", "Documentos Externos", "RIPS", "Historias" };
+    private readonly string[] _tabs = new[] { "Solicitudes", "Kanban", "Calendario" };
     private string _tabSel = "Solicitudes";
-    private static readonly HashSet<string> _tabsActivos = new(StringComparer.OrdinalIgnoreCase) { "Solicitudes", "Kanban", "Calendario" };
 
     // Permisos del usuario logueado (que modulos puede coordinar).
     private List<string> _modulos = new();
@@ -1108,7 +1098,6 @@ else
     // ============ Handlers Tablero ============
     private async Task OnTabSeleccionado(string tab)
     {
-        if (!_tabsActivos.Contains(tab)) { return; }
         _tabSel = tab;
         _error = null; _ok = null;
         if (tab == "Kanban" && _kbCards.Count == 0) { await CargarKanban(); }

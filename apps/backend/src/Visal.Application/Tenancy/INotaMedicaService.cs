@@ -107,6 +107,23 @@ public sealed record AdjuntarDocumentoHcRequest(
     string? Anotaciones);
 
 /// <summary>
+/// Request para subir un documento "libre" al paciente desde el tab Documentos
+/// de <c>/admision</c> — sin nota medica y sin HC de por medio. El documento
+/// queda ligado solo al paciente y aparece en su historial global. Se usa cuando
+/// el operador de admision necesita adjuntar consentimientos previos, escaneos
+/// de identificacion, autorizaciones, etc. antes de que exista cualquier HC o
+/// nota medica del paciente.
+/// </summary>
+public sealed record AdjuntarDocumentoPacienteRequest(
+    Guid PacienteId,
+    string NombreOriginal,
+    string RutaArchivo,
+    string? TipoMime,
+    long Tamano,
+    string? Categoria,
+    string? Anotaciones);
+
+/// <summary>
 /// Resultado de la validacion previa antes de abrir el modulo de notas.
 /// Ok=false significa que el profesional debe primero crear / renovar la HC
 /// del paciente para el formato que pide el servicio. HistoriaId es el id
@@ -171,6 +188,14 @@ public interface INotaMedicaService
     /// <summary>Sube un documento externo asociado a la HC + paciente. No requiere nota.</summary>
     Task<NotaDocumentoDto> AdjuntarDocumentoHcAsync(
         AdjuntarDocumentoHcRequest req, Guid actorUserId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adjunta un documento directamente al paciente (sin nota ni HC). Usado
+    /// por el tab Documentos de <c>/admision</c>. Verifica que el paciente
+    /// exista en el tenant activo.
+    /// </summary>
+    Task<NotaDocumentoDto> AdjuntarDocumentoPacienteAsync(
+        AdjuntarDocumentoPacienteRequest req, Guid actorUserId, CancellationToken ct = default);
 
     Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actorUserId, CancellationToken ct = default);
 }

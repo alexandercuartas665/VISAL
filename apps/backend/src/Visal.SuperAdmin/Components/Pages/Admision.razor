@@ -11,6 +11,8 @@
 @inject ICie11Service Cie11Svc
 @inject IDiagnosticoService DiagSvc
 @inject INotaMedicaService NotaSvc
+@inject ITipologiaArchivoService TipSvc
+@inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 
 <PageTitle>Admision de Pacientes - Visal</PageTitle>
@@ -389,8 +391,55 @@
                         <button class="btn btn-outline-secondary btn-sm" @onclick="RecargarDocsPacienteAsync" disabled="@_docsBusy" title="Refrescar lista">&#128260; Refrescar</button>
                     </div>
                     <div class="text-muted" style="font-size:11.5px;margin-bottom:10px;">
-                        Todos los archivos cargados a notas medicas (firmas, ordenes, anexos) aparecen aqui. Usa "Refrescar" si acabas de capturar una firma por WhatsApp.
+                        Aqui aparecen todos los archivos del paciente: los que subas directamente en este tab, los adjuntos de notas medicas y firmas capturadas por WhatsApp. Usa "Refrescar" si acabas de capturar una firma.
                     </div>
+
+                    @* Bloque de subida directa al paciente (independiente de nota u HC).
+                        Usa el catalogo Tipologia Archivos para categorizar. *@
+                    @if (_id is Guid pacIdUpload)
+                    {
+                        <div class="pac-doc-upload">
+                            <div class="pac-doc-upload-row">
+                                <div class="pac-doc-upload-f">
+                                    <label>Tipologia</label>
+                                    <select class="form-select form-select-sm" @bind="_docUpTipologia">
+                                        <option value="">Seleccione...</option>
+                                        @foreach (var t in _tipologiasArchivo)
+                                        {
+                                            <option value="@t.Nombre">@t.Nombre</option>
+                                        }
+                                    </select>
+                                    @if (_tipologiasArchivo.Count == 0)
+                                    {
+                                        <small class="text-muted">
+                                            Configura tipologias en <em>Configuracion del Sistema -> Tipologia Archivos</em>.
+                                        </small>
+                                    }
+                                </div>
+                                <div class="pac-doc-upload-f pac-doc-upload-f-wide">
+                                    <label>Anotaciones (opcional)</label>
+                                    <input class="form-control form-control-sm" @bind="_docUpAnotaciones"
+                                           placeholder="Ej: consentimiento previo firmado, autorizacion de acompanante..." />
+                                </div>
+                                <div class="pac-doc-upload-f">
+                                    <label>Archivo</label>
+                                    <InputFile OnChange="@(e => OnAdjuntarArchivoPaciente(e, pacIdUpload))"
+                                               class="form-control form-control-sm"
+                                               accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.docx,.xlsx,.pptx"
+                                               disabled="@_docUpBusy" />
+                                    @if (_docUpBusy) { <small class="text-muted">Subiendo...</small> }
+                                </div>
+                            </div>
+                            @if (_docUpError is not null)
+                            {
+                                <div class="ase-alert" style="margin-top:8px;">@_docUpError</div>
+                            }
+                            @if (_docUpMsg is not null)
+                            {
+                                <div class="hc-info-msg" style="margin-top:8px;">@_docUpMsg</div>
+                            }
+                        </div>
+                    }
                     @if (_docsError is not null)
                     {
                         <div class="ase-alert">Error al cargar documentos: @_docsError</div>
@@ -449,7 +498,15 @@
                                             <td>@FormatTam(d.Tamano)</td>
                                             <td>
                                                 <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190; Ver</a>
-                                            </td>
+                                                @* Solo permitimos eliminar los "libres" del paciente (subidos aca).
+                                                    Los que vienen de una nota o de una HC se eliminan desde el modulo donde nacieron. *@
+                                                @if (d.NotaMedicaId is null)
+                                                {
+                                                    <button class="btn btn-outline-danger btn-sm"
+                                                            @onclick="() => EliminarDocPacienteAsync(d.Id)"
+                                                            disabled="@_docUpBusy"
+                                                            title="Eliminar este archivo">&#128465;</button>
+                                                }</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -538,6 +595,11 @@
     .pac-docs-tbl { font-size: 12.5px; }
     .pac-docs-tbl thead th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; background: #f1f5f9; }
     .pac-doc-cat { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }
+    .pac-doc-upload { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:14px; }
+    .pac-doc-upload-row { display:grid; grid-template-columns:220px 1fr 260px; gap:12px; align-items:end; }
+    .pac-doc-upload-f label { font-size:11px; font-weight:600; color:#334155; margin-bottom:4px; display:block; }
+    .pac-doc-upload-f-wide { min-width:0; }
+    @@media (max-width: 900px) { .pac-doc-upload-row { grid-template-columns: 1fr; } }
     .ase-table-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
     .pac-tab { background: none; border: none; padding: 10px 18px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; transition: all .15s; }
     .pac-tab:hover { color: #1565c0; }
@@ -691,10 +753,26 @@
     private List<DocumentoPacienteDto> _docs = new();
     private bool _docsBusy;
 
+    // Bloque de subida directa al paciente (task ADM1).
+    // Ver INotaMedicaService.AdjuntarDocumentoPacienteAsync — persiste con
+    // NotaMedicaId=null y HistoriaClinicaId=null, quedando ligado solo al paciente.
+    private List<TipologiaArchivoDto> _tipologiasArchivo = new();
+    private string _docUpTipologia = "";
+    private string _docUpAnotaciones = "";
+    private bool _docUpBusy;
+    private string? _docUpError;
+    private string? _docUpMsg;
+
     private async Task OnAbrirDocumentosTab()
     {
         _tab = "documentos";
         await RecargarDocsPacienteAsync();
+        // Carga las tipologias activas la primera vez que se abre el tab.
+        if (_tipologiasArchivo.Count == 0)
+        {
+            try { _tipologiasArchivo = (await TipSvc.ListAsync(soloActivos: true)).ToList(); }
+            catch { _tipologiasArchivo = new(); }
+        }
     }
 
     private string? _docsError;
@@ -706,6 +784,62 @@
         try { _docs = (await NotaSvc.ListarDocumentosPorPacienteAsync(pid)).ToList(); }
         catch (Exception ex) { _docs = new(); _docsError = ex.Message; }
         finally { _docsBusy = false; }
+    }
+
+    private async Task OnAdjuntarArchivoPaciente(InputFileChangeEventArgs e, Guid pacienteId)
+    {
+        _docUpBusy = true; _docUpError = null; _docUpMsg = null;
+        try
+        {
+            var f = e.File;
+            // Limite defensivo 20 MB, alineado con NotasMedicasModulo.
+            const long MAX = 20L * 1024 * 1024;
+            if (f.Size > MAX) { _docUpError = "El archivo supera 20 MB."; return; }
+
+            var ext = Path.GetExtension(f.Name);
+            var nombreEnDisco = $"{Guid.NewGuid()}{ext}";
+            // Mismo layout que las Notas: wwwroot/uploads/notas/{guid}{ext}.
+            // Asi la ruta servida es identica y no rompemos ninguna vista.
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "notas");
+            Directory.CreateDirectory(dir);
+            var rutaDisco = Path.Combine(dir, nombreEnDisco);
+            await using (var fs = File.Create(rutaDisco))
+            await using (var rs = f.OpenReadStream(MAX))
+            {
+                await rs.CopyToAsync(fs);
+            }
+            var rutaWeb = $"/uploads/notas/{nombreEnDisco}";
+
+            await NotaSvc.AdjuntarDocumentoPacienteAsync(new AdjuntarDocumentoPacienteRequest(
+                pacienteId,
+                f.Name,
+                rutaWeb,
+                f.ContentType,
+                f.Size,
+                string.IsNullOrWhiteSpace(_docUpTipologia) ? null : _docUpTipologia,
+                string.IsNullOrWhiteSpace(_docUpAnotaciones) ? null : _docUpAnotaciones.Trim()
+            ), Guid.Empty);
+
+            _docUpMsg = "Archivo adjuntado.";
+            _docUpAnotaciones = "";
+            await RecargarDocsPacienteAsync();
+        }
+        catch (Exception ex) { _docUpError = "No se pudo subir el archivo: " + ex.Message; }
+        finally { _docUpBusy = false; }
+    }
+
+    private async Task EliminarDocPacienteAsync(Guid docId)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Eliminar este documento?")) { return; }
+        _docUpBusy = true; _docUpError = null; _docUpMsg = null;
+        try
+        {
+            await NotaSvc.EliminarDocumentoAsync(docId, Guid.Empty);
+            _docUpMsg = "Documento eliminado.";
+            await RecargarDocsPacienteAsync();
+        }
+        catch (Exception ex) { _docUpError = "No se pudo eliminar: " + ex.Message; }
+        finally { _docUpBusy = false; }
     }
 
     private static string FormatTam(long bytes)

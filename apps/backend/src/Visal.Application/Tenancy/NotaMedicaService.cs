@@ -350,6 +350,36 @@ public sealed class NotaMedicaService(
             entity.Anotaciones, entity.CreatedAt);
     }
 
+    public async Task<NotaDocumentoDto> AdjuntarDocumentoPacienteAsync(
+        AdjuntarDocumentoPacienteRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        // Verifica que el paciente exista y este en el tenant activo (evita
+        // pasar un PacienteId arbitrario de otro tenant).
+        var pacienteExiste = await db.Pacientes.AsNoTracking()
+            .AnyAsync(p => p.Id == req.PacienteId, ct);
+        if (!pacienteExiste) { throw new InvalidOperationException("Paciente no encontrado."); }
+        var entity = new NotaMedicaDocumento
+        {
+            TenantId = tid,
+            NotaMedicaId = null,
+            HistoriaClinicaId = null,
+            PacienteId = req.PacienteId,
+            NombreOriginal = req.NombreOriginal,
+            RutaArchivo = req.RutaArchivo,
+            TipoMime = req.TipoMime,
+            Tamano = req.Tamano,
+            Categoria = req.Categoria,
+            Anotaciones = req.Anotaciones
+        };
+        db.NotaMedicaDocumentos.Add(entity);
+        await db.SaveChangesAsync(ct);
+        return new NotaDocumentoDto(
+            entity.Id, entity.NotaMedicaId, entity.NombreOriginal, entity.RutaArchivo,
+            entity.TipoMime, entity.Tamano, entity.Categoria, entity.TipoTerapia, entity.Mes,
+            entity.Anotaciones, entity.CreatedAt);
+    }
+
     public async Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actor, CancellationToken ct = default)
     {
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);

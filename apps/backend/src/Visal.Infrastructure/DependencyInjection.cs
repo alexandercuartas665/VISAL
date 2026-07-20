@@ -77,6 +77,15 @@ public static class DependencyInjection
         // PDF de cotizaciones desde HTML libre (Chromium headless via PuppeteerSharp).
         services.AddScoped<Application.Common.IQuotePdfRenderer, Rendering.PuppeteerQuotePdfRenderer>();
 
+        // Ola 8 RC8e — cola in-process del orquestador REVISOR CLINICO IA. La cola
+        // como singleton porque el Channel<T> sobrevive al request HTTP que encola
+        // y al worker que consume. El BackgroundService se registra aparte para
+        // que el host lo arranque durante Startup.
+        services.AddSingleton<Revision.PreRevisionIaQueue>();
+        services.AddSingleton<Application.Revision.Ia.IPreRevisionIaQueue>(sp =>
+            sp.GetRequiredService<Revision.PreRevisionIaQueue>());
+        services.AddHostedService<Revision.PreRevisionIaWorker>();
+
         return services;
     }
 }

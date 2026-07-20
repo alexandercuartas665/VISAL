@@ -133,6 +133,8 @@ public static class DependencyInjection
         services.AddScoped<Revision.Ia.IPreRevisionIaService, Revision.Ia.PreRevisionIaService>();
         // Metricas del dashboard Kanban de /ordenes (Ola 7 RC7a).
         services.AddScoped<Revision.IRevisionDashboardService, Revision.RevisionDashboardService>();
+        // Notificador WA al profesional cuando su HC es rechazada (Ola 8 RC8c).
+        services.AddScoped<Revision.IRevisionRechazoNotifier, Revision.RevisionRechazoNotifier>();
         return services;
     }
 }

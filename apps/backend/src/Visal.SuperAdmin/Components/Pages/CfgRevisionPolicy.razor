@@ -127,6 +127,19 @@ else if (_policy is not null)
                         antes de mover una card a Aprobadas.
                     </small>
                 </div>
+
+                <div class="rp-field">
+                    <label>
+                        <input type="checkbox" @bind="_policy.NotificarRechazoWhatsApp" />
+                        Notificar al profesional por WhatsApp cuando su HC es rechazada
+                    </label>
+                    <small class="rp-help-sm">
+                        Cuando esta activo y hay linea WhatsApp conectada, el
+                        profesional autor recibe un mensaje con el motivo y un link
+                        para abrir la HC. Best-effort: si algo falla el rechazo se
+                        aplica igual, solo se loguea el warning.
+                    </small>
+                </div>
             </div>
         </div>
     </div>
@@ -208,6 +221,7 @@ else if (_policy is not null)
         public int VentanaAsignacionesRelacionadasDias { get; set; }
         public bool ConfirmarAprobado { get; set; }
         public int MotivoInactivacionMinChars { get; set; }
+        public bool NotificarRechazoWhatsApp { get; set; }
     }
 
     private PolicyModel? _policy;
@@ -261,6 +275,7 @@ else if (_policy is not null)
                 VentanaAsignacionesRelacionadasDias = dto.VentanaAsignacionesRelacionadasDias,
                 ConfirmarAprobado = dto.ConfirmarAprobado,
                 MotivoInactivacionMinChars = dto.MotivoInactivacionMinChars,
+                NotificarRechazoWhatsApp = dto.NotificarRechazoWhatsApp,
             };
         }
         catch (Exception ex) { _error = "No se pudo cargar la politica: " + ex.Message; }
@@ -280,7 +295,8 @@ else if (_policy is not null)
                 _policy.UmbralConfianza,
                 _policy.VentanaAsignacionesRelacionadasDias,
                 _policy.ConfirmarAprobado,
-                _policy.MotivoInactivacionMinChars);
+                _policy.MotivoInactivacionMinChars,
+                _policy.NotificarRechazoWhatsApp);
             await Svc.SaveAsync(dto, _actorId);
             _msg = "Politica guardada. Aplica en el proximo cierre de HC.";
         }

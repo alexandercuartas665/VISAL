@@ -57,4 +57,14 @@ public class RevisionPolicy : TenantEntity
     /// Solo aplica a inactivacion (rechazo exige texto no vacio en cualquier caso).
     /// </summary>
     public int MotivoInactivacionMinChars { get; set; } = 10;
+
+    /// <summary>
+    /// Ola 8 RC8c — si es true, cuando el revisor mueve una card a Rechazadas se
+    /// dispara un mensaje WhatsApp al profesional autor con el motivo y un link
+    /// deep al modal HC. Requiere que el profesional tenga telefono y linea WA
+    /// activa; si algo falla el rechazo NO se aborta (solo se loguea el error).
+    /// Default false para no sorprender a tenants que aun no configuraron HSM
+    /// para este proceso.
+    /// </summary>
+    public bool NotificarRechazoWhatsApp { get; set; }
 }

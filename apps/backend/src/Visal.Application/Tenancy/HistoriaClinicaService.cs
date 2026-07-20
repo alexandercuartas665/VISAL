@@ -12,7 +12,7 @@ public sealed class HistoriaClinicaService(
     IAuditWriter audit,
     IRevisionPolicyService revPolicy,
     IRevisionKanbanService kanban,
-    IPreRevisionIaService preRevisionIa) : IHistoriaClinicaService
+    IPreRevisionIaQueue preRevisionQueue) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -179,20 +179,27 @@ public sealed class HistoriaClinicaService(
                 var rev = await kanban.SolicitarSiFaltaAsync(e.Id, actor, ct);
 
                 // Capa 08 Ola 5 — trigger automatico IA. Se ejecuta solo si el operador
-                // encendio `PreRevisionIAAutoTrigger` en la policy. Si el orquestador
-                // falla (sin cupo, agente apagado, provider caido) NO revertimos el
-                // cierre — la HC ya quedo firmada y el motivo clinico es prioritario.
+                // encendio `PreRevisionIAAutoTrigger` en la policy.
+                //
+                // Ola 8 RC8e — encolamos en vez de ejecutar sincrono. El worker
+                // consume del channel y ejecuta el orquestador en su scope propio;
+                // asi el usuario recupera el control apenas la HC persistio, sin
+                // esperar al proveedor de IA (que puede tardar segundos por retry).
+                // El worker maneja sus propios errores; si el channel falla al
+                // encolar (imposible en unbounded, pero por robustez) el cierre
+                // sigue OK y solo pierde la pre-revision automatica.
                 if (policy.PreRevisionIAAutoTrigger)
                 {
                     try
                     {
-                        await preRevisionIa.EjecutarAsync(rev.Id, ct);
+                        await preRevisionQueue.EnqueueAsync(
+                            new PreRevisionIaJob(e.TenantId, rev.Id, actor), ct);
                     }
-                    catch (Exception iaEx)
+                    catch (Exception qEx)
                     {
-                        audit.Write(actor, "historia-clinica.prerevision-ia-fail", nameof(HistoriaClinica), e.Id,
+                        audit.Write(actor, "historia-clinica.prerevision-ia-queue-fail", nameof(HistoriaClinica), e.Id,
                             previousValue: null,
-                            newValue: new { revisionId = rev.Id, error = iaEx.Message, exceptionType = iaEx.GetType().Name },
+                            newValue: new { revisionId = rev.Id, error = qEx.Message, exceptionType = qEx.GetType().Name },
                             tenantId: e.TenantId);
                         await db.SaveChangesAsync(ct);
                     }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720030656_MigrateAllowedToolsSeedsToColumn")]
+    partial class MigrateAllowedToolsSeedsToColumn
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5854,10 +5857,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<int>("MotivoInactivacionMinChars")
                         .HasColumnType("integer")
                         .HasColumnName("motivo_inactivacion_min_chars");
-
-                    b.Property<bool>("NotificarRechazoWhatsApp")
-                        .HasColumnType("boolean")
-                        .HasColumnName("notificar_rechazo_whats_app");
 
                     b.Property<bool>("PreRevisionIAAutoTrigger")
                         .HasColumnType("boolean")

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
 
@@ -12,19 +13,49 @@ namespace Visal.Application.Revision;
 /// de rechazo y adopcion automatica; para tiempos por columna Kanban se
 /// derivan de <see cref="RevisionClinica.SolicitadaEn"/> y
 /// <see cref="RevisionClinica.UltimaAccionEn"/>.
+///
+/// Ola 8 (RC8b): cache in-memory por tenant con TTL 60s. El dashboard se
+/// abre desde el tab Kanban y no cambia por segundo — un minuto de latencia
+/// es aceptable para KPIs y quita 4 queries pesadas por render.
 /// </summary>
 public sealed class RevisionDashboardService : IRevisionDashboardService
 {
     private readonly IApplicationDbContext _db;
+    private readonly ITenantContext _tenant;
     private readonly TimeProvider _clock;
+    private readonly IMemoryCache _cache;
 
-    public RevisionDashboardService(IApplicationDbContext db, TimeProvider clock)
+    private const string CacheKeyPrefix = "revision-dashboard:";
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+
+    public RevisionDashboardService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock, IMemoryCache cache)
     {
         _db = db;
+        _tenant = tenant;
         _clock = clock;
+        _cache = cache;
     }
 
     public async Task<RevisionDashboardDto> GetAsync(CancellationToken ct = default)
+    {
+        // Sin tenant activo no cacheamos (edge case job/background sin scope).
+        if (_tenant.TenantId is not Guid tid)
+        {
+            return await BuildAsync(ct);
+        }
+
+        var key = CacheKeyPrefix + tid;
+        if (_cache.TryGetValue(key, out RevisionDashboardDto? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var dto = await BuildAsync(ct);
+        _cache.Set(key, dto, CacheTtl);
+        return dto;
+    }
+
+    private async Task<RevisionDashboardDto> BuildAsync(CancellationToken ct)
     {
         var resumen = await CalcularResumenAsync(ct);
         var topRechazos = await CalcularTopRechazosPorProfesionalAsync(ct);

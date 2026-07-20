@@ -1,0 +1,287 @@
+@page "/admin/ai-usage"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using Microsoft.EntityFrameworkCore
+@using Visal.Application.Common
+@using Visal.Application.Tenancy
+@using Visal.Domain.Entities
+@using Visal.Domain.Enums
+@inject IApplicationDbContext Db
+@inject IAiUsageService UsageSvc
+
+<PageTitle>Auditoria de uso IA - Visal</PageTitle>
+
+<div class="ase-page">
+    <div class="ase-page-h">
+        <h2>Auditoria de uso IA</h2>
+        <p class="ase-sub">
+            Historial de llamadas del tenant a proveedores de IA (Ola 8 RC8d).
+            Incluye tokens, costo estimado y agente originador. Los superadmins de
+            plataforma ven el consumo del tenant en el que estan operando.
+        </p>
+    </div>
+
+    @if (!_puedeVer)
+    {
+        <div class="alert alert-warning">
+            No tienes permisos para ver este modulo. Requiere rol Owner o SuperAdmin.
+        </div>
+    }
+    else
+    {
+        <!-- KPIs cabecera -->
+        <div class="aiu-kpis">
+            <div class="aiu-kpi">
+                <div class="aiu-kpi-l">Llamadas</div>
+                <div class="aiu-kpi-v">@(_summary?.TotalCalls ?? 0)</div>
+            </div>
+            <div class="aiu-kpi">
+                <div class="aiu-kpi-l">Tokens totales</div>
+                <div class="aiu-kpi-v">@FormatNum(_summary?.TotalTokens ?? 0)</div>
+            </div>
+            <div class="aiu-kpi">
+                <div class="aiu-kpi-l">Costo estimado USD</div>
+                <div class="aiu-kpi-v">@((_summary?.EstimatedCostUsd ?? 0m).ToString("F4"))</div>
+            </div>
+            <div class="aiu-kpi @(_quota?.UsedPct >= 90 ? "aiu-kpi--warn" : "")">
+                <div class="aiu-kpi-l">Cupo mensual</div>
+                <div class="aiu-kpi-v">
+                    @(_quota?.HasLimit == true ? $"{_quota.UsedPct}%" : "sin limite")
+                </div>
+            </div>
+        </div>
+
+        <!-- Filtros -->
+        <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-card-body">
+                <div class="aiu-filters">
+                    <div>
+                        <label>Agente</label>
+                        <select class="form-select form-select-sm" @bind="_filtroAgentId">
+                            <option value="">(todos)</option>
+                            @foreach (var a in _agentes)
+                            {
+                                <option value="@a.Id">@a.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div>
+                        <label>Origen (source)</label>
+                        <input class="form-control form-control-sm" @bind="_filtroSource" placeholder="chat / test / automation / revision" />
+                    </div>
+                    <div>
+                        <label>Desde</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" />
+                    </div>
+                    <div>
+                        <label>Hasta</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_filtroHasta" />
+                    </div>
+                    <div>
+                        <label>Resultado</label>
+                        <select class="form-select form-select-sm" @bind="_filtroExito">
+                            <option value="">(todos)</option>
+                            <option value="ok">Solo exitosas</option>
+                            <option value="fail">Solo fallidas</option>
+                        </select>
+                    </div>
+                    <div class="aiu-filters-actions">
+                        <button class="btn btn-primary btn-sm" @onclick="RecargarAsync">Aplicar</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarAsync">Limpiar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Grid -->
+        <div class="ase-card">
+            <div class="ase-card-h">
+                Registros (@(_total.ToString("N0")) — pagina @_page de @Math.Max(1, (int)Math.Ceiling(_total / (double)PageSize)))
+            </div>
+            <div class="ase-card-body aiu-tablewrap">
+                @if (_cargando)
+                {
+                    <div class="text-muted">Cargando...</div>
+                }
+                else if (_rows.Count == 0)
+                {
+                    <div class="text-muted">Sin registros con estos filtros.</div>
+                }
+                else
+                {
+                    <table class="table table-sm aiu-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Agente</th>
+                                <th>Proveedor</th>
+                                <th>Modelo</th>
+                                <th>Origen</th>
+                                <th class="text-end">Tok in</th>
+                                <th class="text-end">Tok out</th>
+                                <th class="text-end">Tok total</th>
+                                <th class="text-end">Costo USD</th>
+                                <th>Exito</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _rows)
+                            {
+                                <tr class="@(!r.Success ? "aiu-row--fail" : "")">
+                                    <td>@r.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                    <td>@(_agentNameById.TryGetValue(r.AgentId ?? Guid.Empty, out var nm) ? nm : "-")</td>
+                                    <td>@r.Provider</td>
+                                    <td class="aiu-mono">@r.Model</td>
+                                    <td>@r.Source</td>
+                                    <td class="text-end">@FormatNum(r.InputTokens)</td>
+                                    <td class="text-end">@FormatNum(r.OutputTokens)</td>
+                                    <td class="text-end"><b>@FormatNum(r.TotalTokens)</b></td>
+                                    <td class="text-end">@r.EstimatedCostUsd.ToString("F4")</td>
+                                    <td>@(r.Success ? "OK" : "ERROR")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                    <div class="aiu-pager">
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(_page <= 1)" @onclick="() => IrPageAsync(_page - 1)">&laquo; Anterior</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(_page * PageSize >= _total)" @onclick="() => IrPageAsync(_page + 1)">Siguiente &raquo;</button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .aiu-kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
+    .aiu-kpi { background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:12px 14px; }
+    .aiu-kpi-l { color:#64748b; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+    .aiu-kpi-v { color:#0f172a; font-size:22px; font-weight:700; margin-top:4px; }
+    .aiu-kpi--warn { background:#fff8e1; border-color:#f0d47a; }
+    .aiu-filters { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:10px; align-items:end; }
+    .aiu-filters label { font-size:12px; font-weight:600; color:#334155; margin-bottom:4px; display:block; }
+    .aiu-filters-actions { display:flex; gap:6px; }
+    .aiu-tablewrap { overflow-x:auto; }
+    .aiu-table th { font-size:12px; color:#475569; }
+    .aiu-table td { font-size:13px; }
+    .aiu-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+    .aiu-row--fail td { background:#fdecea; }
+    .aiu-pager { display:flex; gap:8px; margin-top:10px; justify-content:flex-end; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private const int PageSize = 25;
+
+    private bool _puedeVer;
+    private bool _cargando = true;
+    private int _page = 1;
+    private long _total;
+    private List<AiUsageLog> _rows = new();
+
+    private AiUsageSummaryDto? _summary;
+    private AiQuotaDto? _quota;
+
+    private List<AiAgent> _agentes = new();
+    private Dictionary<Guid, string> _agentNameById = new();
+
+    private string _filtroAgentId = "";
+    private string _filtroSource = "";
+    private DateTime? _filtroDesde;
+    private DateTime? _filtroHasta;
+    private string _filtroExito = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolverPermisosAsync();
+        if (!_puedeVer) { _cargando = false; return; }
+
+        try { _summary = await UsageSvc.GetSummaryAsync(); } catch { }
+        try { _quota = await UsageSvc.GetQuotaAsync(); } catch { }
+
+        _agentes = await Db.AiAgents.AsNoTracking().OrderBy(a => a.Name).ToListAsync();
+        _agentNameById = _agentes.ToDictionary(a => a.Id, a => a.Name);
+
+        await RecargarAsync();
+    }
+
+    private async Task ResolverPermisosAsync()
+    {
+        if (AuthState is null) { return; }
+        try
+        {
+            var state = await AuthState;
+            var tenantRole = state.User.FindFirst("tenant_role")?.Value;
+            var platformRole = state.User.FindFirst("platform_role")?.Value;
+            _puedeVer = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { }
+    }
+
+    private IQueryable<AiUsageLog> BuildQuery()
+    {
+        var q = Db.AiUsageLogs.AsNoTracking();
+        if (Guid.TryParse(_filtroAgentId, out var aid))
+        {
+            q = q.Where(l => l.AgentId == aid);
+        }
+        if (!string.IsNullOrWhiteSpace(_filtroSource))
+        {
+            var src = _filtroSource.Trim();
+            q = q.Where(l => l.Source == src);
+        }
+        if (_filtroDesde is DateTime d)
+        {
+            var desde = new DateTimeOffset(DateTime.SpecifyKind(d.Date, DateTimeKind.Utc));
+            q = q.Where(l => l.CreatedAt >= desde);
+        }
+        if (_filtroHasta is DateTime h)
+        {
+            var hasta = new DateTimeOffset(DateTime.SpecifyKind(h.Date.AddDays(1), DateTimeKind.Utc));
+            q = q.Where(l => l.CreatedAt < hasta);
+        }
+        if (_filtroExito == "ok") { q = q.Where(l => l.Success); }
+        else if (_filtroExito == "fail") { q = q.Where(l => !l.Success); }
+        return q;
+    }
+
+    private async Task RecargarAsync()
+    {
+        _cargando = true;
+        try
+        {
+            var q = BuildQuery();
+            _total = await q.LongCountAsync();
+            _rows = await q.OrderByDescending(l => l.CreatedAt)
+                .Skip((_page - 1) * PageSize).Take(PageSize)
+                .ToListAsync();
+        }
+        finally { _cargando = false; }
+    }
+
+    private async Task IrPageAsync(int p)
+    {
+        if (p < 1) { p = 1; }
+        _page = p;
+        await RecargarAsync();
+    }
+
+    private async Task LimpiarAsync()
+    {
+        _filtroAgentId = "";
+        _filtroSource = "";
+        _filtroDesde = null;
+        _filtroHasta = null;
+        _filtroExito = "";
+        _page = 1;
+        await RecargarAsync();
+    }
+
+    private static string FormatNum(long n)
+    {
+        return n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+    }
+}

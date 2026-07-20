@@ -91,6 +91,7 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         row.VentanaAsignacionesRelacionadasDias = policy.VentanaAsignacionesRelacionadasDias;
         row.ConfirmarAprobado = policy.ConfirmarAprobado;
         row.MotivoInactivacionMinChars = policy.MotivoInactivacionMinChars;
+        row.NotificarRechazoWhatsApp = policy.NotificarRechazoWhatsApp;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = actor;
         await _db.SaveChangesAsync(ct);
@@ -107,5 +108,6 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         r.UmbralConfianza,
         r.VentanaAsignacionesRelacionadasDias,
         r.ConfirmarAprobado,
-        r.MotivoInactivacionMinChars);
+        r.MotivoInactivacionMinChars,
+        r.NotificarRechazoWhatsApp);
 }

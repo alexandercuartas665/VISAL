@@ -10,7 +10,8 @@ public sealed record RevisionPolicyDto(
     decimal UmbralConfianza,
     int VentanaAsignacionesRelacionadasDias,
     bool ConfirmarAprobado,
-    int MotivoInactivacionMinChars);
+    int MotivoInactivacionMinChars,
+    bool NotificarRechazoWhatsApp = false);
 
 /// <summary>
 /// Acceso a la <see cref="RevisionPolicy"/> singleton por tenant. Cuando no hay

@@ -212,21 +212,15 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
     private async Task<IReadOnlyList<string>> ResolveAllowedToolsAsync(Guid agentId, CancellationToken ct)
     {
-        // Ola 6 RC6d — leer primero de la columna dedicada `AiAgent.AllowedToolsCsv`.
-        // Si esta null/vacia, fallback al `AiAgentPrompt` legacy (compat retro).
-        // Si tampoco existe, se usan las 9 tools por defecto.
+        // Ola 8 RC8a — solo columna dedicada `AiAgent.AllowedToolsCsv`.
+        // El fallback legacy a `AiAgentPrompt` name=revision.allowed_tools fue eliminado.
+        // La migracion `MigrateAllowedToolsSeedsToColumn` (Ola 8) trasladó los datos
+        // seedeados por Ola 5c a la columna dedicada. Si `AllowedToolsCsv` esta null
+        // o vacio, se usan las 9 tools por defecto.
         var csv = await _db.AiAgents.AsNoTracking()
             .Where(a => a.Id == agentId)
             .Select(a => a.AllowedToolsCsv)
             .FirstOrDefaultAsync(ct);
-
-        if (string.IsNullOrWhiteSpace(csv))
-        {
-            csv = await _db.AiAgentPrompts.AsNoTracking()
-                .Where(p => p.AgentId == agentId && p.Name == AllowedToolsPromptName)
-                .Select(p => p.Body)
-                .FirstOrDefaultAsync(ct);
-        }
 
         if (string.IsNullOrWhiteSpace(csv)) { return RevisionMcpToolNames.Todas; }
 

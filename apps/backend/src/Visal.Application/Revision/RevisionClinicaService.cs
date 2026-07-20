@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
+using Visal.Domain.Enums;
 
 namespace Visal.Application.Revision;
 
@@ -17,12 +18,25 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
     private readonly IApplicationDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly TimeProvider _clock;
+    private readonly IAuditWriter? _audit;
 
     public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock)
     {
         _db = db;
         _tenant = tenant;
         _clock = clock;
+    }
+
+    /// <summary>
+    /// Overload con auditoria opcional (Ola 8 RC8a). El caller que quiera
+    /// que las acciones `ActorTipo=Sistema` queden trazadas en el `AuditLog`
+    /// general del tenant pasa un <see cref="IAuditWriter"/>. Los tests y
+    /// callers que no lo necesiten pueden seguir usando el ctor de 3 args.
+    /// </summary>
+    public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock, IAuditWriter audit)
+        : this(db, tenant, clock)
+    {
+        _audit = audit;
     }
 
     public async Task<RevisionClinicaDto> SolicitarAsync(SolicitarRevisionCmd cmd, CancellationToken ct = default)
@@ -210,6 +224,19 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
 
         revision.EstadoAgregado = RevisionEstadoAgregado.Aprobada;
         revision.UltimaAccionEn = now;
+
+        // Ola 8 RC8a — traza en el AuditLog general del tenant para que las adopciones
+        // automaticas aparezcan en el panel de auditoria SuperAdmin/Owner junto a las
+        // acciones humanas. Guid.Empty como actorUserId porque no hay usuario humano.
+        _audit?.Write(
+            actorUserId: Guid.Empty,
+            actionName: "revision.aprobado-sistema",
+            entityName: nameof(RevisionClinica),
+            entityId: revision.Id,
+            previousValue: null,
+            newValue: payload,
+            tenantId: tenantId,
+            actorType: AuditActorType.System);
 
         await _db.SaveChangesAsync(ct);
         return ToDto(revision);

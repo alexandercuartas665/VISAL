@@ -1,0 +1,103 @@
+@using Visal.Application.Tenancy
+@inject IAiUsageService UsageSvc
+@inject NavigationManager Nav
+
+@* Ola 8 RC8b - banner global que aparece cuando el cupo mensual de tokens IA
+    del tenant esta al 90% (amarillo) o al 100% (rojo). Solo se muestra a usuarios
+    autenticados con tenant; superadmins de plataforma no ven este banner porque
+    el consumo IA se factura por tenant. Un fallo silencioso (sin cupo, sin tenant,
+    error de query) no rompe la navegacion, simplemente no renderiza nada. *@
+
+<AuthorizeView>
+    <Authorized>
+        @if (_show && _quota is not null)
+        {
+            <div class="visal-ai-quota-banner @_toneClass" role="alert">
+                <span class="visal-ai-quota-banner__icon">@(_quota.Exceeded ? "🛑" : "⚠️")</span>
+                <span class="visal-ai-quota-banner__text">
+                    @if (_quota.Exceeded)
+                    {
+                        <text>Cupo mensual de tokens IA agotado (@_quota.UsedPct%). Los agentes no ejecutaran hasta que se libere el cupo o se aumente el plan.</text>
+                    }
+                    else
+                    {
+                        <text>Cupo mensual de tokens IA al @_quota.UsedPct% — quedan @Format(_quota.Remaining) tokens.</text>
+                    }
+                </span>
+                <button type="button" class="btn btn-link visal-ai-quota-banner__cta"
+                        @onclick="@(() => Nav.NavigateTo("/config/revision-policy"))">
+                    Ver detalle
+                </button>
+            </div>
+        }
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    private AiQuotaDto? _quota;
+    private bool _show;
+    private string _toneClass = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _quota = await UsageSvc.GetQuotaAsync();
+        }
+        catch
+        {
+            // No es catastrofico: sin tenant (edge de layout renderizado antes de scope),
+            // sin plan configurado, o error de red en Postgres — el banner simplemente
+            // no aparece.
+            _quota = null;
+            return;
+        }
+        if (_quota is null || !_quota.HasLimit) { return; }
+        if (_quota.UsedPct >= 100)
+        {
+            _show = true;
+            _toneClass = "visal-ai-quota-banner--danger";
+        }
+        else if (_quota.UsedPct >= 90)
+        {
+            _show = true;
+            _toneClass = "visal-ai-quota-banner--warning";
+        }
+    }
+
+    private static string Format(long n)
+    {
+        return n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+    }
+}
+
+<style>
+    .visal-ai-quota-banner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        border-bottom: 1px solid transparent;
+        font-size: 0.92rem;
+        font-weight: 500;
+    }
+    .visal-ai-quota-banner__icon { font-size: 1.1rem; line-height: 1; }
+    .visal-ai-quota-banner__text { flex: 1; }
+    .visal-ai-quota-banner__cta {
+        padding: 0 4px;
+        text-decoration: underline;
+        font-weight: 600;
+    }
+    .visal-ai-quota-banner--warning {
+        background: #fff8e1;
+        color: #8a6d3b;
+        border-bottom-color: #f0d47a;
+    }
+    .visal-ai-quota-banner--warning .visal-ai-quota-banner__cta { color: #8a6d3b; }
+    .visal-ai-quota-banner--danger {
+        background: #fdecea;
+        color: #a12622;
+        border-bottom-color: #f2b5b1;
+    }
+    .visal-ai-quota-banner--danger .visal-ai-quota-banner__cta { color: #a12622; }
+</style>

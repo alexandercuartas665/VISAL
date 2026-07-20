@@ -18,6 +18,7 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
     private readonly IApplicationDbContext _db;
     private readonly IRevisionClinicaService _revisiones;
     private readonly TimeProvider _clock;
+    private readonly IRevisionRechazoNotifier? _notifier;
 
     public RevisionKanbanService(
         IApplicationDbContext db,
@@ -27,6 +28,22 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         _db = db;
         _revisiones = revisiones;
         _clock = clock;
+    }
+
+    /// <summary>
+    /// Ola 8 RC8c — overload con notificador opcional. Los tests que no lo
+    /// necesiten pueden seguir usando el ctor de 3 args; el DI resuelve este
+    /// automaticamente porque <see cref="IRevisionRechazoNotifier"/> esta
+    /// registrado en la misma capa.
+    /// </summary>
+    public RevisionKanbanService(
+        IApplicationDbContext db,
+        IRevisionClinicaService revisiones,
+        TimeProvider clock,
+        IRevisionRechazoNotifier notifier)
+        : this(db, revisiones, clock)
+    {
+        _notifier = notifier;
     }
 
     public async Task<RevisionKanbanBoardDto> GetBoardAsync(RevisionKanbanFiltro? filtro = null, CancellationToken ct = default)
@@ -198,6 +215,13 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
                 }
                 await _revisiones.RechazarAsync(
                     new RechazarCmd(revision.Id, cmd.RevisorUsuarioId, cmd.Motivo!, cmd.Nota), ct);
+                // Ola 8 RC8c — notificacion WA best-effort al profesional autor.
+                // El notificador respeta el flag `NotificarRechazoWhatsApp` de la
+                // policy y nunca lanza — si el envio falla el rechazo queda igual.
+                if (_notifier is not null)
+                {
+                    await _notifier.NotificarAsync(revision.HistoriaClinicaId, cmd.Motivo!, cmd.RevisorUsuarioId, ct);
+                }
                 break;
 
             case RevisionKanbanColumna.Abiertas:

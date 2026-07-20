@@ -197,5 +197,10 @@ public interface INotaMedicaService
     Task<NotaDocumentoDto> AdjuntarDocumentoPacienteAsync(
         AdjuntarDocumentoPacienteRequest req, Guid actorUserId, CancellationToken ct = default);
 
+    /// <summary>Actualiza la categoria (tipologia) de un documento existente.
+    /// null o vacio borra la categoria. Task ADM3.</summary>
+    Task<bool> ActualizarCategoriaDocumentoAsync(
+        Guid documentoId, string? categoria, Guid actorUserId, CancellationToken ct = default);
+
     Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actorUserId, CancellationToken ct = default);
 }

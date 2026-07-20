@@ -380,6 +380,18 @@ public sealed class NotaMedicaService(
             entity.Anotaciones, entity.CreatedAt);
     }
 
+    public async Task<bool> ActualizarCategoriaDocumentoAsync(
+        Guid documentoId, string? categoria, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
+        if (e is null) { return false; }
+        var nueva = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();
+        if (e.Categoria == nueva) { return true; }
+        e.Categoria = nueva;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actor, CancellationToken ct = default)
     {
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);

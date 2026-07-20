@@ -12,6 +12,7 @@
 @inject IDiagnosticoService DiagSvc
 @inject INotaMedicaService NotaSvc
 @inject ITipologiaArchivoService TipSvc
+@inject IDocumentoNotaService DocNotaSvc
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 
@@ -444,6 +445,48 @@
                     {
                         <div class="ase-alert">Error al cargar documentos: @_docsError</div>
                     }
+
+                    @* Toolbar de filtros + toggle Lista/Galeria (task ADM4). *@
+                    @if (_id is not null && (_docs.Count > 0 || _docFiltroTip != "" || _docFiltroDesde is not null || _docFiltroHasta is not null))
+                    {
+                        <div class="pac-doc-toolbar">
+                            <div class="pac-doc-toolbar-fs">
+                                <div class="pac-doc-toolbar-f">
+                                    <label>Tipologia</label>
+                                    <select class="form-select form-select-sm" @bind="_docFiltroTip">
+                                        <option value="">(todas)</option>
+                                        @foreach (var t in _tipologiasArchivo)
+                                        {
+                                            <option value="@t.Nombre">@t.Nombre</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="pac-doc-toolbar-f">
+                                    <label>Desde</label>
+                                    <input type="date" class="form-control form-control-sm" @bind="_docFiltroDesde" />
+                                </div>
+                                <div class="pac-doc-toolbar-f">
+                                    <label>Hasta</label>
+                                    <input type="date" class="form-control form-control-sm" @bind="_docFiltroHasta" />
+                                </div>
+                                <div class="pac-doc-toolbar-f">
+                                    <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosDoc"
+                                            title="Quitar todos los filtros">Limpiar</button>
+                                </div>
+                            </div>
+                            <div class="pac-doc-toggle" role="group">
+                                <button class="pac-doc-toggle-btn @(_docVista == "lista" ? "active" : "")"
+                                        @onclick="@(() => _docVista = "lista")" title="Vista lista">
+                                    &#9776; Lista
+                                </button>
+                                <button class="pac-doc-toggle-btn @(_docVista == "galeria" ? "active" : "")"
+                                        @onclick="@(() => _docVista = "galeria")" title="Vista galeria">
+                                    &#9635; Galeria
+                                </button>
+                            </div>
+                        </div>
+                    }
+
                     @if (_docsBusy)
                     {
                         <div class="ase-empty"><em>Cargando documentos...</em></div>
@@ -454,64 +497,122 @@
                     }
                     else
                     {
-                        <div class="ase-table-wrap">
-                            <table class="table table-sm pac-docs-tbl">
-                                <thead>
-                                    <tr>
-                                        <th>Categoria</th>
-                                        <th>Nombre del archivo</th>
-                                        <th>Nota</th>
-                                        <th>Fecha nota</th>
-                                        <th>Subido</th>
-                                        <th>Tamano</th>
-                                        <th style="width:120px;">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var d in _docs)
-                                    {
+                        var docsFiltrados = FiltrarDocs(_docs);
+                        if (docsFiltrados.Count == 0)
+                        {
+                            <div class="ase-empty">Ningun documento coincide con los filtros. <button class="btn btn-link btn-sm p-0" @onclick="LimpiarFiltrosDoc">Limpiar filtros</button>.</div>
+                        }
+                        else if (_docVista == "galeria")
+                        {
+                            <div class="pac-doc-gallery">
+                                @foreach (var d in docsFiltrados)
+                                {
+                                    <div class="pac-doc-card" @onclick="() => AbrirVisorAsync(d)">
+                                        <div class="pac-doc-card-thumb">
+                                            @if (EsImagen(d.TipoMime, d.NombreOriginal))
+                                            {
+                                                <img src="@d.RutaArchivo" alt="@d.NombreOriginal" />
+                                            }
+                                            else
+                                            {
+                                                <span class="pac-doc-card-icon">@IconoArchivo(d.NombreOriginal)</span>
+                                            }
+                                        </div>
+                                        <div class="pac-doc-card-body">
+                                            @if (!string.IsNullOrWhiteSpace(d.Categoria))
+                                            {
+                                                <span class="pac-doc-cat">@d.Categoria</span>
+                                            }
+                                            <div class="pac-doc-card-name" title="@d.NombreOriginal">@d.NombreOriginal</div>
+                                            <div class="pac-doc-card-meta">@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm") &middot; @FormatTam(d.Tamano)</div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="ase-table-wrap">
+                                <table class="table table-sm pac-docs-tbl">
+                                    <thead>
                                         <tr>
-                                            <td>
-                                                @if (!string.IsNullOrWhiteSpace(d.Categoria))
-                                                {
-                                                    <span class="pac-doc-cat">@d.Categoria</span>
-                                                }
-                                                else { <span class="text-muted">-</span> }
-                                            </td>
-                                            <td title="@d.Anotaciones">@d.NombreOriginal</td>
-                                            <td>
-                                                @if (!string.IsNullOrWhiteSpace(d.CodigoNota))
-                                                {
-                                                    <span class="text-muted">@d.CodigoNota</span>
-                                                }
-                                                else if (d.NotaMedicaId is Guid nid)
-                                                {
-                                                    <span class="text-muted">@nid.ToString("N")[..8]</span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="badge bg-info">Firma libre</span>
-                                                }
-                                            </td>
-                                            <td>@(d.FechaNota?.ToString("dd/MM/yyyy") ?? "-")</td>
-                                            <td>@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
-                                            <td>@FormatTam(d.Tamano)</td>
-                                            <td>
-                                                <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190; Ver</a>
-                                                @* Solo permitimos eliminar los "libres" del paciente (subidos aca).
-                                                    Los que vienen de una nota o de una HC se eliminan desde el modulo donde nacieron. *@
-                                                @if (d.NotaMedicaId is null)
-                                                {
-                                                    <button class="btn btn-outline-danger btn-sm"
-                                                            @onclick="() => EliminarDocPacienteAsync(d.Id)"
-                                                            disabled="@_docUpBusy"
-                                                            title="Eliminar este archivo">&#128465;</button>
-                                                }</td>
+                                            <th>Categoria</th>
+                                            <th>Nombre del archivo</th>
+                                            <th>Nota</th>
+                                            <th>Fecha nota</th>
+                                            <th>Subido</th>
+                                            <th>Tamano</th>
+                                            <th style="width:160px;">Acciones</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var d in docsFiltrados)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    @if (_docEditandoTipId == d.Id)
+                                                    {
+                                                        <div style="display:flex;gap:4px;align-items:center;">
+                                                            <select class="form-select form-select-sm" style="min-width:140px;" @bind="_docEditandoTipValor">
+                                                                <option value="">(sin tipologia)</option>
+                                                                @foreach (var t in _tipologiasArchivo)
+                                                                {
+                                                                    <option value="@t.Nombre">@t.Nombre</option>
+                                                                }
+                                                            </select>
+                                                            <button class="btn btn-success btn-sm" title="Guardar" @onclick="() => GuardarTipInlineAsync(d.Id)">&#10004;</button>
+                                                            <button class="btn btn-outline-secondary btn-sm" title="Cancelar" @onclick="CancelarTipInline">&#10008;</button>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span style="display:inline-flex;align-items:center;gap:6px;">
+                                                            @if (!string.IsNullOrWhiteSpace(d.Categoria))
+                                                            {
+                                                                <span class="pac-doc-cat">@d.Categoria</span>
+                                                            }
+                                                            else { <span class="text-muted">-</span> }
+                                                            <button class="btn btn-link btn-sm p-0" title="Cambiar tipologia" @onclick="() => AbrirEditTipInline(d)">&#9998;</button>
+                                                        </span>
+                                                    }
+                                                </td>
+                                                <td title="@d.Anotaciones">
+                                                    <button class="btn btn-link p-0" style="text-align:left;" @onclick="() => AbrirVisorAsync(d)" title="Abrir visor">@d.NombreOriginal</button>
+                                                </td>
+                                                <td>
+                                                    @if (!string.IsNullOrWhiteSpace(d.CodigoNota))
+                                                    {
+                                                        <span class="text-muted">@d.CodigoNota</span>
+                                                    }
+                                                    else if (d.NotaMedicaId is Guid nid)
+                                                    {
+                                                        <span class="text-muted">@nid.ToString("N")[..8]</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-info">Directo</span>
+                                                    }
+                                                </td>
+                                                <td>@(d.FechaNota?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                                <td>@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
+                                                <td>@FormatTam(d.Tamano)</td>
+                                                <td>
+                                                    <button class="btn btn-outline-secondary btn-sm" title="Abrir en visor" @onclick="() => AbrirVisorAsync(d)">&#128065;</button>
+                                                    <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190;</a>
+                                                    @if (d.NotaMedicaId is null)
+                                                    {
+                                                        <button class="btn btn-outline-danger btn-sm"
+                                                                @onclick="() => EliminarDocPacienteAsync(d.Id)"
+                                                                disabled="@_docUpBusy"
+                                                                title="Eliminar este archivo">&#128465;</button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
                     }
                 }
 
@@ -589,6 +690,113 @@
     </div>
 }
 
+@* ===== Modal visor de documento con panel de notas (task ADM5) ===== *@
+@if (_visorDoc is not null)
+{
+    <div class="doc-visor-backdrop" @onclick="CerrarVisor"></div>
+    <div class="doc-visor">
+        <div class="doc-visor-head">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <span class="doc-visor-icon">@IconoArchivo(_visorDoc.NombreOriginal)</span>
+                <div style="min-width:0;">
+                    <div class="doc-visor-name" title="@_visorDoc.NombreOriginal">@_visorDoc.NombreOriginal</div>
+                    <div class="doc-visor-meta">
+                        @if (!string.IsNullOrWhiteSpace(_visorDoc.Categoria))
+                        {
+                            <span class="pac-doc-cat">@_visorDoc.Categoria</span>
+                        }
+                        <span>@_visorDoc.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
+                        <span>@FormatTam(_visorDoc.Tamano)</span>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;gap:6px;">
+                <a class="btn btn-outline-secondary btn-sm" href="@_visorDoc.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190; Descargar</a>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVisor">&times;</button>
+            </div>
+        </div>
+        <div class="doc-visor-body">
+            <div class="doc-visor-preview">
+                @if (EsImagen(_visorDoc.TipoMime, _visorDoc.NombreOriginal))
+                {
+                    <img src="@_visorDoc.RutaArchivo" alt="@_visorDoc.NombreOriginal" />
+                }
+                else if (EsPdf(_visorDoc.TipoMime, _visorDoc.NombreOriginal))
+                {
+                    <iframe src="@_visorDoc.RutaArchivo" title="@_visorDoc.NombreOriginal"></iframe>
+                }
+                else
+                {
+                    <div class="doc-visor-noprev">
+                        <span class="doc-visor-icon-big">@IconoArchivo(_visorDoc.NombreOriginal)</span>
+                        <div class="text-muted" style="margin-top:8px;">Sin vista previa embebida.</div>
+                        <a class="btn btn-primary btn-sm" href="@_visorDoc.RutaArchivo" target="_blank" style="margin-top:12px;">Abrir en pestaña nueva</a>
+                    </div>
+                }
+            </div>
+            <div class="doc-visor-notas">
+                <div class="doc-visor-notas-h">
+                    <span>Notas del documento</span>
+                    <label class="doc-visor-arch-toggle" title="Incluir notas archivadas">
+                        <input type="checkbox" @bind="_visorIncluirArch" @bind:after="RecargarNotasVisorAsync" /> Ver archivadas
+                    </label>
+                </div>
+                <div class="doc-visor-notas-nueva">
+                    <textarea class="form-control form-control-sm" rows="2"
+                              placeholder="Escribe una nota sobre este archivo..."
+                              @bind="_notaBorrador"></textarea>
+                    <button class="btn btn-primary btn-sm" @onclick="AgregarNotaAsync" disabled="@(_notaBusy || string.IsNullOrWhiteSpace(_notaBorrador))">
+                        @(_notaBusy ? "Guardando..." : "Agregar nota")
+                    </button>
+                </div>
+                @if (_notaError is not null)
+                {
+                    <div class="ase-alert" style="margin:6px 0;">@_notaError</div>
+                }
+                <div class="doc-visor-notas-lista">
+                    @if (_notasBusy)
+                    {
+                        <div class="text-muted" style="padding:8px;">Cargando notas...</div>
+                    }
+                    else if (_notasDoc.Count == 0)
+                    {
+                        <div class="text-muted" style="padding:8px;">Aun no hay notas para este documento.</div>
+                    }
+                    else
+                    {
+                        @foreach (var n in _notasDoc)
+                        {
+                            <div class="doc-visor-nota @(n.Archivada ? "arch" : "")">
+                                <div class="doc-visor-nota-head">
+                                    <span class="doc-visor-nota-autor">@(n.AutorEmail ?? n.AutorUserId.ToString("N")[..8])</span>
+                                    <span class="doc-visor-nota-fecha">@n.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
+                                    @if (n.Archivada)
+                                    {
+                                        <span class="doc-visor-nota-arch" title="Archivada por @(n.ArchivadaPorEmail ?? "-") el @(n.ArchivadaEn?.LocalDateTime.ToString("dd/MM/yyyy HH:mm") ?? "-")">
+                                            &#128193; Archivada
+                                        </span>
+                                    }
+                                </div>
+                                <div class="doc-visor-nota-txt">@n.Texto</div>
+                                <div class="doc-visor-nota-acts">
+                                    @if (n.Archivada)
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" @onclick="() => DesarchivarNotaAsync(n.Id)">Desarchivar</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" @onclick="() => ArchivarNotaAsync(n.Id)">Archivar</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
     .pac-tab:disabled { opacity: .5; cursor: not-allowed; }
@@ -596,6 +804,49 @@
     .pac-docs-tbl thead th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; background: #f1f5f9; }
     .pac-doc-cat { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }
     .pac-doc-upload { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:14px; }
+    /* Toolbar filtros + toggle Lista/Galeria (ADM4) */
+    .pac-doc-toolbar { display:flex; justify-content:space-between; align-items:end; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+    .pac-doc-toolbar-fs { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+    .pac-doc-toolbar-f label { font-size:11px; font-weight:600; color:#334155; margin-bottom:3px; display:block; }
+    .pac-doc-toggle { display:inline-flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; }
+    .pac-doc-toggle-btn { background:#fff; border:none; padding:6px 12px; font-size:12px; color:#475569; cursor:pointer; }
+    .pac-doc-toggle-btn.active { background:#1565c0; color:#fff; font-weight:600; }
+    /* Galeria */
+    .pac-doc-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px; }
+    .pac-doc-card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; cursor:pointer; transition:all .15s; }
+    .pac-doc-card:hover { border-color:#1565c0; box-shadow:0 4px 10px rgba(0,0,0,.06); transform:translateY(-1px); }
+    .pac-doc-card-thumb { height:120px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .pac-doc-card-thumb img { width:100%; height:100%; object-fit:cover; }
+    .pac-doc-card-icon { font-size:44px; }
+    .pac-doc-card-body { padding:8px 10px; }
+    .pac-doc-card-name { font-size:12px; font-weight:600; color:#0f172a; margin:4px 0 2px; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .pac-doc-card-meta { font-size:10.5px; color:#64748b; }
+    /* Modal visor + notas (ADM5) */
+    .doc-visor-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1050; }
+    .doc-visor { position:fixed; inset:5vh 5vw; background:#fff; border-radius:12px; z-index:1060; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+    .doc-visor-head { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid #e2e8f0; gap:12px; }
+    .doc-visor-icon { font-size:24px; }
+    .doc-visor-icon-big { font-size:72px; }
+    .doc-visor-name { font-weight:700; color:#0f172a; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .doc-visor-meta { display:flex; gap:8px; align-items:center; font-size:11.5px; color:#64748b; margin-top:2px; flex-wrap:wrap; }
+    .doc-visor-body { display:grid; grid-template-columns:1fr 380px; gap:0; flex:1; overflow:hidden; }
+    @@media (max-width:900px) { .doc-visor-body { grid-template-columns:1fr; grid-template-rows:1fr auto; } }
+    .doc-visor-preview { background:#0f172a; display:flex; align-items:center; justify-content:center; overflow:auto; }
+    .doc-visor-preview img { max-width:100%; max-height:100%; object-fit:contain; }
+    .doc-visor-preview iframe { width:100%; height:100%; border:none; background:#fff; }
+    .doc-visor-noprev { color:#e2e8f0; text-align:center; padding:24px; }
+    .doc-visor-notas { display:flex; flex-direction:column; border-left:1px solid #e2e8f0; overflow:hidden; }
+    .doc-visor-notas-h { padding:10px 14px; border-bottom:1px solid #e2e8f0; font-weight:700; color:#334155; font-size:13px; display:flex; justify-content:space-between; align-items:center; }
+    .doc-visor-arch-toggle { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; color:#64748b; margin:0; cursor:pointer; }
+    .doc-visor-notas-nueva { padding:10px 14px; border-bottom:1px solid #e2e8f0; display:flex; flex-direction:column; gap:6px; background:#f8fafc; }
+    .doc-visor-notas-lista { flex:1; overflow-y:auto; padding:8px 14px; }
+    .doc-visor-nota { padding:8px 10px; border-radius:6px; background:#fff; border:1px solid #e2e8f0; margin-bottom:8px; }
+    .doc-visor-nota.arch { opacity:.55; background:#f1f5f9; }
+    .doc-visor-nota-head { display:flex; gap:8px; align-items:center; font-size:11px; color:#64748b; margin-bottom:4px; flex-wrap:wrap; }
+    .doc-visor-nota-autor { font-weight:700; color:#0f172a; }
+    .doc-visor-nota-arch { font-size:10px; padding:1px 6px; border-radius:999px; background:#fef3c7; color:#92400e; }
+    .doc-visor-nota-txt { font-size:13px; color:#0f172a; white-space:pre-wrap; word-break:break-word; }
+    .doc-visor-nota-acts { display:flex; gap:8px; margin-top:4px; }
     .pac-doc-upload-row { display:grid; grid-template-columns:220px 1fr 260px; gap:12px; align-items:end; }
     .pac-doc-upload-f label { font-size:11px; font-weight:600; color:#334155; margin-bottom:4px; display:block; }
     .pac-doc-upload-f-wide { min-width:0; }
@@ -840,6 +1091,188 @@
         }
         catch (Exception ex) { _docUpError = "No se pudo eliminar: " + ex.Message; }
         finally { _docUpBusy = false; }
+    }
+
+    // ---- ADM4: filtros + toggle Lista/Galeria + edit inline de tipologia ----
+    private string _docVista = "lista";           // "lista" | "galeria"
+    private string _docFiltroTip = "";
+    private DateTime? _docFiltroDesde;
+    private DateTime? _docFiltroHasta;
+    private Guid? _docEditandoTipId;
+    private string _docEditandoTipValor = "";
+
+    private List<DocumentoPacienteDto> FiltrarDocs(List<DocumentoPacienteDto> src)
+    {
+        IEnumerable<DocumentoPacienteDto> q = src;
+        if (!string.IsNullOrWhiteSpace(_docFiltroTip))
+        {
+            var t = _docFiltroTip.Trim();
+            q = q.Where(d => string.Equals(d.Categoria ?? "", t, StringComparison.OrdinalIgnoreCase));
+        }
+        if (_docFiltroDesde is DateTime d0)
+        {
+            var desde = new DateTimeOffset(DateTime.SpecifyKind(d0.Date, DateTimeKind.Utc));
+            q = q.Where(d => d.CreatedAt >= desde);
+        }
+        if (_docFiltroHasta is DateTime d1)
+        {
+            var hasta = new DateTimeOffset(DateTime.SpecifyKind(d1.Date.AddDays(1), DateTimeKind.Utc));
+            q = q.Where(d => d.CreatedAt < hasta);
+        }
+        return q.ToList();
+    }
+
+    private void LimpiarFiltrosDoc()
+    {
+        _docFiltroTip = "";
+        _docFiltroDesde = null;
+        _docFiltroHasta = null;
+    }
+
+    private void AbrirEditTipInline(DocumentoPacienteDto d)
+    {
+        _docEditandoTipId = d.Id;
+        _docEditandoTipValor = d.Categoria ?? "";
+    }
+
+    private void CancelarTipInline()
+    {
+        _docEditandoTipId = null;
+        _docEditandoTipValor = "";
+    }
+
+    private async Task GuardarTipInlineAsync(Guid docId)
+    {
+        try
+        {
+            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _docEditandoTipValor, Guid.Empty);
+            _docEditandoTipId = null;
+            _docEditandoTipValor = "";
+            await RecargarDocsPacienteAsync();
+        }
+        catch (Exception ex) { _docUpError = "No se pudo cambiar la tipologia: " + ex.Message; }
+    }
+
+    // ---- Helpers de tipo de archivo (visor + galeria) ----
+    private static bool EsImagen(string? mime, string nombre)
+    {
+        if (!string.IsNullOrEmpty(mime) && mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        var ext = Path.GetExtension(nombre ?? "").ToLowerInvariant();
+        return ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp";
+    }
+
+    private static bool EsPdf(string? mime, string nombre)
+    {
+        if (!string.IsNullOrEmpty(mime) && mime.Contains("pdf", StringComparison.OrdinalIgnoreCase)) { return true; }
+        return Path.GetExtension(nombre ?? "").Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string IconoArchivo(string nombre)
+    {
+        var ext = Path.GetExtension(nombre ?? "").ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "\U0001F4D5",
+            ".doc" or ".docx" => "\U0001F4D8",
+            ".xls" or ".xlsx" => "\U0001F4D7",
+            ".ppt" or ".pptx" => "\U0001F4D9",
+            ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp" => "\U0001F5BC",
+            ".zip" or ".rar" => "\U0001F5DC",
+            _ => "\U0001F4C4",
+        };
+    }
+
+    // ---- ADM5: modal visor + notas del documento ----
+    private DocumentoPacienteDto? _visorDoc;
+    private List<DocumentoNotaDto> _notasDoc = new();
+    private bool _notasBusy;
+    private bool _visorIncluirArch;
+    private string _notaBorrador = "";
+    private bool _notaBusy;
+    private string? _notaError;
+
+    private async Task AbrirVisorAsync(DocumentoPacienteDto d)
+    {
+        _visorDoc = d;
+        _notasDoc = new();
+        _notaBorrador = "";
+        _notaError = null;
+        _visorIncluirArch = false;
+        await RecargarNotasVisorAsync();
+    }
+
+    private void CerrarVisor()
+    {
+        _visorDoc = null;
+        _notasDoc = new();
+        _notaBorrador = "";
+        _notaError = null;
+    }
+
+    private async Task RecargarNotasVisorAsync()
+    {
+        if (_visorDoc is null) { return; }
+        _notasBusy = true;
+        try
+        {
+            _notasDoc = (await DocNotaSvc.ListarPorDocumentoAsync(_visorDoc.Id, _visorIncluirArch)).ToList();
+        }
+        catch (Exception ex) { _notaError = "No se pudieron cargar las notas: " + ex.Message; }
+        finally { _notasBusy = false; }
+    }
+
+    private async Task AgregarNotaAsync()
+    {
+        if (_visorDoc is null) { return; }
+        var txt = (_notaBorrador ?? "").Trim();
+        if (txt.Length == 0) { return; }
+        _notaBusy = true; _notaError = null;
+        try
+        {
+            // Resuelve el usuario autor del claim NameIdentifier de la cookie.
+            var actorId = await ResolverUsuarioActualAsync();
+            await DocNotaSvc.AgregarAsync(_visorDoc.Id, txt, actorId);
+            _notaBorrador = "";
+            await RecargarNotasVisorAsync();
+        }
+        catch (Exception ex) { _notaError = "No se pudo agregar la nota: " + ex.Message; }
+        finally { _notaBusy = false; }
+    }
+
+    private async Task ArchivarNotaAsync(Guid notaId)
+    {
+        _notaError = null;
+        try
+        {
+            var actorId = await ResolverUsuarioActualAsync();
+            await DocNotaSvc.ArchivarAsync(notaId, actorId);
+            await RecargarNotasVisorAsync();
+        }
+        catch (Exception ex) { _notaError = "No se pudo archivar: " + ex.Message; }
+    }
+
+    private async Task DesarchivarNotaAsync(Guid notaId)
+    {
+        _notaError = null;
+        try
+        {
+            var actorId = await ResolverUsuarioActualAsync();
+            await DocNotaSvc.DesarchivarAsync(notaId, actorId);
+            await RecargarNotasVisorAsync();
+        }
+        catch (Exception ex) { _notaError = "No se pudo desarchivar: " + ex.Message; }
+    }
+
+    private async Task<Guid> ResolverUsuarioActualAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var st = await AuthState;
+            var s = st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(s, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
     }
 
     private static string FormatTam(long bytes)

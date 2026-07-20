@@ -129,6 +129,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<RevisionClinicaEvento> RevisionClinicaEventos => Set<RevisionClinicaEvento>();
     public DbSet<RevisionPolicy> RevisionPolicies => Set<RevisionPolicy>();
     public DbSet<PreRevisionIaPending> PreRevisionIaPendings => Set<PreRevisionIaPending>();
+    public DbSet<DocumentoNota> DocumentoNotas => Set<DocumentoNota>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

@@ -1,0 +1,584 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@using Visal.Domain.Enums
+@inject ICuentaMedicaConfigService Svc
+@inject ITipologiaArchivoService TipSvc
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+
+@*
+   Panel "Cuenta medica" (paquete de soporte exigido por la aseguradora).
+   Fase 1: solo configuracion. El generador de PDF/ZIP es fase 2.
+
+   Estructura:
+     - Portada (switch + logo + textos + patron por defecto).
+     - Grid de items del informe (drag&drop de orden, edit inline via modal).
+     - Boton "Copiar de otra aseguradora" que clona portada+items tal cual.
+*@
+
+@if (AseguradoraId is null)
+{
+    <div class="ase-empty">Selecciona una aseguradora para configurar su cuenta medica.</div>
+}
+else
+{
+    @if (_msg is not null) { <div class="cm-info">@_msg</div> }
+    @if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+    @* ========= PORTADA + INDICE + PATRON DEFAULT ========= *@
+    <div class="ase-card">
+        <div class="ase-card-h" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Portada e indice del informe</span>
+            <button class="btn btn-outline-primary btn-sm" @onclick="AbrirCopiar" disabled="@_busy" title="Copiar la configuracion completa de otra aseguradora">
+                &#128203; Copiar de otra aseguradora
+            </button>
+        </div>
+        <div class="cm-portada">
+            <div class="cm-portada-col">
+                <div class="cm-switch">
+                    <input type="checkbox" class="form-check-input" id="cm-portada-sw" @bind="_portadaHabilitada" />
+                    <label for="cm-portada-sw">Incluir portada al inicio del informe</label>
+                </div>
+                <div class="cm-switch">
+                    <input type="checkbox" class="form-check-input" id="cm-indice-sw" @bind="_indiceHabilitado" />
+                    <label for="cm-indice-sw">Incluir indice / tabla de contenido</label>
+                </div>
+                <div class="cm-f">
+                    <label>Titulo</label>
+                    <input class="form-control form-control-sm" @bind="_portadaTitulo" placeholder="CUENTA MEDICA - EPS SANITAS" />
+                </div>
+                <div class="cm-f">
+                    <label>Subtitulo</label>
+                    <input class="form-control form-control-sm" @bind="_portadaSubtitulo" placeholder="Soporte de auditoria por paciente" />
+                </div>
+                <div class="cm-f">
+                    <label>Texto legal / footer</label>
+                    <textarea class="form-control form-control-sm" rows="3" @bind="_portadaTextoLegal"
+                              placeholder="Documento generado por Visal para efectos de auditoria..."></textarea>
+                </div>
+                <div class="cm-f">
+                    <label>Patron de nombre por defecto (fallback)</label>
+                    <input class="form-control form-control-sm mono" @bind="_patronDefault"
+                           placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
+                    <small class="text-muted">
+                        Tokens disponibles:
+                        <code>{sigla}</code> <code>{cedula}</code> <code>{nombre}</code>
+                        <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
+                        <code>{mes}</code> <code>{codigo_hc}</code> <code>{tipo_servicio}</code>
+                    </small>
+                </div>
+            </div>
+            <div class="cm-portada-col">
+                <div class="cm-f">
+                    <label>Logo de la aseguradora</label>
+                    @if (!string.IsNullOrEmpty(_portadaLogoUrl))
+                    {
+                        <div class="cm-logo-preview">
+                            <img src="@_portadaLogoUrl" alt="Logo" />
+                            <button class="btn btn-outline-danger btn-sm" @onclick="QuitarLogo" title="Quitar logo">&times;</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="cm-logo-empty">Sin logo</div>
+                    }
+                    <label class="btn btn-outline-primary btn-sm" style="margin-top:6px;">
+                        @(_subiendoLogo ? "Subiendo..." : "Subir logo")
+                        <InputFile OnChange="OnLogoSelected" accept="image/*" style="display:none" />
+                    </label>
+                </div>
+                <div class="cm-preview-hint">
+                    <strong>Vista previa</strong>
+                    <p class="text-muted small">La portada e indice se renderizan al generar el PDF (disponible en fase 2). Aca solo se capturan los datos.</p>
+                </div>
+            </div>
+        </div>
+        <div class="ase-actions">
+            <button class="btn btn-primary btn-sm" @onclick="GuardarPortadaAsync" disabled="@_busy">
+                Guardar portada / patron
+            </button>
+        </div>
+    </div>
+
+    @* ========= ITEMS DEL INFORME ========= *@
+    <div class="ase-card">
+        <div class="ase-card-h" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Items del informe (@_items.Count)</span>
+            <button class="btn btn-primary btn-sm" @onclick="AbrirNuevoItem" disabled="@_busy">+ Agregar item</button>
+        </div>
+        @if (_items.Count == 0)
+        {
+            <div class="ase-empty">
+                Aun no hay items. Cada item define un documento a incluir en el informe
+                (HC, firma, autorizacion, etc.), con su alias y patron de nombre.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle ase-table cm-items-table">
+                    <thead>
+                        <tr>
+                            <th style="width:60px;">Orden</th>
+                            <th>Seccion</th>
+                            <th>Origen</th>
+                            <th>Tipologia</th>
+                            <th>Alias</th>
+                            <th>Patron nombre</th>
+                            <th class="text-center" title="Obligatorio">Obl.</th>
+                            <th class="text-center" title="Solo el mas reciente">1x</th>
+                            <th style="width:130px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (it, idx) in _items.Select((v,i) => (v,i)))
+                        {
+                            <tr>
+                                <td class="cm-orden">
+                                    <button class="btn btn-link btn-sm cm-arrow" @onclick="() => MoverAsync(idx, idx - 1)" disabled="@(idx == 0 || _busy)" title="Subir">&#9650;</button>
+                                    <span>@(it.Orden + 1)</span>
+                                    <button class="btn btn-link btn-sm cm-arrow" @onclick="() => MoverAsync(idx, idx + 1)" disabled="@(idx == _items.Count - 1 || _busy)" title="Bajar">&#9660;</button>
+                                </td>
+                                <td>@(it.Seccion ?? "-")</td>
+                                <td><span class="cm-origen-badge">@LabelOrigen(it.Origen)</span></td>
+                                <td>@(it.TipologiaNombre ?? "-")</td>
+                                <td class="mono"><strong>@it.Alias</strong></td>
+                                <td class="mono small">@(it.PatronNombre ?? "(default)")</td>
+                                <td class="text-center">@(it.Obligatorio ? "SI" : "-")</td>
+                                <td class="text-center">@(it.SoloUltimo ? "SI" : "-")</td>
+                                <td class="ase-row-actions">
+                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirEditarItem(it)" title="Editar">&#9998;</button>
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarItemAsync(it)" title="Eliminar">&times;</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@* ========= MODAL AGREGAR/EDITAR ITEM ========= *@
+@if (_itemModalOpen && _itemEdit is not null)
+{
+    <div class="sn-modal-back" @onclick="CerrarItemModal">
+        <div class="sn-modal sn-modal-md" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Cuenta medica</div>
+                    <div class="sn-modal-title">@(_itemEdit.Id is null ? "Nuevo item" : "Editar item")</div>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarItemModal">&times;</button>
+            </div>
+            <div class="sn-modal-body">
+                <div class="cm-form">
+                    <div class="cm-f">
+                        <label>Origen *</label>
+                        <select class="form-select form-select-sm" @bind="_itemEdit.Origen">
+                            @foreach (var o in Enum.GetValues<OrigenInformeItem>())
+                            {
+                                <option value="@o">@LabelOrigen(o)</option>
+                            }
+                        </select>
+                    </div>
+                    @if (PideTipologia(_itemEdit.Origen))
+                    {
+                        <div class="cm-f">
+                            <label>Tipologia (opcional; deja vacio para "cualquiera")</label>
+                            <select class="form-select form-select-sm" @bind="_itemEdit.TipologiaArchivoId">
+                                <option value="">(cualquier tipologia)</option>
+                                @foreach (var t in _tipologias)
+                                {
+                                    <option value="@t.Id">@t.Nombre</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                    <div class="cm-f">
+                        <label>Alias / sigla * (max 20)</label>
+                        <input class="form-control form-control-sm mono" maxlength="20" @bind="_itemEdit.Alias" placeholder="HC, FIR, AUT, EVO..." />
+                    </div>
+                    <div class="cm-f">
+                        <label>Descripcion (aparece en el indice)</label>
+                        <input class="form-control form-control-sm" @bind="_itemEdit.Descripcion" placeholder="Historia clinica completa" />
+                    </div>
+                    <div class="cm-f">
+                        <label>Seccion (agrupador opcional)</label>
+                        <input class="form-control form-control-sm" @bind="_itemEdit.Seccion" placeholder="Historia / Documentos / Autorizaciones" />
+                    </div>
+                    <div class="cm-f">
+                        <label>Patron de nombre (opcional; usa el default si vacio)</label>
+                        <input class="form-control form-control-sm mono" @bind="_itemEdit.PatronNombre" placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
+                    </div>
+                    <div class="cm-flags">
+                        <label class="cm-flag">
+                            <input type="checkbox" class="form-check-input" @bind="_itemEdit.Obligatorio" />
+                            <span>Obligatorio (el generador reportara si falta)</span>
+                        </label>
+                        <label class="cm-flag">
+                            <input type="checkbox" class="form-check-input" @bind="_itemEdit.SoloUltimo" />
+                            <span>Solo el mas reciente (aplica a HC, notas, consentimientos, etc.)</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="sn-modal-f">
+                <button class="btn btn-secondary btn-sm" @onclick="CerrarItemModal">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="GuardarItemAsync" disabled="@_busy">Guardar item</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ========= MODAL COPIAR DE OTRA ASEGURADORA ========= *@
+@if (_copiarOpen)
+{
+    <div class="sn-modal-back" @onclick="CerrarCopiar">
+        <div class="sn-modal sn-modal-sm" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Cuenta medica</div>
+                    <div class="sn-modal-title">Copiar configuracion</div>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarCopiar">&times;</button>
+            </div>
+            <div class="sn-modal-body">
+                @if (_copiarCandidatas.Count == 0)
+                {
+                    <div class="ase-empty">
+                        No hay otras aseguradoras con configuracion. Primero define
+                        items en al menos una para poder copiar.
+                    </div>
+                }
+                else
+                {
+                    <p class="small text-muted">
+                        Se sobrescribiran la portada y todos los items actuales de esta aseguradora
+                        con los de la seleccionada. La operacion no afecta a la aseguradora origen.
+                    </p>
+                    <div class="cm-f">
+                        <label>Origen</label>
+                        <select class="form-select form-select-sm" @bind="_copiarDesdeId">
+                            <option value="">Selecciona...</option>
+                            @foreach (var a in _copiarCandidatas)
+                            {
+                                <option value="@a.AseguradoraId">@a.Nombre (@a.ItemsCount items)</option>
+                            }
+                        </select>
+                    </div>
+                }
+            </div>
+            <div class="sn-modal-f">
+                <button class="btn btn-secondary btn-sm" @onclick="CerrarCopiar">Cancelar</button>
+                @if (_copiarCandidatas.Count > 0)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="ConfirmarCopiarAsync" disabled="@(_copiarDesdeId is null || _copiarDesdeId == Guid.Empty || _busy)">
+                        Copiar
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .cm-info { padding:8px 12px; background:#eff6ff; border-left:4px solid #2563eb; border-radius:6px; margin-bottom:10px; color:#1e3a8a; font-size:13px; }
+    .cm-portada { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:12px 4px; }
+    @@media (max-width: 900px) { .cm-portada { grid-template-columns:1fr; } }
+    .cm-portada-col { display:flex; flex-direction:column; gap:10px; }
+    .cm-switch { display:flex; align-items:center; gap:8px; font-size:13px; color:#0f172a; }
+    .cm-switch input { margin:0; }
+    .cm-f { display:flex; flex-direction:column; gap:4px; }
+    .cm-f label { font-size:12px; font-weight:600; color:#334155; }
+    .cm-f code { background:#f1f5f9; padding:1px 4px; border-radius:3px; font-size:11px; margin-right:4px; }
+    .cm-logo-preview { display:flex; align-items:center; gap:8px; padding:8px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; }
+    .cm-logo-preview img { max-width:180px; max-height:80px; background:#fff; padding:2px; border-radius:4px; }
+    .cm-logo-empty { padding:12px; text-align:center; color:#94a3b8; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; font-style:italic; font-size:12px; }
+    .cm-preview-hint { padding:10px; background:#fef3c7; border-radius:6px; }
+    .cm-preview-hint strong { color:#92400e; }
+    .cm-items-table th { background:#f8fafc; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:#475569; }
+    .cm-items-table td { font-size:12.5px; vertical-align:middle; }
+    .cm-orden { display:flex; align-items:center; gap:2px; justify-content:center; }
+    .cm-arrow { padding:0 4px; color:#64748b; font-size:10px; }
+    .cm-arrow:hover:not(:disabled) { color:#2563eb; }
+    .cm-arrow:disabled { color:#e2e8f0; }
+    .cm-origen-badge { display:inline-block; padding:2px 8px; background:#eef2ff; color:#4338ca; border-radius:999px; font-weight:600; font-size:11px; }
+    .cm-form { display:flex; flex-direction:column; gap:10px; }
+    .cm-flags { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+    .cm-flag { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#0f172a; margin:0; }
+    .cm-flag input { margin:0; }
+    .mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; font-size:12px; }
+</style>
+
+@code {
+    [Parameter] public Guid? AseguradoraId { get; set; }
+
+    private CuentaMedicaConfigDto? _cfg;
+    private List<InformeItemDto> _items = new();
+    private List<TipologiaArchivoDto> _tipologias = new();
+
+    // Portada state (bindeado)
+    private bool _portadaHabilitada;
+    private string? _portadaLogoUrl;
+    private string? _portadaTitulo;
+    private string? _portadaSubtitulo;
+    private string? _portadaTextoLegal;
+    private bool _indiceHabilitado;
+    private string? _patronDefault;
+
+    private bool _busy;
+    private bool _subiendoLogo;
+    private string? _msg;
+    private string? _error;
+    private Guid? _ultimoAseId;
+
+    // Modal item
+    private bool _itemModalOpen;
+    private ItemEditModel? _itemEdit;
+
+    // Modal copiar
+    private bool _copiarOpen;
+    private List<AseguradoraConConfigDto> _copiarCandidatas = new();
+    private Guid? _copiarDesdeId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList(); }
+        catch { _tipologias = new(); }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AseguradoraId != _ultimoAseId)
+        {
+            _ultimoAseId = AseguradoraId;
+            await CargarAsync();
+        }
+    }
+
+    private async Task CargarAsync()
+    {
+        _msg = _error = null;
+        if (AseguradoraId is not Guid aid) { _cfg = null; _items = new(); return; }
+        _busy = true;
+        try
+        {
+            _cfg = await Svc.GetOrCreateAsync(aid);
+            _portadaHabilitada = _cfg.PortadaHabilitada;
+            _portadaLogoUrl = _cfg.PortadaLogoUrl;
+            _portadaTitulo = _cfg.PortadaTitulo;
+            _portadaSubtitulo = _cfg.PortadaSubtitulo;
+            _portadaTextoLegal = _cfg.PortadaTextoLegal;
+            _indiceHabilitado = _cfg.IndiceHabilitado;
+            _patronDefault = _cfg.PatronNombreDefault;
+            _items = (await Svc.ListarItemsAsync(aid)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task GuardarPortadaAsync()
+    {
+        if (AseguradoraId is not Guid aid) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            _cfg = await Svc.GuardarPortadaAsync(new GuardarPortadaRequest(
+                aid, _portadaHabilitada, _portadaLogoUrl, _portadaTitulo,
+                _portadaSubtitulo, _portadaTextoLegal, _indiceHabilitado, _patronDefault),
+                Guid.Empty);
+            _msg = "Portada guardada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnLogoSelected(InputFileChangeEventArgs e)
+    {
+        _subiendoLogo = true; _error = null;
+        try
+        {
+            var f = e.File;
+            var ext = Path.GetExtension(f.Name);
+            var nombreEnDisco = $"{Guid.NewGuid()}{ext}";
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "aseguradoras", "logos");
+            Directory.CreateDirectory(dir);
+            var rutaDisco = Path.Combine(dir, nombreEnDisco);
+            await using (var fs = File.Create(rutaDisco))
+            await using (var rs = f.OpenReadStream(5L * 1024 * 1024))
+            {
+                await rs.CopyToAsync(fs);
+            }
+            _portadaLogoUrl = $"/uploads/aseguradoras/logos/{nombreEnDisco}";
+            _msg = "Logo subido. Recuerda guardar la portada para persistirlo.";
+        }
+        catch (Exception ex) { _error = "No se pudo subir el logo: " + ex.Message; }
+        finally { _subiendoLogo = false; }
+    }
+
+    private void QuitarLogo()
+    {
+        _portadaLogoUrl = null;
+        _msg = "Logo quitado. Guarda la portada para confirmar.";
+    }
+
+    // ---- Items ----
+
+    private void AbrirNuevoItem()
+    {
+        _itemEdit = new ItemEditModel
+        {
+            Origen = OrigenInformeItem.HistoriaClinicaPdf,
+            Alias = "",
+            Obligatorio = true,
+            SoloUltimo = false,
+        };
+        _itemModalOpen = true;
+    }
+
+    private void AbrirEditarItem(InformeItemDto it)
+    {
+        _itemEdit = new ItemEditModel
+        {
+            Id = it.Id,
+            Origen = it.Origen,
+            TipologiaArchivoId = it.TipologiaArchivoId,
+            Alias = it.Alias,
+            Descripcion = it.Descripcion,
+            Seccion = it.Seccion,
+            PatronNombre = it.PatronNombre,
+            Obligatorio = it.Obligatorio,
+            SoloUltimo = it.SoloUltimo,
+        };
+        _itemModalOpen = true;
+    }
+
+    private void CerrarItemModal()
+    {
+        _itemModalOpen = false;
+        _itemEdit = null;
+    }
+
+    private async Task GuardarItemAsync()
+    {
+        if (_itemEdit is null || AseguradoraId is not Guid aid) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await Svc.GuardarItemAsync(new GuardarItemRequest(
+                _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Origen,
+                _itemEdit.TipologiaArchivoId, _itemEdit.Alias, _itemEdit.Descripcion,
+                _itemEdit.PatronNombre, _itemEdit.Obligatorio, _itemEdit.SoloUltimo),
+                Guid.Empty);
+            CerrarItemModal();
+            _items = (await Svc.ListarItemsAsync(aid)).ToList();
+            _msg = "Item guardado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarItemAsync(InformeItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar el item '{it.Alias}'?");
+        if (!ok) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await Svc.EliminarItemAsync(it.Id, Guid.Empty);
+            if (AseguradoraId is Guid aid) { _items = (await Svc.ListarItemsAsync(aid)).ToList(); }
+            _msg = "Item eliminado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task MoverAsync(int desde, int hacia)
+    {
+        if (hacia < 0 || hacia >= _items.Count || desde == hacia || AseguradoraId is not Guid aid) { return; }
+        var lista = _items.ToList();
+        var it = lista[desde];
+        lista.RemoveAt(desde);
+        lista.Insert(hacia, it);
+        _busy = true; _error = null;
+        try
+        {
+            await Svc.ReordenarItemsAsync(aid, lista.Select(x => x.Id).ToList(), Guid.Empty);
+            _items = (await Svc.ListarItemsAsync(aid)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ---- Copiar ----
+
+    private async Task AbrirCopiar()
+    {
+        if (AseguradoraId is not Guid aid) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            _copiarCandidatas = (await Svc.ListarAseguradorasConConfigAsync(aid)).ToList();
+            _copiarDesdeId = null;
+            _copiarOpen = true;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void CerrarCopiar() { _copiarOpen = false; _copiarDesdeId = null; }
+
+    private async Task ConfirmarCopiarAsync()
+    {
+        if (AseguradoraId is not Guid aid || _copiarDesdeId is not Guid src) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Esto sobrescribira la portada y TODOS los items actuales de esta aseguradora. Continuar?");
+        if (!ok) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await Svc.CopiarDeAsync(src, aid, Guid.Empty);
+            CerrarCopiar();
+            await CargarAsync();
+            _msg = "Configuracion copiada.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ---- helpers ----
+
+    private static bool PideTipologia(OrigenInformeItem o) => o
+        is OrigenInformeItem.DocumentoHc
+        or OrigenInformeItem.DocumentoPacienteLibre
+        or OrigenInformeItem.DocumentoNota;
+
+    private static string LabelOrigen(OrigenInformeItem o) => o switch
+    {
+        OrigenInformeItem.HistoriaClinicaPdf => "Historia clinica (PDF)",
+        OrigenInformeItem.DocumentoHc => "Documento de HC",
+        OrigenInformeItem.DocumentoPacienteLibre => "Documento libre del paciente",
+        OrigenInformeItem.DocumentoNota => "Adjunto de nota",
+        OrigenInformeItem.FirmaPaciente => "Firma del paciente",
+        OrigenInformeItem.AutorizacionAsignacion => "Autorizacion (asignacion)",
+        OrigenInformeItem.Consentimiento => "Consentimiento (HC)",
+        OrigenInformeItem.Evolucion => "Evolucion (HC)",
+        OrigenInformeItem.Escala => "Escala (HC)",
+        _ => o.ToString(),
+    };
+
+    // Model liviano para el form del modal (evita bindear directo al DTO record).
+    private sealed class ItemEditModel
+    {
+        public Guid? Id { get; set; }
+        public string? Seccion { get; set; }
+        public OrigenInformeItem Origen { get; set; }
+        public Guid? TipologiaArchivoId { get; set; }
+        public string Alias { get; set; } = "";
+        public string? Descripcion { get; set; }
+        public string? PatronNombre { get; set; }
+        public bool Obligatorio { get; set; }
+        public bool SoloUltimo { get; set; }
+    }
+}

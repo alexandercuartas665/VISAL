@@ -56,6 +56,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IFirmaRemotaService, Tenancy.FirmaRemotaService>();
         services.AddScoped<Tenancy.IFirmaResolverService, Tenancy.FirmaResolverService>();
         services.AddScoped<Tenancy.ITipologiaArchivoService, Tenancy.TipologiaArchivoService>();
+        services.AddScoped<Tenancy.ICuentaMedicaConfigService, Tenancy.CuentaMedicaConfigService>();
         services.AddScoped<Tenancy.IQuoteTemplateService, Tenancy.QuoteTemplateService>();
         services.AddScoped<Tenancy.ITemplateAssetService, Tenancy.TemplateAssetService>();
         services.AddScoped<Tenancy.IQuoteRenderService, Tenancy.QuoteRenderService>();

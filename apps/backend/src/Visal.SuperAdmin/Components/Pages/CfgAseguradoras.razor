@@ -112,6 +112,18 @@
 
             @if (_aseId is not null)
             {
+                @* ============ Tabs: Contratos / Cuenta medica ============ *@
+                <div class="ase-tabs">
+                    <button class="ase-tab @(_aseTab == "contratos" ? "sel" : "")" @onclick='() => _aseTab = "contratos"'>Contratos y servicios</button>
+                    <button class="ase-tab @(_aseTab == "cuentaMedica" ? "sel" : "")" @onclick='() => _aseTab = "cuentaMedica"'>Cuenta medica</button>
+                </div>
+
+                @if (_aseTab == "cuentaMedica")
+                {
+                    <Visal.SuperAdmin.Components.Forms.CuentaMedicaConfigPanel AseguradoraId="@_aseId" />
+                }
+                else
+                {
                 <!-- Contratos -->
                 <div class="ase-card">
                     <div class="ase-card-h">Contratos <button class="btn btn-outline-primary btn-sm ms-2" @onclick="AddContrato">+ Contrato</button></div>
@@ -218,6 +230,7 @@
                         </div>
                     </div>
                 }
+                } @* fin else (tab contratos) *@
             }
         }
     </div>
@@ -274,6 +287,7 @@
     private List<AseguradoraDto> _aseguradoras = new();
     private bool _showForm;
     private Guid? _aseId;
+    private string _aseTab = "contratos"; // "contratos" | "cuentaMedica"
     private string _aCodigo = "", _aTipo = "EPS", _aNombre = "";
     private string? _aMov, _aNit, _aRegimen, _aCodInt, _aDesc, _aCorreoFac;
 

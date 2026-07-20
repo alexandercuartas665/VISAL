@@ -38,6 +38,8 @@ public interface IApplicationDbContext
     DbSet<FormDefinitionSnapshot> FormDefinitionSnapshots { get; }
     DbSet<Aseguradora> Aseguradoras { get; }
     DbSet<ContratoAseguradora> ContratosAseguradora { get; }
+    DbSet<AseguradoraCuentaMedicaConfig> AseguradoraCuentaMedicaConfigs { get; }
+    DbSet<AseguradoraInformeItem> AseguradoraInformeItems { get; }
     DbSet<ServicioContrato> ServiciosContrato { get; }
     DbSet<Paquete> Paquetes { get; }
     DbSet<PaqueteServicio> PaqueteServicios { get; }

@@ -96,6 +96,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
+    public DbSet<AseguradoraCuentaMedicaConfig> AseguradoraCuentaMedicaConfigs => Set<AseguradoraCuentaMedicaConfig>();
+    public DbSet<AseguradoraInformeItem> AseguradoraInformeItems => Set<AseguradoraInformeItem>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
     public DbSet<Paquete> Paquetes => Set<Paquete>();
     public DbSet<PaqueteServicio> PaqueteServicios => Set<PaqueteServicio>();
@@ -973,6 +975,29 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.AseguradoraId });
             b.HasIndex(x => new { x.TenantId, x.CodigoContrato });
+        });
+
+        // Cuenta medica: singleton por aseguradora + N items ordenados.
+        modelBuilder.Entity<AseguradoraCuentaMedicaConfig>(b =>
+        {
+            b.ToTable("aseguradora_cuenta_medica_configs");
+            b.Property(x => x.PortadaLogoUrl).HasMaxLength(500);
+            b.Property(x => x.PortadaTitulo).HasMaxLength(200);
+            b.Property(x => x.PortadaSubtitulo).HasMaxLength(300);
+            b.Property(x => x.PortadaTextoLegal).HasMaxLength(2000);
+            b.Property(x => x.PatronNombreDefault).HasMaxLength(200);
+            b.HasIndex(x => new { x.TenantId, x.AseguradoraId }).IsUnique();
+        });
+
+        modelBuilder.Entity<AseguradoraInformeItem>(b =>
+        {
+            b.ToTable("aseguradora_informe_items");
+            b.Property(x => x.Alias).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Descripcion).HasMaxLength(300);
+            b.Property(x => x.Seccion).HasMaxLength(80);
+            b.Property(x => x.PatronNombre).HasMaxLength(200);
+            b.Property(x => x.Origen).HasConversion<int>();
+            b.HasIndex(x => new { x.TenantId, x.ConfigId, x.Orden });
         });
 
         modelBuilder.Entity<TipoProfesional>(b =>

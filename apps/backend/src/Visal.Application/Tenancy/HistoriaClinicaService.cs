@@ -12,7 +12,8 @@ public sealed class HistoriaClinicaService(
     IAuditWriter audit,
     IRevisionPolicyService revPolicy,
     IRevisionKanbanService kanban,
-    IPreRevisionIaQueue preRevisionQueue) : IHistoriaClinicaService
+    IPreRevisionIaQueue preRevisionQueue,
+    IPreRevisionIaPendingStore preRevisionStore) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -192,8 +193,15 @@ public sealed class HistoriaClinicaService(
                 {
                     try
                     {
-                        await preRevisionQueue.EnqueueAsync(
-                            new PreRevisionIaJob(e.TenantId, rev.Id, actor), ct);
+                        // Ola 9 RC9c — persistimos primero en la staging table.
+                        // Si el proceso muere entre INSERT y el WriteAsync del
+                        // channel, el startup del worker relee la tabla y
+                        // reencola. Si el proceso muere despues del Write pero
+                        // antes de que el worker consuma, tambien: la fila
+                        // sigue viva hasta que el worker haga Delete al terminar.
+                        var job = new PreRevisionIaJob(e.TenantId, rev.Id, actor);
+                        var pendingId = await preRevisionStore.InsertAsync(job, ct);
+                        await preRevisionQueue.EnqueueAsync(job with { PendingId = pendingId }, ct);
                     }
                     catch (Exception qEx)
                     {

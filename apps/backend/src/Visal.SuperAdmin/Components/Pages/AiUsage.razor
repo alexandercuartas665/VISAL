@@ -88,6 +88,9 @@
                     <div class="aiu-filters-actions">
                         <button class="btn btn-primary btn-sm" @onclick="RecargarAsync">Aplicar</button>
                         <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarAsync">Limpiar</button>
+                        <a class="btn btn-outline-primary btn-sm" href="@BuildExportUrl()" target="_blank" rel="noopener">
+                            Descargar CSV
+                        </a>
                     </div>
                 </div>
             </div>
@@ -283,5 +286,33 @@
     private static string FormatNum(long n)
     {
         return n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private string BuildExportUrl()
+    {
+        // Espeja los filtros del grid al querystring del endpoint. Uso ISO 8601
+        // para las fechas — el endpoint las lee como DateTimeOffset.
+        var qs = new List<string>();
+        if (Guid.TryParse(_filtroAgentId, out var aid)) { qs.Add($"agentId={aid}"); }
+        if (!string.IsNullOrWhiteSpace(_filtroSource))
+        {
+            qs.Add($"source={Uri.EscapeDataString(_filtroSource.Trim())}");
+        }
+        if (_filtroDesde is DateTime d)
+        {
+            var iso = new DateTimeOffset(DateTime.SpecifyKind(d.Date, DateTimeKind.Utc)).ToString("o");
+            qs.Add($"desde={Uri.EscapeDataString(iso)}");
+        }
+        if (_filtroHasta is DateTime h)
+        {
+            var iso = new DateTimeOffset(DateTime.SpecifyKind(h.Date.AddDays(1), DateTimeKind.Utc)).ToString("o");
+            qs.Add($"hasta={Uri.EscapeDataString(iso)}");
+        }
+        if (!string.IsNullOrEmpty(_filtroExito))
+        {
+            qs.Add($"exito={_filtroExito}");
+        }
+        var url = "/admin/ai-usage/export.csv";
+        return qs.Count == 0 ? url : url + "?" + string.Join('&', qs);
     }
 }

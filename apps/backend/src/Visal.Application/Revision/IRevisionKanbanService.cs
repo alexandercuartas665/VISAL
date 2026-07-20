@@ -145,11 +145,12 @@ public interface IRevisionKanbanService
         RevisionArchivoFiltro filtro, CancellationToken ct = default);
 
     /// <summary>
-    /// Ola 7 RC7b — exporta el tab Archivo filtrado como CSV UTF-8 con BOM.
-    /// Headers exactos en espanol, separador coma, valores con quote si contienen
-    /// coma o comillas. Encoding UTF-8 con BOM para que Excel abra tildes correctas.
+    /// Ola 9 RC9b — export streaming del tab Archivo. Devuelve las lineas CSV
+    /// una a una (header + N rows) para que el endpoint las escriba directo al
+    /// response body sin materializar todo en memoria. Sin cap de 500 rows —
+    /// el caller escribe el BOM UTF-8 antes de la primera linea.
     /// </summary>
-    Task<byte[]> ExportarArchivoCsvAsync(RevisionArchivoFiltro filtro, CancellationToken ct = default);
+    IAsyncEnumerable<string> ExportarArchivoCsvLineasAsync(RevisionArchivoFiltro filtro, CancellationToken ct = default);
 
     /// <summary>Helper del boton "Enviar a revision" en la HC — crea el ciclo si no existe.</summary>
     Task<RevisionClinicaDto> SolicitarSiFaltaAsync(Guid historiaClinicaId, Guid actorUsuarioId, CancellationToken ct = default);

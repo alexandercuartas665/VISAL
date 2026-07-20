@@ -44,6 +44,29 @@ public sealed class PreRevisionIaWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _log.LogInformation("PreRevisionIaWorker arrancado.");
+
+        // Ola 9 RC9c — al startup, reencolamos lo que quedo en la staging table
+        // (items enqueue-ados en la corrida anterior que murieron antes de que
+        // el worker los procesara). Un scope temporal para leer el store.
+        try
+        {
+            using var startupScope = _scopeFactory.CreateScope();
+            var store = startupScope.ServiceProvider.GetRequiredService<IPreRevisionIaPendingStore>();
+            var pending = await store.LoadAllAsync(stoppingToken);
+            if (pending.Count > 0)
+            {
+                _log.LogInformation("RC9c reencolando {N} pre-revisiones IA pending del restart anterior.", pending.Count);
+                foreach (var job in pending)
+                {
+                    await _queue.EnqueueAsync(job, stoppingToken);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogError(ex, "RC9c fallo cargando pending al startup — el worker sigue arrancando; los items en channel se procesan.");
+        }
+
         try
         {
             await foreach (var job in _queue.ReadAllAsync(stoppingToken))
@@ -75,6 +98,23 @@ public sealed class PreRevisionIaWorker : BackgroundService
             _log.LogWarning(ex,
                 "RC8e worker PreRevision IA fallo tenant={TenantId} rev={RevId} (ignorado).",
                 job.TenantId, job.RevisionClinicaId);
+        }
+        finally
+        {
+            // Ola 9 RC9c — borra la fila staging aunque el ejecutar haya fallado.
+            // El orquestador es idempotente pero no queremos reintentar
+            // infinitamente en cada restart un job que rompe deterministicamente.
+            try
+            {
+                var store = scope.ServiceProvider.GetRequiredService<IPreRevisionIaPendingStore>();
+                await store.DeleteAsync(job.PendingId, ct);
+            }
+            catch (Exception delEx)
+            {
+                _log.LogWarning(delEx,
+                    "RC9c fallo borrando pending tenant={TenantId} rev={RevId} pending={PendingId} (item quedara y se reencolara al proximo restart).",
+                    job.TenantId, job.RevisionClinicaId, job.PendingId);
+            }
         }
     }
 }

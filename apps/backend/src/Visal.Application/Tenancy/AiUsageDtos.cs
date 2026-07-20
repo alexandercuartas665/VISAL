@@ -21,6 +21,15 @@ public sealed record AiQuotaDto(long MonthlyLimitTokens, long MonthlyUsedTokens,
     public int UsedPct => HasLimit ? (int)Math.Min(100, Math.Round(100.0 * MonthlyUsedTokens / MonthlyLimitTokens)) : 0;
 }
 
+/// <summary>Filtros del export CSV del panel /admin/ai-usage (Ola 9 RC9a).
+/// Espeja los del grid. Todos opcionales; sin filtro se exporta todo el tenant.</summary>
+public sealed record AiUsageExportFiltro(
+    Guid? AgentId = null,
+    string? Source = null,
+    DateTimeOffset? Desde = null,
+    DateTimeOffset? Hasta = null,
+    bool? Success = null);
+
 /// <summary>
 /// Modulo de consumo de tokens (capa 3). Punto unico por el que pasa TODO uso de IA del tenant:
 /// registra proveedor, modelo, tokens y costo estimado. Provee indicadores globales y por agente.
@@ -35,6 +44,9 @@ public interface IAiUsageService
 
     /// <summary>Cupo mensual de tokens (segun el plan) y consumo del mes en curso.</summary>
     Task<AiQuotaDto> GetQuotaAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Export CSV del historial del tenant, aplicando los filtros del grid /admin/ai-usage. UTF-8 con BOM.</summary>
+    Task<byte[]> ExportarCsvAsync(AiUsageExportFiltro filtro, CancellationToken cancellationToken = default);
 
     /// <summary>Clave del limite de plan para tokens de IA mensuales.</summary>
     public const string MonthlyTokenLimitKey = "max_ai_tokens_monthly";

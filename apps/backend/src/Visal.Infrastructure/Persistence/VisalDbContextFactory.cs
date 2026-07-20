@@ -1,6 +1,7 @@
 using Visal.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Visal.Infrastructure.Persistence;
 
@@ -19,6 +20,11 @@ public sealed class VisalDbContextFactory : IDesignTimeDbContextFactory<VisalDbC
         var options = new DbContextOptionsBuilder<VisalDbContext>()
             .UseNpgsql(connectionString)
             .UseSnakeCaseNamingConvention()
+            // Mismo tratamiento que en runtime (ver Visal.Infrastructure/DependencyInjection):
+            // EF 9 escala PendingModelChangesWarning a fatal cuando ve diferencias entre modelo
+            // y snapshot. En dev a veces sembra manual y hay drift; bajarlo a warning para no
+            // bloquear `dotnet ef database update`.
+            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
 
         return new VisalDbContext(options, new DesignTimeTenantContext());

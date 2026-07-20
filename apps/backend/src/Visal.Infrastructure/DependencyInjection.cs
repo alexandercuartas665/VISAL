@@ -84,6 +84,9 @@ public static class DependencyInjection
         services.AddSingleton<Revision.PreRevisionIaQueue>();
         services.AddSingleton<Application.Revision.Ia.IPreRevisionIaQueue>(sp =>
             sp.GetRequiredService<Revision.PreRevisionIaQueue>());
+        // Ola 9 RC9c — staging table para no perder jobs si el proceso muere.
+        // Scoped porque usa IApplicationDbContext scoped.
+        services.AddScoped<Application.Revision.Ia.IPreRevisionIaPendingStore, Revision.PreRevisionIaPendingStore>();
         services.AddHostedService<Revision.PreRevisionIaWorker>();
 
         return services;

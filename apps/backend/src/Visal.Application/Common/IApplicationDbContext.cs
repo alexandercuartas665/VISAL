@@ -97,6 +97,7 @@ public interface IApplicationDbContext
     DbSet<RevisionClinica> RevisionesClinica { get; }
     DbSet<RevisionClinicaEvento> RevisionClinicaEventos { get; }
     DbSet<RevisionPolicy> RevisionPolicies { get; }
+    DbSet<PreRevisionIaPending> PreRevisionIaPendings { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }
     DbSet<TenantSubscription> TenantSubscriptions { get; }

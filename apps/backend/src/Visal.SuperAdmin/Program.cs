@@ -1138,7 +1138,7 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
 // Ola 7 RC7b — Export CSV del tab Archivo de /ordenes. Los filtros van en
 // query string. El servicio aplica el global query filter por tenant, asi que
 // otro tenant recibe solo sus propias archivadas o vacio.
-app.MapGet("/revision/archivo/export.csv", async (
+app.MapGet("/revision/archivo/export.csv", (
     string? paciente,
     string? sabor,
     DateOnly? desde,
@@ -1157,8 +1157,48 @@ app.MapGet("/revision/archivo/export.csv", async (
         Sabor: saborFiltro,
         FechaDesde: desde,
         FechaHasta: hasta);
-    var bytes = await kanbanSvc.ExportarArchivoCsvAsync(filtro, ct);
     var nombre = $"revision-archivo-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+    // Ola 9 RC9b — streaming. Escribimos BOM UTF-8 primero para que Excel lea
+    // tildes; luego una linea por row desde el cursor pgSQL.
+    return Results.Stream(async output =>
+    {
+        var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+        await using var sw = new StreamWriter(output, utf8);
+        await foreach (var linea in kanbanSvc.ExportarArchivoCsvLineasAsync(filtro, ct))
+        {
+            await sw.WriteLineAsync(linea);
+        }
+        await sw.FlushAsync(ct);
+    }, "text/csv; charset=utf-8", nombre);
+}).RequireAuthorization();
+
+// Ola 9 RC9a — Export CSV del panel /admin/ai-usage. Los filtros espejan los
+// del grid. El global query filter por tenant sigue aplicando; el gate por
+// rol Owner/SuperAdmin se aplica en la UI (endpoint solo requiere autenticar
+// porque los datos ya estan tenant-scoped y no exponen otros tenants).
+app.MapGet("/admin/ai-usage/export.csv", async (
+    Guid? agentId,
+    string? source,
+    DateTimeOffset? desde,
+    DateTimeOffset? hasta,
+    string? exito,
+    Visal.Application.Tenancy.IAiUsageService usageSvc,
+    CancellationToken ct) =>
+{
+    bool? successFiltro = exito switch
+    {
+        "ok" => true,
+        "fail" => false,
+        _ => null,
+    };
+    var filtro = new Visal.Application.Tenancy.AiUsageExportFiltro(
+        AgentId: agentId,
+        Source: string.IsNullOrWhiteSpace(source) ? null : source.Trim(),
+        Desde: desde,
+        Hasta: hasta,
+        Success: successFiltro);
+    var bytes = await usageSvc.ExportarCsvAsync(filtro, ct);
+    var nombre = $"ai-usage-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
     return Results.File(bytes, "text/csv; charset=utf-8", nombre);
 }).RequireAuthorization();
 

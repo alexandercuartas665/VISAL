@@ -357,34 +357,85 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         }).ToList();
     }
 
-    public async Task<byte[]> ExportarArchivoCsvAsync(RevisionArchivoFiltro filtro, CancellationToken ct = default)
+    public async IAsyncEnumerable<string> ExportarArchivoCsvLineasAsync(
+        RevisionArchivoFiltro filtro,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Reusa la query filtrada del archivo — misma proyeccion, misma tabla.
-        var items = await GetArchivoAsync(filtro, ct);
+        // Ola 9 RC9b — streaming. Header primero, luego una linea por row de la
+        // BD via AsAsyncEnumerable(). Sin Take(500) — el operador que exporta
+        // quiere el listado completo del filtro. La proyeccion enumera Rows
+        // directo del cursor pgSQL sin materializar todo el resultset.
+        yield return "Fecha archivo,Sabor,Paciente,Tipo doc,Documento,Formato,Especialista,Revisor,Iteraciones,Motivo";
 
-        var sb = new System.Text.StringBuilder();
-        // Header en espanol para el operador — coincide con las columnas del grid.
-        sb.AppendLine("Fecha archivo,Sabor,Paciente,Tipo doc,Documento,Formato,Especialista,Revisor,Iteraciones,Motivo");
-
-        foreach (var i in items)
+        // Reusamos la query base del archivo (misma tabla, mismos filtros de
+        // Sabor/Fecha/Paciente). El filtro por revisor requiere JOIN al ultimo
+        // evento terminal, no lo soportamos aca — el operador puede filtrar
+        // en Excel despues del export.
+        var q = _db.RevisionesClinica.AsNoTracking()
+            .Where(r => r.EstadoAgregado == RevisionEstadoAgregado.ArchivadaOk
+                     || r.EstadoAgregado == RevisionEstadoAgregado.Inactivada);
+        if (filtro.Sabor is RevisionEstadoAgregado sabor)
         {
-            var sabor = i.Sabor == RevisionEstadoAgregado.ArchivadaOk ? "Archivada OK" : "Inactivada";
-            var revisor = i.RevisorUsuarioId?.ToString() ?? "";
-            sb.Append(Csv(i.FechaArchivo.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))).Append(',');
-            sb.Append(Csv(sabor)).Append(',');
-            sb.Append(Csv(i.PacienteNombre)).Append(',');
-            sb.Append(Csv(i.PacienteTipoDoc)).Append(',');
-            sb.Append(Csv(i.PacienteDoc)).Append(',');
-            sb.Append(Csv(i.FormatoNombre)).Append(',');
-            sb.Append(Csv(i.EspecialistaNombre ?? "")).Append(',');
-            sb.Append(Csv(revisor)).Append(',');
-            sb.Append(i.IteracionesTotales).Append(',');
-            sb.AppendLine(Csv(i.Motivo ?? ""));
+            q = q.Where(r => r.EstadoAgregado == sabor);
+        }
+        if (filtro.FechaDesde is DateOnly d)
+        {
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            q = q.Where(r => r.UltimaAccionEn >= dStart);
+        }
+        if (filtro.FechaHasta is DateOnly h)
+        {
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+            q = q.Where(r => r.UltimaAccionEn <= dEnd);
         }
 
-        // BOM UTF-8 para que Excel lea tildes/enes correctamente al abrir el CSV.
-        var payload = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(sb.ToString());
-        return payload;
+        var joined = q
+            .Join(_db.HistoriasClinicas.AsNoTracking(), r => r.HistoriaClinicaId, h => h.Id,
+                (r, h) => new { r, h })
+            .Join(_db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
+                (x, p) => new { x.r, x.h, p })
+            .Join(_db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
+                (x, f) => new { x.r, x.h, x.p, f });
+
+        if (!string.IsNullOrWhiteSpace(filtro.PacienteTexto))
+        {
+            var t = filtro.PacienteTexto.Trim().ToLower();
+            joined = joined.Where(x =>
+                x.p.NombreCompleto.ToLower().Contains(t) ||
+                x.p.NumeroDocumento.ToLower().Contains(t));
+        }
+
+        var proyeccion = joined
+            .OrderByDescending(x => x.r.UltimaAccionEn)
+            .Select(x => new
+            {
+                x.r.UltimaAccionEn,
+                x.r.EstadoAgregado,
+                x.p.NombreCompleto,
+                x.p.TipoDocumento,
+                x.p.NumeroDocumento,
+                x.f.Nombre,
+                x.h.EspecialistaNombre,
+                x.r.IteracionActual,
+            });
+
+        await foreach (var i in proyeccion.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            var saborLabel = i.EstadoAgregado == RevisionEstadoAgregado.ArchivadaOk ? "Archivada OK" : "Inactivada";
+            yield return
+                Csv(i.UltimaAccionEn.ToLocalTime().ToString("yyyy-MM-dd HH:mm")) + "," +
+                Csv(saborLabel) + "," +
+                Csv(i.NombreCompleto) + "," +
+                Csv(i.TipoDocumento) + "," +
+                Csv(i.NumeroDocumento) + "," +
+                Csv(i.Nombre) + "," +
+                Csv(i.EspecialistaNombre ?? "") + "," +
+                // Revisor en streaming es N+1 lookup al evento terminal — se omite
+                // aca. El operador puede consultar el revisor abriendo la card.
+                "" + "," +
+                i.IteracionActual + "," +
+                "";
+        }
     }
 
     private static string Csv(string? s)

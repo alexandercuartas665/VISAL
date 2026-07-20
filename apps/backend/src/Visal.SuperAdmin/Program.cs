@@ -1135,6 +1135,33 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();
 
+// Ola 7 RC7b — Export CSV del tab Archivo de /ordenes. Los filtros van en
+// query string. El servicio aplica el global query filter por tenant, asi que
+// otro tenant recibe solo sus propias archivadas o vacio.
+app.MapGet("/revision/archivo/export.csv", async (
+    string? paciente,
+    string? sabor,
+    DateOnly? desde,
+    DateOnly? hasta,
+    Visal.Application.Revision.IRevisionKanbanService kanbanSvc,
+    CancellationToken ct) =>
+{
+    Visal.Domain.Entities.RevisionEstadoAgregado? saborFiltro = sabor switch
+    {
+        "ArchivadaOk" => Visal.Domain.Entities.RevisionEstadoAgregado.ArchivadaOk,
+        "Inactivada" => Visal.Domain.Entities.RevisionEstadoAgregado.Inactivada,
+        _ => null,
+    };
+    var filtro = new Visal.Application.Revision.RevisionArchivoFiltro(
+        PacienteTexto: string.IsNullOrWhiteSpace(paciente) ? null : paciente.Trim(),
+        Sabor: saborFiltro,
+        FechaDesde: desde,
+        FechaHasta: hasta);
+    var bytes = await kanbanSvc.ExportarArchivoCsvAsync(filtro, ct);
+    var nombre = $"revision-archivo-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+    return Results.File(bytes, "text/csv; charset=utf-8", nombre);
+}).RequireAuthorization();
+
 try
 {
     app.Run();

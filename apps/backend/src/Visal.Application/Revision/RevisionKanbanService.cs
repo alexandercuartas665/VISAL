@@ -29,15 +29,37 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         _clock = clock;
     }
 
-    public async Task<RevisionKanbanBoardDto> GetBoardAsync(CancellationToken ct = default)
+    public async Task<RevisionKanbanBoardDto> GetBoardAsync(RevisionKanbanFiltro? filtro = null, CancellationToken ct = default)
     {
         // Trae todas las HCs no-inactivas + su revision (LEFT JOIN). Excluye HCs
         // clinicamente Inactivas y revisiones terminales (ArchivadaOk / Inactivada).
         // El Kanban muestra: HCs abiertas (sin revision), HCs cerradas con revision
         // en estado no-terminal, y HCs cerradas sin revision (aparecen en Cerradas
         // como candidatas a "Enviar a revision"). Tope 500 igual que el grid Lista.
-        var raw = await _db.HistoriasClinicas.AsNoTracking()
-            .Where(h => h.Estado != HistoriaClinicaEstado.Inactiva)
+        var q = _db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Estado != HistoriaClinicaEstado.Inactiva);
+
+        // Ola 7 RC7d — filtros del toolbar del Kanban (todos opcionales, AND).
+        if (filtro is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(filtro.EspecialistaNombre))
+            {
+                var esp = filtro.EspecialistaNombre.Trim();
+                q = q.Where(h => h.EspecialistaNombre == esp);
+            }
+            if (filtro.FechaDesde is DateOnly d)
+            {
+                var desde = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+                q = q.Where(h => h.FechaApertura >= desde);
+            }
+            if (filtro.FechaHasta is DateOnly h2)
+            {
+                var hasta = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+                q = q.Where(h => h.FechaApertura <= hasta);
+            }
+        }
+
+        var raw = await q
             .GroupJoin(_db.RevisionesClinica.AsNoTracking(),
                 h => h.Id, r => r.HistoriaClinicaId,
                 (h, rs) => new { h, rs })
@@ -309,6 +331,44 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
                 eventoTerminal?.Motivo ?? eventoTerminal?.Nota,
                 x.r.IteracionActual);
         }).ToList();
+    }
+
+    public async Task<byte[]> ExportarArchivoCsvAsync(RevisionArchivoFiltro filtro, CancellationToken ct = default)
+    {
+        // Reusa la query filtrada del archivo — misma proyeccion, misma tabla.
+        var items = await GetArchivoAsync(filtro, ct);
+
+        var sb = new System.Text.StringBuilder();
+        // Header en espanol para el operador — coincide con las columnas del grid.
+        sb.AppendLine("Fecha archivo,Sabor,Paciente,Tipo doc,Documento,Formato,Especialista,Revisor,Iteraciones,Motivo");
+
+        foreach (var i in items)
+        {
+            var sabor = i.Sabor == RevisionEstadoAgregado.ArchivadaOk ? "Archivada OK" : "Inactivada";
+            var revisor = i.RevisorUsuarioId?.ToString() ?? "";
+            sb.Append(Csv(i.FechaArchivo.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))).Append(',');
+            sb.Append(Csv(sabor)).Append(',');
+            sb.Append(Csv(i.PacienteNombre)).Append(',');
+            sb.Append(Csv(i.PacienteTipoDoc)).Append(',');
+            sb.Append(Csv(i.PacienteDoc)).Append(',');
+            sb.Append(Csv(i.FormatoNombre)).Append(',');
+            sb.Append(Csv(i.EspecialistaNombre ?? "")).Append(',');
+            sb.Append(Csv(revisor)).Append(',');
+            sb.Append(i.IteracionesTotales).Append(',');
+            sb.AppendLine(Csv(i.Motivo ?? ""));
+        }
+
+        // BOM UTF-8 para que Excel lea tildes/enes correctamente al abrir el CSV.
+        var payload = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(sb.ToString());
+        return payload;
+    }
+
+    private static string Csv(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) { return ""; }
+        var needsQuote = s.Contains(',') || s.Contains('"') || s.Contains('\n') || s.Contains('\r');
+        if (!needsQuote) { return s; }
+        return "\"" + s.Replace("\"", "\"\"") + "\"";
     }
 
     public Task<RevisionClinicaDto> SolicitarSiFaltaAsync(

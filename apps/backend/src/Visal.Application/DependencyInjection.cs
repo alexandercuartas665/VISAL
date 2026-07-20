@@ -131,6 +131,8 @@ public static class DependencyInjection
         services.AddScoped<Revision.Ia.IRevisionMcpToolsService, Revision.Ia.RevisionMcpToolsService>();
         // Orquestador del agente REVISOR CLINICO IA (Ola 5).
         services.AddScoped<Revision.Ia.IPreRevisionIaService, Revision.Ia.PreRevisionIaService>();
+        // Metricas del dashboard Kanban de /ordenes (Ola 7 RC7a).
+        services.AddScoped<Revision.IRevisionDashboardService, Revision.RevisionDashboardService>();
         return services;
     }
 }

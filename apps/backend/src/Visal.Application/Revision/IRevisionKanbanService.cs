@@ -59,6 +59,19 @@ public sealed record RevisionKanbanBoardDto(
     IReadOnlyList<RevisionKanbanCardDto> Cards,
     RevisionKanbanKpisDto Kpis);
 
+/// <summary>
+/// Filtros del tab Kanban (Ola 7 RC7d). Todos opcionales — omitir un filtro
+/// significa "no filtrar por eso". Se aplican con AND. Multi-tenant sigue vivo
+/// via global filter, estos filtros se apilan encima.
+/// </summary>
+public sealed record RevisionKanbanFiltro(
+    /// <summary>Nombre exacto del especialista (denormalizado en la HC).</summary>
+    string? EspecialistaNombre = null,
+    /// <summary>Rango de fecha (por FechaApertura de la HC).</summary>
+    DateOnly? FechaDesde = null,
+    /// <summary>Rango de fecha (por FechaApertura de la HC).</summary>
+    DateOnly? FechaHasta = null);
+
 /// <summary>Item del tab Archivo — HCs con revision en `ArchivadaOk` o `Inactivada`.</summary>
 public sealed record RevisionArchivoItemDto(
     Guid HistoriaClinicaId,
@@ -118,8 +131,8 @@ public sealed record ArchivarKanbanCmd(
 /// </summary>
 public interface IRevisionKanbanService
 {
-    /// <summary>Snapshot completo del tablero para el tab Kanban. Excluye terminales.</summary>
-    Task<RevisionKanbanBoardDto> GetBoardAsync(CancellationToken ct = default);
+    /// <summary>Snapshot completo del tablero para el tab Kanban. Excluye terminales. Filtros opcionales (Ola 7 RC7d).</summary>
+    Task<RevisionKanbanBoardDto> GetBoardAsync(RevisionKanbanFiltro? filtro = null, CancellationToken ct = default);
 
     /// <summary>Ejecuta la transicion pedida por drag&amp;drop. Valida transicion + permisos + motivo.</summary>
     Task MoverCardAsync(MoverCardCmd cmd, bool tienePermisoRevisar, CancellationToken ct = default);
@@ -130,6 +143,13 @@ public interface IRevisionKanbanService
     /// <summary>Listado del tab Archivo con filtros (paciente, sabor, rango de fechas, revisor).</summary>
     Task<IReadOnlyList<RevisionArchivoItemDto>> GetArchivoAsync(
         RevisionArchivoFiltro filtro, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ola 7 RC7b — exporta el tab Archivo filtrado como CSV UTF-8 con BOM.
+    /// Headers exactos en espanol, separador coma, valores con quote si contienen
+    /// coma o comillas. Encoding UTF-8 con BOM para que Excel abra tildes correctas.
+    /// </summary>
+    Task<byte[]> ExportarArchivoCsvAsync(RevisionArchivoFiltro filtro, CancellationToken ct = default);
 
     /// <summary>Helper del boton "Enviar a revision" en la HC — crea el ciclo si no existe.</summary>
     Task<RevisionClinicaDto> SolicitarSiFaltaAsync(Guid historiaClinicaId, Guid actorUsuarioId, CancellationToken ct = default);

@@ -3,7 +3,9 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Microsoft.AspNetCore.Components.Authorization
 @using Visal.Application.Revision
+@using Visal.Application.Tenancy
 @inject IRevisionPolicyService Svc
+@inject IAiUsageService UsageSvc
 
 <PageTitle>Politica de Revision Clinica - Visal</PageTitle>
 
@@ -34,6 +36,50 @@ else if (_cargando && _policy is null)
 }
 else if (_policy is not null)
 {
+    @* Ola 7 RC7c — KPI de cupo IA del tenant. Alerta visual si >70% (amarillo) o >90% (rojo). *@
+    @if (_quota is not null && _quota.HasLimit)
+    {
+        var pctClase = _quota.UsedPct >= 90 ? "rp-cupo-rojo" : (_quota.UsedPct >= 70 ? "rp-cupo-amarillo" : "rp-cupo-verde");
+        <div class="ase-card">
+            <div class="ase-card-h">Cupo mensual de tokens IA</div>
+            <div class="ase-card-body">
+                <div class="rp-cupo @pctClase" style="display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;">
+                    <div style="font-size:32px;font-weight:700;line-height:1;">
+                        @_quota.UsedPct%
+                    </div>
+                    <div>
+                        <div style="font-weight:600;">
+                            @_quota.MonthlyUsedTokens.ToString("N0") / @_quota.MonthlyLimitTokens.ToString("N0") tokens
+                        </div>
+                        <div class="text-muted" style="font-size:13px;">
+                            Restantes: @_quota.Remaining.ToString("N0")
+                            · Modo: @(_quota.Hard ? "duro (bloquea al agotarse)" : "blando (solo alerta)")
+                            · Reset: primero de cada mes UTC
+                        </div>
+                        <div style="background:#e5e7eb;border-radius:4px;height:8px;margin-top:6px;overflow:hidden;">
+                            <div style="height:100%;width:@(_quota.UsedPct)%;background:@(_quota.UsedPct >= 90 ? "#dc2626" : _quota.UsedPct >= 70 ? "#f59e0b" : "#10b981");"></div>
+                        </div>
+                    </div>
+                    @if (_quota.Exceeded)
+                    {
+                        <div class="rp-cupo-badge" style="background:#dc2626;color:#fff;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">
+                            AGOTADO
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else if (_quota is not null)
+    {
+        <div class="ase-card">
+            <div class="ase-card-h">Cupo mensual de tokens IA</div>
+            <div class="ase-card-body">
+                <div class="text-muted">Este plan no tiene limite de tokens configurado.</div>
+            </div>
+        </div>
+    }
+
     <div class="ase-card">
         <div class="ase-card-h">Trigger automatico</div>
         <div class="ase-card-body">
@@ -165,6 +211,7 @@ else if (_policy is not null)
     }
 
     private PolicyModel? _policy;
+    private AiQuotaDto? _quota;
     private bool _cargando = true;
     private bool _guardando;
     private bool _puedeConfig;
@@ -178,6 +225,8 @@ else if (_policy is not null)
         if (_puedeConfig)
         {
             await CargarAsync();
+            try { _quota = await UsageSvc.GetQuotaAsync(); }
+            catch { /* Sin cupo (edge case en dev sin plan) — el widget se oculta. */ }
         }
         _cargando = false;
     }

@@ -8,6 +8,7 @@
 @inject IOrdenesClinicasService OcSvc
 @inject IRevisionKanbanService KanbanSvc
 @inject Visal.Application.Revision.Ia.IPreRevisionIaService PreIaSvc
+@inject IRevisionDashboardService DashboardSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthProvider
@@ -45,6 +46,8 @@
             @onclick='() => SeleccionarTab("kanban")'>Kanban revision</button>
     <button type="button" class="oc-tab @(_tabActivo == "archivo" ? "activo" : "")"
             @onclick='() => SeleccionarTab("archivo")'>Archivo</button>
+    <button type="button" class="oc-tab @(_tabActivo == "dashboard" ? "activo" : "")"
+            @onclick='() => SeleccionarTab("dashboard")'>Dashboard</button>
 </div>
 
 @if (_tabActivo == "kanban")
@@ -78,6 +81,50 @@
                         @(_cargandoKanban ? "Recargando..." : "🔄 Recargar")
                     </button>
                 </div>
+            </div>
+
+            @* Ola 7 RC7d — Toolbar de filtros del Kanban. AND entre filtros. *@
+            <div class="oc-kb-filtros" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:12px 0;border-bottom:1px solid #e5e7eb;margin-bottom:12px;">
+                <div style="min-width:200px;">
+                    <label style="font-size:12px;color:#666;display:block;">Especialista</label>
+                    <select class="form-select form-select-sm" @bind="_kbFiltroEspecialista">
+                        <option value="">(Todos)</option>
+                        @foreach (var esp in _especialistas)
+                        {
+                            <option value="@esp">@esp</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px;color:#666;display:block;">Fecha desde</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_kbFiltroDesde" />
+                </div>
+                <div>
+                    <label style="font-size:12px;color:#666;display:block;">Fecha hasta</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_kbFiltroHasta" />
+                </div>
+                <div style="display:flex;gap:6px;">
+                    <button class="btn btn-primary btn-sm" @onclick="AplicarFiltrosKanban" disabled="@_cargandoKanban">🔍 Aplicar</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosKanban" disabled="@_cargandoKanban">Limpiar</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_kbFiltroEspecialista) || _kbFiltroDesde is not null || _kbFiltroHasta is not null)
+                {
+                    <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                        <span style="font-size:12px;color:#666;">Filtros activos:</span>
+                        @if (!string.IsNullOrWhiteSpace(_kbFiltroEspecialista))
+                        {
+                            <span class="oc-kpi" style="background:#e0e7ff;color:#4338ca;">👤 @_kbFiltroEspecialista</span>
+                        }
+                        @if (_kbFiltroDesde is DateTime dd)
+                        {
+                            <span class="oc-kpi" style="background:#e0e7ff;color:#4338ca;">📅 desde @dd.ToString("yyyy-MM-dd")</span>
+                        }
+                        @if (_kbFiltroHasta is DateTime dh)
+                        {
+                            <span class="oc-kpi" style="background:#e0e7ff;color:#4338ca;">📅 hasta @dh.ToString("yyyy-MM-dd")</span>
+                        }
+                    </div>
+                }
             </div>
 
             @if (_kanbanError is not null)
@@ -191,6 +238,11 @@ else if (_tabActivo == "archivo")
                 <button class="btn btn-primary btn-sm" @onclick="RefrescarArchivo" disabled="@_cargandoArchivo">
                     @(_cargandoArchivo ? "Cargando..." : "🔍 Buscar")
                 </button>
+                @* Ola 7 RC7b — Export CSV del archivo con los mismos filtros actuales. *@
+                <button class="btn btn-outline-secondary btn-sm" @onclick="DescargarArchivoCsv"
+                        title="Descarga el listado actual del tab Archivo como CSV (UTF-8 con BOM).">
+                    📥 CSV
+                </button>
             </div>
         </div>
 
@@ -267,6 +319,103 @@ else if (_tabActivo == "archivo")
                         }
                     </tbody>
                 </table>
+            </div>
+        }
+    </div>
+}
+else if (_tabActivo == "dashboard")
+{
+    @* Ola 7 RC7a: Dashboard con KPIs Kanban (tiempo por columna, tasa rechazo, adopcion agente). *@
+    <div class="ase-card oc-dashboard">
+        @if (_dashboard is null)
+        {
+            <div class="ase-empty" style="padding:24px;">
+                @(_cargandoDashboard ? "Cargando metricas..." : "Sin datos.")
+            </div>
+        }
+        else
+        {
+            <div class="oc-dash-actions" style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="RefrescarDashboard" disabled="@_cargandoDashboard">
+                    @(_cargandoDashboard ? "Recargando..." : "🔄 Recargar")
+                </button>
+            </div>
+
+            @* Resumen — KPI cards principales *@
+            <div class="oc-kpis oc-dash-resumen">
+                <div class="oc-kpi"><span class="oc-kpi-n">@_dashboard.Resumen.TotalCiclos</span> Total ciclos</div>
+                <div class="oc-kpi oc-kpi-a"><span class="oc-kpi-n">@_dashboard.Resumen.CiclosActivos</span> Activos</div>
+                <div class="oc-kpi"><span class="oc-kpi-n">@_dashboard.Resumen.CiclosTerminales</span> Terminales</div>
+                <div class="oc-kpi oc-kpi-ap"><span class="oc-kpi-n">@_dashboard.Resumen.Aprobadas</span> Aprobadas</div>
+                <div class="oc-kpi oc-kpi-r"><span class="oc-kpi-n">@_dashboard.Resumen.Rechazadas</span> Rechazadas</div>
+                <div class="oc-kpi"><span class="oc-kpi-n">@_dashboard.Resumen.PorcentajeRechazoGlobal.ToString("0.0")%</span> Tasa rechazo global</div>
+            </div>
+
+            @* Grid de 2 columnas: adopcion agente + tiempo por columna Kanban *@
+            <div class="oc-dash-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+                <div class="oc-dash-card">
+                    <h3>🤖 Adopcion automatica del agente</h3>
+                    <div class="oc-dash-big" style="font-size:28px;font-weight:700;">
+                        @_dashboard.AdopcionAgente.PorcentajeAdopcion.ToString("0.0")%
+                    </div>
+                    <div class="oc-dash-sub" style="color:#666;font-size:13px;">
+                        @_dashboard.AdopcionAgente.AprobacionesAutomaticas de @_dashboard.AdopcionAgente.TotalAprobaciones aprobaciones fueron automaticas (agente con confianza >= umbral).
+                    </div>
+                </div>
+                <div class="oc-dash-card">
+                    <h3>⏱ Tiempo promedio en columna Kanban</h3>
+                    <table class="oc-dash-tabla" style="width:100%;font-size:13px;">
+                        <thead>
+                            <tr><th style="text-align:left;">Columna</th><th style="text-align:right;">Muestras</th><th style="text-align:right;">Promedio</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in _dashboard.TiemposMediosPorColumna)
+                            {
+                                <tr>
+                                    <td>@t.Columna</td>
+                                    <td style="text-align:right;">@t.Muestras</td>
+                                    <td style="text-align:right;">@(t.PromedioPermanencia is TimeSpan ts ? FormatearDuracion(ts) : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            @* Top 10 rechazos por profesional *@
+            <div class="oc-dash-card" style="margin-top:16px;">
+                <h3>🚨 Top rechazos por profesional</h3>
+                @if (_dashboard.TopRechazosPorProfesional.Count == 0)
+                {
+                    <div class="ase-empty" style="padding:16px;color:#666;">Aun no hay rechazos registrados.</div>
+                }
+                else
+                {
+                    <table class="oc-dash-tabla" style="width:100%;font-size:13px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;">#</th>
+                                <th style="text-align:left;">Especialista</th>
+                                <th style="text-align:right;">Total ciclos</th>
+                                <th style="text-align:right;">Rechazados</th>
+                                <th style="text-align:right;">% rechazo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{ var idx = 1; }
+                            @foreach (var r in _dashboard.TopRechazosPorProfesional)
+                            {
+                                <tr>
+                                    <td>@(idx++)</td>
+                                    <td>@r.EspecialistaNombre</td>
+                                    <td style="text-align:right;">@r.TotalCiclos</td>
+                                    <td style="text-align:right;">@r.Rechazados</td>
+                                    <td style="text-align:right;">@r.PorcentajeRechazo.ToString("0.0")%</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
             </div>
         }
     </div>
@@ -838,6 +987,15 @@ else
     private bool _puedeAprobarFinal;
     private Guid _actorId;
 
+    // ── Estado del tab Dashboard (Ola 7 RC7a) ────────────────────────────
+    private RevisionDashboardDto? _dashboard;
+    private bool _cargandoDashboard;
+
+    // ── Filtros del tab Kanban (Ola 7 RC7d) ──────────────────────────────
+    private string _kbFiltroEspecialista = "";
+    private DateTime? _kbFiltroDesde;
+    private DateTime? _kbFiltroHasta;
+
     // ── Estado del tab Archivo (RC2d) ────────────────────────────────────
     private List<RevisionArchivoItemDto> _archivo = new();
     private bool _cargandoArchivo;
@@ -998,7 +1156,7 @@ else
         await JS.InvokeVoidAsync("open", url, "_blank");
     }
 
-    /// <summary>Cambia entre los 3 tabs secundarios (Ola 2). El tab Lista es el default.</summary>
+    /// <summary>Cambia entre los tabs secundarios (Ola 2 + Ola 7). El tab Lista es el default.</summary>
     private async Task SeleccionarTab(string tab)
     {
         _tabActivo = tab;
@@ -1011,6 +1169,42 @@ else
         {
             await RefrescarArchivo();
         }
+        else if (tab == "dashboard" && _dashboard is null)
+        {
+            await RefrescarDashboard();
+        }
+    }
+
+    /// <summary>
+    /// Ola 7 RC7b — dispara la descarga del CSV del tab Archivo con los filtros
+    /// actuales. Construye la URL del endpoint minimal API y navega en una
+    /// nueva ventana para que el browser maneje el download.
+    /// </summary>
+    private async Task DescargarArchivoCsv()
+    {
+        var qs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_archPaciente)) { qs.Add("paciente=" + Uri.EscapeDataString(_archPaciente.Trim())); }
+        if (!string.IsNullOrWhiteSpace(_archSabor)) { qs.Add("sabor=" + Uri.EscapeDataString(_archSabor)); }
+        if (_archDesde is DateTime d1) { qs.Add("desde=" + d1.ToString("yyyy-MM-dd")); }
+        if (_archHasta is DateTime d2) { qs.Add("hasta=" + d2.ToString("yyyy-MM-dd")); }
+        var url = "/revision/archivo/export.csv" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    /// <summary>Ola 7 RC7a — carga las metricas del Dashboard de /ordenes.</summary>
+    private async Task RefrescarDashboard()
+    {
+        if (_cargandoDashboard) { return; }
+        _cargandoDashboard = true;
+        try
+        {
+            _dashboard = await DashboardSvc.GetAsync();
+        }
+        catch (Exception ex)
+        {
+            _kanbanError = "No se pudo cargar el dashboard: " + ex.Message;
+        }
+        finally { _cargandoDashboard = false; }
     }
 
     /// <summary>Carga el listado del tab Archivo con los filtros actuales.</summary>
@@ -1077,13 +1271,30 @@ else
         _kanbanError = null;
         try
         {
-            _board = await KanbanSvc.GetBoardAsync();
+            // Ola 7 RC7d — pasa filtros del toolbar al servicio.
+            var filtro = new RevisionKanbanFiltro(
+                EspecialistaNombre: string.IsNullOrWhiteSpace(_kbFiltroEspecialista) ? null : _kbFiltroEspecialista,
+                FechaDesde: _kbFiltroDesde is DateTime d1 ? DateOnly.FromDateTime(d1) : null,
+                FechaHasta: _kbFiltroHasta is DateTime d2 ? DateOnly.FromDateTime(d2) : null);
+            _board = await KanbanSvc.GetBoardAsync(filtro);
         }
         catch (Exception ex)
         {
             _kanbanError = "No se pudo cargar el tablero: " + ex.Message;
         }
         finally { _cargandoKanban = false; }
+    }
+
+    /// <summary>Ola 7 RC7d — recarga el Kanban aplicando los filtros del toolbar.</summary>
+    private Task AplicarFiltrosKanban() => RefrescarKanban();
+
+    /// <summary>Ola 7 RC7d — limpia todos los filtros y recarga.</summary>
+    private async Task LimpiarFiltrosKanban()
+    {
+        _kbFiltroEspecialista = "";
+        _kbFiltroDesde = null;
+        _kbFiltroHasta = null;
+        await RefrescarKanban();
     }
 
     private void OnDragStart(RevisionKanbanCardDto card)

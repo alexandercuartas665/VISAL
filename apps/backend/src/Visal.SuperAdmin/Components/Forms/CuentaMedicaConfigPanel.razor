@@ -10,10 +10,10 @@
    Panel "Cuenta medica" (paquete de soporte exigido por la aseguradora).
    Fase 1: solo configuracion. El generador de PDF/ZIP es fase 2.
 
-   Estructura:
-     - Portada (switch + logo + textos + patron por defecto).
-     - Grid de items del informe (drag&drop de orden, edit inline via modal).
-     - Boton "Copiar de otra aseguradora" que clona portada+items tal cual.
+   Layout:
+     - Header con 3 botones: Configurar portada, + Agregar item, Copiar de EPS.
+     - Grid de cards, una por item del informe (alias + origen + tipologia + patron).
+     - Modales: portada, item (crear/editar), copiar.
 *@
 
 @if (AseguradoraId is null)
@@ -25,137 +25,166 @@ else
     @if (_msg is not null) { <div class="cm-info">@_msg</div> }
     @if (_error is not null) { <div class="ase-alert">@_error</div> }
 
-    @* ========= PORTADA + INDICE + PATRON DEFAULT ========= *@
-    <div class="ase-card">
-        <div class="ase-card-h" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>Portada e indice del informe</span>
-            <button class="btn btn-outline-primary btn-sm" @onclick="AbrirCopiar" disabled="@_busy" title="Copiar la configuracion completa de otra aseguradora">
+    @* ========= HEADER ========= *@
+    <div class="cm-toolbar">
+        <div class="cm-toolbar-info">
+            <div class="cm-toolbar-title">Configuracion del informe</div>
+            <div class="cm-toolbar-sub">
+                @_items.Count item(s)
+                @if (_cfg is not null && _cfg.PortadaHabilitada) { <span class="cm-chip cm-chip-on">Portada ON</span> }
+                @if (_cfg is not null && _cfg.IndiceHabilitado) { <span class="cm-chip cm-chip-on">Indice ON</span> }
+                @if (!string.IsNullOrEmpty(_cfg?.PatronNombreDefault))
+                {
+                    <span class="cm-chip mono" title="Patron por defecto">@_cfg.PatronNombreDefault</span>
+                }
+            </div>
+        </div>
+        <div class="cm-toolbar-acts">
+            <button class="btn btn-outline-primary btn-sm" @onclick="AbrirPortadaModal" disabled="@_busy">
+                &#9881; Configurar portada / patron
+            </button>
+            <button class="btn btn-outline-primary btn-sm" @onclick="AbrirCopiar" disabled="@_busy">
                 &#128203; Copiar de otra aseguradora
             </button>
-        </div>
-        <div class="cm-portada">
-            <div class="cm-portada-col">
-                <div class="cm-switch">
-                    <input type="checkbox" class="form-check-input" id="cm-portada-sw" @bind="_portadaHabilitada" />
-                    <label for="cm-portada-sw">Incluir portada al inicio del informe</label>
-                </div>
-                <div class="cm-switch">
-                    <input type="checkbox" class="form-check-input" id="cm-indice-sw" @bind="_indiceHabilitado" />
-                    <label for="cm-indice-sw">Incluir indice / tabla de contenido</label>
-                </div>
-                <div class="cm-f">
-                    <label>Titulo</label>
-                    <input class="form-control form-control-sm" @bind="_portadaTitulo" placeholder="CUENTA MEDICA - EPS SANITAS" />
-                </div>
-                <div class="cm-f">
-                    <label>Subtitulo</label>
-                    <input class="form-control form-control-sm" @bind="_portadaSubtitulo" placeholder="Soporte de auditoria por paciente" />
-                </div>
-                <div class="cm-f">
-                    <label>Texto legal / footer</label>
-                    <textarea class="form-control form-control-sm" rows="3" @bind="_portadaTextoLegal"
-                              placeholder="Documento generado por Visal para efectos de auditoria..."></textarea>
-                </div>
-                <div class="cm-f">
-                    <label>Patron de nombre por defecto (fallback)</label>
-                    <input class="form-control form-control-sm mono" @bind="_patronDefault"
-                           placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
-                    <small class="text-muted">
-                        Tokens disponibles:
-                        <code>{sigla}</code> <code>{cedula}</code> <code>{nombre}</code>
-                        <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
-                        <code>{mes}</code> <code>{codigo_hc}</code> <code>{tipo_servicio}</code>
-                    </small>
-                </div>
-            </div>
-            <div class="cm-portada-col">
-                <div class="cm-f">
-                    <label>Logo de la aseguradora</label>
-                    @if (!string.IsNullOrEmpty(_portadaLogoUrl))
-                    {
-                        <div class="cm-logo-preview">
-                            <img src="@_portadaLogoUrl" alt="Logo" />
-                            <button class="btn btn-outline-danger btn-sm" @onclick="QuitarLogo" title="Quitar logo">&times;</button>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="cm-logo-empty">Sin logo</div>
-                    }
-                    <label class="btn btn-outline-primary btn-sm" style="margin-top:6px;">
-                        @(_subiendoLogo ? "Subiendo..." : "Subir logo")
-                        <InputFile OnChange="OnLogoSelected" accept="image/*" style="display:none" />
-                    </label>
-                </div>
-                <div class="cm-preview-hint">
-                    <strong>Vista previa</strong>
-                    <p class="text-muted small">La portada e indice se renderizan al generar el PDF (disponible en fase 2). Aca solo se capturan los datos.</p>
-                </div>
-            </div>
-        </div>
-        <div class="ase-actions">
-            <button class="btn btn-primary btn-sm" @onclick="GuardarPortadaAsync" disabled="@_busy">
-                Guardar portada / patron
+            <button class="btn btn-primary btn-sm" @onclick="AbrirNuevoItem" disabled="@_busy">
+                + Agregar item
             </button>
         </div>
     </div>
 
-    @* ========= ITEMS DEL INFORME ========= *@
-    <div class="ase-card">
-        <div class="ase-card-h" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>Items del informe (@_items.Count)</span>
-            <button class="btn btn-primary btn-sm" @onclick="AbrirNuevoItem" disabled="@_busy">+ Agregar item</button>
+    @* ========= GRID DE CARDS ========= *@
+    @if (_items.Count == 0)
+    {
+        <div class="ase-empty" style="margin-top:16px;">
+            Aun no hay items configurados. Cada item define un documento a incluir en el informe
+            (HC, firma, autorizacion, etc.), con su alias y patron de nombre.
         </div>
-        @if (_items.Count == 0)
-        {
-            <div class="ase-empty">
-                Aun no hay items. Cada item define un documento a incluir en el informe
-                (HC, firma, autorizacion, etc.), con su alias y patron de nombre.
-            </div>
-        }
-        else
-        {
-            <div class="table-responsive">
-                <table class="table table-sm align-middle ase-table cm-items-table">
-                    <thead>
-                        <tr>
-                            <th style="width:60px;">Orden</th>
-                            <th>Seccion</th>
-                            <th>Origen</th>
-                            <th>Tipologia</th>
-                            <th>Alias</th>
-                            <th>Patron nombre</th>
-                            <th class="text-center" title="Obligatorio">Obl.</th>
-                            <th class="text-center" title="Solo el mas reciente">1x</th>
-                            <th style="width:130px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var (it, idx) in _items.Select((v,i) => (v,i)))
+    }
+    else
+    {
+        <div class="cm-cards">
+            @foreach (var (it, idx) in _items.Select((v,i) => (v,i)))
+            {
+                <div class="cm-card @(it.Obligatorio ? "cm-card-obl" : "")">
+                    <div class="cm-card-order">
+                        <button class="cm-card-arrow" @onclick="() => MoverAsync(idx, idx - 1)" disabled="@(idx == 0 || _busy)" title="Subir">&#9650;</button>
+                        <span class="cm-card-num">@(it.Orden + 1)</span>
+                        <button class="cm-card-arrow" @onclick="() => MoverAsync(idx, idx + 1)" disabled="@(idx == _items.Count - 1 || _busy)" title="Bajar">&#9660;</button>
+                    </div>
+                    <div class="cm-card-body">
+                        <div class="cm-card-alias-row">
+                            <span class="cm-card-alias mono">@it.Alias</span>
+                            @if (it.Obligatorio) { <span class="cm-card-badge cm-card-badge-req" title="Obligatorio">OBL</span> }
+                            @if (it.SoloUltimo) { <span class="cm-card-badge cm-card-badge-last" title="Solo el mas reciente">1x</span> }
+                        </div>
+                        @if (!string.IsNullOrEmpty(it.Descripcion))
                         {
-                            <tr>
-                                <td class="cm-orden">
-                                    <button class="btn btn-link btn-sm cm-arrow" @onclick="() => MoverAsync(idx, idx - 1)" disabled="@(idx == 0 || _busy)" title="Subir">&#9650;</button>
-                                    <span>@(it.Orden + 1)</span>
-                                    <button class="btn btn-link btn-sm cm-arrow" @onclick="() => MoverAsync(idx, idx + 1)" disabled="@(idx == _items.Count - 1 || _busy)" title="Bajar">&#9660;</button>
-                                </td>
-                                <td>@(it.Seccion ?? "-")</td>
-                                <td><span class="cm-origen-badge">@LabelOrigen(it.Origen)</span></td>
-                                <td>@(it.TipologiaNombre ?? "-")</td>
-                                <td class="mono"><strong>@it.Alias</strong></td>
-                                <td class="mono small">@(it.PatronNombre ?? "(default)")</td>
-                                <td class="text-center">@(it.Obligatorio ? "SI" : "-")</td>
-                                <td class="text-center">@(it.SoloUltimo ? "SI" : "-")</td>
-                                <td class="ase-row-actions">
-                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirEditarItem(it)" title="Editar">&#9998;</button>
-                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarItemAsync(it)" title="Eliminar">&times;</button>
-                                </td>
-                            </tr>
+                            <div class="cm-card-desc" title="@it.Descripcion">@it.Descripcion</div>
                         }
-                    </tbody>
-                </table>
+                        <div class="cm-card-meta">
+                            <span class="cm-card-origen">@LabelOrigen(it.Origen)</span>
+                            @if (!string.IsNullOrEmpty(it.TipologiaNombre))
+                            {
+                                <span class="cm-card-tip">@it.TipologiaNombre</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(it.Seccion))
+                        {
+                            <div class="cm-card-sec"><span class="cm-card-sec-lbl">Seccion:</span> @it.Seccion</div>
+                        }
+                        <div class="cm-card-pat mono" title="Patron de nombre del archivo">
+                            &#128193; @(string.IsNullOrEmpty(it.PatronNombre) ? "(patron default)" : it.PatronNombre)
+                        </div>
+                    </div>
+                    <div class="cm-card-actions">
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirEditarItem(it)" title="Editar">&#9998; Editar</button>
+                        <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarItemAsync(it)" title="Eliminar">&times; Eliminar</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@* ========= MODAL PORTADA / PATRON ========= *@
+@if (_portadaOpen)
+{
+    <div class="sn-modal-back" @onclick="CerrarPortadaModal">
+        <div class="sn-modal sn-modal-lg" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Cuenta medica</div>
+                    <div class="sn-modal-title">Portada, indice y patron por defecto</div>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarPortadaModal">&times;</button>
             </div>
-        }
+            <div class="sn-modal-body">
+                <div class="cm-portada">
+                    <div class="cm-portada-col">
+                        <div class="cm-switch">
+                            <input type="checkbox" class="form-check-input" id="cm-portada-sw" @bind="_portadaHabilitada" />
+                            <label for="cm-portada-sw">Incluir portada al inicio del informe</label>
+                        </div>
+                        <div class="cm-switch">
+                            <input type="checkbox" class="form-check-input" id="cm-indice-sw" @bind="_indiceHabilitado" />
+                            <label for="cm-indice-sw">Incluir indice / tabla de contenido</label>
+                        </div>
+                        <div class="cm-f">
+                            <label>Titulo</label>
+                            <input class="form-control form-control-sm" @bind="_portadaTitulo" placeholder="CUENTA MEDICA - EPS SANITAS" />
+                        </div>
+                        <div class="cm-f">
+                            <label>Subtitulo</label>
+                            <input class="form-control form-control-sm" @bind="_portadaSubtitulo" placeholder="Soporte de auditoria por paciente" />
+                        </div>
+                        <div class="cm-f">
+                            <label>Texto legal / footer</label>
+                            <textarea class="form-control form-control-sm" rows="3" @bind="_portadaTextoLegal"
+                                      placeholder="Documento generado por Visal para efectos de auditoria..."></textarea>
+                        </div>
+                        <div class="cm-f">
+                            <label>Patron de nombre por defecto (fallback)</label>
+                            <input class="form-control form-control-sm mono" @bind="_patronDefault"
+                                   placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
+                            <small class="text-muted">
+                                Tokens disponibles:
+                                <code>{sigla}</code> <code>{cedula}</code> <code>{nombre}</code>
+                                <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
+                                <code>{mes}</code> <code>{codigo_hc}</code> <code>{tipo_servicio}</code>
+                            </small>
+                        </div>
+                    </div>
+                    <div class="cm-portada-col">
+                        <div class="cm-f">
+                            <label>Logo de la aseguradora</label>
+                            @if (!string.IsNullOrEmpty(_portadaLogoUrl))
+                            {
+                                <div class="cm-logo-preview">
+                                    <img src="@_portadaLogoUrl" alt="Logo" />
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="QuitarLogo" title="Quitar logo">&times;</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="cm-logo-empty">Sin logo</div>
+                            }
+                            <label class="btn btn-outline-primary btn-sm" style="margin-top:6px;">
+                                @(_subiendoLogo ? "Subiendo..." : "Subir logo")
+                                <InputFile OnChange="OnLogoSelected" accept="image/*" style="display:none" />
+                            </label>
+                        </div>
+                        <div class="cm-preview-hint">
+                            <strong>Vista previa</strong>
+                            <p class="text-muted small">La portada e indice se renderizan al generar el PDF (disponible en fase 2). Aca solo se capturan los datos.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sn-modal-f">
+                <button class="btn btn-secondary btn-sm" @onclick="CerrarPortadaModal">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="GuardarPortadaAsync" disabled="@_busy">Guardar cambios</button>
+            </div>
+        </div>
     </div>
 }
 
@@ -284,7 +313,75 @@ else
 
 <style>
     .cm-info { padding:8px 12px; background:#eff6ff; border-left:4px solid #2563eb; border-radius:6px; margin-bottom:10px; color:#1e3a8a; font-size:13px; }
-    .cm-portada { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:12px 4px; }
+
+    /* Toolbar */
+    .cm-toolbar {
+        display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+        padding:12px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;
+        margin-bottom:14px; flex-wrap:wrap;
+    }
+    .cm-toolbar-title { font-weight:700; color:#0f172a; font-size:14px; }
+    .cm-toolbar-sub { font-size:12px; color:#64748b; margin-top:4px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .cm-toolbar-acts { display:flex; gap:6px; flex-wrap:wrap; }
+    .cm-chip { padding:2px 8px; border-radius:999px; font-size:10.5px; font-weight:700; background:#e2e8f0; color:#475569; }
+    .cm-chip-on { background:#dcfce7; color:#166534; }
+
+    /* Grid de cards */
+    .cm-cards {
+        display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));
+        gap:12px; margin-top:4px;
+    }
+    .cm-card {
+        display:flex; gap:10px; padding:12px; background:#fff;
+        border:1px solid #e2e8f0; border-left:4px solid #cbd5e1; border-radius:8px;
+        transition:box-shadow .15s, transform .15s;
+    }
+    .cm-card:hover { box-shadow:0 4px 12px rgba(15,23,42,.08); }
+    .cm-card-obl { border-left-color:#2563eb; }
+
+    .cm-card-order { display:flex; flex-direction:column; align-items:center; gap:2px; padding-top:2px; }
+    .cm-card-arrow {
+        background:none; border:none; color:#94a3b8; cursor:pointer; padding:0 4px;
+        font-size:11px; line-height:1;
+    }
+    .cm-card-arrow:hover:not(:disabled) { color:#2563eb; }
+    .cm-card-arrow:disabled { color:#e2e8f0; cursor:not-allowed; }
+    .cm-card-num {
+        display:inline-block; min-width:22px; padding:1px 6px; text-align:center;
+        background:#f1f5f9; color:#475569; border-radius:6px; font-weight:700; font-size:11px;
+    }
+
+    .cm-card-body { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:4px; }
+    .cm-card-alias-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .cm-card-alias { font-size:16px; font-weight:800; color:#0f172a; letter-spacing:.02em; }
+    .cm-card-badge {
+        display:inline-block; padding:1px 6px; border-radius:4px; font-size:10px;
+        font-weight:700; letter-spacing:.04em;
+    }
+    .cm-card-badge-req { background:#dbeafe; color:#1e40af; }
+    .cm-card-badge-last { background:#fef3c7; color:#92400e; }
+    .cm-card-desc { font-size:12.5px; color:#334155; }
+    .cm-card-meta { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
+    .cm-card-origen {
+        display:inline-block; padding:2px 8px; background:#eef2ff; color:#4338ca;
+        border-radius:4px; font-weight:600; font-size:11px;
+    }
+    .cm-card-tip {
+        display:inline-block; padding:2px 8px; background:#f1f5f9; color:#475569;
+        border-radius:4px; font-weight:600; font-size:11px;
+    }
+    .cm-card-sec { font-size:11.5px; color:#64748b; margin-top:2px; }
+    .cm-card-sec-lbl { color:#94a3b8; font-weight:600; }
+    .cm-card-pat {
+        font-size:11px; color:#64748b; padding:3px 6px; background:#f8fafc;
+        border-radius:4px; word-break:break-all; margin-top:2px;
+    }
+
+    .cm-card-actions { display:flex; flex-direction:column; gap:4px; align-self:flex-start; }
+    .cm-card-actions .btn { padding:2px 8px; font-size:11px; white-space:nowrap; }
+
+    /* Modal portada */
+    .cm-portada { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:4px; }
     @@media (max-width: 900px) { .cm-portada { grid-template-columns:1fr; } }
     .cm-portada-col { display:flex; flex-direction:column; gap:10px; }
     .cm-switch { display:flex; align-items:center; gap:8px; font-size:13px; color:#0f172a; }
@@ -297,13 +394,8 @@ else
     .cm-logo-empty { padding:12px; text-align:center; color:#94a3b8; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; font-style:italic; font-size:12px; }
     .cm-preview-hint { padding:10px; background:#fef3c7; border-radius:6px; }
     .cm-preview-hint strong { color:#92400e; }
-    .cm-items-table th { background:#f8fafc; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:#475569; }
-    .cm-items-table td { font-size:12.5px; vertical-align:middle; }
-    .cm-orden { display:flex; align-items:center; gap:2px; justify-content:center; }
-    .cm-arrow { padding:0 4px; color:#64748b; font-size:10px; }
-    .cm-arrow:hover:not(:disabled) { color:#2563eb; }
-    .cm-arrow:disabled { color:#e2e8f0; }
-    .cm-origen-badge { display:inline-block; padding:2px 8px; background:#eef2ff; color:#4338ca; border-radius:999px; font-weight:600; font-size:11px; }
+
+    /* Modal item */
     .cm-form { display:flex; flex-direction:column; gap:10px; }
     .cm-flags { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
     .cm-flag { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#0f172a; margin:0; }
@@ -318,7 +410,7 @@ else
     private List<InformeItemDto> _items = new();
     private List<TipologiaArchivoDto> _tipologias = new();
 
-    // Portada state (bindeado)
+    // Portada state (bindeado en el modal)
     private bool _portadaHabilitada;
     private string? _portadaLogoUrl;
     private string? _portadaTitulo;
@@ -333,11 +425,10 @@ else
     private string? _error;
     private Guid? _ultimoAseId;
 
-    // Modal item
+    // Modales
+    private bool _portadaOpen;
     private bool _itemModalOpen;
     private ItemEditModel? _itemEdit;
-
-    // Modal copiar
     private bool _copiarOpen;
     private List<AseguradoraConConfigDto> _copiarCandidatas = new();
     private Guid? _copiarDesdeId;
@@ -365,18 +456,28 @@ else
         try
         {
             _cfg = await Svc.GetOrCreateAsync(aid);
-            _portadaHabilitada = _cfg.PortadaHabilitada;
-            _portadaLogoUrl = _cfg.PortadaLogoUrl;
-            _portadaTitulo = _cfg.PortadaTitulo;
-            _portadaSubtitulo = _cfg.PortadaSubtitulo;
-            _portadaTextoLegal = _cfg.PortadaTextoLegal;
-            _indiceHabilitado = _cfg.IndiceHabilitado;
-            _patronDefault = _cfg.PatronNombreDefault;
+            SyncPortadaFromCfg();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
     }
+
+    private void SyncPortadaFromCfg()
+    {
+        if (_cfg is null) { return; }
+        _portadaHabilitada = _cfg.PortadaHabilitada;
+        _portadaLogoUrl = _cfg.PortadaLogoUrl;
+        _portadaTitulo = _cfg.PortadaTitulo;
+        _portadaSubtitulo = _cfg.PortadaSubtitulo;
+        _portadaTextoLegal = _cfg.PortadaTextoLegal;
+        _indiceHabilitado = _cfg.IndiceHabilitado;
+        _patronDefault = _cfg.PatronNombreDefault;
+    }
+
+    // ---- Modal Portada ----
+    private void AbrirPortadaModal() { SyncPortadaFromCfg(); _portadaOpen = true; }
+    private void CerrarPortadaModal() { _portadaOpen = false; }
 
     private async Task GuardarPortadaAsync()
     {
@@ -389,6 +490,7 @@ else
                 _portadaSubtitulo, _portadaTextoLegal, _indiceHabilitado, _patronDefault),
                 Guid.Empty);
             _msg = "Portada guardada.";
+            _portadaOpen = false;
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }

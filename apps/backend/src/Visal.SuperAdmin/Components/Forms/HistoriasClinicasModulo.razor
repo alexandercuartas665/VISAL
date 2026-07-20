@@ -434,6 +434,7 @@
                             {
                                 <HcDocumentosExternos HistoriaClinicaId="@_historiaSel?.Id"
                                                        PacienteId="@PacienteActivo?.Id"
+                                                       HcAbierta="@(string.Equals(_historiaSel?.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))"
                                                        OnCountChanged="@(c => _docExtCount = c)" />
                             }
                             else if (_tabSel == "Revision")

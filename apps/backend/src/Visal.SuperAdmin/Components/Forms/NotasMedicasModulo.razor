@@ -3,6 +3,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Domain.Enums
 @inject INotaMedicaService NotaSvc
+@inject IHistoriaClinicaService HcSvc
 @inject IFirmaRemotaService FirmaSvc
 @inject IWhatsAppLineService LineasSvc
 @inject IPacienteService PacientesSvc
@@ -416,7 +417,28 @@ else if (_tabSel == "Documentos Externos")
                                     <div class="nm-doc-thumb-nm" title="@d.NombreOriginal">@d.NombreOriginal</div>
                                     <div class="nm-doc-thumb-meta">
                                         <small>@FormatBytes(d.Tamano)</small>
-                                        @if (!string.IsNullOrEmpty(d.Categoria)) { <span class="nm-doc-badge">@d.Categoria</span> }
+                                        @if (_editDocId == d.Id)
+                                        {
+                                            <span class="nm-doc-tip-edit">
+                                                <select class="form-select form-select-sm" @bind="_editTip" style="min-width:0;flex:1 1 auto;">
+                                                    <option value="">(sin tipologia)</option>
+                                                    @foreach (var t in _tipologias)
+                                                    {
+                                                        <option value="@t.Nombre">@t.Nombre</option>
+                                                    }
+                                                </select>
+                                                <button class="btn btn-primary btn-sm" @onclick="() => GuardarTipInlineAsync(d.Id)" title="Guardar">&#10003;</button>
+                                                <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarEditTipInline" title="Cancelar">&#10005;</button>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            @if (!string.IsNullOrEmpty(d.Categoria)) { <span class="nm-doc-badge">@d.Categoria</span> }
+                                            @if (_hcAbierta)
+                                            {
+                                                <button class="btn btn-link btn-sm nm-doc-tip-btn" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria)" title="Editar tipologia">&#9998;</button>
+                                            }
+                                        }
                                     </div>
                                     <div class="nm-doc-thumb-actions">
                                         <a class="btn btn-sm btn-outline-primary" href="@d.RutaArchivo" download="@d.NombreOriginal" title="Descargar">&#11015; Descargar</a>
@@ -690,6 +712,10 @@ else if (_tabSel == "Ver Historial")
     .nm-doc-thumb-meta { display:flex; gap:6px; align-items:center; font-size:11px; color:#64748b; flex-wrap:wrap; }
     .nm-doc-thumb-actions { display:flex; gap:6px; }
     .nm-doc-thumb-actions .btn { padding:2px 8px; font-size:11px; }
+    .nm-doc-tip-btn { padding:0 4px; color:#64748b; }
+    .nm-doc-tip-btn:hover { color:#2563eb; }
+    .nm-doc-tip-edit { display:inline-flex; gap:4px; align-items:center; flex:1 1 auto; min-width:0; }
+    .nm-doc-tip-edit .btn { padding:2px 8px; font-size:11px; }
 
     /* Preview modal */
     .nm-prev-bk { position:fixed; inset:0; background:rgba(15,23,42,.7); z-index:1100; }
@@ -842,6 +868,12 @@ else if (_tabSel == "Ver Historial")
     }
 
     private Guid? _ultimoHcId;
+    // Estado del edit inline de tipologia sobre un documento adjunto.
+    // Solo se muestra el boton lapiz cuando la HC esta Abierta — el backend
+    // ademas rechaza la mutacion si la HC de origen no lo esta.
+    private Guid? _editDocId;
+    private string? _editTip;
+    private bool _hcAbierta = true;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -858,7 +890,43 @@ else if (_tabSel == "Ver Historial")
                 await TipSvc.SeedDefaultsAsync();
                 _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList();
             }
+            // Estado de la HC para gate del edit-inline. Cualquier fallo aqui deja
+            // _hcAbierta en true (permisivo en UI), el backend cerrara la brecha.
+            if (HistoriaClinicaId is Guid hidState)
+            {
+                try
+                {
+                    var hc = await HcSvc.GetAsync(hidState);
+                    _hcAbierta = hc is null
+                        || string.Equals(hc.Estado, "Abierta", StringComparison.OrdinalIgnoreCase);
+                }
+                catch { _hcAbierta = true; }
+            }
         }
+    }
+
+    private void AbrirEditTipInline(Guid docId, string? actual)
+    {
+        _editDocId = docId;
+        _editTip = actual ?? "";
+    }
+
+    private void CancelarEditTipInline()
+    {
+        _editDocId = null;
+        _editTip = null;
+    }
+
+    private async Task GuardarTipInlineAsync(Guid docId)
+    {
+        try
+        {
+            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _editTip, Guid.Empty);
+            _editDocId = null;
+            _editTip = null;
+            await RecargarDocumentos();
+        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
     private async Task Refrescar()

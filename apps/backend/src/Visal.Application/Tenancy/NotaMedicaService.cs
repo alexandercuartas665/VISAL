@@ -385,6 +385,24 @@ public sealed class NotaMedicaService(
     {
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
+
+        // Gate ADM: si el documento pertenece a una HC (directa o via nota), esa HC
+        // debe estar Abierta. Documento libre del paciente (sin HC ni nota) se puede
+        // editar siempre porque no hay documento clinico firmado que proteger.
+        Guid? hcId = e.HistoriaClinicaId;
+        if (hcId is null && e.NotaMedicaId is Guid notaId)
+        {
+            hcId = await db.NotasMedicas
+                .AsNoTracking()
+                .Where(n => n.Id == notaId)
+                .Select(n => (Guid?)n.HistoriaClinicaId)
+                .FirstOrDefaultAsync(ct);
+        }
+        if (hcId is Guid hcIdVal)
+        {
+            await db.EnsureAbiertaAsync(hcIdVal, ct);
+        }
+
         var nueva = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();
         if (e.Categoria == nueva) { return true; }
         e.Categoria = nueva;

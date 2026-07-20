@@ -1,6 +1,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Visal.Application.Tenancy
 @inject INotaMedicaService NotaSvc
+@inject ITipologiaArchivoService TipSvc
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 
@@ -39,9 +40,19 @@ else
     @if (_error is not null) { <div class="ase-alert">@_error</div> }
 
     <div class="hc-dxe-cats">
-        <input type="text" class="form-control form-control-sm hc-dxe-cat-input"
-               placeholder="Categoria del proximo archivo (opcional, ej. Consentimiento firmado, Examen laboratorio, etc.)"
-               @bind="_categoria" @bind:event="oninput" />
+        <select class="form-select form-select-sm hc-dxe-cat-input" @bind="_categoria" title="Tipologia del proximo archivo">
+            <option value="">-- Tipologia (opcional) --</option>
+            @foreach (var t in _tipologias)
+            {
+                <option value="@t.Nombre">@t.Nombre</option>
+            }
+        </select>
+        @if (_tipologias.Count == 0)
+        {
+            <small class="text-muted" style="align-self:center;">
+                (Configura tipologias en <em>Configuracion del Sistema -&gt; Tipologia Archivos</em>)
+            </small>
+        }
         <input type="text" class="form-control form-control-sm hc-dxe-cat-input"
                placeholder="Notas del proximo archivo (opcional)"
                @bind="_anotaciones" @bind:event="oninput" />
@@ -96,22 +107,44 @@ else
     .hc-dxe-nombre { font-weight: 700; color: #0f172a; font-size: 13px; word-break: break-word; }
     .hc-dxe-meta { font-size: 11px; color: #64748b; }
     .hc-dxe-cat { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #eef2ff; color: #4338ca; text-transform: uppercase; letter-spacing: .04em; align-self: flex-start; }
+    .hc-dxe-cat-empty { background: #f1f5f9; color: #94a3b8; font-style: italic; text-transform: none; letter-spacing: 0; }
+    .hc-dxe-tip-row { display: flex; align-items: center; gap: 4px; }
+    .hc-dxe-tip-btn { padding: 0 4px; color: #64748b; }
+    .hc-dxe-tip-btn:hover { color: #2563eb; }
+    .hc-dxe-tip-edit { display: flex; gap: 4px; align-items: center; }
+    .hc-dxe-tip-edit select { flex: 1 1 auto; min-width: 0; }
     .hc-dxe-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 </style>
 
 @code {
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public Guid? PacienteId { get; set; }
+    /// <summary>Solo con HC Abierta se permite editar la tipologia inline. Si es false
+    /// el boton lapiz no aparece en las cards de "Archivos de esta HC" y el backend
+    /// tambien rechaza la mutacion como red de seguridad.</summary>
+    [Parameter] public bool HcAbierta { get; set; } = true;
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
 
     private List<NotaDocumentoDto> _docsHc = new();
     private List<DocumentoPacienteDto> _docsPaciente = new();
+    private List<TipologiaArchivoDto> _tipologias = new();
     private bool _subiendo;
     private string? _msg;
     private string? _error;
     private string? _categoria;
     private string? _anotaciones;
     private string _ultimoKey = "";
+
+    // Estado del edit inline de tipologia. _editDocId != null significa que la
+    // card correspondiente muestra el select en vez del badge estatico.
+    private Guid? _editDocId;
+    private string? _editTip;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList(); }
+        catch { _tipologias = new(); }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -182,6 +215,31 @@ else
         finally { _subiendo = false; }
     }
 
+    private void AbrirEditTipInline(Guid docId, string? actual)
+    {
+        _editDocId = docId;
+        _editTip = actual ?? "";
+    }
+
+    private void CancelarEditTipInline()
+    {
+        _editDocId = null;
+        _editTip = null;
+    }
+
+    private async Task GuardarTipInlineAsync(Guid docId)
+    {
+        try
+        {
+            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _editTip, Guid.Empty);
+            _msg = "Tipologia actualizada.";
+            _editDocId = null;
+            _editTip = null;
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
     private async Task EliminarAsync(Guid docId, string nombre)
     {
         var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar '{nombre}'? No se puede deshacer.");
@@ -213,13 +271,40 @@ else
             <div class="hc-dxe-meta">
                 @FormatoTamano(d.Tamano) &middot; @(d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))
             </div>
-            @if (!string.IsNullOrWhiteSpace(d.Categoria))
+            @if (_editDocId == d.Id)
             {
-                <span class="hc-dxe-cat">@d.Categoria</span>
+                <div class="hc-dxe-tip-edit">
+                    <select class="form-select form-select-sm" @bind="_editTip">
+                        <option value="">(sin tipologia)</option>
+                        @foreach (var t in _tipologias)
+                        {
+                            <option value="@t.Nombre">@t.Nombre</option>
+                        }
+                    </select>
+                    <button class="btn btn-primary btn-sm" @onclick="() => GuardarTipInlineAsync(d.Id)" title="Guardar">&#10003;</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarEditTipInline" title="Cancelar">&#10005;</button>
+                </div>
+            }
+            else
+            {
+                <div class="hc-dxe-tip-row">
+                    @if (!string.IsNullOrWhiteSpace(d.Categoria))
+                    {
+                        <span class="hc-dxe-cat">@d.Categoria</span>
+                    }
+                    else
+                    {
+                        <span class="hc-dxe-cat hc-dxe-cat-empty">(sin tipologia)</span>
+                    }
+                    @if (esHc && HcAbierta)
+                    {
+                        <button class="btn btn-link btn-sm hc-dxe-tip-btn" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria)" title="Editar tipologia">&#9998;</button>
+                    }
+                </div>
             }
             <div class="hc-dxe-acts">
                 <a class="btn btn-outline-primary btn-sm" href="@d.RutaArchivo" target="_blank" rel="noopener">Abrir</a>
-                @if (esHc)
+                @if (esHc && HcAbierta)
                 {
                     <button class="btn btn-link btn-sm text-danger" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)" title="Eliminar">&#128465;</button>
                 }

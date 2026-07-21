@@ -448,6 +448,16 @@ else
                 }
             </select>
         </div>
+        <div class="oc-f oc-f-wide">
+            <label>EPS</label>
+            <select class="form-select form-select-sm" @bind="_aseguradoraFiltro">
+                <option value="">(Todas)</option>
+                @foreach (var a in _aseguradoras)
+                {
+                    <option value="@a.Id">@a.Nombre</option>
+                }
+            </select>
+        </div>
         <div class="oc-f">
             <label>Estado</label>
             <select class="form-select form-select-sm" @bind="_estadoFiltro">
@@ -494,6 +504,7 @@ else
                         <th style="width:160px">Documento</th>
                         <th>Formato HC</th>
                         <th style="width:180px">Especialista</th>
+                        <th style="width:180px" title="EPS bajo la cual se ejecuto la atencion (contrato principal del paciente)">EPS</th>
                         <th class="text-center" style="width:110px">Estado</th>
                         <th class="text-center" style="width:130px">Fecha</th>
                         <th class="text-center" style="width:320px">Documentos</th>
@@ -520,6 +531,7 @@ else
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
                             <td>@r.FormatoNombre</td>
                             <td>@(r.EspecialistaNombre ?? "-")</td>
+                            <td>@(r.AseguradoraNombre ?? "-")</td>
                             <td class="text-center">
                                 @if (cerrada)
                                 {
@@ -1134,6 +1146,8 @@ else
     private string _especialista = "";
     private string _estadoFiltro = ""; // "", "Cerrada", "Abierta"
     private List<string> _especialistas = new();
+    private List<AseguradoraOpcionDto> _aseguradoras = new();
+    private string _aseguradoraFiltro = "";
     private List<OrdenClinicaItemDto> _rows = new();
     private bool _buscando;
 
@@ -1156,6 +1170,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _especialistas = (await OcSvc.ListarEspecialistasAsync()).ToList();
+        _aseguradoras = (await OcSvc.ListarAseguradorasAsync()).ToList();
         await ResolverPermisosAsync();
         await Buscar();
     }
@@ -1207,7 +1222,8 @@ else
                 Desde: _desde is DateTime d1 ? DateOnly.FromDateTime(d1) : (DateOnly?)null,
                 Hasta: _hasta is DateTime d2 ? DateOnly.FromDateTime(d2) : (DateOnly?)null,
                 Especialista: string.IsNullOrWhiteSpace(_especialista) ? null : _especialista,
-                SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase));
+                SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase),
+                AseguradoraId: Guid.TryParse(_aseguradoraFiltro, out var aseId) ? aseId : (Guid?)null);
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -1225,7 +1241,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _estadoFiltro = "";
+        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _estadoFiltro = "";
         await Buscar();
     }
 

@@ -36,7 +36,12 @@ public sealed record OrdenClinicaItemDto(
     /// <summary>Iteracion actual del ciclo. 1 al inicio; aumenta por cada reenvio tras rechazo.</summary>
     int? RevisionIteracion = null,
     /// <summary>Ultima nota o motivo del agente — resumen para el tooltip del chip pre-revision.</summary>
-    string? RevisionAgenteResumen = null);
+    string? RevisionAgenteResumen = null,
+    /// <summary>Aseguradora (EPS) del contrato principal del paciente bajo el cual se
+    /// ejecuto la atencion. Resuelta via Paciente.Contrato1Id -> Contrato.AseguradoraId.
+    /// Null cuando el paciente no tiene Contrato1 configurado o esta huerfano.</summary>
+    string? AseguradoraNombre = null,
+    Guid? AseguradoraId = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,
@@ -45,7 +50,11 @@ public sealed record OrdenesClinicasFiltro(
     string? Especialista = null,
     // Por defecto ahora traemos todas (abiertas + cerradas). El listado marca
     // el estado con un tag y la UI bloquea Consultar/Imprimir para las abiertas.
-    bool SoloCerradas = false);
+    bool SoloCerradas = false,
+    /// <summary>Filtra HCs cuya EPS (via Contrato1 del paciente) sea esta aseguradora.</summary>
+    Guid? AseguradoraId = null);
+
+public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 
 public interface IOrdenesClinicasService
 {
@@ -54,4 +63,9 @@ public interface IOrdenesClinicasService
 
     /// <summary>Lista de nombres distintos de especialistas para popular el dropdown.</summary>
     Task<IReadOnlyList<string>> ListarEspecialistasAsync(CancellationToken ct = default);
+
+    /// <summary>Lista de aseguradoras que aparecen realmente en /ordenes (via Contrato1
+    /// de los pacientes que tienen HCs). Ordenadas por nombre. Sirve para el dropdown
+    /// de filtro EPS.</summary>
+    Task<IReadOnlyList<AseguradoraOpcionDto>> ListarAseguradorasAsync(CancellationToken ct = default);
 }

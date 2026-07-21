@@ -82,9 +82,35 @@ public sealed class MessageTemplateService : IMessageTemplateService
             return false;
         }
         _db.MessageTemplates.Remove(entity);
+
+        // Marca al tenant como "ya intervine" — evita que el auto-seed del chat
+        // WhatsApp resucite los defaults al proximo abrir de un chat. Idempotente:
+        // no duplica la marca si ya existe.
+        if (_tenantContext.TenantId is Guid tenantId)
+        {
+            var yaMarcado = await _db.TenantConfigurations
+                .AsNoTracking()
+                .AnyAsync(c => c.ConfigKey == SeededFlagKey, cancellationToken);
+            if (!yaMarcado)
+            {
+                _db.TenantConfigurations.Add(new TenantConfiguration
+                {
+                    TenantId = tenantId,
+                    ConfigKey = SeededFlagKey,
+                    ConfigValue = DateTimeOffset.UtcNow.ToString("O")
+                });
+            }
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    /// <summary>Key en <see cref="TenantConfiguration"/> que marca que este tenant
+    /// ya recibio el seed una vez. Si esta seteada, los defaults NO se vuelven
+    /// a sembrar aunque el tenant borre todas sus plantillas — el borrado es
+    /// deliberado y debe respetarse.</summary>
+    private const string SeededFlagKey = "messagetemplates.seeded_at";
 
     public async Task<int> SeedDefaultsAsync(CancellationToken cancellationToken = default)
     {
@@ -92,30 +118,49 @@ public sealed class MessageTemplateService : IMessageTemplateService
         {
             return 0;
         }
-        var exists = await _db.MessageTemplates.AnyAsync(cancellationToken);
-        if (exists)
+
+        // Si YA sembramos alguna vez, no volver a hacerlo — respeta que el usuario
+        // haya eliminado plantillas a proposito.
+        var yaSembrado = await _db.TenantConfigurations
+            .AsNoTracking()
+            .AnyAsync(c => c.ConfigKey == SeededFlagKey, cancellationToken);
+        if (yaSembrado)
         {
             return 0;
         }
 
+        // Fallback para tenants anteriores al flag: si hay al menos una plantilla,
+        // consideramos que ya paso por el seed y creamos la marca sin volver a
+        // insertar. Asi convergemos sin duplicados.
+        var tieneAlguna = await _db.MessageTemplates.AnyAsync(cancellationToken);
         var created = 0;
-        foreach (var (category, items) in _defaults)
+        if (!tieneAlguna)
         {
-            var order = 0;
-            foreach (var body in items)
+            foreach (var (category, items) in _defaults)
             {
-                _db.MessageTemplates.Add(new MessageTemplate
+                var order = 0;
+                foreach (var body in items)
                 {
-                    TenantId = tenantId,
-                    Category = category,
-                    Body = body,
-                    MediaType = MessageMediaType.None,
-                    SortOrder = order++,
-                    IsActive = true
-                });
-                created++;
+                    _db.MessageTemplates.Add(new MessageTemplate
+                    {
+                        TenantId = tenantId,
+                        Category = category,
+                        Body = body,
+                        MediaType = MessageMediaType.None,
+                        SortOrder = order++,
+                        IsActive = true
+                    });
+                    created++;
+                }
             }
         }
+
+        _db.TenantConfigurations.Add(new TenantConfiguration
+        {
+            TenantId = tenantId,
+            ConfigKey = SeededFlagKey,
+            ConfigValue = DateTimeOffset.UtcNow.ToString("O")
+        });
         await _db.SaveChangesAsync(cancellationToken);
         return created;
     }

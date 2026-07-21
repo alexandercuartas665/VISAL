@@ -96,6 +96,7 @@ public interface IApplicationDbContext
     DbSet<RdaEvento> RdaEventos { get; }
     DbSet<FacturacionSnapshot> FacturacionSnapshots { get; }
     DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas { get; }
+    DbSet<FacturacionSnapshotColumnaConfig> FacturacionSnapshotColumnaConfigs { get; }
     DbSet<RevisionClinica> RevisionesClinica { get; }
     DbSet<RevisionClinicaEvento> RevisionClinicaEventos { get; }
     DbSet<RevisionPolicy> RevisionPolicies { get; }

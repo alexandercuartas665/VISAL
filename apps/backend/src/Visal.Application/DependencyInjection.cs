@@ -123,6 +123,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         // Facturacion — motor generico de snapshots + builders por tipo.
         services.AddScoped<Facturacion.IFacturacionSnapshotService, Facturacion.FacturacionSnapshotService>();
+        services.AddScoped<Facturacion.ISnapshotColumnaConfigService, Facturacion.SnapshotColumnaConfigService>();
         services.AddScoped<Facturacion.ISnapshotBuilder, Facturacion.Builders.SnapshotRelacionFacturasBuilder>();
         // Revision Clinica (Capa 08) — motor del ciclo con bitacora append-only.
         services.AddScoped<Revision.IRevisionClinicaService, Revision.RevisionClinicaService>();

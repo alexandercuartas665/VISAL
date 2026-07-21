@@ -127,6 +127,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<RdaEvento> RdaEventos => Set<RdaEvento>();
     public DbSet<FacturacionSnapshot> FacturacionSnapshots => Set<FacturacionSnapshot>();
     public DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas => Set<FacturacionSnapshotFila>();
+    public DbSet<FacturacionSnapshotColumnaConfig> FacturacionSnapshotColumnaConfigs => Set<FacturacionSnapshotColumnaConfig>();
     public DbSet<RevisionClinica> RevisionesClinica => Set<RevisionClinica>();
     public DbSet<RevisionClinicaEvento> RevisionClinicaEventos => Set<RevisionClinicaEvento>();
     public DbSet<RevisionPolicy> RevisionPolicies => Set<RevisionPolicy>();
@@ -1376,6 +1377,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Orden natural + paginacion server-side. Unico por snapshot para que
             // el builder pueda re-emitir la misma numeracion si retry.
             b.HasIndex(x => new { x.SnapshotId, x.NumeroFila }).IsUnique();
+        });
+
+        modelBuilder.Entity<FacturacionSnapshotColumnaConfig>(b =>
+        {
+            b.Property(x => x.ColumnaOriginal).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Alias).HasMaxLength(200);
+
+            // Un solo override por (tenant, tipo, columna). Si el tenant guarda
+            // dos veces la misma columna, upsert.
+            b.HasIndex(x => new { x.TenantId, x.Tipo, x.ColumnaOriginal }).IsUnique();
         });
 
         modelBuilder.Entity<RevisionClinica>(b =>

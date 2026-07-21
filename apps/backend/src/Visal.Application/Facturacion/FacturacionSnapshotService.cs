@@ -19,7 +19,8 @@ namespace Visal.Application.Facturacion;
 public sealed class FacturacionSnapshotService(
     IApplicationDbContext db,
     ITenantContext tenant,
-    IEnumerable<ISnapshotBuilder> builders) : IFacturacionSnapshotService
+    IEnumerable<ISnapshotBuilder> builders,
+    ISnapshotColumnaConfigService columnaConfig) : IFacturacionSnapshotService
 {
     /// <summary>Tamano de lote para persistir filas del builder. Balance memoria vs. round-trips.</summary>
     private const int BatchSize = 500;
@@ -257,12 +258,12 @@ public sealed class FacturacionSnapshotService(
         // Nombre de hoja: limpiar chars invalidos + tope 31 chars (limite Excel).
         var hoja = wb.Worksheets.Add(SanitizarNombreHoja(ctx.Snapshot.Nombre));
 
-        // Headers exactos del builder. Respetar tildes y demas — el formato lo
-        // impone la EPS/MinSalud, no lo estandarizamos.
+        // Headers: usa alias del tenant si esta configurado, sino el header canonico
+        // del builder. La clave interna (ColumnaOriginal) es la que busca el dict de la fila.
         for (var c = 0; c < ctx.Columnas.Count; c++)
         {
             var cell = hoja.Cell(1, c + 1);
-            cell.Value = ctx.Columnas[c];
+            cell.Value = ctx.Columnas[c].HeaderExport;
             cell.Style.Font.Bold = true;
             cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#dbeafe");
             cell.Style.Alignment.WrapText = false;
@@ -274,7 +275,7 @@ public sealed class FacturacionSnapshotService(
         {
             for (var c = 0; c < ctx.Columnas.Count; c++)
             {
-                var col = ctx.Columnas[c];
+                var col = ctx.Columnas[c].ColumnaOriginal;
                 if (!fila.TryGetValue(col, out var val) || val is null) { continue; }
                 var cell = hoja.Cell(row, c + 1);
                 switch (val)
@@ -307,15 +308,15 @@ public sealed class FacturacionSnapshotService(
         if (ctx is null) { return null; }
 
         var sb = new StringBuilder();
-        // Cabecera exacta del builder.
-        sb.AppendLine(string.Join(';', ctx.Columnas.Select(EscaparCsv)));
+        // Cabecera: alias del tenant si esta configurado, sino header canonico del builder.
+        sb.AppendLine(string.Join(';', ctx.Columnas.Select(c => EscaparCsv(c.HeaderExport))));
 
         await foreach (var fila in IterarFilasAsync(id, ct))
         {
             var partes = new string[ctx.Columnas.Count];
             for (var c = 0; c < ctx.Columnas.Count; c++)
             {
-                var col = ctx.Columnas[c];
+                var col = ctx.Columnas[c].ColumnaOriginal;
                 var val = fila.TryGetValue(col, out var v) && v is not null ? v.ToString() ?? "" : "";
                 partes[c] = EscaparCsv(val);
             }
@@ -336,8 +337,10 @@ public sealed class FacturacionSnapshotService(
             SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".csv");
     }
 
-    /// <summary>Contexto compartido de los dos exportadores.</summary>
-    private sealed record CtxExport(FacturacionSnapshot Snapshot, IReadOnlyList<string> Columnas);
+    /// <summary>Contexto compartido de los dos exportadores. Cada entrada de <see cref="Columnas"/>
+    /// lleva la clave interna (para leer del dict de la fila) y el header que se escribe
+    /// en el archivo (respetando alias del tenant si existe).</summary>
+    private sealed record CtxExport(FacturacionSnapshot Snapshot, IReadOnlyList<ColumnaExportInfo> Columnas);
 
     private async Task<CtxExport?> CargarParaExportAsync(Guid id, CancellationToken ct)
     {
@@ -348,8 +351,8 @@ public sealed class FacturacionSnapshotService(
         // en ese caso caemos a inferir columnas desde la primera fila. Cubre
         // snapshots historicos con nuevas versiones del builder.
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == snap.Tipo);
-        IReadOnlyList<string> columnas = builder?.Columnas ?? Array.Empty<string>();
-        if (columnas.Count == 0)
+        IReadOnlyList<string> canonicas = builder?.Columnas ?? Array.Empty<string>();
+        if (canonicas.Count == 0)
         {
             var primera = await db.FacturacionSnapshotFilas.AsNoTracking()
                 .Where(x => x.SnapshotId == id)
@@ -358,10 +361,13 @@ public sealed class FacturacionSnapshotService(
             if (primera is not null)
             {
                 using var doc = JsonDocument.Parse(primera);
-                columnas = doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+                canonicas = doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
             }
         }
 
+        // Aplica preferencia del tenant (orden, visibilidad, alias). Si el tenant
+        // no configuro nada, obtenemos las mismas columnas del builder tal cual.
+        var columnas = await columnaConfig.ObtenerParaExportAsync(snap.Tipo, canonicas, ct);
         return new CtxExport(snap, columnas);
     }
 

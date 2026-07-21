@@ -7,6 +7,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Domain.Enums
 @inject IFacturacionSnapshotService Svc
+@inject ISnapshotColumnaConfigService ColSvc
 @inject IEnumerable<ISnapshotBuilder> Builders
 @inject IAseguradoraService AseSvc
 @inject ISucursalService SucSvc
@@ -39,6 +40,9 @@
     <div style="display:flex;gap:8px;">
         <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@_cargando">
             @(_cargando ? "..." : "Refrescar")
+        </button>
+        <button class="btn btn-outline-primary btn-sm" @onclick="AbrirConfigColumnas" disabled="@(_tiposDisponibles.Count == 0)">
+            Configurar columnas
         </button>
         <button class="btn btn-primary btn-sm" @onclick="AbrirNuevo" disabled="@(_tiposDisponibles.Count == 0)">
             + Nuevo snapshot
@@ -406,6 +410,81 @@
     </div>
 }
 
+@* ============ Modal Configurar columnas ============ *@
+@if (_showColConfig)
+{
+    <div class="sn-modal-back" @onclick="CerrarColConfig"></div>
+    <div class="sn-modal sn-modal-lg" @onclick:stopPropagation="true">
+        <div class="sn-modal-h">
+            <b>Configurar columnas del archivo</b>
+            <button class="sn-close" @onclick="CerrarColConfig">x</button>
+        </div>
+        <div class="sn-modal-b">
+            <p style="margin:0 0 10px;color:#475569;font-size:13px;">
+                Reordena arrastrando con las flechas, apaga el visto para ocultar la columna
+                en el archivo, o escribe un alias para cambiar el titulo del encabezado. Aplica
+                a TODOS los snapshots nuevos y descargas del tipo seleccionado.
+            </p>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                <label style="font-size:12px;color:#475569;">Tipo:</label>
+                <select class="form-control form-control-sm" style="max-width:280px;" value="@_colConfigTipo" @onchange="OnCambiarTipoColConfig" disabled="@_colConfigCargando">
+                    @foreach (var t in _tiposDisponibles)
+                    {
+                        <option value="@t.ToString()">@NombreTipoSnapshot(t)</option>
+                    }
+                </select>
+                @if (_colConfigCargando)
+                {
+                    <span style="color:#94a3b8;font-size:12px;">Cargando...</span>
+                }
+            </div>
+
+            @if (_colConfigErr is not null) { <div class="ase-alert">@_colConfigErr</div> }
+
+            <div class="fcc-list">
+                <div class="fcc-row fcc-head">
+                    <div class="fcc-move"></div>
+                    <div class="fcc-vis">Visible</div>
+                    <div class="fcc-name">Columna original</div>
+                    <div class="fcc-alias">Alias (header en archivo)</div>
+                </div>
+                @for (var i = 0; i < _colConfigItems.Count; i++)
+                {
+                    var idx = i;
+                    var it = _colConfigItems[idx];
+                    <div class="fcc-row @(it.Visible ? "" : "fcc-off")">
+                        <div class="fcc-move">
+                            <button class="fcc-arr" title="Subir" disabled="@(idx == 0)" @onclick="() => SubirColConfig(idx)">^</button>
+                            <button class="fcc-arr" title="Bajar" disabled="@(idx == _colConfigItems.Count - 1)" @onclick="() => BajarColConfig(idx)">v</button>
+                        </div>
+                        <div class="fcc-vis">
+                            <input type="checkbox" checked="@it.Visible" @onchange="e => ToggleColConfig(idx, (bool)e.Value!)" />
+                        </div>
+                        <div class="fcc-name" title="@it.ColumnaOriginal">@it.ColumnaOriginal</div>
+                        <div class="fcc-alias">
+                            <input class="form-control form-control-sm" placeholder="@it.ColumnaOriginal"
+                                   value="@(it.Alias ?? "")" @oninput="e => SetAliasColConfig(idx, e.Value?.ToString())" />
+                        </div>
+                    </div>
+                }
+                @if (_colConfigItems.Count == 0)
+                {
+                    <div class="ase-empty">Este tipo no expone columnas todavia.</div>
+                }
+            </div>
+        </div>
+        <div class="sn-modal-f" style="justify-content:space-between;">
+            <button class="btn btn-outline-danger btn-sm" @onclick="ResetColConfig" disabled="@_colConfigGuardando">Restaurar defaults</button>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarColConfig">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="GuardarColConfig" disabled="@(_colConfigGuardando || _colConfigItems.Count == 0)">
+                    @(_colConfigGuardando ? "Guardando..." : "Guardar")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .sn-card { padding:0; overflow:hidden; }
     .sn-tabs { display:flex; border-bottom:1px solid var(--border); }
@@ -470,6 +549,24 @@
     .sn-multi-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:14px; background:white; border:1px solid var(--border); font-size:12px; cursor:pointer; user-select:none; margin:0; }
     .sn-multi-chip:hover { background:#eff6ff; border-color:#93c5fd; }
     .sn-multi-chip input { margin:0; cursor:pointer; }
+
+    /* Modal grande para el editor de columnas. */
+    .sn-modal-lg { max-width:960px; width:96%; }
+
+    /* Editor columnas del snapshot: filas apiladas verticales con handle, toggle, alias. */
+    .fcc-list { border:1px solid var(--border); border-radius:6px; max-height:60vh; overflow-y:auto; background:white; }
+    .fcc-row { display:grid; grid-template-columns: 68px 68px minmax(180px, 1.2fr) minmax(180px, 1.4fr); gap:8px; padding:8px 10px; border-bottom:1px solid #f1f5f9; align-items:center; }
+    .fcc-row:last-child { border-bottom:none; }
+    .fcc-row.fcc-off { background:#f8fafc; opacity:0.7; }
+    .fcc-head { background:#f1f5f9; font-weight:600; font-size:12px; color:#334155; position:sticky; top:0; z-index:1; }
+    .fcc-move { display:flex; gap:4px; }
+    .fcc-arr { width:26px; height:26px; border:1px solid var(--border); background:white; border-radius:4px; font-size:11px; line-height:1; cursor:pointer; padding:0; }
+    .fcc-arr:hover:not(:disabled) { background:#eff6ff; border-color:#93c5fd; }
+    .fcc-arr:disabled { color:#cbd5e1; cursor:not-allowed; }
+    .fcc-vis { display:flex; justify-content:center; }
+    .fcc-vis input { width:18px; height:18px; cursor:pointer; }
+    .fcc-name { font-size:13px; color:#1e293b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .fcc-alias input { font-size:12px; }
 </style>
 
 @code {
@@ -529,6 +626,14 @@
     private string _archivarMotivo = "";
     private bool _archivando;
     private string? _archivarErr;
+
+    // Modal Configurar columnas (aplica al archivo Excel/CSV de salida).
+    private bool _showColConfig;
+    private TipoSnapshot _colConfigTipo = TipoSnapshot.RelacionFacturas;
+    private List<ColumnaConfigItemDto> _colConfigItems = new();
+    private bool _colConfigCargando;
+    private bool _colConfigGuardando;
+    private string? _colConfigErr;
 
     // Usuario / permisos.
     private Guid _actorId;
@@ -799,5 +904,118 @@
         var mins = m / 60000;
         var secs = (m % 60000) / 1000;
         return $"{mins}m {secs}s";
+    }
+
+    // ---- Configurar columnas ----
+
+    private static string NombreTipoSnapshot(TipoSnapshot t) => t switch
+    {
+        TipoSnapshot.RelacionFacturas => "Relacion de Facturas",
+        _ => t.ToString()
+    };
+
+    private async Task AbrirConfigColumnas()
+    {
+        _colConfigErr = null;
+        // Preselecciona el primer tipo disponible (hoy solo RelacionFacturas).
+        _colConfigTipo = _tiposDisponibles.FirstOrDefault();
+        _showColConfig = true;
+        await CargarConfigColumnasAsync();
+    }
+
+    private void CerrarColConfig()
+    {
+        _showColConfig = false;
+        _colConfigItems = new();
+        _colConfigErr = null;
+    }
+
+    private async Task OnCambiarTipoColConfig(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<TipoSnapshot>(e.Value?.ToString(), out var t))
+        {
+            _colConfigTipo = t;
+            await CargarConfigColumnasAsync();
+        }
+    }
+
+    private async Task CargarConfigColumnasAsync()
+    {
+        _colConfigErr = null;
+        _colConfigCargando = true;
+        try
+        {
+            var items = await ColSvc.ListarAsync(_colConfigTipo);
+            // Renumeramos orden secuencial para simplificar el drag & drop en memoria.
+            _colConfigItems = items
+                .Select((it, i) => new ColumnaConfigItemDto(it.ColumnaOriginal, i, it.Visible, it.Alias))
+                .ToList();
+        }
+        catch (Exception ex) { _colConfigErr = ex.Message; }
+        finally { _colConfigCargando = false; }
+    }
+
+    private void SubirColConfig(int idx)
+    {
+        if (idx <= 0) { return; }
+        (_colConfigItems[idx], _colConfigItems[idx - 1]) = (_colConfigItems[idx - 1], _colConfigItems[idx]);
+        Renumerar();
+    }
+
+    private void BajarColConfig(int idx)
+    {
+        if (idx >= _colConfigItems.Count - 1) { return; }
+        (_colConfigItems[idx], _colConfigItems[idx + 1]) = (_colConfigItems[idx + 1], _colConfigItems[idx]);
+        Renumerar();
+    }
+
+    private void ToggleColConfig(int idx, bool visible)
+    {
+        var it = _colConfigItems[idx];
+        _colConfigItems[idx] = it with { Visible = visible };
+    }
+
+    private void SetAliasColConfig(int idx, string? alias)
+    {
+        var it = _colConfigItems[idx];
+        _colConfigItems[idx] = it with { Alias = string.IsNullOrWhiteSpace(alias) ? null : alias };
+    }
+
+    private void Renumerar()
+    {
+        for (var i = 0; i < _colConfigItems.Count; i++)
+        {
+            _colConfigItems[i] = _colConfigItems[i] with { Orden = i };
+        }
+    }
+
+    private async Task GuardarColConfig()
+    {
+        _colConfigErr = null;
+        _colConfigGuardando = true;
+        try
+        {
+            Renumerar();
+            await ColSvc.GuardarAsync(_colConfigTipo, _colConfigItems, _actorId);
+            _ok = "Configuracion de columnas guardada.";
+            _showColConfig = false;
+        }
+        catch (Exception ex) { _colConfigErr = ex.Message; }
+        finally { _colConfigGuardando = false; }
+    }
+
+    private async Task ResetColConfig()
+    {
+        var confirmado = await JS.InvokeAsync<bool>("confirm", "Esto elimina todos los overrides guardados y vuelve al orden natural del builder. Continuar?");
+        if (!confirmado) { return; }
+        _colConfigGuardando = true;
+        try
+        {
+            await ColSvc.ResetAsync(_colConfigTipo, _actorId);
+            await CargarConfigColumnasAsync();
+            _ok = "Configuracion restaurada a defaults.";
+        }
+        catch (Exception ex) { _colConfigErr = ex.Message; }
+        finally { _colConfigGuardando = false; }
     }
 }

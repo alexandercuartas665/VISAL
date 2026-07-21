@@ -282,6 +282,15 @@ app.MapPost("/auth/login", async (
         if (membership?.RolId is Guid rolId)
         {
             claims.Add(new Claim("rol_id", rolId.ToString()));
+            // rol_nombre permite al NavMenu tratar como admin de agencia a usuarios
+            // con rol "Administrador" en el sistema nuevo — indepediente del legacy
+            // tenant_role, que puede seguir siendo "Advisor" en usuarios migrados.
+            var rolNombre = await db.Roles.IgnoreQueryFilters()
+                .Where(r => r.Id == rolId).Select(r => r.Nombre).FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(rolNombre))
+            {
+                claims.Add(new Claim("rol_nombre", rolNombre));
+            }
             var permisos = await db.RolPermisos.IgnoreQueryFilters()
                 .Where(p => p.RolId == rolId && p.Ver)
                 .Select(p => p.Modulo)

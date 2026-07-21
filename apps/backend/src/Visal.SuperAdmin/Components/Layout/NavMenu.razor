@@ -39,9 +39,11 @@
 </div>
 
 <nav class="visal-nav">
-    @if (_showTenant && _esProfesional)
+    @if (_showTenant && _esProfesional && !_esAdminAgencia)
     {
-        @* Usuario derivado de un profesional: solo ve el modulo de Atencion (sus servicios asignados). *@
+        @* Usuario derivado de un profesional que NO es admin de agencia: solo ve
+           el modulo de Atencion (sus servicios asignados). Los profesionales que
+           tambien son Owner/Admin/Administrador ven el menu completo. *@
         <div class="visal-nav-label">Mi trabajo</div>
 
         <NavLink class="visal-nav-link" href="atencion">
@@ -443,7 +445,14 @@
         _showTenant = isPlatformOperator || isTenantUser;
         _esProfesional = state.User.FindFirst("profesional_id") is not null;
         var rol = state.User.FindFirst("tenant_role")?.Value ?? "";
-        _esAdminAgencia = isPlatformOperator || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase) || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase);
+        // rol_nombre viene del sistema nuevo de roles (task #22). Un usuario puede
+        // estar registrado como Advisor en el legacy tenant_role pero tener rol
+        // "Administrador" en el sistema nuevo — ambos casos son admins de agencia.
+        var rolNombre = state.User.FindFirst("rol_nombre")?.Value ?? "";
+        _esAdminAgencia = isPlatformOperator
+            || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase)
+            || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase)
+            || rolNombre.Equals("Administrador", StringComparison.OrdinalIgnoreCase);
 
         _userName = state.User.Identity?.Name;
         _avatar = Initials(_userName);

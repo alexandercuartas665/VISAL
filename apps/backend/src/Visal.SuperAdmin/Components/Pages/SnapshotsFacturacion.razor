@@ -413,7 +413,7 @@
 @* ============ Modal Configurar columnas ============ *@
 @if (_showColConfig)
 {
-    <div class="sn-modal-back" @onclick="CerrarColConfig"></div>
+    <div class="sn-modal-back" @onclick="CerrarColConfig">
     <div class="sn-modal sn-modal-lg" @onclick:stopPropagation="true">
         <div class="sn-modal-h">
             <b>Configurar columnas del archivo</b>
@@ -482,6 +482,7 @@
                 </button>
             </div>
         </div>
+    </div>
     </div>
 }
 

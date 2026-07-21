@@ -885,7 +885,58 @@ else
     </div>
 }
 
+@* =========================================================================
+   Modal grande "Ver revision": iframe con la impresion completa de la HC
+   a la izquierda + panel de revision (bitacora + aprobar/rechazar) a la
+   derecha. Reutiliza HcRevisionPanel, el mismo componente que ya se usa
+   en el menu lateral del modal HC.
+   ========================================================================= *@
+@if (_showRevisionModal && _revisionModalHcId is Guid rmHcId)
+{
+    <div class="oc-rv-backdrop" @onclick="CerrarRevisionModalAsync"></div>
+    <div class="oc-rv-modal" @onclick:stopPropagation>
+        <div class="oc-rv-h">
+            <div>
+                <div class="oc-rv-eyebrow">Ordenes clinicas</div>
+                <h3 class="oc-rv-title">Ver revision de la HC</h3>
+            </div>
+            <button class="oc-rv-close" @onclick="CerrarRevisionModalAsync" title="Cerrar">&times;</button>
+        </div>
+        <div class="oc-rv-body">
+            <div class="oc-rv-left">
+                <iframe class="oc-rv-iframe"
+                        src="@($"/imprimir-paquete/{rmHcId}?docs={_revisionModalDocs}")"
+                        title="Impresion HC">
+                </iframe>
+            </div>
+            <div class="oc-rv-right">
+                <Visal.SuperAdmin.Components.Forms.HcRevisionPanel
+                    HistoriaClinicaId="@rmHcId"
+                    HcCerrada="true" />
+            </div>
+        </div>
+    </div>
+}
+
 <style>
+    /* Modal doble columna "Ver revision" */
+    .oc-rv-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1050; }
+    .oc-rv-modal {
+        position:fixed; inset:3vh 3vw; z-index:1060;
+        background:#fff; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.3);
+        display:flex; flex-direction:column; overflow:hidden;
+    }
+    .oc-rv-h { padding:14px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .oc-rv-eyebrow { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#64748b; margin-bottom:2px; font-weight:600; }
+    .oc-rv-title { margin:0; font-size:17px; font-weight:700; color:#0f172a; }
+    .oc-rv-close { background:transparent; border:0; font-size:26px; color:#64748b; cursor:pointer; line-height:1; padding:0 6px; }
+    .oc-rv-close:hover { color:#0f172a; }
+    .oc-rv-body { flex:1 1 auto; display:grid; grid-template-columns: 1.6fr 1fr; min-height:0; }
+    @@media (max-width: 1100px) { .oc-rv-body { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+    .oc-rv-left { border-right:1px solid #e2e8f0; overflow:hidden; background:#f1f5f9; }
+    .oc-rv-iframe { width:100%; height:100%; border:0; background:#fff; }
+    .oc-rv-right { padding:16px 20px; overflow-y:auto; background:#fff; }
+
     .oc-filtros { display:grid; grid-template-columns: 1.5fr 1fr 1fr 1.4fr 1fr auto; gap:14px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; align-items:end; }
     .oc-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; display:block; }
     .oc-f-wide { min-width:200px; }
@@ -1089,6 +1140,12 @@ else
     // Kebab de acciones en cada fila: guarda el id de la HC cuyo menu esta abierto
     // (o null si ninguno). Solo un menu abierto a la vez para simplificar.
     private Guid? _kebabRowId;
+
+    // Modal grande "Ver revision": iframe con la impresion de la HC a la izquierda
+    // y HcRevisionPanel a la derecha (bitacora + aprobar/rechazar).
+    private bool _showRevisionModal;
+    private Guid? _revisionModalHcId;
+    private string _revisionModalDocs = "";
 
     // Estado del modal de impresion
     private bool _showImprimirModal;
@@ -1526,12 +1583,25 @@ else
         return $"{(int)t.TotalMinutes}m";
     }
 
-    /// <summary>Abre el modal HC en la tab Revision (Ola 2). Por ahora navega a /atencion?hc=id con hash — se cablea en RC2e.</summary>
-    private async Task AbrirRevision(OrdenClinicaItemDto r)
+    /// <summary>Abre el modal grande de revision: HC impresa a la izquierda +
+    /// panel de revision (bitacora + aprobar/rechazar) a la derecha. El panel
+    /// reutiliza el componente <see cref="Visal.SuperAdmin.Components.Forms.HcRevisionPanel"/>
+    /// que ya vive en el modal HC.</summary>
+    private void AbrirRevision(OrdenClinicaItemDto r)
     {
-        // RC2e cableara este boton para abrir el modal HC directamente en la tab
-        // Revision. Por ahora dejamos un fallback que abre la HC en modo consulta.
-        await JS.InvokeVoidAsync("open", $"/imprimir-paquete/{r.HistoriaClinicaId}?docs=HC#revision", "_blank");
+        _revisionModalHcId = r.HistoriaClinicaId;
+        _revisionModalDocs = BuildAllDocsQuery(r);
+        _showRevisionModal = true;
+    }
+
+    private async Task CerrarRevisionModalAsync()
+    {
+        _showRevisionModal = false;
+        _revisionModalHcId = null;
+        _revisionModalDocs = "";
+        // Refresca la tabla para reflejar cambios de estado (aprobado/rechazado
+        // pudo ocurrir dentro del panel via HcRevisionPanel).
+        await Buscar();
     }
 
     // ─────────────── Kebab de acciones ───────────────

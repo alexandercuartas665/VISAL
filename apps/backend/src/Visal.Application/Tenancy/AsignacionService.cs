@@ -487,7 +487,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             return Array.Empty<AsignacionPendienteDto>();
         }
 
-        var permisos = modulosPermitidos.Select(m => m.ToUpperInvariant()).ToList();
+        var permisos = ExpandirSinonimosModulo(modulosPermitidos);
 
         // Asignaciones cuyo Modulo (o TipoServicio como fallback) esta entre los permitidos.
         var q = db.Asignaciones.AsNoTracking()
@@ -1164,7 +1164,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             return Array.Empty<AsignacionTableroKanbanDto>();
         }
 
-        var permisos = modulosPermitidos.Select(m => m.ToUpperInvariant()).ToList();
+        var permisos = ExpandirSinonimosModulo(modulosPermitidos);
 
         var q = db.Asignaciones.AsNoTracking()
             .Where(a => a.AnioServicio == (short)anio)
@@ -1301,7 +1301,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             return Array.Empty<SesionCalendarioDto>();
         }
 
-        var permisos = modulosPermitidos.Select(m => m.ToUpperInvariant()).ToList();
+        var permisos = ExpandirSinonimosModulo(modulosPermitidos);
 
         // Rango del mes.
         var desde = new DateOnly(anio, mes, 1);
@@ -1401,4 +1401,39 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
         return result;
     }
+
+    /// <summary>
+    /// Expande cada modulo permitido a todas sus variantes conocidas plural/singular.
+    /// El catalogo TS4 normalizo a singular (TERAPIA, INSUMO, etc.) pero en prod
+    /// conviven asignaciones antiguas en plural (TERAPIAS, INSUMOS) y coordinadores
+    /// que pueden tener registrada cualquiera de las dos formas. Match tolerante
+    /// evita que un desfase de una letra oculte 65+ pendientes en /coordinacion.
+    /// </summary>
+    private static List<string> ExpandirSinonimosModulo(IReadOnlyList<string> modulosPermitidos)
+    {
+        var salida = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in modulosPermitidos)
+        {
+            var key = (m ?? "").Trim().ToUpperInvariant();
+            if (key.Length == 0) { continue; }
+            salida.Add(key);
+            if (_sinonimosModulo.TryGetValue(key, out var extras))
+            {
+                foreach (var e in extras) { salida.Add(e); }
+            }
+        }
+        return salida.ToList();
+    }
+
+    /// <summary>Aliases plural &lt;-&gt; singular por modulo. Ambas direcciones para
+    /// que el orden de entrada no importe. Ampliar aqui si aparecen mas colisiones.</summary>
+    private static readonly Dictionary<string, string[]> _sinonimosModulo = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["TERAPIA"] = new[] { "TERAPIAS" },
+        ["TERAPIAS"] = new[] { "TERAPIA" },
+        ["INSUMO"] = new[] { "INSUMOS" },
+        ["INSUMOS"] = new[] { "INSUMO" },
+        ["EQUIPO"] = new[] { "EQUIPOS" },
+        ["EQUIPOS"] = new[] { "EQUIPO" },
+    };
 }

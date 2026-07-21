@@ -1,8 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Visal.Application.Common;
-using Visal.Domain.Entities;
+using Visal.Application.Facturacion.Selectors;
 using Visal.Domain.Enums;
 
 namespace Visal.Application.Facturacion.Builders;
@@ -12,18 +10,13 @@ namespace Visal.Application.Facturacion.Builders;
 /// columnas EXACTAS del template EPS/MinSalud — nombres, orden, tildes rotas
 /// incluidas (spec: "07. Facturacion / 2. Snapshot Relacion de Facturas").
 ///
-/// Granularidad: 1 fila = 1 <see cref="NotaMedica"/> definitiva en el rango.
-/// Excepcion paquete: notas provenientes del mismo <c>PaqueteInstanciaId</c>
-/// producen UNA sola fila (la del turno que trae <c>PaqueteValorPactado</c>);
-/// las demas se descartan. La fila del paquete usa el CUPS + descripcion +
-/// datos del <see cref="Paquete.CupsRepresentativoServicio"/>. Si el paquete
-/// no lo tiene definido, cae a <c>Servicios.OrderBy(Codigo).First()</c>.
-///
-/// Filtros del JSON: <c>aseguradoraId</c> (Guid, obligatorio), <c>sucursalIds</c>
-/// (lista de Guids, opcional — vacio = todas), <c>fechaInicio</c>/<c>fechaFin</c>
-/// (yyyy-MM-dd). Multi-EPS se resuelve en el motor generico como N snapshots.
+/// Este builder es intencionalmente delgado: NO conoce reglas de negocio sobre
+/// que se factura. Solo (a) parsea los filtros del JSON, (b) pide los "hechos
+/// facturables" al <see cref="IRelacionFacturasSelector"/> y (c) mapea cada
+/// hecho a un diccionario columna->valor. Iteraciones sobre "que cuenta como
+/// facturado" viven en el selector, no aqui.
 /// </summary>
-public sealed class SnapshotRelacionFacturasBuilder(IApplicationDbContext db) : ISnapshotBuilder
+public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector selector) : ISnapshotBuilder
 {
     public TipoSnapshot TipoAplicable => TipoSnapshot.RelacionFacturas;
 
@@ -78,252 +71,78 @@ public sealed class SnapshotRelacionFacturasBuilder(IApplicationDbContext db) : 
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var filtros = ParsearFiltros(filtrosJson);
+        var hechos = await selector.SelectAsync(filtros, ct);
 
-        // Notas definitivas en el rango. Traemos todo el arbol necesario en una
-        // sola query para no hacer N+1 sobre 500+ filas de un mes.
-        var notas = await db.NotasMedicas.AsNoTracking()
-            .Where(n => n.Estado == NotaMedicaEstado.Definitivo
-                     && n.FechaNota >= filtros.FechaInicio
-                     && n.FechaNota <= filtros.FechaFin)
-            .OrderBy(n => n.FechaNota).ThenBy(n => n.HoraNota)
-            .ToListAsync(ct);
-
-        if (notas.Count == 0) { yield break; }
-
-        // Indices para JOIN in-memory. Todo tenant-scoped por los global query
-        // filters del DbContext — no exponen datos de otros tenants.
-        var pacientes = await CargarDictAsync(db.Pacientes, notas.Select(n => n.PacienteId).Distinct().ToList(), ct);
-        var turnos = await CargarDictAsync(
-            db.AsignacionTurnos,
-            notas.Where(n => n.AsignacionTurnoId is not null).Select(n => n.AsignacionTurnoId!.Value).Distinct().ToList(),
-            ct);
-        var asignaciones = await CargarDictAsync(db.Asignaciones, turnos.Values.Select(t => t.AsignacionId).Distinct().ToList(), ct);
-        var profesionales = await CargarDictAsync(db.Profesionales, turnos.Values.Select(t => t.ProfesionalId).Distinct().ToList(), ct);
-
-        // ContratoAseguradora se resuelve por CodigoContrato dentro del tenant.
-        var codigosContrato = asignaciones.Values.Select(a => a.ContratoCodigo).Distinct().ToList();
-        var contratos = await db.ContratosAseguradora.AsNoTracking()
-            .Where(c => codigosContrato.Contains(c.CodigoContrato))
-            .ToListAsync(ct);
-        var contratoPorCodigo = contratos.ToDictionary(c => c.CodigoContrato, c => c);
-
-        // Aseguradora (FILTRO PRINCIPAL) + Sucursal.
-        var aseguradora = await db.Aseguradoras.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Id == filtros.AseguradoraId, ct);
-        var sucursales = await db.Sucursales.AsNoTracking().ToListAsync(ct);
-        var sucursalPorCodigo = sucursales.ToDictionary(s => s.Codigo, s => s, StringComparer.OrdinalIgnoreCase);
-        var sucursalPorId = sucursales.ToDictionary(s => s.Id, s => s);
-
-        // ServicioContrato indexado por (contratoId, codigoServicio) o por Guid.
-        var contratoIds = contratos.Select(c => c.Id).Distinct().ToList();
-        var serviciosContrato = await db.ServiciosContrato.AsNoTracking()
-            .Where(sc => contratoIds.Contains(sc.ContratoId))
-            .ToListAsync(ct);
-        var servicioPorCodigo = serviciosContrato
-            .Where(sc => !string.IsNullOrEmpty(sc.CodigoServicio))
-            .GroupBy(sc => (sc.ContratoId, sc.CodigoServicio!))
-            .ToDictionary(g => g.Key, g => g.First());
-        var servicioPorId = serviciosContrato.ToDictionary(sc => sc.Id, sc => sc);
-
-        // Paquetes (para reemplazar CUPS por representativo cuando aplica).
-        var paqueteCodigos = asignaciones.Values.Where(a => !string.IsNullOrEmpty(a.PaqueteCodigo))
-            .Select(a => a.PaqueteCodigo!).Distinct().ToList();
-        var paquetes = paqueteCodigos.Count == 0
-            ? new List<Paquete>()
-            : await db.Paquetes.AsNoTracking()
-                .Include(p => p.Servicios)
-                .Where(p => paqueteCodigos.Contains(p.Codigo))
-                .ToListAsync(ct);
-        var paquetePorCodigo = paquetes.ToDictionary(p => p.Codigo, p => p);
-
-        // Catalogo de referencia (CUPS + descripcion). Traemos solo los codigos que aparecen.
-        var codigosCups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var sc in serviciosContrato) { if (!string.IsNullOrEmpty(sc.CodigoServicio)) { codigosCups.Add(sc.CodigoServicio); } }
-        foreach (var p in paquetes) { foreach (var s in p.Servicios) { codigosCups.Add(s.Codigo); } }
-        var codigosList = codigosCups.ToList();
-        var catalogo = await db.CatalogosServicioReferencia.AsNoTracking()
-            .Where(c => codigosList.Contains(c.Codigo))
-            .ToListAsync(ct);
-        var catalogoPorCodigo = catalogo.ToDictionary(c => c.Codigo, c => c, StringComparer.OrdinalIgnoreCase);
-
-        // Geografia (Departamento, Municipio, Pais) — catalogos globales.
-        var depIds = pacientes.Values.Where(p => p.DepartamentoId is not null).Select(p => p.DepartamentoId!.Value).Distinct().ToList();
-        var munIds = pacientes.Values.Where(p => p.MunicipioId is not null).Select(p => p.MunicipioId!.Value).Distinct().ToList();
-        var paisIds = pacientes.Values.Where(p => p.PaisResidenciaId is not null).Select(p => p.PaisResidenciaId!.Value).Distinct().ToList();
-        var depts = await db.Departamentos.AsNoTracking().Where(d => depIds.Contains(d.Id)).ToDictionaryAsync(d => d.Id, d => d.Nombre, ct);
-        var muns = await db.Municipios.AsNoTracking().Where(m => munIds.Contains(m.Id)).ToDictionaryAsync(m => m.Id, m => m.Nombre, ct);
-        var paisesNombre = await db.Paises.AsNoTracking().Where(p => paisIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Nombre, ct);
-
-        // Dedup paquete: agrupamos por (Asignacion, PaqueteInstanciaId) y solo dejamos
-        // los turnos cuya Asignacion trae PaqueteValorPactado (regla del spec §5.1).
-        var lotesPaqueteYaEmitidos = new HashSet<Guid>();
-
-        foreach (var nota in notas)
+        foreach (var h in hechos)
         {
             ct.ThrowIfCancellationRequested();
-
-            if (!pacientes.TryGetValue(nota.PacienteId, out var paciente)) { continue; }
-            if (nota.AsignacionTurnoId is null || !turnos.TryGetValue(nota.AsignacionTurnoId.Value, out var turno)) { continue; }
-            if (!asignaciones.TryGetValue(turno.AsignacionId, out var asignacion)) { continue; }
-            if (!contratoPorCodigo.TryGetValue(asignacion.ContratoCodigo, out var contrato)) { continue; }
-
-            // Filtro por aseguradora (obligatorio).
-            if (contrato.AseguradoraId != filtros.AseguradoraId) { continue; }
-
-            // Filtro por sucursal (opcional). Asignacion.Sucursal es codigo string.
-            Sucursal? sucursal = null;
-            if (!string.IsNullOrEmpty(asignacion.Sucursal))
-            {
-                sucursalPorCodigo.TryGetValue(asignacion.Sucursal, out sucursal);
-            }
-            if (filtros.SucursalIds is { Count: > 0 })
-            {
-                if (sucursal is null || !filtros.SucursalIds.Contains(sucursal.Id)) { continue; }
-            }
-
-            // Regla paquete: 1 fila por lote. La fila es la de la asignacion cuyo
-            // PaqueteValorPactado != null. Las demas se descartan.
-            if (asignacion.PaqueteInstanciaId is Guid loteId)
-            {
-                if (asignacion.PaqueteValorPactado is null) { continue; } // asignacion no-ancla
-                if (!lotesPaqueteYaEmitidos.Add(loteId)) { continue; } // ancla ya emitida
-            }
-
-            profesionales.TryGetValue(turno.ProfesionalId, out var profesional);
-
-            // Resolver ServicioContrato: Asignacion.ServicioId puede ser Guid string o codigo.
-            ServicioContrato? servicio = null;
-            if (Guid.TryParse(asignacion.ServicioId, out var scGuid) && servicioPorId.TryGetValue(scGuid, out var scPorGuid))
-            {
-                servicio = scPorGuid;
-            }
-            else if (servicioPorCodigo.TryGetValue((contrato.Id, asignacion.ServicioId), out var scPorCod))
-            {
-                servicio = scPorCod;
-            }
-
-            // Determinar CUPS + descripcion + servicio origen (para RIPS).
-            // Si es paquete y hay CUPS representativo → usar ese. Si no, usar el
-            // ServicioContrato de la asignacion como origen.
-            string? cupsCodigo = servicio?.CodigoServicio;
-            string? cupsDescripcion = null;
-            ServicioContrato? servicioParaRips = servicio;
-
-            if (asignacion.PaqueteInstanciaId is not null
-                && !string.IsNullOrEmpty(asignacion.PaqueteCodigo)
-                && paquetePorCodigo.TryGetValue(asignacion.PaqueteCodigo, out var paquete))
-            {
-                var pServ = ResolverPaqueteServicioRepresentativo(paquete);
-                if (pServ is not null)
-                {
-                    cupsCodigo = pServ.Codigo;
-                }
-            }
-
-            if (!string.IsNullOrEmpty(cupsCodigo) && catalogoPorCodigo.TryGetValue(cupsCodigo, out var cat))
-            {
-                cupsDescripcion = cat.Nombre;
-            }
-
-            // Cuota/Copago mutuamente excluyentes (spec §7.3).
-            decimal? vCuota = null, vCopago = null;
-            if (string.Equals(asignacion.TipoPago, "CUOTA", StringComparison.OrdinalIgnoreCase))
-            {
-                vCuota = asignacion.ValorPagoReal ?? asignacion.ValorPagoSugerido;
-            }
-            else if (string.Equals(asignacion.TipoPago, "COPAGO", StringComparison.OrdinalIgnoreCase))
-            {
-                vCopago = asignacion.ValorPagoReal ?? asignacion.ValorPagoSugerido;
-            }
-
-            // Valor unitario: paquete → PaqueteValorPactado; suelto → ServicioContrato.Tarifa.
-            decimal? valorUnitario = asignacion.PaqueteValorPactado ?? servicio?.Tarifa;
-            decimal? valorTotal = servicio?.ValorTotal ?? valorUnitario;
-
-            // Nacionalidad: Pais.Nombre via Paciente.PaisResidenciaId (fallback COLOMBIA).
-            string nacionalidad = "COLOMBIA";
-            if (paciente.PaisResidenciaId is Guid pid && paisesNombre.TryGetValue(pid, out var pn))
-            {
-                nacionalidad = pn;
-            }
-
-            var fila = new Dictionary<string, object?>
-            {
-                ["Consecutivo Factura"] = null,                                // 1  — proceso posterior
-                ["Orden"] = null,                                              // 2  — vacio por ahora
-                ["Contrato"] = asignacion.ContratoCodigo,                      // 3
-                ["codigo habilitacion "] = sucursal?.CodigoHabilitacion,       // 4
-                ["Regimen"] = paciente.Regimen,                                // 5
-                ["Archivo json"] = null,                                       // 6  — vacio
-                ["Autorizacion"] = asignacion.CodigoAutorizacion,              // 7
-                ["Tipo_Id"] = paciente.TipoDocumento,                          // 8
-                ["Identificación"] = paciente.NumeroDocumento,                 // 9
-                ["Primer Apellido"] = paciente.PrimerApellido,                 // 10
-                ["Segundo Apellido"] = paciente.SegundoApellido,               // 11
-                ["Primer Nombre"] = paciente.PrimerNombre,                     // 12
-                ["Segundo Nombre"] = paciente.SegundoNombre,                   // 13
-                ["Fecha de Nacimiento"] = paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 14
-                ["Sexo"] = paciente.Sexo,                                      // 15
-                ["Fecha suministro de tecnologia"] = turno.FechaInicio?.ToString("yyyy-MM-dd"), // 16
-                ["Hora"] = nota.HoraNota?.ToString("HH:mm:ss") ?? nota.CreatedAt.ToString("HH:mm:ss"), // 17
-                ["CUPS"] = cupsCodigo,                                         // 18
-                ["Codigo Externo (Factura)"] = servicio?.CodigoInterno,        // 19 — CodigoInterno hace las veces
-                ["Cantidad"] = asignacion.PaqueteInstanciaId is not null ? 1 : turno.Cantidad, // 20
-                ["Descripción del procedimiento (Factura)"] = cupsDescripcion, // 21
-                ["Valor Unitario"] = valorUnitario,                            // 22
-                ["Vr Cuota Moderadora "] = vCuota,                             // 23
-                ["Copago o Pago Compartido"] = vCopago,                        // 24
-                ["Valor Total"] = valorTotal,                                  // 25
-                ["Diagnóstico"] = paciente.Cie10Codigo ?? paciente.DiagnosticoPrincipal, // 26
-                ["TipoDocProfesional"] = profesional?.TipoDocumento,           // 27
-                ["DocumentoProf"] = profesional?.NumeroDocumento,              // 28
-                ["NomProf"] = profesional?.NombreCompleto,                     // 29
-                ["Finalidad"] = servicioParaRips?.Finalidad,                   // 30
-                ["Causa Externa"] = servicioParaRips?.CausaExterna,            // 31
-                ["Modalidad Atención"] = servicioParaRips?.ModalidadAtencion,  // 32
-                ["Vía de Ingreso"] = servicioParaRips?.ViaIngreso,             // 33
-                ["Grupo Servicios"] = servicioParaRips?.GrupoServicios,        // 34
-                ["Servicios"] = servicioParaRips?.Servicios,                   // 35
-                ["Nacionalidad"] = nacionalidad,                               // 36
-                ["Departamento"] = paciente.DepartamentoId is Guid dId && depts.TryGetValue(dId, out var dn) ? dn : null, // 37
-                ["Municipio"] = paciente.MunicipioId is Guid mId && muns.TryGetValue(mId, out var mn) ? mn : null,        // 38
-                ["Dirección"] = paciente.Direccion,                            // 39
-                ["Telefono"] = paciente.Telefono,                              // 40
-                ["Correo electrónico"] = aseguradora?.CorreoFacturacion,       // 41
-            };
-
-            yield return fila;
+            yield return Mapear(h);
         }
     }
 
-    private static PaqueteServicio? ResolverPaqueteServicioRepresentativo(Paquete paquete)
+    private static Dictionary<string, object?> Mapear(RelacionFacturasHecho h)
     {
-        if (paquete.CupsRepresentativoServicioId is Guid rid)
+        // Cuota/Copago mutuamente excluyentes (spec §7.3).
+        decimal? vCuota = null, vCopago = null;
+        if (string.Equals(h.Asignacion.TipoPago, "CUOTA", StringComparison.OrdinalIgnoreCase))
         {
-            var explicito = paquete.Servicios.FirstOrDefault(s => s.Id == rid);
-            if (explicito is not null) { return explicito; }
+            vCuota = h.Asignacion.ValorPagoReal ?? h.Asignacion.ValorPagoSugerido;
         }
-        // Fallback determinista: el primero por codigo.
-        return paquete.Servicios.OrderBy(s => s.Codigo, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+        else if (string.Equals(h.Asignacion.TipoPago, "COPAGO", StringComparison.OrdinalIgnoreCase))
+        {
+            vCopago = h.Asignacion.ValorPagoReal ?? h.Asignacion.ValorPagoSugerido;
+        }
+
+        decimal? valorUnitario = h.Asignacion.PaqueteValorPactado ?? h.Servicio?.Tarifa;
+        decimal? valorTotal = h.Servicio?.ValorTotal ?? valorUnitario;
+
+        return new Dictionary<string, object?>
+        {
+            ["Consecutivo Factura"] = null,                                    //  1  — proceso posterior
+            ["Orden"] = null,                                                  //  2  — vacio por ahora
+            ["Contrato"] = h.Asignacion.ContratoCodigo,                        //  3
+            ["codigo habilitacion "] = h.Sucursal?.CodigoHabilitacion,         //  4
+            ["Regimen"] = h.Paciente.Regimen,                                  //  5
+            ["Archivo json"] = null,                                           //  6  — vacio
+            ["Autorizacion"] = h.Asignacion.CodigoAutorizacion,                //  7
+            ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  8
+            ["Identificación"] = h.Paciente.NumeroDocumento,                   //  9
+            ["Primer Apellido"] = h.Paciente.PrimerApellido,                   // 10
+            ["Segundo Apellido"] = h.Paciente.SegundoApellido,                 // 11
+            ["Primer Nombre"] = h.Paciente.PrimerNombre,                       // 12
+            ["Segundo Nombre"] = h.Paciente.SegundoNombre,                     // 13
+            ["Fecha de Nacimiento"] = h.Paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 14
+            ["Sexo"] = h.Paciente.Sexo,                                        // 15
+            ["Fecha suministro de tecnologia"] = h.Sesion.FechaAtencion.ToString("yyyy-MM-dd"), // 16 — fecha real de atencion
+            ["Hora"] = h.Sesion.CreatedAt.ToString("HH:mm:ss"),                // 17 — no hay hora explicita, usamos CreatedAt de la sesion
+            ["CUPS"] = h.CupsCodigo,                                           // 18
+            ["Codigo Externo (Factura)"] = h.Servicio?.CodigoInterno,          // 19
+            ["Cantidad"] = h.Asignacion.PaqueteInstanciaId is not null ? 1 : h.Turno.Cantidad, // 20
+            ["Descripción del procedimiento (Factura)"] = h.CupsDescripcion,   // 21
+            ["Valor Unitario"] = valorUnitario,                                // 22
+            ["Vr Cuota Moderadora "] = vCuota,                                 // 23
+            ["Copago o Pago Compartido"] = vCopago,                            // 24
+            ["Valor Total"] = valorTotal,                                      // 25
+            ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 26
+            ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 27
+            ["DocumentoProf"] = h.Profesional?.NumeroDocumento,                // 28
+            ["NomProf"] = h.Profesional?.NombreCompleto,                       // 29
+            ["Finalidad"] = h.Servicio?.Finalidad,                             // 30
+            ["Causa Externa"] = h.Servicio?.CausaExterna,                      // 31
+            ["Modalidad Atención"] = h.Servicio?.ModalidadAtencion,            // 32
+            ["Vía de Ingreso"] = h.Servicio?.ViaIngreso,                       // 33
+            ["Grupo Servicios"] = h.Servicio?.GrupoServicios,                  // 34
+            ["Servicios"] = h.Servicio?.Servicios,                             // 35
+            ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 36
+            ["Departamento"] = h.DepartamentoNombre,                           // 37
+            ["Municipio"] = h.MunicipioNombre,                                 // 38
+            ["Dirección"] = h.Paciente.Direccion,                              // 39
+            ["Telefono"] = h.Paciente.Telefono,                                // 40
+            ["Correo electrónico"] = h.Aseguradora.CorreoFacturacion,          // 41
+        };
     }
 
-    private static async Task<Dictionary<Guid, T>> CargarDictAsync<T>(
-        Microsoft.EntityFrameworkCore.DbSet<T> set,
-        List<Guid> ids,
-        CancellationToken ct) where T : Visal.Domain.Common.BaseEntity
-    {
-        if (ids.Count == 0) { return new Dictionary<Guid, T>(); }
-        var items = await set.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
-        return items.ToDictionary(x => x.Id, x => x);
-    }
-
-    private sealed record FiltrosRelacionFacturas(
-        Guid AseguradoraId,
-        IReadOnlyList<Guid>? SucursalIds,
-        DateOnly FechaInicio,
-        DateOnly FechaFin);
-
-    private static FiltrosRelacionFacturas ParsearFiltros(string json)
+    private static RelacionFacturasFiltros ParsearFiltros(string json)
     {
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
         var root = doc.RootElement;
@@ -337,19 +156,29 @@ public sealed class SnapshotRelacionFacturasBuilder(IApplicationDbContext db) : 
         if (root.TryGetProperty("sucursalIds", out var se) && se.ValueKind == JsonValueKind.Array)
         {
             sedes = new List<Guid>();
-            foreach (var el in se.EnumerateArray())
+            foreach (var e in se.EnumerateArray())
             {
-                if (el.ValueKind == JsonValueKind.String && Guid.TryParse(el.GetString(), out var g)) { sedes.Add(g); }
+                if (e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var g))
+                {
+                    sedes.Add(g);
+                }
             }
         }
-        var fi = LeerFecha(root, "fechaInicio") ?? DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-30));
-        var ff = LeerFecha(root, "fechaFin") ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        return new FiltrosRelacionFacturas(aseg, sedes, fi, ff);
-    }
 
-    private static DateOnly? LeerFecha(JsonElement root, string prop)
-    {
-        if (!root.TryGetProperty(prop, out var el) || el.ValueKind != JsonValueKind.String) { return null; }
-        return DateOnly.TryParse(el.GetString(), out var d) ? d : null;
+        var hoy = DateTime.Today;
+        var fechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
+        var fechaFin = DateOnly.FromDateTime(hoy);
+        if (root.TryGetProperty("fechaInicio", out var fi) && fi.ValueKind == JsonValueKind.String
+            && DateOnly.TryParse(fi.GetString(), out var fiParsed))
+        {
+            fechaIni = fiParsed;
+        }
+        if (root.TryGetProperty("fechaFin", out var ff) && ff.ValueKind == JsonValueKind.String
+            && DateOnly.TryParse(ff.GetString(), out var ffParsed))
+        {
+            fechaFin = ffParsed;
+        }
+
+        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin);
     }
 }

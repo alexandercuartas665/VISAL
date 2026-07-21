@@ -426,9 +426,12 @@ else
     <div class="oc-filtros">
         <div class="oc-f oc-f-wide">
             <label>Paciente</label>
+            @* Sin @bind:event="oninput": cada tecla NO re-renderiza el listado.
+               Los filtros se acumulan en memoria y solo se aplican al click de
+               Buscar (o Enter). Limpiar es la unica forma de resetear. *@
             <input class="form-control form-control-sm"
                    placeholder="Nombre o documento del paciente..."
-                   @bind="_filtroPaciente" @bind:event="oninput" @onkeyup="OnKeyup" />
+                   @bind="_filtroPaciente" @onkeyup="OnKeyup" />
         </div>
         <div class="oc-f">
             <label>Fecha desde</label>

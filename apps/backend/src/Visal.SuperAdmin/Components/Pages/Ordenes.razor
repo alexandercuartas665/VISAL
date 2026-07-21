@@ -461,6 +461,16 @@ else
                 }
             </select>
         </div>
+        <div class="oc-f oc-f-wide">
+            <label>Agencia</label>
+            <select class="form-select form-select-sm" @bind="_sucursalFiltro">
+                <option value="">(Todas)</option>
+                @foreach (var s in _sucursales)
+                {
+                    <option value="@s.Id">@s.Nombre</option>
+                }
+            </select>
+        </div>
         <div class="oc-f">
             <label>Estado</label>
             <select class="form-select form-select-sm" @bind="_estadoFiltro">
@@ -508,6 +518,7 @@ else
                         <th>Formato HC</th>
                         <th style="width:180px">Especialista</th>
                         <th style="width:180px" title="EPS bajo la cual se ejecuto la atencion (contrato principal del paciente)">EPS</th>
+                        <th style="width:160px" title="Sede (sucursal) donde se atiende al paciente">Agencia</th>
                         <th class="text-center" style="width:110px">Estado</th>
                         <th class="text-center" style="width:130px">Fecha</th>
                         <th class="text-center" style="width:320px">Documentos</th>
@@ -535,6 +546,7 @@ else
                             <td>@r.FormatoNombre</td>
                             <td>@(r.EspecialistaNombre ?? "-")</td>
                             <td>@(r.AseguradoraNombre ?? "-")</td>
+                            <td>@(r.SedeNombre ?? "-")</td>
                             <td class="text-center">
                                 @if (cerrada)
                                 {
@@ -1151,6 +1163,8 @@ else
     private List<string> _especialistas = new();
     private List<AseguradoraOpcionDto> _aseguradoras = new();
     private string _aseguradoraFiltro = "";
+    private List<SucursalOpcionDto> _sucursales = new();
+    private string _sucursalFiltro = "";
     private List<OrdenClinicaItemDto> _rows = new();
     private bool _buscando;
 
@@ -1174,6 +1188,7 @@ else
     {
         _especialistas = (await OcSvc.ListarEspecialistasAsync()).ToList();
         _aseguradoras = (await OcSvc.ListarAseguradorasAsync()).ToList();
+        _sucursales = (await OcSvc.ListarSucursalesAsync()).ToList();
         await ResolverPermisosAsync();
         await Buscar();
     }
@@ -1226,7 +1241,8 @@ else
                 Hasta: _hasta is DateTime d2 ? DateOnly.FromDateTime(d2) : (DateOnly?)null,
                 Especialista: string.IsNullOrWhiteSpace(_especialista) ? null : _especialista,
                 SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase),
-                AseguradoraId: Guid.TryParse(_aseguradoraFiltro, out var aseId) ? aseId : (Guid?)null);
+                AseguradoraId: Guid.TryParse(_aseguradoraFiltro, out var aseId) ? aseId : (Guid?)null,
+                SucursalId: Guid.TryParse(_sucursalFiltro, out var sedeId) ? sedeId : (Guid?)null);
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -1244,7 +1260,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _estadoFiltro = "";
+        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = "";
         await Buscar();
     }
 

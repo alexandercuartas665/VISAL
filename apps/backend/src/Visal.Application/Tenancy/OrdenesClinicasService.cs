@@ -68,6 +68,13 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             joined = joined.Where(x => x.p.Contrato1Id != null && contratosDeEsaAse.Contains(x.p.Contrato1Id));
         }
 
+        // Filtro Sede: la sucursal esta directamente en el paciente
+        // (SedeAtencionId), traducible sin trucos.
+        if (filtro.SucursalId is Guid sedeFiltro)
+        {
+            joined = joined.Where(x => x.p.SedeAtencionId == sedeFiltro);
+        }
+
         // Orden: paciente alfabetico ascendente, secundario por fecha de cierre desc
         // (las mas recientes arriba dentro del mismo paciente). El usuario pidio "orden
         // alfabetico por la fecha de cierre" — interpretamos: alfabetico por paciente,
@@ -204,6 +211,19 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(a => new { a.Id, a.Nombre })
                 .ToDictionaryAsync(x => x.Id, x => x.Nombre, ct);
 
+        // Lookup Sede por paciente: Paciente.SedeAtencionId -> Sucursal.Nombre.
+        var sedeIds = rows
+            .Where(r => r.Pa.SedeAtencionId.HasValue)
+            .Select(r => r.Pa.SedeAtencionId!.Value)
+            .Distinct()
+            .ToList();
+        var sedeIdToNombre = sedeIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Sucursales.AsNoTracking()
+                .Where(s => sedeIds.Contains(s.Id))
+                .Select(s => new { s.Id, s.Nombre })
+                .ToDictionaryAsync(x => x.Id, x => x.Nombre, ct);
+
         return rows.Select(r =>
         {
             Guid? aseId = null;
@@ -213,6 +233,9 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 aseId = aId;
                 aseIdToNombre.TryGetValue(aId, out aseNombre);
             }
+            Guid? sedeId = r.Pa.SedeAtencionId;
+            string? sedeNombre = null;
+            if (sedeId is Guid sid) { sedeIdToNombre.TryGetValue(sid, out sedeNombre); }
             return new OrdenClinicaItemDto(
                 r.Hc.Id,
                 r.Pa.Id,
@@ -242,7 +265,9 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 r.Rv?.IteracionActual,
                 r.Rv is null ? null : agenteResumenes.GetValueOrDefault(r.Rv.Id),
                 aseNombre,
-                aseId
+                aseId,
+                sedeNombre,
+                sedeId
             );
         }).ToList();
     }
@@ -285,6 +310,27 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             .Where(a => aseguradoraIds.Contains(a.Id))
             .OrderBy(a => a.Nombre)
             .Select(a => new AseguradoraOpcionDto(a.Id, a.Nombre))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<SucursalOpcionDto>> ListarSucursalesAsync(CancellationToken ct = default)
+    {
+        // Solo sucursales que aparecen como SedeAtencionId de pacientes con HCs.
+        // Partido en dos queries por la misma razon que Aseguradoras: EF Core
+        // no traduce Distinct()+Join en cadena tras query filters.
+        var sedeIds = await db.HistoriasClinicas.AsNoTracking()
+            .Join(db.Pacientes.AsNoTracking(), h => h.PacienteId, p => p.Id,
+                (h, p) => p.SedeAtencionId)
+            .Where(s => s != null)
+            .Distinct()
+            .ToListAsync(ct);
+        if (sedeIds.Count == 0) { return Array.Empty<SucursalOpcionDto>(); }
+
+        var sedeIdValues = sedeIds.Select(s => s!.Value).ToList();
+        return await db.Sucursales.AsNoTracking()
+            .Where(s => sedeIdValues.Contains(s.Id))
+            .OrderBy(s => s.Nombre)
+            .Select(s => new SucursalOpcionDto(s.Id, s.Nombre))
             .ToListAsync(ct);
     }
 }

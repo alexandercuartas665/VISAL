@@ -41,7 +41,12 @@ public sealed record OrdenClinicaItemDto(
     /// ejecuto la atencion. Resuelta via Paciente.Contrato1Id -> Contrato.AseguradoraId.
     /// Null cuando el paciente no tiene Contrato1 configurado o esta huerfano.</summary>
     string? AseguradoraNombre = null,
-    Guid? AseguradoraId = null);
+    Guid? AseguradoraId = null,
+    /// <summary>Sede (sucursal) donde se atiende al paciente. Resuelta via
+    /// Paciente.SedeAtencionId -> Sucursal.Nombre. Null si el paciente no
+    /// tiene sede configurada.</summary>
+    string? SedeNombre = null,
+    Guid? SedeId = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,
@@ -52,9 +57,12 @@ public sealed record OrdenesClinicasFiltro(
     // el estado con un tag y la UI bloquea Consultar/Imprimir para las abiertas.
     bool SoloCerradas = false,
     /// <summary>Filtra HCs cuya EPS (via Contrato1 del paciente) sea esta aseguradora.</summary>
-    Guid? AseguradoraId = null);
+    Guid? AseguradoraId = null,
+    /// <summary>Filtra HCs cuyo paciente atienda en esta sede (SedeAtencionId).</summary>
+    Guid? SucursalId = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
+public sealed record SucursalOpcionDto(Guid Id, string Nombre);
 
 public interface IOrdenesClinicasService
 {
@@ -68,4 +76,8 @@ public interface IOrdenesClinicasService
     /// de los pacientes que tienen HCs). Ordenadas por nombre. Sirve para el dropdown
     /// de filtro EPS.</summary>
     Task<IReadOnlyList<AseguradoraOpcionDto>> ListarAseguradorasAsync(CancellationToken ct = default);
+
+    /// <summary>Lista de sucursales que aparecen realmente en /ordenes (via
+    /// SedeAtencionId de los pacientes que tienen HCs). Ordenadas por nombre.</summary>
+    Task<IReadOnlyList<SucursalOpcionDto>> ListarSucursalesAsync(CancellationToken ct = default);
 }

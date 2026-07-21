@@ -28,7 +28,11 @@
 {
     <div class="ase-card">
         <div class="ase-empty at-no-prof">
-            @if (_tieneProfesionalVinculado)
+            @if (_esAdmin)
+            {
+                <text>No hay turnos coordinados en la agencia todavia. Cuando el coordinador programe turnos desde el modulo <code>Coordinacion</code>, apareceran aqui.</text>
+            }
+            else if (_tieneProfesionalVinculado)
             {
                 <text>No tienes servicios asignados todavia. Pide al coordinador que te asigne turnos desde el modulo <code>Coordinacion</code>.</text>
             }

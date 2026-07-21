@@ -331,6 +331,7 @@ app.MapPost("/auth/login", async (
 app.MapPost("/auth/select-empresa", async (
     HttpContext http,
     [FromForm] Guid tenantId,
+    IApplicationDbContext db,
     Visal.Application.Tenancy.IEmpresaSelectorService selector,
     Visal.Application.Tenancy.ISedeSelectorService sedes) =>
 {
@@ -350,15 +351,52 @@ app.MapPost("/auth/select-empresa", async (
     }
 
     // Reconstruir claims preservando identidad y agregando tenant_id + tenant_role.
+    // Tambien limpiamos los claims por-tenant que dependen del membership del tenant
+    // ANTERIOR (profesional_id, rol_id, rol_nombre, perms) — los recalculamos abajo
+    // desde el membership del tenant elegido. Sin este reset, un usuario que cambia
+    // de agencia arrastraria los permisos/rol de la anterior.
     var keep = new List<Claim>();
     foreach (var c in http.User.Claims)
     {
-        if (c.Type is "tenant_id" or "tenant_role" or "needs_tenant" or "sucursal_id") { continue; }
+        if (c.Type is "tenant_id" or "tenant_role" or "needs_tenant" or "sucursal_id"
+            or "profesional_id" or "rol_id" or "rol_nombre" or "perms") { continue; }
         keep.Add(c);
     }
     keep.Add(new Claim("tenant_id", resultado.TenantId.ToString()));
     keep.Add(new Claim("tenant_role", resultado.TenantRole));
     if (resultado.EsGlobalAccess) { keep.Add(new Claim("global_access", "1")); }
+
+    // Cargar membership del tenant elegido para emitir los mismos claims que el
+    // flujo /auth/login (profesional_id / rol_id / rol_nombre / perms). Sin esto,
+    // un especialista que entra via el selector no aparece vinculado en /atencion
+    // y un admin cuyo rol vive en la tabla Roles pierde su menu completo.
+    var membership = await db.TenantUsers.IgnoreQueryFilters()
+        .Where(tu => tu.PlatformUserId == userId
+                  && tu.TenantId == resultado.TenantId
+                  && tu.Status == PlatformUserStatus.Active)
+        .FirstOrDefaultAsync();
+    if (membership?.ProfesionalId is Guid pidSel)
+    {
+        keep.Add(new Claim("profesional_id", pidSel.ToString()));
+    }
+    if (membership?.RolId is Guid rolIdSel)
+    {
+        keep.Add(new Claim("rol_id", rolIdSel.ToString()));
+        var rolNombreSel = await db.Roles.IgnoreQueryFilters()
+            .Where(r => r.Id == rolIdSel).Select(r => r.Nombre).FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(rolNombreSel))
+        {
+            keep.Add(new Claim("rol_nombre", rolNombreSel));
+        }
+        var permisosSel = await db.RolPermisos.IgnoreQueryFilters()
+            .Where(p => p.RolId == rolIdSel && p.Ver)
+            .Select(p => p.Modulo)
+            .ToListAsync();
+        if (permisosSel.Count > 0)
+        {
+            keep.Add(new Claim("perms", string.Join(',', permisosSel)));
+        }
+    }
 
     // Si el usuario tiene exactamente una sede a su alcance, entrar directo con sucursal_id.
     // Si tiene varias o ninguna, dejarlo en el selector de sede (o seguir sin sede si no hay).

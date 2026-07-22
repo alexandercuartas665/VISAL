@@ -168,6 +168,20 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             .Where(c => c.Activo)
             .ToDictionaryAsync(c => c.Codigo, c => c.TipoArchivoRips, StringComparer.OrdinalIgnoreCase, ct);
 
+        // 6.d) Tarifa unitaria del ServicioContrato (mapeamos por Guid ya que
+        //      Asignacion.ServicioId guarda el Guid del servicio contratado
+        //      como string — ver AsignacionService linea 557 patron heredado).
+        var servicioContratoIds = asignacionesPorPac.Values
+            .SelectMany(l => l)
+            .Where(a => Guid.TryParse(a.ServicioId, out _))
+            .Select(a => Guid.Parse(a.ServicioId))
+            .Distinct().ToList();
+        var serviciosContrato = servicioContratoIds.Count == 0
+            ? new Dictionary<Guid, ServicioContrato>()
+            : await db.ServiciosContrato.AsNoTracking()
+                .Where(s => servicioContratoIds.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id, ct);
+
         // Descripciones CUPS via catalogo — usamos el diagnostico principal del
         // paciente como proxy cuando no hay servicio contrato claro. Es lo mas
         // que podemos derivar sin cablear turno/asignacion.
@@ -260,11 +274,42 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
 
             string? codigoAutorizacion = asigRelevante?.CodigoAutorizacion;
 
+            // Nombre del servicio y tarifa unitaria — vienen del par
+            // (Asignacion, ServicioContrato). NombreServicio esta denormalizado
+            // en la asignacion; la tarifa vive en el contrato de servicio.
+            string? nombreServicio = asigRelevante?.NombreServicio;
+            decimal? valorUnitario = null;
+            if (asigRelevante is not null
+                && Guid.TryParse(asigRelevante.ServicioId, out var sid)
+                && serviciosContrato.TryGetValue(sid, out var sc))
+            {
+                valorUnitario = sc.Tarifa;
+            }
+
+            // Cuota moderadora / copago — mutuamente excluyentes segun TipoPago
+            // de la asignacion. Preferimos el valor real que pago el paciente;
+            // si no se registro, caemos al sugerido por el catalogo de cuotas.
+            decimal? cuotaModeradora = null;
+            decimal? copago = null;
+            if (asigRelevante is not null)
+            {
+                var valorPago = asigRelevante.ValorPagoReal ?? asigRelevante.ValorPagoSugerido;
+                if (string.Equals(asigRelevante.TipoPago, "CUOTA", StringComparison.OrdinalIgnoreCase))
+                {
+                    cuotaModeradora = valorPago;
+                }
+                else if (string.Equals(asigRelevante.TipoPago, "COPAGO", StringComparison.OrdinalIgnoreCase))
+                {
+                    copago = valorPago;
+                }
+            }
+
             hechos.Add(new RelacionFacturasHecho(
                 hc, paciente, contrato, aseguradora, sucursal, profesional,
                 cupsCodigo, cupsDescripcion,
                 deptoNombre, munNombre, nacNombre,
-                codHabResuelto, tipoArchivoRips, codigoAutorizacion));
+                codHabResuelto, tipoArchivoRips, codigoAutorizacion,
+                nombreServicio, valorUnitario, cuotaModeradora, copago));
         }
         return hechos;
     }

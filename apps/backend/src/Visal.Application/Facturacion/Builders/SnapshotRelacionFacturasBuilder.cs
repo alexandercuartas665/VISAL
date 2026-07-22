@@ -87,6 +87,13 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Archivo json"]                            = "Tipo de archivo RIPS del modulo del servicio prestado (Catalogo /config/tipos-servicio → TipoArchivoRips: AC/AP/AT/AM)",
         ["Fecha suministro de tecnologia"]          = "sale del modulo de coordinacion momento que asigna el servicio",
         ["CUPS"]                                    = "sale del modulo de asignacion, cuando se selecciona el servicio y la cantidad al momento de asignar",
+        ["Codigo Externo (Factura)"]                = "Mismo valor que CUPS — la EPS lo espera duplicado para trazabilidad interna de la factura",
+        ["Cantidad"]                                = "1 por fila — cada HC Cerrada representa un servicio individual facturable",
+        ["Descripción del procedimiento (Factura)"] = "Nombre del servicio asignado al paciente (Asignacion.NombreServicio). Si no hay asignacion, fallback: descripcion del CUPS",
+        ["Valor Unitario"]                          = "Tarifa del servicio pactada en el contrato (Aseguradoras → Contratos → Servicios → columna Tarifa)",
+        ["Vr Cuota Moderadora "]                    = "Cuota moderadora que pago el paciente. Sale de /asignacion cuando el operador marca TipoPago=CUOTA (valor real o sugerido por el catalogo cuotas-copagos)",
+        ["Copago o Pago Compartido"]                = "Copago que pago el paciente. Sale de /asignacion cuando el operador marca TipoPago=COPAGO (valor real o sugerido por el catalogo cuotas-copagos)",
+        ["Valor Total"]                             = "Cantidad × Valor Unitario. Con cantidad=1 por fila, coincide con la tarifa del servicio",
         ["Diagnóstico"]                             = "Modulo de atencion, historia clinica",
         ["TipoDocProfesional"]                      = "Modulo de atencion datos del profesional que realiza la historia clinica",
         ["Finalidad"]                               = "Modulo atencion, cuando el profesional llena la historia clinica",
@@ -140,13 +147,13 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 17 — fecha de cierre de la HC
             ["Hora"] = fechaLocal.ToString("HH:mm:ss"),                        // 18
             ["CUPS"] = h.CupsCodigo,                                           // 19
-            ["Codigo Externo (Factura)"] = null,                               // 20
+            ["Codigo Externo (Factura)"] = h.CupsCodigo,                       // 20 — misma clave que CUPS (spec EPS)
             ["Cantidad"] = 1,                                                  // 21 — 1 HC = 1 fila
-            ["Descripción del procedimiento (Factura)"] = h.CupsDescripcion,   // 22
-            ["Valor Unitario"] = null,                                         // 23 — sin servicio/tarifa asociada
-            ["Vr Cuota Moderadora "] = null,                                   // 24
-            ["Copago o Pago Compartido"] = null,                               // 25
-            ["Valor Total"] = null,                                            // 26
+            ["Descripción del procedimiento (Factura)"] = h.NombreServicio ?? h.CupsDescripcion, // 22 — nombre del servicio asignado
+            ["Valor Unitario"] = h.ValorUnitario,                              // 23 — ServicioContrato.Tarifa
+            ["Vr Cuota Moderadora "] = h.ValorCuotaModeradora,                 // 24 — Asignacion (TipoPago=CUOTA)
+            ["Copago o Pago Compartido"] = h.ValorCopago,                     // 25 — Asignacion (TipoPago=COPAGO)
+            ["Valor Total"] = h.ValorUnitario,                                 // 26 — Cantidad(1) x Tarifa
             ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 27
             ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 28
             ["DocumentoProf"] = h.Profesional?.NumeroDocumento,                // 29

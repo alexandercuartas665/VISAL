@@ -50,4 +50,12 @@ public sealed record RelacionFacturasHecho(
     /// tipos de servicio segun el modulo de la asignacion asociada a la HC.</summary>
     string? TipoArchivoRips,
     /// <summary>Numero de autorizacion de la EPS, viene de la asignacion.</summary>
-    string? CodigoAutorizacion);
+    string? CodigoAutorizacion,
+    /// <summary>Nombre del servicio prestado (Asignacion.NombreServicio).</summary>
+    string? NombreServicio,
+    /// <summary>Tarifa unitaria del servicio segun el contrato (ServicioContrato.Tarifa).</summary>
+    decimal? ValorUnitario,
+    /// <summary>Cuota moderadora pagada por el paciente (solo si Asignacion.TipoPago == CUOTA).</summary>
+    decimal? ValorCuotaModeradora,
+    /// <summary>Copago pagado por el paciente (solo si Asignacion.TipoPago == COPAGO).</summary>
+    decimal? ValorCopago);

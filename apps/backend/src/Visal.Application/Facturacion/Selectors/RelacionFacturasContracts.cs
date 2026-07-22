@@ -18,23 +18,23 @@ public sealed record RelacionFacturasFiltros(
 /// snapshot necesita para producir UNA fila del template EPS. Se compone
 /// enteramente de entidades ya cargadas: el builder no vuelve a la BD.
 ///
-/// Criterio actual (v2): 1 hecho = 1 sesion atendida (AsignacionTurnoSesion)
-/// cuya asignacion apunta al contrato de la aseguradora filtrada, en el rango
-/// de fecha, y con al menos una HC del paciente en estado Cerrada.
+/// Criterio actual (v3): 1 hecho = 1 <see cref="HistoriaClinica"/> con
+/// <c>Estado = Cerrada</c> cuya <c>fecha_cierre</c> cae en el rango. El
+/// vinculo con la aseguradora se resuelve por el contrato principal del
+/// paciente (<c>Paciente.Contrato1Id</c> / 2 / 3) o por <c>Paciente.AseguradoraId</c>
+/// directo, en ese orden. Los campos de sesion/turno/asignacion/servicio/paquete
+/// se dejan nullable — v3 no los usa, pero el record los mantiene para
+/// backward-compat con builders/tests que puedan haberlos referenciado antes.
 /// </summary>
 public sealed record RelacionFacturasHecho(
-    AsignacionTurnoSesion Sesion,
-    AsignacionTurno Turno,
-    Asignacion Asignacion,
+    HistoriaClinica Hc,
     Paciente Paciente,
     ContratoAseguradora Contrato,
     Aseguradora Aseguradora,
     Sucursal? Sucursal,
     Profesional? Profesional,
-    ServicioContrato? Servicio,
-    Paquete? Paquete,
-    /// <summary>CUPS a mostrar en la fila. Puede venir del ServicioContrato o
-    /// del representativo del paquete cuando aplica.</summary>
+    /// <summary>CUPS a mostrar en la fila. Puede venir del contrato o del
+    /// FormDefinition; null si no se puede resolver.</summary>
     string? CupsCodigo,
     /// <summary>Descripcion del CUPS resuelta desde el catalogo de referencia.</summary>
     string? CupsDescripcion,

@@ -36,6 +36,21 @@ public sealed class FacturacionSnapshotServiceTests
         return (new VisalDbContext(opts, tenant), tenant);
     }
 
+    /// <summary>
+    /// Fake vacio del override de columnas — devuelve la lista canonica del
+    /// builder tal cual. Los tests de este archivo no ejercitan el override,
+    /// solo el motor de snapshot.
+    /// </summary>
+    private sealed class FakeColumnaConfig : ISnapshotColumnaConfigService
+    {
+        public Task<IReadOnlyList<ColumnaConfigItemDto>> ListarAsync(TipoSnapshot tipo, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ColumnaConfigItemDto>>(Array.Empty<ColumnaConfigItemDto>());
+        public Task GuardarAsync(TipoSnapshot tipo, IReadOnlyList<ColumnaConfigItemDto> items, Guid actorUserId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ResetAsync(TipoSnapshot tipo, Guid actorUserId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<ColumnaExportInfo>> ObtenerParaExportAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ColumnaExportInfo>>(columnasCanonicas.Select(c => new ColumnaExportInfo(c, c)).ToArray());
+    }
+
     [Fact]
     public async Task GenerarAsync_ConBuilderQueEmite3Filas_TerminaVigenteYPersistePrompt()
     {
@@ -49,7 +64,7 @@ public sealed class FacturacionSnapshotServiceTests
                 new Dictionary<string, object?> { ["Col1"] = "b", ["Col2"] = 2L },
                 new Dictionary<string, object?> { ["Col1"] = "c", ["Col2"] = 3L }
             });
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(
             new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "ASMET Junio", "{\"foo\":1}"),
@@ -71,7 +86,7 @@ public sealed class FacturacionSnapshotServiceTests
     public async Task GenerarAsync_SinBuilderRegistrado_LanzaInvalidOperation()
     {
         var (ctx, tenant) = Db(TenantA);
-        var svc = new FacturacionSnapshotService(ctx, tenant, Array.Empty<ISnapshotBuilder>());
+        var svc = new FacturacionSnapshotService(ctx, tenant, Array.Empty<ISnapshotBuilder>(), new FakeColumnaConfig());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor));
@@ -82,7 +97,7 @@ public sealed class FacturacionSnapshotServiceTests
     {
         var (ctx, tenant) = Db(TenantA);
         var builder = new BuilderQueLanza(TipoSnapshot.RelacionFacturas, "boom!");
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { (ISnapshotBuilder)builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { (ISnapshotBuilder)builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(
             new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, null, "{}"),
@@ -102,7 +117,7 @@ public sealed class FacturacionSnapshotServiceTests
         var (ctx, tenant) = Db(TenantA, dbName);
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
             new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = "y" } });
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var idVigente = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "v", "{}"), Actor);
         var idArchivar = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "a", "{}"), Actor);
@@ -123,7 +138,7 @@ public sealed class FacturacionSnapshotServiceTests
         var (ctx, tenant) = Db(TenantA);
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
             new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = 1L } });
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
 
@@ -139,7 +154,7 @@ public sealed class FacturacionSnapshotServiceTests
     {
         var (ctx, tenant) = Db(TenantA);
         var builder = new BuilderQueLanza(TipoSnapshot.RelacionFacturas, "boom");
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { (ISnapshotBuilder)builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { (ISnapshotBuilder)builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
 
@@ -155,7 +170,7 @@ public sealed class FacturacionSnapshotServiceTests
             Enumerable.Range(1, 10)
                 .Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["Nombre"] = $"paciente{i}" })
                 .ToArray());
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
 
@@ -184,7 +199,7 @@ public sealed class FacturacionSnapshotServiceTests
             new Dictionary<string, object?> { ["Consecutivo Factura"] = null, ["Identificación"] = "104578855", ["Descripción del procedimiento (Factura)"] = "TERAPIA FISICA" }
         };
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "ASMET Junio", "{}"), Actor);
         var archivo = await svc.ExportarExcelAsync(id);
@@ -224,7 +239,7 @@ public sealed class FacturacionSnapshotServiceTests
             }
         };
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
         var archivo = await svc.ExportarExcelAsync(id);
@@ -254,7 +269,7 @@ public sealed class FacturacionSnapshotServiceTests
             }
         };
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
         var archivo = await svc.ExportarExcelAsync(id);
@@ -291,7 +306,7 @@ public sealed class FacturacionSnapshotServiceTests
             }
         };
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
         var archivo = await svc.ExportarExcelAsync(id);
@@ -315,7 +330,7 @@ public sealed class FacturacionSnapshotServiceTests
             new Dictionary<string, object?> { ["Col1"] = "sin escape", ["Col2"] = 42L }
         };
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, cols, filas);
-        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder });
+        var svc = new FacturacionSnapshotService(ctx, tenant, new[] { builder }, new FakeColumnaConfig());
 
         var id = await svc.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "x", "{}"), Actor);
         var archivo = await svc.ExportarCsvAsync(id);
@@ -340,7 +355,7 @@ public sealed class FacturacionSnapshotServiceTests
     public async Task ExportarAsync_SnapshotInexistente_DevuelveNull()
     {
         var (ctx, tenant) = Db(TenantA);
-        var svc = new FacturacionSnapshotService(ctx, tenant, Array.Empty<ISnapshotBuilder>());
+        var svc = new FacturacionSnapshotService(ctx, tenant, Array.Empty<ISnapshotBuilder>(), new FakeColumnaConfig());
 
         var xlsx = await svc.ExportarExcelAsync(Guid.NewGuid());
         var csv = await svc.ExportarCsvAsync(Guid.NewGuid());
@@ -357,11 +372,11 @@ public sealed class FacturacionSnapshotServiceTests
         var (ctxA, tenantA) = Db(TenantA, dbName);
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
             new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = "solo A" } });
-        var svcA = new FacturacionSnapshotService(ctxA, tenantA, new[] { builder });
+        var svcA = new FacturacionSnapshotService(ctxA, tenantA, new[] { builder }, new FakeColumnaConfig());
         var idA = await svcA.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "A", "{}"), Actor);
 
         var (ctxB, tenantB) = Db(TenantB, dbName);
-        var svcB = new FacturacionSnapshotService(ctxB, tenantB, new[] { builder });
+        var svcB = new FacturacionSnapshotService(ctxB, tenantB, new[] { builder }, new FakeColumnaConfig());
 
         Assert.Null(await svcB.ExportarExcelAsync(idA));
         Assert.Null(await svcB.ExportarCsvAsync(idA));
@@ -375,13 +390,13 @@ public sealed class FacturacionSnapshotServiceTests
         var (ctxA, tenantA) = Db(TenantA, dbName);
         var builder = new BuilderFake(TipoSnapshot.RelacionFacturas, new[] { "X" },
             new IReadOnlyDictionary<string, object?>[] { new Dictionary<string, object?> { ["X"] = "solo A" } });
-        var svcA = new FacturacionSnapshotService(ctxA, tenantA, new[] { builder });
+        var svcA = new FacturacionSnapshotService(ctxA, tenantA, new[] { builder }, new FakeColumnaConfig());
 
         var idA = await svcA.GenerarAsync(new GenerarSnapshotCmd(TipoSnapshot.RelacionFacturas, "A", "{}"), Actor);
 
         // Ahora el mismo store visto desde tenant B.
         var (ctxB, tenantB) = Db(TenantB, dbName);
-        var svcB = new FacturacionSnapshotService(ctxB, tenantB, new[] { builder });
+        var svcB = new FacturacionSnapshotService(ctxB, tenantB, new[] { builder }, new FakeColumnaConfig());
 
         var listaB = await svcB.ListarAsync(EstadoSnapshot.Vigente);
         Assert.Empty(listaB);

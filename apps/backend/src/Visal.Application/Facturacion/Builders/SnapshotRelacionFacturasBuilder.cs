@@ -82,29 +82,22 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
 
     private static Dictionary<string, object?> Mapear(RelacionFacturasHecho h)
     {
-        // Cuota/Copago mutuamente excluyentes (spec §7.3).
-        decimal? vCuota = null, vCopago = null;
-        if (string.Equals(h.Asignacion.TipoPago, "CUOTA", StringComparison.OrdinalIgnoreCase))
-        {
-            vCuota = h.Asignacion.ValorPagoReal ?? h.Asignacion.ValorPagoSugerido;
-        }
-        else if (string.Equals(h.Asignacion.TipoPago, "COPAGO", StringComparison.OrdinalIgnoreCase))
-        {
-            vCopago = h.Asignacion.ValorPagoReal ?? h.Asignacion.ValorPagoSugerido;
-        }
-
-        decimal? valorUnitario = h.Asignacion.PaqueteValorPactado ?? h.Servicio?.Tarifa;
-        decimal? valorTotal = h.Servicio?.ValorTotal ?? valorUnitario;
+        // v3: la HC es la unidad base. Los campos de asignacion/turno/sesion/
+        // servicio ya no aplican (prod no genera esos registros). Los dejamos
+        // en null explicito para que la EPS reciba filas consistentes aunque
+        // incompletas — el flujo de facturacion posterior debera completarlos.
+        var fechaCierre = h.Hc.FechaCierre ?? h.Hc.UpdatedAt ?? h.Hc.CreatedAt;
+        var fechaLocal = fechaCierre.ToLocalTime();
 
         return new Dictionary<string, object?>
         {
             ["Consecutivo Factura"] = null,                                    //  1  — proceso posterior
             ["Orden"] = null,                                                  //  2  — vacio por ahora
-            ["Contrato"] = h.Asignacion.ContratoCodigo,                        //  3
+            ["Contrato"] = h.Contrato.CodigoContrato,                          //  3  — codigo del contrato de la EPS
             ["codigo habilitacion "] = h.Sucursal?.CodigoHabilitacion,         //  4
             ["Regimen"] = h.Paciente.Regimen,                                  //  5
             ["Archivo json"] = null,                                           //  6  — vacio
-            ["Autorizacion"] = h.Asignacion.CodigoAutorizacion,                //  7
+            ["Autorizacion"] = null,                                           //  7  — v3 no resuelve autorizacion
             ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  8
             ["Identificación"] = h.Paciente.NumeroDocumento,                   //  9
             ["Primer Apellido"] = h.Paciente.PrimerApellido,                   // 10
@@ -113,26 +106,26 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Segundo Nombre"] = h.Paciente.SegundoNombre,                     // 13
             ["Fecha de Nacimiento"] = h.Paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 14
             ["Sexo"] = h.Paciente.Sexo,                                        // 15
-            ["Fecha suministro de tecnologia"] = h.Sesion.FechaAtencion.ToString("yyyy-MM-dd"), // 16 — fecha real de atencion
-            ["Hora"] = h.Sesion.CreatedAt.ToString("HH:mm:ss"),                // 17 — no hay hora explicita, usamos CreatedAt de la sesion
+            ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 16 — fecha de cierre de la HC
+            ["Hora"] = fechaLocal.ToString("HH:mm:ss"),                        // 17
             ["CUPS"] = h.CupsCodigo,                                           // 18
-            ["Codigo Externo (Factura)"] = h.Servicio?.CodigoInterno,          // 19
-            ["Cantidad"] = h.Asignacion.PaqueteInstanciaId is not null ? 1 : h.Turno.Cantidad, // 20
+            ["Codigo Externo (Factura)"] = null,                               // 19
+            ["Cantidad"] = 1,                                                  // 20 — 1 HC = 1 fila
             ["Descripción del procedimiento (Factura)"] = h.CupsDescripcion,   // 21
-            ["Valor Unitario"] = valorUnitario,                                // 22
-            ["Vr Cuota Moderadora "] = vCuota,                                 // 23
-            ["Copago o Pago Compartido"] = vCopago,                            // 24
-            ["Valor Total"] = valorTotal,                                      // 25
+            ["Valor Unitario"] = null,                                         // 22 — sin servicio/tarifa asociada
+            ["Vr Cuota Moderadora "] = null,                                   // 23
+            ["Copago o Pago Compartido"] = null,                               // 24
+            ["Valor Total"] = null,                                            // 25
             ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 26
             ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 27
             ["DocumentoProf"] = h.Profesional?.NumeroDocumento,                // 28
             ["NomProf"] = h.Profesional?.NombreCompleto,                       // 29
-            ["Finalidad"] = h.Servicio?.Finalidad,                             // 30
-            ["Causa Externa"] = h.Servicio?.CausaExterna,                      // 31
-            ["Modalidad Atención"] = h.Servicio?.ModalidadAtencion,            // 32
-            ["Vía de Ingreso"] = h.Servicio?.ViaIngreso,                       // 33
-            ["Grupo Servicios"] = h.Servicio?.GrupoServicios,                  // 34
-            ["Servicios"] = h.Servicio?.Servicios,                             // 35
+            ["Finalidad"] = h.Hc.RipsFinalidadCodigo,                          // 30
+            ["Causa Externa"] = h.Hc.RipsCausaExternaCodigo,                   // 31
+            ["Modalidad Atención"] = null,                                     // 32
+            ["Vía de Ingreso"] = h.Hc.RipsViaIngresoCodigo,                    // 33
+            ["Grupo Servicios"] = null,                                        // 34
+            ["Servicios"] = null,                                              // 35
             ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 36
             ["Departamento"] = h.DepartamentoNombre,                           // 37
             ["Municipio"] = h.MunicipioNombre,                                 // 38

@@ -128,6 +128,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<FacturacionSnapshot> FacturacionSnapshots => Set<FacturacionSnapshot>();
     public DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas => Set<FacturacionSnapshotFila>();
     public DbSet<FacturacionSnapshotColumnaConfig> FacturacionSnapshotColumnaConfigs => Set<FacturacionSnapshotColumnaConfig>();
+    public DbSet<FacturacionSnapshotFilaCambio> FacturacionSnapshotFilaCambios => Set<FacturacionSnapshotFilaCambio>();
     public DbSet<RevisionClinica> RevisionesClinica => Set<RevisionClinica>();
     public DbSet<RevisionClinicaEvento> RevisionClinicaEventos => Set<RevisionClinicaEvento>();
     public DbSet<RevisionPolicy> RevisionPolicies => Set<RevisionPolicy>();
@@ -1397,6 +1398,22 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Un solo override por (tenant, tipo, columna). Si el tenant guarda
             // dos veces la misma columna, upsert.
             b.HasIndex(x => new { x.TenantId, x.Tipo, x.ColumnaOriginal }).IsUnique();
+        });
+
+        modelBuilder.Entity<FacturacionSnapshotFilaCambio>(b =>
+        {
+            b.Property(x => x.ColumnaOriginal).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ValorAntes).HasMaxLength(4000);
+            b.Property(x => x.ValorDespues).HasMaxLength(4000);
+            b.Property(x => x.Motivo).HasMaxLength(1000);
+
+            b.HasOne(x => x.Snapshot).WithMany()
+                .HasForeignKey(x => x.SnapshotId).OnDelete(DeleteBehavior.Cascade);
+
+            // Panel de auditoria: listar cambios por snapshot ordenados por fecha.
+            b.HasIndex(x => new { x.SnapshotId, x.CreatedAt });
+            // Reporte "quien tocó qué fila" — util cuando la EPS reclama por una fila.
+            b.HasIndex(x => new { x.SnapshotId, x.FilaId, x.CreatedAt });
         });
 
         modelBuilder.Entity<RevisionClinica>(b =>

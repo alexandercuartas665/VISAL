@@ -203,10 +203,18 @@ public sealed class FacturacionSnapshotService(
         var filas = await q.OrderBy(x => x.NumeroFila)
             .Skip((pagina - 1) * tamanoPagina)
             .Take(tamanoPagina)
-            .Select(x => x.DatosJson)
+            .Select(x => new { x.Id, x.DatosJson })
             .ToListAsync(ct);
 
-        var items = filas.Select(Deserializar).ToList();
+        // Enriquecemos cada dict con __filaId para que la UI pueda ubicar la
+        // fila al editar celdas. Clave con doble underscore para no chocar con
+        // columnas del builder (que nunca empiezan asi).
+        var items = filas.Select(f =>
+        {
+            var dict = new Dictionary<string, object?>(Deserializar(f.DatosJson), StringComparer.Ordinal);
+            dict["__filaId"] = f.Id;
+            return (IReadOnlyDictionary<string, object?>)dict;
+        }).ToList();
 
         // TODO Fase 2/3: ordenar server-side por columna arbitraria (requiere
         // extraer campo del jsonb). Por ahora ordenamos client-side dentro de la
@@ -245,6 +253,95 @@ public sealed class FacturacionSnapshotService(
         snap.ArchivadoPor = actor;
         snap.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<bool> ActualizarValorCeldaAsync(
+        Guid snapshotId,
+        Guid filaId,
+        string columna,
+        string? valorNuevo,
+        Guid actor,
+        string? motivo = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(columna)) { throw new ArgumentException("Columna requerida.", nameof(columna)); }
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == snapshotId, ct)
+            ?? throw new InvalidOperationException("Snapshot no encontrado.");
+        if (snap.Estado != EstadoSnapshot.Vigente)
+        {
+            throw new InvalidOperationException(
+                $"Solo se pueden editar celdas de snapshots Vigentes. Estado actual: {snap.Estado}.");
+        }
+
+        var fila = await db.FacturacionSnapshotFilas.FirstOrDefaultAsync(
+            x => x.Id == filaId && x.SnapshotId == snapshotId, ct)
+            ?? throw new InvalidOperationException("Fila no encontrada en el snapshot.");
+
+        // Deserializamos, actualizamos y reserializamos con las mismas opciones
+        // que usa el motor de escritura para mantener el formato coherente.
+        var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(fila.DatosJson) ?? new();
+        string? valorAntesStr = null;
+        if (dict.TryGetValue(columna, out var jeAntes))
+        {
+            valorAntesStr = jeAntes.ValueKind switch
+            {
+                JsonValueKind.Null => null,
+                JsonValueKind.String => jeAntes.GetString(),
+                _ => jeAntes.GetRawText()
+            };
+        }
+
+        // Normalizacion: string vacio se guarda como null para consistencia con
+        // "columna sin valor".
+        var valorLimpio = string.IsNullOrWhiteSpace(valorNuevo) ? null : valorNuevo.Trim();
+
+        if (string.Equals(valorAntesStr, valorLimpio, StringComparison.Ordinal))
+        {
+            // Sin cambio real — no ensuciamos la auditoria con no-ops.
+            return false;
+        }
+
+        // Regeneramos el dict con el nuevo valor y guardamos.
+        var nuevo = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var kv in dict)
+        {
+            nuevo[kv.Key] = kv.Key == columna ? valorLimpio : ExtraerValor(kv.Value);
+        }
+        // Si la columna no existia en la fila original, la agregamos ahora.
+        if (!nuevo.ContainsKey(columna)) { nuevo[columna] = valorLimpio; }
+
+        fila.DatosJson = JsonSerializer.Serialize(nuevo, JsonOpts);
+        fila.UpdatedBy = actor;
+
+        db.FacturacionSnapshotFilaCambios.Add(new FacturacionSnapshotFilaCambio
+        {
+            TenantId = tid,
+            SnapshotId = snapshotId,
+            FilaId = filaId,
+            NumeroFila = fila.NumeroFila,
+            ColumnaOriginal = columna,
+            ValorAntes = Truncate(valorAntesStr, 4000),
+            ValorDespues = Truncate(valorLimpio, 4000),
+            ActorUserId = actor,
+            Motivo = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim(),
+            CreatedBy = actor
+        });
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default)
+    {
+        return await db.FacturacionSnapshotFilaCambios.AsNoTracking()
+            .Where(x => x.SnapshotId == snapshotId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new CambioCeldaDto(
+                x.Id, x.FilaId, x.NumeroFila, x.ColumnaOriginal,
+                x.ValorAntes, x.ValorDespues, x.ActorUserId, x.CreatedAt, x.Motivo))
+            .ToListAsync(ct);
     }
 
     private static FacturacionSnapshotDto Map(FacturacionSnapshot x, string? aseguradoraNombre = null) => new(
@@ -299,8 +396,8 @@ public sealed class FacturacionSnapshotService(
         _ => el.GetRawText()
     };
 
-    private static string Truncate(string s, int max) =>
-        string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max];
+    private static string? Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) || s!.Length <= max ? s : s[..max];
 
     // ---- Export ----
 

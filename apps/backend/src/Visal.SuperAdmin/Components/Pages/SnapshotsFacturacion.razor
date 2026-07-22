@@ -383,15 +383,37 @@
                             <tbody>
                                 @foreach (var fila in _verFilas)
                                 {
+                                    var filaIdObj = fila.TryGetValue("__filaId", out var fv) ? fv : null;
+                                    var filaIdParsed = filaIdObj is Guid g ? g : (Guid.TryParse(filaIdObj?.ToString(), out var gg) ? gg : Guid.Empty);
                                     <tr>
                                         @for (var i = 0; i < _verDetalle.Columnas.Count; i++)
                                         {
                                             var col = _verDetalle.Columnas[i];
                                             var idx = i;
                                             var val = fila.TryGetValue(col, out var v) ? v?.ToString() ?? "" : "";
-                                            <td class="@(idx < _verFijar ? "sn-vt-freeze" : "")"
+                                            var editable = _esColumnaEditable(col);
+                                            var esVigente = _verDetalle.Metadata.Estado == EstadoSnapshot.Vigente;
+                                            var cellClass = (idx < _verFijar ? "sn-vt-freeze" : "") + (editable && esVigente ? " sn-cell-editable" : "");
+                                            <td class="@cellClass"
                                                 style="@(idx < _verFijar ? $"left:{idx * 160}px;" : "")"
-                                                title="@val">@val</td>
+                                                title="@val">
+                                                @if (editable && esVigente && filaIdParsed != Guid.Empty)
+                                                {
+                                                    <select class="form-select form-select-sm sn-cell-select"
+                                                            value="@val"
+                                                            @onchange="@(async (ChangeEventArgs e) => await EditarCeldaAsync(filaIdParsed, col, e.Value?.ToString()))">
+                                                        <option value="">(vacio)</option>
+                                                        <option value="AC">AC</option>
+                                                        <option value="AP">AP</option>
+                                                        <option value="AT">AT</option>
+                                                        <option value="AM">AM</option>
+                                                    </select>
+                                                }
+                                                else
+                                                {
+                                                    @val
+                                                }
+                                            </td>
                                         }
                                     </tr>
                                 }
@@ -408,6 +430,7 @@
                     <a class="btn btn-outline-success btn-sm"
                        href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=csv")"
                        target="_blank" rel="noopener">Descargar CSV</a>
+                    <button class="btn btn-outline-primary btn-sm" @onclick="AbrirHistorial">Historial cambios</button>
                 </div>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVer">Cerrar</button>
             </div>
@@ -445,6 +468,60 @@
                 <button class="btn btn-danger btn-sm" @onclick="ConfirmarArchivar" disabled="@_archivando">
                     @(_archivando ? "Archivando..." : "Archivar")
                 </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ============ Modal Historial de cambios ============ *@
+@if (_showHistorial)
+{
+    <div class="sn-modal-back" @onclick="CerrarHistorial">
+        <div class="sn-modal sn-modal-lg" @onclick:stopPropagation="true">
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Auditoria</div>
+                    <h3>Historial de cambios manuales</h3>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarHistorial">&times;</button>
+            </div>
+            <div class="sn-modal-b">
+                @if (_historial.Count == 0)
+                {
+                    <div class="sn-empty">Sin cambios manuales en este snapshot.</div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Fila</th>
+                                <th>Columna</th>
+                                <th>Antes</th>
+                                <th>Despues</th>
+                                <th>Motivo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in _historial)
+                            {
+                                <tr>
+                                    <td class="sn-mono">@c.Fecha.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                    <td class="sn-td-num">@c.NumeroFila</td>
+                                    <td>@c.ColumnaOriginal</td>
+                                    <td><em>@(string.IsNullOrEmpty(c.ValorAntes) ? "(vacio)" : c.ValorAntes)</em></td>
+                                    <td><strong>@(string.IsNullOrEmpty(c.ValorDespues) ? "(vacio)" : c.ValorDespues)</strong></td>
+                                    <td>@(c.Motivo ?? "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+            <div class="sn-modal-f">
+                <span></span>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarHistorial">Cerrar</button>
             </div>
         </div>
     </div>
@@ -1174,4 +1251,54 @@
         catch (Exception ex) { _colConfigErr = ex.Message; }
         finally { _colConfigGuardando = false; }
     }
+
+    // ---------- Edicion inline de celdas (Tanda C) ----------
+
+    /// <summary>
+    /// Columnas que se pueden editar inline desde el modal Ver. Por ahora solo
+    /// "Archivo json" (AC/AP/AT/AM) — el usuario puede ampliar despues por
+    /// config. Otras columnas son readonly para evitar romper la traza EPS.
+    /// </summary>
+    private static readonly HashSet<string> _colsEditablesRelFact = new(StringComparer.Ordinal)
+    {
+        "Archivo json"
+    };
+
+    private static bool _esColumnaEditable(string col) => _colsEditablesRelFact.Contains(col);
+
+    private bool _showHistorial;
+    private List<CambioCeldaDto> _historial = new();
+
+    private async Task EditarCeldaAsync(Guid filaId, string columna, string? valorNuevo)
+    {
+        if (_verDetalle is null) { return; }
+        try
+        {
+            var cambio = await Svc.ActualizarValorCeldaAsync(
+                _verDetalle.Metadata.Id, filaId, columna, valorNuevo, _actorId);
+            if (cambio)
+            {
+                _ok = $"Celda actualizada — {columna}";
+                // Refrescar la pagina actual para reflejar el nuevo valor.
+                await CargarPaginaVer();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = "No se pudo actualizar la celda: " + ex.Message;
+        }
+    }
+
+    private async Task AbrirHistorial()
+    {
+        if (_verDetalle is null) { return; }
+        try
+        {
+            _historial = (await Svc.ListarCambiosAsync(_verDetalle.Metadata.Id)).ToList();
+            _showHistorial = true;
+        }
+        catch (Exception ex) { _error = "No se pudo cargar el historial: " + ex.Message; }
+    }
+
+    private void CerrarHistorial() => _showHistorial = false;
 }

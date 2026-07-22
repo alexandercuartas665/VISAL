@@ -49,6 +49,18 @@ public sealed record PagedResult<T>(
     int Pagina,
     int TamanoPagina);
 
+/// <summary>Entrada del historial de cambios de celdas de un snapshot.</summary>
+public sealed record CambioCeldaDto(
+    Guid Id,
+    Guid FilaId,
+    int NumeroFila,
+    string ColumnaOriginal,
+    string? ValorAntes,
+    string? ValorDespues,
+    Guid ActorUserId,
+    DateTimeOffset Fecha,
+    string? Motivo);
+
 /// <summary>
 /// Motor generico de snapshots de facturacion. Los tipos concretos aportan un
 /// <see cref="ISnapshotBuilder"/>; el motor orquesta ciclo de vida, persistencia
@@ -106,6 +118,25 @@ public interface IFacturacionSnapshotService
     /// Excel Colombia lo abra bien). Devuelve null si no existe o no es del tenant.
     /// </summary>
     Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Actualiza el valor de una celda especifica del snapshot y persiste el cambio
+    /// en la tabla de trazabilidad. Solo permitido en snapshots Vigentes.
+    /// <paramref name="valorNuevo"/> = null limpia la celda.
+    /// <paramref name="motivo"/> es opcional pero recomendado.
+    /// Devuelve true si hubo cambio, false si el valor era igual (no se registra).
+    /// </summary>
+    Task<bool> ActualizarValorCeldaAsync(
+        Guid snapshotId,
+        Guid filaId,
+        string columna,
+        string? valorNuevo,
+        Guid actor,
+        string? motivo = null,
+        CancellationToken ct = default);
+
+    /// <summary>Historial completo de cambios manuales sobre un snapshot, mas reciente primero.</summary>
+    Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default);
 }
 
 /// <summary>

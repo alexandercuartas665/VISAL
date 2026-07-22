@@ -32,4 +32,12 @@ public class CatalogoTipoServicio : TenantEntity
     /// <summary>Si esta apagado no aparece en dropdowns nuevos; los datos historicos
     /// que lo referencien siguen validos.</summary>
     public bool Activo { get; set; } = true;
+
+    /// <summary>
+    /// Tipo de archivo RIPS al que corresponde este modulo. Valores conocidos:
+    /// AC (Consultas), AP (Procedimientos), AT (Otros servicios), AM (Medicamentos).
+    /// Se guarda como texto libre en MAYUSCULAS (2 chars) para permitir agregar
+    /// tipos futuros sin migracion de enum. Null = sin clasificar.
+    /// </summary>
+    public string? TipoArchivoRips { get; set; }
 }

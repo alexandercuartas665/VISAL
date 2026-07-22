@@ -42,6 +42,7 @@
                         <th style="width:70px">Orden</th>
                         <th style="width:180px">Codigo</th>
                         <th>Nombre</th>
+                        <th style="width:130px" class="text-center" title="Tipo de archivo RIPS: AC (Consultas), AP (Procedimientos), AT (Otros servicios), AM (Medicamentos)">Tipo archivo RIPS</th>
                         <th style="width:90px" class="text-center">Activo</th>
                         <th style="width:110px"></th>
                     </tr>
@@ -53,6 +54,12 @@
                             <td>@r.Orden</td>
                             <td><code>@r.Codigo</code></td>
                             <td>@r.Nombre</td>
+                            <td class="text-center">
+                                @if (!string.IsNullOrEmpty(r.TipoArchivoRips))
+                                { <span class="badge bg-info">@r.TipoArchivoRips</span> }
+                                else
+                                { <span class="text-muted">—</span> }
+                            </td>
                             <td class="text-center">
                                 @if (r.Activo) { <span class="badge bg-success">Activo</span> }
                                 else { <span class="badge bg-secondary">Apagado</span> }
@@ -93,6 +100,16 @@
                 <div class="ase-f">
                     <label>Orden</label>
                     <input type="number" class="form-control form-control-sm" @bind="_fOrden" min="0" />
+                </div>
+                <div class="ase-f">
+                    <label>Tipo archivo RIPS <small class="text-muted">(opcional)</small></label>
+                    <select class="form-select form-select-sm" @bind="_fTipoArchivoRips">
+                        <option value="">-- Sin clasificar --</option>
+                        <option value="AC">AC - Consultas</option>
+                        <option value="AP">AP - Procedimientos</option>
+                        <option value="AT">AT - Otros servicios</option>
+                        <option value="AM">AM - Medicamentos</option>
+                    </select>
                 </div>
                 <label class="ase-chk" style="margin-top:4px;">
                     <input type="checkbox" @bind="_fActivo" /> <span>Activo</span>
@@ -145,6 +162,7 @@
     private string _fNombre = "";
     private int _fOrden = 100;
     private bool _fActivo = true;
+    private string _fTipoArchivoRips = "";
     private string? _modalError;
 
     protected override async Task OnInitializedAsync()
@@ -165,6 +183,7 @@
         _fCodigo = ""; _fNombre = "";
         _fOrden = (_rows.Count == 0 ? 1 : _rows.Max(r => r.Orden) + 1);
         _fActivo = true;
+        _fTipoArchivoRips = "";
         _modalOpen = true;
     }
 
@@ -172,6 +191,7 @@
     {
         _editId = r.Id; _modalError = null;
         _fCodigo = r.Codigo; _fNombre = r.Nombre; _fOrden = r.Orden; _fActivo = r.Activo;
+        _fTipoArchivoRips = r.TipoArchivoRips ?? "";
         _modalOpen = true;
     }
 
@@ -186,7 +206,7 @@
         try
         {
             var actor = await ActorAsync();
-            var req = new GuardarTipoServicioRequest(_editId, _fCodigo, _fNombre, _fOrden, _fActivo);
+            var req = new GuardarTipoServicioRequest(_editId, _fCodigo, _fNombre, _fOrden, _fActivo, _fTipoArchivoRips);
             await Svc.GuardarAsync(req, actor);
             _ok = _editId is null ? "Tipo creado." : "Tipo actualizado.";
             _modalOpen = false;

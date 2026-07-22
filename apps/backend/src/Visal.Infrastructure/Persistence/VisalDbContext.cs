@@ -905,6 +905,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
             b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.Property(x => x.TipoArchivoRips).HasMaxLength(2);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
         });

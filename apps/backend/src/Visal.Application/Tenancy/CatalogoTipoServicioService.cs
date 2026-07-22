@@ -20,14 +20,14 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
         var rows = await q.ToListAsync(ct);
         return rows
             .OrderBy(r => r.Orden).ThenBy(r => r.Codigo, StringComparer.OrdinalIgnoreCase)
-            .Select(r => new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo))
+            .Select(r => new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips))
             .ToList();
     }
 
     public async Task<CatalogoTipoServicioDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
         var r = await db.CatalogosTipoServicio.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        return r is null ? null : new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo);
+        return r is null ? null : new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips);
     }
 
     public async Task<CatalogoTipoServicioDto> GuardarAsync(GuardarTipoServicioRequest req, Guid actor, CancellationToken ct = default)
@@ -55,8 +55,9 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
         entity.Nombre = nombre;
         entity.Orden = req.Orden;
         entity.Activo = req.Activo;
+        entity.TipoArchivoRips = string.IsNullOrWhiteSpace(req.TipoArchivoRips) ? null : req.TipoArchivoRips.Trim().ToUpperInvariant();
         await db.SaveChangesAsync(ct);
-        return new CatalogoTipoServicioDto(entity.Id, entity.Codigo, entity.Nombre, entity.Orden, entity.Activo);
+        return new CatalogoTipoServicioDto(entity.Id, entity.Codigo, entity.Nombre, entity.Orden, entity.Activo, entity.TipoArchivoRips);
     }
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)

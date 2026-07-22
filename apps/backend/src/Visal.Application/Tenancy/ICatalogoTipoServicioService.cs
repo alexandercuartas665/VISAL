@@ -5,14 +5,16 @@ public sealed record CatalogoTipoServicioDto(
     string Codigo,
     string Nombre,
     int Orden,
-    bool Activo);
+    bool Activo,
+    string? TipoArchivoRips);
 
 public sealed record GuardarTipoServicioRequest(
     Guid? Id,
     string Codigo,
     string Nombre,
     int Orden,
-    bool Activo);
+    bool Activo,
+    string? TipoArchivoRips);
 
 /// <summary>
 /// Catalogo dinamico de modulos / tipos de servicio contratado. Es la fuente

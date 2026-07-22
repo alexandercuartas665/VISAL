@@ -1361,6 +1361,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.Estado, x.CreatedAt });
             // Filtro por Tipo en la misma pagina.
             b.HasIndex(x => new { x.TenantId, x.Tipo, x.Estado });
+            // Filtro por aseguradora — snapshots multi-EPS generan uno por EPS y la
+            // UI necesita agrupar/filtrar sin parsear FiltrosJson.
+            b.HasIndex(x => new { x.TenantId, x.AseguradoraId, x.Estado });
+            b.HasOne(x => x.Aseguradora)
+                .WithMany()
+                .HasForeignKey(x => x.AseguradoraId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<FacturacionSnapshotFila>(b =>

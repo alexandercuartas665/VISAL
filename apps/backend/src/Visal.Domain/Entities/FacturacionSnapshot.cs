@@ -23,6 +23,15 @@ public class FacturacionSnapshot : TenantEntity
     public TipoSnapshot Tipo { get; set; }
 
     /// <summary>
+    /// Aseguradora (EPS) principal del snapshot. Se popula automatico desde el
+    /// filtro <c>aseguradoraId</c> al generar. Sirve para mostrar columna en el
+    /// listado y filtrar sin tener que parsear <see cref="FiltrosJson"/>.
+    /// Null solo en tipos de snapshot que no aplican por EPS (Glosas globales, etc).
+    /// </summary>
+    public Guid? AseguradoraId { get; set; }
+    public Aseguradora? Aseguradora { get; set; }
+
+    /// <summary>
     /// Filtros aplicados serializados como JSON. La forma varia por tipo — ver
     /// el doc de cada tipo. Ejemplo Relacion de Facturas:
     /// <c>{"aseguradoraIds":[...],"sucursalIds":[...],"fechaInicio":"2026-06-01","fechaFin":"2026-06-30"}</c>.

@@ -84,6 +84,16 @@
             </select>
         </div>
         <div class="sn-f">
+            <label>Aseguradora</label>
+            <select class="form-select form-select-sm" @bind="_filtroAseguradora" @bind:after="CargarLista">
+                <option value="">(Todas)</option>
+                @foreach (var a in _relAseguradoras)
+                {
+                    <option value="@a.Id">@a.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="sn-f">
             <label>Fecha desde</label>
             <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" @bind:after="CargarLista" />
         </div>
@@ -111,6 +121,7 @@
                 <thead>
                     <tr>
                         <th>Nombre</th>
+                        <th>Aseguradora</th>
                         <th>Tipo</th>
                         <th>Estado</th>
                         <th>Inicio</th>
@@ -135,6 +146,7 @@
                                     <div class="sn-error-inline" title="@s.ErrorMensaje">Error: @Truncar(s.ErrorMensaje, 80)</div>
                                 }
                             </td>
+                            <td>@(s.AseguradoraNombre ?? "-")</td>
                             <td><span class="sn-tag">@s.Tipo</span></td>
                             <td>
                                 <span class="sn-estado sn-estado-@(s.Estado.ToString().ToLower())">@s.Estado</span>
@@ -636,6 +648,7 @@
 
     // Filtros del listado.
     private string _filtroTipo = "";
+    private string _filtroAseguradora = "";
     private DateOnly? _filtroDesde;
     private DateOnly? _filtroHasta;
 
@@ -726,7 +739,9 @@
             var estado = _tab == Tab.Vigentes ? EstadoSnapshot.Vigente : EstadoSnapshot.Archivado;
             TipoSnapshot? tipo = null;
             if (!string.IsNullOrWhiteSpace(_filtroTipo) && Enum.TryParse<TipoSnapshot>(_filtroTipo, out var t)) { tipo = t; }
-            var filtros = new FiltrosListaSnapshotDto(null, _filtroDesde, _filtroHasta);
+            Guid? asegFiltro = null;
+            if (!string.IsNullOrWhiteSpace(_filtroAseguradora) && Guid.TryParse(_filtroAseguradora, out var af)) { asegFiltro = af; }
+            var filtros = new FiltrosListaSnapshotDto(null, _filtroDesde, _filtroHasta, asegFiltro);
             _lista = (await Svc.ListarAsync(estado, tipo, filtros)).ToList();
 
             // Refrescamos ambos contadores en paralelo para el tab.
@@ -834,11 +849,12 @@
                 var okCount = 0;
                 var errores = new List<string>();
 
+                var vacios = 0;
                 foreach (var a in seleccionadas)
                 {
-                    // Cuando hay mas de una EPS, sufijamos el nombre con la aseguradora
-                    // para que la lista sea legible; con una sola respetamos el nombre puesto.
-                    var nombre = esMulti ? $"{nombreBase} - {a.Nombre}" : nombreBase;
+                    // El nombre queda tal cual lo puso el usuario — la EPS ahora es un
+                    // campo estructurado (columna Aseguradora + filtro), asi que ya no
+                    // se necesita sufijarla al nombre para distinguir los snapshots.
                     var payload = new
                     {
                         aseguradoraId = a.Id.ToString(),
@@ -849,10 +865,12 @@
                     var filtrosJson = JsonSerializer.Serialize(payload);
                     try
                     {
-                        var cmd = new GenerarSnapshotCmd(_nuevoTipo, nombre, filtrosJson);
+                        var cmd = new GenerarSnapshotCmd(_nuevoTipo, nombreBase, filtrosJson);
                         var id = await Svc.GenerarAsync(cmd, _actorId);
-                        okCount++;
-                        primerId ??= id;
+                        // Guid.Empty = el servicio descarto el snapshot por 0 filas
+                        // (regla "no basura" — no persistimos combinaciones sin datos).
+                        if (id == Guid.Empty) { vacios++; }
+                        else { okCount++; primerId ??= id; }
                     }
                     catch (Exception ex)
                     {
@@ -861,9 +879,11 @@
                 }
 
                 _showNuevo = false;
-                _ok = esMulti
+                var resumen = esMulti
                     ? $"Se generaron {okCount} snapshots (uno por aseguradora)."
                     : $"Snapshot generado: {nombreBase}.";
+                if (vacios > 0) { resumen += $" {vacios} EPS sin datos (no se guardaron)."; }
+                _ok = resumen;
                 if (errores.Count > 0)
                 {
                     _error = "Algunos snapshots fallaron: " + string.Join(" | ", errores);
@@ -897,9 +917,17 @@
             var cmd = new GenerarSnapshotCmd(_nuevoTipo, _nuevoNombre.Trim(), filtrosJsonOtro);
             var id = await Svc.GenerarAsync(cmd, _actorId);
             _showNuevo = false;
-            _ok = $"Snapshot generado: {_nuevoNombre.Trim()}.";
-            await CargarLista();
-            await AbrirVer(id);
+            if (id == Guid.Empty)
+            {
+                _ok = $"El snapshot '{_nuevoNombre.Trim()}' no se genero porque no hubo datos para los filtros aplicados.";
+                await CargarLista();
+            }
+            else
+            {
+                _ok = $"Snapshot generado: {_nuevoNombre.Trim()}.";
+                await CargarLista();
+                await AbrirVer(id);
+            }
         }
         catch (Exception ex) { _nuevoErr = ex.Message; }
         finally { _generando = false; }

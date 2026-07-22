@@ -15,7 +15,8 @@ public sealed record GenerarSnapshotCmd(
 public sealed record FiltrosListaSnapshotDto(
     Guid? UsuarioId = null,
     DateOnly? FechaInicio = null,
-    DateOnly? FechaFin = null);
+    DateOnly? FechaFin = null,
+    Guid? AseguradoraId = null);
 
 /// <summary>Fila del listado.</summary>
 public sealed record FacturacionSnapshotDto(
@@ -31,7 +32,9 @@ public sealed record FacturacionSnapshotDto(
     Guid? ArchivadoPor,
     string? MotivoArchivado,
     DateTimeOffset? FechaArchivado,
-    string? ErrorMensaje);
+    string? ErrorMensaje,
+    Guid? AseguradoraId,
+    string? AseguradoraNombre);
 
 /// <summary>Vista detallada de un snapshot (metadata + columnas del builder).</summary>
 public sealed record FacturacionSnapshotDetalleDto(

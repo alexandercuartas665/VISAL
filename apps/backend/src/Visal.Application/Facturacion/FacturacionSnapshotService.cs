@@ -47,11 +47,16 @@ public sealed class FacturacionSnapshotService(
             ? $"{cmd.Tipo} - {ahora:yyyy-MM-dd HH:mm:ss}"
             : cmd.Nombre.Trim();
 
+        // El campo estructurado aseguradora_id se hidrata del JSON de filtros
+        // para no tener que parsearlo en cada listado / filtro de la UI.
+        var aseguradoraId = ExtraerAseguradoraIdDeFiltros(cmd.FiltrosJson);
+
         var snap = new FacturacionSnapshot
         {
             TenantId = tid,
             Nombre = nombre,
             Tipo = cmd.Tipo,
+            AseguradoraId = aseguradoraId,
             FiltrosJson = string.IsNullOrWhiteSpace(cmd.FiltrosJson) ? "{}" : cmd.FiltrosJson,
             Estado = EstadoSnapshot.Ejecutando,
             FechaEjecucionInicio = ahora,
@@ -89,6 +94,16 @@ public sealed class FacturacionSnapshotService(
             }
 
             sw.Stop();
+            // Politica "no basura": snapshots sin filas no se persisten. Evita
+            // llenar el listado con combinaciones (EPS x sede) que no facturan.
+            // El caller multi-EPS reintenta con otra EPS y esta simplemente no
+            // deja rastro.
+            if (numero == 0)
+            {
+                db.FacturacionSnapshots.Remove(snap);
+                await db.SaveChangesAsync(ct);
+                return Guid.Empty;
+            }
             snap.Estado = EstadoSnapshot.Vigente;
             snap.FechaEjecucionFin = DateTimeOffset.UtcNow;
             snap.DuracionMs = (int)Math.Min(int.MaxValue, sw.ElapsedMilliseconds);
@@ -123,6 +138,7 @@ public sealed class FacturacionSnapshotService(
         var q = db.FacturacionSnapshots.AsNoTracking().Where(x => x.Estado == estado);
         if (tipo is TipoSnapshot t) { q = q.Where(x => x.Tipo == t); }
         if (filtros?.UsuarioId is Guid u) { q = q.Where(x => x.CreatedBy == u); }
+        if (filtros?.AseguradoraId is Guid ase) { q = q.Where(x => x.AseguradoraId == ase); }
         if (filtros?.FechaInicio is DateOnly fi)
         {
             var d = new DateTimeOffset(fi.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
@@ -133,7 +149,17 @@ public sealed class FacturacionSnapshotService(
             var d = new DateTimeOffset(ff.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
             q = q.Where(x => x.CreatedAt <= d);
         }
-        return await q.OrderByDescending(x => x.CreatedAt).Select(x => Map(x)).ToListAsync(ct);
+        // Lookup en memoria: cargamos los snapshots y luego traducimos
+        // AseguradoraId -> Nombre desde un dict prefetched. Evita GroupJoin
+        // que EF no traduce limpio (patron heredado del selector).
+        var rows = await q.OrderByDescending(x => x.CreatedAt).ToListAsync(ct);
+        var asegIds = rows.Where(r => r.AseguradoraId is not null).Select(r => r.AseguradoraId!.Value).Distinct().ToList();
+        var aseguradoras = asegIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Aseguradoras.AsNoTracking()
+                .Where(a => asegIds.Contains(a.Id))
+                .ToDictionaryAsync(a => a.Id, a => a.Nombre, ct);
+        return rows.Select(r => Map(r, r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null)).ToList();
     }
 
     public async Task<FacturacionSnapshotDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
@@ -142,7 +168,13 @@ public sealed class FacturacionSnapshotService(
         if (snap is null) { return null; }
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == snap.Tipo);
         var columnas = builder?.Columnas ?? Array.Empty<string>();
-        return new FacturacionSnapshotDetalleDto(Map(snap), columnas, snap.FiltrosJson);
+        string? asegNombre = null;
+        if (snap.AseguradoraId is Guid aid)
+        {
+            asegNombre = await db.Aseguradoras.AsNoTracking()
+                .Where(a => a.Id == aid).Select(a => a.Nombre).FirstOrDefaultAsync(ct);
+        }
+        return new FacturacionSnapshotDetalleDto(Map(snap, asegNombre), columnas, snap.FiltrosJson);
     }
 
     public async Task<PagedResult<IReadOnlyDictionary<string, object?>>> ListarFilasAsync(
@@ -215,10 +247,33 @@ public sealed class FacturacionSnapshotService(
         await db.SaveChangesAsync(ct);
     }
 
-    private static FacturacionSnapshotDto Map(FacturacionSnapshot x) => new(
+    private static FacturacionSnapshotDto Map(FacturacionSnapshot x, string? aseguradoraNombre = null) => new(
         x.Id, x.Nombre, x.Tipo, x.Estado,
         x.FechaEjecucionInicio, x.FechaEjecucionFin, x.DuracionMs, x.TotalFilas,
-        x.CreatedBy, x.ArchivadoPor, x.MotivoArchivado, x.FechaArchivado, x.ErrorMensaje);
+        x.CreatedBy, x.ArchivadoPor, x.MotivoArchivado, x.FechaArchivado, x.ErrorMensaje,
+        x.AseguradoraId, aseguradoraNombre);
+
+    /// <summary>
+    /// Extrae <c>aseguradoraId</c> del JSON de filtros para poder guardarlo en
+    /// una columna estructurada. Devuelve null si el filtro no lo trae o no es
+    /// parseable — el snapshot se persiste con AseguradoraId NULL.
+    /// </summary>
+    private static Guid? ExtraerAseguradoraIdDeFiltros(string? filtrosJson)
+    {
+        if (string.IsNullOrWhiteSpace(filtrosJson)) { return null; }
+        try
+        {
+            using var doc = JsonDocument.Parse(filtrosJson);
+            if (doc.RootElement.TryGetProperty("aseguradoraId", out var ae)
+                && ae.ValueKind == JsonValueKind.String
+                && Guid.TryParse(ae.GetString(), out var g))
+            {
+                return g;
+            }
+        }
+        catch { /* filtros mal formados -> null */ }
+        return null;
+    }
 
     private static IReadOnlyDictionary<string, object?> Deserializar(string json)
     {

@@ -21,6 +21,16 @@ public interface ISnapshotBuilder
     IReadOnlyList<string> Columnas { get; }
 
     /// <summary>
+    /// Descripciones intrínsecas de cada columna — de qué modulo/campo sale y
+    /// para qué sirve. Se usan como valor por defecto en la UI de Configurar
+    /// columnas cuando el tenant no ha definido una descripción propia.
+    /// Clave = <see cref="Columnas"/> tal cual; columnas sin entrada devuelven
+    /// null en el default. Vacío por defecto para builders que no las publican.
+    /// </summary>
+    IReadOnlyDictionary<string, string?> Descripciones =>
+        System.Collections.Immutable.ImmutableDictionary<string, string?>.Empty;
+
+    /// <summary>
     /// Construye las filas del snapshot para los filtros dados. Cada elemento
     /// del stream es un diccionario cuyos keys DEBEN coincidir con
     /// <see cref="Columnas"/> (los que falten se guardan como null).

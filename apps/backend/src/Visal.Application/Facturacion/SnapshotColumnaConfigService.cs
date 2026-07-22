@@ -15,6 +15,11 @@ public sealed class SnapshotColumnaConfigService(
         var canonicas = ColumnasCanonicas(tipo);
         if (canonicas.Count == 0) { return Array.Empty<ColumnaConfigItemDto>(); }
 
+        // Descripciones default publicadas por el builder (p.ej. copiadas de la
+        // fila 2 del template EPS). Se usan como sugerencia cuando el tenant no
+        // ha guardado una descripcion propia — el override siempre gana.
+        var descrDefault = DescripcionesDefault(tipo);
+
         var overrides = await db.FacturacionSnapshotColumnaConfigs.AsNoTracking()
             .Where(c => c.Tipo == tipo)
             .ToDictionaryAsync(c => c.ColumnaOriginal, ct);
@@ -27,11 +32,17 @@ public sealed class SnapshotColumnaConfigService(
         {
             if (overrides.TryGetValue(col, out var ov))
             {
-                conOverride.Add(new ColumnaConfigItemDto(col, ov.Orden, ov.Visible, ov.Alias, ov.Descripcion, ov.RutaOrigen));
+                // Si el tenant guardo descripcion, se respeta; si la dejo vacia,
+                // caemos al default del builder para que la UI muestre algo util.
+                var descr = string.IsNullOrWhiteSpace(ov.Descripcion)
+                    ? (descrDefault.TryGetValue(col, out var d) ? d : null)
+                    : ov.Descripcion;
+                conOverride.Add(new ColumnaConfigItemDto(col, ov.Orden, ov.Visible, ov.Alias, descr, ov.RutaOrigen));
             }
             else
             {
-                sinOverride.Add(new ColumnaConfigItemDto(col, siguienteOrdenBase + i, Visible: true, Alias: null, Descripcion: null, RutaOrigen: null));
+                var descr = descrDefault.TryGetValue(col, out var d) ? d : null;
+                sinOverride.Add(new ColumnaConfigItemDto(col, siguienteOrdenBase + i, Visible: true, Alias: null, Descripcion: descr, RutaOrigen: null));
                 i++;
             }
         }
@@ -140,5 +151,11 @@ public sealed class SnapshotColumnaConfigService(
     {
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == tipo);
         return builder?.Columnas ?? Array.Empty<string>();
+    }
+
+    private IReadOnlyDictionary<string, string?> DescripcionesDefault(TipoSnapshot tipo)
+    {
+        var builder = builders.FirstOrDefault(b => b.TipoAplicable == tipo);
+        return builder?.Descripciones ?? System.Collections.Immutable.ImmutableDictionary<string, string?>.Empty;
     }
 }

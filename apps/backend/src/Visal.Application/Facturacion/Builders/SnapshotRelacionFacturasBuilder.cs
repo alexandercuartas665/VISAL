@@ -20,50 +20,79 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
 {
     public TipoSnapshot TipoAplicable => TipoSnapshot.RelacionFacturas;
 
-    // Orden EXACTO del template EPS. NO reformatear los espacios ni las tildes.
+    // Orden EXACTO del template EPS "RELACION FACTURAS VISAL RT final v0.xlsx".
+    // NO reformatear los espacios ni las tildes — cualquier cambio rompe la
+    // validacion de la EPS al radicar.
     public IReadOnlyList<string> Columnas { get; } = new[]
     {
         "Consecutivo Factura",                        //  1
         "Orden",                                      //  2
         "Contrato",                                   //  3
         "codigo habilitacion ",                       //  4  (con espacio final del template)
-        "Regimen",                                    //  5
-        "Archivo json",                               //  6
-        "Autorizacion",                               //  7
-        "Tipo_Id",                                    //  8
-        "Identificación",                             //  9
-        "Primer Apellido",                            // 10
-        "Segundo Apellido",                           // 11
-        "Primer Nombre",                              // 12
-        "Segundo Nombre",                             // 13
-        "Fecha de Nacimiento",                        // 14
-        "Sexo",                                       // 15
-        "Fecha suministro de tecnologia",             // 16
-        "Hora",                                       // 17
-        "CUPS",                                       // 18
-        "Codigo Externo (Factura)",                   // 19
-        "Cantidad",                                   // 20
-        "Descripción del procedimiento (Factura)",    // 21
-        "Valor Unitario",                             // 22
-        "Vr Cuota Moderadora ",                       // 23  (con espacio final)
-        "Copago o Pago Compartido",                   // 24
-        "Valor Total",                                // 25
-        "Diagnóstico",                                // 26
-        "TipoDocProfesional",                         // 27
-        "DocumentoProf",                              // 28
-        "NomProf",                                    // 29
-        "Finalidad",                                  // 30
-        "Causa Externa",                              // 31
-        "Modalidad Atención",                         // 32
-        "Vía de Ingreso",                             // 33
-        "Grupo Servicios",                            // 34
-        "Servicios",                                  // 35
-        "Nacionalidad",                               // 36
-        "Departamento",                               // 37
-        "Municipio",                                  // 38
-        "Dirección",                                  // 39
-        "Telefono",                                   // 40
-        "Correo electrónico"                          // 41
+        "Sede",                                       //  5  (agregada por spec EPS julio 2026)
+        "Regimen",                                    //  6
+        "Archivo json",                               //  7
+        "Autorizacion",                               //  8
+        "Tipo_Id",                                    //  9
+        "Identificación",                             // 10
+        "Primer Apellido",                            // 11
+        "Segundo Apellido",                           // 12
+        "Primer Nombre",                              // 13
+        "Segundo Nombre",                             // 14
+        "Fecha de Nacimiento",                        // 15
+        "Sexo",                                       // 16
+        "Fecha suministro de tecnologia",             // 17
+        "Hora",                                       // 18
+        "CUPS",                                       // 19
+        "Codigo Externo (Factura)",                   // 20
+        "Cantidad",                                   // 21
+        "Descripción del procedimiento (Factura)",    // 22
+        "Valor Unitario",                             // 23
+        "Vr Cuota Moderadora ",                       // 24  (con espacio final)
+        "Copago o Pago Compartido",                   // 25
+        "Valor Total",                                // 26
+        "Diagnóstico",                                // 27
+        "TipoDocProfesional",                         // 28
+        "DocumentoProf",                              // 29
+        "NomProf",                                    // 30
+        "Finalidad",                                  // 31
+        "Causa Externa",                              // 32
+        "Modalidad Atención",                         // 33
+        "Vía de Ingreso",                             // 34
+        "Grupo Servicios",                            // 35
+        "Servicios",                                  // 36
+        "Nacionalidad",                               // 37
+        "Departamento",                               // 38
+        "Municipio",                                  // 39
+        "Dirección",                                  // 40
+        "Telefono",                                   // 41
+        "Correo electrónico"                          // 42
+    };
+
+    /// <summary>
+    /// Descripciones de cada columna copiadas EXACTAS de la fila 2 del template
+    /// EPS (columnas sin descripcion en el Excel quedan sin entrada aqui — la
+    /// UI usa null como default). Sirven de valor inicial al configurar
+    /// columnas del snapshot; el tenant puede sobrescribirlas.
+    /// </summary>
+    public IReadOnlyDictionary<string, string?> Descripciones { get; } = new Dictionary<string, string?>
+    {
+        ["Consecutivo Factura"]                     = "Numero de factura",
+        ["Contrato"]                                = "sale del modulo de admision casilla contrato",
+        ["codigo habilitacion "]                    = "Codigo de habilitacion sede",
+        ["Sede"]                                    = "sale de la sede de servicio prestado",
+        ["Regimen"]                                 = "sale del modulo de admision casilla tipo usuario",
+        ["Autorizacion"]                            = "sale del modulo de coordinacion casilla autorizacion",
+        ["Tipo_Id"]                                 = "sale del modulo de admision Datos del paciente",
+        ["Fecha suministro de tecnologia"]          = "sale del modulo de coordinacion momento que asigna el servicio",
+        ["CUPS"]                                    = "sale del modulo de asignacion, cuando se selecciona el servicio y la cantidad al momento de asignar",
+        ["Diagnóstico"]                             = "Modulo de atencion, historia clinica",
+        ["TipoDocProfesional"]                      = "Modulo de atencion datos del profesional que realiza la historia clinica",
+        ["Finalidad"]                               = "Modulo atencion, cuando el profesional llena la historia clinica",
+        ["Modalidad Atención"]                      = "Modulo de asignacion al momento de agregar el servicio o consulta",
+        ["Vía de Ingreso"]                          = "Modulo de admision",
+        ["Grupo Servicios"]                         = "Modulo de admision, casilla contratos",
+        ["Nacionalidad"]                            = "sale del modulo de admision Datos del paciente",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -95,43 +124,44 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Orden"] = null,                                                  //  2  — vacio por ahora
             ["Contrato"] = h.Contrato.CodigoContrato,                          //  3  — codigo del contrato de la EPS
             ["codigo habilitacion "] = h.Sucursal?.CodigoHabilitacion,         //  4
-            ["Regimen"] = h.Paciente.Regimen,                                  //  5
-            ["Archivo json"] = null,                                           //  6  — vacio
-            ["Autorizacion"] = null,                                           //  7  — v3 no resuelve autorizacion
-            ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  8
-            ["Identificación"] = h.Paciente.NumeroDocumento,                   //  9
-            ["Primer Apellido"] = h.Paciente.PrimerApellido,                   // 10
-            ["Segundo Apellido"] = h.Paciente.SegundoApellido,                 // 11
-            ["Primer Nombre"] = h.Paciente.PrimerNombre,                       // 12
-            ["Segundo Nombre"] = h.Paciente.SegundoNombre,                     // 13
-            ["Fecha de Nacimiento"] = h.Paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 14
-            ["Sexo"] = h.Paciente.Sexo,                                        // 15
-            ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 16 — fecha de cierre de la HC
-            ["Hora"] = fechaLocal.ToString("HH:mm:ss"),                        // 17
-            ["CUPS"] = h.CupsCodigo,                                           // 18
-            ["Codigo Externo (Factura)"] = null,                               // 19
-            ["Cantidad"] = 1,                                                  // 20 — 1 HC = 1 fila
-            ["Descripción del procedimiento (Factura)"] = h.CupsDescripcion,   // 21
-            ["Valor Unitario"] = null,                                         // 22 — sin servicio/tarifa asociada
-            ["Vr Cuota Moderadora "] = null,                                   // 23
-            ["Copago o Pago Compartido"] = null,                               // 24
-            ["Valor Total"] = null,                                            // 25
-            ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 26
-            ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 27
-            ["DocumentoProf"] = h.Profesional?.NumeroDocumento,                // 28
-            ["NomProf"] = h.Profesional?.NombreCompleto,                       // 29
-            ["Finalidad"] = h.Hc.RipsFinalidadCodigo,                          // 30
-            ["Causa Externa"] = h.Hc.RipsCausaExternaCodigo,                   // 31
-            ["Modalidad Atención"] = null,                                     // 32
-            ["Vía de Ingreso"] = h.Hc.RipsViaIngresoCodigo,                    // 33
-            ["Grupo Servicios"] = null,                                        // 34
-            ["Servicios"] = null,                                              // 35
-            ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 36
-            ["Departamento"] = h.DepartamentoNombre,                           // 37
-            ["Municipio"] = h.MunicipioNombre,                                 // 38
-            ["Dirección"] = h.Paciente.Direccion,                              // 39
-            ["Telefono"] = h.Paciente.Telefono,                                // 40
-            ["Correo electrónico"] = h.Aseguradora.CorreoFacturacion,          // 41
+            ["Sede"] = h.Sucursal?.Nombre,                                     //  5  — nombre de la sede que atendio
+            ["Regimen"] = h.Paciente.Regimen,                                  //  6
+            ["Archivo json"] = null,                                           //  7  — vacio
+            ["Autorizacion"] = null,                                           //  8  — v3 no resuelve autorizacion
+            ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  9
+            ["Identificación"] = h.Paciente.NumeroDocumento,                   // 10
+            ["Primer Apellido"] = h.Paciente.PrimerApellido,                   // 11
+            ["Segundo Apellido"] = h.Paciente.SegundoApellido,                 // 12
+            ["Primer Nombre"] = h.Paciente.PrimerNombre,                       // 13
+            ["Segundo Nombre"] = h.Paciente.SegundoNombre,                     // 14
+            ["Fecha de Nacimiento"] = h.Paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 15
+            ["Sexo"] = h.Paciente.Sexo,                                        // 16
+            ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 17 — fecha de cierre de la HC
+            ["Hora"] = fechaLocal.ToString("HH:mm:ss"),                        // 18
+            ["CUPS"] = h.CupsCodigo,                                           // 19
+            ["Codigo Externo (Factura)"] = null,                               // 20
+            ["Cantidad"] = 1,                                                  // 21 — 1 HC = 1 fila
+            ["Descripción del procedimiento (Factura)"] = h.CupsDescripcion,   // 22
+            ["Valor Unitario"] = null,                                         // 23 — sin servicio/tarifa asociada
+            ["Vr Cuota Moderadora "] = null,                                   // 24
+            ["Copago o Pago Compartido"] = null,                               // 25
+            ["Valor Total"] = null,                                            // 26
+            ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 27
+            ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 28
+            ["DocumentoProf"] = h.Profesional?.NumeroDocumento,                // 29
+            ["NomProf"] = h.Profesional?.NombreCompleto,                       // 30
+            ["Finalidad"] = h.Hc.RipsFinalidadCodigo,                          // 31
+            ["Causa Externa"] = h.Hc.RipsCausaExternaCodigo,                   // 32
+            ["Modalidad Atención"] = null,                                     // 33
+            ["Vía de Ingreso"] = h.Hc.RipsViaIngresoCodigo,                    // 34
+            ["Grupo Servicios"] = null,                                        // 35
+            ["Servicios"] = null,                                              // 36
+            ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 37
+            ["Departamento"] = h.DepartamentoNombre,                           // 38
+            ["Municipio"] = h.MunicipioNombre,                                 // 39
+            ["Dirección"] = h.Paciente.Direccion,                              // 40
+            ["Telefono"] = h.Paciente.Telefono,                                // 41
+            ["Correo electrónico"] = h.Aseguradora.CorreoFacturacion,          // 42
         };
     }
 

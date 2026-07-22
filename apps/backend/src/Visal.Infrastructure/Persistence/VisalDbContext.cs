@@ -1383,6 +1383,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.ColumnaOriginal).HasMaxLength(200).IsRequired();
             b.Property(x => x.Alias).HasMaxLength(200);
+            b.Property(x => x.Descripcion).HasMaxLength(2000);
+            b.Property(x => x.RutaOrigen).HasMaxLength(500);
 
             // Un solo override por (tenant, tipo, columna). Si el tenant guarda
             // dos veces la misma columna, upsert.

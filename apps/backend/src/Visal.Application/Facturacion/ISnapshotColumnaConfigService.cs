@@ -47,7 +47,9 @@ public sealed record ColumnaConfigItemDto(
     string ColumnaOriginal,
     int Orden,
     bool Visible,
-    string? Alias);
+    string? Alias,
+    string? Descripcion,
+    string? RutaOrigen);
 
 /// <summary>Info compacta usada por el exportador (ya filtrada + ordenada).</summary>
 public sealed record ColumnaExportInfo(string ColumnaOriginal, string HeaderExport);

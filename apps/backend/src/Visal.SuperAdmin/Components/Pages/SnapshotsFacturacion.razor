@@ -202,22 +202,50 @@
                         </select>
                     </div>
                     <div class="ase-f">
-                        <label>Nombre * <small class="text-muted">(para identificarlo en el listado)</small></label>
-                        <input class="form-control form-control-sm" @bind="_nuevoNombre" placeholder="ASMET SALUD - Junio 2026" />
+                        <label>
+                            Nombre *
+                            <small class="text-muted">
+                                @(_nuevoTipo == TipoSnapshot.RelacionFacturas && _relAseguradoraIds.Count > 1
+                                    ? "(se sufija con el nombre de cada EPS)"
+                                    : "(para identificarlo en el listado)")
+                            </small>
+                        </label>
+                        <input class="form-control form-control-sm" @bind="_nuevoNombre" placeholder="Facturacion Julio 2026" />
                     </div>
                     @if (_nuevoTipo == TipoSnapshot.RelacionFacturas)
                     {
                         <div class="ase-f">
-                            <label>Aseguradora *</label>
-                            <select class="form-select form-select-sm" @bind="_relAseguradoraId">
-                                <option value="">-- Selecciona --</option>
+                            <label>
+                                Aseguradoras *
+                                <small class="text-muted">
+                                    (@_relAseguradoraIds.Count seleccionada@(_relAseguradoraIds.Count == 1 ? "" : "s"))
+                                </small>
+                            </label>
+                            <div style="display:flex;gap:8px;margin-bottom:6px;">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="MarcarTodasAseguradoras">
+                                    Marcar todas
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="QuitarTodasAseguradoras">
+                                    Quitar todas
+                                </button>
+                            </div>
+                            <div class="sn-multi" style="max-height:220px;overflow-y:auto;">
                                 @foreach (var a in _relAseguradoras)
                                 {
-                                    <option value="@a.Id">@a.Nombre @(string.IsNullOrEmpty(a.Nit) ? "" : $"({a.Nit})")</option>
+                                    <label class="sn-multi-chip">
+                                        <input type="checkbox"
+                                               checked="@_relAseguradoraIds.Contains(a.Id)"
+                                               @onchange="e => ToggleAseguradora(a.Id, (bool)(e.Value ?? false))" />
+                                        <span>@a.Nombre @(string.IsNullOrEmpty(a.Nit) ? "" : $"({a.Nit})")</span>
+                                    </label>
                                 }
-                            </select>
+                                @if (_relAseguradoras.Count == 0)
+                                {
+                                    <span class="text-muted">Sin aseguradoras activas.</span>
+                                }
+                            </div>
                             <small class="text-muted d-block mt-1">
-                                1 snapshot = 1 aseguradora = 1 Excel. Para multi-EPS, genera un snapshot por cada una.
+                                Se genera un snapshot independiente por cada aseguradora marcada.
                             </small>
                         </div>
                         <div class="ase-f">
@@ -442,28 +470,44 @@
             @if (_colConfigErr is not null) { <div class="ase-alert">@_colConfigErr</div> }
 
             <div class="fcc-list">
-                <div class="fcc-row fcc-head">
-                    <div class="fcc-move"></div>
-                    <div class="fcc-vis">Visible</div>
-                    <div class="fcc-name">Columna original</div>
-                    <div class="fcc-alias">Alias (header en archivo)</div>
+                <div class="fcc-item fcc-head">
+                    <div class="fcc-row-main">
+                        <div class="fcc-move"></div>
+                        <div class="fcc-vis">Visible</div>
+                        <div class="fcc-name">Columna original</div>
+                        <div class="fcc-alias">Alias (header en archivo)</div>
+                    </div>
                 </div>
                 @for (var i = 0; i < _colConfigItems.Count; i++)
                 {
                     var idx = i;
                     var it = _colConfigItems[idx];
-                    <div class="fcc-row @(it.Visible ? "" : "fcc-off")">
-                        <div class="fcc-move">
-                            <button class="fcc-arr" title="Subir" disabled="@(idx == 0)" @onclick="() => SubirColConfig(idx)">^</button>
-                            <button class="fcc-arr" title="Bajar" disabled="@(idx == _colConfigItems.Count - 1)" @onclick="() => BajarColConfig(idx)">v</button>
+                    <div class="fcc-item @(it.Visible ? "" : "fcc-off")">
+                        <div class="fcc-row-main">
+                            <div class="fcc-move">
+                                <button class="fcc-arr" title="Subir" disabled="@(idx == 0)" @onclick="() => SubirColConfig(idx)">^</button>
+                                <button class="fcc-arr" title="Bajar" disabled="@(idx == _colConfigItems.Count - 1)" @onclick="() => BajarColConfig(idx)">v</button>
+                            </div>
+                            <div class="fcc-vis">
+                                <input type="checkbox" checked="@it.Visible" @onchange="e => ToggleColConfig(idx, (bool)e.Value!)" />
+                            </div>
+                            <div class="fcc-name" title="@it.ColumnaOriginal">@it.ColumnaOriginal</div>
+                            <div class="fcc-alias">
+                                <input class="form-control form-control-sm" placeholder="@it.ColumnaOriginal"
+                                       value="@(it.Alias ?? "")" @oninput="e => SetAliasColConfig(idx, e.Value?.ToString())" />
+                            </div>
                         </div>
-                        <div class="fcc-vis">
-                            <input type="checkbox" checked="@it.Visible" @onchange="e => ToggleColConfig(idx, (bool)e.Value!)" />
-                        </div>
-                        <div class="fcc-name" title="@it.ColumnaOriginal">@it.ColumnaOriginal</div>
-                        <div class="fcc-alias">
-                            <input class="form-control form-control-sm" placeholder="@it.ColumnaOriginal"
-                                   value="@(it.Alias ?? "")" @oninput="e => SetAliasColConfig(idx, e.Value?.ToString())" />
+                        <div class="fcc-row-extra">
+                            <div class="fcc-extra-field">
+                                <label>Descripcion</label>
+                                <input class="form-control form-control-sm" placeholder="Que significa este campo..."
+                                       value="@(it.Descripcion ?? "")" @oninput="e => SetDescripcionColConfig(idx, e.Value?.ToString())" />
+                            </div>
+                            <div class="fcc-extra-field">
+                                <label>Ruta origen</label>
+                                <input class="form-control form-control-sm" placeholder="Paciente.NumeroDocumento"
+                                       value="@(it.RutaOrigen ?? "")" @oninput="e => SetRutaOrigenColConfig(idx, e.Value?.ToString())" />
+                            </div>
                         </div>
                     </div>
                 }
@@ -556,10 +600,16 @@
 
     /* Editor columnas del snapshot: filas apiladas verticales con handle, toggle, alias. */
     .fcc-list { border:1px solid var(--border); border-radius:6px; max-height:60vh; overflow-y:auto; background:white; }
-    .fcc-row { display:grid; grid-template-columns: 68px 68px minmax(180px, 1.2fr) minmax(180px, 1.4fr); gap:8px; padding:8px 10px; border-bottom:1px solid #f1f5f9; align-items:center; }
-    .fcc-row:last-child { border-bottom:none; }
-    .fcc-row.fcc-off { background:#f8fafc; opacity:0.7; }
+    .fcc-item { border-bottom:1px solid #f1f5f9; }
+    .fcc-item:last-child { border-bottom:none; }
+    .fcc-item.fcc-off { background:#f8fafc; opacity:0.7; }
+    .fcc-row-main { display:grid; grid-template-columns: 68px 68px minmax(180px, 1.2fr) minmax(180px, 1.4fr); gap:8px; padding:8px 10px; align-items:center; }
+    .fcc-row-extra { display:grid; grid-template-columns: 2fr 1fr; gap:8px; padding:0 10px 10px; }
+    .fcc-extra-field { display:flex; flex-direction:column; gap:2px; }
+    .fcc-extra-field label { font-size:11px; color:#64748b; margin:0; }
+    .fcc-extra-field input { font-size:12px; }
     .fcc-head { background:#f1f5f9; font-weight:600; font-size:12px; color:#334155; position:sticky; top:0; z-index:1; }
+    .fcc-head .fcc-row-main { padding:10px; }
     .fcc-move { display:flex; gap:4px; }
     .fcc-arr { width:26px; height:26px; border:1px solid var(--border); background:white; border-radius:4px; font-size:11px; line-height:1; cursor:pointer; padding:0; }
     .fcc-arr:hover:not(:disabled) { background:#eff6ff; border-color:#93c5fd; }
@@ -599,7 +649,7 @@
     // Filtros visuales Relacion de Facturas (F4b).
     private List<AseguradoraDto> _relAseguradoras = new();
     private List<SucursalDto> _relSucursales = new();
-    private string _relAseguradoraId = "";
+    private HashSet<Guid> _relAseguradoraIds = new();
     private HashSet<Guid> _relSucursalIds = new();
     private DateOnly? _relFechaInicio;
     private DateOnly? _relFechaFin;
@@ -708,7 +758,7 @@
         // El motor filtra por tenant activo — lo que aparece aca ya esta scoped.
         _relAseguradoras = (await AseSvc.ListAseguradorasAsync()).OrderBy(a => a.Nombre).ToList();
         _relSucursales = (await SucSvc.ListAsync(soloActivas: true)).OrderBy(s => s.Nombre).ToList();
-        _relAseguradoraId = "";
+        _relAseguradoraIds = new();
         _relSucursalIds = new();
         var hoy = DateOnly.FromDateTime(DateTime.Today);
         _relFechaInicio = new DateOnly(hoy.Year, hoy.Month, 1);
@@ -720,6 +770,22 @@
     {
         if (selected) { _relSucursalIds.Add(id); }
         else { _relSucursalIds.Remove(id); }
+    }
+
+    private void ToggleAseguradora(Guid id, bool selected)
+    {
+        if (selected) { _relAseguradoraIds.Add(id); }
+        else { _relAseguradoraIds.Remove(id); }
+    }
+
+    private void MarcarTodasAseguradoras()
+    {
+        _relAseguradoraIds = _relAseguradoras.Select(a => a.Id).ToHashSet();
+    }
+
+    private void QuitarTodasAseguradoras()
+    {
+        _relAseguradoraIds.Clear();
     }
 
     private void CerrarNuevo()
@@ -737,13 +803,13 @@
             return;
         }
 
-        string filtrosJson;
+        // Rama tipo RelacionFacturas: multi-EPS -> N snapshots (uno por aseguradora).
+        // Los otros tipos usan el JSON crudo y siguen siendo 1 snapshot.
         if (_nuevoTipo == TipoSnapshot.RelacionFacturas)
         {
-            // Validaciones spec §2.
-            if (!Guid.TryParse(_relAseguradoraId, out var aseg))
+            if (_relAseguradoraIds.Count == 0)
             {
-                _nuevoErr = "Selecciona la aseguradora."; return;
+                _nuevoErr = "Marca al menos una aseguradora."; return;
             }
             if (_relFechaInicio is null || _relFechaFin is null)
             {
@@ -753,37 +819,85 @@
             {
                 _nuevoErr = "La fecha fin debe ser mayor o igual a la fecha inicio."; return;
             }
-            // Armar el JSON exacto que el builder espera (ver
-            // SnapshotRelacionFacturasBuilder.ParsearFiltros).
-            var payload = new
+
+            _generando = true;
+            try
             {
-                aseguradoraId = aseg.ToString(),
-                sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
-                fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
-                fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
-            };
-            filtrosJson = JsonSerializer.Serialize(payload);
-        }
-        else
-        {
-            try { using var _ = JsonDocument.Parse(_nuevoFiltrosJson); }
-            catch (Exception ex)
-            {
-                _nuevoErr = "Los filtros no son JSON valido: " + ex.Message;
-                return;
+                var nombreBase = _nuevoNombre.Trim();
+                var seleccionadas = _relAseguradoras
+                    .Where(a => _relAseguradoraIds.Contains(a.Id))
+                    .OrderBy(a => a.Nombre)
+                    .ToList();
+                var esMulti = seleccionadas.Count > 1;
+                Guid? primerId = null;
+                var okCount = 0;
+                var errores = new List<string>();
+
+                foreach (var a in seleccionadas)
+                {
+                    // Cuando hay mas de una EPS, sufijamos el nombre con la aseguradora
+                    // para que la lista sea legible; con una sola respetamos el nombre puesto.
+                    var nombre = esMulti ? $"{nombreBase} - {a.Nombre}" : nombreBase;
+                    var payload = new
+                    {
+                        aseguradoraId = a.Id.ToString(),
+                        sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
+                        fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
+                        fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
+                    };
+                    var filtrosJson = JsonSerializer.Serialize(payload);
+                    try
+                    {
+                        var cmd = new GenerarSnapshotCmd(_nuevoTipo, nombre, filtrosJson);
+                        var id = await Svc.GenerarAsync(cmd, _actorId);
+                        okCount++;
+                        primerId ??= id;
+                    }
+                    catch (Exception ex)
+                    {
+                        errores.Add($"{a.Nombre}: {ex.Message}");
+                    }
+                }
+
+                _showNuevo = false;
+                _ok = esMulti
+                    ? $"Se generaron {okCount} snapshots (uno por aseguradora)."
+                    : $"Snapshot generado: {nombreBase}.";
+                if (errores.Count > 0)
+                {
+                    _error = "Algunos snapshots fallaron: " + string.Join(" | ", errores);
+                }
+                await CargarLista();
+                // Cuando es una sola EPS, abrir el detalle. Con multiples, dejar
+                // al usuario en la lista para que revise cada uno por separado.
+                if (!esMulti && primerId is Guid onlyId)
+                {
+                    await AbrirVer(onlyId);
+                }
             }
-            filtrosJson = _nuevoFiltrosJson.Trim();
+            catch (Exception ex) { _nuevoErr = ex.Message; }
+            finally { _generando = false; }
+            return;
         }
+
+        // Otros tipos: JSON manual, 1 snapshot.
+        string filtrosJsonOtro;
+        try { using var _ = JsonDocument.Parse(_nuevoFiltrosJson); }
+        catch (Exception ex)
+        {
+            _nuevoErr = "Los filtros no son JSON valido: " + ex.Message;
+            return;
+        }
+        filtrosJsonOtro = _nuevoFiltrosJson.Trim();
 
         _generando = true;
         try
         {
-            var cmd = new GenerarSnapshotCmd(_nuevoTipo, _nuevoNombre.Trim(), filtrosJson);
+            var cmd = new GenerarSnapshotCmd(_nuevoTipo, _nuevoNombre.Trim(), filtrosJsonOtro);
             var id = await Svc.GenerarAsync(cmd, _actorId);
             _showNuevo = false;
             _ok = $"Snapshot generado: {_nuevoNombre.Trim()}.";
             await CargarLista();
-            // Abrir directo al modal de detalle asi el usuario ve lo que produjo.
             await AbrirVer(id);
         }
         catch (Exception ex) { _nuevoErr = ex.Message; }
@@ -949,7 +1063,7 @@
             var items = await ColSvc.ListarAsync(_colConfigTipo);
             // Renumeramos orden secuencial para simplificar el drag & drop en memoria.
             _colConfigItems = items
-                .Select((it, i) => new ColumnaConfigItemDto(it.ColumnaOriginal, i, it.Visible, it.Alias))
+                .Select((it, i) => new ColumnaConfigItemDto(it.ColumnaOriginal, i, it.Visible, it.Alias, it.Descripcion, it.RutaOrigen))
                 .ToList();
         }
         catch (Exception ex) { _colConfigErr = ex.Message; }
@@ -980,6 +1094,18 @@
     {
         var it = _colConfigItems[idx];
         _colConfigItems[idx] = it with { Alias = string.IsNullOrWhiteSpace(alias) ? null : alias };
+    }
+
+    private void SetDescripcionColConfig(int idx, string? descripcion)
+    {
+        var it = _colConfigItems[idx];
+        _colConfigItems[idx] = it with { Descripcion = string.IsNullOrWhiteSpace(descripcion) ? null : descripcion };
+    }
+
+    private void SetRutaOrigenColConfig(int idx, string? ruta)
+    {
+        var it = _colConfigItems[idx];
+        _colConfigItems[idx] = it with { RutaOrigen = string.IsNullOrWhiteSpace(ruta) ? null : ruta };
     }
 
     private void Renumerar()

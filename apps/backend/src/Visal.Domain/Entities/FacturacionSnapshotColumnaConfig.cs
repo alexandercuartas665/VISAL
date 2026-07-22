@@ -38,4 +38,10 @@ public class FacturacionSnapshotColumnaConfig : TenantEntity
     /// (que sigue siendo la columna original).
     /// </summary>
     public string? Alias { get; set; }
+
+    /// <summary>Descripcion humana del campo (para que sirve, que significa).</summary>
+    public string? Descripcion { get; set; }
+
+    /// <summary>Ruta/origen del dato (ej. "Paciente.NumeroDocumento" o "Asignacion.ContratoCodigo -> ContratoAseguradora.Codigo").</summary>
+    public string? RutaOrigen { get; set; }
 }

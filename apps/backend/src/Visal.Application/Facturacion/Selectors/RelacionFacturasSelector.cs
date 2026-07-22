@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
+using Visal.Domain.Enums;
 
 namespace Visal.Application.Facturacion.Selectors;
 
@@ -69,10 +70,51 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             .ToListAsync(ct);
         var pacienteHasHcCerrada = pacientesConHcCerrada.ToHashSet();
 
+        // 5b) Gate "HC revisada por sede" (FCC-R). Cada sucursal decide con el flag
+        //     Sucursal.ExigirHcRevisadaParaFacturar si sus pacientes deben tener HC
+        //     con RevisionClinica en estado terminal positivo (Aprobada o ArchivadaOk)
+        //     para poder facturar. Si ninguna sede lo exige, este bloque se salta y
+        //     no cuesta queries adicionales.
+        var sedesExigenRevision = sucursales
+            .Where(s => s.ExigirHcRevisadaParaFacturar)
+            .Select(s => s.Id)
+            .ToHashSet();
+        HashSet<Guid> pacienteHasHcRevisada = new();
+        Dictionary<Guid, Guid?> pacienteSedeMap = new();
+        if (sedesExigenRevision.Count > 0)
+        {
+            pacienteSedeMap = await db.Pacientes.AsNoTracking()
+                .Where(p => pacienteIdsCandidatos.Contains(p.Id))
+                .Select(p => new { p.Id, p.SedeAtencionId })
+                .ToDictionaryAsync(x => x.Id, x => x.SedeAtencionId, ct);
+
+            // Cruce en 2 pasos (evita joins que EF Core no traduce bien tras query filters):
+            //  a) Ids de HC de los pacientes candidatos.
+            //  b) Ids de esas HC que tienen RevisionClinica.EstadoAgregado terminal positivo.
+            var hcCandidatas = await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => pacienteIdsCandidatos.Contains(h.PacienteId))
+                .Select(h => new { h.Id, h.PacienteId })
+                .ToListAsync(ct);
+            var hcIds = hcCandidatas.Select(x => x.Id).ToList();
+            var hcRevisadasIds = hcIds.Count == 0
+                ? new List<Guid>()
+                : await db.RevisionesClinica.AsNoTracking()
+                    .Where(r => hcIds.Contains(r.HistoriaClinicaId)
+                             && (r.EstadoAgregado == RevisionEstadoAgregado.Aprobada
+                              || r.EstadoAgregado == RevisionEstadoAgregado.ArchivadaOk))
+                    .Select(r => r.HistoriaClinicaId)
+                    .ToListAsync(ct);
+            var hcRevisadasSet = hcRevisadasIds.ToHashSet();
+            pacienteHasHcRevisada = hcCandidatas
+                .Where(x => hcRevisadasSet.Contains(x.Id))
+                .Select(x => x.PacienteId)
+                .ToHashSet();
+        }
+
         // 6) Prefiltrado: nos quedamos solo con las sesiones que pasan aseguradora +
-        //    sucursal + HC-cerrada. Sesiones con turno/asig/contrato faltantes se
-        //    descartan silenciosamente (datos corruptos, mismo comportamiento que
-        //    el builder original).
+        //    sucursal + HC-cerrada + gate HC-revisada-por-sede. Sesiones con
+        //    turno/asig/contrato faltantes se descartan silenciosamente (datos
+        //    corruptos, mismo comportamiento que el builder original).
         var sesionesFiltradas = new List<(AsignacionTurnoSesion Sesion, AsignacionTurno Turno, Asignacion Asignacion, ContratoAseguradora Contrato, Sucursal? Sucursal)>();
         foreach (var sesion in sesiones)
         {
@@ -92,6 +134,18 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             }
 
             if (!pacienteHasHcCerrada.Contains(asig.PacienteId)) { continue; }
+
+            // Gate HC-revisada-por-sede: si la sede del paciente exige revision,
+            // el paciente debe tener al menos una HC con estado revision Aprobada
+            // o ArchivadaOk. Exclusion silenciosa: la sesion simplemente no aparece.
+            if (sedesExigenRevision.Count > 0
+                && pacienteSedeMap.TryGetValue(asig.PacienteId, out var sedePaciente)
+                && sedePaciente is Guid sedeId
+                && sedesExigenRevision.Contains(sedeId)
+                && !pacienteHasHcRevisada.Contains(asig.PacienteId))
+            {
+                continue;
+            }
 
             sesionesFiltradas.Add((sesion, turno, asig, contrato, sucursal));
         }

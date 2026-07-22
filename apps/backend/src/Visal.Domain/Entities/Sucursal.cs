@@ -27,4 +27,12 @@ public class Sucursal : TenantEntity
     /// (aquel es por sede+ambiente para OAuth IHCE).
     /// </summary>
     public string? CodigoHabilitacion { get; set; }
+
+    /// <summary>
+    /// Cuando es true, el snapshot Relacion de Facturas excluye silenciosamente
+    /// las sesiones de pacientes de esta sede cuyo estado de revision clinica
+    /// NO sea "Aprobada" en el rango. Regla operativa por sede — cada sucursal
+    /// decide si quiere el gate anti-facturacion-sin-revision. Default false.
+    /// </summary>
+    public bool ExigirHcRevisadaParaFacturar { get; set; }
 }

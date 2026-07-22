@@ -27,11 +27,11 @@ public sealed class SnapshotColumnaConfigService(
         {
             if (overrides.TryGetValue(col, out var ov))
             {
-                conOverride.Add(new ColumnaConfigItemDto(col, ov.Orden, ov.Visible, ov.Alias));
+                conOverride.Add(new ColumnaConfigItemDto(col, ov.Orden, ov.Visible, ov.Alias, ov.Descripcion, ov.RutaOrigen));
             }
             else
             {
-                sinOverride.Add(new ColumnaConfigItemDto(col, siguienteOrdenBase + i, Visible: true, Alias: null));
+                sinOverride.Add(new ColumnaConfigItemDto(col, siguienteOrdenBase + i, Visible: true, Alias: null, Descripcion: null, RutaOrigen: null));
                 i++;
             }
         }
@@ -65,6 +65,8 @@ public sealed class SnapshotColumnaConfigService(
                 e.Orden = item.Orden;
                 e.Visible = item.Visible;
                 e.Alias = string.IsNullOrWhiteSpace(item.Alias) ? null : item.Alias.Trim();
+                e.Descripcion = string.IsNullOrWhiteSpace(item.Descripcion) ? null : item.Descripcion.Trim();
+                e.RutaOrigen = string.IsNullOrWhiteSpace(item.RutaOrigen) ? null : item.RutaOrigen.Trim();
                 mapExistentes.Remove(item.ColumnaOriginal);
             }
             else
@@ -76,7 +78,9 @@ public sealed class SnapshotColumnaConfigService(
                     ColumnaOriginal = item.ColumnaOriginal,
                     Orden = item.Orden,
                     Visible = item.Visible,
-                    Alias = string.IsNullOrWhiteSpace(item.Alias) ? null : item.Alias.Trim()
+                    Alias = string.IsNullOrWhiteSpace(item.Alias) ? null : item.Alias.Trim(),
+                    Descripcion = string.IsNullOrWhiteSpace(item.Descripcion) ? null : item.Descripcion.Trim(),
+                    RutaOrigen = string.IsNullOrWhiteSpace(item.RutaOrigen) ? null : item.RutaOrigen.Trim()
                 });
             }
         }

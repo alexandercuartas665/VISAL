@@ -135,6 +135,39 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 .Where(p => profesionalIds.Contains(p.Id))
                 .ToDictionaryAsync(p => p.Id, ct);
 
+        // 6.a) Codigo de habilitacion por sede — lo maneja Config Interoperabilidad
+        //      (una fila por sede x ambiente). Sin config activo, fallback al
+        //      campo directo Sucursal.CodigoHabilitacion.
+        var interopConfig = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+        var ambienteActivo = interopConfig?.AmbienteActivo ?? AmbienteIhce.Sandbox;
+        var sucursalIds = hechosPrefiltrados
+            .Where(x => x.Sucursal is not null)
+            .Select(x => x.Sucursal!.Id).Distinct().ToList();
+        var credencialesSede = sucursalIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await db.InteroperabilidadCredencialesSede.AsNoTracking()
+                .Where(c => c.Ambiente == ambienteActivo && sucursalIds.Contains(c.SucursalId))
+                .ToDictionaryAsync(c => c.SucursalId, c => c.CodigoHabilitacion, ct);
+
+        // 6.b) Asignacion mas relevante por HC — buscamos por (paciente, contrato)
+        //      y elegimos la mas cercana (por fecha) al cierre de la HC. Sirve
+        //      para resolver Autorizacion y modulo/TipoArchivoRips que hoy vienen
+        //      del flujo de asignacion.
+        var pacienteIdsPrefil = hechosPrefiltrados.Select(x => x.Paciente.Id).Distinct().ToList();
+        var asignacionesPorPac = pacienteIdsPrefil.Count == 0
+            ? new Dictionary<Guid, List<Asignacion>>()
+            : (await db.Asignaciones.AsNoTracking()
+                .Where(a => pacienteIdsPrefil.Contains(a.PacienteId))
+                .ToListAsync(ct))
+                .GroupBy(a => a.PacienteId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+        // 6.c) TipoArchivoRips desde el catalogo de tipos de servicio — mapeamos
+        //      por codigo del modulo de la asignacion (CONSULTA/TERAPIA/...).
+        var catalogoTipos = await db.CatalogosTipoServicio.AsNoTracking()
+            .Where(c => c.Activo)
+            .ToDictionaryAsync(c => c.Codigo, c => c.TipoArchivoRips, StringComparer.OrdinalIgnoreCase, ct);
+
         // Descripciones CUPS via catalogo — usamos el diagnostico principal del
         // paciente como proxy cuando no hay servicio contrato claro. Es lo mas
         // que podemos derivar sin cablear turno/asignacion.
@@ -182,10 +215,56 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             string? munNombre = paciente.MunicipioId is Guid mId && muns.TryGetValue(mId, out var mn) ? mn : null;
             string? nacNombre = paciente.PaisResidenciaId is Guid pId && paisesNombre.TryGetValue(pId, out var pn) ? pn : null;
 
+            // Codigo habilitacion: credencial de interop (ambiente activo) ganan
+            // sobre el campo directo de la sede.
+            string? codHabResuelto = null;
+            if (sucursal is not null)
+            {
+                if (credencialesSede.TryGetValue(sucursal.Id, out var chIhce) && !string.IsNullOrWhiteSpace(chIhce))
+                {
+                    codHabResuelto = chIhce;
+                }
+                else
+                {
+                    codHabResuelto = sucursal.CodigoHabilitacion;
+                }
+            }
+
+            // Asignacion mas relevante: preferimos misma sede + mismo contrato
+            // codigo, y de esas la mas cercana en fecha al cierre de la HC.
+            Asignacion? asigRelevante = null;
+            if (asignacionesPorPac.TryGetValue(paciente.Id, out var listaAsig))
+            {
+                var fechaCierre = hc.FechaCierre?.LocalDateTime ?? hc.UpdatedAt?.LocalDateTime ?? hc.CreatedAt.LocalDateTime;
+                asigRelevante = listaAsig
+                    .Where(a => a.ContratoCodigo == contrato.CodigoContrato)
+                    .OrderBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
+                    .FirstOrDefault()
+                    ?? listaAsig
+                        .OrderBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
+                        .FirstOrDefault();
+            }
+
+            // TipoArchivoRips desde el modulo de la asignacion via catalogo.
+            string? tipoArchivoRips = null;
+            if (!string.IsNullOrEmpty(asigRelevante?.Modulo)
+                && catalogoTipos.TryGetValue(asigRelevante.Modulo, out var tar))
+            {
+                tipoArchivoRips = tar;
+            }
+            else if (!string.IsNullOrEmpty(asigRelevante?.TipoServicio)
+                && catalogoTipos.TryGetValue(asigRelevante.TipoServicio, out var tar2))
+            {
+                tipoArchivoRips = tar2;
+            }
+
+            string? codigoAutorizacion = asigRelevante?.CodigoAutorizacion;
+
             hechos.Add(new RelacionFacturasHecho(
                 hc, paciente, contrato, aseguradora, sucursal, profesional,
                 cupsCodigo, cupsDescripcion,
-                deptoNombre, munNombre, nacNombre));
+                deptoNombre, munNombre, nacNombre,
+                codHabResuelto, tipoArchivoRips, codigoAutorizacion));
         }
         return hechos;
     }

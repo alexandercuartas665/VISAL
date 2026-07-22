@@ -41,4 +41,13 @@ public sealed record RelacionFacturasHecho(
     string? DepartamentoNombre,
     string? MunicipioNombre,
     /// <summary>Nombre del pais de residencia (fallback COLOMBIA en el builder).</summary>
-    string? NacionalidadNombre);
+    string? NacionalidadNombre,
+    /// <summary>Codigo de habilitacion REPS de la sede, resuelto desde
+    /// InteroperabilidadCredencialSede (ambiente activo) con fallback a
+    /// Sucursal.CodigoHabilitacion.</summary>
+    string? CodigoHabilitacionResuelto,
+    /// <summary>Tipo de archivo RIPS (AC/AP/AT/AM) tomado del catalogo de
+    /// tipos de servicio segun el modulo de la asignacion asociada a la HC.</summary>
+    string? TipoArchivoRips,
+    /// <summary>Numero de autorizacion de la EPS, viene de la asignacion.</summary>
+    string? CodigoAutorizacion);

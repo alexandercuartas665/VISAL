@@ -79,11 +79,12 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
     {
         ["Consecutivo Factura"]                     = "Numero de factura",
         ["Contrato"]                                = "sale del modulo de admision casilla contrato",
-        ["codigo habilitacion "]                    = "Codigo de habilitacion sede",
-        ["Sede"]                                    = "sale de la sede de servicio prestado",
+        ["codigo habilitacion "]                    = "Config Interoperabilidad -> Credenciales por sede (ambiente activo). Fallback: campo directo de la sucursal.",
+        ["Sede"]                                    = "Nombre de la sede que atendio (Sucursal del paciente)",
         ["Regimen"]                                 = "sale del modulo de admision casilla tipo usuario",
-        ["Autorizacion"]                            = "sale del modulo de coordinacion casilla autorizacion",
+        ["Autorizacion"]                            = "Asignacion.CodigoAutorizacion — se captura al asignar el servicio al paciente en /asignacion",
         ["Tipo_Id"]                                 = "sale del modulo de admision Datos del paciente",
+        ["Archivo json"]                            = "Tipo de archivo RIPS del modulo del servicio prestado (Catalogo /config/tipos-servicio → TipoArchivoRips: AC/AP/AT/AM)",
         ["Fecha suministro de tecnologia"]          = "sale del modulo de coordinacion momento que asigna el servicio",
         ["CUPS"]                                    = "sale del modulo de asignacion, cuando se selecciona el servicio y la cantidad al momento de asignar",
         ["Diagnóstico"]                             = "Modulo de atencion, historia clinica",
@@ -123,11 +124,11 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Consecutivo Factura"] = null,                                    //  1  — proceso posterior
             ["Orden"] = null,                                                  //  2  — vacio por ahora
             ["Contrato"] = h.Contrato.CodigoContrato,                          //  3  — codigo del contrato de la EPS
-            ["codigo habilitacion "] = h.Sucursal?.CodigoHabilitacion,         //  4
+            ["codigo habilitacion "] = h.CodigoHabilitacionResuelto,           //  4  — credencial interop x sede (fallback Sucursal.CodigoHabilitacion)
             ["Sede"] = h.Sucursal?.Nombre,                                     //  5  — nombre de la sede que atendio
             ["Regimen"] = h.Paciente.Regimen,                                  //  6
-            ["Archivo json"] = null,                                           //  7  — vacio
-            ["Autorizacion"] = null,                                           //  8  — v3 no resuelve autorizacion
+            ["Archivo json"] = h.TipoArchivoRips,                              //  7  — TipoArchivoRips del catalogo tipo servicio (AC/AP/AT/AM)
+            ["Autorizacion"] = h.CodigoAutorizacion,                           //  8  — Asignacion.CodigoAutorizacion
             ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  9
             ["Identificación"] = h.Paciente.NumeroDocumento,                   // 10
             ["Primer Apellido"] = h.Paciente.PrimerApellido,                   // 11

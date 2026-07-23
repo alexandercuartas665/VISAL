@@ -80,4 +80,12 @@ public interface IOrdenesClinicasService
     /// <summary>Lista de sucursales que aparecen realmente en /ordenes (via
     /// SedeAtencionId de los pacientes que tienen HCs). Ordenadas por nombre.</summary>
     Task<IReadOnlyList<SucursalOpcionDto>> ListarSucursalesAsync(CancellationToken ct = default);
+
+    /// <summary>Exporta el listado filtrado a Excel (.xlsx). Aplica los mismos
+    /// filtros que <see cref="BuscarAsync"/> — el archivo refleja exactamente
+    /// lo que el usuario ve en la tabla.</summary>
+    Task<OrdenesArchivoExportado> ExportarExcelAsync(OrdenesClinicasFiltro filtro, CancellationToken ct = default);
 }
+
+/// <summary>Archivo binario listo para servir por HTTP.</summary>
+public sealed record OrdenesArchivoExportado(byte[] Contenido, string MimeType, string NombreArchivo);

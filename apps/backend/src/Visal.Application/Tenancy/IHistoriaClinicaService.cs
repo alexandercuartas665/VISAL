@@ -88,6 +88,12 @@ public interface IHistoriaClinicaService
     /// <summary>Marca como Inactiva (descarte) con motivo opcional.</summary>
     Task<bool> DescartarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default);
 
+    /// <summary>Reactiva una HC previamente Inactiva (descartada), moviendola a
+    /// Abierta y limpiando FechaCierre + MotivoInactivacion. Solo aplica si el
+    /// estado actual es Inactiva. El caller debe validar el permiso administrativo
+    /// del actor antes de invocar este metodo (mismo criterio que ReabrirAsync).</summary>
+    Task<bool> ActivarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default);
+
     /// <summary>Id de la HC abierta mas reciente del paciente, o null si no hay.</summary>
     Task<Guid?> BuscarUltimaAbiertaPorPacienteAsync(Guid pacienteId, CancellationToken ct = default);
 

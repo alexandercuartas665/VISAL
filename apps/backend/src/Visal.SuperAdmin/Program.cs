@@ -1182,6 +1182,32 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();
 
+// Export XLSX del listado /ordenes (todas las filas visibles con los filtros
+// aplicados). Reusa BuscarAsync + global query filter por tenant, asi que la
+// respuesta esta siempre acotada al tenant activo.
+app.MapGet("/ordenes/export.xlsx", async (
+    string? paciente,
+    DateOnly? desde,
+    DateOnly? hasta,
+    string? especialista,
+    Guid? aseguradoraId,
+    Guid? sucursalId,
+    string? estado,
+    Visal.Application.Tenancy.IOrdenesClinicasService svc,
+    CancellationToken ct) =>
+{
+    var f = new Visal.Application.Tenancy.OrdenesClinicasFiltro(
+        PacienteTexto: string.IsNullOrWhiteSpace(paciente) ? null : paciente.Trim(),
+        Desde: desde,
+        Hasta: hasta,
+        Especialista: string.IsNullOrWhiteSpace(especialista) ? null : especialista,
+        SoloCerradas: string.Equals(estado, "Cerrada", StringComparison.OrdinalIgnoreCase),
+        AseguradoraId: aseguradoraId,
+        SucursalId: sucursalId);
+    var archivo = await svc.ExportarExcelAsync(f, ct);
+    return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
 // Ola 7 RC7b — Export CSV del tab Archivo de /ordenes. Los filtros van en
 // query string. El servicio aplica el global query filter por tenant, asi que
 // otro tenant recibe solo sus propias archivadas o vacio.

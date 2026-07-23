@@ -1,3 +1,4 @@
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
@@ -332,5 +333,78 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             .OrderBy(s => s.Nombre)
             .Select(s => new SucursalOpcionDto(s.Id, s.Nombre))
             .ToListAsync(ct);
+    }
+
+    public async Task<OrdenesArchivoExportado> ExportarExcelAsync(OrdenesClinicasFiltro filtro, CancellationToken ct = default)
+    {
+        var rows = await BuscarAsync(filtro, ct);
+
+        using var wb = new XLWorkbook();
+        var hoja = wb.Worksheets.Add("Ordenes clinicas");
+
+        // Headers (linea 1): mismos titulos que la tabla en pantalla.
+        string[] headers = {
+            "Paciente", "Documento", "Formato", "Especialista", "Aseguradora", "Sede",
+            "Estado", "Fecha", "Total ordenes", "Revision", "Agente IA",
+            "Medicamentos", "Servicios", "Insumos", "Remisiones", "Incapacidades",
+            "Certificaciones", "RxImag", "Laboratorios", "Insumos externos",
+            "Escalas", "Evoluciones", "Consentimientos",
+        };
+        for (var c = 0; c < headers.Length; c++)
+        {
+            var cell = hoja.Cell(1, c + 1);
+            cell.Value = headers[c];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#dbeafe");
+        }
+
+        // Filas
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = r + 2;
+            var it = rows[r];
+            var totalOrdenes =
+                it.MedicamentosCount + it.ServiciosCount + it.InsumosCount + it.RemisionesCount +
+                it.IncapacidadesCount + it.CertificacionesCount + it.RxImagCount + it.LabExtCount +
+                it.InsExtCount + it.EscalasCount + it.EvolucionesCount + it.ConsentimientosCount;
+            var fecha = (it.FechaCierre ?? it.FechaApertura).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+            hoja.Cell(row, 1).Value = it.PacienteNombre;
+            hoja.Cell(row, 2).Value = $"{it.PacienteTipoDoc} {it.PacienteDoc}".Trim();
+            hoja.Cell(row, 3).Value = it.FormatoNombre;
+            hoja.Cell(row, 4).Value = it.EspecialistaNombre ?? "";
+            hoja.Cell(row, 5).Value = it.AseguradoraNombre ?? "";
+            hoja.Cell(row, 6).Value = it.SedeNombre ?? "";
+            hoja.Cell(row, 7).Value = it.Estado;
+            hoja.Cell(row, 8).Value = fecha;
+            hoja.Cell(row, 9).Value = totalOrdenes;
+            hoja.Cell(row, 10).Value = it.RevisionEstado?.ToString() ?? "";
+            hoja.Cell(row, 11).Value = it.RevisionAgente?.ToString() ?? "";
+            hoja.Cell(row, 12).Value = it.MedicamentosCount;
+            hoja.Cell(row, 13).Value = it.ServiciosCount;
+            hoja.Cell(row, 14).Value = it.InsumosCount;
+            hoja.Cell(row, 15).Value = it.RemisionesCount;
+            hoja.Cell(row, 16).Value = it.IncapacidadesCount;
+            hoja.Cell(row, 17).Value = it.CertificacionesCount;
+            hoja.Cell(row, 18).Value = it.RxImagCount;
+            hoja.Cell(row, 19).Value = it.LabExtCount;
+            hoja.Cell(row, 20).Value = it.InsExtCount;
+            hoja.Cell(row, 21).Value = it.EscalasCount;
+            hoja.Cell(row, 22).Value = it.EvolucionesCount;
+            hoja.Cell(row, 23).Value = it.ConsentimientosCount;
+        }
+
+        hoja.Columns().AdjustToContents(1, Math.Max(1, rows.Count + 1));
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        // No usamos Date.Now directo — el nombre lleva la fecha local del server
+        // como suffix legible; los caracteres invalidos ya no aparecen porque
+        // el prefijo es fijo.
+        var nombre = $"ordenes-clinicas-{DateTime.Now:yyyyMMdd-HHmm}.xlsx";
+        return new OrdenesArchivoExportado(
+            ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            nombre);
     }
 }

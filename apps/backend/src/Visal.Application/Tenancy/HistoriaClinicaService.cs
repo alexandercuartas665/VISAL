@@ -265,6 +265,30 @@ public sealed class HistoriaClinicaService(
         return true;
     }
 
+    public async Task<bool> ActivarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
+        if (e is null) { return false; }
+        if (e.Estado != HistoriaClinicaEstado.Inactiva)
+        {
+            throw new InvalidOperationException("Solo se puede activar una historia que este Inactiva.");
+        }
+        var motivoPrev = e.MotivoInactivacion;
+        var fechaCierrePrev = e.FechaCierre;
+        e.Estado = HistoriaClinicaEstado.Abierta;
+        e.FechaCierre = null;
+        e.MotivoInactivacion = null;
+        // Auditoria administrativa: reactivar una HC descartada es tan sensible
+        // como reabrir una Cerrada — deja rastro de quien lo hizo, motivo del
+        // reingreso al flujo y el motivo original del descarte.
+        audit.Write(actor, "historia-clinica.activar", nameof(HistoriaClinica), e.Id,
+            previousValue: new { estado = HistoriaClinicaEstado.Inactiva.ToString(), motivoInactivacion = motivoPrev, fechaCierre = fechaCierrePrev },
+            newValue: new { estado = e.Estado.ToString(), motivoActivacion = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim(), pacienteId = e.PacienteId },
+            tenantId: e.TenantId);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<Guid?> BuscarUltimaAbiertaPorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
         // Si hay varias abiertas (raro pero posible si el profesional cerro sesion

@@ -7,6 +7,7 @@
 @using Visal.Application.Tenancy
 @inject IAseguradoraService Svc
 @inject IPaqueteService PaqSvc
+@inject IServicioBulkUpdateService BulkSvc
 @inject IJSRuntime JS
 
 <PageTitle>Entidades Aseguradoras - Visal</PageTitle>
@@ -16,7 +17,10 @@
         <div class="ase-eyebrow">Configuracion del Sistema</div>
         <h1 class="ase-title">Entidades Aseguradoras</h1>
     </div>
-    <button class="btn btn-primary btn-sm" @onclick="NewAseguradora">+ Nueva aseguradora</button>
+    <div class="ase-head-actions">
+        <button class="btn btn-outline-secondary btn-sm" title="Actualizar en masa MODALIDAD, GRUPO SERVICIO y SERVICIO FACTURACION de todos los servicios que coincidan con la busqueda por Descripcion. Guarda snapshot para deshacer." @onclick="AbrirBulk">&#128736; Actualizar en masa</button>
+        <button class="btn btn-primary btn-sm" @onclick="NewAseguradora">+ Nueva aseguradora</button>
+    </div>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
@@ -184,11 +188,23 @@
                                 <button class="btn btn-outline-danger btn-sm" @onclick="BorrarTodosLosServicios" disabled="@(_busy || _contratoId is null)" title="Borra TODOS los servicios de este contrato. Util cuando hiciste un import incorrecto.">&#128465; Borrar todos</button>
                             </span>
                         </div>
-                        <div class="table-responsive">
-                            <table class="table table-sm align-middle ase-table ase-serv">
+                        <div class="ase-serv-wrap">
+                            <table class="table table-sm align-middle ase-table ase-serv ase-serv-wide">
                                 <thead><tr>
-                                    <th>Historia</th><th>Paquete</th><th>Cod. Servicio</th><th>Cod. Interno</th><th>Descripcion</th><th>Tarifa</th>
-                                    <th>Modulo</th><th>Especialidad</th><th>Modalidad</th><th>Sede</th><th></th>
+                                    <th style="min-width:90px;">Historia</th>
+                                    <th style="min-width:110px;">Paquete</th>
+                                    <th style="min-width:120px;">Cod. Servicio</th>
+                                    <th style="min-width:120px;">Cod. Interno</th>
+                                    <th style="min-width:340px;">Descripcion</th>
+                                    <th style="min-width:100px;">Tarifa</th>
+                                    <th style="min-width:130px;">Modulo</th>
+                                    <th style="min-width:150px;">Especialidad</th>
+                                    <th style="min-width:130px;">Modalidad</th>
+                                    <th style="min-width:110px;">Sede</th>
+                                    <th style="min-width:150px;" class="ase-th-fact">Modalidad Fact.</th>
+                                    <th style="min-width:170px;" class="ase-th-fact">Grupo Servicio Fact.</th>
+                                    <th style="min-width:200px;" class="ase-th-fact">Servicio Facturacion</th>
+                                    <th style="min-width:140px;"></th>
                                 </tr></thead>
                                 <tbody>
                                     @foreach (var s in FilteredServicios())
@@ -212,6 +228,9 @@
                                             <td><input class="form-control form-control-sm" @bind="s.Especialidad" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Modalidad" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Sede" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact" @bind="s.ModalidadFacturacion" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact" @bind="s.GrupoServicioFacturacion" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact" @bind="s.ServicioFacturacion" /></td>
                                             <td class="ase-row-actions">
                                                 <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => SaveServicio(s)">&#10003;</button>
                                                 <button class="btn @(TieneRips(s) ? "btn-info" : "btn-outline-info") btn-sm"
@@ -275,10 +294,188 @@
     </div>
 }
 
+@* ================== Modal: Actualizar en masa ================== *@
+@if (_bulkOpen)
+{
+    <div class="sn-modal-back" @onclick="CerrarBulk">
+        <div class="sn-modal sn-modal-lg bulk-modal" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Facturacion</div>
+                    <h3>Actualizar en masa <small class="text-muted">— aplica a servicios de todos los contratos</small></h3>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarBulk">&times;</button>
+            </div>
+            <div class="sn-modal-b">
+                <div class="bulk-tabs">
+                    <button class="bulk-tab @(_bulkTab == "buscar" ? "sel" : "")" @onclick='() => _bulkTab = "buscar"'>Buscar y aplicar</button>
+                    <button class="bulk-tab @(_bulkTab == "historial" ? "sel" : "")" @onclick='async () => { _bulkTab = "historial"; await LoadHistorialBulk(); }'>Historial (max 20)</button>
+                </div>
+
+                @if (_bulkTab == "buscar")
+                {
+                    <div class="bulk-row">
+                        <div style="min-width:170px;">
+                            <label class="bulk-lbl">Operador</label>
+                            <select class="form-select form-select-sm" @bind="_bulkOperador">
+                                <option value="Contiene">Contiene</option>
+                                <option value="EmpiezaCon">Empieza con</option>
+                                <option value="TerminaCon">Termina con</option>
+                                <option value="Exacto">Exacto</option>
+                            </select>
+                        </div>
+                        <div class="bulk-grow">
+                            <label class="bulk-lbl">Buscar en Descripcion</label>
+                            <input class="form-control form-control-sm" placeholder="Ej: TERAPIA FISICA..." @bind="_bulkTexto" @onkeyup="OnBulkTextoKeyup" />
+                        </div>
+                        <div>
+                            <label class="bulk-lbl">&nbsp;</label>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="BuscarBulk" disabled="@_bulkBusy">@(_bulkBusy ? "Buscando..." : "Buscar")</button>
+                        </div>
+                    </div>
+
+                    @if (_bulkBusqueda is not null)
+                    {
+                        <div class="bulk-count">
+                            <b>@_bulkBusqueda.TotalCoincidencias</b> servicios coinciden.
+                            @if (_bulkBusqueda.TotalCoincidencias > 0)
+                            {
+                                <span class="text-muted"> Mostrando @_bulkBusqueda.Preview.Count preview.</span>
+                            }
+                        </div>
+                        @if (_bulkBusqueda.Preview.Count > 0)
+                        {
+                            <div class="bulk-preview-wrap">
+                                <table class="table table-sm bulk-preview">
+                                    <thead><tr>
+                                        <th>Aseguradora</th><th>Contrato</th><th>Descripcion</th>
+                                        <th>Modalidad Fact.</th><th>Grupo Serv. Fact.</th><th>Servicio Fact.</th>
+                                    </tr></thead>
+                                    <tbody>
+                                        @foreach (var f in _bulkBusqueda.Preview)
+                                        {
+                                            <tr>
+                                                <td>@f.Aseguradora</td>
+                                                <td class="mono">@f.CodigoContrato</td>
+                                                <td>@f.Descripcion</td>
+                                                <td>@(f.ModalidadFacturacionActual ?? "-")</td>
+                                                <td>@(f.GrupoServicioFacturacionActual ?? "-")</td>
+                                                <td>@(f.ServicioFacturacionActual ?? "-")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+
+                    <div class="bulk-sep">Nuevos valores <small class="text-muted">(deja vacio los campos que no quieres cambiar)</small></div>
+                    <div class="bulk-row">
+                        <div class="bulk-grow"><label class="bulk-lbl">Modalidad Fact.</label>
+                            <input class="form-control form-control-sm" placeholder="Ej: PGP" @bind="_bulkNuevaModalidad" /></div>
+                        <div class="bulk-grow"><label class="bulk-lbl">Grupo Servicio Fact.</label>
+                            <input class="form-control form-control-sm" placeholder="Ej: TERAPIAS" @bind="_bulkNuevoGrupo" /></div>
+                        <div class="bulk-grow"><label class="bulk-lbl">Servicio Facturacion</label>
+                            <input class="form-control form-control-sm" placeholder="Ej: TERAPIA FISICA POR SESION" @bind="_bulkNuevoServicio" /></div>
+                    </div>
+                    <div class="bulk-row">
+                        <div class="bulk-grow"><label class="bulk-lbl">Motivo <span style="color:#dc2626;">*</span></label>
+                            <input class="form-control form-control-sm" placeholder="Ej: Actualizacion contratos ASMET Julio 2026" @bind="_bulkMotivo" /></div>
+                    </div>
+                    @if (_bulkError is not null) { <div class="ase-alert">@_bulkError</div> }
+                    @if (_bulkOk is not null) { <div class="ase-ok">@_bulkOk</div> }
+                }
+                else
+                {
+                    <div class="bulk-historial">
+                        @if (_bulkHistorial.Count == 0) { <div class="ase-empty">Sin ejecuciones registradas.</div> }
+                        else
+                        {
+                            <table class="table table-sm">
+                                <thead><tr>
+                                    <th>Fecha</th><th>Filtro</th><th>Cambios</th><th>Motivo</th><th>Afectados</th><th>Estado</th><th></th>
+                                </tr></thead>
+                                <tbody>
+                                    @foreach (var h in _bulkHistorial)
+                                    {
+                                        <tr>
+                                            <td class="mono">@h.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                            <td><span class="mono">@h.OperadorBusqueda</span> "@h.TextoBusqueda"</td>
+                                            <td>
+                                                @if (h.NuevaModalidad is not null) { <span class="bulk-chip">Mod=@h.NuevaModalidad</span> }
+                                                @if (h.NuevoGrupo is not null) { <span class="bulk-chip">Grupo=@h.NuevoGrupo</span> }
+                                                @if (h.NuevoServicio is not null) { <span class="bulk-chip">Serv=@h.NuevoServicio</span> }
+                                            </td>
+                                            <td>@h.Motivo</td>
+                                            <td>@h.TotalAfectados</td>
+                                            <td><span class="bulk-estado bulk-estado-@h.Estado.ToLower()">@h.Estado</span></td>
+                                            <td>
+                                                @if (h.Estado == "Aplicada")
+                                                {
+                                                    <button class="btn btn-outline-warning btn-sm" title="Revertir esta ejecucion (restaura los valores anteriores)"
+                                                            @onclick="() => RevertirBulk(h.Id)">Revertir</button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="sn-modal-f">
+                <small class="text-muted">Retencion: se guardan las ultimas 20 ejecuciones para permitir rollback.</small>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarBulk">Cerrar</button>
+                    @if (_bulkTab == "buscar")
+                    {
+                        <button class="btn btn-primary btn-sm ms-2" @onclick="AplicarBulk"
+                                disabled="@(_bulkBusy || _bulkBusqueda is null || _bulkBusqueda.TotalCoincidencias == 0 || string.IsNullOrWhiteSpace(_bulkMotivo))">
+                            Aplicar a @(_bulkBusqueda?.TotalCoincidencias ?? 0) servicios
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .rips-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
     .rips-grid label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
     .rips-span2 { grid-column:1 / -1; }
+
+    /* Cabecera con acciones (Actualizar en masa + Nueva aseguradora) */
+    .ase-head-actions { display:flex; gap:8px; align-items:center; }
+
+    /* Tabla de servicios ampliada + sticky header + scroll */
+    .ase-serv-wrap { max-height: calc(100vh - 340px); overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
+    .ase-serv-wide { border-collapse: separate; border-spacing: 0; margin: 0; }
+    .ase-serv-wide th { position: sticky; top: 0; z-index: 3; background: #eff6ff; color: #1e3a8a; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid #dbeafe; white-space: nowrap; }
+    .ase-serv-wide th.ase-th-fact { background: #ecfdf5; color: #065f46; }
+    .ase-serv-wide td { padding: 4px 6px; vertical-align: middle; }
+    .ase-serv-wide td .form-control-sm, .ase-serv-wide td .form-select-sm { font-size: 12.5px; }
+    .ase-td-fact { border-left: 2px solid #d1fae5 !important; background: #f0fdf4; }
+
+    /* Modal Bulk Update */
+    .sn-modal-lg { max-width: 900px; }
+    .bulk-modal .sn-modal-b { max-height: 65vh; overflow: auto; }
+    .bulk-tabs { display:flex; gap:4px; border-bottom:1px solid #e2e8f0; margin-bottom:12px; }
+    .bulk-tab { background:transparent; border:0; border-bottom:2px solid transparent; padding:8px 14px; font-size:13px; color:#64748b; cursor:pointer; }
+    .bulk-tab.sel { color:#1e3a8a; border-bottom-color:#2563eb; font-weight:600; }
+    .bulk-row { display:flex; gap:12px; margin-bottom:12px; align-items:flex-end; flex-wrap:wrap; }
+    .bulk-grow { flex:1 1 200px; }
+    .bulk-lbl { display:block; font-size:11px; color:#475569; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; }
+    .bulk-count { padding:8px 12px; background:#eff6ff; border-radius:4px; margin-bottom:8px; color:#0f172a; }
+    .bulk-preview-wrap { max-height:220px; overflow:auto; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:12px; }
+    .bulk-preview th { position:sticky; top:0; background:#f8fafc; font-size:11.5px; color:#475569; }
+    .bulk-preview td { font-size:12px; }
+    .bulk-sep { margin:16px 0 6px 0; font-weight:600; color:#0f172a; border-top:1px dashed #e2e8f0; padding-top:12px; }
+    .bulk-chip { display:inline-block; padding:2px 6px; background:#f0fdf4; color:#065f46; border-radius:3px; font-size:11px; margin-right:4px; }
+    .bulk-estado { padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+    .bulk-estado-aplicada { background:#dbeafe; color:#1e3a8a; }
+    .bulk-estado-revertida { background:#fef3c7; color:#92400e; }
 </style>
 
 @code {
@@ -430,7 +627,8 @@
             var req = new SaveServicioRequest(s.Id, _contratoId!.Value, s.Sede, s.Historia, s.PaqueteId,
                 s.CodigoServicio, s.CodigoInterno,
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
-                s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal);
+                s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal,
+                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion);
             var saved = await Svc.SaveServicioAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar el servicio."; return; }
             s.Id = saved.Id;
@@ -643,6 +841,93 @@
         { Id = d.Id, CodigoContrato = d.CodigoContrato, FechaInicial = d.FechaInicial, FechaFinal = d.FechaFinal, Estado = d.Estado, Prorroga = d.Prorroga, RequierePdfAutorizacion = d.RequierePdfAutorizacion };
     }
 
+    // ══════════════════════ Modal Bulk Update ══════════════════════
+    // Estado del modal + tab activa. Ver docstring en IServicioBulkUpdateService.
+    private bool _bulkOpen;
+    private string _bulkTab = "buscar";
+    private string _bulkOperador = "Contiene";
+    private string _bulkTexto = "";
+    private BulkBusquedaResultado? _bulkBusqueda;
+    private string? _bulkNuevaModalidad;
+    private string? _bulkNuevoGrupo;
+    private string? _bulkNuevoServicio;
+    private string _bulkMotivo = "";
+    private bool _bulkBusy;
+    private string? _bulkError;
+    private string? _bulkOk;
+    private List<BulkUpdateDto> _bulkHistorial = new();
+
+    private void AbrirBulk()
+    {
+        _bulkOpen = true;
+        _bulkTab = "buscar";
+        _bulkBusqueda = null;
+        _bulkTexto = ""; _bulkMotivo = "";
+        _bulkNuevaModalidad = _bulkNuevoGrupo = _bulkNuevoServicio = null;
+        _bulkError = _bulkOk = null;
+    }
+
+    private void CerrarBulk() { _bulkOpen = false; }
+
+    private async Task OnBulkTextoKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await BuscarBulk(); }
+    }
+
+    private async Task BuscarBulk()
+    {
+        if (string.IsNullOrWhiteSpace(_bulkTexto)) { _bulkBusqueda = null; return; }
+        _bulkBusy = true; _bulkError = null;
+        try
+        {
+            var op = Enum.TryParse<OperadorBusquedaServicio>(_bulkOperador, out var o) ? o : OperadorBusquedaServicio.Contiene;
+            _bulkBusqueda = await BulkSvc.BuscarAsync(op, _bulkTexto);
+        }
+        catch (Exception ex) { _bulkError = ex.Message; }
+        finally { _bulkBusy = false; }
+    }
+
+    private async Task AplicarBulk()
+    {
+        _bulkError = _bulkOk = null;
+        if (_bulkBusqueda is null || _bulkBusqueda.TotalCoincidencias == 0) { _bulkError = "Busca antes de aplicar."; return; }
+        if (string.IsNullOrWhiteSpace(_bulkMotivo)) { _bulkError = "El motivo es obligatorio."; return; }
+        if (_bulkNuevaModalidad is null && _bulkNuevoGrupo is null && _bulkNuevoServicio is null)
+        { _bulkError = "Ingresa al menos un campo nuevo para aplicar."; return; }
+        _bulkBusy = true;
+        try
+        {
+            var op = Enum.TryParse<OperadorBusquedaServicio>(_bulkOperador, out var o) ? o : OperadorBusquedaServicio.Contiene;
+            var req = new AplicarBulkRequest(op, _bulkTexto, _bulkNuevaModalidad, _bulkNuevoGrupo, _bulkNuevoServicio, _bulkMotivo);
+            var res = await BulkSvc.AplicarAsync(req, await Actor());
+            if (res is null) { _bulkError = "No se aplico ningun cambio."; }
+            else
+            {
+                _bulkOk = $"Aplicado a {res.TotalAfectados} servicios. Puedes revertir desde el tab Historial.";
+                _bulkBusqueda = null;
+                if (_contratoId is not null) { await LoadServicios(); }
+            }
+        }
+        catch (Exception ex) { _bulkError = ex.Message; }
+        finally { _bulkBusy = false; }
+    }
+
+    private async Task LoadHistorialBulk()
+    {
+        _bulkHistorial = (await BulkSvc.ListarHistorialAsync()).ToList();
+    }
+
+    private async Task RevertirBulk(Guid bulkId)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Revertir esta ejecucion? Restaura los valores previos de los servicios afectados.")) { return; }
+        var ok = await BulkSvc.RevertirAsync(bulkId, await Actor());
+        if (ok)
+        {
+            await LoadHistorialBulk();
+            if (_contratoId is not null) { await LoadServicios(); }
+        }
+    }
+
     private sealed class ServicioEdit
     {
         public Guid? Id { get; set; }
@@ -666,6 +951,10 @@
         public string? GrupoServicios { get; set; }
         public string? Servicios { get; set; }
         public decimal? ValorTotal { get; set; }
+        // Bulk-editable via /cfg-aseguradoras > Actualizar en masa.
+        public string? ModalidadFacturacion { get; set; }
+        public string? GrupoServicioFacturacion { get; set; }
+        public string? ServicioFacturacion { get; set; }
         public static ServicioEdit From(ServicioDto d) => new()
         {
             Id = d.Id, Sede = d.Sede, Historia = d.Historia, PaqueteId = d.PaqueteId,
@@ -674,7 +963,10 @@
             Modalidad = d.Modalidad, Clasificacion = d.Clasificacion, Observaciones = d.Observaciones,
             Finalidad = d.Finalidad, CausaExterna = d.CausaExterna, ModalidadAtencion = d.ModalidadAtencion,
             ViaIngreso = d.ViaIngreso, GrupoServicios = d.GrupoServicios, Servicios = d.Servicios,
-            ValorTotal = d.ValorTotal
+            ValorTotal = d.ValorTotal,
+            ModalidadFacturacion = d.ModalidadFacturacion,
+            GrupoServicioFacturacion = d.GrupoServicioFacturacion,
+            ServicioFacturacion = d.ServicioFacturacion
         };
     }
 }

@@ -99,6 +99,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AseguradoraCuentaMedicaConfig> AseguradoraCuentaMedicaConfigs => Set<AseguradoraCuentaMedicaConfig>();
     public DbSet<AseguradoraInformeItem> AseguradoraInformeItems => Set<AseguradoraInformeItem>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
+    public DbSet<ServicioBulkUpdate> ServicioBulkUpdates => Set<ServicioBulkUpdate>();
+    public DbSet<ServicioBulkUpdateItem> ServicioBulkUpdateItems => Set<ServicioBulkUpdateItem>();
     public DbSet<Paquete> Paquetes => Set<Paquete>();
     public DbSet<PaqueteServicio> PaqueteServicios => Set<PaqueteServicio>();
     public DbSet<CuotaCopago> CuotasCopagos => Set<CuotaCopago>();
@@ -1067,10 +1069,38 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.GrupoServicios).HasMaxLength(10);
             b.Property(x => x.Servicios).HasMaxLength(10);
             b.Property(x => x.ValorTotal).HasPrecision(14, 2);
+            // Campos comerciales de facturacion (bulk-editables).
+            b.Property(x => x.ModalidadFacturacion).HasMaxLength(80);
+            b.Property(x => x.GrupoServicioFacturacion).HasMaxLength(120);
+            b.Property(x => x.ServicioFacturacion).HasMaxLength(200);
             b.HasOne(x => x.Contrato).WithMany().HasForeignKey(x => x.ContratoId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.Paquete).WithMany().HasForeignKey(x => x.PaqueteId).OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(x => new { x.TenantId, x.ContratoId });
             b.HasIndex(x => new { x.TenantId, x.PaqueteId });
+        });
+
+        modelBuilder.Entity<ServicioBulkUpdate>(b =>
+        {
+            b.ToTable("servicio_bulk_updates");
+            b.Property(x => x.OperadorBusqueda).HasMaxLength(20).IsRequired();
+            b.Property(x => x.TextoBusqueda).HasMaxLength(300).IsRequired();
+            b.Property(x => x.NuevaModalidadFacturacion).HasMaxLength(80);
+            b.Property(x => x.NuevoGrupoServicioFacturacion).HasMaxLength(120);
+            b.Property(x => x.NuevoServicioFacturacion).HasMaxLength(200);
+            b.Property(x => x.Motivo).HasMaxLength(500).IsRequired();
+            b.Property(x => x.Estado).HasMaxLength(20).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.CreatedAt });
+        });
+
+        modelBuilder.Entity<ServicioBulkUpdateItem>(b =>
+        {
+            b.ToTable("servicio_bulk_update_items");
+            b.Property(x => x.ModalidadFacturacionAntes).HasMaxLength(80);
+            b.Property(x => x.GrupoServicioFacturacionAntes).HasMaxLength(120);
+            b.Property(x => x.ServicioFacturacionAntes).HasMaxLength(200);
+            b.HasOne(x => x.BulkUpdate).WithMany(x => x.Items).HasForeignKey(x => x.BulkUpdateId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.BulkUpdateId });
+            b.HasIndex(x => new { x.TenantId, x.ServicioContratoId });
         });
 
         modelBuilder.Entity<Paquete>(b =>

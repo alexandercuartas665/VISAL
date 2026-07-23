@@ -160,7 +160,8 @@ public sealed class AseguradoraService : IAseguradoraService
                 s.PaqueteId != null ? _db.Paquetes.Where(p => p.Id == s.PaqueteId).Select(p => p.Codigo).FirstOrDefault() : null,
                 s.CodigoServicio, s.CodigoInterno,
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
-                s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal))
+                s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal,
+                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion))
             .ToListAsync(ct);
     }
 
@@ -200,6 +201,9 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.GrupoServicios = req.GrupoServicios?.Trim();
         entity.Servicios = req.Servicios?.Trim();
         entity.ValorTotal = req.ValorTotal;
+        entity.ModalidadFacturacion = req.ModalidadFacturacion?.Trim();
+        entity.GrupoServicioFacturacion = req.GrupoServicioFacturacion?.Trim();
+        entity.ServicioFacturacion = req.ServicioFacturacion?.Trim();
 
         await _db.SaveChangesAsync(ct);
         var paqueteCod = entity.PaqueteId is Guid pid
@@ -209,7 +213,8 @@ public sealed class AseguradoraService : IAseguradoraService
             entity.PaqueteId, paqueteCod,
             entity.CodigoServicio, entity.CodigoInterno,
             entity.Descripcion, entity.Tarifa, entity.Modulo, entity.Especialidad, entity.Modalidad, entity.Clasificacion, entity.Observaciones,
-            entity.Finalidad, entity.CausaExterna, entity.ModalidadAtencion, entity.ViaIngreso, entity.GrupoServicios, entity.Servicios, entity.ValorTotal);
+            entity.Finalidad, entity.CausaExterna, entity.ModalidadAtencion, entity.ViaIngreso, entity.GrupoServicios, entity.Servicios, entity.ValorTotal,
+            entity.ModalidadFacturacion, entity.GrupoServicioFacturacion, entity.ServicioFacturacion);
     }
 
     public async Task<bool> DeleteServicioAsync(Guid id, Guid actor, CancellationToken ct = default)

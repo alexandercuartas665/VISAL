@@ -44,4 +44,17 @@ public class ServicioContrato : TenantEntity
     public string? Servicios { get; set; }
     /// <summary>Valor Total del servicio segun contrato (Tarifa * cantidad tope). Nullable — si no se define, el builder cae a Tarifa.</summary>
     public decimal? ValorTotal { get; set; }
+
+    // ---- Campos comerciales de Facturacion (independientes de RIPS/REPS) ----
+    // Solicitados por operacion para clasificacion interna a nivel de contrato.
+    // Se mantienen aparte de Modalidad/GrupoServicios/Servicios (RIPS) porque
+    // corresponden a la nomenclatura comercial de la EPS, no al codigo MinSalud.
+    // Editables masivamente via /config/entidades > Actualizar en masa.
+
+    /// <summary>Modalidad comercial de facturacion (ej. "PGP", "EVENTO", "CAPITA").</summary>
+    public string? ModalidadFacturacion { get; set; }
+    /// <summary>Grupo de servicio comercial de facturacion (ej. "TERAPIAS", "MEDICAMENTOS").</summary>
+    public string? GrupoServicioFacturacion { get; set; }
+    /// <summary>Nombre/codigo de servicio que la EPS espera en la factura.</summary>
+    public string? ServicioFacturacion { get; set; }
 }

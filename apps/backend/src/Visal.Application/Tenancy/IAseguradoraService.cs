@@ -28,7 +28,10 @@ public sealed record ServicioDto(
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones,
     // RIPS Res 2275 + ValorTotal (Fase 4 Facturacion).
     string? Finalidad, string? CausaExterna, string? ModalidadAtencion,
-    string? ViaIngreso, string? GrupoServicios, string? Servicios, decimal? ValorTotal);
+    string? ViaIngreso, string? GrupoServicios, string? Servicios, decimal? ValorTotal,
+    // Campos comerciales bulk-editables (spec BulkUpdate 2026-07-23).
+    string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
+    string? ServicioFacturacion = null);
 
 public sealed record SaveServicioRequest(
     Guid? Id, Guid ContratoId, string? Sede, string? Historia,
@@ -38,7 +41,9 @@ public sealed record SaveServicioRequest(
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones,
     string? Finalidad = null, string? CausaExterna = null, string? ModalidadAtencion = null,
     string? ViaIngreso = null, string? GrupoServicios = null, string? Servicios = null,
-    decimal? ValorTotal = null);
+    decimal? ValorTotal = null,
+    string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
+    string? ServicioFacturacion = null);
 
 /// <summary>Fila de servicio leida del Excel de carga (Hoja1). El campo PaqueteCodigo
 /// es opcional; si viene y matchea un Paquete existente por codigo, se enlaza.</summary>

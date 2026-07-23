@@ -125,133 +125,384 @@ else
     </div>
 }
 
-@* ===== Modal: Card detail ===== *@
+@* ===== Modal: Card detail (Trello-like) ===== *@
 @if (_cardModalOpen && _cardDetail is not null)
 {
-    <div class="tb-modal-backdrop" @onclick="CloseCardModal"></div>
-    <div class="tb-modal" style="width:720px;">
-        <div class="tb-modal-h">
-            <input class="td-title-input" @bind="_editCardTitle" @bind:event="oninput" />
-            <button class="tb-modal-close" @onclick="CloseCardModal">&times;</button>
-        </div>
-        <div class="tb-modal-body td-modal-grid">
-            <div>
-                <label>Descripcion</label>
-                <textarea class="form-control" rows="4" @bind="_editCardDescription"></textarea>
-
-                <div style="display:flex; gap:12px; margin-top:12px;">
-                    <div style="flex:1;">
-                        <label>Fecha limite</label>
-                        <input type="date" class="form-control form-control-sm" @bind="_editCardDueDate" />
-                    </div>
-                    <div>
-                        <label>Color</label>
-                        <input type="color" class="form-control form-control-sm" style="width:60px; height:32px; padding:2px;" @bind="_editCardColor" />
-                    </div>
-                    <div style="margin-top:22px;">
-                        <button class="btn btn-primary btn-sm" @onclick="SaveCardAsync">Guardar</button>
-                    </div>
-                </div>
-
-                <hr style="margin:16px 0;" />
-
-                <label>Checklist</label>
-                @if (_cardDetail.Checklist.Count == 0)
-                {
-                    <p class="text-muted small">Sin items.</p>
-                }
-                else
-                {
-                    <div class="td-checklist">
-                        @foreach (var it in _cardDetail.Checklist)
-                        {
-                            <div class="td-check-item">
-                                <input type="checkbox" checked="@it.IsCompleted" @onchange="@(e => ToggleChecklistAsync(it, (bool)(e.Value ?? false)))" />
-                                <span class="@(it.IsCompleted ? "td-done" : "")">@it.Text</span>
-                                <button class="tb-icon-btn" style="margin-left:auto;" @onclick="@(() => DeleteChecklistAsync(it))">×</button>
-                            </div>
-                        }
-                    </div>
-                }
-                <div style="display:flex; gap:6px; margin-top:8px;">
-                    <input class="form-control form-control-sm" @bind="_newChecklistText" placeholder="+ Nuevo item..." />
-                    <button class="btn btn-primary btn-sm" @onclick="AddChecklistAsync">+</button>
-                </div>
-
-                <hr style="margin:16px 0;" />
-
-                <label>Comentarios y actividad</label>
-                <div class="td-activity">
-                    @foreach (var a in _cardDetail.Activity)
+    var detail = _cardDetail;
+    var col = _columns.FirstOrDefault(c => c.Id == detail.Card.ColumnId);
+    <div class="td-modal-overlay" @onclick="CloseCardModal">
+        <div class="td-modal" @onclick:stopPropagation="true">
+            @* ===== Header ===== *@
+            <div class="td-modal-head">
+                <span class="td-modal-head-icon">📋</span>
+                <div class="td-modal-head-content">
+                    @if (_editingTitle)
                     {
-                        <div class="td-activity-row">
-                            <span class="tb-avatar" style="width:24px;height:24px;font-size:10px;">@Initials(a.ActorName)</span>
-                            <div style="flex:1;">
-                                <div class="td-activity-h">
-                                    <b>@a.ActorName</b>
-                                    <span class="td-activity-time">@a.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</span>
-                                </div>
-                                <div class="td-activity-text @(a.Type == Visal.Domain.Enums.TaskActivityType.Comment ? "" : "td-activity-action")">@a.Text</div>
-                            </div>
+                        <input class="form-control td-modal-title-input" @bind="_editTitle" @bind:event="oninput" />
+                        <div style="display:flex; gap:6px; margin-top:8px;">
+                            <button class="btn btn-primary btn-sm" @onclick="SaveTitleAsync">Guardar</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => { _editingTitle = false; _editTitle = detail.Card.Title; })">Cancelar</button>
                         </div>
                     }
+                    else
+                    {
+                        <h2 class="td-modal-title" style="@(string.IsNullOrEmpty(detail.Card.Color) ? "" : $"color:{detail.Card.Color};")"
+                            @onclick="@(() => { _editingTitle = true; _editTitle = detail.Card.Title; })">@detail.Card.Title</h2>
+                        <p class="td-modal-sub">en la lista <strong>@(col?.Name ?? "(sin columna)")</strong></p>
+                    }
                 </div>
-                <div style="display:flex; gap:6px; margin-top:8px;">
-                    <input class="form-control form-control-sm" @bind="_newCommentText" placeholder="Escribe un comentario..." />
-                    <button class="btn btn-primary btn-sm" @onclick="AddCommentAsync">Enviar</button>
-                </div>
+                <button class="td-modal-x" @onclick="CloseCardModal" aria-label="Cerrar">×</button>
             </div>
 
-            @* Sidebar *@
-            <div class="td-card-side">
-                <div>
-                    <label>Miembros</label>
-                    <div class="td-side-list">
-                        @foreach (var mem in _cardDetail.Card.Members)
-                        {
-                            <div class="td-side-item">
-                                <span class="tb-avatar" style="width:24px;height:24px;font-size:10px;">@mem.Initials</span>
-                                <span style="flex:1;">@mem.DisplayName</span>
-                                <button class="tb-icon-btn" @onclick="@(() => UnassignMemberAsync(mem))">×</button>
-                            </div>
-                        }
-                        @foreach (var candidate in _boardMembers.Where(bm => !_cardDetail.Card.Members.Any(cm => cm.PlatformUserId == bm.PlatformUserId)))
-                        {
-                            <div class="td-side-item td-side-add">
-                                <span class="tb-avatar" style="width:24px;height:24px;font-size:10px;background:#94a3b8;">@candidate.Initials</span>
-                                <span style="flex:1; color:#64748b;">@candidate.DisplayName</span>
-                                <button class="tb-icon-btn" title="Asignar" @onclick="@(() => AssignMemberAsync(candidate))">+</button>
-                            </div>
-                        }
-                    </div>
-                </div>
+            @* ===== Body: main + side + popovers ===== *@
+            <div class="td-modal-body">
+                <div class="td-modal-main">
 
-                <div style="margin-top:16px;">
-                    <label>Adjuntos</label>
-                    @foreach (var att in _cardDetail.Attachments)
+                    @* --- Row inline: Miembros + Etiquetas + Fecha (chips arriba) --- *@
+                    @if (detail.Card.Members.Count > 0 || detail.Card.Tags.Count > 0 || detail.Card.DueAt.HasValue)
                     {
-                        <div class="td-side-item">
-                            <span>📎</span>
-                            <a href="@att.Url" target="_blank" style="flex:1; font-size:12px;">@att.FileName</a>
-                            <button class="tb-icon-btn tb-icon-danger" @onclick="@(() => DeleteAttachmentAsync(att))">×</button>
+                        <div class="td-modal-inline">
+                            @if (detail.Card.Members.Count > 0)
+                            {
+                                <div>
+                                    <h4 class="td-modal-mini">Miembros</h4>
+                                    <div class="td-avatar-row">
+                                        @foreach (var m in detail.Card.Members)
+                                        {
+                                            <div class="td-avatar" title="@m.DisplayName" @onclick="@(() => UnassignMemberAsync(m))">@m.Initials</div>
+                                        }
+                                        <button class="td-plus-btn" @onclick="@(() => TogglePopover("members"))" title="Agregar miembro">+</button>
+                                    </div>
+                                </div>
+                            }
+                            @if (detail.Card.Tags.Count > 0)
+                            {
+                                <div>
+                                    <h4 class="td-modal-mini">Etiquetas</h4>
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                                        @foreach (var t in detail.Card.Tags)
+                                        {
+                                            <span class="td-modal-tag" style="@(string.IsNullOrWhiteSpace(t.Color) ? "" : $"background:{t.Color};color:#fff;")"
+                                                  @onclick="@(() => DetachTagAsync(t.Id))" title="Quitar etiqueta">@t.Name</span>
+                                        }
+                                        <button class="td-plus-btn td-plus-sq" @onclick="@(() => TogglePopover("tags"))" title="Agregar etiqueta">+</button>
+                                    </div>
+                                </div>
+                            }
+                            @if (detail.Card.DueAt is DateTimeOffset dueChip)
+                            {
+                                <div>
+                                    <h4 class="td-modal-mini">Fecha limite</h4>
+                                    <span class="td-modal-due-chip" @onclick="@(() => TogglePopover("date"))">📅 @dueChip.ToLocalTime().ToString("dd MMM yyyy")</span>
+                                </div>
+                            }
                         </div>
                     }
-                    <div style="display:flex; gap:6px; margin-top:8px;">
-                        <input class="form-control form-control-sm" @bind="_newAttUrl" placeholder="URL del archivo..." />
+
+                    @* --- Descripcion --- *@
+                    <div class="td-modal-section">
+                        <span class="td-modal-section-icon">📝</span>
+                        <div class="td-modal-section-body">
+                            <div class="td-modal-section-head">
+                                <h3 class="td-modal-section-title">Descripcion</h3>
+                                @if (!string.IsNullOrWhiteSpace(detail.Card.Description) && !_editingDesc)
+                                {
+                                    <button class="td-modal-section-action" @onclick="@(() => { _editingDesc = true; _editDescription = detail.Card.Description ?? string.Empty; })">Editar</button>
+                                }
+                            </div>
+                            @if (_editingDesc)
+                            {
+                                <div class="td-desc-edit">
+                                    <textarea @bind="_editDescription" @bind:event="oninput" placeholder="Que detalles importantes debe saber el equipo?"></textarea>
+                                    <div style="display:flex; gap:8px;">
+                                        <button class="btn btn-primary btn-sm" @onclick="SaveDescriptionAsync">Guardar</button>
+                                        <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => { _editingDesc = false; _editDescription = detail.Card.Description ?? string.Empty; })">Cancelar</button>
+                                    </div>
+                                </div>
+                            }
+                            else if (string.IsNullOrWhiteSpace(detail.Card.Description))
+                            {
+                                <div class="td-desc-empty" @onclick="@(() => { _editingDesc = true; _editDescription = string.Empty; })">
+                                    Agrega una descripcion mas detallada...
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="td-desc-text" @onclick="@(() => { _editingDesc = true; _editDescription = detail.Card.Description ?? string.Empty; })">@detail.Card.Description</div>
+                            }
+                        </div>
                     </div>
-                    <div style="display:flex; gap:6px; margin-top:4px;">
-                        <input class="form-control form-control-sm" @bind="_newAttName" placeholder="Nombre..." />
-                        <button class="btn btn-primary btn-sm" @onclick="AddAttachmentAsync">+</button>
+
+                    @* --- Checklist --- *@
+                    @if (detail.Checklist.Count > 0 || _showChecklistAdd)
+                    {
+                        var total = detail.Checklist.Count;
+                        var done = detail.Checklist.Count(i => i.IsCompleted);
+                        var pct = total == 0 ? 0 : (int)Math.Round((double)done / total * 100);
+                        <div class="td-modal-section">
+                            <span class="td-modal-section-icon">☑</span>
+                            <div class="td-modal-section-body">
+                                <div class="td-modal-section-head">
+                                    <h3 class="td-modal-section-title">Checklist</h3>
+                                </div>
+                                @if (total > 0)
+                                {
+                                    <div class="td-check-progress">
+                                        <span class="td-check-progress-label">@pct%</span>
+                                        <div class="td-check-bar"><div class="td-check-bar-fill" style="width:@(pct)%"></div></div>
+                                    </div>
+                                }
+                                <div class="td-check-list">
+                                    @foreach (var it in detail.Checklist)
+                                    {
+                                        <div class="td-check-item">
+                                            <input type="checkbox" checked="@it.IsCompleted" @onchange="@(e => ToggleChecklistAsync(it, (bool)(e.Value ?? false)))" />
+                                            <span class="td-check-text @(it.IsCompleted ? "done" : "")">@it.Text</span>
+                                            <button class="td-check-del" @onclick="@(() => DeleteChecklistAsync(it))">×</button>
+                                        </div>
+                                    }
+                                </div>
+                                <div class="td-check-add">
+                                    <input @bind="_newChecklistText" @bind:event="oninput" placeholder="Agregar elemento al checklist..." />
+                                    <button class="btn btn-primary btn-sm" @onclick="AddChecklistAsync" disabled="@string.IsNullOrWhiteSpace(_newChecklistText)">Agregar</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @* --- Adjuntos --- *@
+                    @if (detail.Attachments.Count > 0 || _showAttachAdd)
+                    {
+                        <div class="td-modal-section">
+                            <span class="td-modal-section-icon">📎</span>
+                            <div class="td-modal-section-body">
+                                <div class="td-modal-section-head">
+                                    <h3 class="td-modal-section-title">Adjuntos</h3>
+                                </div>
+                                <div class="td-att-list">
+                                    @foreach (var att in detail.Attachments)
+                                    {
+                                        <div class="td-att-item">
+                                            <span class="td-att-thumb">📎</span>
+                                            <div class="td-att-body">
+                                                <a href="@att.Url" target="_blank" class="td-att-name">@att.FileName</a>
+                                                <div class="td-att-meta">Subido @att.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy") @(att.UploadedByName is null ? "" : $"por {att.UploadedByName}")</div>
+                                            </div>
+                                            <button class="td-check-del" @onclick="@(() => DeleteAttachmentAsync(att))">×</button>
+                                        </div>
+                                    }
+                                </div>
+                                @if (_showAttachAdd)
+                                {
+                                    <div class="td-att-add">
+                                        <input class="form-control form-control-sm" @bind="_newAttName" placeholder="Nombre visible..." />
+                                        <input class="form-control form-control-sm" @bind="_newAttUrl" placeholder="URL del archivo (https://...)" />
+                                        <div style="display:flex; gap:6px;">
+                                            <button class="btn btn-primary btn-sm" @onclick="AddAttachmentAsync" disabled="@string.IsNullOrWhiteSpace(_newAttUrl)">Adjuntar</button>
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => _showAttachAdd = false)">Cancelar</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @* --- Actividad --- *@
+                    <div class="td-modal-section">
+                        <span class="td-modal-section-icon">📣</span>
+                        <div class="td-modal-section-body">
+                            <div class="td-modal-section-head">
+                                <h3 class="td-modal-section-title">Actividad</h3>
+                            </div>
+                            <div class="td-act-input">
+                                <div class="td-avatar">@Initials(_actorDisplayName)</div>
+                                <div class="td-act-input-box">
+                                    <textarea @bind="_newCommentText" @bind:event="oninput" placeholder="Escribe un comentario..."></textarea>
+                                    <div class="td-act-input-foot">
+                                        <span></span>
+                                        <button class="btn btn-primary btn-sm" @onclick="AddCommentAsync" disabled="@string.IsNullOrWhiteSpace(_newCommentText)">Guardar</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="td-act-list">
+                                @if (detail.Activity.Count == 0)
+                                {
+                                    <p class="td-act-empty">No hay actividad reciente en esta tarjeta.</p>
+                                }
+                                @foreach (var a in detail.Activity)
+                                {
+                                    <div class="td-act-item">
+                                        <div class="td-act-item-avatar">@Initials(a.ActorName)</div>
+                                        @if (a.Type == Visal.Domain.Enums.TaskActivityType.Comment)
+                                        {
+                                            <div class="td-act-bubble">
+                                                <div class="td-act-head">
+                                                    <span class="td-act-name">@a.ActorName</span>
+                                                    <span class="td-act-time">@FormatRelative(a.CreatedAt)</span>
+                                                </div>
+                                                <p class="td-act-text">@a.Text</p>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="td-act-action">
+                                                <strong>@a.ActorName</strong> @a.Text
+                                                <span class="td-act-time" style="margin-left:6px;">@FormatRelative(a.CreatedAt)</span>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div style="margin-top:16px;">
-                    <label>Acciones</label>
-                    <button class="btn btn-outline-secondary btn-sm td-side-btn" @onclick="ArchiveCardAsync">
-                        @(_cardDetail.Card.IsArchived ? "Desarchivar" : "Archivar")
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm td-side-btn" @onclick="DeleteCardAsync">Eliminar tarjeta</button>
+                @* ===== Sidebar derecha ===== *@
+                <div class="td-modal-side">
+                    <div>
+                        <h4>Agregar a la tarjeta</h4>
+                        <div class="td-modal-side-btns">
+                            <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("members"))">👥 Miembros</button>
+                            <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("tags"))">🏷 Etiquetas</button>
+                            <button class="td-modal-side-btn" @onclick="@(() => { CloseAllPopovers(); _showChecklistAdd = true; })">☑ Checklist</button>
+                            <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("date"))">📅 Fecha</button>
+                            <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("color"))">🎨 Color</button>
+                            <button class="td-modal-side-btn" @onclick="@(() => { CloseAllPopovers(); _showAttachAdd = true; })">📎 Adjunto</button>
+                        </div>
+                    </div>
+                    <div>
+                        <h4>Acciones</h4>
+                        <div class="td-modal-side-btns">
+                            <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("move"))">➡ Mover</button>
+                            <button class="td-modal-side-btn" @onclick="ArchiveCardAsync">
+                                📦 @(detail.Card.IsArchived ? "Desarchivar" : "Archivar")
+                            </button>
+                            <hr class="td-modal-side-divider" />
+                            <button class="td-modal-side-btn td-danger" @onclick="DeleteCardAsync">🗑 Eliminar</button>
+                        </div>
+                    </div>
                 </div>
+
+                @* ===== Popovers ===== *@
+                @if (_showMembersPop)
+                {
+                    <div class="td-pop" style="top:90px;" @onclick:stopPropagation="true">
+                        <div class="td-pop-head">
+                            <span>Miembros del tablero</span>
+                            <button class="td-modal-x" style="width:22px; height:22px; font-size:16px;" @onclick="@(() => _showMembersPop = false)">×</button>
+                        </div>
+                        <div class="td-pop-list">
+                            @if (_boardMembers.Count == 0)
+                            {
+                                <div class="td-pop-empty">Aun no hay miembros. Invitalos desde el boton Miembros del header.</div>
+                            }
+                            else
+                            {
+                                @foreach (var bm in _boardMembers)
+                                {
+                                    var isSel = detail.Card.Members.Any(m => m.PlatformUserId == bm.PlatformUserId);
+                                    <div class="td-pop-item @(isSel ? "selected" : "")" @onclick="@(() => ToggleCardMemberAsync(bm, !isSel))">
+                                        <div class="td-avatar">@bm.Initials</div>
+                                        <span style="flex:1;">@bm.DisplayName</span>
+                                        @if (isSel) { <span>✓</span> }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (_showTagsPop)
+                {
+                    <div class="td-pop" style="top:150px;" @onclick:stopPropagation="true">
+                        <div class="td-pop-head">
+                            <span>Etiquetas</span>
+                            <button class="td-modal-x" style="width:22px; height:22px; font-size:16px;" @onclick="@(() => _showTagsPop = false)">×</button>
+                        </div>
+                        <div class="td-pop-list">
+                            @if (_boardTags.Count == 0)
+                            {
+                                <div class="td-pop-empty">Aun no hay etiquetas. Crea una abajo.</div>
+                            }
+                            else
+                            {
+                                @foreach (var t in _boardTags)
+                                {
+                                    var isSel = detail.Card.Tags.Any(x => x.Id == t.Id);
+                                    <div class="td-pop-item @(isSel ? "selected" : "")" @onclick="@(() => ToggleCardTagAsync(t.Id, !isSel))">
+                                        <span class="td-modal-tag" style="@(string.IsNullOrWhiteSpace(t.Color) ? "" : $"background:{t.Color};color:#fff;")">@t.Name</span>
+                                        <span style="flex:1;"></span>
+                                        @if (isSel) { <span>✓</span> }
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <div class="td-pop-add">
+                            <input @bind="_newTagName" @bind:event="oninput" placeholder="Nueva etiqueta" />
+                            <input type="color" @bind="_newTagColor" style="width:40px; height:32px; padding:2px;" />
+                            <button class="btn btn-primary btn-sm" @onclick="CreateTagAsync" disabled="@string.IsNullOrWhiteSpace(_newTagName)">+</button>
+                        </div>
+                    </div>
+                }
+
+                @if (_showDatePop)
+                {
+                    <div class="td-pop" style="top:210px;" @onclick:stopPropagation="true">
+                        <div class="td-pop-head">
+                            <span>Fecha de vencimiento</span>
+                            <button class="td-modal-x" style="width:22px; height:22px; font-size:16px;" @onclick="@(() => _showDatePop = false)">×</button>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:10px;">
+                            <input type="date" class="form-control" @bind="_editCardDueDate" />
+                            <div style="display:flex; gap:6px;">
+                                <button class="btn btn-primary btn-sm" @onclick="SaveDueDateAsync">Guardar</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="ClearDueDateAsync">Quitar</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @if (_showColorPop)
+                {
+                    <div class="td-pop" style="top:270px;" @onclick:stopPropagation="true">
+                        <div class="td-pop-head">
+                            <span>Color del titulo</span>
+                            <button class="td-modal-x" style="width:22px; height:22px; font-size:16px;" @onclick="@(() => _showColorPop = false)">×</button>
+                        </div>
+                        <div class="td-color-swatches">
+                            @foreach (var c in _colorPalette)
+                            {
+                                var isSel = detail.Card.Color == c;
+                                <button class="td-color-swatch @(isSel ? "sel" : "")" style="background:@c;" @onclick="@(() => SaveColorAsync(c))" title="@c"></button>
+                            }
+                            <button class="td-color-swatch clear @(string.IsNullOrEmpty(detail.Card.Color) ? "sel" : "")" @onclick="@(() => SaveColorAsync(null))" title="Sin color">×</button>
+                        </div>
+                        <div style="display:flex; gap:6px; margin-top:10px;">
+                            <input type="color" @bind="_editCardColor" style="width:44px; height:32px; padding:2px;" />
+                            <button class="btn btn-primary btn-sm" style="flex:1;" @onclick="@(() => SaveColorAsync(_editCardColor))">Aplicar color libre</button>
+                        </div>
+                    </div>
+                }
+
+                @if (_showMovePop)
+                {
+                    <div class="td-pop" style="top:330px;" @onclick:stopPropagation="true">
+                        <div class="td-pop-head">
+                            <span>Mover a columna</span>
+                            <button class="td-modal-x" style="width:22px; height:22px; font-size:16px;" @onclick="@(() => _showMovePop = false)">×</button>
+                        </div>
+                        <div class="td-pop-list">
+                            @foreach (var c in _columns)
+                            {
+                                var isSel = c.Id == detail.Card.ColumnId;
+                                <div class="td-pop-item @(isSel ? "selected" : "")" @onclick="@(() => MoveCardToColumnAsync(c.Id))">
+                                    <span style="flex:1;">@c.Name @if (c.IsDone) { <span title="Estado final">✓</span> }</span>
+                                    @if (isSel) { <span>✓</span> }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -425,6 +676,116 @@ else
 
     /* Comparte estilos del modal base con Tableros.razor — repetimos para que
        la pagina sea autocontenida (Blazor no comparte style-blocks entre razors). */
+    /* ===== Modal Trello-like para tarjeta ===== */
+    .td-modal-overlay { position:fixed; inset:0; background:rgba(15,23,42,0.55); backdrop-filter:blur(2px); z-index:1000; display:grid; place-items:center; padding:20px; overflow-y:auto; }
+    .td-modal { position:relative; width:100%; max-width:880px; background:#fafafa; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,0.3); max-height:calc(100vh - 40px); overflow-y:auto; }
+    .td-modal-head { padding:22px 28px 12px; display:flex; align-items:flex-start; gap:14px; }
+    .td-modal-head-icon { font-size:20px; margin-top:2px; color:#64748b; }
+    .td-modal-head-content { flex:1; min-width:0; }
+    .td-modal-title { font-size:22px; font-weight:700; margin:0 0 4px; color:#0f172a; cursor:text; line-height:1.2; }
+    .td-modal-title-input { font-size:22px; font-weight:700; padding:4px 8px; }
+    .td-modal-sub { font-size:12.5px; color:#64748b; margin:0; }
+    .td-modal-sub strong { color:#334155; text-decoration:underline; }
+    .td-modal-x { width:32px; height:32px; border-radius:999px; border:0; background:transparent; color:#64748b; cursor:pointer; font-size:22px; line-height:1; display:grid; place-items:center; }
+    .td-modal-x:hover { background:#e2e8f0; color:#0f172a; }
+    .td-modal-body { display:flex; gap:24px; padding:6px 28px 28px; position:relative; }
+    .td-modal-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:24px; }
+    .td-modal-side { width:190px; flex:none; display:flex; flex-direction:column; gap:18px; }
+    .td-modal-side h4 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin:0 0 8px; }
+    .td-modal-side-btns { display:flex; flex-direction:column; gap:6px; }
+    .td-modal-side-btn { width:100%; text-align:left; padding:7px 12px; background:#e2e8f0; color:#0f172a; border:0; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; transition:background 0.15s; }
+    .td-modal-side-btn:hover { background:#cbd5e1; }
+    .td-modal-side-btn.td-danger { color:#dc2626; }
+    .td-modal-side-btn.td-danger:hover { background:#fee2e2; color:#991b1b; }
+    .td-modal-side-divider { border:0; border-top:1px solid #e2e8f0; margin:4px 0; }
+    .td-modal-inline { display:flex; flex-wrap:wrap; gap:22px; padding-left:34px; margin-bottom:4px; }
+    .td-modal-mini { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#64748b; margin:0 0 6px; }
+    .td-avatar-row { display:flex; gap:0; align-items:center; }
+    .td-avatar { width:30px; height:30px; border-radius:999px; background:#3b82f6; color:#fff; font-size:11px; font-weight:700; display:grid; place-items:center; margin-left:-6px; border:2px solid #fafafa; cursor:pointer; }
+    .td-avatar:first-child { margin-left:0; }
+    .td-plus-btn { width:30px; height:30px; border-radius:999px; background:#e2e8f0; border:0; margin-left:6px; color:#64748b; cursor:pointer; font-size:16px; line-height:1; }
+    .td-plus-btn:hover { background:#cbd5e1; color:#0f172a; }
+    .td-plus-btn.td-plus-sq { border-radius:4px; width:30px; height:26px; font-size:14px; margin-left:0; }
+    .td-modal-tag { font-size:12.5px; font-weight:600; padding:4px 10px; border-radius:4px; background:#e2e8f0; color:#334155; cursor:pointer; }
+    .td-modal-tag:hover { opacity:0.85; }
+    .td-modal-due-chip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; padding:6px 10px; background:#fef3c7; color:#92400e; border-radius:6px; cursor:pointer; font-weight:600; }
+    .td-modal-due-chip:hover { background:#fde68a; }
+    /* Secciones (Descripcion / Checklist / Adjuntos / Actividad) */
+    .td-modal-section { display:flex; gap:14px; align-items:flex-start; }
+    .td-modal-section-icon { font-size:16px; margin-top:2px; color:#64748b; flex:none; width:22px; }
+    .td-modal-section-body { flex:1; min-width:0; }
+    .td-modal-section-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .td-modal-section-title { font-size:14.5px; font-weight:700; color:#0f172a; margin:0; }
+    .td-modal-section-action { padding:5px 12px; background:#e2e8f0; color:#0f172a; border:0; border-radius:4px; font-size:12px; font-weight:600; cursor:pointer; }
+    .td-modal-section-action:hover { background:#cbd5e1; }
+    /* Descripcion */
+    .td-desc-empty { padding:12px 14px; background:#e2e8f0; border-radius:6px; color:#64748b; font-size:13px; cursor:pointer; min-height:60px; }
+    .td-desc-empty:hover { background:#cbd5e1; }
+    .td-desc-text { font-size:13.5px; color:#0f172a; white-space:pre-wrap; line-height:1.55; cursor:pointer; padding:8px 12px; border-radius:6px; }
+    .td-desc-text:hover { background:#f1f5f9; }
+    .td-desc-edit { display:flex; flex-direction:column; gap:8px; }
+    .td-desc-edit textarea { width:100%; min-height:100px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13.5px; font-family:inherit; resize:vertical; outline:none; }
+    .td-desc-edit textarea:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.12); }
+    /* Checklist */
+    .td-check-progress { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+    .td-check-progress-label { font-size:11px; color:#64748b; width:34px; font-weight:600; }
+    .td-check-bar { flex:1; height:8px; background:#e2e8f0; border-radius:999px; overflow:hidden; }
+    .td-check-bar-fill { height:100%; background:#22c55e; transition:width 0.3s; }
+    .td-check-list { display:flex; flex-direction:column; gap:2px; }
+    .td-check-item { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:4px; transition:background 0.1s; }
+    .td-check-item:hover { background:#f1f5f9; }
+    .td-check-item input[type=checkbox] { width:16px; height:16px; cursor:pointer; }
+    .td-check-text { flex:1; font-size:13.5px; color:#0f172a; }
+    .td-check-text.done { color:#94a3b8; text-decoration:line-through; }
+    .td-check-del { background:transparent; border:0; color:#64748b; cursor:pointer; padding:4px 8px; border-radius:4px; opacity:0; font-size:16px; line-height:1; }
+    .td-check-item:hover .td-check-del { opacity:1; }
+    .td-check-del:hover { color:#dc2626; background:#fee2e2; }
+    .td-check-add { display:flex; gap:8px; margin-top:8px; }
+    .td-check-add input { flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; outline:none; }
+    .td-check-add input:focus { border-color:#3b82f6; }
+    /* Adjuntos */
+    .td-att-list { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+    .td-att-item { display:flex; align-items:center; gap:10px; padding:8px 10px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; }
+    .td-att-thumb { font-size:18px; }
+    .td-att-body { flex:1; min-width:0; }
+    .td-att-name { display:block; font-weight:600; color:#3b82f6; text-decoration:none; font-size:13px; }
+    .td-att-name:hover { text-decoration:underline; }
+    .td-att-meta { font-size:11px; color:#64748b; }
+    .td-att-add { display:flex; flex-direction:column; gap:6px; padding:10px; background:#f1f5f9; border-radius:6px; }
+    /* Actividad */
+    .td-act-input { display:flex; gap:10px; margin-bottom:14px; }
+    .td-act-input-box { flex:1; background:#fff; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden; transition:border-color 0.15s, box-shadow 0.15s; }
+    .td-act-input-box:focus-within { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.12); }
+    .td-act-input-box textarea { width:100%; min-height:50px; padding:8px 10px; border:0; outline:0; font-size:13px; font-family:inherit; resize:none; }
+    .td-act-input-foot { background:#f8fafc; padding:6px 10px; display:flex; align-items:center; justify-content:space-between; border-top:1px solid #e2e8f0; }
+    .td-act-list { display:flex; flex-direction:column; gap:12px; }
+    .td-act-empty { font-size:12.5px; color:#94a3b8; font-style:italic; padding-left:44px; margin:0; }
+    .td-act-item { display:flex; gap:10px; }
+    .td-act-item-avatar { width:32px; height:32px; border-radius:999px; background:#e2e8f0; color:#64748b; font-size:11px; font-weight:700; display:grid; place-items:center; flex:none; }
+    .td-act-bubble { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 12px; flex:1; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+    .td-act-head { display:flex; gap:6px; align-items:baseline; margin-bottom:2px; }
+    .td-act-name { font-weight:700; font-size:12.5px; color:#0f172a; }
+    .td-act-time { font-size:10.5px; color:#94a3b8; }
+    .td-act-text { font-size:12.5px; color:#334155; margin:0; line-height:1.4; }
+    .td-act-action { font-size:12.5px; color:#64748b; padding-top:6px; }
+    .td-act-action strong { color:#0f172a; font-weight:600; }
+    /* Popover */
+    .td-pop { position:absolute; right:220px; z-index:60; background:#fff; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 12px 32px rgba(0,0,0,0.18); padding:12px; width:280px; }
+    .td-pop-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; font-size:12.5px; font-weight:700; color:#0f172a; }
+    .td-pop-list { display:flex; flex-direction:column; gap:3px; max-height:260px; overflow-y:auto; }
+    .td-pop-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; cursor:pointer; font-size:13px; }
+    .td-pop-item:hover { background:#f1f5f9; }
+    .td-pop-item.selected { background:#eff6ff; color:#1e40af; }
+    .td-pop-empty { font-size:12px; color:#94a3b8; font-style:italic; padding:8px; }
+    .td-pop-add { display:flex; gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid #e2e8f0; }
+    .td-pop-add input { flex:1; padding:5px 8px; border:1px solid #cbd5e1; border-radius:5px; font-size:12.5px; outline:none; }
+    .td-color-swatches { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
+    .td-color-swatch { width:100%; aspect-ratio:1; border:2px solid transparent; border-radius:6px; cursor:pointer; padding:0; }
+    .td-color-swatch:hover { transform:scale(1.08); }
+    .td-color-swatch.sel { border-color:#0f172a; }
+    .td-color-swatch.clear { background:#fff; border:1px dashed #cbd5e1; color:#94a3b8; font-size:14px; font-weight:700; }
+
+    /* ===== Modales pequeños (Nueva tarjeta, Editar tablero, Miembros del tablero) ===== */
     .tb-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.45); z-index:1000; }
     .tb-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:10px; z-index:1001; max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.25); }
     .tb-modal-h { padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
@@ -469,6 +830,22 @@ else
     private string? _editCardDescription;
     private string? _editCardColor;
     private DateTime? _editCardDueDate;
+    // Trello-like modal state (title/description inline edit + popovers)
+    private bool _editingTitle;
+    private string _editTitle = "";
+    private bool _editingDesc;
+    private string _editDescription = "";
+    private bool _showMembersPop, _showTagsPop, _showDatePop, _showColorPop, _showMovePop, _showChecklistAdd, _showAttachAdd;
+    private string _newTagName = "";
+    private string _newTagColor = "#3b82f6";
+    private List<TaskCardTagDto> _boardTags = new();
+    // Paleta reusable para el color del titulo de la tarjeta
+    private static readonly string[] _colorPalette = new[]
+    {
+        "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#10b981",
+        "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7",
+        "#ec4899", "#475569",
+    };
     private string _newChecklistText = "";
     private string _newCommentText = "";
     private string _newAttUrl = "";
@@ -521,6 +898,7 @@ else
         _columns = (await BoardsSvc.ListColumnsAsync(BoardId, _actorId)).ToList();
         _cards = (await BoardsSvc.ListCardsAsync(BoardId, _actorId)).ToList();
         _boardMembers = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
+        _boardTags = (await BoardsSvc.ListBoardTagsAsync(BoardId, _actorId)).ToList();
     }
 
     // ---- Drag&drop ----
@@ -736,6 +1114,143 @@ else
         _board = await BoardsSvc.GetBoardAsync(BoardId, _actorId);
     }
 
+    // ---- Trello-like modal: inline title/desc + popovers + tags catalogo ----
+
+    private void CloseAllPopovers()
+    {
+        _showMembersPop = _showTagsPop = _showDatePop = _showColorPop = _showMovePop = false;
+    }
+
+    private void TogglePopover(string which)
+    {
+        var wasMembers = _showMembersPop;
+        var wasTags = _showTagsPop;
+        var wasDate = _showDatePop;
+        var wasColor = _showColorPop;
+        var wasMove = _showMovePop;
+        CloseAllPopovers();
+        _showChecklistAdd = false;
+        switch (which)
+        {
+            case "members": _showMembersPop = !wasMembers; break;
+            case "tags":    _showTagsPop    = !wasTags; break;
+            case "date":    _showDatePop    = !wasDate; break;
+            case "color":   _showColorPop   = !wasColor; break;
+            case "move":    _showMovePop    = !wasMove; break;
+        }
+    }
+
+    private async Task SaveTitleAsync()
+    {
+        if (_cardDetail is null || string.IsNullOrWhiteSpace(_editTitle)) { return; }
+        var due = _cardDetail.Card.DueAt;
+        await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
+            new UpdateTaskCardRequest(_editTitle, _cardDetail.Card.Description, due, _cardDetail.Card.Color),
+            _actorId, _actorDisplayName);
+        _editingTitle = false;
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task SaveDescriptionAsync()
+    {
+        if (_cardDetail is null) { return; }
+        var due = _cardDetail.Card.DueAt;
+        await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _editDescription, due, _cardDetail.Card.Color),
+            _actorId, _actorDisplayName);
+        _editingDesc = false;
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task SaveDueDateAsync()
+    {
+        if (_cardDetail is null) { return; }
+        DateTimeOffset? due = _editCardDueDate is DateTime dt ? new DateTimeOffset(dt) : null;
+        await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, due, _cardDetail.Card.Color),
+            _actorId, _actorDisplayName);
+        _showDatePop = false;
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task ClearDueDateAsync()
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, null, _cardDetail.Card.Color),
+            _actorId, _actorDisplayName);
+        _editCardDueDate = null;
+        _showDatePop = false;
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task SaveColorAsync(string? color)
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, _cardDetail.Card.DueAt, color),
+            _actorId, _actorDisplayName);
+        _showColorPop = false;
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task MoveCardToColumnAsync(Guid columnId)
+    {
+        if (_cardDetail is null || columnId == _cardDetail.Card.ColumnId) { _showMovePop = false; return; }
+        var newOrder = _cards.Count(c => c.ColumnId == columnId);
+        await BoardsSvc.MoveCardAsync(_cardDetail.Card.Id, new MoveTaskCardRequest(columnId, newOrder), _actorId, _actorDisplayName);
+        _showMovePop = false;
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task ToggleCardMemberAsync(TaskBoardMemberDto member, bool assign)
+    {
+        if (_cardDetail is null) { return; }
+        if (assign)
+        {
+            await BoardsSvc.AssignMemberToCardAsync(new AssignMemberRequest(_cardDetail.Card.Id, member.PlatformUserId), _actorId, _actorDisplayName);
+        }
+        else
+        {
+            await BoardsSvc.UnassignMemberFromCardAsync(_cardDetail.Card.Id, member.PlatformUserId, _actorId, _actorDisplayName);
+        }
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task ToggleCardTagAsync(Guid tagId, bool attach)
+    {
+        if (_cardDetail is null) { return; }
+        if (attach)
+        {
+            await BoardsSvc.AttachTagToCardAsync(_cardDetail.Card.Id, tagId, _actorId);
+        }
+        else
+        {
+            await BoardsSvc.DetachTagFromCardAsync(_cardDetail.Card.Id, tagId, _actorId);
+        }
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task DetachTagAsync(Guid tagId)
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.DetachTagFromCardAsync(_cardDetail.Card.Id, tagId, _actorId);
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task CreateTagAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTagName)) { return; }
+        var tag = await BoardsSvc.CreateBoardTagAsync(new CreateBoardTagRequest(BoardId, _newTagName, _newTagColor), _actorId);
+        if (tag is not null && _cardDetail is not null)
+        {
+            await BoardsSvc.AttachTagToCardAsync(_cardDetail.Card.Id, tag.Id, _actorId);
+        }
+        _newTagName = "";
+        _boardTags = (await BoardsSvc.ListBoardTagsAsync(BoardId, _actorId)).ToList();
+        await RefreshCardAndListAsync();
+    }
+
     // ---- Helpers ----
 
     private static string Initials(string name)
@@ -746,5 +1261,17 @@ else
         var first = char.ToUpperInvariant(parts[0][0]);
         if (parts.Length == 1) { return first.ToString(); }
         return $"{first}{char.ToUpperInvariant(parts[1][0])}";
+    }
+
+    /// <summary>Formato relativo tipo Trello: "hace 5 min", "ayer", "hace 3 dias", o fecha absoluta si es viejo.</summary>
+    private static string FormatRelative(DateTimeOffset when)
+    {
+        var diff = DateTimeOffset.UtcNow - when;
+        if (diff.TotalSeconds < 60) { return "recien ahora"; }
+        if (diff.TotalMinutes < 60) { return $"hace {(int)diff.TotalMinutes} min"; }
+        if (diff.TotalHours < 24) { return $"hace {(int)diff.TotalHours} h"; }
+        if (diff.TotalDays < 2) { return "ayer"; }
+        if (diff.TotalDays < 7) { return $"hace {(int)diff.TotalDays} dias"; }
+        return when.ToLocalTime().ToString("dd MMM yyyy");
     }
 }

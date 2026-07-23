@@ -281,13 +281,21 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             // Nombre del servicio y tarifa unitaria — vienen del par
             // (Asignacion, ServicioContrato). NombreServicio esta denormalizado
             // en la asignacion; la tarifa vive en el contrato de servicio.
+            // Modalidad/Grupo/Servicio de facturacion tambien viven en el
+            // ServicioContrato (config una vez por servicio del contrato).
             string? nombreServicio = asigRelevante?.NombreServicio;
             decimal? valorUnitario = null;
+            string? modalidadFacturacion = null;
+            string? grupoServicioFacturacion = null;
+            string? servicioFacturacion = null;
             if (asigRelevante is not null
                 && Guid.TryParse(asigRelevante.ServicioId, out var sid)
                 && serviciosContrato.TryGetValue(sid, out var sc))
             {
                 valorUnitario = sc.Tarifa;
+                modalidadFacturacion = sc.ModalidadFacturacion;
+                grupoServicioFacturacion = sc.GrupoServicioFacturacion;
+                servicioFacturacion = sc.ServicioFacturacion;
             }
 
             // Cuota moderadora / copago — mutuamente excluyentes segun TipoPago
@@ -313,7 +321,8 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 cupsCodigo, cupsDescripcion,
                 deptoNombre, munNombre, nacNombre,
                 codHabResuelto, tipoArchivoRips, codigoAutorizacion,
-                nombreServicio, valorUnitario, cuotaModeradora, copago));
+                nombreServicio, valorUnitario, cuotaModeradora, copago,
+                modalidadFacturacion, grupoServicioFacturacion, servicioFacturacion));
         }
         return hechos;
     }

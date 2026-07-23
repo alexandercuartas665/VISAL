@@ -58,4 +58,13 @@ public sealed record RelacionFacturasHecho(
     /// <summary>Cuota moderadora pagada por el paciente (solo si Asignacion.TipoPago == CUOTA).</summary>
     decimal? ValorCuotaModeradora,
     /// <summary>Copago pagado por el paciente (solo si Asignacion.TipoPago == COPAGO).</summary>
-    decimal? ValorCopago);
+    decimal? ValorCopago,
+    /// <summary>Modalidad de atencion para facturacion (col 33), configurada en
+    /// el servicio del contrato (ServicioContrato.ModalidadFacturacion).</summary>
+    string? ModalidadFacturacion,
+    /// <summary>Grupo de servicios para facturacion (col 35), configurado en
+    /// el servicio del contrato (ServicioContrato.GrupoServicioFacturacion).</summary>
+    string? GrupoServicioFacturacion,
+    /// <summary>Codigo/categoria de servicio para facturacion (col 36),
+    /// configurado en el servicio del contrato (ServicioContrato.ServicioFacturacion).</summary>
+    string? ServicioFacturacion);

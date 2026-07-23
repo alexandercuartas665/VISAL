@@ -97,9 +97,10 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Diagnóstico"]                             = "Modulo de atencion, historia clinica",
         ["TipoDocProfesional"]                      = "Modulo de atencion datos del profesional que realiza la historia clinica",
         ["Finalidad"]                               = "Modulo atencion, cuando el profesional llena la historia clinica",
-        ["Modalidad Atención"]                      = "Modulo de asignacion al momento de agregar el servicio o consulta",
+        ["Modalidad Atención"]                      = "Aseguradoras → Contratos → Servicios → columna MODALIDAD FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
         ["Vía de Ingreso"]                          = "Modulo de admision",
-        ["Grupo Servicios"]                         = "Modulo de admision, casilla contratos",
+        ["Grupo Servicios"]                         = "Aseguradoras → Contratos → Servicios → columna GRUPO SERV. FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
+        ["Servicios"]                               = "Aseguradoras → Contratos → Servicios → columna SERVICIO FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
         ["Nacionalidad"]                            = "sale del modulo de admision Datos del paciente",
         ["Correo electrónico"]                      = "Correo del paciente registrado en /admision (Paciente.Email)",
     };
@@ -161,10 +162,10 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["NomProf"] = h.Profesional?.NombreCompleto,                       // 30
             ["Finalidad"] = h.Hc.RipsFinalidadCodigo,                          // 31
             ["Causa Externa"] = h.Hc.RipsCausaExternaCodigo,                   // 32
-            ["Modalidad Atención"] = null,                                     // 33
+            ["Modalidad Atención"] = h.ModalidadFacturacion,                   // 33 — ServicioContrato.ModalidadFacturacion
             ["Vía de Ingreso"] = h.Hc.RipsViaIngresoCodigo,                    // 34
-            ["Grupo Servicios"] = null,                                        // 35
-            ["Servicios"] = null,                                              // 36
+            ["Grupo Servicios"] = h.GrupoServicioFacturacion,                  // 35 — ServicioContrato.GrupoServicioFacturacion
+            ["Servicios"] = h.ServicioFacturacion,                             // 36 — ServicioContrato.ServicioFacturacion
             ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 37
             ["Departamento"] = h.DepartamentoNombre,                           // 38
             ["Municipio"] = h.MunicipioNombre,                                 // 39

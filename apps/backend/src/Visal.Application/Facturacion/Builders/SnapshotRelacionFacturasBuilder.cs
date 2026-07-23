@@ -101,6 +101,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Vía de Ingreso"]                          = "Modulo de admision",
         ["Grupo Servicios"]                         = "Modulo de admision, casilla contratos",
         ["Nacionalidad"]                            = "sale del modulo de admision Datos del paciente",
+        ["Correo electrónico"]                      = "Correo del paciente registrado en /admision (Paciente.Email)",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -169,7 +170,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Municipio"] = h.MunicipioNombre,                                 // 39
             ["Dirección"] = h.Paciente.Direccion,                              // 40
             ["Telefono"] = h.Paciente.Telefono,                                // 41
-            ["Correo electrónico"] = h.Aseguradora.CorreoFacturacion,          // 42
+            ["Correo electrónico"] = h.Paciente.Email,                         // 42 — correo del paciente (Paciente.Email)
         };
     }
 

@@ -1621,7 +1621,30 @@
     }
 
     private async Task LoadLista() => _lista = (await Svc.ListAsync(string.IsNullOrWhiteSpace(_filtro) ? null : _filtro)).ToList();
-    private async Task OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; await LoadLista(); }
+
+    // Debounce + guard: al teclear rápido varios OnFiltro concurrentes tocaban
+    // el DbContext scoped a la vez y explotaban con "second operation on
+    // context". Ahora esperamos 300 ms tras la última tecla y serializamos
+    // el LoadLista con un semaphore.
+    private CancellationTokenSource? _filtroCts;
+    private readonly System.Threading.SemaphoreSlim _filtroGate = new(1, 1);
+    private async Task OnFiltro(ChangeEventArgs e)
+    {
+        _filtro = e.Value?.ToString() ?? "";
+        _filtroCts?.Cancel();
+        _filtroCts = new CancellationTokenSource();
+        var ct = _filtroCts.Token;
+        try { await Task.Delay(300, ct); } catch (TaskCanceledException) { return; }
+        await _filtroGate.WaitAsync(ct);
+        try
+        {
+            if (ct.IsCancellationRequested) return;
+            await LoadLista();
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { }
+        finally { _filtroGate.Release(); }
+    }
 
     // Se dispara cuando el usuario elige una fecha de nacimiento (input type=date).
     // Calcula la edad y la asigna al campo readonly. Si la fecha es invalida

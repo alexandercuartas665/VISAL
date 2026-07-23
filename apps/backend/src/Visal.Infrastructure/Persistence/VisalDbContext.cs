@@ -137,6 +137,18 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<PreRevisionIaPending> PreRevisionIaPendings => Set<PreRevisionIaPending>();
     public DbSet<DocumentoNota> DocumentoNotas => Set<DocumentoNota>();
 
+    // Modulo Tableros (Kanban colaborativo)
+    public DbSet<TaskBoard> TaskBoards => Set<TaskBoard>();
+    public DbSet<TaskBoardMember> TaskBoardMembers => Set<TaskBoardMember>();
+    public DbSet<TaskBoardColumn> TaskBoardColumns => Set<TaskBoardColumn>();
+    public DbSet<TaskCard> TaskCards => Set<TaskCard>();
+    public DbSet<TaskCardAssignment> TaskCardAssignments => Set<TaskCardAssignment>();
+    public DbSet<TaskCardTag> TaskCardTags => Set<TaskCardTag>();
+    public DbSet<TaskCardTagAssignment> TaskCardTagAssignments => Set<TaskCardTagAssignment>();
+    public DbSet<TaskCardChecklistItem> TaskCardChecklistItems => Set<TaskCardChecklistItem>();
+    public DbSet<TaskCardActivity> TaskCardActivities => Set<TaskCardActivity>();
+    public DbSet<TaskCardAttachment> TaskCardAttachments => Set<TaskCardAttachment>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         // Todos los enums se persisten como texto (legibles y estables ante reordenamientos).
@@ -1479,6 +1491,97 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.UmbralConfianza).HasPrecision(4, 3);
             // Singleton por tenant — una fila max por TenantId.
             b.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        // ---- Modulo Tableros (Kanban colaborativo) ----
+        // Portado de CUBOT.travels con una diferencia clave: se agrega
+        // TaskBoardMember para gate por invitacion. Todas las lecturas del
+        // servicio filtran por (OwnerPlatformUserId = actor) OR (existe TaskBoardMember(actor, board)).
+        modelBuilder.Entity<TaskBoard>(b =>
+        {
+            b.Property(x => x.Name).HasMaxLength(150).IsRequired();
+            b.Property(x => x.Description).HasMaxLength(2000);
+            b.Property(x => x.Color).HasMaxLength(20);
+            b.HasIndex(x => new { x.TenantId, x.SortOrder });
+            b.HasIndex(x => new { x.TenantId, x.OwnerPlatformUserId });
+        });
+
+        modelBuilder.Entity<TaskBoardMember>(b =>
+        {
+            b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+            b.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            // Un mismo usuario no se puede invitar 2 veces al mismo tablero.
+            b.HasIndex(x => new { x.BoardId, x.PlatformUserId }).IsUnique();
+            // Reverse lookup: "los tableros de este usuario" en el listado.
+            b.HasIndex(x => new { x.TenantId, x.PlatformUserId });
+        });
+
+        modelBuilder.Entity<TaskBoardColumn>(b =>
+        {
+            b.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Color).HasMaxLength(20);
+            b.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.BoardId, x.SortOrder });
+        });
+
+        modelBuilder.Entity<TaskCard>(b =>
+        {
+            b.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Description).HasColumnType("text");
+            b.Property(x => x.Color).HasMaxLength(20);
+            b.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Column).WithMany().HasForeignKey(x => x.ColumnId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(x => new { x.TenantId, x.BoardId, x.ColumnId, x.SortOrder });
+            b.HasIndex(x => new { x.TenantId, x.IsArchived });
+        });
+
+        modelBuilder.Entity<TaskCardAssignment>(b =>
+        {
+            b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+            b.HasOne(x => x.TaskCard).WithMany().HasForeignKey(x => x.TaskCardId).OnDelete(DeleteBehavior.Cascade);
+            // Un usuario no se asigna dos veces a la misma tarjeta.
+            b.HasIndex(x => new { x.TaskCardId, x.PlatformUserId }).IsUnique();
+        });
+
+        modelBuilder.Entity<TaskCardTag>(b =>
+        {
+            b.Property(x => x.Name).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Color).HasMaxLength(20);
+            b.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            // El nombre de etiqueta es unico por tablero.
+            b.HasIndex(x => new { x.BoardId, x.Name }).IsUnique();
+        });
+
+        modelBuilder.Entity<TaskCardTagAssignment>(b =>
+        {
+            b.HasOne(x => x.TaskCard).WithMany().HasForeignKey(x => x.TaskCardId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Tag).WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TaskCardId, x.TagId }).IsUnique();
+        });
+
+        modelBuilder.Entity<TaskCardChecklistItem>(b =>
+        {
+            b.Property(x => x.Text).HasMaxLength(500).IsRequired();
+            b.HasOne(x => x.TaskCard).WithMany().HasForeignKey(x => x.TaskCardId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TaskCardId, x.SortOrder });
+        });
+
+        modelBuilder.Entity<TaskCardActivity>(b =>
+        {
+            b.Property(x => x.ActorName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Text).HasColumnType("text").IsRequired();
+            b.HasOne(x => x.TaskCard).WithMany().HasForeignKey(x => x.TaskCardId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TaskCardId, x.CreatedAt });
+        });
+
+        modelBuilder.Entity<TaskCardAttachment>(b =>
+        {
+            b.Property(x => x.FileName).HasMaxLength(255).IsRequired();
+            b.Property(x => x.Url).HasMaxLength(500).IsRequired();
+            b.Property(x => x.MimeType).HasMaxLength(120);
+            b.Property(x => x.UploadedByName).HasMaxLength(200);
+            b.HasOne(x => x.TaskCard).WithMany().HasForeignKey(x => x.TaskCardId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TaskCardId, x.CreatedAt });
         });
     }
 

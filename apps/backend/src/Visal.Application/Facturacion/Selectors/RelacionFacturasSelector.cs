@@ -245,17 +245,21 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             }
 
             // Asignacion mas relevante: preferimos misma sede + mismo contrato
-            // codigo, y de esas la mas cercana en fecha al cierre de la HC.
+            // codigo, y de esas priorizamos las que tengan TipoPago poblado
+            // (para no perder cuota/copago), luego la mas cercana en fecha al
+            // cierre de la HC.
             Asignacion? asigRelevante = null;
             if (asignacionesPorPac.TryGetValue(paciente.Id, out var listaAsig))
             {
                 var fechaCierre = hc.FechaCierre?.LocalDateTime ?? hc.UpdatedAt?.LocalDateTime ?? hc.CreatedAt.LocalDateTime;
                 asigRelevante = listaAsig
                     .Where(a => a.ContratoCodigo == contrato.CodigoContrato)
-                    .OrderBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
+                    .OrderByDescending(a => !string.IsNullOrEmpty(a.TipoPago))
+                    .ThenBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
                     .FirstOrDefault()
                     ?? listaAsig
-                        .OrderBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
+                        .OrderByDescending(a => !string.IsNullOrEmpty(a.TipoPago))
+                        .ThenBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
                         .FirstOrDefault();
             }
 

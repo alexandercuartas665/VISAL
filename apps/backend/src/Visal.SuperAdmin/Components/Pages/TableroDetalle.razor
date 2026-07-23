@@ -1,0 +1,750 @@
+@page "/tableros/{BoardId:guid}"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@inject ITaskBoardService BoardsSvc
+@inject ITaskBoardMemberService MembersSvc
+@inject NavigationManager Nav
+
+<PageTitle>@(_board?.Name ?? "Tablero") - Visal</PageTitle>
+
+@if (_loading)
+{
+    <p class="tb-loading">Cargando tablero...</p>
+}
+else if (_board is null || _accessDenied)
+{
+    <div class="tb-denied">
+        <h2>Este tablero no existe o no fuiste invitado.</h2>
+        <p>Pidele al dueño que te invite desde su tablero, o crea uno tuyo.</p>
+        <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/tableros"))">Volver a Tableros</button>
+    </div>
+}
+else
+{
+    <div class="td-page">
+        @* ===== Header ===== *@
+        <div class="td-head">
+            <div class="td-head-left">
+                <a href="/tableros" class="td-back">←</a>
+                <span class="td-color-dot" style="background:@(_board.Color ?? "#3b82f6");"></span>
+                <h1 class="td-title">@_board.Name</h1>
+                @if (_board.IsOwner)
+                {
+                    <span class="tb-badge-owner">Owner</span>
+                }
+            </div>
+            <div class="td-head-right">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="OpenMembers">👥 Miembros (@_board.MemberCount)</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="OpenEditBoard">✎ Editar</button>
+            </div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_board.Description))
+        {
+            <p class="td-desc">@_board.Description</p>
+        }
+
+        @* ===== Kanban ===== *@
+        <div class="td-kanban">
+            @foreach (var col in _columns)
+            {
+                <div class="td-col" @ondragover:preventDefault @ondragover="@(e => OnDragOver(col.Id))" @ondrop="@(() => OnDropAsync(col.Id))">
+                    <div class="td-col-head" style="border-top:3px solid @(col.Color ?? "#94a3b8");">
+                        <div class="td-col-title">@col.Name @if (col.IsDone) { <span title="Estado final">✓</span> }</div>
+                        <div class="td-col-count">@col.CardCount</div>
+                    </div>
+                    <div class="td-col-body">
+                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).OrderBy(c => c.SortOrder))
+                        {
+                            <div class="td-card @(card.Color is null ? "" : "td-card-colored")"
+                                 style="@(card.Color is null ? "" : $"border-left:3px solid {card.Color};")"
+                                 draggable="true"
+                                 @ondragstart="@(() => _draggingCardId = card.Id)"
+                                 @ondragend="@(() => _draggingCardId = null)"
+                                 @onclick="@(() => OpenCardAsync(card.Id))">
+                                <div class="td-card-title">@card.Title</div>
+                                @if (card.Tags.Count > 0)
+                                {
+                                    <div class="td-card-tags">
+                                        @foreach (var tg in card.Tags)
+                                        {
+                                            <span class="td-tag" style="background:@(tg.Color ?? "#e2e8f0");">@tg.Name</span>
+                                        }
+                                    </div>
+                                }
+                                <div class="td-card-meta">
+                                    @if (card.DueAt is DateTimeOffset due)
+                                    {
+                                        <span class="td-meta-item" title="Fecha limite">📅 @due.ToLocalTime().ToString("dd/MM")</span>
+                                    }
+                                    @if (card.ChecklistTotal > 0)
+                                    {
+                                        <span class="td-meta-item" title="Checklist">☑ @card.ChecklistDone/@card.ChecklistTotal</span>
+                                    }
+                                    @if (card.CommentsCount > 0)
+                                    {
+                                        <span class="td-meta-item" title="Comentarios">💬 @card.CommentsCount</span>
+                                    }
+                                    @if (card.AttachmentsCount > 0)
+                                    {
+                                        <span class="td-meta-item" title="Adjuntos">📎 @card.AttachmentsCount</span>
+                                    }
+                                    @if (card.Members.Count > 0)
+                                    {
+                                        <span class="td-meta-item" style="margin-left:auto;">
+                                            @foreach (var mem in card.Members.Take(3))
+                                            {
+                                                <span class="td-mini-avatar" title="@mem.DisplayName">@mem.Initials</span>
+                                            }
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        <button class="td-add-card" @onclick="@(() => OpenNewCard(col.Id))">+ Añadir tarjeta</button>
+                    </div>
+                </div>
+            }
+
+            @* Nueva columna *@
+            @if (_newColOpen)
+            {
+                <div class="td-col td-col-newform">
+                    <input class="form-control form-control-sm" @bind="_newColName" placeholder="Nombre de la columna" />
+                    <div style="display:flex; gap:6px; margin-top:8px;">
+                        <button class="btn btn-primary btn-sm" @onclick="AddColumnAsync">Añadir</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => _newColOpen = false)">Cancelar</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <button class="td-add-column" @onclick="@(() => { _newColName = ""; _newColOpen = true; })">+ Añadir columna</button>
+            }
+        </div>
+    </div>
+}
+
+@* ===== Modal: Card detail ===== *@
+@if (_cardModalOpen && _cardDetail is not null)
+{
+    <div class="tb-modal-backdrop" @onclick="CloseCardModal"></div>
+    <div class="tb-modal" style="width:720px;">
+        <div class="tb-modal-h">
+            <input class="td-title-input" @bind="_editCardTitle" @bind:event="oninput" />
+            <button class="tb-modal-close" @onclick="CloseCardModal">&times;</button>
+        </div>
+        <div class="tb-modal-body td-modal-grid">
+            <div>
+                <label>Descripcion</label>
+                <textarea class="form-control" rows="4" @bind="_editCardDescription"></textarea>
+
+                <div style="display:flex; gap:12px; margin-top:12px;">
+                    <div style="flex:1;">
+                        <label>Fecha limite</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_editCardDueDate" />
+                    </div>
+                    <div>
+                        <label>Color</label>
+                        <input type="color" class="form-control form-control-sm" style="width:60px; height:32px; padding:2px;" @bind="_editCardColor" />
+                    </div>
+                    <div style="margin-top:22px;">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveCardAsync">Guardar</button>
+                    </div>
+                </div>
+
+                <hr style="margin:16px 0;" />
+
+                <label>Checklist</label>
+                @if (_cardDetail.Checklist.Count == 0)
+                {
+                    <p class="text-muted small">Sin items.</p>
+                }
+                else
+                {
+                    <div class="td-checklist">
+                        @foreach (var it in _cardDetail.Checklist)
+                        {
+                            <div class="td-check-item">
+                                <input type="checkbox" checked="@it.IsCompleted" @onchange="@(e => ToggleChecklistAsync(it, (bool)(e.Value ?? false)))" />
+                                <span class="@(it.IsCompleted ? "td-done" : "")">@it.Text</span>
+                                <button class="tb-icon-btn" style="margin-left:auto;" @onclick="@(() => DeleteChecklistAsync(it))">×</button>
+                            </div>
+                        }
+                    </div>
+                }
+                <div style="display:flex; gap:6px; margin-top:8px;">
+                    <input class="form-control form-control-sm" @bind="_newChecklistText" placeholder="+ Nuevo item..." />
+                    <button class="btn btn-primary btn-sm" @onclick="AddChecklistAsync">+</button>
+                </div>
+
+                <hr style="margin:16px 0;" />
+
+                <label>Comentarios y actividad</label>
+                <div class="td-activity">
+                    @foreach (var a in _cardDetail.Activity)
+                    {
+                        <div class="td-activity-row">
+                            <span class="tb-avatar" style="width:24px;height:24px;font-size:10px;">@Initials(a.ActorName)</span>
+                            <div style="flex:1;">
+                                <div class="td-activity-h">
+                                    <b>@a.ActorName</b>
+                                    <span class="td-activity-time">@a.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</span>
+                                </div>
+                                <div class="td-activity-text @(a.Type == Visal.Domain.Enums.TaskActivityType.Comment ? "" : "td-activity-action")">@a.Text</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div style="display:flex; gap:6px; margin-top:8px;">
+                    <input class="form-control form-control-sm" @bind="_newCommentText" placeholder="Escribe un comentario..." />
+                    <button class="btn btn-primary btn-sm" @onclick="AddCommentAsync">Enviar</button>
+                </div>
+            </div>
+
+            @* Sidebar *@
+            <div class="td-card-side">
+                <div>
+                    <label>Miembros</label>
+                    <div class="td-side-list">
+                        @foreach (var mem in _cardDetail.Card.Members)
+                        {
+                            <div class="td-side-item">
+                                <span class="tb-avatar" style="width:24px;height:24px;font-size:10px;">@mem.Initials</span>
+                                <span style="flex:1;">@mem.DisplayName</span>
+                                <button class="tb-icon-btn" @onclick="@(() => UnassignMemberAsync(mem))">×</button>
+                            </div>
+                        }
+                        @foreach (var candidate in _boardMembers.Where(bm => !_cardDetail.Card.Members.Any(cm => cm.PlatformUserId == bm.PlatformUserId)))
+                        {
+                            <div class="td-side-item td-side-add">
+                                <span class="tb-avatar" style="width:24px;height:24px;font-size:10px;background:#94a3b8;">@candidate.Initials</span>
+                                <span style="flex:1; color:#64748b;">@candidate.DisplayName</span>
+                                <button class="tb-icon-btn" title="Asignar" @onclick="@(() => AssignMemberAsync(candidate))">+</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div style="margin-top:16px;">
+                    <label>Adjuntos</label>
+                    @foreach (var att in _cardDetail.Attachments)
+                    {
+                        <div class="td-side-item">
+                            <span>📎</span>
+                            <a href="@att.Url" target="_blank" style="flex:1; font-size:12px;">@att.FileName</a>
+                            <button class="tb-icon-btn tb-icon-danger" @onclick="@(() => DeleteAttachmentAsync(att))">×</button>
+                        </div>
+                    }
+                    <div style="display:flex; gap:6px; margin-top:8px;">
+                        <input class="form-control form-control-sm" @bind="_newAttUrl" placeholder="URL del archivo..." />
+                    </div>
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <input class="form-control form-control-sm" @bind="_newAttName" placeholder="Nombre..." />
+                        <button class="btn btn-primary btn-sm" @onclick="AddAttachmentAsync">+</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:16px;">
+                    <label>Acciones</label>
+                    <button class="btn btn-outline-secondary btn-sm td-side-btn" @onclick="ArchiveCardAsync">
+                        @(_cardDetail.Card.IsArchived ? "Desarchivar" : "Archivar")
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm td-side-btn" @onclick="DeleteCardAsync">Eliminar tarjeta</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===== Modal: Nueva tarjeta ===== *@
+@if (_newCardOpen)
+{
+    <div class="tb-modal-backdrop" @onclick="@(() => _newCardOpen = false)"></div>
+    <div class="tb-modal" style="width:480px;">
+        <div class="tb-modal-h">
+            <h3>Nueva tarjeta</h3>
+            <button class="tb-modal-close" @onclick="@(() => _newCardOpen = false)">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            <div class="tb-field">
+                <label>Titulo *</label>
+                <input class="form-control" @bind="_newCardTitle" autocomplete="off" />
+            </div>
+            <div class="tb-field">
+                <label>Descripcion</label>
+                <textarea class="form-control" rows="3" @bind="_newCardDescription"></textarea>
+            </div>
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="@(() => _newCardOpen = false)">Cancelar</button>
+            <button class="btn btn-primary" @onclick="CreateCardAsync">Crear</button>
+        </div>
+    </div>
+}
+
+@* ===== Modal: Editar tablero ===== *@
+@if (_editBoardOpen && _board is not null)
+{
+    <div class="tb-modal-backdrop" @onclick="@(() => _editBoardOpen = false)"></div>
+    <div class="tb-modal" style="width:520px;">
+        <div class="tb-modal-h">
+            <h3>Editar tablero</h3>
+            <button class="tb-modal-close" @onclick="@(() => _editBoardOpen = false)">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            <div class="tb-field">
+                <label>Nombre</label>
+                <input class="form-control" @bind="_editBoardName" />
+            </div>
+            <div class="tb-field">
+                <label>Descripcion</label>
+                <textarea class="form-control" rows="2" @bind="_editBoardDescription"></textarea>
+            </div>
+            <div class="tb-field">
+                <label>Color</label>
+                <input type="color" class="form-control" style="width:80px; height:36px; padding:2px;" @bind="_editBoardColor" />
+            </div>
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="@(() => _editBoardOpen = false)">Cancelar</button>
+            <button class="btn btn-primary" @onclick="SaveBoardEditAsync">Guardar</button>
+        </div>
+    </div>
+}
+
+@* ===== Modal: Miembros ===== *@
+@if (_membersOpen && _board is not null)
+{
+    <div class="tb-modal-backdrop" @onclick="@(() => _membersOpen = false)"></div>
+    <div class="tb-modal" style="width:640px;">
+        <div class="tb-modal-h">
+            <h3>Miembros — @_board.Name</h3>
+            <button class="tb-modal-close" @onclick="@(() => _membersOpen = false)">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            <div class="td-side-list">
+                @foreach (var m in _members)
+                {
+                    <div class="td-side-item">
+                        <span class="tb-avatar">@m.Initials</span>
+                        <div style="flex:1;">
+                            <div class="tb-member-name">@m.DisplayName</div>
+                            <div class="tb-member-role">@(m.IsOwner ? "Dueño" : $"Invitado {m.InvitedAt.ToLocalTime():dd/MM/yyyy}")</div>
+                        </div>
+                        @if (_board.IsOwner && !m.IsOwner)
+                        {
+                            <button class="tb-icon-btn tb-icon-danger" @onclick="@(() => RemoveMemberAsync(m))">×</button>
+                        }
+                    </div>
+                }
+            </div>
+            @if (_board.IsOwner)
+            {
+                <hr style="margin:16px 0;" />
+                <div class="tb-field">
+                    <label>Invitar usuario</label>
+                    <input class="form-control" @bind="_inviteSearch" @bind:event="oninput" @onkeyup="OnInviteSearchKeyupAsync" placeholder="Busca por nombre o email..." />
+                </div>
+                <div class="td-side-list">
+                    @foreach (var c in _inviteCandidates)
+                    {
+                        <div class="td-side-item">
+                            <span class="tb-avatar">@c.Initials</span>
+                            <div style="flex:1;">
+                                <div class="tb-member-name">@c.DisplayName</div>
+                                <div class="tb-member-role">@c.Email</div>
+                            </div>
+                            <button class="btn btn-primary btn-sm" @onclick="@(() => InviteAsync(c))">+ Invitar</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .tb-loading { color:#64748b; padding:20px; }
+    .tb-denied { padding:40px; text-align:center; color:#64748b; }
+    .tb-denied h2 { color:#0f172a; font-size:20px; }
+
+    .td-page { padding:8px 4px; }
+    .td-head { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:6px; }
+    .td-head-left { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+    .td-back { text-decoration:none; color:#64748b; font-size:20px; padding:4px 8px; }
+    .td-back:hover { color:#0f172a; }
+    .td-color-dot { width:14px; height:14px; border-radius:50%; flex:none; }
+    .td-title { margin:0; font-size:20px; font-weight:700; color:#0f172a; }
+    .td-head-right { display:flex; gap:6px; }
+    .td-desc { color:#64748b; font-size:13px; margin:4px 0 16px 40px; }
+
+    /* Kanban */
+    .td-kanban { display:flex; gap:12px; overflow-x:auto; padding-bottom:12px; align-items:flex-start; }
+    .td-col { flex:0 0 280px; background:#f1f5f9; border-radius:8px; min-height:200px; display:flex; flex-direction:column; }
+    .td-col-newform { padding:12px; }
+    .td-col-head { padding:10px 12px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; background:#fff; border-radius:8px 8px 0 0; }
+    .td-col-title { font-weight:700; color:#0f172a; font-size:13px; text-transform:uppercase; }
+    .td-col-count { color:#64748b; font-size:11px; background:#e2e8f0; padding:2px 6px; border-radius:10px; }
+    .td-col-body { padding:8px; flex:1; display:flex; flex-direction:column; gap:6px; }
+    .td-card { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px; cursor:pointer; transition:box-shadow 0.1s; }
+    .td-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.06); }
+    .td-card-title { font-weight:600; color:#0f172a; font-size:13px; line-height:1.3; }
+    .td-card-tags { display:flex; flex-wrap:wrap; gap:3px; margin-top:6px; }
+    .td-tag { font-size:10px; padding:1px 6px; border-radius:8px; color:#334155; font-weight:600; }
+    .td-card-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:11px; color:#64748b; align-items:center; }
+    .td-meta-item { display:inline-flex; align-items:center; gap:2px; }
+    .td-mini-avatar { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:#3b82f6; color:#fff; font-size:9px; font-weight:700; margin-left:2px; }
+    .td-add-card { border:none; background:transparent; padding:8px; color:#64748b; font-size:12px; text-align:left; cursor:pointer; border-radius:4px; }
+    .td-add-card:hover { background:#e2e8f0; color:#0f172a; }
+    .td-add-column { flex:0 0 280px; height:60px; background:#f8fafc; border:2px dashed #cbd5e1; border-radius:8px; color:#64748b; cursor:pointer; }
+    .td-add-column:hover { background:#f1f5f9; border-color:#94a3b8; }
+
+    /* Card modal */
+    .td-title-input { flex:1; font-size:16px; font-weight:700; border:none; padding:4px 8px; background:transparent; color:#0f172a; }
+    .td-title-input:focus { outline:1px solid #3b82f6; border-radius:4px; }
+    .td-modal-grid { display:grid; grid-template-columns: 1fr 220px; gap:20px; }
+    .td-modal-grid label { display:block; font-size:11px; font-weight:700; text-transform:uppercase; color:#64748b; margin-bottom:6px; letter-spacing:0.5px; }
+    .td-checklist { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+    .td-check-item { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:4px; }
+    .td-check-item:hover { background:#f8fafc; }
+    .td-check-item .td-done { text-decoration:line-through; color:#94a3b8; }
+    .td-activity { max-height:220px; overflow:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:8px; }
+    .td-activity-row { display:flex; gap:8px; align-items:flex-start; }
+    .td-activity-h { display:flex; gap:6px; align-items:baseline; font-size:12px; }
+    .td-activity-time { color:#94a3b8; font-size:10px; }
+    .td-activity-text { font-size:12.5px; color:#334155; line-height:1.4; }
+    .td-activity-action { color:#64748b; font-style:italic; font-size:11px; }
+    .td-card-side { display:flex; flex-direction:column; }
+    .td-side-list { display:flex; flex-direction:column; gap:4px; }
+    .td-side-item { display:flex; align-items:center; gap:6px; padding:6px 4px; border-radius:4px; font-size:12px; }
+    .td-side-item:hover { background:#f8fafc; }
+    .td-side-add { opacity:0.7; }
+    .td-side-add:hover { opacity:1; }
+    .td-side-btn { display:block; width:100%; margin-top:6px; }
+
+    /* Comparte estilos del modal base con Tableros.razor — repetimos para que
+       la pagina sea autocontenida (Blazor no comparte style-blocks entre razors). */
+    .tb-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.45); z-index:1000; }
+    .tb-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:10px; z-index:1001; max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.25); }
+    .tb-modal-h { padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+    .tb-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
+    .tb-modal-close { background:transparent; border:none; font-size:26px; cursor:pointer; color:#64748b; padding:0 6px; line-height:1; }
+    .tb-modal-body { padding:20px; }
+    .tb-modal-foot { padding:12px 20px; border-top:1px solid #e2e8f0; display:flex; gap:8px; justify-content:flex-end; }
+    .tb-field { margin-bottom:14px; }
+    .tb-field > label { display:block; font-size:12px; font-weight:600; color:#334155; margin-bottom:6px; }
+    .tb-avatar { width:32px; height:32px; border-radius:50%; background:#3b82f6; color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; }
+    .tb-icon-btn { border:none; background:transparent; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:14px; color:#64748b; }
+    .tb-icon-btn:hover { background:#e2e8f0; color:#0f172a; }
+    .tb-icon-danger { color:#dc2626; }
+    .tb-icon-danger:hover { background:#fee2e2; color:#991b1b; }
+    .tb-badge-owner { background:#eef2ff; color:#4338ca; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; }
+    .tb-member-name { font-weight:600; color:#0f172a; font-size:13px; }
+    .tb-member-role { color:#64748b; font-size:11px; }
+</style>
+
+@code {
+    [Parameter] public Guid BoardId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _accessDenied;
+    private Guid _actorId;
+    private string _actorDisplayName = "";
+
+    private TaskBoardDto? _board;
+    private List<TaskBoardColumnDto> _columns = new();
+    private List<TaskCardSummaryDto> _cards = new();
+    private List<TaskBoardMemberDto> _boardMembers = new();
+
+    // Drag&drop
+    private Guid? _draggingCardId;
+    private Guid? _dragOverColumnId;
+
+    // Modal card
+    private bool _cardModalOpen;
+    private TaskCardDetailDto? _cardDetail;
+    private string _editCardTitle = "";
+    private string? _editCardDescription;
+    private string? _editCardColor;
+    private DateTime? _editCardDueDate;
+    private string _newChecklistText = "";
+    private string _newCommentText = "";
+    private string _newAttUrl = "";
+    private string _newAttName = "";
+
+    // Modal Nueva tarjeta
+    private bool _newCardOpen;
+    private Guid _newCardColumnId;
+    private string _newCardTitle = "";
+    private string? _newCardDescription;
+
+    // Modal columna
+    private bool _newColOpen;
+    private string _newColName = "";
+
+    // Modal editar tablero
+    private bool _editBoardOpen;
+    private string _editBoardName = "";
+    private string? _editBoardDescription;
+    private string? _editBoardColor;
+
+    // Modal miembros
+    private bool _membersOpen;
+    private List<TaskBoardMemberDto> _members = new();
+    private string _inviteSearch = "";
+    private List<TaskBoardInviteCandidateDto> _inviteCandidates = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolveActorAsync();
+        await ReloadAllAsync();
+        _loading = false;
+    }
+
+    private async Task ResolveActorAsync()
+    {
+        if (AuthState is null) { return; }
+        var st = await AuthState;
+        var uid = st.User.FindFirst("user_id")?.Value ?? st.User.FindFirst("sub")?.Value;
+        _actorId = Guid.TryParse(uid, out var id) ? id : Guid.Empty;
+        _actorDisplayName = st.User.FindFirst("display_name")?.Value
+            ?? st.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "Usuario";
+    }
+
+    private async Task ReloadAllAsync()
+    {
+        _board = await BoardsSvc.GetBoardAsync(BoardId, _actorId);
+        if (_board is null) { _accessDenied = true; return; }
+        _columns = (await BoardsSvc.ListColumnsAsync(BoardId, _actorId)).ToList();
+        _cards = (await BoardsSvc.ListCardsAsync(BoardId, _actorId)).ToList();
+        _boardMembers = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
+    }
+
+    // ---- Drag&drop ----
+
+    private void OnDragOver(Guid columnId) { _dragOverColumnId = columnId; }
+
+    private async Task OnDropAsync(Guid columnId)
+    {
+        if (_draggingCardId is not Guid cid) { return; }
+        var newOrder = _cards.Count(c => c.ColumnId == columnId);
+        await BoardsSvc.MoveCardAsync(cid, new MoveTaskCardRequest(columnId, newOrder), _actorId, _actorDisplayName);
+        _draggingCardId = null;
+        await ReloadAllAsync();
+    }
+
+    // ---- Columna ----
+
+    private async Task AddColumnAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newColName)) { return; }
+        await BoardsSvc.CreateColumnAsync(new CreateTaskColumnRequest(BoardId, _newColName, null, false), _actorId);
+        _newColOpen = false;
+        _newColName = "";
+        await ReloadAllAsync();
+    }
+
+    // ---- Editar tablero ----
+
+    private void OpenEditBoard()
+    {
+        if (_board is null) { return; }
+        _editBoardName = _board.Name;
+        _editBoardDescription = _board.Description;
+        _editBoardColor = _board.Color ?? "#3b82f6";
+        _editBoardOpen = true;
+    }
+
+    private async Task SaveBoardEditAsync()
+    {
+        if (_board is null) { return; }
+        await BoardsSvc.UpdateBoardAsync(BoardId,
+            new UpdateTaskBoardRequest(_editBoardName, _editBoardDescription, _editBoardColor, _board.IsArchived),
+            _actorId);
+        _editBoardOpen = false;
+        await ReloadAllAsync();
+    }
+
+    // ---- Nueva tarjeta ----
+
+    private void OpenNewCard(Guid columnId)
+    {
+        _newCardColumnId = columnId;
+        _newCardTitle = "";
+        _newCardDescription = null;
+        _newCardOpen = true;
+    }
+
+    private async Task CreateCardAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newCardTitle)) { return; }
+        await BoardsSvc.CreateCardAsync(
+            new CreateTaskCardRequest(BoardId, _newCardColumnId, _newCardTitle, _newCardDescription),
+            _actorId, _actorDisplayName);
+        _newCardOpen = false;
+        await ReloadAllAsync();
+    }
+
+    // ---- Card modal ----
+
+    private async Task OpenCardAsync(Guid cardId)
+    {
+        _cardDetail = await BoardsSvc.GetCardAsync(cardId, _actorId);
+        if (_cardDetail is null) { return; }
+        _editCardTitle = _cardDetail.Card.Title;
+        _editCardDescription = _cardDetail.Card.Description;
+        _editCardColor = _cardDetail.Card.Color ?? "#3b82f6";
+        _editCardDueDate = _cardDetail.Card.DueAt?.LocalDateTime;
+        _cardModalOpen = true;
+        _newChecklistText = "";
+        _newCommentText = "";
+        _newAttUrl = "";
+        _newAttName = "";
+    }
+
+    private void CloseCardModal() { _cardModalOpen = false; _cardDetail = null; }
+
+    private async Task SaveCardAsync()
+    {
+        if (_cardDetail is null) { return; }
+        DateTimeOffset? due = _editCardDueDate is DateTime dt ? new DateTimeOffset(dt) : null;
+        await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
+            new UpdateTaskCardRequest(_editCardTitle, _editCardDescription, due, _editCardColor),
+            _actorId, _actorDisplayName);
+        await RefreshCardAndListAsync();
+    }
+
+    private async Task RefreshCardAndListAsync()
+    {
+        if (_cardDetail is null) { return; }
+        _cardDetail = await BoardsSvc.GetCardAsync(_cardDetail.Card.Id, _actorId);
+        _cards = (await BoardsSvc.ListCardsAsync(BoardId, _actorId)).ToList();
+    }
+
+    // Checklist
+    private async Task AddChecklistAsync()
+    {
+        if (_cardDetail is null || string.IsNullOrWhiteSpace(_newChecklistText)) { return; }
+        await BoardsSvc.AddChecklistItemAsync(new AddChecklistItemRequest(_cardDetail.Card.Id, _newChecklistText), _actorId, _actorDisplayName);
+        _newChecklistText = "";
+        await RefreshCardAndListAsync();
+    }
+    private async Task ToggleChecklistAsync(TaskCardChecklistItemDto it, bool val)
+    {
+        await BoardsSvc.UpdateChecklistItemAsync(it.Id, new UpdateChecklistItemRequest(it.Text, val), _actorId, _actorDisplayName);
+        await RefreshCardAndListAsync();
+    }
+    private async Task DeleteChecklistAsync(TaskCardChecklistItemDto it)
+    {
+        await BoardsSvc.DeleteChecklistItemAsync(it.Id, _actorId);
+        await RefreshCardAndListAsync();
+    }
+
+    // Comentario
+    private async Task AddCommentAsync()
+    {
+        if (_cardDetail is null || string.IsNullOrWhiteSpace(_newCommentText)) { return; }
+        await BoardsSvc.AddCommentAsync(new AddCommentRequest(_cardDetail.Card.Id, _newCommentText), _actorId, _actorDisplayName);
+        _newCommentText = "";
+        await RefreshCardAndListAsync();
+    }
+
+    // Miembros de la tarjeta
+    private async Task AssignMemberAsync(TaskBoardMemberDto candidate)
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.AssignMemberToCardAsync(new AssignMemberRequest(_cardDetail.Card.Id, candidate.PlatformUserId), _actorId, _actorDisplayName);
+        await RefreshCardAndListAsync();
+    }
+    private async Task UnassignMemberAsync(TaskCardMemberDto mem)
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.UnassignMemberFromCardAsync(_cardDetail.Card.Id, mem.PlatformUserId, _actorId, _actorDisplayName);
+        await RefreshCardAndListAsync();
+    }
+
+    // Adjuntos
+    private async Task AddAttachmentAsync()
+    {
+        if (_cardDetail is null || string.IsNullOrWhiteSpace(_newAttUrl)) { return; }
+        var name = string.IsNullOrWhiteSpace(_newAttName) ? _newAttUrl : _newAttName;
+        await BoardsSvc.AddAttachmentAsync(
+            new AddAttachmentRequest(_cardDetail.Card.Id, name, _newAttUrl, null, 0),
+            _actorId, _actorDisplayName);
+        _newAttUrl = "";
+        _newAttName = "";
+        await RefreshCardAndListAsync();
+    }
+    private async Task DeleteAttachmentAsync(TaskCardAttachmentDto att)
+    {
+        await BoardsSvc.DeleteAttachmentAsync(att.Id, _actorId);
+        await RefreshCardAndListAsync();
+    }
+
+    // Acciones
+    private async Task ArchiveCardAsync()
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.ArchiveCardAsync(_cardDetail.Card.Id, _actorId, _actorDisplayName);
+        CloseCardModal();
+        await ReloadAllAsync();
+    }
+    private async Task DeleteCardAsync()
+    {
+        if (_cardDetail is null) { return; }
+        await BoardsSvc.DeleteCardAsync(_cardDetail.Card.Id, _actorId);
+        CloseCardModal();
+        await ReloadAllAsync();
+    }
+
+    // ---- Miembros del tablero ----
+
+    private async Task OpenMembers()
+    {
+        _members = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
+        _inviteSearch = "";
+        _inviteCandidates = _board?.IsOwner == true
+            ? (await MembersSvc.ListInviteCandidatesAsync(BoardId, _actorId)).Take(20).ToList()
+            : new();
+        _membersOpen = true;
+    }
+
+    private async Task OnInviteSearchKeyupAsync(KeyboardEventArgs e)
+    {
+        _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(BoardId, _actorId, _inviteSearch)).Take(20).ToList();
+    }
+
+    private async Task InviteAsync(TaskBoardInviteCandidateDto candidate)
+    {
+        await MembersSvc.InviteMemberAsync(new InviteMemberRequest(BoardId, candidate.PlatformUserId), _actorId);
+        _members = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
+        _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(BoardId, _actorId, _inviteSearch)).Take(20).ToList();
+        _boardMembers = _members;
+        _board = await BoardsSvc.GetBoardAsync(BoardId, _actorId);
+    }
+
+    private async Task RemoveMemberAsync(TaskBoardMemberDto m)
+    {
+        if (m.IsOwner) { return; }
+        await MembersSvc.RemoveMemberAsync(BoardId, m.PlatformUserId, _actorId);
+        _members = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
+        _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(BoardId, _actorId, _inviteSearch)).Take(20).ToList();
+        _boardMembers = _members;
+        _board = await BoardsSvc.GetBoardAsync(BoardId, _actorId);
+    }
+
+    // ---- Helpers ----
+
+    private static string Initials(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) { return "?"; }
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) { return "?"; }
+        var first = char.ToUpperInvariant(parts[0][0]);
+        if (parts.Length == 1) { return first.ToString(); }
+        return $"{first}{char.ToUpperInvariant(parts[1][0])}";
+    }
+}

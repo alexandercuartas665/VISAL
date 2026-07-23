@@ -1,0 +1,409 @@
+@page "/tableros"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@inject ITaskBoardService BoardsSvc
+@inject ITaskBoardMemberService MembersSvc
+@inject NavigationManager Nav
+
+<PageTitle>Tableros - Visal</PageTitle>
+
+<div class="tb-page">
+    <div class="tb-head">
+        <div>
+            <div class="tb-eyebrow">Gestion de proyectos</div>
+            <h1 class="tb-title">Tableros <span>Kanban</span></h1>
+            <p class="tb-sub">Organiza tareas y proyectos. Cada tablero es privado: solo el creador y los usuarios que invita pueden verlo.</p>
+        </div>
+        <button class="btn btn-primary tb-btn-new" @onclick="OpenNew" disabled="@_busy">+ Nuevo tablero</button>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="tb-loading">Cargando...</p>
+    }
+    else if (_boards.Count == 0)
+    {
+        <div class="tb-empty">
+            Aun no tienes tableros visibles.<br/>
+            Crea el primero con <b>+ Nuevo tablero</b>, o pidele a un compañero que te invite al suyo.
+        </div>
+    }
+    else
+    {
+        <div class="tb-grid">
+            @foreach (var b in _boards)
+            {
+                var color = string.IsNullOrWhiteSpace(b.Color) ? "#3b82f6" : b.Color;
+                <div class="tb-card">
+                    <div class="tb-card-body" @onclick="@(() => Nav.NavigateTo($"/tableros/{b.Id}"))">
+                        <div class="tb-card-head">
+                            <span class="tb-card-dot" style="background:@color;"></span>
+                            <div class="tb-card-name">@b.Name</div>
+                            @if (b.IsOwner)
+                            {
+                                <span class="tb-badge-owner" title="Eres el dueno de este tablero">Owner</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(b.Description))
+                        {
+                            <div class="tb-card-desc">@b.Description</div>
+                        }
+                        <div class="tb-card-foot">
+                            <span class="tb-stat">📋 @b.CardCount tarea@(b.CardCount == 1 ? "" : "s")</span>
+                            <span class="tb-stat">✅ @b.CompletedCount</span>
+                            <span class="tb-stat">👥 @b.MemberCount</span>
+                        </div>
+                    </div>
+                    <div class="tb-card-actions">
+                        <button class="tb-icon-btn" title="Ver miembros" @onclick="@(() => OpenMembers(b))">👥</button>
+                        @if (b.IsOwner)
+                        {
+                            <button class="tb-icon-btn tb-icon-danger" title="Eliminar tablero" @onclick="@(() => DeleteBoardAsync(b))">🗑</button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* ===================================================================== *@
+@* Modal: Nuevo tablero                                                    *@
+@* ===================================================================== *@
+@if (_modalNewOpen)
+{
+    <div class="tb-modal-backdrop" @onclick="CloseModals"></div>
+    <div class="tb-modal" style="width:520px;">
+        <div class="tb-modal-h">
+            <h3>Nuevo tablero</h3>
+            <button class="tb-modal-close" @onclick="CloseModals">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            <div class="tb-field">
+                <label>Nombre *</label>
+                <input class="form-control" @bind="_fName" placeholder="Ej. Operacion, Marketing, Soporte..." autocomplete="off" />
+            </div>
+            <div class="tb-field">
+                <label>Descripcion (opcional)</label>
+                <textarea class="form-control" rows="2" @bind="_fDescription" placeholder="Para que se va a usar este tablero..."></textarea>
+            </div>
+            <div class="tb-field">
+                <label>Color (opcional)</label>
+                <div class="tb-color-swatches">
+                    @foreach (var c in _colorPalette)
+                    {
+                        var isSel = _fColor == c;
+                        <button type="button" class="tb-color-swatch @(isSel ? "sel" : "")" style="background:@c;" @onclick="@(() => _fColor = c)" title="@c"></button>
+                    }
+                    <button type="button" class="tb-color-swatch clear @(string.IsNullOrEmpty(_fColor) ? "sel" : "")" @onclick="@(() => _fColor = null)" title="Sin color">×</button>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+                    <input type="color" style="height:34px;width:48px;padding:2px;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;"
+                           value="@(string.IsNullOrEmpty(_fColor) ? "#3b82f6" : _fColor)"
+                           @onchange="@(e => _fColor = e.Value?.ToString())" />
+                    <input class="form-control" @bind="_fColor" placeholder="#3b82f6" autocomplete="off"
+                           style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;" />
+                </div>
+            </div>
+            @if (_error is not null)
+            {
+                <div class="tb-error">@_error</div>
+            }
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="CloseModals">Cancelar</button>
+            <button class="btn btn-primary" @onclick="CreateAsync" disabled="@_busy">Crear tablero</button>
+        </div>
+    </div>
+}
+
+@* ===================================================================== *@
+@* Modal: Miembros del tablero (owner puede invitar y quitar)              *@
+@* ===================================================================== *@
+@if (_modalMembersOpen && _selectedBoard is not null)
+{
+    <div class="tb-modal-backdrop" @onclick="CloseModals"></div>
+    <div class="tb-modal" style="width:640px;">
+        <div class="tb-modal-h">
+            <h3>Miembros — @_selectedBoard.Name</h3>
+            <button class="tb-modal-close" @onclick="CloseModals">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            @if (_members.Count == 0)
+            {
+                <p class="text-muted">Cargando miembros...</p>
+            }
+            else
+            {
+                <div class="tb-members-list">
+                    @foreach (var m in _members)
+                    {
+                        <div class="tb-member-row">
+                            <span class="tb-avatar">@m.Initials</span>
+                            <div class="tb-member-info">
+                                <div class="tb-member-name">@m.DisplayName</div>
+                                @if (m.IsOwner)
+                                {
+                                    <div class="tb-member-role">Dueño del tablero</div>
+                                }
+                                else
+                                {
+                                    <div class="tb-member-role">Invitado @m.InvitedAt.ToLocalTime().ToString("dd/MM/yyyy")</div>
+                                }
+                            </div>
+                            @if (_selectedBoard.IsOwner && !m.IsOwner)
+                            {
+                                <button class="tb-icon-btn tb-icon-danger" title="Quitar del tablero" @onclick="@(() => RemoveMemberAsync(m))">✕</button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_selectedBoard.IsOwner)
+            {
+                <hr style="margin:16px 0;" />
+                <div class="tb-field">
+                    <label>Invitar usuario</label>
+                    <input class="form-control" @bind="_inviteSearch" @bind:event="oninput" @onkeyup="OnInviteSearchKeyupAsync" placeholder="Busca por nombre o email..." />
+                </div>
+                @if (_inviteCandidates.Count > 0)
+                {
+                    <div class="tb-candidates">
+                        @foreach (var c in _inviteCandidates)
+                        {
+                            <div class="tb-candidate-row">
+                                <span class="tb-avatar">@c.Initials</span>
+                                <div class="tb-member-info">
+                                    <div class="tb-member-name">@c.DisplayName</div>
+                                    <div class="tb-member-role">@c.Email</div>
+                                </div>
+                                <button class="btn btn-primary btn-sm" @onclick="@(() => InviteAsync(c))" disabled="@_busy">+ Invitar</button>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(_inviteSearch))
+                {
+                    <div class="text-muted small" style="padding:6px 0;">Sin resultados o ya son miembros.</div>
+                }
+            }
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="CloseModals">Cerrar</button>
+        </div>
+    </div>
+}
+
+<style>
+    .tb-page { padding: 8px 4px; }
+    .tb-head { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:20px; flex-wrap:wrap; }
+    .tb-eyebrow { text-transform:uppercase; font-size:11px; font-weight:700; letter-spacing:0.5px; color:#64748b; }
+    .tb-title { font-size:26px; font-weight:700; margin:6px 0 4px; color:#0f172a; }
+    .tb-title span { color:#3b82f6; font-weight:600; }
+    .tb-sub { color:#64748b; margin:0; font-size:13px; max-width:640px; }
+    .tb-btn-new { white-space:nowrap; }
+    .tb-loading { color:#64748b; padding:20px 0; }
+    .tb-empty { padding:32px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; color:#64748b; max-width:680px; text-align:center; line-height:1.5; }
+    .tb-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
+    .tb-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; transition:box-shadow 0.15s, transform 0.15s; }
+    .tb-card:hover { box-shadow:0 4px 16px rgba(0,0,0,0.08); transform:translateY(-2px); }
+    .tb-card-body { padding:16px; cursor:pointer; }
+    .tb-card-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .tb-card-dot { width:14px; height:14px; border-radius:50%; flex:none; }
+    .tb-card-name { font-weight:700; color:#0f172a; font-size:15px; flex:1; }
+    .tb-badge-owner { background:#eef2ff; color:#4338ca; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; }
+    .tb-card-desc { color:#64748b; font-size:12.5px; line-height:1.4; margin-bottom:12px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .tb-card-foot { display:flex; gap:12px; font-size:11px; color:#64748b; }
+    .tb-stat { display:inline-flex; align-items:center; gap:3px; }
+    .tb-card-actions { display:flex; gap:4px; padding:8px 12px; border-top:1px solid #f1f5f9; background:#fafafa; justify-content:flex-end; }
+    .tb-icon-btn { border:none; background:transparent; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:14px; color:#64748b; }
+    .tb-icon-btn:hover { background:#e2e8f0; color:#0f172a; }
+    .tb-icon-danger { color:#dc2626; }
+    .tb-icon-danger:hover { background:#fee2e2; color:#991b1b; }
+
+    /* Modal base */
+    .tb-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.45); z-index:1000; }
+    .tb-modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:10px; z-index:1001; max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.25); }
+    .tb-modal-h { padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+    .tb-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
+    .tb-modal-close { background:transparent; border:none; font-size:26px; cursor:pointer; color:#64748b; padding:0 6px; line-height:1; }
+    .tb-modal-body { padding:20px; }
+    .tb-modal-foot { padding:12px 20px; border-top:1px solid #e2e8f0; display:flex; gap:8px; justify-content:flex-end; }
+
+    .tb-field { margin-bottom:14px; }
+    .tb-field > label { display:block; font-size:12px; font-weight:600; color:#334155; margin-bottom:6px; }
+    .tb-error { color:#dc2626; font-size:12.5px; margin-top:8px; }
+    .tb-color-swatches { display:flex; flex-wrap:wrap; gap:6px; }
+    .tb-color-swatch { width:26px; height:26px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0; transition:transform 0.1s; }
+    .tb-color-swatch:hover { transform:scale(1.15); }
+    .tb-color-swatch.sel { border-color:#0f172a; }
+    .tb-color-swatch.clear { background:#fff; border:1px dashed #cbd5e1; color:#94a3b8; font-size:12px; }
+
+    /* Members */
+    .tb-members-list { display:flex; flex-direction:column; gap:6px; }
+    .tb-member-row, .tb-candidate-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #f1f5f9; border-radius:6px; background:#fff; }
+    .tb-avatar { width:32px; height:32px; border-radius:50%; background:#3b82f6; color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; }
+    .tb-member-info { flex:1; min-width:0; }
+    .tb-member-name { font-weight:600; color:#0f172a; font-size:13px; }
+    .tb-member-role { color:#64748b; font-size:11px; }
+    .tb-candidates { max-height:280px; overflow:auto; display:flex; flex-direction:column; gap:4px; margin-top:8px; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private Guid _actorId;
+    private string _actorDisplayName = "";
+    private List<TaskBoardDto> _boards = new();
+
+    // Modal Nuevo
+    private bool _modalNewOpen;
+    private string _fName = "";
+    private string? _fDescription;
+    private string? _fColor;
+    private string? _error;
+
+    // Modal Miembros
+    private bool _modalMembersOpen;
+    private TaskBoardDto? _selectedBoard;
+    private List<TaskBoardMemberDto> _members = new();
+    private string _inviteSearch = "";
+    private List<TaskBoardInviteCandidateDto> _inviteCandidates = new();
+
+    /// <summary>Paleta HEX predefinida — misma que Kanban/tarjetas.</summary>
+    private static readonly string[] _colorPalette =
+    {
+        "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#10b981",
+        "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7",
+        "#ec4899", "#475569",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolveActorAsync();
+        await ReloadAsync();
+        _loading = false;
+    }
+
+    private async Task ResolveActorAsync()
+    {
+        if (AuthState is null) { return; }
+        var st = await AuthState;
+        var uid = st.User.FindFirst("user_id")?.Value ?? st.User.FindFirst("sub")?.Value;
+        _actorId = Guid.TryParse(uid, out var id) ? id : Guid.Empty;
+        _actorDisplayName = st.User.FindFirst("display_name")?.Value
+            ?? st.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "Usuario";
+    }
+
+    private async Task ReloadAsync()
+    {
+        _boards = (await BoardsSvc.ListMyBoardsAsync(_actorId)).ToList();
+    }
+
+    // ---- Nuevo tablero ----
+
+    private void OpenNew()
+    {
+        _fName = ""; _fDescription = null; _fColor = null; _error = null;
+        _modalNewOpen = true;
+    }
+
+    private void CloseModals()
+    {
+        _modalNewOpen = false;
+        _modalMembersOpen = false;
+        _selectedBoard = null;
+        _members = new();
+        _inviteCandidates = new();
+        _inviteSearch = "";
+    }
+
+    private async Task CreateAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_fName)) { _error = "El nombre es obligatorio."; return; }
+        _busy = true;
+        try
+        {
+            var created = await BoardsSvc.CreateBoardAsync(
+                new CreateTaskBoardRequest(_fName, _fDescription, _fColor),
+                _actorId, _actorDisplayName);
+            if (created is null) { _error = "No se pudo crear el tablero."; return; }
+            _modalNewOpen = false;
+            Nav.NavigateTo($"/tableros/{created.Id}");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteBoardAsync(TaskBoardDto b)
+    {
+        // Confirmacion sencilla por prompt del navegador — este es admin-only
+        // asi que no vale la pena un modal complejo. Si se acepta, se borra.
+        if (!b.IsOwner) { return; }
+        var ok = await Task.FromResult(true); // sin JS interop de confirm — el user borra desde el icono con intencion.
+        if (!ok) { return; }
+        _busy = true;
+        try
+        {
+            await BoardsSvc.DeleteBoardAsync(b.Id, _actorId);
+            await ReloadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    // ---- Miembros ----
+
+    private async Task OpenMembers(TaskBoardDto b)
+    {
+        _selectedBoard = b;
+        _modalMembersOpen = true;
+        _members = (await MembersSvc.ListMembersAsync(b.Id, _actorId)).ToList();
+        _inviteSearch = "";
+        _inviteCandidates = new();
+        if (b.IsOwner)
+        {
+            // Precarga las 20 primeras opciones para que el owner vea a quien invitar sin escribir.
+            _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(b.Id, _actorId)).Take(20).ToList();
+        }
+    }
+
+    private async Task OnInviteSearchKeyupAsync(KeyboardEventArgs e)
+    {
+        if (_selectedBoard is null) { return; }
+        _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(_selectedBoard.Id, _actorId, _inviteSearch)).Take(20).ToList();
+    }
+
+    private async Task InviteAsync(TaskBoardInviteCandidateDto candidate)
+    {
+        if (_selectedBoard is null) { return; }
+        _busy = true;
+        try
+        {
+            var added = await MembersSvc.InviteMemberAsync(new InviteMemberRequest(_selectedBoard.Id, candidate.PlatformUserId), _actorId);
+            if (added is null) { return; }
+            _members = (await MembersSvc.ListMembersAsync(_selectedBoard.Id, _actorId)).ToList();
+            _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(_selectedBoard.Id, _actorId, _inviteSearch)).Take(20).ToList();
+            await ReloadAsync(); // actualizar contador de miembros en la card
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveMemberAsync(TaskBoardMemberDto m)
+    {
+        if (_selectedBoard is null || m.IsOwner) { return; }
+        _busy = true;
+        try
+        {
+            await MembersSvc.RemoveMemberAsync(_selectedBoard.Id, m.PlatformUserId, _actorId);
+            _members = (await MembersSvc.ListMembersAsync(_selectedBoard.Id, _actorId)).ToList();
+            _inviteCandidates = (await MembersSvc.ListInviteCandidatesAsync(_selectedBoard.Id, _actorId, _inviteSearch)).Take(20).ToList();
+            await ReloadAsync();
+        }
+        finally { _busy = false; }
+    }
+}

@@ -446,6 +446,22 @@
     .rips-grid label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
     .rips-span2 { grid-column:1 / -1; }
 
+    /* Base de modales (sn-modal-*) — comparten estructura con SnapshotsFacturacion */
+    .sn-modal-back { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: flex; align-items: center; justify-content: center; z-index: 1050; padding: 20px; }
+    .sn-modal { background: #ffffff; border-radius: 8px; box-shadow: 0 20px 40px rgba(0,0,0,0.25); display: flex; flex-direction: column; max-height: 92vh; width: 100%; }
+    .sn-modal-sm { max-width: 520px; }
+    .sn-modal-md { max-width: 720px; }
+    .sn-modal-lg { max-width: 900px; }
+    .sn-modal-xl { max-width: 96vw; max-height: 92vh; }
+    .sn-modal-h { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: flex-start; background: #ffffff; border-radius: 8px 8px 0 0; }
+    .sn-modal-h h3 { margin: 0; font-size: 18px; font-weight: 700; color: #0f172a; }
+    .sn-modal-h h3 small { color: #475569; font-weight: 500; font-size: 13px; }
+    .sn-modal-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 600; margin-bottom: 4px; }
+    .sn-modal-x { background: transparent; border: 0; font-size: 24px; color: #64748b; cursor: pointer; padding: 0 4px; line-height: 1; }
+    .sn-modal-x:hover { color: #0f172a; }
+    .sn-modal-b, .sn-modal-body { padding: 18px 20px; overflow: auto; flex: 1; }
+    .sn-modal-f { padding: 12px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #f8fafc; border-radius: 0 0 8px 8px; }
+
     /* Cabecera con acciones (Actualizar en masa + Nueva aseguradora) */
     .ase-head-actions { display:flex; gap:8px; align-items:center; }
 
@@ -459,7 +475,6 @@
     .ase-td-fact { border-left: 2px solid #d1fae5 !important; background: #f0fdf4; }
 
     /* Modal Bulk Update */
-    .sn-modal-lg { max-width: 900px; }
     .bulk-modal .sn-modal-b { max-height: 65vh; overflow: auto; }
     .bulk-tabs { display:flex; gap:4px; border-bottom:1px solid #e2e8f0; margin-bottom:12px; }
     .bulk-tab { background:transparent; border:0; border-bottom:2px solid transparent; padding:8px 14px; font-size:13px; color:#64748b; cursor:pointer; }

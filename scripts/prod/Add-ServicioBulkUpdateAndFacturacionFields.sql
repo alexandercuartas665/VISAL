@@ -83,9 +83,11 @@ CREATE INDEX IF NOT EXISTS ix_servicio_bulk_update_items_tenant_id_servicio_cont
     ON servicio_bulk_update_items (tenant_id, servicio_contrato_id);
 
 -- Registrar en __EFMigrationsHistory (evita re-aplicacion por EF) ---------
-INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+-- Nota: la tabla usa comillas (tiene mayusculas) pero las columnas son
+-- snake_case (migration_id, product_version) por convencion EF-Npgsql.
+INSERT INTO "__EFMigrationsHistory" (migration_id, product_version)
 VALUES ('20260723023501_AddServicioBulkUpdateAndFacturacionFields', '9.0.11')
-ON CONFLICT ("MigrationId") DO NOTHING;
+ON CONFLICT (migration_id) DO NOTHING;
 
 COMMIT;
 

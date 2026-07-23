@@ -65,6 +65,8 @@ public interface ITaskBoardService
 
     // ---- Adjuntos ----
     Task<TaskCardAttachmentDto?> AddAttachmentAsync(AddAttachmentRequest request, Guid actorPlatformUserId, string actorDisplayName, CancellationToken ct = default);
+    /// <summary>Sube el archivo al almacenamiento local (wwwroot/uploads/tableros) y crea el TaskCardAttachment. Retorna el DTO o null.</summary>
+    Task<TaskCardAttachmentDto?> UploadAttachmentAsync(Guid cardId, string fileName, string? mimeType, byte[] content, Guid actorPlatformUserId, string actorDisplayName, CancellationToken ct = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, Guid actorPlatformUserId, CancellationToken ct = default);
 
     // ---- Permisos ----

@@ -131,7 +131,17 @@ else
     var detail = _cardDetail;
     var col = _columns.FirstOrDefault(c => c.Id == detail.Card.ColumnId);
     <div class="td-modal-overlay" @onclick="CloseCardModal">
-        <div class="td-modal" @onclick:stopPropagation="true">
+        <div class="td-modal @(_dragOver ? "td-drag-over" : "")" @onclick:stopPropagation="true"
+             @ondragenter:preventDefault="true" @ondragover:preventDefault="true"
+             @ondragenter="OnCardDragEnter" @ondragleave="OnCardDragLeave">
+            @* Drop mask: cubre TODO el modal cuando el usuario arrastra un archivo.
+               El InputFile transparente captura el drop nativo del navegador. *@
+            <div class="td-dropmask">
+                <div class="td-dropmask-inner">📎 Suelta el archivo para adjuntarlo</div>
+                <InputFile OnChange="OnAttachFilePickedAsync" accept="*/*" multiple class="td-dropmask-input" />
+            </div>
+            @* InputFile oculto disparado por el label "📎 Adjunto" del sidebar. *@
+            <InputFile OnChange="OnAttachFilePickedAsync" accept="*/*" multiple id="td-attach-file" style="display:none;" />
             @* ===== Header ===== *@
             <div class="td-modal-head">
                 <span class="td-modal-head-icon">📋</span>
@@ -271,37 +281,37 @@ else
                     }
 
                     @* --- Adjuntos --- *@
-                    @if (detail.Attachments.Count > 0 || _showAttachAdd)
+                    @if (detail.Attachments.Count > 0 || _uploadingAttach || _attachError is not null)
                     {
                         <div class="td-modal-section">
                             <span class="td-modal-section-icon">📎</span>
                             <div class="td-modal-section-body">
                                 <div class="td-modal-section-head">
                                     <h3 class="td-modal-section-title">Adjuntos</h3>
+                                    <label for="td-attach-file" class="td-modal-section-action" style="cursor:pointer;">Agregar</label>
                                 </div>
                                 <div class="td-att-list">
                                     @foreach (var att in detail.Attachments)
                                     {
                                         <div class="td-att-item">
-                                            <span class="td-att-thumb">📎</span>
+                                            <span class="td-att-thumb">@(IsImage(att.MimeType) ? "🖼" : "📎")</span>
                                             <div class="td-att-body">
                                                 <a href="@att.Url" target="_blank" class="td-att-name">@att.FileName</a>
-                                                <div class="td-att-meta">Subido @att.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy") @(att.UploadedByName is null ? "" : $"por {att.UploadedByName}")</div>
+                                                <div class="td-att-meta">
+                                                    @FormatSize(att.SizeBytes) · Subido @att.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy") @(att.UploadedByName is null ? "" : $"por {att.UploadedByName}")
+                                                </div>
                                             </div>
                                             <button class="td-check-del" @onclick="@(() => DeleteAttachmentAsync(att))">×</button>
                                         </div>
                                     }
                                 </div>
-                                @if (_showAttachAdd)
+                                @if (_uploadingAttach)
                                 {
-                                    <div class="td-att-add">
-                                        <input class="form-control form-control-sm" @bind="_newAttName" placeholder="Nombre visible..." />
-                                        <input class="form-control form-control-sm" @bind="_newAttUrl" placeholder="URL del archivo (https://...)" />
-                                        <div style="display:flex; gap:6px;">
-                                            <button class="btn btn-primary btn-sm" @onclick="AddAttachmentAsync" disabled="@string.IsNullOrWhiteSpace(_newAttUrl)">Adjuntar</button>
-                                            <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => _showAttachAdd = false)">Cancelar</button>
-                                        </div>
-                                    </div>
+                                    <p class="td-att-hint">Subiendo archivo...</p>
+                                }
+                                @if (_attachError is not null)
+                                {
+                                    <p class="td-att-error">@_attachError</p>
                                 }
                             </div>
                         </div>
@@ -367,7 +377,7 @@ else
                             <button class="td-modal-side-btn" @onclick="@(() => { CloseAllPopovers(); _showChecklistAdd = true; })">☑ Checklist</button>
                             <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("date"))">📅 Fecha</button>
                             <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("color"))">🎨 Color</button>
-                            <button class="td-modal-side-btn" @onclick="@(() => { CloseAllPopovers(); _showAttachAdd = true; })">📎 Adjunto</button>
+                            <label class="td-modal-side-btn" for="td-attach-file" style="cursor:pointer;">📎 Adjunto</label>
                         </div>
                     </div>
                     <div>
@@ -693,7 +703,7 @@ else
     .td-modal-side { width:190px; flex:none; display:flex; flex-direction:column; gap:18px; }
     .td-modal-side h4 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin:0 0 8px; }
     .td-modal-side-btns { display:flex; flex-direction:column; gap:6px; }
-    .td-modal-side-btn { width:100%; text-align:left; padding:7px 12px; background:#e2e8f0; color:#0f172a; border:0; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; transition:background 0.15s; }
+    .td-modal-side-btn { display:block; width:100%; text-align:left; padding:7px 12px; background:#e2e8f0; color:#0f172a; border:0; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; transition:background 0.15s; box-sizing:border-box; }
     .td-modal-side-btn:hover { background:#cbd5e1; }
     .td-modal-side-btn.td-danger { color:#dc2626; }
     .td-modal-side-btn.td-danger:hover { background:#fee2e2; color:#991b1b; }
@@ -751,7 +761,15 @@ else
     .td-att-name { display:block; font-weight:600; color:#3b82f6; text-decoration:none; font-size:13px; }
     .td-att-name:hover { text-decoration:underline; }
     .td-att-meta { font-size:11px; color:#64748b; }
-    .td-att-add { display:flex; flex-direction:column; gap:6px; padding:10px; background:#f1f5f9; border-radius:6px; }
+    .td-att-hint { font-size:12px; color:#3b82f6; margin:6px 0 0; font-style:italic; }
+    .td-att-error { font-size:12px; color:#dc2626; margin:6px 0 0; }
+    /* Drop mask sobre el modal completo. Cuando td-drag-over se dispara, el mascarilla se muestra
+       y su InputFile transparente captura el drop nativo. */
+    .td-modal { position:relative; }
+    .td-dropmask { position:absolute; inset:8px; z-index:80; border:3px dashed #3b82f6; border-radius:12px; background:rgba(59,130,246,0.10); display:none; align-items:center; justify-content:center; text-align:center; pointer-events:none; }
+    .td-modal.td-drag-over .td-dropmask { display:flex; pointer-events:auto; }
+    .td-dropmask-inner { font-size:18px; font-weight:700; color:#1e40af; pointer-events:none; }
+    .td-dropmask-input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
     /* Actividad */
     .td-act-input { display:flex; gap:10px; margin-bottom:14px; }
     .td-act-input-box { flex:1; background:#fff; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden; transition:border-color 0.15s, box-shadow 0.15s; }
@@ -835,7 +853,11 @@ else
     private string _editTitle = "";
     private bool _editingDesc;
     private string _editDescription = "";
-    private bool _showMembersPop, _showTagsPop, _showDatePop, _showColorPop, _showMovePop, _showChecklistAdd, _showAttachAdd;
+    private bool _showMembersPop, _showTagsPop, _showDatePop, _showColorPop, _showMovePop, _showChecklistAdd;
+    // Adjuntos por upload real (drag&drop + file picker)
+    private bool _dragOver;
+    private bool _uploadingAttach;
+    private string? _attachError;
     private string _newTagName = "";
     private string _newTagColor = "#3b82f6";
     private List<TaskCardTagDto> _boardTags = new();
@@ -848,8 +870,6 @@ else
     };
     private string _newChecklistText = "";
     private string _newCommentText = "";
-    private string _newAttUrl = "";
-    private string _newAttName = "";
 
     // Modal Nueva tarjeta
     private bool _newCardOpen;
@@ -979,8 +999,8 @@ else
         _cardModalOpen = true;
         _newChecklistText = "";
         _newCommentText = "";
-        _newAttUrl = "";
-        _newAttName = "";
+        _attachError = null;
+        _dragOver = false;
     }
 
     private void CloseCardModal() { _cardModalOpen = false; _cardDetail = null; }
@@ -1044,22 +1064,57 @@ else
         await RefreshCardAndListAsync();
     }
 
-    // Adjuntos
-    private async Task AddAttachmentAsync()
+    // Adjuntos por upload real
+    private const long MaxAttachmentBytes = 20L * 1024 * 1024; // 20 MB
+
+    private async Task OnAttachFilePickedAsync(InputFileChangeEventArgs e)
     {
-        if (_cardDetail is null || string.IsNullOrWhiteSpace(_newAttUrl)) { return; }
-        var name = string.IsNullOrWhiteSpace(_newAttName) ? _newAttUrl : _newAttName;
-        await BoardsSvc.AddAttachmentAsync(
-            new AddAttachmentRequest(_cardDetail.Card.Id, name, _newAttUrl, null, 0),
-            _actorId, _actorDisplayName);
-        _newAttUrl = "";
-        _newAttName = "";
-        await RefreshCardAndListAsync();
+        _dragOver = false;
+        _attachError = null;
+        if (_cardDetail is null) { return; }
+        _uploadingAttach = true;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(20))
+            {
+                if (file.Size <= 0) { continue; }
+                if (file.Size > MaxAttachmentBytes)
+                {
+                    _attachError = $"'{file.Name}' supera el limite de 20 MB.";
+                    continue;
+                }
+                using var ms = new MemoryStream();
+                await file.OpenReadStream(MaxAttachmentBytes).CopyToAsync(ms);
+                await BoardsSvc.UploadAttachmentAsync(
+                    _cardDetail.Card.Id, file.Name, file.ContentType, ms.ToArray(),
+                    _actorId, _actorDisplayName);
+            }
+            await RefreshCardAndListAsync();
+        }
+        catch (Exception ex) { _attachError = ex.Message; }
+        finally { _uploadingAttach = false; }
     }
+
+    private void OnCardDragEnter(DragEventArgs _) => _dragOver = true;
+    private void OnCardDragLeave(DragEventArgs _) => _dragOver = false;
+
     private async Task DeleteAttachmentAsync(TaskCardAttachmentDto att)
     {
         await BoardsSvc.DeleteAttachmentAsync(att.Id, _actorId);
         await RefreshCardAndListAsync();
+    }
+
+    private static bool IsImage(string? mime)
+        => !string.IsNullOrEmpty(mime) && mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes <= 0) { return "0 B"; }
+        string[] units = { "B", "KB", "MB", "GB" };
+        double size = bytes;
+        var u = 0;
+        while (size >= 1024 && u < units.Length - 1) { size /= 1024; u++; }
+        return $"{size:0.#} {units[u]}";
     }
 
     // Acciones

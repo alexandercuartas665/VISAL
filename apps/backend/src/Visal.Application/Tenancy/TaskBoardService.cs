@@ -26,12 +26,14 @@ public sealed class TaskBoardService : ITaskBoardService
     private readonly IApplicationDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IAuditWriter _audit;
+    private readonly IUploadStorage _uploads;
 
-    public TaskBoardService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit)
+    public TaskBoardService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit, IUploadStorage uploads)
     {
         _db = db;
         _tenant = tenant;
         _audit = audit;
+        _uploads = uploads;
     }
 
     // =====================================================================
@@ -709,6 +711,37 @@ public sealed class TaskBoardService : ITaskBoardService
             TenantId = tid, TaskCardId = req.TaskCardId, Type = TaskActivityType.Action,
             ActorUserId = actor, ActorName = actorDisplayName,
             Text = $"adjunto \"{req.FileName}\"", CreatedBy = actor,
+        });
+        await _db.SaveChangesAsync(ct);
+        return new TaskCardAttachmentDto(file.Id, file.FileName, file.Url, file.MimeType, file.SizeBytes, file.UploadedByName, file.CreatedAt);
+    }
+
+    public async Task<TaskCardAttachmentDto?> UploadAttachmentAsync(Guid cardId, string fileName, string? mimeType, byte[] content, Guid actor, string actorDisplayName, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tid) { return null; }
+        if (content is null || content.Length == 0) { return null; }
+        var card = await _db.TaskCards.FirstOrDefaultAsync(c => c.Id == cardId, ct);
+        if (card is null || !await HasAccessAsync(card.BoardId, actor, ct)) { return null; }
+
+        var safeName = string.IsNullOrWhiteSpace(fileName) ? "archivo.bin" : Path.GetFileName(fileName);
+        var ext = Path.GetExtension(safeName);
+        if (string.IsNullOrWhiteSpace(ext)) { ext = ".bin"; }
+        var storedName = $"card-{Guid.NewGuid():N}{ext}";
+        var url = await _uploads.GuardarAsync("tableros", storedName, content, ct);
+
+        var mime = string.IsNullOrWhiteSpace(mimeType) ? "application/octet-stream" : mimeType;
+        var file = new TaskCardAttachment
+        {
+            TenantId = tid, TaskCardId = cardId,
+            FileName = safeName, Url = url, MimeType = mime, SizeBytes = content.LongLength,
+            UploadedBy = actor, UploadedByName = actorDisplayName, CreatedBy = actor,
+        };
+        _db.TaskCardAttachments.Add(file);
+        _db.TaskCardActivities.Add(new TaskCardActivity
+        {
+            TenantId = tid, TaskCardId = cardId, Type = TaskActivityType.Action,
+            ActorUserId = actor, ActorName = actorDisplayName,
+            Text = $"adjunto \"{safeName}\"", CreatedBy = actor,
         });
         await _db.SaveChangesAsync(ct);
         return new TaskCardAttachmentDto(file.Id, file.FileName, file.Url, file.MimeType, file.SizeBytes, file.UploadedByName, file.CreatedAt);

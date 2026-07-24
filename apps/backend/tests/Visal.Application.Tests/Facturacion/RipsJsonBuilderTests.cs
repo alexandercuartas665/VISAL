@@ -325,6 +325,79 @@ public class RipsJsonBuilderTests
         Assert.Contains(errores, e => e.Contains("codPrestador"));
     }
 
+    // ==== R5: cuadre financiero ====
+
+    [Fact]
+    public void Validate_CopagosSuperanServicios_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        // Un servicio con copago > tarifa: viola manual §4.1.
+        var fila = FilaBaseMutable("AC", "1111", copago: 100000m);
+        fila["Valor Total"] = 50000m;
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("supera suma servicios"));
+    }
+
+    [Fact]
+    public void Validate_CopagosIgualesAServicios_NoEmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBaseMutable("AC", "1111", copago: 45000m);
+        fila["Valor Total"] = 45000m;
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        Assert.DoesNotContain(builder.Validate(p), e => e.Contains("supera suma servicios"));
+    }
+
+    [Fact]
+    public void Validate_CopagosPorPacienteSeAcumulan()
+    {
+        // Paciente 1111 tiene 2 servicios: 20000 c/u = 40000 en servicios,
+        // 15000+15000 = 30000 en copagos -> OK (30k <= 40k).
+        // Paciente 2222 tiene 1 servicio de 10000 y copago 20000 -> viola (§4.1).
+        var builder = new RipsJsonBuilder();
+        var f1a = FilaBaseMutable("AC", "1111", copago: 15000m); f1a["Valor Total"] = 20000m;
+        var f1b = FilaBaseMutable("AC", "1111", copago: 15000m); f1b["Valor Total"] = 20000m;
+        var f2 = FilaBaseMutable("AC", "2222", copago: 20000m); f2["Valor Total"] = 10000m;
+        var p = builder.Build(SampleDetalle(), new[]
+        {
+            (IReadOnlyDictionary<string, object?>)f1a,
+            (IReadOnlyDictionary<string, object?>)f1b,
+            (IReadOnlyDictionary<string, object?>)f2
+        }, "900123456");
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("Paciente 2222"));
+        Assert.DoesNotContain(errores, e => e.Contains("Paciente 1111"));
+    }
+
+    [Fact]
+    public void Validate_ValorNegativo_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBaseMutable("AC", "1111");
+        fila["Valor Total"] = -100m;
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("vrServicio negativo"));
+    }
+
+    [Fact]
+    public void TotalNeto_SumaServiciosYRestaCopagos()
+    {
+        var builder = new RipsJsonBuilder();
+        var f1 = FilaBaseMutable("AC", "1111", copago: 5000m); f1["Valor Total"] = 45000m;
+        var f2 = FilaBaseMutable("AP", "2222", cuota: 3000m); f2["Valor Total"] = 80000m;
+        var p = builder.Build(SampleDetalle(), new[]
+        {
+            (IReadOnlyDictionary<string, object?>)f1,
+            (IReadOnlyDictionary<string, object?>)f2
+        }, "900123456");
+        var (serv, mod, neto) = RipsJsonBuilder.TotalNeto(p);
+        Assert.Equal(125000m, serv);
+        Assert.Equal(8000m, mod);
+        Assert.Equal(117000m, neto);
+    }
+
     private static Dictionary<string, object?> FilaBaseMutable(string archivo, string numDoc, decimal cuota = 0m, decimal copago = 0m) =>
         new()
         {

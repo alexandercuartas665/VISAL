@@ -3,13 +3,15 @@ using System.Globalization;
 namespace Visal.Application.Facturacion.Rips;
 
 /// <summary>
-/// Implementacion R1-R4 del builder RIPS JSON:
+/// Implementacion R1-R5 del builder RIPS JSON:
 /// - R1: usuarios unicos + estructura raiz con arrays vacios.
 /// - R2: NIT del tenant normalizado + validador pre-serializacion (numFactura, NIT).
 /// - R3: dispatch por columna "Archivo json" (AC/AP/AM/AT) + bloque financiero.
 /// - R4: normalizadores (sexo, tipoDoc, regimen) a codigos oficiales del manual,
-///   defaults sensatos cuando el snapshot no trae (finalidad 10, causa 15, tipoDx 02,
-///   zona 01, incapacidad NO, viaIngreso 02) y validaciones adicionales de estructura.
+///   defaults sensatos y validaciones de estructura.
+/// - R5: cuadre financiero cruzado (manual §4): copagos por paciente <= servicios,
+///   regla ciclica 04 reversa, vrServicio/vrModerador >= 0. TotalNeto() expone el
+///   sumatorio para comparar contra &lt;PayableAmount&gt; de la FEV manualmente.
 /// </summary>
 public sealed class RipsJsonBuilder : IRipsJsonBuilder
 {
@@ -305,8 +307,85 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             }
         }
 
+        // ==== R5: cuadre financiero (manual seccion 4) ====
+
+        // Recorrido unico por todos los items para acumular por paciente + validar
+        // reglas por item. La proyeccion (numDoc, vrServicio, vrModerador, concepto)
+        // se calcula una vez y sirve para las 2 verificaciones.
+        var items = EnumerarItems(payload).ToList();
+
+        // Regla ciclica (§4.3): vrServicio nunca puede ser negativo (manual §1.1: monetario >= 0).
+        // Regla ciclica reversa (§4.3): si conceptoRecaudo == 04, moderador debe ser 0.
+        // Si conceptoRecaudo != 04, moderador debe ser > 0 (o el 04 aplica). Si aparece
+        // moderador = 0 con concepto != 04, se corrige a 04 en R3 al momento de armar;
+        // aqui detectamos inconsistencias que hayan quedado tras edicion inline.
+        foreach (var it in items)
+        {
+            if (it.VrServicio < 0m)
+            {
+                errores.Add($"{it.Tipo} {it.Consecutivo} ({it.NumDoc}): vrServicio negativo ({it.VrServicio:0.00}). Manual §1.1 exige valores >= 0.");
+            }
+            if (it.VrModerador < 0m)
+            {
+                errores.Add($"{it.Tipo} {it.Consecutivo} ({it.NumDoc}): vrPagoModerador negativo ({it.VrModerador:0.00}).");
+            }
+            if (it.Concepto == "04" && it.VrModerador > 0m)
+            {
+                errores.Add($"{it.Tipo} {it.Consecutivo} ({it.NumDoc}): conceptoRecaudo=04 (No aplica) pero vrPagoModerador={it.VrModerador:0.00}. Manual §4.3 exige 0 en este caso.");
+            }
+            if (it.Concepto != "04" && it.VrModerador <= 0m)
+            {
+                errores.Add($"{it.Tipo} {it.Consecutivo} ({it.NumDoc}): conceptoRecaudo={it.Concepto} pero vrPagoModerador={it.VrModerador:0.00}. Manual §4.3 exige > 0 cuando el concepto no es 04.");
+            }
+        }
+
+        // Regla §4.1: la suma de copagos por paciente no puede superar la suma de
+        // servicios de ese paciente. Se agrupa por numDoc para el cruce.
+        foreach (var g in items.GroupBy(x => x.NumDoc))
+        {
+            var sumServ = g.Sum(x => x.VrServicio);
+            var sumMod = g.Sum(x => x.VrModerador);
+            if (sumMod > sumServ)
+            {
+                errores.Add($"Paciente {g.Key}: suma copagos ({sumMod:0.00}) supera suma servicios ({sumServ:0.00}). Manual §4.1.");
+            }
+        }
+
         return errores;
     }
+
+    /// <summary>
+    /// Total neto del payload (Σ vrServicio - Σ vrPagoModerador). Manual §4.2:
+    /// debe cuadrar al centavo con &lt;PayableAmount&gt; del XML de la FEV enviado a la DIAN.
+    /// No forzamos el match aqui (no tenemos el FEV en el snapshot) — el operador lo
+    /// verifica manualmente contra la factura. La UI puede mostrar este total al lado
+    /// del boton "Generar JSON RIPS" para el cruce visual.
+    /// </summary>
+    public static (decimal TotalServicios, decimal TotalModerador, decimal Neto) TotalNeto(RipsPayload payload)
+    {
+        decimal totServ = 0m, totMod = 0m;
+        foreach (var it in EnumerarItems(payload))
+        {
+            totServ += it.VrServicio;
+            totMod += it.VrModerador;
+        }
+        return (totServ, totMod, totServ - totMod);
+    }
+
+    /// <summary>Aplana los 4 sub-arrays a una proyeccion comun para las validaciones §4.</summary>
+    private static IEnumerable<ItemFinanciero> EnumerarItems(RipsPayload p)
+    {
+        foreach (var c in p.Servicios.Consultas)
+            yield return new ItemFinanciero("Consulta", c.Consecutivo, c.NumDocumentoIdentificacion, c.VrServicio, c.VrPagoModerador, c.ConceptoRecaudo);
+        foreach (var pr in p.Servicios.Procedimientos)
+            yield return new ItemFinanciero("Procedimiento", pr.Consecutivo, pr.NumDocumentoIdentificacion, pr.VrServicio, pr.VrPagoModerador, pr.ConceptoRecaudo);
+        foreach (var m in p.Servicios.Medicamentos)
+            yield return new ItemFinanciero("Medicamento", m.Consecutivo, m.NumDocumentoIdentificacion, m.VrServicio, m.VrPagoModerador, m.ConceptoRecaudo);
+        foreach (var o in p.Servicios.OtrosServicios)
+            yield return new ItemFinanciero("OtroServicio", o.Consecutivo, o.NumDocumentoIdentificacion, o.VrServicio, o.VrPagoModerador, o.ConceptoRecaudo);
+    }
+
+    private sealed record ItemFinanciero(string Tipo, int Consecutivo, string NumDoc, decimal VrServicio, decimal VrModerador, string Concepto);
 
     // ==== Helpers ====
 

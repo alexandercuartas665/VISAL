@@ -487,10 +487,16 @@ public sealed class FacturacionSnapshotService(
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, opts);
+
+        // R5: total neto expuesto en el nombre de archivo para trazabilidad basica
+        // (operador puede comparar contra el <PayableAmount> del FEV sin abrir el JSON).
+        // El nombre queda: "{snapshot}-neto-{total}.rips.json".
+        var (_, _, neto) = Visal.Application.Facturacion.Rips.RipsJsonBuilder.TotalNeto(payload);
+        var netoStr = neto.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
         var archivo = new ArchivoExportado(
             bytes,
             "application/json; charset=utf-8",
-            SanitizarNombreArchivo(detalle.Metadata.Nombre) + ".rips.json");
+            $"{SanitizarNombreArchivo(detalle.Metadata.Nombre)}-neto-{netoStr}.rips.json");
         return new RipsExportResult(archivo, Array.Empty<string>());
     }
 

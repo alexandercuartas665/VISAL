@@ -32,7 +32,7 @@ public class RipsJsonBuilderTests
     public void Build_ConSnapshotVacio_EmiteEstructuraCompletaConArraysVacios()
     {
         var builder = new RipsJsonBuilder();
-        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900123456");
+        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900123456", RipsCatalogos.Empty);
 
         Assert.NotNull(payload);
         Assert.Empty(payload.Usuarios);
@@ -53,7 +53,7 @@ public class RipsJsonBuilderTests
         {
             new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-001" }
         };
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         Assert.Equal("FE-001", payload.Transaccion.NumFactura);
     }
 
@@ -78,7 +78,7 @@ public class RipsJsonBuilderTests
                 ["Regimen"] = "02", ["Sexo"] = "F"
             }
         };
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         Assert.Equal(2, payload.Usuarios.Count);
         Assert.Equal(1, payload.Usuarios[0].Consecutivo);
         Assert.Equal(2, payload.Usuarios[1].Consecutivo);
@@ -87,7 +87,7 @@ public class RipsJsonBuilderTests
     [Fact]
     public void Build_NormalizaNit_QuitaGuionesYDV()
     {
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900.123.456-7");
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900.123.456-7", RipsCatalogos.Empty);
         Assert.Equal("9001234567", payload.Transaccion.NumDocumentoIdObligado);
     }
 
@@ -95,7 +95,7 @@ public class RipsJsonBuilderTests
     public void Validate_SinNumFactura_EmiteError()
     {
         var builder = new RipsJsonBuilder();
-        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900123456");
+        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(payload);
         Assert.Contains(errores, e => e.Contains("Consecutivo Factura"));
     }
@@ -108,7 +108,7 @@ public class RipsJsonBuilderTests
         {
             new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-1" }
         };
-        var payload = builder.Build(SampleDetalle(), filas, "");
+        var payload = builder.Build(SampleDetalle(), filas, "", RipsCatalogos.Empty);
         var errores = builder.Validate(payload);
         Assert.Contains(errores, e => e.Contains("NIT del obligado"));
     }
@@ -120,7 +120,7 @@ public class RipsJsonBuilderTests
         // R4 exige al menos un servicio + diagnostico + codPrestador en cada consulta;
         // FilaBase(AC, ...) los trae por default.
         var fila = FilaBase("AC", "1111");
-        var payload = builder.Build(SampleDetalle(), new[] { fila }, "900123456");
+        var payload = builder.Build(SampleDetalle(), new[] { fila }, "900123456", RipsCatalogos.Empty);
         Assert.Empty(builder.Validate(payload));
     }
 
@@ -136,7 +136,7 @@ public class RipsJsonBuilderTests
             FilaBase("AM", "3333"),
             FilaBase("AT", "4444")
         };
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         Assert.Single(p.Servicios.Consultas);
         Assert.Single(p.Servicios.Procedimientos);
         Assert.Single(p.Servicios.Medicamentos);
@@ -152,7 +152,7 @@ public class RipsJsonBuilderTests
             FilaBase("AC", "2222"),
             FilaBase("AP", "3333")
         };
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         Assert.Equal(1, p.Servicios.Consultas[0].Consecutivo);
         Assert.Equal(2, p.Servicios.Consultas[1].Consecutivo);
         Assert.Equal(1, p.Servicios.Procedimientos[0].Consecutivo);
@@ -162,7 +162,7 @@ public class RipsJsonBuilderTests
     public void Build_ConceptoRecaudo_SinCopagoNiCuota_Emite04Y0()
     {
         var fila = FilaBase("AC", "1111");
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("04", p.Servicios.Consultas[0].ConceptoRecaudo);
         Assert.Equal(0m, p.Servicios.Consultas[0].VrPagoModerador);
     }
@@ -171,7 +171,7 @@ public class RipsJsonBuilderTests
     public void Build_ConceptoRecaudo_SoloCopago_Emite01()
     {
         var fila = FilaBase("AC", "1111", copago: 5000m);
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("01", p.Servicios.Consultas[0].ConceptoRecaudo);
         Assert.Equal(5000m, p.Servicios.Consultas[0].VrPagoModerador);
     }
@@ -180,7 +180,7 @@ public class RipsJsonBuilderTests
     public void Build_ConceptoRecaudo_CuotaYCopago_Emite03YSuma()
     {
         var fila = FilaBase("AC", "1111", cuota: 3000m, copago: 5000m);
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("03", p.Servicios.Consultas[0].ConceptoRecaudo);
         Assert.Equal(8000m, p.Servicios.Consultas[0].VrPagoModerador);
     }
@@ -194,7 +194,7 @@ public class RipsJsonBuilderTests
             ["Fecha suministro de tecnologia"] = new DateOnly(2026, 7, 15),
             ["Hora"] = "8:5"
         };
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)m }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)m }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("2026-07-15 08:05", p.Servicios.Consultas[0].FechaInicioAtencion);
     }
 
@@ -203,7 +203,7 @@ public class RipsJsonBuilderTests
     {
         var m = FilaBaseMutable("AM", "1111");
         m["Descripción del procedimiento (Factura)"] = "ACETAMINOFEN \"500mg\"\r\ntabletas";
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)m }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)m }, "900123456", RipsCatalogos.Empty);
         var nom = p.Servicios.Medicamentos[0].NomTecnologiaSalud;
         Assert.DoesNotContain("\"", nom);
         Assert.DoesNotContain("\n", nom);
@@ -266,7 +266,7 @@ public class RipsJsonBuilderTests
                 ["Fecha de Nacimiento"] = new DateOnly(1990, 1, 1)
             }
         };
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         var u = p.Usuarios[0];
         Assert.Equal("CC", u.TipoDocumentoIdentificacion);
         Assert.Equal("01", u.TipoUsuario);
@@ -278,7 +278,7 @@ public class RipsJsonBuilderTests
     {
         var fila = FilaBaseMutable("AC", "1111");
         fila.Remove("Finalidad");
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("10", p.Servicios.Consultas[0].FinalidadTecnologiaSalud);
     }
 
@@ -286,7 +286,7 @@ public class RipsJsonBuilderTests
     public void Build_ConsultaSinCausaExterna_AplicaDefault15()
     {
         var fila = FilaBaseMutable("AC", "1111");
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("15", p.Servicios.Consultas[0].CausaMotivoAtencion);
     }
 
@@ -298,7 +298,7 @@ public class RipsJsonBuilderTests
         {
             new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-1" }
         };
-        var p = builder.Build(SampleDetalle(), filas, "900123456");
+        var p = builder.Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(p);
         Assert.Contains(errores, e => e.Contains("ningun servicio"));
     }
@@ -309,7 +309,7 @@ public class RipsJsonBuilderTests
         var builder = new RipsJsonBuilder();
         var fila = FilaBaseMutable("AC", "1111");
         fila["Diagnóstico"] = "";
-        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(p);
         Assert.Contains(errores, e => e.Contains("codDiagnosticoPrincipal"));
     }
@@ -320,9 +320,67 @@ public class RipsJsonBuilderTests
         var builder = new RipsJsonBuilder();
         var fila = FilaBaseMutable("AC", "1111");
         fila["codigo habilitacion "] = "";
-        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(p);
         Assert.Contains(errores, e => e.Contains("codPrestador"));
+    }
+
+    // ==== R7: catalogo Medicamentos ganan sobre snapshot ====
+
+    [Fact]
+    public void Build_Medicamento_ConCatalogo_UsaCumInvimaSobreSnapshot()
+    {
+        var fila = FilaBaseMutable("AM", "1111");
+        fila["Codigo Externo (Factura)"] = "EXP-123";
+        fila["Descripción del procedimiento (Factura)"] = "generico";
+
+        var catalogos = new RipsCatalogos(new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["EXP-123"] = new MedicamentoCatalogoInfo(
+                CumInvima: "19942360-01",
+                Nombre: "ACETAMINOFEN",
+                Concentracion: "500 mg",
+                UnidadMedida: "mg",
+                FormaFarmaceutica: "Tableta",
+                EsPos: true)
+        });
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", catalogos);
+        var m = p.Servicios.Medicamentos[0];
+        Assert.Equal("19942360-01", m.CodTecnologiaSalud);
+        Assert.Equal("ACETAMINOFEN", m.NomTecnologiaSalud);
+        Assert.Equal("500 mg", m.ConcentracionMedicamento);
+        Assert.Equal("01", m.UnidadMedida);
+        Assert.Equal("Tableta", m.FormaFarmaceutica);
+        Assert.Equal("01", m.TipoMedicamento);
+    }
+
+    [Fact]
+    public void Build_Medicamento_ConCatalogoNoPos_TipoMedicamento02()
+    {
+        var fila = FilaBaseMutable("AM", "1111");
+        fila["Codigo Externo (Factura)"] = "EXP-999";
+        var catalogos = new RipsCatalogos(new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["EXP-999"] = new MedicamentoCatalogoInfo(
+                CumInvima: "1-1", Nombre: "X", Concentracion: null,
+                UnidadMedida: null, FormaFarmaceutica: null, EsPos: false)
+        });
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", catalogos);
+        Assert.Equal("02", p.Servicios.Medicamentos[0].TipoMedicamento);
+    }
+
+    [Fact]
+    public void Build_Medicamento_SinMatchEnCatalogo_UsaHeuristicaR6()
+    {
+        var fila = FilaBaseMutable("AM", "1111");
+        fila["Codigo Externo (Factura)"] = "NO-EXISTE";
+        fila["Descripción del procedimiento (Factura)"] = "IBUPROFENO 400 mg";
+        var catalogos = new RipsCatalogos(new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase));
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", catalogos);
+        var m = p.Servicios.Medicamentos[0];
+        Assert.Equal("NO-EXISTE", m.CodTecnologiaSalud); // fallback al codExt del snapshot
+        Assert.Equal("400 mg", m.ConcentracionMedicamento); // heuristica R6
+        Assert.Equal("01", m.UnidadMedida);
     }
 
     // ==== R6: campos ricos por sub-array ====
@@ -349,7 +407,7 @@ public class RipsJsonBuilderTests
     {
         var fila = FilaBaseMutable("AM", "1111");
         fila["Descripción del procedimiento (Factura)"] = "ACETAMINOFEN 500 mg tabletas";
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         var m = p.Servicios.Medicamentos[0];
         Assert.Equal("500 mg", m.ConcentracionMedicamento);
         Assert.Equal("01", m.UnidadMedida);
@@ -361,7 +419,7 @@ public class RipsJsonBuilderTests
         var fila = FilaBaseMutable("AM", "1111");
         fila["CUPS"] = "890201";
         fila["Codigo Externo (Factura)"] = "19942360-01"; // CUM
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("19942360-01", p.Servicios.Medicamentos[0].CodTecnologiaSalud);
     }
 
@@ -371,7 +429,7 @@ public class RipsJsonBuilderTests
         var fila = FilaBaseMutable("AM", "1111");
         fila["CUPS"] = "890201";
         fila["Codigo Externo (Factura)"] = "";
-        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         Assert.Equal("890201", p.Servicios.Medicamentos[0].CodTecnologiaSalud);
     }
 
@@ -384,7 +442,7 @@ public class RipsJsonBuilderTests
         // Un servicio con copago > tarifa: viola manual §4.1.
         var fila = FilaBaseMutable("AC", "1111", copago: 100000m);
         fila["Valor Total"] = 50000m;
-        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(p);
         Assert.Contains(errores, e => e.Contains("supera suma servicios"));
     }
@@ -395,7 +453,7 @@ public class RipsJsonBuilderTests
         var builder = new RipsJsonBuilder();
         var fila = FilaBaseMutable("AC", "1111", copago: 45000m);
         fila["Valor Total"] = 45000m;
-        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         Assert.DoesNotContain(builder.Validate(p), e => e.Contains("supera suma servicios"));
     }
 
@@ -414,7 +472,7 @@ public class RipsJsonBuilderTests
             (IReadOnlyDictionary<string, object?>)f1a,
             (IReadOnlyDictionary<string, object?>)f1b,
             (IReadOnlyDictionary<string, object?>)f2
-        }, "900123456");
+        }, "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(p);
         Assert.Contains(errores, e => e.Contains("Paciente 2222"));
         Assert.DoesNotContain(errores, e => e.Contains("Paciente 1111"));
@@ -426,7 +484,7 @@ public class RipsJsonBuilderTests
         var builder = new RipsJsonBuilder();
         var fila = FilaBaseMutable("AC", "1111");
         fila["Valor Total"] = -100m;
-        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456", RipsCatalogos.Empty);
         var errores = builder.Validate(p);
         Assert.Contains(errores, e => e.Contains("vrServicio negativo"));
     }
@@ -441,7 +499,7 @@ public class RipsJsonBuilderTests
         {
             (IReadOnlyDictionary<string, object?>)f1,
             (IReadOnlyDictionary<string, object?>)f2
-        }, "900123456");
+        }, "900123456", RipsCatalogos.Empty);
         var (serv, mod, neto) = RipsJsonBuilder.TotalNeto(p);
         Assert.Equal(125000m, serv);
         Assert.Equal(8000m, mod);
@@ -482,7 +540,7 @@ public class RipsJsonBuilderTests
             new Dictionary<string, object?> { ["Tipo_Id"] = "CC", ["Identificación"] = "" },
             new Dictionary<string, object?> { ["Tipo_Id"] = "CC", ["Identificación"] = "1111" }
         };
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456", RipsCatalogos.Empty);
         Assert.Single(payload.Usuarios);
     }
 }

@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Visal.Application.Facturacion.Rips;
 
 /// <summary>
-/// Implementacion R1-R6 del builder RIPS JSON:
+/// Implementacion R1-R7 del builder RIPS JSON:
 /// - R1: usuarios unicos + estructura raiz con arrays vacios.
 /// - R2: NIT del tenant normalizado + validador pre-serializacion (numFactura, NIT).
 /// - R3: dispatch por columna "Archivo json" (AC/AP/AM/AT) + bloque financiero.
@@ -14,6 +14,9 @@ namespace Visal.Application.Facturacion.Rips;
 ///   sumatorio para comparar contra &lt;PayableAmount&gt; de la FEV manualmente.
 /// - R6: campos ricos del §3.3.5-6: concentracion y unidadMedida derivadas del
 ///   nomTecnologiaSalud via regex (heuristica "500 mg" / "10 ml" / "500 mcg").
+/// - R7: si el snapshot referencia un medicamento del catalogo (CUM/expediente),
+///   sobrescribe con datos reales: CumInvima, concentracion, formaFarmaceutica,
+///   EsPos -> tipoMedicamento 01/02. La heuristica de R6 sigue como fallback.
 /// </summary>
 public sealed class RipsJsonBuilder : IRipsJsonBuilder
 {
@@ -49,7 +52,8 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
     public RipsPayload Build(
         FacturacionSnapshotDetalleDto detalle,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> filas,
-        string numDocumentoIdObligado)
+        string numDocumentoIdObligado,
+        RipsCatalogos catalogos)
     {
         var numFactura = string.Empty;
         if (filas.Count > 0 && filas[0].TryGetValue(ColFactura, out var f) && f is not null)
@@ -106,7 +110,7 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
                     procedimientos.Add(BuildProcedimiento(fila, tipoDocN, numDoc, procedimientos.Count + 1));
                     break;
                 case "AM":
-                    medicamentos.Add(BuildMedicamento(fila, tipoDocN, numDoc, medicamentos.Count + 1));
+                    medicamentos.Add(BuildMedicamento(fila, tipoDocN, numDoc, medicamentos.Count + 1, catalogos));
                     break;
                 case "AT":
                     otrosServicios.Add(BuildOtroServicio(fila, tipoDocN, numDoc, otrosServicios.Count + 1));
@@ -182,20 +186,53 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             Consecutivo: consecutivo);
     }
 
-    private static RipsMedicamento BuildMedicamento(IReadOnlyDictionary<string, object?> f, string tipoDoc, string numDoc, int consecutivo)
+    private static RipsMedicamento BuildMedicamento(IReadOnlyDictionary<string, object?> f, string tipoDoc, string numDoc, int consecutivo, RipsCatalogos catalogos)
     {
         var (vrServicio, vrModerador, concepto) = ExtraerFinancieros(f);
-        var nombre = LimpiarStringDescriptivo(ReadString(f, ColDescripcion));
-        var (concentracion, unidad) = ExtraerConcentracionYUnidad(nombre);
-        // R6: preferir Codigo Externo (CUM/INVIMA) si viene; fallback a CUPS.
+        var nombreRaw = LimpiarStringDescriptivo(ReadString(f, ColDescripcion));
         var codExt = ReadString(f, ColCodExterno);
-        var codTec = string.IsNullOrWhiteSpace(codExt) ? ReadString(f, ColCups) : codExt;
+        var cups = ReadString(f, ColCups);
+
+        // R7: intentar match contra catalogo por Codigo Externo o CUPS. Si el
+        // medicamento existe en la BD del tenant, sus datos ganan sobre la
+        // heuristica de R6 y sobre lo que venga en el snapshot.
+        MedicamentoCatalogoInfo? info = null;
+        if (!string.IsNullOrWhiteSpace(codExt) && catalogos.MedicamentosPorCodigo.TryGetValue(codExt, out var i1)) { info = i1; }
+        else if (!string.IsNullOrWhiteSpace(cups) && catalogos.MedicamentosPorCodigo.TryGetValue(cups, out var i2)) { info = i2; }
+
+        string codTec;
+        string? concentracion, unidad, formaFarm;
+        string tipoMed;
+        string nombre;
+
+        if (info is not null)
+        {
+            // Match del catalogo: datos oficiales ganan.
+            codTec = NullIfEmpty(info.CumInvima) ?? (string.IsNullOrWhiteSpace(codExt) ? cups : codExt);
+            nombre = NullIfEmpty(info.Nombre) ?? nombreRaw;
+            concentracion = NullIfEmpty(info.Concentracion);
+            unidad = MapearUnidadMedida(info.UnidadMedida) ?? MapearUnidadMedida(ExtraerConcentracionYUnidad(nombreRaw).unidadMedida);
+            formaFarm = NullIfEmpty(info.FormaFarmaceutica);
+            tipoMed = info.EsPos ? "01" : "02";
+        }
+        else
+        {
+            // Sin match: R6 fallback (regex sobre el nombre).
+            codTec = string.IsNullOrWhiteSpace(codExt) ? cups : codExt;
+            nombre = nombreRaw;
+            var (c, u) = ExtraerConcentracionYUnidad(nombreRaw);
+            concentracion = c;
+            unidad = u;
+            formaFarm = null;
+            tipoMed = "01";
+        }
+
         return new RipsMedicamento(
             CodPrestador: ReadString(f, ColCodHab),
             NumAutorizacion: NullIfEmpty(ReadString(f, ColAutorizacion)),
             FechaDispensacionAdmon: FormatFechaHora(f, ColFechaSuministro, ColHora),
             CodDiagnosticoPrincipal: ReadString(f, ColDiagnostico),
-            TipoMedicamento: "01", // 01 = POS/PBS default; siguiente ola leera catalogo Medicamentos.EsPOS
+            TipoMedicamento: tipoMed,
             CodTecnologiaSalud: codTec,
             NomTecnologiaSalud: nombre,
             CantidadMedicamento: ReadInt(f, ColCantidad, defaultVal: 1),
@@ -206,7 +243,29 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             VrPagoModerador: vrModerador,
             Consecutivo: consecutivo,
             ConcentracionMedicamento: concentracion,
-            UnidadMedida: unidad);
+            UnidadMedida: unidad,
+            FormaFarmaceutica: formaFarm);
+    }
+
+    /// <summary>
+    /// Traduce texto libre del catalogo Medicamentos.UnidadMedida al codigo MinSalud
+    /// (01 mg, 02 ml, 03 UI, 04 g, 05 mcg, 06 %). Pass-through si ya viene en 2 digitos.
+    /// </summary>
+    private static string? MapearUnidadMedida(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return null; }
+        var v = raw.Trim().ToLowerInvariant();
+        if (v.Length == 2 && v.All(char.IsDigit)) { return v; }
+        return v switch
+        {
+            "mg" or "miligramo" or "miligramos" => "01",
+            "ml" or "mililitro" or "mililitros" => "02",
+            "ui" or "iu" or "unidad internacional" => "03",
+            "g" or "gramo" or "gramos" => "04",
+            "mcg" or "ug" or "microgramo" or "microgramos" => "05",
+            "%" or "porcentaje" => "06",
+            _ => null
+        };
     }
 
     // Nota: no usamos \b al final porque % no es un char \w y romperia el match.

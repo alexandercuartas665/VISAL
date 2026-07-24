@@ -471,7 +471,32 @@ public sealed class FacturacionSnapshotService(
         // Una sola pagina grande — R1/R2 solo necesitan usuarios+transaccion.
         // Olas siguientes iteraran por bloques cuando emitan servicios[].
         var page = await ListarFilasAsync(id, pagina: 1, tamanoPagina: int.MaxValue, ct: ct);
-        var payload = ripsBuilder.Build(detalle, page.Items, taxId ?? string.Empty);
+
+        // R7: precargar el catalogo de Medicamentos del tenant una sola vez y armar
+        // el lookup por 2 llaves (CUM compuesto + expediente base) para que el
+        // builder pueda enriquecer cada medicamento con datos oficiales sin tocar el DbContext.
+        var meds = await db.Medicamentos.AsNoTracking().ToListAsync(ct);
+        var medDict = new Dictionary<string, Visal.Application.Facturacion.Rips.MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in meds)
+        {
+            var cumCompuesto = (!string.IsNullOrWhiteSpace(m.ExpedienteCum) && !string.IsNullOrWhiteSpace(m.ConsecutivoCum))
+                ? $"{m.ExpedienteCum}-{m.ConsecutivoCum}"
+                : null;
+            var info = new Visal.Application.Facturacion.Rips.MedicamentoCatalogoInfo(
+                CumInvima: cumCompuesto,
+                Nombre: m.Producto ?? m.DescripcionComercial,
+                Concentracion: m.Concentracion,
+                UnidadMedida: m.UnidadMedida,
+                FormaFarmaceutica: m.FormaFarmaceutica,
+                // Heuristica POS/PBS: si Modalidad contiene "NO" -> No PBS (02);
+                // en cualquier otro caso (incluido null) -> asumimos POS/PBS (01).
+                EsPos: !(m.Modalidad?.Contains("NO", StringComparison.OrdinalIgnoreCase) ?? false));
+            if (cumCompuesto is not null) { medDict[cumCompuesto] = info; }
+            if (!string.IsNullOrWhiteSpace(m.Expediente)) { medDict.TryAdd(m.Expediente, info); }
+        }
+        var catalogos = new Visal.Application.Facturacion.Rips.RipsCatalogos(medDict);
+
+        var payload = ripsBuilder.Build(detalle, page.Items, taxId ?? string.Empty, catalogos);
 
         var errores = ripsBuilder.Validate(payload);
         if (errores.Count > 0) { return new RipsExportResult(null, errores); }

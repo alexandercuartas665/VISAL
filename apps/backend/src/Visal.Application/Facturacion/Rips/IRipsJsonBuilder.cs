@@ -8,23 +8,46 @@ namespace Visal.Application.Facturacion.Rips;
 public interface IRipsJsonBuilder
 {
     /// <summary>
-    /// Construye el payload a partir de un snapshot ya cargado + sus filas. Sincronica y pura
-    /// para evitar dependencia circular con <see cref="IFacturacionSnapshotService"/>; el
-    /// servicio es el que carga snapshot + filas y llama al builder.
+    /// Construye el payload a partir de un snapshot ya cargado + sus filas + catalogos
+    /// precargados por el servicio. Sincronica y pura (no toca DbContext); el servicio
+    /// hace las consultas y le pasa los lookups como <paramref name="catalogos"/>.
     /// </summary>
-    /// <param name="numDocumentoIdObligado">NIT del tenant emisor (sin DV ni guiones). Va al nodo transaccion.</param>
+    /// <param name="numDocumentoIdObligado">NIT del tenant emisor (sin DV ni guiones).</param>
+    /// <param name="catalogos">Lookups precargados por el servicio (medicamentos por CUM/expediente, etc.). R7 lo introduce; para tests pasar <see cref="RipsCatalogos.Empty"/>.</param>
     RipsPayload Build(
         FacturacionSnapshotDetalleDto detalle,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> filas,
-        string numDocumentoIdObligado);
+        string numDocumentoIdObligado,
+        RipsCatalogos catalogos);
 
     /// <summary>
     /// Valida que el payload cumpla las reglas duras del manual antes de serializar. Retorna
-    /// la lista de errores (vacia = OK). R2 solo valida numFactura no vacio; R5 anadira
-    /// cuadre financiero y regla ciclica de copago.
+    /// la lista de errores (vacia = OK).
     /// </summary>
     IReadOnlyList<string> Validate(RipsPayload payload);
 }
+
+/// <summary>
+/// Lookups precomputados por el servicio antes de invocar al builder. Evita que el
+/// builder consulte el DbContext y mantiene los tests puros. R7 solo trae medicamentos;
+/// olas siguientes anadiran diagnosticos, prestadores, etc.
+/// </summary>
+public sealed record RipsCatalogos(
+    IReadOnlyDictionary<string, MedicamentoCatalogoInfo> MedicamentosPorCodigo)
+{
+    /// <summary>Instancia vacia para tests o snapshots sin necesidad de catalogos.</summary>
+    public static RipsCatalogos Empty { get; } =
+        new(new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>Fila de la BD Medicamentos proyectada al minimo que necesita el builder.</summary>
+public sealed record MedicamentoCatalogoInfo(
+    string? CumInvima,
+    string? Nombre,
+    string? Concentracion,
+    string? UnidadMedida,
+    string? FormaFarmaceutica,
+    bool EsPos);
 
 /// <summary>Raiz del documento RIPS. Los arrays vacios deben serializarse como [] (no omitirse).</summary>
 public sealed record RipsPayload(

@@ -20,7 +20,8 @@ public sealed class FacturacionSnapshotService(
     IApplicationDbContext db,
     ITenantContext tenant,
     IEnumerable<ISnapshotBuilder> builders,
-    ISnapshotColumnaConfigService columnaConfig) : IFacturacionSnapshotService
+    ISnapshotColumnaConfigService columnaConfig,
+    Visal.Application.Facturacion.Rips.IRipsJsonBuilder ripsBuilder) : IFacturacionSnapshotService
 {
     /// <summary>Tamano de lote para persistir filas del builder. Balance memoria vs. round-trips.</summary>
     private const int BatchSize = 500;
@@ -452,6 +453,33 @@ public sealed class FacturacionSnapshotService(
             ms.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".xlsx");
+    }
+
+    public async Task<ArchivoExportado?> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default)
+    {
+        var detalle = await ObtenerAsync(id, ct);
+        if (detalle is null) { return null; }
+
+        // Una sola pagina grande — R1 solo necesita datos demograficos unicos.
+        // Olas siguientes iteraran por bloques cuando emitan servicios[].
+        var page = await ListarFilasAsync(id, pagina: 1, tamanoPagina: int.MaxValue, ct: ct);
+        var payload = ripsBuilder.Build(detalle, page.Items);
+
+        // UTF-8 PURO SIN BOM (Res. 2275 seccion 1.1). SerializeToUtf8Bytes ya
+        // no incluye preamble; NamingPolicy=CamelCase emite las llaves como
+        // "numFactura", "codSexo", etc. IgnoreNull omite opcionales vacios.
+        var opts = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, opts);
+        return new ArchivoExportado(
+            bytes,
+            "application/json; charset=utf-8",
+            SanitizarNombreArchivo(detalle.Metadata.Nombre) + ".rips.json");
     }
 
     public async Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default)

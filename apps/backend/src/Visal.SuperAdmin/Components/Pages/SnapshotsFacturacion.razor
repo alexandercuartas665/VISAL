@@ -430,6 +430,10 @@
                     <a class="btn btn-outline-success btn-sm"
                        href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=csv")"
                        target="_blank" rel="noopener">Descargar CSV</a>
+                    <a class="btn btn-outline-info btn-sm"
+                       href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=json")"
+                       target="_blank" rel="noopener"
+                       title="JSON RIPS Resolucion 2275/2023 (esqueleto R1)">Generar JSON RIPS</a>
                     <button class="btn btn-outline-primary btn-sm" @onclick="AbrirHistorial">Historial cambios</button>
                 </div>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVer">Cerrar</button>

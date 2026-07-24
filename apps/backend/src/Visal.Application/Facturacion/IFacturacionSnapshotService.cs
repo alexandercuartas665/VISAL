@@ -120,6 +120,13 @@ public interface IFacturacionSnapshotService
     Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
+    /// Exporta el snapshot como JSON RIPS (Resolucion 2275 de 2023). UTF-8 puro sin BOM,
+    /// llaves nulas omitidas. R1 emite esqueleto (transaccion + usuarios + servicios con
+    /// arrays vacios). Devuelve null si no existe o no es del tenant activo.
+    /// </summary>
+    Task<ArchivoExportado?> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
     /// Actualiza el valor de una celda especifica del snapshot y persiste el cambio
     /// en la tabla de trazabilidad. Solo permitido en snapshots Vigentes.
     /// <paramref name="valorNuevo"/> = null limpia la celda.

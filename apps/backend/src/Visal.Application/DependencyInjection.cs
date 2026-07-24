@@ -129,6 +129,8 @@ public static class DependencyInjection
         services.AddScoped<Facturacion.ISnapshotColumnaConfigService, Facturacion.SnapshotColumnaConfigService>();
         services.AddScoped<Facturacion.Selectors.IRelacionFacturasSelector, Facturacion.Selectors.RelacionFacturasSelector>();
         services.AddScoped<Facturacion.ISnapshotBuilder, Facturacion.Builders.SnapshotRelacionFacturasBuilder>();
+        // RIPS JSON — Resolucion 2275 de 2023. R1 emite el esqueleto; olas R2-R6 completan.
+        services.AddScoped<Facturacion.Rips.IRipsJsonBuilder, Facturacion.Rips.RipsJsonBuilder>();
         // Revision Clinica (Capa 08) — motor del ciclo con bitacora append-only.
         services.AddScoped<Revision.IRevisionClinicaService, Revision.RevisionClinicaService>();
         // Tablero Kanban + tab Archivo del modulo /ordenes (Ola 2).

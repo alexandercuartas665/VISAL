@@ -1176,6 +1176,7 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
     {
         "xlsx" => await svc.ExportarExcelAsync(id, ct),
         "csv"  => await svc.ExportarCsvAsync(id, ct),
+        "json" => await svc.ExportarJsonRipsAsync(id, ct),
         _ => null
     };
     if (archivo is null) { return Results.NotFound(); }

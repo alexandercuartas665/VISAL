@@ -114,14 +114,13 @@ public class RipsJsonBuilderTests
     }
 
     [Fact]
-    public void Validate_ConNumFacturaYNit_NoEmiteErrores()
+    public void Validate_ConNumFacturaYNitYServicio_NoEmiteErrores()
     {
         var builder = new RipsJsonBuilder();
-        var filas = new List<IReadOnlyDictionary<string, object?>>
-        {
-            new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-1" }
-        };
-        var payload = builder.Build(SampleDetalle(), filas, "900123456");
+        // R4 exige al menos un servicio + diagnostico + codPrestador en cada consulta;
+        // FilaBase(AC, ...) los trae por default.
+        var fila = FilaBase("AC", "1111");
+        var payload = builder.Build(SampleDetalle(), new[] { fila }, "900123456");
         Assert.Empty(builder.Validate(payload));
     }
 
@@ -211,6 +210,121 @@ public class RipsJsonBuilderTests
         Assert.DoesNotContain("\r", nom);
     }
 
+    // ==== R4: normalizadores + defaults + validaciones extra ====
+
+    [Theory]
+    [InlineData("MASCULINO", "M")]
+    [InlineData("M", "M")]
+    [InlineData("HOMBRE", "M")]
+    [InlineData("FEMENINO", "F")]
+    [InlineData("MUJER", "F")]
+    [InlineData("F", "F")]
+    [InlineData("", "I")]
+    [InlineData("Otro", "I")]
+    public void NormalizarSexo_MapeaVariantesAlCodigoOficial(string entrada, string esperado)
+    {
+        Assert.Equal(esperado, RipsJsonBuilder.NormalizarSexo(entrada));
+    }
+
+    [Theory]
+    [InlineData("CC", "CC")]
+    [InlineData("cedula", "CC")]
+    [InlineData("Cedula de Ciudadania", "CC")]
+    [InlineData("TI", "TI")]
+    [InlineData("Tarjeta de Identidad", "TI")]
+    [InlineData("PASAPORTE", "PA")]
+    [InlineData("registro civil", "RC")]
+    public void NormalizarTipoDoc_MapeaTextoLibreACodigo(string entrada, string esperado)
+    {
+        Assert.Equal(esperado, RipsJsonBuilder.NormalizarTipoDoc(entrada));
+    }
+
+    [Theory]
+    [InlineData("CONTRIBUTIVO", "01")]
+    [InlineData("contributivo", "01")]
+    [InlineData("Subsidiado", "02")]
+    [InlineData("VINCULADO", "03")]
+    [InlineData("Particular", "04")]
+    [InlineData("01", "01")]
+    [InlineData("99", "99")]
+    public void NormalizarRegimen_MapeaTextoLibreACodigo(string entrada, string esperado)
+    {
+        Assert.Equal(esperado, RipsJsonBuilder.NormalizarRegimen(entrada));
+    }
+
+    [Fact]
+    public void Build_AplicaNormalizacionAlUsuario()
+    {
+        var filas = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?>
+            {
+                ["Tipo_Id"] = "cedula",
+                ["Identificación"] = "1111",
+                ["Regimen"] = "CONTRIBUTIVO",
+                ["Sexo"] = "MASCULINO",
+                ["Fecha de Nacimiento"] = new DateOnly(1990, 1, 1)
+            }
+        };
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
+        var u = p.Usuarios[0];
+        Assert.Equal("CC", u.TipoDocumentoIdentificacion);
+        Assert.Equal("01", u.TipoUsuario);
+        Assert.Equal("M", u.CodSexo);
+    }
+
+    [Fact]
+    public void Build_ConsultaSinFinalidad_AplicaDefault10()
+    {
+        var fila = FilaBaseMutable("AC", "1111");
+        fila.Remove("Finalidad");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        Assert.Equal("10", p.Servicios.Consultas[0].FinalidadTecnologiaSalud);
+    }
+
+    [Fact]
+    public void Build_ConsultaSinCausaExterna_AplicaDefault15()
+    {
+        var fila = FilaBaseMutable("AC", "1111");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        Assert.Equal("15", p.Servicios.Consultas[0].CausaMotivoAtencion);
+    }
+
+    [Fact]
+    public void Validate_SinServicios_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var filas = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-1" }
+        };
+        var p = builder.Build(SampleDetalle(), filas, "900123456");
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("ningun servicio"));
+    }
+
+    [Fact]
+    public void Validate_ConsultaSinDiagnostico_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBaseMutable("AC", "1111");
+        fila["Diagnóstico"] = "";
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("codDiagnosticoPrincipal"));
+    }
+
+    [Fact]
+    public void Validate_ConsultaSinCodPrestador_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBaseMutable("AC", "1111");
+        fila["codigo habilitacion "] = "";
+        var p = builder.Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("codPrestador"));
+    }
+
     private static Dictionary<string, object?> FilaBaseMutable(string archivo, string numDoc, decimal cuota = 0m, decimal copago = 0m) =>
         new()
         {
@@ -220,6 +334,7 @@ public class RipsJsonBuilderTests
             ["Identificación"] = numDoc,
             ["Regimen"] = "01",
             ["Sexo"] = "M",
+            ["Fecha de Nacimiento"] = new DateOnly(1990, 1, 1),
             ["codigo habilitacion "] = "760001234501",
             ["CUPS"] = "890201",
             ["Cantidad"] = 1,

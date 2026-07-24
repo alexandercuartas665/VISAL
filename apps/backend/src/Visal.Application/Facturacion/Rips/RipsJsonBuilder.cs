@@ -3,12 +3,13 @@ using System.Globalization;
 namespace Visal.Application.Facturacion.Rips;
 
 /// <summary>
-/// Implementacion R1-R3 del builder RIPS JSON:
+/// Implementacion R1-R4 del builder RIPS JSON:
 /// - R1: usuarios unicos + estructura raiz con arrays vacios.
 /// - R2: NIT del tenant normalizado + validador pre-serializacion (numFactura, NIT).
-/// - R3: dispatch por columna "Archivo json" (AC/AP/AM/AT) al sub-array correspondiente,
-///   con bloque financiero minimo (vrServicio / vrPagoModerador / conceptoRecaudo) y
-///   consecutivo autoincremental por sub-array.
+/// - R3: dispatch por columna "Archivo json" (AC/AP/AM/AT) + bloque financiero.
+/// - R4: normalizadores (sexo, tipoDoc, regimen) a codigos oficiales del manual,
+///   defaults sensatos cuando el snapshot no trae (finalidad 10, causa 15, tipoDx 02,
+///   zona 01, incapacidad NO, viaIngreso 02) y validaciones adicionales de estructura.
 /// </summary>
 public sealed class RipsJsonBuilder : IRipsJsonBuilder
 {
@@ -64,11 +65,11 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             if (usuariosMap.ContainsKey(key)) { continue; }
 
             usuariosMap[key] = new RipsUsuario(
-                TipoDocumentoIdentificacion: tipoDoc,
+                TipoDocumentoIdentificacion: NormalizarTipoDoc(tipoDoc),
                 NumDocumentoIdentificacion: numDoc,
-                TipoUsuario: ReadString(fila, ColRegimen),
+                TipoUsuario: NormalizarRegimen(ReadString(fila, ColRegimen)),
                 FechaNacimiento: FormatFechaCorta(fila, ColFechaNacim),
-                CodSexo: ReadString(fila, ColSexo).ToUpperInvariant(),
+                CodSexo: NormalizarSexo(ReadString(fila, ColSexo)),
                 CodPaisResidencia: NonEmptyOr(ReadString(fila, ColNacionalidad), "170"),
                 CodMunicipioResidencia: NullIfEmpty(ReadString(fila, ColMunicipio)),
                 CodZonaTerritorialResidencia: "01",
@@ -88,25 +89,28 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             var numDoc = ReadString(fila, ColNumDoc);
             if (string.IsNullOrWhiteSpace(numDoc)) { continue; }
 
+            // Normaliza el tipo doc UNA VEZ para que la FK de servicios haga match
+            // con la clave del array usuarios (que tambien se normalizo arriba).
+            var tipoDocN = NormalizarTipoDoc(tipoDoc);
             var archivo = ReadString(fila, ColArchivoJson).ToUpperInvariant().Trim();
             switch (archivo)
             {
                 case "AC":
-                    consultas.Add(BuildConsulta(fila, tipoDoc, numDoc, consultas.Count + 1));
+                    consultas.Add(BuildConsulta(fila, tipoDocN, numDoc, consultas.Count + 1));
                     break;
                 case "AP":
-                    procedimientos.Add(BuildProcedimiento(fila, tipoDoc, numDoc, procedimientos.Count + 1));
+                    procedimientos.Add(BuildProcedimiento(fila, tipoDocN, numDoc, procedimientos.Count + 1));
                     break;
                 case "AM":
-                    medicamentos.Add(BuildMedicamento(fila, tipoDoc, numDoc, medicamentos.Count + 1));
+                    medicamentos.Add(BuildMedicamento(fila, tipoDocN, numDoc, medicamentos.Count + 1));
                     break;
                 case "AT":
-                    otrosServicios.Add(BuildOtroServicio(fila, tipoDoc, numDoc, otrosServicios.Count + 1));
+                    otrosServicios.Add(BuildOtroServicio(fila, tipoDocN, numDoc, otrosServicios.Count + 1));
                     break;
                 default:
                     // Sin tipo o desconocido: por defecto la EPS espera "otros servicios".
                     // Manual §3.3.6 acepta insumos/traslados/estancia sin catalogo formal.
-                    otrosServicios.Add(BuildOtroServicio(fila, tipoDoc, numDoc, otrosServicios.Count + 1));
+                    otrosServicios.Add(BuildOtroServicio(fila, tipoDocN, numDoc, otrosServicios.Count + 1));
                     break;
             }
         }
@@ -139,10 +143,11 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             ModalidadGrupoServicioTecSal: ReadString(f, ColModalidad),
             GrupoServicios: ReadString(f, ColGrupoServicios),
             CodServicio: ReadString(f, ColServicios),
-            FinalidadTecnologiaSalud: NullIfEmpty(ReadString(f, ColFinalidad)),
-            CausaMotivoAtencion: NullIfEmpty(ReadString(f, ColCausaExterna)),
+            // Defaults del manual: finalidad 10 = Enfermedad general, causa 15 = Enf. general.
+            FinalidadTecnologiaSalud: NonEmptyOr(ReadString(f, ColFinalidad), "10"),
+            CausaMotivoAtencion: NonEmptyOr(ReadString(f, ColCausaExterna), "15"),
             CodDiagnosticoPrincipal: ReadString(f, ColDiagnostico),
-            TipoDiagnosticoPrincipal: "02", // "Confirmado nuevo" default; R4 leera HC.tipoDiagnostico
+            TipoDiagnosticoPrincipal: "02", // "Confirmado nuevo" default; R5 leera HC.tipoDiagnostico
             TipoDocumentoIdentificacion: tipoDoc,
             NumDocumentoIdentificacion: numDoc,
             VrServicio: vrServicio,
@@ -163,7 +168,7 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             ModalidadGrupoServicioTecSal: ReadString(f, ColModalidad),
             GrupoServicios: ReadString(f, ColGrupoServicios),
             CodServicio: ReadString(f, ColServicios),
-            FinalidadTecnologiaSalud: NullIfEmpty(ReadString(f, ColFinalidad)),
+            FinalidadTecnologiaSalud: NonEmptyOr(ReadString(f, ColFinalidad), "10"),
             CodDiagnosticoPrincipal: ReadString(f, ColDiagnostico),
             TipoDocumentoIdentificacion: tipoDoc,
             NumDocumentoIdentificacion: numDoc,
@@ -244,10 +249,124 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
         {
             errores.Add("No se pudo determinar el numero de factura (columna 'Consecutivo Factura' vacia en la 1ra fila del snapshot).");
         }
+
+        // Debe haber al menos un servicio; JSON sin servicios lo rechaza MinSalud.
+        var totalServicios =
+            payload.Servicios.Consultas.Count +
+            payload.Servicios.Procedimientos.Count +
+            payload.Servicios.Medicamentos.Count +
+            payload.Servicios.OtrosServicios.Count +
+            payload.Servicios.Urgencias.Count +
+            payload.Servicios.Hospitalizacion.Count +
+            payload.Servicios.RecienNacidos.Count;
+        if (totalServicios == 0)
+        {
+            errores.Add("El snapshot no contiene ningun servicio facturable (usuarios y servicios estan vacios).");
+        }
+
+        // Cada usuario debe tener numDoc + sexo + fecha nacimiento.
+        foreach (var u in payload.Usuarios)
+        {
+            if (string.IsNullOrWhiteSpace(u.NumDocumentoIdentificacion))
+            {
+                errores.Add($"Usuario consecutivo {u.Consecutivo}: numDocumentoIdentificacion vacio.");
+            }
+            if (u.CodSexo is not ("M" or "F" or "I"))
+            {
+                errores.Add($"Usuario {u.NumDocumentoIdentificacion}: codSexo '{u.CodSexo}' invalido (esperado M/F/I).");
+            }
+            if (string.IsNullOrWhiteSpace(u.FechaNacimiento))
+            {
+                errores.Add($"Usuario {u.NumDocumentoIdentificacion}: fechaNacimiento vacia.");
+            }
+        }
+
+        // Cada consulta obliga codPrestador + diagnostico CIE-10 no vacio.
+        foreach (var c in payload.Servicios.Consultas)
+        {
+            if (string.IsNullOrWhiteSpace(c.CodPrestador))
+            {
+                errores.Add($"Consulta {c.Consecutivo} ({c.NumDocumentoIdentificacion}): codPrestador vacio (col 'codigo habilitacion' del snapshot).");
+            }
+            if (string.IsNullOrWhiteSpace(c.CodDiagnosticoPrincipal))
+            {
+                errores.Add($"Consulta {c.Consecutivo} ({c.NumDocumentoIdentificacion}): codDiagnosticoPrincipal vacio (col 'Diagnostico' del snapshot).");
+            }
+        }
+        foreach (var p in payload.Servicios.Procedimientos)
+        {
+            if (string.IsNullOrWhiteSpace(p.CodPrestador))
+            {
+                errores.Add($"Procedimiento {p.Consecutivo} ({p.NumDocumentoIdentificacion}): codPrestador vacio.");
+            }
+            if (string.IsNullOrWhiteSpace(p.CodProcedimiento))
+            {
+                errores.Add($"Procedimiento {p.Consecutivo} ({p.NumDocumentoIdentificacion}): codProcedimiento vacio (col 'CUPS' del snapshot).");
+            }
+        }
+
         return errores;
     }
 
     // ==== Helpers ====
+
+    /// <summary>
+    /// Sexo -> M/F/I. Acepta variantes en espanol: "MASCULINO"/"HOMBRE"/"M",
+    /// "FEMENINO"/"MUJER"/"F". Cualquier otro texto no reconocido cae en "I".
+    /// </summary>
+    public static string NormalizarSexo(string s)
+    {
+        var v = (s ?? "").Trim().ToUpperInvariant();
+        if (v.Length == 0) { return "I"; }
+        if (v == "M" || v.StartsWith("MASC") || v == "HOMBRE") { return "M"; }
+        if (v == "F" || v.StartsWith("FEM")  || v == "MUJER")  { return "F"; }
+        return "I";
+    }
+
+    /// <summary>
+    /// Tipo documento -> codigos oficiales del catalogo MinSalud (2 letras):
+    /// CC/TI/CE/PA/RC/AS/MS/SC/PE/PT. Acepta el texto completo o el codigo. Si
+    /// no reconoce, deja el input original en mayusculas (mejor pasar algo raro
+    /// que perder la fila).
+    /// </summary>
+    public static string NormalizarTipoDoc(string s)
+    {
+        var v = (s ?? "").Trim().ToUpperInvariant();
+        if (v.Length == 0) { return string.Empty; }
+        return v switch
+        {
+            "CC" or "TI" or "CE" or "PA" or "RC" or "AS" or "MS" or "SC" or "PE" or "PT" => v,
+            "CEDULA" or "CEDULA DE CIUDADANIA" or "C.C." or "C.C" => "CC",
+            "TARJETA DE IDENTIDAD" or "T.I." or "T.I" => "TI",
+            "CEDULA DE EXTRANJERIA" or "C.E." or "C.E" => "CE",
+            "PASAPORTE" => "PA",
+            "REGISTRO CIVIL" or "R.C." or "R.C" => "RC",
+            "ADULTO SIN IDENTIFICAR" => "AS",
+            "MENOR SIN IDENTIFICAR" => "MS",
+            "SALVOCONDUCTO" => "SC",
+            "PERMISO ESPECIAL" or "PERMISO ESPECIAL DE PERMANENCIA" => "PE",
+            "PERMISO POR PROTECCION TEMPORAL" or "PPT" => "PT",
+            _ => v
+        };
+    }
+
+    /// <summary>
+    /// Regimen -> tipoUsuario 2 digitos MinSalud (§3.2). "CONTRIBUTIVO"->01,
+    /// "SUBSIDIADO"->02, "VINCULADO"->03, "PARTICULAR"->04. Si ya viene en
+    /// 2 digitos, passthrough.
+    /// </summary>
+    public static string NormalizarRegimen(string s)
+    {
+        var v = (s ?? "").Trim().ToUpperInvariant();
+        if (v.Length == 0) { return string.Empty; }
+        if (v.Length == 2 && v.All(char.IsDigit)) { return v; }
+        if (v.StartsWith("CONTRIB")) { return "01"; }
+        if (v.StartsWith("SUBSID"))  { return "02"; }
+        if (v.StartsWith("VINCUL"))  { return "03"; }
+        if (v.StartsWith("PARTIC"))  { return "04"; }
+        if (v.Contains("ESPECIAL"))  { return "05"; }
+        return v;
+    }
 
     /// <summary>Devuelve solo digitos. La regla del manual excluye DV y guiones.</summary>
     private static string NormalizarNit(string? nit)

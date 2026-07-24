@@ -1172,11 +1172,17 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
     CancellationToken ct) =>
 {
     var fmt = (formato ?? "xlsx").ToLowerInvariant();
+    if (fmt == "json")
+    {
+        var r = await svc.ExportarJsonRipsAsync(id, ct);
+        if (r.Archivo is not null) { return Results.File(r.Archivo.Contenido, r.Archivo.MimeType, r.Archivo.NombreArchivo); }
+        if (r.Errores.Count > 0) { return Results.Problem(string.Join(" | ", r.Errores), statusCode: 422, title: "JSON RIPS invalido"); }
+        return Results.NotFound();
+    }
     Visal.Application.Facturacion.ArchivoExportado? archivo = fmt switch
     {
         "xlsx" => await svc.ExportarExcelAsync(id, ct),
         "csv"  => await svc.ExportarCsvAsync(id, ct),
-        "json" => await svc.ExportarJsonRipsAsync(id, ct),
         _ => null
     };
     if (archivo is null) { return Results.NotFound(); }

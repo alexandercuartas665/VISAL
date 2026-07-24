@@ -14,9 +14,18 @@ public interface IRipsJsonBuilder
     /// para evitar dependencia circular con <see cref="IFacturacionSnapshotService"/>; el
     /// servicio es el que carga snapshot + filas y llama al builder.
     /// </summary>
+    /// <param name="numDocumentoIdObligado">NIT del tenant emisor (sin DV ni guiones). Va al nodo transaccion.</param>
     RipsPayload Build(
         FacturacionSnapshotDetalleDto detalle,
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> filas);
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> filas,
+        string numDocumentoIdObligado);
+
+    /// <summary>
+    /// Valida que el payload cumpla las reglas duras del manual antes de serializar. Retorna
+    /// la lista de errores (vacia = OK). R2 solo valida numFactura no vacio; R5 anadira
+    /// cuadre financiero y regla ciclica de copago.
+    /// </summary>
+    IReadOnlyList<string> Validate(RipsPayload payload);
 }
 
 /// <summary>Raiz del documento RIPS. Los arrays vacios deben serializarse como [] (no omitirse).</summary>

@@ -32,7 +32,7 @@ public class RipsJsonBuilderTests
     public void Build_ConSnapshotVacio_EmiteEstructuraCompletaConArraysVacios()
     {
         var builder = new RipsJsonBuilder();
-        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>());
+        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900123456");
 
         Assert.NotNull(payload);
         Assert.Empty(payload.Usuarios);
@@ -53,7 +53,7 @@ public class RipsJsonBuilderTests
         {
             new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-001" }
         };
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas);
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
         Assert.Equal("FE-001", payload.Transaccion.NumFactura);
     }
 
@@ -78,10 +78,51 @@ public class RipsJsonBuilderTests
                 ["Regimen"] = "02", ["Sexo"] = "F"
             }
         };
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas);
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
         Assert.Equal(2, payload.Usuarios.Count);
         Assert.Equal(1, payload.Usuarios[0].Consecutivo);
         Assert.Equal(2, payload.Usuarios[1].Consecutivo);
+    }
+
+    [Fact]
+    public void Build_NormalizaNit_QuitaGuionesYDV()
+    {
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900.123.456-7");
+        Assert.Equal("9001234567", payload.Transaccion.NumDocumentoIdObligado);
+    }
+
+    [Fact]
+    public void Validate_SinNumFactura_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var payload = builder.Build(SampleDetalle(), Array.Empty<IReadOnlyDictionary<string, object?>>(), "900123456");
+        var errores = builder.Validate(payload);
+        Assert.Contains(errores, e => e.Contains("Consecutivo Factura"));
+    }
+
+    [Fact]
+    public void Validate_SinNit_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var filas = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-1" }
+        };
+        var payload = builder.Build(SampleDetalle(), filas, "");
+        var errores = builder.Validate(payload);
+        Assert.Contains(errores, e => e.Contains("NIT del obligado"));
+    }
+
+    [Fact]
+    public void Validate_ConNumFacturaYNit_NoEmiteErrores()
+    {
+        var builder = new RipsJsonBuilder();
+        var filas = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["Consecutivo Factura"] = "FE-1" }
+        };
+        var payload = builder.Build(SampleDetalle(), filas, "900123456");
+        Assert.Empty(builder.Validate(payload));
     }
 
     [Fact]
@@ -92,7 +133,7 @@ public class RipsJsonBuilderTests
             new Dictionary<string, object?> { ["Tipo_Id"] = "CC", ["Identificación"] = "" },
             new Dictionary<string, object?> { ["Tipo_Id"] = "CC", ["Identificación"] = "1111" }
         };
-        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas);
+        var payload = new RipsJsonBuilder().Build(SampleDetalle(), filas, "900123456");
         Assert.Single(payload.Usuarios);
     }
 }

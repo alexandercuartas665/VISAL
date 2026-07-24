@@ -22,7 +22,8 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
 
     public RipsPayload Build(
         FacturacionSnapshotDetalleDto detalle,
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> filas)
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> filas,
+        string numDocumentoIdObligado)
     {
         var numFactura = string.Empty;
         if (filas.Count > 0 && filas[0].TryGetValue(ColFactura, out var f) && f is not null)
@@ -56,7 +57,8 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
 
         return new RipsPayload(
             Transaccion: new RipsTransaccion(
-                NumDocumentoIdObligado: string.Empty, // R2: NIT del tenant
+                // NIT del obligado: solo digitos, sin DV ni guiones (manual seccion 3.1)
+                NumDocumentoIdObligado: NormalizarNit(numDocumentoIdObligado),
                 NumFactura: numFactura,
                 NumNota: null,
                 TipoNota: null),
@@ -69,6 +71,29 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
                 RecienNacidos: Array.Empty<RipsRecienNacido>(),
                 Medicamentos: Array.Empty<RipsMedicamento>(),
                 OtrosServicios: Array.Empty<RipsOtroServicio>()));
+    }
+
+    public IReadOnlyList<string> Validate(RipsPayload payload)
+    {
+        var errores = new List<string>();
+        if (string.IsNullOrWhiteSpace(payload.Transaccion.NumDocumentoIdObligado))
+        {
+            errores.Add("El NIT del obligado (Tenant.TaxId) esta vacio. Configuralo en Mi cuenta > Perfil de la agencia.");
+        }
+        if (string.IsNullOrWhiteSpace(payload.Transaccion.NumFactura))
+        {
+            errores.Add("No se pudo determinar el numero de factura (columna 'Consecutivo Factura' vacia en la 1ra fila del snapshot).");
+        }
+        return errores;
+    }
+
+    /// <summary>Devuelve solo digitos. La regla del manual excluye DV y guiones.</summary>
+    private static string NormalizarNit(string? nit)
+    {
+        if (string.IsNullOrWhiteSpace(nit)) { return string.Empty; }
+        var sb = new System.Text.StringBuilder(nit.Length);
+        foreach (var c in nit) { if (char.IsDigit(c)) { sb.Append(c); } }
+        return sb.ToString();
     }
 
     private static string ReadString(IReadOnlyDictionary<string, object?> fila, string col)

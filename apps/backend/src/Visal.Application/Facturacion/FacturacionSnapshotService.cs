@@ -455,15 +455,26 @@ public sealed class FacturacionSnapshotService(
             SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".xlsx");
     }
 
-    public async Task<ArchivoExportado?> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default)
+    public async Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default)
     {
         var detalle = await ObtenerAsync(id, ct);
-        if (detalle is null) { return null; }
+        if (detalle is null) { return new RipsExportResult(null, Array.Empty<string>()); }
 
-        // Una sola pagina grande — R1 solo necesita datos demograficos unicos.
+        // NIT del obligado: lee Tenant.TaxId del tenant activo. Sin global query filter
+        // en Tenants (es entidad global), tid ya vino resuelto por ITenantContext.
+        if (tenant.TenantId is not Guid tid) { return new RipsExportResult(null, new[] { "Sin tenant activo." }); }
+        var taxId = await db.Tenants.AsNoTracking()
+            .Where(t => t.Id == tid)
+            .Select(t => t.TaxId)
+            .FirstOrDefaultAsync(ct);
+
+        // Una sola pagina grande — R1/R2 solo necesitan usuarios+transaccion.
         // Olas siguientes iteraran por bloques cuando emitan servicios[].
         var page = await ListarFilasAsync(id, pagina: 1, tamanoPagina: int.MaxValue, ct: ct);
-        var payload = ripsBuilder.Build(detalle, page.Items);
+        var payload = ripsBuilder.Build(detalle, page.Items, taxId ?? string.Empty);
+
+        var errores = ripsBuilder.Validate(payload);
+        if (errores.Count > 0) { return new RipsExportResult(null, errores); }
 
         // UTF-8 PURO SIN BOM (Res. 2275 seccion 1.1). SerializeToUtf8Bytes ya
         // no incluye preamble; NamingPolicy=CamelCase emite las llaves como
@@ -476,10 +487,11 @@ public sealed class FacturacionSnapshotService(
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, opts);
-        return new ArchivoExportado(
+        var archivo = new ArchivoExportado(
             bytes,
             "application/json; charset=utf-8",
             SanitizarNombreArchivo(detalle.Metadata.Nombre) + ".rips.json");
+        return new RipsExportResult(archivo, Array.Empty<string>());
     }
 
     public async Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default)

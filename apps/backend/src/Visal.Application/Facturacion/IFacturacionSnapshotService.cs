@@ -121,10 +121,12 @@ public interface IFacturacionSnapshotService
 
     /// <summary>
     /// Exporta el snapshot como JSON RIPS (Resolucion 2275 de 2023). UTF-8 puro sin BOM,
-    /// llaves nulas omitidas. R1 emite esqueleto (transaccion + usuarios + servicios con
-    /// arrays vacios). Devuelve null si no existe o no es del tenant activo.
+    /// llaves nulas omitidas. R1 emite esqueleto; R2 hidrata NIT del tenant y valida
+    /// que numFactura no venga vacio. El endpoint mapea el resultado asi:
+    /// Archivo != null -> 200 File; Errores != vacio -> 422 con la lista;
+    /// snapshot no existe -> Archivo=null y Errores vacio (endpoint devuelve 404).
     /// </summary>
-    Task<ArchivoExportado?> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default);
+    Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
     /// Actualiza el valor de una celda especifica del snapshot y persiste el cambio
@@ -151,3 +153,9 @@ public interface IFacturacionSnapshotService
 /// via Results.File.
 /// </summary>
 public sealed record ArchivoExportado(byte[] Contenido, string MimeType, string NombreArchivo);
+
+/// <summary>
+/// Resultado del export JSON RIPS: o el archivo listo para descarga, o la lista de
+/// errores de validacion. Si ambos son vacios, el snapshot no existe (404).
+/// </summary>
+public sealed record RipsExportResult(ArchivoExportado? Archivo, IReadOnlyList<string> Errores);

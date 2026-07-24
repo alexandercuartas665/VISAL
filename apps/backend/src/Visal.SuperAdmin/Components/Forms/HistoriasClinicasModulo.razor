@@ -26,6 +26,7 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject Microsoft.Extensions.Logging.ILogger<HistoriasClinicasModulo> Log
 
 @*
    Modulo reutilizable de Historias Clinicas.
@@ -1971,58 +1972,86 @@
         var fid = _ripsFormatoPendiente;
         if (fid == Guid.Empty) { _showRipsModal = false; return; }
 
-        var via = _ripsVias.FirstOrDefault(v => v.Codigo == _ripsViaCod);
-        var fin = _ripsFinalidades.FirstOrDefault(v => v.Codigo == _ripsFinCod);
-        var cau = _ripsCausas.FirstOrDefault(v => v.Codigo == _ripsCausaCod);
-        if (via is null || fin is null || cau is null)
+        // Diagnostico: cada paso registra en Serilog con contexto (paciente, formato,
+        // codigos RIPS). Cuando prod crashee sabemos exactamente en que linea murio
+        // sin depender del banner de Blazor. Sacar cuando el bug este estable.
+        var stage = "init";
+        try
         {
-            _ripsError = "Alguna de las opciones seleccionadas ya no esta activa. Recarga la pagina.";
-            return;
+            var via = _ripsVias.FirstOrDefault(v => v.Codigo == _ripsViaCod);
+            var fin = _ripsFinalidades.FirstOrDefault(v => v.Codigo == _ripsFinCod);
+            var cau = _ripsCausas.FirstOrDefault(v => v.Codigo == _ripsCausaCod);
+            if (via is null || fin is null || cau is null)
+            {
+                _ripsError = "Alguna de las opciones seleccionadas ya no esta activa. Recarga la pagina.";
+                return;
+            }
+
+            stage = "GetFormDefinition";
+            var detail = await FormsSvc.GetAsync(fid);
+            if (detail is null) { _ripsError = "El formato ya no existe."; return; }
+
+            stage = "FormSchema.FromJson";
+            _schemaActual = FormSchema.FromJson(detail.SchemaJson);
+            stage = "PrefillRouteSet.FromJson";
+            _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
+            _valores = new();
+            stage = "DefaultValuesHelper.Aplicar";
+            DefaultValuesHelper.Aplicar(_valores, _schemaActual);
+            stage = "PrefillFromPaciente";
+            await PrefillFromPaciente();
+            _formatoActualNombre = detail.Nombre;
+            _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version) ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}" : $"Codigo: {detail.Codigo}";
+            _tabSel = "Historial";
+
+            stage = "GetEspecialistaNombreAsync";
+            var especialista = await GetEspecialistaNombreAsync();
+            stage = "ResolverMiProfesionalIdAsync";
+            var miProf = await ResolverMiProfesionalIdAsync();
+
+            stage = "HcSvc.CrearAsync";
+            var creada = await HcSvc.CrearAsync(
+                new CrearHistoriaRequest(
+                    p.Id, fid, SerializeValores(_valores), especialista, miProf,
+                    via.Codigo, via.Nombre,
+                    fin.Codigo, fin.Nombre,
+                    cau.Codigo, cau.Nombre),
+                Guid.Empty);
+
+            stage = "HeaderAutoFillHelper.Aplicar";
+            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura);
+            _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
+            stage = "HcSvc.GuardarValoresAsync";
+            await HcSvc.GuardarValoresAsync(creada.Id, SerializeValores(_valores), Guid.Empty);
+
+            var nueva = new HistoriaRow
+            {
+                Id = creada.Id,
+                Especialista = creada.EspecialistaNombre ?? "(usuario actual)",
+                Fecha = DateOnly.FromDateTime(creada.FechaApertura.LocalDateTime),
+                Estado = creada.Estado,
+                Observaciones = $"Iniciada con formato {detail.Codigo} para {p.NombreCompleto}",
+                ProfesionalId = creada.ProfesionalId,
+                RipsViaNombre = creada.RipsViaIngresoNombre,
+                RipsFinalidadNombre = creada.RipsFinalidadNombre,
+                RipsCausaNombre = creada.RipsCausaExternaNombre
+            };
+            _historias.Insert(0, nueva);
+            _historiaSel = nueva;
+            _hcEsDeOtroDoctor = false;
+            _imprimirMsg = null;
+            _medCount = 0;
+            _showRipsModal = false;
         }
-
-        var detail = await FormsSvc.GetAsync(fid);
-        if (detail is null) { _ripsError = "El formato ya no existe."; return; }
-        _schemaActual = FormSchema.FromJson(detail.SchemaJson);
-        _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
-        _valores = new();
-        DefaultValuesHelper.Aplicar(_valores, _schemaActual);
-        await PrefillFromPaciente();
-        _formatoActualNombre = detail.Nombre;
-        _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version) ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}" : $"Codigo: {detail.Codigo}";
-        _tabSel = "Historial";
-
-        var especialista = await GetEspecialistaNombreAsync();
-        var miProf = await ResolverMiProfesionalIdAsync();
-        var creada = await HcSvc.CrearAsync(
-            new CrearHistoriaRequest(
-                p.Id, fid, SerializeValores(_valores), especialista, miProf,
-                via.Codigo, via.Nombre,
-                fin.Codigo, fin.Nombre,
-                cau.Codigo, cau.Nombre),
-            Guid.Empty);
-
-        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura);
-        _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
-        await HcSvc.GuardarValoresAsync(creada.Id, SerializeValores(_valores), Guid.Empty);
-
-        var nueva = new HistoriaRow
+        catch (Exception ex)
         {
-            Id = creada.Id,
-            Especialista = creada.EspecialistaNombre ?? "(usuario actual)",
-            Fecha = DateOnly.FromDateTime(creada.FechaApertura.LocalDateTime),
-            Estado = creada.Estado,
-            Observaciones = $"Iniciada con formato {detail.Codigo} para {p.NombreCompleto}",
-            ProfesionalId = creada.ProfesionalId,
-            RipsViaNombre = creada.RipsViaIngresoNombre,
-            RipsFinalidadNombre = creada.RipsFinalidadNombre,
-            RipsCausaNombre = creada.RipsCausaExternaNombre
-        };
-        _historias.Insert(0, nueva);
-        _historiaSel = nueva;
-        _hcEsDeOtroDoctor = false;
-        _imprimirMsg = null;
-        _medCount = 0;
-        _showRipsModal = false;
+            Log.LogError(ex,
+                "ConfirmarRipsYCrearAsync CRASH stage={Stage} PacienteId={PacienteId} PacienteDoc={PacienteDoc} FormatoId={FormatoId} viaCod={Via} finCod={Fin} causaCod={Causa}",
+                stage, p.Id, p.NumeroDocumento, fid, _ripsViaCod, _ripsFinCod, _ripsCausaCod);
+            _ripsError = $"Error al iniciar la historia ({stage}): {ex.Message}";
+            // No rethrow: el banner del circuito se evita y el usuario ve el error
+            // adentro del modal RIPS con contexto util.
+        }
     }
 
     private async Task<string?> GetEspecialistaNombreAsync()

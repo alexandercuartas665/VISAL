@@ -48,7 +48,15 @@ CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents()
+    .AddInteractiveServerComponents(options =>
+    {
+        // Prod y dev: enviamos el mensaje real de excepciones al circuito Blazor para
+        // que el banner "Ha ocurrido un error" traiga texto util. El texto sensible
+        // ya se filtra en el hoster (nunca serializamos secretos), y Serilog registra
+        // el stack completo. Sin esto el usuario solo ve "unhandled exception" y hay
+        // que ir al log del servidor para cada bug.
+        options.DetailedErrors = true;
+    })
     // Sube el limite de mensajes del circuito SignalR: al arrastrar y soltar archivos al chat,
     // el contenido viaja como base64 por invokeMethodAsync y el limite por defecto (32 KB) lo
     // rechazaba en silencio. 32 MB cubre el tope de 16 MB del archivo (~21 MB en base64).

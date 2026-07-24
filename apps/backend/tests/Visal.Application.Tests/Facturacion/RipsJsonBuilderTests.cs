@@ -325,6 +325,56 @@ public class RipsJsonBuilderTests
         Assert.Contains(errores, e => e.Contains("codPrestador"));
     }
 
+    // ==== R6: campos ricos por sub-array ====
+
+    [Theory]
+    [InlineData("ACETAMINOFEN 500 mg tabletas", "500 mg", "01")]
+    [InlineData("Ibuprofeno 400mg caps", "400 mg", "01")]
+    [InlineData("Amoxicilina 250 mg/5 ml suspension", "250 mg", "01")]
+    [InlineData("Solucion salina 10 ml ampolla", "10 ml", "02")]
+    [InlineData("Vitamina D 1000 UI", "1000 ui", "03")]
+    [InlineData("Levotiroxina 500 mcg tab", "500 mcg", "05")]
+    [InlineData("Clorhexidina 2%", "2 %", "06")]
+    [InlineData("Sin numero", null, null)]
+    [InlineData("", null, null)]
+    public void ExtraerConcentracionYUnidad_ParseaTextoLibre(string nombre, string? concentracion, string? unidad)
+    {
+        var (c, u) = RipsJsonBuilder.ExtraerConcentracionYUnidad(nombre);
+        Assert.Equal(concentracion, c);
+        Assert.Equal(unidad, u);
+    }
+
+    [Fact]
+    public void Build_Medicamento_DerivaConcentracionDesdeNombre()
+    {
+        var fila = FilaBaseMutable("AM", "1111");
+        fila["Descripción del procedimiento (Factura)"] = "ACETAMINOFEN 500 mg tabletas";
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        var m = p.Servicios.Medicamentos[0];
+        Assert.Equal("500 mg", m.ConcentracionMedicamento);
+        Assert.Equal("01", m.UnidadMedida);
+    }
+
+    [Fact]
+    public void Build_Medicamento_PrefiereCodigoExternoSobreCups()
+    {
+        var fila = FilaBaseMutable("AM", "1111");
+        fila["CUPS"] = "890201";
+        fila["Codigo Externo (Factura)"] = "19942360-01"; // CUM
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        Assert.Equal("19942360-01", p.Servicios.Medicamentos[0].CodTecnologiaSalud);
+    }
+
+    [Fact]
+    public void Build_Medicamento_SinCodigoExterno_UsaCupsComoFallback()
+    {
+        var fila = FilaBaseMutable("AM", "1111");
+        fila["CUPS"] = "890201";
+        fila["Codigo Externo (Factura)"] = "";
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { (IReadOnlyDictionary<string, object?>)fila }, "900123456");
+        Assert.Equal("890201", p.Servicios.Medicamentos[0].CodTecnologiaSalud);
+    }
+
     // ==== R5: cuadre financiero ====
 
     [Fact]

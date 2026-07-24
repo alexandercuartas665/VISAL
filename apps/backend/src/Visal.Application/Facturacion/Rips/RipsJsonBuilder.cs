@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Visal.Application.Facturacion.Rips;
 
 /// <summary>
-/// Implementacion R1-R5 del builder RIPS JSON:
+/// Implementacion R1-R6 del builder RIPS JSON:
 /// - R1: usuarios unicos + estructura raiz con arrays vacios.
 /// - R2: NIT del tenant normalizado + validador pre-serializacion (numFactura, NIT).
 /// - R3: dispatch por columna "Archivo json" (AC/AP/AM/AT) + bloque financiero.
@@ -12,6 +12,8 @@ namespace Visal.Application.Facturacion.Rips;
 /// - R5: cuadre financiero cruzado (manual §4): copagos por paciente <= servicios,
 ///   regla ciclica 04 reversa, vrServicio/vrModerador >= 0. TotalNeto() expone el
 ///   sumatorio para comparar contra &lt;PayableAmount&gt; de la FEV manualmente.
+/// - R6: campos ricos del §3.3.5-6: concentracion y unidadMedida derivadas del
+///   nomTecnologiaSalud via regex (heuristica "500 mg" / "10 ml" / "500 mcg").
 /// </summary>
 public sealed class RipsJsonBuilder : IRipsJsonBuilder
 {
@@ -183,21 +185,60 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
     private static RipsMedicamento BuildMedicamento(IReadOnlyDictionary<string, object?> f, string tipoDoc, string numDoc, int consecutivo)
     {
         var (vrServicio, vrModerador, concepto) = ExtraerFinancieros(f);
+        var nombre = LimpiarStringDescriptivo(ReadString(f, ColDescripcion));
+        var (concentracion, unidad) = ExtraerConcentracionYUnidad(nombre);
+        // R6: preferir Codigo Externo (CUM/INVIMA) si viene; fallback a CUPS.
+        var codExt = ReadString(f, ColCodExterno);
+        var codTec = string.IsNullOrWhiteSpace(codExt) ? ReadString(f, ColCups) : codExt;
         return new RipsMedicamento(
             CodPrestador: ReadString(f, ColCodHab),
             NumAutorizacion: NullIfEmpty(ReadString(f, ColAutorizacion)),
             FechaDispensacionAdmon: FormatFechaHora(f, ColFechaSuministro, ColHora),
             CodDiagnosticoPrincipal: ReadString(f, ColDiagnostico),
-            TipoMedicamento: "01", // 01 = POS/PBS default; R4 leera catalogo
-            CodTecnologiaSalud: ReadString(f, ColCups), // R5: usar CUM en vez de CUPS
-            NomTecnologiaSalud: LimpiarStringDescriptivo(ReadString(f, ColDescripcion)),
+            TipoMedicamento: "01", // 01 = POS/PBS default; siguiente ola leera catalogo Medicamentos.EsPOS
+            CodTecnologiaSalud: codTec,
+            NomTecnologiaSalud: nombre,
             CantidadMedicamento: ReadInt(f, ColCantidad, defaultVal: 1),
             TipoDocumentoIdentificacion: tipoDoc,
             NumDocumentoIdentificacion: numDoc,
             VrServicio: vrServicio,
             ConceptoRecaudo: concepto,
             VrPagoModerador: vrModerador,
-            Consecutivo: consecutivo);
+            Consecutivo: consecutivo,
+            ConcentracionMedicamento: concentracion,
+            UnidadMedida: unidad);
+    }
+
+    // Nota: no usamos \b al final porque % no es un char \w y romperia el match.
+    // El orden dentro del grupo importa (mcg antes de mg, mcg antes de g).
+    private static readonly System.Text.RegularExpressions.Regex ConcentracionRx =
+        new(@"(?<num>\d+(?:[.,]\d+)?)\s*(?<u>mcg|ug|mg|ml|ui|iu|g|%)(?![a-zA-Z])",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Extrae la concentracion y la unidad codificada del nombre del medicamento.
+    /// Ejemplos: "ACETAMINOFEN 500 mg tabletas" -> ("500 mg", "01").
+    /// Codigos MinSalud: 01 mg, 02 ml, 03 UI/IU, 04 g, 05 mcg/ug, 06 %.
+    /// Retorna (null, null) si no se detecta patron.
+    /// </summary>
+    public static (string? concentracion, string? unidadMedida) ExtraerConcentracionYUnidad(string nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) { return (null, null); }
+        var m = ConcentracionRx.Match(nombre);
+        if (!m.Success) { return (null, null); }
+        var num = m.Groups["num"].Value.Replace(",", ".");
+        var u = m.Groups["u"].Value.ToLowerInvariant();
+        var codigo = u switch
+        {
+            "mg"   => "01",
+            "ml"   => "02",
+            "ui" or "iu" => "03",
+            "g"    => "04",
+            "mcg" or "ug" => "05",
+            "%"    => "06",
+            _ => null
+        };
+        return ($"{num} {u}", codigo);
     }
 
     private static RipsOtroServicio BuildOtroServicio(IReadOnlyDictionary<string, object?> f, string tipoDoc, string numDoc, int consecutivo)

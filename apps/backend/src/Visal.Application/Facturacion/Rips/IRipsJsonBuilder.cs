@@ -99,7 +99,10 @@ public sealed record RipsProcedimiento(
     decimal VrServicio,
     string ConceptoRecaudo,
     decimal VrPagoModerador,
-    int Consecutivo);
+    int Consecutivo,
+    // R6: opcionales del §3.3.2. Se emiten si el snapshot los alimenta; por defecto null (se omiten del JSON).
+    string? CodDiagnosticoRelacionado = null,
+    string? CodComplicacion = null);
 
 /// <summary>Urgencia (Archivo json = AU). Manual seccion 3.3.3. R3 placeholder.</summary>
 public sealed record RipsUrgencia();
@@ -125,7 +128,14 @@ public sealed record RipsMedicamento(
     decimal VrServicio,
     string ConceptoRecaudo,
     decimal VrPagoModerador,
-    int Consecutivo);
+    int Consecutivo,
+    // R6: campos ricos del §3.3.5. Se emiten si se pueden derivar del nomTecnologiaSalud
+    // (concentracion via regex) o vienen en columnas futuras. Null -> se omiten del JSON.
+    string? ConcentracionMedicamento = null,
+    string? UnidadMedida = null,
+    string? FormaFarmaceutica = null,
+    string? UnidadMinDispensa = null,
+    int? DiasTratamiento = null);
 
 /// <summary>Otro servicio (Archivo json = AT). Manual seccion 3.3.6.</summary>
 public sealed record RipsOtroServicio(

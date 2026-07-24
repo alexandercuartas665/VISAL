@@ -696,63 +696,47 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var pkg = await db.Paquetes.AsNoTracking().FirstOrDefaultAsync(p => p.Id == paqueteId, ct);
         if (pkg is null) { return null; }
 
-        var codigos = await db.PaqueteServicios.AsNoTracking()
-            .Where(x => x.PaqueteId == paqueteId)
-            .OrderBy(x => x.Codigo)
-            .Select(x => new { x.Codigo, x.Cantidad, x.CatalogoServicioReferenciaId })
+        // Fuente de verdad: los servicios que la aseguradora realmente pacto con
+        // este paquete en el contrato del paciente (ServicioContrato.PaqueteId).
+        // NO usamos paquete_servicios (catalogo global) como fuente de "esperados"
+        // porque el operador solo puede agregar al carrito servicios que existen
+        // en su contrato — si el catalogo global tuviera 14 codigos pero la EPS
+        // solo pacto 3, el mensaje "faltantes" mencionaria codigos imposibles de
+        // agregar. Ver diagnostico usuario 2026-07-24.
+        //
+        // Enriquecemos con Cantidad canonica del catalogo global (paquete_servicios)
+        // cuando el codigo coincide; si no hay entrada canonica caemos a Cantidad=1.
+        var contratados = await db.ServiciosContrato.AsNoTracking()
+            .Join(db.ContratosAseguradora.AsNoTracking(), s => s.ContratoId, c => c.Id, (s, c) => new { s, c })
+            .Where(x => x.c.CodigoContrato == contratoCodigo
+                     && x.s.PaqueteId == paqueteId
+                     && !string.IsNullOrEmpty(x.s.CodigoServicio))
+            .OrderBy(x => x.s.CodigoServicio)
+            .Select(x => new { x.s.Id, x.s.CodigoServicio, x.s.Descripcion, x.s.Modulo, x.s.Tarifa })
             .ToListAsync(ct);
-        if (codigos.Count == 0)
+        if (contratados.Count == 0)
         {
             return new PaqueteExpansionDto(pkg.Id, pkg.Codigo, pkg.Nombre, pkg.Precio, Array.Empty<PaqueteExpansionItemDto>());
         }
 
-        // Resolver nombres y tarifas contra ServicioContrato del mismo contrato PRIMERO
-        // (asi heredamos tarifa + modulo pactados) y contra el catalogo global despues.
-        var codigosSet = codigos.Select(x => x.Codigo).ToList();
-        var svcContratoDict = await db.ServiciosContrato.AsNoTracking()
-            .Join(db.ContratosAseguradora.AsNoTracking(), s => s.ContratoId, c => c.Id, (s, c) => new { s, c })
-            .Where(x => x.c.CodigoContrato == contratoCodigo && codigosSet.Contains(x.s.CodigoServicio!))
-            .Select(x => new { x.s.Id, x.s.CodigoServicio, x.s.Descripcion, x.s.Modulo, x.s.Tarifa })
-            .ToListAsync(ct);
-        var scByCodigo = svcContratoDict
-            .GroupBy(x => x.CodigoServicio!)
-            .ToDictionary(g => g.Key, g => g.First());
+        var codigosContratados = contratados.Select(x => x.CodigoServicio!).ToList();
+        var cantidadCanonicaPorCodigo = await db.PaqueteServicios.AsNoTracking()
+            .Where(x => x.PaqueteId == paqueteId && codigosContratados.Contains(x.Codigo))
+            .Select(x => new { x.Codigo, x.Cantidad })
+            .ToDictionaryAsync(x => x.Codigo, x => x.Cantidad, ct);
 
-        var faltantes = codigosSet.Except(scByCodigo.Keys).ToList();
-        var catByCodigo = new Dictionary<string, string>();
-        if (faltantes.Count > 0)
+        var items = new List<PaqueteExpansionItemDto>(contratados.Count);
+        foreach (var sc in contratados)
         {
-            catByCodigo = await db.CatalogosServicioReferencia.AsNoTracking()
-                .Where(c => faltantes.Contains(c.Codigo))
-                .Select(c => new { c.Codigo, c.Nombre })
-                .ToDictionaryAsync(x => x.Codigo, x => x.Nombre, ct);
-        }
-
-        var items = new List<PaqueteExpansionItemDto>();
-        foreach (var s in codigos)
-        {
-            if (scByCodigo.TryGetValue(s.Codigo, out var sc))
-            {
-                items.Add(new PaqueteExpansionItemDto(
-                    s.Codigo,
-                    sc.Descripcion ?? s.Codigo,
-                    sc.Modulo ?? "",
-                    sc.Modulo,
-                    s.Cantidad,
-                    sc.Id,
-                    sc.Tarifa));
-            }
-            else
-            {
-                items.Add(new PaqueteExpansionItemDto(
-                    s.Codigo,
-                    catByCodigo.TryGetValue(s.Codigo, out var n) ? n : s.Codigo,
-                    "",
-                    null,
-                    s.Cantidad,
-                    null,
-                    null));
-            }
+            var cantidad = cantidadCanonicaPorCodigo.TryGetValue(sc.CodigoServicio!, out var c) ? c : 1;
+            items.Add(new PaqueteExpansionItemDto(
+                sc.CodigoServicio!,
+                sc.Descripcion ?? sc.CodigoServicio!,
+                sc.Modulo ?? "",
+                sc.Modulo,
+                cantidad,
+                sc.Id,
+                sc.Tarifa));
         }
         return new PaqueteExpansionDto(pkg.Id, pkg.Codigo, pkg.Nombre, pkg.Precio, items);
     }

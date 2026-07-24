@@ -179,6 +179,14 @@
                             Servicios del contrato
                             <span class="ase-tools">
                                 <input class="form-control form-control-sm ase-filter" placeholder="Filtrar servicios..." value="@_filtro" @oninput="OnFiltroInput" />
+                                <select class="form-select form-select-sm ase-filter" title="Filtrar por paquete" @bind="_filtroPaqueteId">
+                                    <option value="">Todos los paquetes</option>
+                                    <option value="@Guid.Empty">Sin paquete</option>
+                                    @foreach (var p in _paquetes)
+                                    {
+                                        <option value="@p.Id">@p.Codigo</option>
+                                    }
+                                </select>
                                 <button class="btn btn-outline-primary btn-sm" @onclick="AddServicio">+ Servicio</button>
                                 <button class="btn btn-outline-secondary btn-sm" @onclick="DescargarPlantilla" disabled="@_busy" title="Descarga un Excel con las columnas esperadas y un ejemplo.">&#11015; Plantilla</button>
                                 <label class="btn btn-primary btn-sm mb-0">
@@ -509,6 +517,9 @@
     private List<ServicioEdit> _servicios = new();
     private List<PaqueteDto> _paquetes = new();
     private string _filtro = "";
+    // Filtro por Paquete de los servicios del contrato. null = todos los paquetes,
+    // Guid.Empty = solo servicios SIN paquete asignado, otro Guid = ese paquete.
+    private Guid? _filtroPaqueteId = null;
 
     private bool _busy;
     private string? _error, _ok;
@@ -601,7 +612,7 @@
         await LoadAseguradoras();
     }
 
-    private async Task SelectContrato(Guid id) { _contratoId = id; _filtro = ""; await LoadServicios(); }
+    private async Task SelectContrato(Guid id) { _contratoId = id; _filtro = ""; _filtroPaqueteId = null; await LoadServicios(); }
 
     // ── Servicios ──
     private async Task LoadServicios()
@@ -615,9 +626,17 @@
 
     private IEnumerable<ServicioEdit> FilteredServicios()
     {
-        if (string.IsNullOrWhiteSpace(_filtro)) { return _servicios; }
+        IEnumerable<ServicioEdit> q = _servicios;
+        if (_filtroPaqueteId is Guid pid)
+        {
+            // Guid.Empty = "sin paquete" (para revisar servicios huerfanos); Guid real = ese paquete.
+            q = pid == Guid.Empty
+                ? q.Where(s => s.PaqueteId is null)
+                : q.Where(s => s.PaqueteId == pid);
+        }
+        if (string.IsNullOrWhiteSpace(_filtro)) { return q; }
         var f = _filtro.Trim().ToLowerInvariant();
-        return _servicios.Where(s =>
+        return q.Where(s =>
             (s.Descripcion ?? "").ToLowerInvariant().Contains(f) ||
             (s.CodigoServicio ?? "").ToLowerInvariant().Contains(f) ||
             (s.CodigoInterno ?? "").ToLowerInvariant().Contains(f) ||

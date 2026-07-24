@@ -193,7 +193,7 @@
 @if (_showNuevo)
 {
     <div class="sn-modal-back" @onclick="CerrarNuevo">
-        <div class="sn-modal sn-modal-md" @onclick:stopPropagation>
+        <div class="sn-modal sn-modal-nuevo" @onclick:stopPropagation>
             <div class="sn-modal-h">
                 <div>
                     <div class="sn-modal-eyebrow">Facturacion</div>
@@ -203,30 +203,53 @@
             </div>
             <div class="sn-modal-b">
                 @if (_nuevoErr is not null) { <div class="ase-alert">@_nuevoErr</div> }
-                <div class="ase-form" style="display:grid;gap:12px;">
-                    <div class="ase-f">
-                        <label>Tipo *</label>
-                        <select class="form-select form-select-sm" @bind="_nuevoTipo">
-                            @foreach (var t in _tiposDisponibles)
-                            {
-                                <option value="@t">@t</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="ase-f">
-                        <label>
-                            Nombre *
-                            <small class="text-muted">
-                                @(_nuevoTipo == TipoSnapshot.RelacionFacturas && _relAseguradoraIds.Count > 1
-                                    ? "(se sufija con el nombre de cada EPS)"
-                                    : "(para identificarlo en el listado)")
-                            </small>
-                        </label>
-                        <input class="form-control form-control-sm" @bind="_nuevoNombre" placeholder="Facturacion Julio 2026" />
+                <div class="snf-form">
+                    <div class="snf-row-2">
+                        <div class="snf-f">
+                            <label>Tipo *</label>
+                            <select class="form-select form-select-sm" @bind="_nuevoTipo">
+                                @foreach (var t in _tiposDisponibles)
+                                {
+                                    <option value="@t">@t</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="snf-f">
+                            <label>
+                                Nombre *
+                                <small class="text-muted">
+                                    @(_nuevoTipo == TipoSnapshot.RelacionFacturas && _relAseguradoraIds.Count > 1
+                                        ? "(se sufija con el nombre de cada EPS)"
+                                        : "(para identificarlo en el listado)")
+                                </small>
+                            </label>
+                            <input class="form-control form-control-sm" @bind="_nuevoNombre" placeholder="Facturacion Julio 2026" />
+                        </div>
                     </div>
                     @if (_nuevoTipo == TipoSnapshot.RelacionFacturas)
                     {
-                        <div class="ase-f">
+                        <div class="snf-row-2">
+                            <div class="snf-f">
+                                <label>Fecha inicio *</label>
+                                <input type="date" class="form-control form-control-sm" @bind="_relFechaInicio" />
+                            </div>
+                            <div class="snf-f">
+                                <label>Fecha fin *</label>
+                                <input type="date" class="form-control form-control-sm" @bind="_relFechaFin" />
+                            </div>
+                        </div>
+                        <div class="snf-f">
+                            <label>
+                                Filtro paciente <small class="text-muted">(opcional — para pruebas del sistema)</small>
+                            </label>
+                            <input class="form-control form-control-sm"
+                                   @bind="_relPacienteQuery"
+                                   placeholder="Nombre o identificacion del paciente" />
+                            <small class="text-muted d-block mt-1">
+                                Solo se incluiran en el snapshot las HC de pacientes cuyo nombre o documento contenga este texto (case y tildes insensibles). Vacio = todos.
+                            </small>
+                        </div>
+                        <div class="snf-f">
                             <label>
                                 Aseguradoras *
                                 <small class="text-muted">
@@ -260,7 +283,7 @@
                                 Se genera un snapshot independiente por cada aseguradora marcada.
                             </small>
                         </div>
-                        <div class="ase-f">
+                        <div class="snf-f">
                             <label>Sucursales <small class="text-muted">(opcional — vacio = todas las del tenant)</small></label>
                             <div class="sn-multi">
                                 @foreach (var s in _relSucursales)
@@ -278,31 +301,10 @@
                                 }
                             </div>
                         </div>
-                        <div class="ase-f" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                            <div>
-                                <label>Fecha inicio *</label>
-                                <input type="date" class="form-control form-control-sm" @bind="_relFechaInicio" />
-                            </div>
-                            <div>
-                                <label>Fecha fin *</label>
-                                <input type="date" class="form-control form-control-sm" @bind="_relFechaFin" />
-                            </div>
-                        </div>
-                        <div class="ase-f">
-                            <label>
-                                Filtro paciente <small class="text-muted">(opcional — para pruebas del sistema)</small>
-                            </label>
-                            <input class="form-control form-control-sm"
-                                   @bind="_relPacienteQuery"
-                                   placeholder="Nombre o identificacion del paciente" />
-                            <small class="text-muted d-block mt-1">
-                                Solo se incluiran en el snapshot las HC de pacientes cuyo nombre o documento contenga este texto (case y tildes insensibles). Vacio = todos.
-                            </small>
-                        </div>
                     }
                     else
                     {
-                        <div class="ase-f">
+                        <div class="snf-f">
                             <label>Filtros del snapshot (JSON)</label>
                             <textarea class="form-control form-control-sm" rows="4"
                                       style="font-family:'JetBrains Mono','Consolas',monospace;font-size:12px;"
@@ -669,6 +671,16 @@
     .sn-modal { background:white; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,0.3); display:flex; flex-direction:column; width:100%; overflow:hidden; }
     .sn-modal-sm { max-width:520px; }
     .sn-modal-md { max-width:720px; }
+    /* Modal Nuevo Snapshot: layout limpio en columna con filas 2-col
+       para campos cortos. El grid propio evita heredar el 4-col de
+       .ase-form (definido en CfgAseguradoras.razor.css) que apretaba
+       los campos en 4 columnas del ancho del modal. */
+    .sn-modal-nuevo { max-width:640px; }
+    .snf-form { display:grid; grid-template-columns:1fr; gap:14px; }
+    .snf-row-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .snf-f { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .snf-f > label { font-size:12px; font-weight:600; color:#334155; }
+    .snf-f > label small { font-weight:400; color:#64748b; margin-left:4px; }
     .sn-modal-xl { max-width:96vw; max-height:92vh; }
     .sn-modal-h { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:flex-start; background:#ffffff; }
     .sn-modal-h h3 { margin:0; font-size:18px; font-weight:700; color:#0f172a; }

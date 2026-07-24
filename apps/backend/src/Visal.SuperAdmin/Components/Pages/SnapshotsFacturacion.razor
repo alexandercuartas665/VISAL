@@ -288,6 +288,17 @@
                                 <input type="date" class="form-control form-control-sm" @bind="_relFechaFin" />
                             </div>
                         </div>
+                        <div class="ase-f">
+                            <label>
+                                Filtro paciente <small class="text-muted">(opcional — para pruebas del sistema)</small>
+                            </label>
+                            <input class="form-control form-control-sm"
+                                   @bind="_relPacienteQuery"
+                                   placeholder="Nombre o identificacion del paciente" />
+                            <small class="text-muted d-block mt-1">
+                                Solo se incluiran en el snapshot las HC de pacientes cuyo nombre o documento contenga este texto (case y tildes insensibles). Vacio = todos.
+                            </small>
+                        </div>
                     }
                     else
                     {
@@ -751,6 +762,9 @@
     private HashSet<Guid> _relSucursalIds = new();
     private DateOnly? _relFechaInicio;
     private DateOnly? _relFechaFin;
+    // Filtro opcional pensado para pruebas: nombre o identificacion del paciente
+    // (contiene, case+tildes insensitive). Vacio = no filtra.
+    private string _relPacienteQuery = string.Empty;
 
     // Modal Ver.
     private bool _showVer;
@@ -863,6 +877,7 @@
         var hoy = DateOnly.FromDateTime(DateTime.Today);
         _relFechaInicio = new DateOnly(hoy.Year, hoy.Month, 1);
         _relFechaFin = hoy;
+        _relPacienteQuery = string.Empty;
         _showNuevo = true;
     }
 
@@ -939,12 +954,14 @@
                     // El nombre queda tal cual lo puso el usuario — la EPS ahora es un
                     // campo estructurado (columna Aseguradora + filtro), asi que ya no
                     // se necesita sufijarla al nombre para distinguir los snapshots.
+                    var pq = string.IsNullOrWhiteSpace(_relPacienteQuery) ? null : _relPacienteQuery.Trim();
                     var payload = new
                     {
                         aseguradoraId = a.Id.ToString(),
                         sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
                         fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
                         fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
+                        pacienteQuery = pq,
                     };
                     var filtrosJson = JsonSerializer.Serialize(payload);
                     try

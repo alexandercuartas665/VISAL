@@ -67,6 +67,31 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         var pacientes = await db.Pacientes.AsNoTracking()
             .Where(p => pacienteIds.Contains(p.Id))
             .ToListAsync(ct);
+
+        // 3.1) Filtro PacienteQuery (opcional, pensado para pruebas): match
+        //      case+tilde-insensitive por CONTIENE contra el nombre completo
+        //      o contra la identificacion. Se aplica sobre la coleccion ya
+        //      cargada en memoria para no reescribir la query EF.
+        if (!string.IsNullOrWhiteSpace(filtros.PacienteQuery))
+        {
+            var needle = NormalizarParaBusqueda(filtros.PacienteQuery);
+            pacientes = pacientes
+                .Where(p =>
+                {
+                    var nombre = NormalizarParaBusqueda(string.Join(' ', new[]
+                    {
+                        p.PrimerNombre,
+                        p.SegundoNombre,
+                        p.PrimerApellido,
+                        p.SegundoApellido
+                    }.Where(x => !string.IsNullOrWhiteSpace(x))));
+                    var docu = NormalizarParaBusqueda(p.NumeroDocumento);
+                    return nombre.Contains(needle, StringComparison.Ordinal)
+                        || docu.Contains(needle, StringComparison.Ordinal);
+                })
+                .ToList();
+            if (pacientes.Count == 0) { return Array.Empty<RelacionFacturasHecho>(); }
+        }
         var pacientePorId = pacientes.ToDictionary(p => p.Id);
 
         // 4) Sucursales + prep del gate de revision.
@@ -339,5 +364,23 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         if (p.Contrato2Id is Guid c2 && contratoIdsPermitidos.Contains(c2)) { return c2; }
         if (p.Contrato3Id is Guid c3 && contratoIdsPermitidos.Contains(c3)) { return c3; }
         return null;
+    }
+
+    // Normaliza para busqueda: trim + upper invariant + strip de diacriticos
+    // (tildes/dieresis) para que "Perez" matchee "PÉREZ" y viceversa.
+    private static string NormalizarParaBusqueda(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) { return string.Empty; }
+        var formD = s.Trim().Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(formD.Length);
+        foreach (var ch in formD)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch)
+                != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(ch);
+            }
+        }
+        return sb.ToString().Normalize(System.Text.NormalizationForm.FormC).ToUpperInvariant();
     }
 }

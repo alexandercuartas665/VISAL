@@ -212,6 +212,13 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             fechaFin = ffParsed;
         }
 
-        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin);
+        string? pacienteQuery = null;
+        if (root.TryGetProperty("pacienteQuery", out var pq) && pq.ValueKind == JsonValueKind.String)
+        {
+            var s = pq.GetString();
+            if (!string.IsNullOrWhiteSpace(s)) { pacienteQuery = s.Trim(); }
+        }
+
+        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQuery);
     }
 }

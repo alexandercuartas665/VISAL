@@ -334,6 +334,81 @@ public sealed class FacturacionSnapshotService(
         return true;
     }
 
+    public async Task<int> ActualizarColumnaEnLoteAsync(
+        Guid snapshotId,
+        string columna,
+        string? valorNuevo,
+        Guid actor,
+        string? motivo = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(columna)) { throw new ArgumentException("Columna requerida.", nameof(columna)); }
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == snapshotId, ct)
+            ?? throw new InvalidOperationException("Snapshot no encontrado.");
+        if (snap.Estado != EstadoSnapshot.Vigente)
+        {
+            throw new InvalidOperationException(
+                $"Solo se pueden editar celdas de snapshots Vigentes. Estado actual: {snap.Estado}.");
+        }
+
+        var valorLimpio = string.IsNullOrWhiteSpace(valorNuevo) ? null : valorNuevo.Trim();
+        var motivoLimpio = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim();
+
+        // Recorremos todas las filas del snapshot; regeneramos el JSON con la
+        // columna sustituida y creamos un cambio de auditoria por cada fila que
+        // efectivamente cambio (no ensuciamos la trazabilidad con no-ops).
+        var filas = await db.FacturacionSnapshotFilas
+            .Where(f => f.SnapshotId == snapshotId)
+            .ToListAsync(ct);
+
+        var cambiadas = 0;
+        foreach (var fila in filas)
+        {
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(fila.DatosJson) ?? new();
+            string? valorAntesStr = null;
+            if (dict.TryGetValue(columna, out var jeAntes))
+            {
+                valorAntesStr = jeAntes.ValueKind switch
+                {
+                    JsonValueKind.Null => null,
+                    JsonValueKind.String => jeAntes.GetString(),
+                    _ => jeAntes.GetRawText()
+                };
+            }
+            if (string.Equals(valorAntesStr, valorLimpio, StringComparison.Ordinal)) { continue; }
+
+            var nuevo = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var kv in dict)
+            {
+                nuevo[kv.Key] = kv.Key == columna ? valorLimpio : ExtraerValor(kv.Value);
+            }
+            if (!nuevo.ContainsKey(columna)) { nuevo[columna] = valorLimpio; }
+
+            fila.DatosJson = JsonSerializer.Serialize(nuevo, JsonOpts);
+            fila.UpdatedBy = actor;
+
+            db.FacturacionSnapshotFilaCambios.Add(new FacturacionSnapshotFilaCambio
+            {
+                TenantId = tid,
+                SnapshotId = snapshotId,
+                FilaId = fila.Id,
+                NumeroFila = fila.NumeroFila,
+                ColumnaOriginal = columna,
+                ValorAntes = Truncate(valorAntesStr, 4000),
+                ValorDespues = Truncate(valorLimpio, 4000),
+                ActorUserId = actor,
+                Motivo = motivoLimpio,
+                CreatedBy = actor
+            });
+            cambiadas++;
+        }
+
+        if (cambiadas > 0) { await db.SaveChangesAsync(ct); }
+        return cambiadas;
+    }
+
     public async Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default)
     {
         return await db.FacturacionSnapshotFilaCambios.AsNoTracking()
@@ -455,7 +530,7 @@ public sealed class FacturacionSnapshotService(
             SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".xlsx");
     }
 
-    public async Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default)
+    public async Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, bool ignorarValidacion = false, CancellationToken ct = default)
     {
         var detalle = await ObtenerAsync(id, ct);
         if (detalle is null) { return new RipsExportResult(null, Array.Empty<string>()); }
@@ -514,7 +589,13 @@ public sealed class FacturacionSnapshotService(
         var errores = ripsBuilder is Visal.Application.Facturacion.Rips.RipsJsonBuilder rb
             ? rb.ValidateWith(payload, catalogos)
             : ripsBuilder.Validate(payload);
-        if (errores.Count > 0) { return new RipsExportResult(null, errores); }
+        // Modo estricto (default): si hay errores, no se genera archivo. Modo tolerante
+        // (ignorarValidacion=true, para depuracion): se genera igualmente y se devuelven
+        // ambos — el consumidor decide que hacer con los warnings.
+        if (errores.Count > 0 && !ignorarValidacion)
+        {
+            return new RipsExportResult(null, errores);
+        }
 
         // UTF-8 PURO SIN BOM (Res. 2275 seccion 1.1). SerializeToUtf8Bytes ya
         // no incluye preamble; NamingPolicy=CamelCase emite las llaves como
@@ -537,7 +618,9 @@ public sealed class FacturacionSnapshotService(
             bytes,
             "application/json; charset=utf-8",
             $"{SanitizarNombreArchivo(detalle.Metadata.Nombre)}-neto-{netoStr}.rips.json");
-        return new RipsExportResult(archivo, Array.Empty<string>());
+        // En modo tolerante devolvemos el archivo Y los errores (si los hubo) para que
+        // el operador tenga trazabilidad de la validacion aunque haya forzado la descarga.
+        return new RipsExportResult(archivo, errores);
     }
 
     public async Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default)

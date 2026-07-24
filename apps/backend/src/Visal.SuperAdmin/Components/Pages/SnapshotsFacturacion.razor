@@ -365,6 +365,25 @@
                     <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina + 1)" disabled="@(_verPagina >= _verTotalPaginas)">&gt;</button>
                 </div>
             </div>
+            @* Toolbar bulk-fill: aplicar el mismo valor de "Consecutivo Factura" a
+               TODAS las filas del snapshot. Pensado para cuando la EPS asigna un
+               unico numero de factura al lote. Solo se muestra en snapshots Vigentes. *@
+            @if (_verDetalle.Metadata.Estado == EstadoSnapshot.Vigente
+                 && _verDetalle.Columnas.Contains("Consecutivo Factura"))
+            {
+                <div class="sn-bulk-bar">
+                    <label>N° factura del lote</label>
+                    <input class="form-control form-control-sm" style="width:220px;"
+                           placeholder="Ej: FE-2026-1023"
+                           @bind="_bulkFactura" />
+                    <button class="btn btn-primary btn-sm"
+                            @onclick="AplicarFacturaAlLote"
+                            disabled="@(_bulkAplicando || string.IsNullOrWhiteSpace(_bulkFactura))">
+                        @(_bulkAplicando ? "Aplicando..." : "Aplicar a todas")
+                    </button>
+                    <small class="text-muted">Reemplaza la columna <b>Consecutivo Factura</b> en las @_verTotal filas del snapshot.</small>
+                </div>
+            }
             <div class="sn-modal-b sn-modal-b-tabla">
                 @if (_verCargando)
                 {
@@ -444,9 +463,16 @@
                        href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=csv")"
                        target="_blank" rel="noopener">Descargar CSV</a>
                     <a class="btn btn-outline-info btn-sm"
-                       href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=json")"
+                       href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=json&ignorarValidacion={(_ripsIgnorarValidacion ? "true" : "false")}")"
                        target="_blank" rel="noopener"
-                       title="JSON RIPS Resolucion 2275/2023 (esqueleto R1)">Generar JSON RIPS</a>
+                       title="JSON RIPS Resolucion 2275/2023">
+                        Generar JSON RIPS
+                    </a>
+                    <label class="d-flex align-items-center gap-1 mb-0" style="font-size:12px;color:#475569;"
+                           title="Genera el archivo aunque falle la validacion (para probar contra el validador MinSalud).">
+                        <input type="checkbox" @bind="_ripsIgnorarValidacion" />
+                        Generar aunque falle validacion
+                    </label>
                     <button class="btn btn-outline-primary btn-sm" @onclick="AbrirHistorial">Historial cambios</button>
                 </div>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVer">Cerrar</button>
@@ -694,6 +720,10 @@
     .sn-modal-f { padding:12px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; align-items:center; gap:8px; }
     .sn-modal-controls { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); background:#f8fafc; flex-wrap:wrap; }
     .sn-modal-controls-l, .sn-modal-controls-r { display:flex; align-items:center; gap:8px; }
+    /* Barra bulk-fill del N° factura. Estilo tenue para no competir con la tabla. */
+    .sn-bulk-bar { display:flex; align-items:center; gap:8px; padding:8px 20px; background:#f0f9ff; border-bottom:1px solid #bae6fd; flex-wrap:wrap; }
+    .sn-bulk-bar > label { font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#0369a1; font-weight:600; margin:0; }
+    .sn-bulk-bar small { font-size:11px; color:#64748b; }
     .sn-modal-controls label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
     .sn-page-info { font-size:12px; color:var(--muted); margin-right:8px; }
 
@@ -793,6 +823,13 @@
     private string? _verOrden;
     private bool _verOrdenDesc;
     private CancellationTokenSource? _verBuscarCts;
+
+    // Bulk-fill de "Consecutivo Factura" para el lote entero.
+    private string _bulkFactura = "";
+    private bool _bulkAplicando;
+
+    // Checkbox: generar JSON RIPS aunque falle la validacion (modo depuracion).
+    private bool _ripsIgnorarValidacion;
 
     // Modal Archivar.
     private bool _showArchivar;
@@ -1083,7 +1120,48 @@
         finally { _verCargando = false; }
     }
 
-    private void CerrarVer() => _showVer = false;
+    private void CerrarVer()
+    {
+        _showVer = false;
+        // Limpia el input para no arrastrarlo al proximo snapshot.
+        _bulkFactura = "";
+        _bulkAplicando = false;
+        _ripsIgnorarValidacion = false;
+    }
+
+    private async Task AplicarFacturaAlLote()
+    {
+        if (_verDetalle is null || _bulkAplicando) { return; }
+        var valor = (_bulkFactura ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(valor)) { return; }
+        if (_verDetalle.Metadata.Estado != EstadoSnapshot.Vigente)
+        {
+            _error = "Solo se puede aplicar en snapshots Vigentes.";
+            return;
+        }
+
+        _bulkAplicando = true;
+        _error = null;
+        try
+        {
+            var n = await Svc.ActualizarColumnaEnLoteAsync(
+                _verDetalle.Metadata.Id,
+                "Consecutivo Factura",
+                valor,
+                _actorId,
+                motivo: $"Bulk-fill N° factura del lote a '{valor}'");
+            _ok = $"N° factura aplicado a {n} fila(s).";
+            await CargarPaginaVer();
+        }
+        catch (Exception ex)
+        {
+            _error = "No se pudo aplicar el N° factura: " + ex.Message;
+        }
+        finally
+        {
+            _bulkAplicando = false;
+        }
+    }
 
     private async Task IrPagina(int p)
     {

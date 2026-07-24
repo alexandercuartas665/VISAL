@@ -125,8 +125,25 @@ public interface IFacturacionSnapshotService
     /// que numFactura no venga vacio. El endpoint mapea el resultado asi:
     /// Archivo != null -> 200 File; Errores != vacio -> 422 con la lista;
     /// snapshot no existe -> Archivo=null y Errores vacio (endpoint devuelve 404).
+    /// <paramref name="ignorarValidacion"/>=true genera el archivo incluso si hay errores
+    /// (util para depuracion / prueba manual contra el validador MinSalud). En ese caso
+    /// el resultado trae <b>ambos</b>: <c>Archivo != null</c> y <c>Errores != vacio</c>.
     /// </summary>
-    Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, CancellationToken ct = default);
+    Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, bool ignorarValidacion = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Bulk-fill: asigna <paramref name="valorNuevo"/> a la misma <paramref name="columna"/>
+    /// en TODAS las filas del snapshot. Registra un cambio en la trazabilidad por cada
+    /// fila que efectivamente cambio (las que ya tenian el valor destino no se tocan).
+    /// Devuelve el numero de filas actualizadas. Solo permitido en snapshots Vigentes.
+    /// </summary>
+    Task<int> ActualizarColumnaEnLoteAsync(
+        Guid snapshotId,
+        string columna,
+        string? valorNuevo,
+        Guid actor,
+        string? motivo = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Actualiza el valor de una celda especifica del snapshot y persiste el cambio

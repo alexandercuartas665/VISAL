@@ -1166,16 +1166,34 @@ app.MapPost("/api/firma/{token}/submit", async (
 // del servicio via query filter global — un intento de descargar un snapshot de
 // otro tenant devuelve 404.
 app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
+    HttpContext http,
     Guid id,
     string? formato,
+    bool? ignorarValidacion,
     Visal.Application.Facturacion.IFacturacionSnapshotService svc,
     CancellationToken ct) =>
 {
     var fmt = (formato ?? "xlsx").ToLowerInvariant();
     if (fmt == "json")
     {
-        var r = await svc.ExportarJsonRipsAsync(id, ct);
-        if (r.Archivo is not null) { return Results.File(r.Archivo.Contenido, r.Archivo.MimeType, r.Archivo.NombreArchivo); }
+        var forzar = ignorarValidacion == true;
+        var r = await svc.ExportarJsonRipsAsync(id, forzar, ct);
+        if (r.Archivo is not null)
+        {
+            // En modo forzado, exponemos los warnings como header para trazabilidad
+            // (el navegador los descarta al abrir la descarga, pero quedan en devtools/logs).
+            // HTTP no permite non-ASCII (0x00-0x7F) — Kestrel lanza si dejamos § o tildes.
+            // Los warnings originales conservan sus caracteres; aca solo aplanamos el header.
+            if (r.Errores.Count > 0)
+            {
+                var raw = string.Join(" | ", r.Errores);
+                var chars = new System.Text.StringBuilder(raw.Length);
+                foreach (var ch in raw) { chars.Append(ch < 0x20 || ch > 0x7E ? '?' : ch); }
+                http.Response.Headers["X-Rips-Warnings"] = chars.ToString();
+                http.Response.Headers["X-Rips-Warning-Count"] = r.Errores.Count.ToString();
+            }
+            return Results.File(r.Archivo.Contenido, r.Archivo.MimeType, r.Archivo.NombreArchivo);
+        }
         if (r.Errores.Count > 0) { return Results.Problem(string.Join(" | ", r.Errores), statusCode: 422, title: "JSON RIPS invalido"); }
         return Results.NotFound();
     }

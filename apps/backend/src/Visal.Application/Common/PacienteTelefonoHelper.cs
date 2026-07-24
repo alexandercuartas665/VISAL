@@ -2,12 +2,18 @@ namespace Visal.Application.Common;
 
 /// <summary>
 /// Utilidades para el campo Paciente.Telefono, que puede contener MULTIPLES
-/// telefonos separados por "; " o ",". Los consumidores que necesitan UN solo
-/// numero (WhatsApp, firma remota) llaman Principal para obtener el primero.
+/// telefonos separados. Los consumidores que necesitan UN solo numero (WhatsApp,
+/// firma remota) llaman Principal para obtener el primero.
+///
+/// Separadores aceptados: ";", ",", "\n", "-", "/", "|". Los operadores en prod
+/// escriben con cualquiera de estos ("311 2887609 - 3132539732 - ..." se ve
+/// mucho); si Principal no los reconoce, el string entero pasa como telefono
+/// y otros campos varchar(40) revientan al persistir (fijado 2026-07-24 tras
+/// crash al iniciar HC para paciente con 4 numeros separados por " - ").
 /// </summary>
 public static class PacienteTelefonoHelper
 {
-    private static readonly char[] _sep = new[] { ';', ',', '\n' };
+    private static readonly char[] _sep = new[] { ';', ',', '\n', '-', '/', '|' };
 
     /// <summary>Devuelve el primer telefono de la lista almacenada o null si esta vacia.</summary>
     public static string? Principal(string? telefono)

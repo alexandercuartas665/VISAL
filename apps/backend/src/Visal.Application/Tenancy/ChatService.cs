@@ -341,5 +341,15 @@ public sealed class ChatService : IChatService
         return (tu.Id, name);
     }
 
-    private static string Digits(string s) => new(s.Where(char.IsDigit).ToArray());
+    // Extrae solo los digitos y trunca al ancho de la columna (varchar(40)) para
+    // que ningun caller — con teléfonos concatenados, multiples numeros o codigos
+    // de pais duplicados — reviente el INSERT a conversations con "value too long
+    // for type character varying(40)". Precedente: paciente con 4 celulares en un
+    // solo campo separados por " - " (2026-07-24).
+    private const int MaxPhoneLength = 40;
+    private static string Digits(string s)
+    {
+        var d = new string(s.Where(char.IsDigit).ToArray());
+        return d.Length > MaxPhoneLength ? d.Substring(0, MaxPhoneLength) : d;
+    }
 }

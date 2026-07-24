@@ -325,6 +325,92 @@ public class RipsJsonBuilderTests
         Assert.Contains(errores, e => e.Contains("codPrestador"));
     }
 
+    // ==== R8/R9/R10 ====
+
+    [Fact]
+    public void ValidateWith_DiagnosticoNoEnCatalogo_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBase("AC", "1111"); // Diagnostico = "I10X" en base
+        var catalogos = new RipsCatalogos(
+            MedicamentosPorCodigo: new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase),
+            CodigosCie10Validos: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "J45X", "K21X" }); // I10X NO esta
+        var p = builder.Build(SampleDetalle(), new[] { fila }, "900123456", catalogos);
+        var errores = builder.ValidateWith(p, catalogos);
+        Assert.Contains(errores, e => e.Contains("I10X") && e.Contains("no existe en el catalogo"));
+    }
+
+    [Fact]
+    public void ValidateWith_DiagnosticoEnCatalogo_NoEmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBase("AC", "1111");
+        var catalogos = new RipsCatalogos(
+            MedicamentosPorCodigo: new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase),
+            CodigosCie10Validos: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "I10X" });
+        var p = builder.Build(SampleDetalle(), new[] { fila }, "900123456", catalogos);
+        var errores = builder.ValidateWith(p, catalogos);
+        Assert.DoesNotContain(errores, e => e.Contains("no existe en el catalogo"));
+    }
+
+    [Fact]
+    public void ValidateWith_CatalogoVacio_NoValidaCie10()
+    {
+        // Tenant sin catalogo Diagnosticos cargado: no debe emitir warnings.
+        var builder = new RipsJsonBuilder();
+        var fila = FilaBase("AC", "1111");
+        var p = builder.Build(SampleDetalle(), new[] { fila }, "900123456", RipsCatalogos.Empty);
+        var errores = builder.ValidateWith(p, RipsCatalogos.Empty);
+        Assert.DoesNotContain(errores, e => e.Contains("no existe en el catalogo"));
+    }
+
+    [Fact]
+    public void Build_TipoDiagnosticoDesdeCatalogo_GanaSobreDefault()
+    {
+        var fila = FilaBase("AC", "1111");
+        var catalogos = new RipsCatalogos(
+            MedicamentosPorCodigo: new Dictionary<string, MedicamentoCatalogoInfo>(StringComparer.OrdinalIgnoreCase),
+            TiposDiagnosticoPorPacienteFactura: new Dictionary<(string, string), string>
+            {
+                [("1111", "FE-1")] = "03" // Confirmado repetido
+            });
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456", catalogos);
+        Assert.Equal("03", p.Servicios.Consultas[0].TipoDiagnosticoPrincipal);
+    }
+
+    [Fact]
+    public void Build_TipoDiagnosticoSinMatch_UsaDefault02()
+    {
+        var fila = FilaBase("AC", "1111");
+        var p = new RipsJsonBuilder().Build(SampleDetalle(), new[] { fila }, "900123456", RipsCatalogos.Empty);
+        Assert.Equal("02", p.Servicios.Consultas[0].TipoDiagnosticoPrincipal);
+    }
+
+    [Fact]
+    public void Validate_SnapshotMultiFactura_EmiteError()
+    {
+        var builder = new RipsJsonBuilder();
+        var f1 = FilaBaseMutable("AC", "1111"); f1["Consecutivo Factura"] = "FE-1";
+        var f2 = FilaBaseMutable("AC", "2222"); f2["Consecutivo Factura"] = "FE-2";
+        var p = builder.Build(SampleDetalle(), new[]
+        {
+            (IReadOnlyDictionary<string, object?>)f1,
+            (IReadOnlyDictionary<string, object?>)f2
+        }, "900123456", RipsCatalogos.Empty);
+        var errores = builder.Validate(p);
+        Assert.Contains(errores, e => e.Contains("mezcla") && e.Contains("2 facturas"));
+    }
+
+    [Fact]
+    public void Validate_SnapshotUnaFactura_NoEmiteErrorMultiFactura()
+    {
+        var builder = new RipsJsonBuilder();
+        var f1 = FilaBase("AC", "1111");
+        var f2 = FilaBase("AC", "2222"); // ambos con Consecutivo Factura = "FE-1"
+        var p = builder.Build(SampleDetalle(), new[] { f1, f2 }, "900123456", RipsCatalogos.Empty);
+        Assert.DoesNotContain(builder.Validate(p), e => e.Contains("mezcla"));
+    }
+
     // ==== R7: catalogo Medicamentos ganan sobre snapshot ====
 
     [Fact]

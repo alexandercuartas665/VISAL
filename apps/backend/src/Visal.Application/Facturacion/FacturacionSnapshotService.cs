@@ -494,11 +494,26 @@ public sealed class FacturacionSnapshotService(
             if (cumCompuesto is not null) { medDict[cumCompuesto] = info; }
             if (!string.IsNullOrWhiteSpace(m.Expediente)) { medDict.TryAdd(m.Expediente, info); }
         }
-        var catalogos = new Visal.Application.Facturacion.Rips.RipsCatalogos(medDict);
+        // R8: precargar los codigos CIE-10 habilitados para validar los diagnosticos
+        // que trae el snapshot. Case-insensitive. Set vacio si el tenant no ha cargado
+        // el catalogo (el builder no valida en ese caso).
+        var cieCodigos = await db.Diagnosticos.AsNoTracking()
+            .Where(d => d.Habilitado)
+            .Select(d => d.Codigo)
+            .ToListAsync(ct);
+        var cieSet = new HashSet<string>(cieCodigos, StringComparer.OrdinalIgnoreCase);
+
+        var catalogos = new Visal.Application.Facturacion.Rips.RipsCatalogos(
+            MedicamentosPorCodigo: medDict,
+            CodigosCie10Validos: cieSet);
 
         var payload = ripsBuilder.Build(detalle, page.Items, taxId ?? string.Empty, catalogos);
 
-        var errores = ripsBuilder.Validate(payload);
+        // R8: usar el overload ValidateWith que verifica los CIE-10 contra el catalogo.
+        // Downcasting seguro: solo la implementacion concreta expone ValidateWith.
+        var errores = ripsBuilder is Visal.Application.Facturacion.Rips.RipsJsonBuilder rb
+            ? rb.ValidateWith(payload, catalogos)
+            : ripsBuilder.Validate(payload);
         if (errores.Count > 0) { return new RipsExportResult(null, errores); }
 
         // UTF-8 PURO SIN BOM (Res. 2275 seccion 1.1). SerializeToUtf8Bytes ya

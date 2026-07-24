@@ -29,11 +29,17 @@ public interface IRipsJsonBuilder
 
 /// <summary>
 /// Lookups precomputados por el servicio antes de invocar al builder. Evita que el
-/// builder consulte el DbContext y mantiene los tests puros. R7 solo trae medicamentos;
-/// olas siguientes anadiran diagnosticos, prestadores, etc.
+/// builder consulte el DbContext y mantiene los tests puros.
 /// </summary>
 public sealed record RipsCatalogos(
-    IReadOnlyDictionary<string, MedicamentoCatalogoInfo> MedicamentosPorCodigo)
+    IReadOnlyDictionary<string, MedicamentoCatalogoInfo> MedicamentosPorCodigo,
+    // R8: catalogo Diagnosticos del tenant indexado por Codigo (case-insensitive).
+    // Se usa solo para validar que el CIE-10 del snapshot este registrado.
+    IReadOnlySet<string>? CodigosCie10Validos = null,
+    // R9: hook para tipoDiagnosticoPrincipal real por (numDoc, numFactura) desde HC.
+    // Si el mapa trae el par, gana sobre el default "02" del builder. Siguiente ola
+    // llena este mapa consultando HistoriaClinica.TipoDiagnostico.
+    IReadOnlyDictionary<(string numDoc, string numFactura), string>? TiposDiagnosticoPorPacienteFactura = null)
 {
     /// <summary>Instancia vacia para tests o snapshots sin necesidad de catalogos.</summary>
     public static RipsCatalogos Empty { get; } =
@@ -53,7 +59,14 @@ public sealed record MedicamentoCatalogoInfo(
 public sealed record RipsPayload(
     RipsTransaccion Transaccion,
     IReadOnlyList<RipsUsuario> Usuarios,
-    RipsServicios Servicios);
+    RipsServicios Servicios,
+    /// <summary>
+    /// R10: facturas distintas detectadas en el snapshot original. NO forma parte
+    /// del JSON RIPS oficial (JsonIgnore); es solo para que Validate() detecte
+    /// snapshots que mezclan varias facturas — manual §3.1 exige numFactura unico.
+    /// </summary>
+    [property: System.Text.Json.Serialization.JsonIgnore]
+    IReadOnlyList<string>? FacturasDetectadas = null);
 
 /// <summary>Cabecera de facturacion. Vincula el JSON con la FEV enviada a la DIAN.</summary>
 public sealed record RipsTransaccion(

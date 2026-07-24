@@ -17,6 +17,12 @@ namespace Visal.Application.Facturacion.Rips;
 /// - R7: si el snapshot referencia un medicamento del catalogo (CUM/expediente),
 ///   sobrescribe con datos reales: CumInvima, concentracion, formaFarmaceutica,
 ///   EsPos -> tipoMedicamento 01/02. La heuristica de R6 sigue como fallback.
+/// - R8: Validate() advierte si un codDiagnosticoPrincipal no existe en el catalogo
+///   Diagnosticos del tenant (para atrapar tipeos y CIE-10 obsoletos).
+/// - R9: tipoDiagnosticoPrincipal usa hook TiposDiagnosticoPorPacienteFactura del
+///   catalogo cuando esta disponible; sino cae al default "02" (Confirmado nuevo).
+/// - R10: Validate() falla si el snapshot mezcla varias facturas (manual §3.1
+///   exige numFactura unico por JSON RIPS).
 /// </summary>
 public sealed class RipsJsonBuilder : IRipsJsonBuilder
 {
@@ -55,6 +61,14 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
         string numDocumentoIdObligado,
         RipsCatalogos catalogos)
     {
+        // R10: recolectar TODAS las facturas distintas del snapshot para que Validate
+        // pueda advertir si viene mezcla. numFactura oficial usa la primera fila.
+        var facturasDetectadas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fila in filas)
+        {
+            var v = ReadString(fila, ColFactura);
+            if (!string.IsNullOrWhiteSpace(v)) { facturasDetectadas.Add(v); }
+        }
         var numFactura = string.Empty;
         if (filas.Count > 0 && filas[0].TryGetValue(ColFactura, out var f) && f is not null)
         {
@@ -104,7 +118,7 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             switch (archivo)
             {
                 case "AC":
-                    consultas.Add(BuildConsulta(fila, tipoDocN, numDoc, consultas.Count + 1));
+                    consultas.Add(BuildConsulta(fila, tipoDocN, numDoc, consultas.Count + 1, numFactura, catalogos));
                     break;
                 case "AP":
                     procedimientos.Add(BuildProcedimiento(fila, tipoDocN, numDoc, procedimientos.Count + 1));
@@ -137,12 +151,17 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
                 Hospitalizacion: Array.Empty<RipsHospitalizacion>(),
                 RecienNacidos: Array.Empty<RipsRecienNacido>(),
                 Medicamentos: medicamentos,
-                OtrosServicios: otrosServicios));
+                OtrosServicios: otrosServicios),
+            FacturasDetectadas: facturasDetectadas.ToList());
     }
 
-    private static RipsConsulta BuildConsulta(IReadOnlyDictionary<string, object?> f, string tipoDoc, string numDoc, int consecutivo)
+    private static RipsConsulta BuildConsulta(IReadOnlyDictionary<string, object?> f, string tipoDoc, string numDoc, int consecutivo, string numFactura, RipsCatalogos catalogos)
     {
         var (vrServicio, vrModerador, concepto) = ExtraerFinancieros(f);
+        // R9: si el catalogo trae tipoDiagnostico real desde HC, usarlo. Sino "02".
+        var tipoDx = catalogos.TiposDiagnosticoPorPacienteFactura?.TryGetValue((numDoc, numFactura), out var t) == true
+            ? t
+            : "02";
         return new RipsConsulta(
             CodPrestador: ReadString(f, ColCodHab),
             FechaInicioAtencion: FormatFechaHora(f, ColFechaSuministro, ColHora),
@@ -155,7 +174,7 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             FinalidadTecnologiaSalud: NonEmptyOr(ReadString(f, ColFinalidad), "10"),
             CausaMotivoAtencion: NonEmptyOr(ReadString(f, ColCausaExterna), "15"),
             CodDiagnosticoPrincipal: ReadString(f, ColDiagnostico),
-            TipoDiagnosticoPrincipal: "02", // "Confirmado nuevo" default; R5 leera HC.tipoDiagnostico
+            TipoDiagnosticoPrincipal: tipoDx,
             TipoDocumentoIdentificacion: tipoDoc,
             NumDocumentoIdentificacion: numDoc,
             VrServicio: vrServicio,
@@ -340,7 +359,14 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
         return (vrTotal, moderador, concepto);
     }
 
-    public IReadOnlyList<string> Validate(RipsPayload payload)
+    public IReadOnlyList<string> Validate(RipsPayload payload) => ValidateWith(payload, RipsCatalogos.Empty);
+
+    /// <summary>
+    /// Overload de Validate que ademas usa el catalogo de Diagnosticos (R8) para
+    /// advertir sobre CIE-10 no registrados en el tenant. El endpoint del service
+    /// llama a este overload; los tests puros pueden seguir usando <see cref="Validate"/>.
+    /// </summary>
+    public IReadOnlyList<string> ValidateWith(RipsPayload payload, RipsCatalogos catalogos)
     {
         var errores = new List<string>();
         if (string.IsNullOrWhiteSpace(payload.Transaccion.NumDocumentoIdObligado))
@@ -350,6 +376,14 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
         if (string.IsNullOrWhiteSpace(payload.Transaccion.NumFactura))
         {
             errores.Add("No se pudo determinar el numero de factura (columna 'Consecutivo Factura' vacia en la 1ra fila del snapshot).");
+        }
+
+        // R10: manual §3.1 exige numFactura unico en el JSON RIPS. Si el snapshot
+        // mezcla varias facturas, la EPS rechazara: hay que generar un snapshot por
+        // factura o filtrar antes de generar.
+        if (payload.FacturasDetectadas is { Count: > 1 } multi)
+        {
+            errores.Add($"El snapshot mezcla {multi.Count} facturas distintas ({string.Join(", ", multi.Take(5))}{(multi.Count > 5 ? "..." : "")}). Manual §3.1 exige numFactura unico; genera un snapshot por factura.");
         }
 
         // Debe haber al menos un servicio; JSON sin servicios lo rechaza MinSalud.
@@ -393,6 +427,11 @@ public sealed class RipsJsonBuilder : IRipsJsonBuilder
             if (string.IsNullOrWhiteSpace(c.CodDiagnosticoPrincipal))
             {
                 errores.Add($"Consulta {c.Consecutivo} ({c.NumDocumentoIdentificacion}): codDiagnosticoPrincipal vacio (col 'Diagnostico' del snapshot).");
+            }
+            // R8: si hay catalogo Diagnosticos, verificar que el CIE-10 este registrado.
+            else if (catalogos.CodigosCie10Validos is { } cieSet && cieSet.Count > 0 && !cieSet.Contains(c.CodDiagnosticoPrincipal))
+            {
+                errores.Add($"Consulta {c.Consecutivo} ({c.NumDocumentoIdentificacion}): codDiagnosticoPrincipal '{c.CodDiagnosticoPrincipal}' no existe en el catalogo Diagnosticos del tenant.");
             }
         }
         foreach (var p in payload.Servicios.Procedimientos)

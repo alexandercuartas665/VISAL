@@ -3,9 +3,7 @@ namespace Visal.Application.Facturacion.Rips;
 /// <summary>
 /// Constructor del payload JSON RIPS conforme a la Resolucion 2275 de 2023 (MinSalud).
 /// Recibe un snapshot ya generado y produce un DTO serializable. La logica de mapeo
-/// entre columnas del snapshot y llaves RIPS crece por olas: R1 solo emite el
-/// esqueleto (transaccion + usuarios + servicios con arrays vacios); olas siguientes
-/// completaran consultas/procedimientos/medicamentos/otros.
+/// entre columnas del snapshot y llaves RIPS crece por olas.
 /// </summary>
 public interface IRipsJsonBuilder
 {
@@ -64,11 +62,83 @@ public sealed record RipsServicios(
     IReadOnlyList<RipsMedicamento> Medicamentos,
     IReadOnlyList<RipsOtroServicio> OtrosServicios);
 
-// Ola R1: placeholders vacios para los sub-arrays. Olas R2-R6 hidrataran las llaves reales.
-public sealed record RipsConsulta();
-public sealed record RipsProcedimiento();
+/// <summary>Consulta externa (Archivo json = AC en el snapshot). Manual seccion 3.3.1.</summary>
+public sealed record RipsConsulta(
+    string CodPrestador,
+    string FechaInicioAtencion,
+    string? NumAutorizacion,
+    string CodConsulta,
+    string ModalidadGrupoServicioTecSal,
+    string GrupoServicios,
+    string CodServicio,
+    string? FinalidadTecnologiaSalud,
+    string? CausaMotivoAtencion,
+    string CodDiagnosticoPrincipal,
+    string TipoDiagnosticoPrincipal,
+    string TipoDocumentoIdentificacion,
+    string NumDocumentoIdentificacion,
+    decimal VrServicio,
+    string ConceptoRecaudo,
+    decimal VrPagoModerador,
+    int Consecutivo);
+
+/// <summary>Procedimiento (Archivo json = AP). Manual seccion 3.3.2.</summary>
+public sealed record RipsProcedimiento(
+    string CodPrestador,
+    string FechaInicioAtencion,
+    string? NumAutorizacion,
+    string CodProcedimiento,
+    string ViaIngresoServicioSalud,
+    string ModalidadGrupoServicioTecSal,
+    string GrupoServicios,
+    string CodServicio,
+    string? FinalidadTecnologiaSalud,
+    string CodDiagnosticoPrincipal,
+    string TipoDocumentoIdentificacion,
+    string NumDocumentoIdentificacion,
+    decimal VrServicio,
+    string ConceptoRecaudo,
+    decimal VrPagoModerador,
+    int Consecutivo);
+
+/// <summary>Urgencia (Archivo json = AU). Manual seccion 3.3.3. R3 placeholder.</summary>
 public sealed record RipsUrgencia();
+
+/// <summary>Hospitalizacion (Archivo json = AH). Manual seccion 3.3.4. R3 placeholder.</summary>
 public sealed record RipsHospitalizacion();
+
+/// <summary>Recien nacido (Archivo json = AN). Manual nota final seccion 3.3. R3 placeholder.</summary>
 public sealed record RipsRecienNacido();
-public sealed record RipsMedicamento();
-public sealed record RipsOtroServicio();
+
+/// <summary>Medicamento (Archivo json = AM). Manual seccion 3.3.5.</summary>
+public sealed record RipsMedicamento(
+    string CodPrestador,
+    string? NumAutorizacion,
+    string FechaDispensacionAdmon,
+    string CodDiagnosticoPrincipal,
+    string TipoMedicamento,
+    string CodTecnologiaSalud,
+    string NomTecnologiaSalud,
+    int CantidadMedicamento,
+    string TipoDocumentoIdentificacion,
+    string NumDocumentoIdentificacion,
+    decimal VrServicio,
+    string ConceptoRecaudo,
+    decimal VrPagoModerador,
+    int Consecutivo);
+
+/// <summary>Otro servicio (Archivo json = AT). Manual seccion 3.3.6.</summary>
+public sealed record RipsOtroServicio(
+    string CodPrestador,
+    string? NumAutorizacion,
+    string FechaSuministroTecnologia,
+    string TipoOS,
+    string CodTecnologiaSalud,
+    string NomTecnologiaSalud,
+    int CantidadOS,
+    string TipoDocumentoIdentificacion,
+    string NumDocumentoIdentificacion,
+    decimal VrServicio,
+    string ConceptoRecaudo,
+    decimal VrPagoModerador,
+    int Consecutivo);

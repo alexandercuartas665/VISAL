@@ -296,8 +296,20 @@
                 </div>
                 <div></div>
             </div>
-            <div class="ase-modal-f">
-                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModal">Cancelar</button>
+            <div class="ase-modal-f" style="align-items:center;gap:12px;">
+                @if (!string.IsNullOrEmpty(_guardadoOk))
+                {
+                    <span class="badge bg-success" style="margin-right:auto;font-size:13px;padding:8px 12px;">
+                        ✓ @_guardadoOk
+                    </span>
+                }
+                else if (!string.IsNullOrEmpty(_guardadoError))
+                {
+                    <span class="badge bg-danger" style="margin-right:auto;font-size:13px;padding:8px 12px;">
+                        ✗ @_guardadoError
+                    </span>
+                }
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModal" disabled="@_savingCred">Cancelar</button>
                 <button class="btn btn-primary btn-sm" @onclick="GuardarCredencial" disabled="@_savingCred">
                     @if (_savingCred) { <span>Guardando...</span> } else { <span>Guardar</span> }
                 </button>
@@ -339,6 +351,10 @@
     private List<SucursalDto> _sucursales = new();
     private ModalCredencial? _modal;
     private bool _savingCred;
+    // Estado inline del modal para dar feedback visible al guardar (antes el mensaje quedaba
+    // detras al cerrar el modal — usuario percibia que no pasaba nada).
+    private string? _guardadoOk;
+    private string? _guardadoError;
 
     // ----- Prueba de conexion -----
     private Guid? _probandoId;
@@ -421,8 +437,12 @@
     private async Task GuardarCredencial()
     {
         if (_modal is null) { return; }
-        _error = null; _ok = null;
-        if (_modal.SucursalId == Guid.Empty) { _error = "Selecciona una sede."; return; }
+        _error = null; _ok = null; _guardadoOk = null; _guardadoError = null;
+        if (_modal.SucursalId == Guid.Empty)
+        {
+            _guardadoError = "Selecciona una sede.";
+            return;
+        }
         _savingCred = true;
         try
         {
@@ -430,16 +450,35 @@
             DateTimeOffset? fe = _modal.FechaExpiracion is null
                 ? null
                 : new DateTimeOffset(_modal.FechaExpiracion.Value, TimeSpan.Zero);
+            var secretCambia = !string.IsNullOrWhiteSpace(_modal.ClientSecretNuevo);
+            var sedeNombre = _sucursales.FirstOrDefault(s => s.Id == _modal.SucursalId)?.Nombre ?? "sede";
             var req = new InteroperabilidadCredencialSedeSaveRequest(
                 _modal.SucursalId, _modal.Ambiente,
                 _modal.CodigoHabilitacion, _modal.NombreLlave,
                 _modal.ClientId, _modal.ClientSecretNuevo, fe);
             await InterSvc.GuardarCredencialAsync(req, actor);
+
+            // Mostrar confirmacion DENTRO del modal para que el usuario vea que si paso algo
+            // (antes cerrabamos el modal inmediato y el mensaje de exito quedaba detras, invisible).
+            _guardadoOk = secretCambia
+                ? "Guardado. Nuevo Client Secret aplicado. Cerrando..."
+                : "Guardado. Cerrando...";
+            await Task.Delay(1400);
             _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
             _modal = null;
-            _ok = "Credencial guardada.";
+            _guardadoOk = null;
+            _ok = secretCambia
+                ? $"Credencial de {sedeNombre} guardada. Nota: si cambiaste el Client Secret, " +
+                  "el proximo 'Probar' puede tardar hasta 1 hora en usar el nuevo (token cacheado en memoria). " +
+                  "Reinicia Visal para forzar re-autenticacion inmediata."
+                : $"Credencial de {sedeNombre} guardada correctamente.";
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            _guardadoError = ex.Message;
+            _error = ex.Message;
+            // dejar el modal abierto para que el usuario vea el error
+        }
         finally { _savingCred = false; }
     }
 

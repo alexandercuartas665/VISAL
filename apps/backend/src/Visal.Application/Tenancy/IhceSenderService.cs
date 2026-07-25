@@ -56,6 +56,15 @@ public sealed class IhceSenderService(
         // PRE-FLIGHT CHECK: consultar profesional firmante en el directorio IHCE.
         // Si MinSalud no lo tiene (cruzado contra ReTHUS), no tiene sentido enviar el RDA
         // porque devolveria BUNDLE-005 'Practitioner not found'. Reportamos error claro.
+        //
+        // El resultado se clasifica segun httpStatus para no confundir timeout con "no existe":
+        //   0        => timeout / red bloqueada (comun con IPs no-colombianas hacia el APIM)
+        //   404      => realmente no esta en el directorio
+        //   401/403  => token rechazado (credenciales mal enroladas)
+        //   5xx      => APIM degradado
+        //   4xx otro => rechazo generico
+        // Historia del bug: hasta 2026-07-25 el mensaje visible siempre decia "no esta
+        // registrado", incluso cuando la falla era timeout — confundio a operacion y soporte.
         if (ev.ProfesionalId is Guid profId)
         {
             var prof = await db.Profesionales.AsNoTracking()
@@ -67,13 +76,31 @@ public sealed class IhceSenderService(
                 var consultaCall = await PostJsonAsync(consultaUrl, apimSubskey, consultaPayload, bearer, ct);
                 if (!consultaCall.Exito)
                 {
+                    var (categoria, mensaje, estadoResultado) = ClasificarFallaPreflight(
+                        consultaCall, prof.TipoDocumento, prof.NumeroDocumento, prof.NombreCompleto);
+
+                    // Contexto adicional del envio: sede + REPS que declaro el Bundle en
+                    // Custodian.reference + client_id enmascarado. Sirve al ticket con MinSalud.
+                    var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
+                        .FirstOrDefaultAsync(c => c.SucursalId == ev.SucursalId && c.Ambiente == ev.Ambiente, ct);
+                    var repsBundle = ExtraerCustodianReps(ev.BundleJson);
+
                     ev.UltimoIntento = DateTimeOffset.UtcNow;
                     ev.Intentos += 1;
-                    ev.Estado = EstadoRdaEvento.Rechazado;
+                    ev.Estado = estadoResultado;
                     ev.ErroresJson = JsonSerializer.Serialize(new
                     {
                         preflight = "consultar-profesional-salud",
-                        mensaje = $"El profesional CC {prof.NumeroDocumento} ({prof.NombreCompleto}) no esta registrado en el directorio IHCE. RDA no enviado.",
+                        categoria,
+                        mensaje,
+                        contexto = new
+                        {
+                            sucursalId = ev.SucursalId,
+                            repsCredencial = credencial?.CodigoHabilitacion,
+                            repsBundle,
+                            clientIdMasked = MaskClientId(credencial?.ClientId),
+                            ambiente = ev.Ambiente.ToString()
+                        },
                         consulta = new
                         {
                             httpStatus = consultaCall.HttpStatus,
@@ -82,8 +109,14 @@ public sealed class IhceSenderService(
                         }
                     }, new JsonSerializerOptions { WriteIndented = true });
                     await db.SaveChangesAsync(ct);
-                    log.LogWarning("RDA {Id} NO enviado: pre-flight fallo, profesional {Cc} no esta en IHCE (HTTP {Code})",
-                        ev.Id, prof.NumeroDocumento, consultaCall.HttpStatus);
+
+                    log.LogWarning(
+                        "RDA {Id} pre-flight {Categoria} (HTTP {Code} en {Ms} ms). Prof {Cc}. Sede {SucId} REPS={RepsCred} Bundle.Custodian={RepsBundle} ClientId={ClientId}",
+                        ev.Id, categoria, consultaCall.HttpStatus, consultaCall.ElapsedMs,
+                        prof.NumeroDocumento, ev.SucursalId,
+                        credencial?.CodigoHabilitacion ?? "?", repsBundle ?? "?",
+                        MaskClientId(credencial?.ClientId));
+
                     return new EnvioRdaResultado(consultaCall, ev.Id, ev.Estado, null);
                 }
                 log.LogInformation("Pre-flight OK: profesional {Cc} encontrado en IHCE", prof.NumeroDocumento);
@@ -436,6 +469,84 @@ public sealed class IhceSenderService(
             }
         }
         catch (JsonException) { /* bundle mal formado, ignoramos */ }
+        return null;
+    }
+
+    /// <summary>
+    /// Clasifica la falla del pre-flight consultar-profesional-salud segun el httpStatus real
+    /// para no mezclar timeout de red con "profesional no existe". El tuple devuelve:
+    ///   categoria     — slug para logs y filtros (timeout | no-encontrado | token-invalido | ...)
+    ///   mensaje       — texto humano que ve operacion en la UI
+    ///   estadoEvento  — Rechazado si el rechazo es del contenido, Error si es de infraestructura
+    /// </summary>
+    private static (string categoria, string mensaje, EstadoRdaEvento estadoEvento) ClasificarFallaPreflight(
+        IhceCallResult call, string tipoDoc, string numeroDoc, string nombreProf)
+    {
+        return call.HttpStatus switch
+        {
+            0 => (
+                "timeout-red",
+                $"El servicio IHCE no respondio en {call.ElapsedMs / 1000} s. Posible bloqueo perimetral " +
+                "de red desde la IP publica del servidor. Verifica conectividad o solicita whitelist a MinSalud. RDA no enviado.",
+                EstadoRdaEvento.Error),
+            404 => (
+                "no-encontrado",
+                $"El profesional {tipoDoc} {numeroDoc} ({nombreProf}) no esta registrado en el directorio IHCE (RETHUS). RDA no enviado.",
+                EstadoRdaEvento.Rechazado),
+            401 or 403 => (
+                "token-invalido",
+                "MinSalud rechazo el token de acceso (HTTP " + call.HttpStatus + "). " +
+                "Verifica que el ClientID/Secret de la sede este activo y autorizado sobre el REPS declarado. RDA no enviado.",
+                EstadoRdaEvento.Rechazado),
+            >= 500 => (
+                "apim-degradado",
+                $"El servicio IHCE respondio con error {call.HttpStatus}. El APIM MinSalud puede estar degradado. Reintenta en unos minutos. RDA no enviado.",
+                EstadoRdaEvento.Error),
+            _ => (
+                "rechazo-generico",
+                $"El pre-flight al IHCE fallo con HTTP {call.HttpStatus}. Revisa el detalle en el body de la respuesta. RDA no enviado.",
+                EstadoRdaEvento.Rechazado)
+        };
+    }
+
+    /// <summary>
+    /// Enmascara un ClientId para logs — deja los primeros 8 y ultimos 4 caracteres,
+    /// ej. "0b484466-...-ad306". Nunca loguear el ClientId completo por politica.
+    /// </summary>
+    private static string? MaskClientId(string? clientId)
+    {
+        if (string.IsNullOrWhiteSpace(clientId)) return null;
+        if (clientId.Length <= 12) return "***";
+        return clientId.Substring(0, 8) + "-...-" + clientId.Substring(clientId.Length - 4);
+    }
+
+    /// <summary>
+    /// Extrae el valor de <c>Composition.custodian.reference</c> del BundleJson del RDA.
+    /// Sirve para el log y para adjuntar al ticket MinSalud (confirma REPS declarado).
+    /// Devuelve null si el bundle esta mal formado o no tiene custodian.
+    /// </summary>
+    private static string? ExtraerCustodianReps(string? bundleJson)
+    {
+        if (string.IsNullOrWhiteSpace(bundleJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(bundleJson);
+            if (!doc.RootElement.TryGetProperty("entry", out var entries) ||
+                entries.ValueKind != JsonValueKind.Array) return null;
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("resource", out var res)) continue;
+                if (!res.TryGetProperty("resourceType", out var rt) ||
+                    rt.GetString() != "Composition") continue;
+                if (res.TryGetProperty("custodian", out var cust) &&
+                    cust.TryGetProperty("reference", out var refProp) &&
+                    refProp.ValueKind == JsonValueKind.String)
+                {
+                    return refProp.GetString();
+                }
+            }
+        }
+        catch (JsonException) { /* bundle mal formado */ }
         return null;
     }
 

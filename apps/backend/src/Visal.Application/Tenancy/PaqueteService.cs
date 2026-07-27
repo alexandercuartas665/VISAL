@@ -16,14 +16,14 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
             q = q.Where(p => p.Codigo.ToLower().Contains(f) || p.Nombre.ToLower().Contains(f));
         }
         return await q.OrderBy(p => p.Codigo)
-            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId))
+            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId, p.Observacion))
             .ToListAsync(ct);
     }
 
     public async Task<PaqueteDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
         return await db.Paquetes.AsNoTracking().Where(p => p.Id == id)
-            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId))
+            .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId, p.Observacion))
             .FirstOrDefaultAsync(ct);
     }
 
@@ -65,10 +65,11 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
         entity.Nombre = nombre;
         entity.Activo = req.Activo;
         entity.Precio = req.Precio;
+        entity.Observacion = string.IsNullOrWhiteSpace(req.Observacion) ? null : req.Observacion.Trim();
 
         await db.SaveChangesAsync(ct);
         return new PaqueteDto(entity.Id, entity.Codigo, entity.Nombre, entity.Activo, entity.Precio,
-            entity.CupsRepresentativoServicioId);
+            entity.CupsRepresentativoServicioId, entity.Observacion);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -108,7 +109,8 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
                 Codigo = codigo,
                 Nombre = nombre,
                 Activo = it.Activo,
-                Precio = it.Precio
+                Precio = it.Precio,
+                Observacion = string.IsNullOrWhiteSpace(it.Observacion) ? null : it.Observacion!.Trim()
             });
             existentesSet.Add(codigo);
             n++;
@@ -230,6 +232,6 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
         paquete.CupsRepresentativoServicioId = paqueteServicioId;
         await db.SaveChangesAsync(ct);
         return new PaqueteDto(paquete.Id, paquete.Codigo, paquete.Nombre, paquete.Activo, paquete.Precio,
-            paquete.CupsRepresentativoServicioId);
+            paquete.CupsRepresentativoServicioId, paquete.Observacion);
     }
 }

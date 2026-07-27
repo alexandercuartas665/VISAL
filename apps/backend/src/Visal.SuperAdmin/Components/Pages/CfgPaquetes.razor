@@ -71,6 +71,12 @@
                             }
                         </td>
                     </tr>
+                    <tr class="pkg-obs-row">
+                        <td></td>
+                        <td colspan="5">
+                            <textarea class="form-control form-control-sm" @bind="it.Observacion" maxlength="500" rows="2" placeholder="Observacion (opcional, max 500 caracteres)"></textarea>
+                        </td>
+                    </tr>
                     @if (it.Expandido && it.Id is Guid pid)
                     {
                         <tr class="pkg-detalle-row">
@@ -213,6 +219,7 @@
         _items = (await Svc.ListarAsync(_filtro, soloActivos: false))
             .Select(p => new Item {
                 Id = p.Id, Codigo = p.Codigo, Nombre = p.Nombre, Activo = p.Activo, Precio = p.Precio,
+                Observacion = p.Observacion,
                 CupsRepresentativoServicioId = p.CupsRepresentativoServicioId,
                 Expandido = expandidosIds.Contains(p.Id)
             })
@@ -240,11 +247,12 @@
         try
         {
             var saved = await Svc.SaveAsync(
-                new SavePaqueteRequest(it.Id, it.Codigo.Trim(), it.Nombre.Trim(), it.Activo, it.Precio),
+                new SavePaqueteRequest(it.Id, it.Codigo.Trim(), it.Nombre.Trim(), it.Activo, it.Precio, it.Observacion),
                 Guid.Empty);
             if (saved is null) { _error = "No se pudo guardar."; return; }
             it.Id = saved.Id;
             it.Precio = saved.Precio;
+            it.Observacion = saved.Observacion;
             _ok = $"Paquete '{saved.Codigo}' guardado.";
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -395,6 +403,7 @@
         public string Nombre { get; set; } = "";
         public bool Activo { get; set; } = true;
         public decimal? Precio { get; set; }
+        public string? Observacion { get; set; }
         /// <summary>PaqueteServicio.Id marcado como representativo para facturacion.
         /// Nullable — si no se marca, el builder cae al primero por codigo.</summary>
         public Guid? CupsRepresentativoServicioId { get; set; }

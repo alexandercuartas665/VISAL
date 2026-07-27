@@ -4,7 +4,7 @@ namespace Visal.Application.Tenancy;
 /// identifica cual PaqueteServicio va como CUPS al facturar el paquete (Fase 4 Facturacion).
 /// Nullable — si no se ha marcado, el builder cae al primer servicio ordenado por codigo.</summary>
 public sealed record PaqueteDto(Guid Id, string Codigo, string Nombre, bool Activo, decimal? Precio,
-    Guid? CupsRepresentativoServicioId);
+    Guid? CupsRepresentativoServicioId, string? Observacion);
 
 /// <summary>Servicio dentro del detalle de un paquete. <c>Nombre</c> viene por JOIN
 /// al catalogo de servicios de referencia. Si el catalogo no existe, viene null.</summary>
@@ -14,7 +14,8 @@ public sealed record PaqueteServicioDto(
 
 /// <summary>Payload de guardado. Precio es opcional (numeric). El detalle de servicios
 /// se guarda por separado con <see cref="IPaqueteService.AgregarServicioAsync"/>.</summary>
-public sealed record SavePaqueteRequest(Guid? Id, string Codigo, string Nombre, bool Activo, decimal? Precio);
+public sealed record SavePaqueteRequest(Guid? Id, string Codigo, string Nombre, bool Activo, decimal? Precio,
+    string? Observacion = null);
 
 /// <summary>Payload para agregar un servicio al detalle del paquete. El
 /// <c>CatalogoServicioReferenciaId</c> es fuertemente recomendado (viene del autocomplete)

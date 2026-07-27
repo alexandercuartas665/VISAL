@@ -107,15 +107,27 @@
         <div class="ase-card">
             <div class="ase-card-h">2. Seleccione el Servicio</div>
             <div class="ase-form">
-                <div class="ase-f">
+                <div class="ase-f ase-f-full">
                     <label>Paquete</label>
-                    <select class="form-select form-select-sm mono" @bind="_paqueteSel" @bind:after="StateHasChanged">
+                    <select class="form-select form-select-sm" @bind="_paqueteSel" @bind:after="StateHasChanged">
                         <option value="">(todos)</option>
                         @foreach (var p in _paquetesDisponibles)
                         {
-                            <option value="@p.Codigo">@p.Codigo</option>
+                            <option value="@p.Codigo">@p.Codigo &mdash; @p.Nombre</option>
                         }
                     </select>
+                    @{
+                        var pkgSel = string.IsNullOrEmpty(_paqueteSel)
+                            ? null
+                            : _paquetesDisponibles.FirstOrDefault(x => x.Codigo == _paqueteSel);
+                    }
+                    @if (pkgSel is not null && !string.IsNullOrWhiteSpace(pkgSel.Observacion))
+                    {
+                        <div class="alert alert-info py-2 px-3 mt-2 mb-0 small" role="note"
+                             title="Observacion del paquete (definida en /config/paquetes)">
+                            <strong>Observacion del paquete:</strong> @pkgSel.Observacion
+                        </div>
+                    }
                 </div>
                 <div class="ase-f ase-f-full">
                     <label>Busqueda por servicio</label>

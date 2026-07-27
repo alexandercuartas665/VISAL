@@ -38,4 +38,8 @@ public class Paquete : TenantEntity
     /// </summary>
     public Guid? CupsRepresentativoServicioId { get; set; }
     public PaqueteServicio? CupsRepresentativoServicio { get; set; }
+
+    /// <summary>Nota general del paquete (contexto administrativo/comercial). Nullable,
+    /// max 500 chars. Se edita en /config/paquetes.</summary>
+    public string? Observacion { get; set; }
 }

@@ -110,14 +110,22 @@
                 <div class="ase-f ase-f-full">
                     <label>Paquete</label>
                     <select class="form-select form-select-sm" @bind="_paqueteSel" @bind:after="StateHasChanged">
-                        <option value="">(todos)</option>
+                        <option value="">Todos</option>
+                        <option value="__SIN__">Sin paquete</option>
+                        <option value="__CON__">Con paquete</option>
+                        @if (_paquetesDisponibles.Count > 0)
+                        {
+                            <option disabled>&mdash; Paquete especifico &mdash;</option>
+                        }
                         @foreach (var p in _paquetesDisponibles)
                         {
                             <option value="@p.Codigo">@p.Codigo &mdash; @p.Nombre</option>
                         }
                     </select>
                     @{
-                        var pkgSel = string.IsNullOrEmpty(_paqueteSel)
+                        // Solo hay observacion visible cuando se elige un paquete concreto
+                        // (los agrupadores Sin/Con no tienen paquete asociado).
+                        var pkgSel = (string.IsNullOrEmpty(_paqueteSel) || _paqueteSel == "__SIN__" || _paqueteSel == "__CON__")
                             ? null
                             : _paquetesDisponibles.FirstOrDefault(x => x.Codigo == _paqueteSel);
                     }
@@ -887,7 +895,13 @@ else
             var f = _filtroSvc?.Trim().ToLower() ?? "";
             return _servicios
                 .Where(s => s.Modulo == _moduloSel)
-                .Where(s => string.IsNullOrEmpty(_paqueteSel) || s.PaqueteCodigo == _paqueteSel)
+                .Where(s => _paqueteSel switch
+                {
+                    "" => true,                                       // Todos
+                    "__SIN__" => string.IsNullOrEmpty(s.PaqueteCodigo), // Sin paquete
+                    "__CON__" => !string.IsNullOrEmpty(s.PaqueteCodigo),// Con paquete
+                    _ => s.PaqueteCodigo == _paqueteSel               // Paquete especifico
+                })
                 .Where(s => f.Length == 0
                     || (s.Descripcion ?? "").ToLower().Contains(f)
                     || (s.Codigo ?? "").ToLower().Contains(f)

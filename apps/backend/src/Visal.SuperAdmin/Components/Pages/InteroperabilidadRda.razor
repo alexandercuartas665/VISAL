@@ -484,6 +484,10 @@
     private bool _generando;
     private Guid? _generandoHcId;
     private List<string> _advertenciasUltimo = new();
+    // Serializa BuscarHc() para evitar "A second operation was started on this
+    // context instance" — el @bind:after="BuscarHc" dispara una query por keystroke
+    // y todas comparten el DbContext scoped del circuito Blazor.
+    private readonly SemaphoreSlim _buscarHcLock = new(1, 1);
 
     // ----- Modal Ver JSON -----
     private RdaEventoDetailDto? _detail;
@@ -531,24 +535,30 @@
         finally { _cargando = false; }
     }
 
-    private void AbrirGenerar()
+    private async Task AbrirGenerar()
     {
         _modalGenerar = true;
         _buscarHc = null;
         _hcCandidatas = new();
         _advertenciasUltimo = new();
-        _ = BuscarHc();
+        await BuscarHc();
     }
 
     private void CerrarGenerar() => _modalGenerar = false;
 
     private async Task BuscarHc()
     {
+        // Serializado: cada keystroke en el buscador dispara BuscarHc via @bind:after,
+        // y todas las llamadas comparten el DbContext scoped del circuito Blazor.
+        // Sin este lock el usuario tipea "MARIA" y se lanzan 5 queries en paralelo,
+        // reventando con "A second operation was started on this context instance".
+        await _buscarHcLock.WaitAsync();
         try
         {
             _hcCandidatas = (await Svc.ListarHcCandidatasAsync(_buscarHc)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
+        finally { _buscarHcLock.Release(); }
     }
 
     private async Task GenerarParaHc(Guid hcId)

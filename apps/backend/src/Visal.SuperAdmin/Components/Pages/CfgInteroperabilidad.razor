@@ -447,9 +447,17 @@
         try
         {
             var actor = await ActorAsync();
+            // El input <type="date"> devuelve DateTime con Kind=Local (UTC-5 en Colombia).
+            // Pasarlo directo a `new DateTimeOffset(dt, TimeSpan.Zero)` truena con:
+            //   "The UTC Offset of the local dateTime parameter does not match the offset argument"
+            // porque .NET valida que Kind=Local haga match con el offset del sistema.
+            // Como esta es una fecha de expiracion (solo dia), forzamos Kind=Unspecified
+            // para bypasear la validacion y guardar el dia calendario tal cual el usuario lo ve.
             DateTimeOffset? fe = _modal.FechaExpiracion is null
                 ? null
-                : new DateTimeOffset(_modal.FechaExpiracion.Value, TimeSpan.Zero);
+                : new DateTimeOffset(
+                    DateTime.SpecifyKind(_modal.FechaExpiracion.Value.Date, DateTimeKind.Unspecified),
+                    TimeSpan.Zero);
             var secretCambia = !string.IsNullOrWhiteSpace(_modal.ClientSecretNuevo);
             var sedeNombre = _sucursales.FirstOrDefault(s => s.Id == _modal.SucursalId)?.Nombre ?? "sede";
             var req = new InteroperabilidadCredencialSedeSaveRequest(

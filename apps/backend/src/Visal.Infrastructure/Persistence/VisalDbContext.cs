@@ -120,6 +120,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Asignacion> Asignaciones => Set<Asignacion>();
     public DbSet<AsignacionTurno> AsignacionTurnos => Set<AsignacionTurno>();
     public DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones => Set<AsignacionTurnoSesion>();
+    public DbSet<AsignacionTurnoSesionHc> AsignacionTurnoSesionHcs => Set<AsignacionTurnoSesionHc>();
     public DbSet<Cie11Config> Cie11Configs => Set<Cie11Config>();
     public DbSet<Pais> Paises => Set<Pais>();
     public DbSet<Departamento> Departamentos => Set<Departamento>();
@@ -1297,6 +1298,24 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.Estado, x.MesVigencia, x.AnioServicio });
             b.HasIndex(x => x.LoteId);
             b.HasIndex(x => x.PaqueteInstanciaId);
+        });
+
+        modelBuilder.Entity<AsignacionTurnoSesion>(b =>
+        {
+            // Indice para el filtro Pendiente/Completado de la parrilla /atencion:
+            // sirve tanto a la lista tenant-scope como al chequeo "todas las sesiones
+            // 1..N-1 estan Completadas" del validador de orden secuencial.
+            b.HasIndex(x => new { x.TenantId, x.AsignacionTurnoId, x.Completado });
+        });
+
+        modelBuilder.Entity<AsignacionTurnoSesionHc>(b =>
+        {
+            b.HasOne(x => x.Sesion).WithMany().HasForeignKey(x => x.SesionId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId).OnDelete(DeleteBehavior.Cascade);
+            // Una fila por (sesion, HC): evita duplicados si el HC service se
+            // dispara dos veces por race (Blazor circuit + auto-save concurrente).
+            b.HasIndex(x => new { x.SesionId, x.HistoriaClinicaId }).IsUnique();
+            b.HasIndex(x => x.HistoriaClinicaId);
         });
 
         modelBuilder.Entity<Cie11Config>(b =>

@@ -62,6 +62,7 @@ public interface IApplicationDbContext
     DbSet<Asignacion> Asignaciones { get; }
     DbSet<AsignacionTurno> AsignacionTurnos { get; }
     DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones { get; }
+    DbSet<AsignacionTurnoSesionHc> AsignacionTurnoSesionHcs { get; }
     DbSet<HistoriaClinica> HistoriasClinicas { get; }
     DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos { get; }
     DbSet<HistoriaClinicaOrdenServicio> HistoriaClinicaOrdenesServicio { get; }

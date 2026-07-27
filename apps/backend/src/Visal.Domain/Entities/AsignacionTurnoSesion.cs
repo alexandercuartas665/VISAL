@@ -32,4 +32,18 @@ public class AsignacionTurnoSesion : TenantEntity
     /// <summary>Horas trabajadas en la sesion. Cuando viene de una programacion
     /// se toma de la celda del grid (una L=0h, un DN=24h, etc). Null cuando no aplica.</summary>
     public decimal? Horas { get; set; }
+
+    /// <summary>
+    /// Denormalizado. true cuando existe al menos una HC vinculada a esta
+    /// sesion (via <see cref="AsignacionTurnoSesionHc"/>) en estado Cerrada
+    /// (Guardado Definitivo). Se recalcula desde HistoriaClinicaService en
+    /// Crear/Cerrar/Reabrir/Descartar. HC inactivas o solamente abiertas NO
+    /// completan la sesion (una sesion Abierta si bloquea nuevas por otro
+    /// camino, pero para efectos de "esta atendida" cuenta solo la Cerrada).
+    ///
+    /// Rendimiento: se denormaliza para que el filtro Pendiente/Completado
+    /// de la parrilla /atencion (~5k filas por tenant) sea un WHERE indexado
+    /// y no un JOIN + agregado por cada fila renderizada.
+    /// </summary>
+    public bool Completado { get; set; }
 }

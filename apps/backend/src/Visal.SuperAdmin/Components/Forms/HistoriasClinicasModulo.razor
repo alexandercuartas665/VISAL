@@ -3,6 +3,7 @@
 @using System.Text.Json
 @using Microsoft.Extensions.DependencyInjection
 @using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Forms
 @using Visal.Domain.Enums
 @using Visal.SuperAdmin.Components.Forms
 @inject IFormDefinitionService FormsSvc
@@ -1591,21 +1592,28 @@
         _schemaActual = FormSchema.FromJson(detail.SchemaJson);
         _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
         _valores = DeserializeValores(detail.ValoresJson);
+        // Hidratar celdas de tabla y campos sueltos AUSENTES en el JSON con el
+        // DefaultValue del schema. Cubre el caso de HCs guardadas antes de que
+        // se agregaran columnas nuevas al schema: el visor pintaba el default
+        // como placeholder pero no lo persistia -> la impresion salia vacia.
+        // Idempotente: solo escribe si la clave NO existe (respeta vaciados
+        // deliberados del doctor).
+        var _valoresJsonAntesCambios = SerializeValores(_valores);
+        DefaultValuesHelper.HidratarDefaultsAusentes(_valores, _schemaActual);
         // Refrescar firmas en vivo (paciente + profesional + acompanantes 1..4).
         // Si el paciente firmo remotamente por WhatsApp o /firma/{token} DESPUES
         // de que la HC se creo, el ValoresJson persistido tiene la firma anterior
         // (o vacia). Aca re-resolvemos y sobrescribimos las keys de firma antes
-        // de pintar. Si la HC esta Abierta y cambio algo, persistimos para que la
-        // proxima carga ya venga con las firmas al dia sin re-resolver.
-        var _valoresJsonAntesFirmas = SerializeValores(_valores);
+        // de pintar. Si la HC esta Abierta y cambio algo (hidratacion o firmas),
+        // persistimos para que la proxima carga ya venga al dia sin re-resolver.
         await RefrescarFirmasEnVivoAsync();
         if (h.Estado == "Abierta")
         {
-            var _valoresJsonDespuesFirmas = SerializeValores(_valores);
-            if (!string.Equals(_valoresJsonAntesFirmas, _valoresJsonDespuesFirmas, StringComparison.Ordinal))
+            var _valoresJsonDespuesCambios = SerializeValores(_valores);
+            if (!string.Equals(_valoresJsonAntesCambios, _valoresJsonDespuesCambios, StringComparison.Ordinal))
             {
-                try { await HcSvc.GuardarValoresAsync(h.Id, _valoresJsonDespuesFirmas, await ResolverActorAsync()); }
-                catch { /* si el guardado falla, la HC sigue mostrando las firmas frescas en memoria */ }
+                try { await HcSvc.GuardarValoresAsync(h.Id, _valoresJsonDespuesCambios, await ResolverActorAsync()); }
+                catch { /* si el guardado falla, la HC sigue mostrando el estado fresco en memoria */ }
             }
         }
         // Re-aplicar header autofill (No Historia / Fecha / Hora) por si la HC se

@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Application.Revision;
 using Visal.Application.Revision.Ia;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -123,7 +125,11 @@ public sealed class HistoriaClinicaService(
         {
             throw new InvalidOperationException("Solo se pueden actualizar valores de historias abiertas.");
         }
-        e.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? "{}" : valoresJson;
+        // Safety net: rellenar defaults ausentes segun el schema. Blinda contra
+        // clientes viejos o flows que no pasen por el FormViewer nuevo con
+        // hidratacion al abrir. Idempotente y sin sobrescribir vaciados
+        // deliberados del doctor. Ver DefaultValuesHelper.HidratarDefaultsAusentes.
+        e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, valoresJson, ct);
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -149,7 +155,12 @@ public sealed class HistoriaClinicaService(
             throw new InvalidOperationException("No se puede cerrar una historia inactiva.");
         }
         var estadoPrev = e.Estado;
-        e.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
+        // Safety net al Cerrar: si el cliente mando JSON nuevo lo enriquecemos
+        // con defaults; si no mando nada (Cerrar sin cambios), tambien
+        // enriquecemos el JSON ya persistido — asi HCs viejas se blindan al
+        // menos en el momento del cierre.
+        var jsonBase = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
+        e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, jsonBase, ct);
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
         // Auditoria antes de SaveChanges: audit.Write solo agrega la entrada al
@@ -450,6 +461,10 @@ public sealed class HistoriaClinicaService(
             });
         }
 
+        // Enriquecer los valores copiados con defaults ausentes por si el schema
+        // evoluciono despues de que se guardo la HC origen. Idempotente.
+        nueva.ValoresJson = await EnriquecerConDefaultsAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct);
+
         audit.Write(actor, "historia-clinica.copiar", nameof(HistoriaClinica), nueva.Id,
             previousValue: null,
             newValue: new
@@ -472,5 +487,41 @@ public sealed class HistoriaClinicaService(
         await db.SaveChangesAsync(ct);
 
         return await GetAsync(nueva.Id, ct);
+    }
+
+    /// <summary>
+    /// Deserializa <paramref name="valoresJson"/>, aplica defaults ausentes
+    /// segun el schema del FormDefinition, y devuelve el JSON re-serializado.
+    /// Si el schema no se puede cargar o no aplica nada nuevo, devuelve el
+    /// JSON original saneado ({} para blanco). Los tenants sin schema (imposible
+    /// en la practica pero defensivo) obtienen el JSON tal cual.
+    /// </summary>
+    private async Task<string> EnriquecerConDefaultsAsync(Guid formDefinitionId, string? valoresJson, CancellationToken ct)
+    {
+        var jsonSaneado = string.IsNullOrWhiteSpace(valoresJson) ? "{}" : valoresJson;
+
+        var schemaJson = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Id == formDefinitionId)
+            .Select(f => f.SchemaJson)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(schemaJson)) { return jsonSaneado; }
+
+        Dictionary<string, string?>? valores;
+        try
+        {
+            valores = JsonSerializer.Deserialize<Dictionary<string, string?>>(jsonSaneado)
+                      ?? new Dictionary<string, string?>();
+        }
+        catch
+        {
+            // JSON malformado: no arriesgamos data, lo dejamos como llego.
+            return jsonSaneado;
+        }
+
+        var schema = FormSchema.FromJson(schemaJson);
+        var cambio = DefaultValuesHelper.HidratarDefaultsAusentes(valores, schema);
+        if (!cambio) { return jsonSaneado; }
+
+        return JsonSerializer.Serialize(valores);
     }
 }

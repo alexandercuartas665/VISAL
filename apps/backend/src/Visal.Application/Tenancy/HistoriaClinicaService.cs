@@ -15,7 +15,8 @@ public sealed class HistoriaClinicaService(
     IRevisionPolicyService revPolicy,
     IRevisionKanbanService kanban,
     IPreRevisionIaQueue preRevisionQueue,
-    IPreRevisionIaPendingStore preRevisionStore) : IHistoriaClinicaService
+    IPreRevisionIaPendingStore preRevisionStore,
+    IAtencionOrdenService atencionOrden) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -92,6 +93,21 @@ public sealed class HistoriaClinicaService(
         {
             throw new InvalidOperationException(
                 "Debes indicar Via de ingreso, Finalidad de la consulta y Causa externa (datos RIPS obligatorios).");
+        }
+
+        // Gate de orden secuencial /atencion: cuando la HC viene desde una sesion
+        // programada, la UI ya bloqueo el boton pero validamos de nuevo aqui como
+        // defensa contra clientes que evadan la UI (Blazor Server + eventos JS
+        // manipulados, o llamadas via consola). Si el usuario tiene permiso
+        // "atencion.saltar-orden" o es Owner/Admin, el servicio devuelve null y
+        // pasamos libre.
+        if (req.SesionId is Guid sesionValidar)
+        {
+            var bloqueo = await atencionOrden.ValidarAperturaAsync(sesionValidar, actor, ct);
+            if (bloqueo is not null)
+            {
+                throw new InvalidOperationException(bloqueo.Motivo);
+            }
         }
 
         var entity = new HistoriaClinica

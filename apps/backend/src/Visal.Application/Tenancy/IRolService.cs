@@ -26,6 +26,11 @@ public static class ModuloCatalogo
         // historias.revisar. Owner/Admin del tenant y SuperAdmin lo tienen implicito.
         new("historias.revisar.aprobar_final", "Historias Clinicas - Archivar/Inactivar revision aprobada", "Operacion Clinica"),
         new("notas", "Notas Medicas", "Operacion Clinica"),
+        // Escape administrativo: abrir HC de una sesion aun teniendo sesiones
+        // anteriores del mismo turno pendientes. Sin este permiso, el rol tiene
+        // que respetar el orden secuencial en /atencion. Owner/Admin del tenant
+        // lo tienen implicito (mismo criterio que historias.reabrir).
+        new("atencion.saltar-orden", "Atencion - Abrir HC saltando el orden secuencial", "Operacion Clinica"),
         new("ordenes", "Ordenes Clinicas", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),
         new("formularios", "Motor de Formularios", "Operacion Clinica"),

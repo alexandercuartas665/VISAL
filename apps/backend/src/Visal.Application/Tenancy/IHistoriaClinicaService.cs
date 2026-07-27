@@ -49,7 +49,12 @@ public sealed record CrearHistoriaRequest(
     string? RipsFinalidadCodigo = null,
     string? RipsFinalidadNombre = null,
     string? RipsCausaExternaCodigo = null,
-    string? RipsCausaExternaNombre = null);
+    string? RipsCausaExternaNombre = null,
+    // Sesion de AsignacionTurno que dispara esta HC. Cuando llega, el
+    // service crea el pivote AsignacionTurnoSesionHc para que el modulo
+    // Atencion pueda calcular el flag Completado y el orden secuencial.
+    // Null cuando la HC se crea fuera del flow de Atencion (Admision u otros).
+    Guid? SesionId = null);
 
 public interface IHistoriaClinicaService
 {

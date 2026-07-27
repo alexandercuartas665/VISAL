@@ -162,7 +162,12 @@ public sealed class AtencionProfesionalService(
             for (int n = 1; n <= t.Cantidad; n++)
             {
                 var sesion = sesionesT.TryGetValue(n, out var s) ? s : null;
-                var completado = sesion is not null;
+                // Nueva semantica (Ola 1): Completado se lee del flag denormalizado
+                // que HistoriaClinicaService mantiene sincronizado con el pivote
+                // AsignacionTurnoSesionHc (true sii al menos una HC vinculada esta
+                // en estado Cerrada). Si aun no existe la fila AsignacionTurnoSesion
+                // (sesion nunca atendida), el flag es false por definicion.
+                var completado = sesion?.Completado ?? false;
                 if (!incluirCompletados && completado) { continue; }
 
                 // Incremento del numero de sesion GLOBAL por asignacion.

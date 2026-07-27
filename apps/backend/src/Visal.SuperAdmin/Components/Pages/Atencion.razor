@@ -489,7 +489,15 @@ else
     private bool _filtrosOpen;
     private string _sortBy = "recent";
     private HashSet<string> _filTipos = new(StringComparer.OrdinalIgnoreCase);
-    private string _filEstado = "";              // "" = ambos, "pendientes", "completados"
+    // Ola 4 orden secuencial: la parrilla es una lista de trabajo pendiente,
+    // no un log historico. Por defecto solo muestra sesiones sin HC Cerrada
+    // vinculada; el usuario puede alternar a Completados o volver a "" (todos).
+    private string _filEstado = "pendientes";    // "" = ambos, "pendientes", "completados"
+    // True cuando el usuario tiene rol Owner/Admin del tenant o el permiso
+    // "atencion.saltar-orden" marcado en /cfg-roles. Cuando es true, la UI
+    // no bloquea los botones HC/Notas por orden secuencial (el backend gate
+    // en HistoriaClinicaService.CrearAsync tampoco los bloquea).
+    private bool _puedeSaltarOrden;
     private HashSet<string> _filServicios = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _filProfesionales = new(StringComparer.OrdinalIgnoreCase);
     private string _filPaquete = "";             // "" = ambos, "con", "sin"
@@ -591,6 +599,35 @@ else
         }
     }
 
+    /// <summary>
+    /// Devuelve motivo del bloqueo por orden secuencial, o null si la sesion
+    /// puede atenderse. Regla: dentro del mismo AsignacionTurnoId, para atender
+    /// SessionNo N deben estar Completadas todas las 1..N-1. Se calcula sobre
+    /// <see cref="_todos"/> (lo que la UI ya tiene cargado): no hay round-trip.
+    /// El backend gate en HistoriaClinicaService.CrearAsync valida la misma
+    /// regla al crear la HC, este chequeo es solo UX (tooltip + disabled).
+    /// El escape por permiso se hace en el caller (PuedeAtender).
+    /// </summary>
+    private string? MotivoBloqueoOrden(MiServicioAsignadoDto s)
+    {
+        if (s.SessionNo <= 1) { return null; }
+        var anterioresPendientes = _todos
+            .Where(x => x.AsignacionTurnoId == s.AsignacionTurnoId && x.SessionNo < s.SessionNo && !x.Completado)
+            .OrderBy(x => x.SessionNo)
+            .ToList();
+        if (anterioresPendientes.Count == 0) { return null; }
+        var primera = anterioresPendientes[0];
+        return $"Debes cerrar la sesion {primera.SessionNo} antes de abrir la sesion {s.SessionNo}.";
+    }
+
+    /// <summary>True si el user puede abrir HC/Notas de esta sesion. False cuando
+    /// hay una sesion anterior pendiente y el user NO tiene escape.</summary>
+    private bool PuedeAtender(MiServicioAsignadoDto s)
+    {
+        if (_puedeSaltarOrden) { return true; }
+        return MotivoBloqueoOrden(s) is null;
+    }
+
     private bool FiltrosActivos => _filTipos.Count > 0 || !string.IsNullOrEmpty(_filEstado)
                                    || _filServicios.Count > 0 || _filProfesionales.Count > 0
                                    || !string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0
@@ -662,6 +699,14 @@ else
             var tenantRole = st.User.FindFirst("tenant_role")?.Value ?? "";
             _esAdmin = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(rol, "Administrador", StringComparison.OrdinalIgnoreCase);
+            // Escape del orden secuencial: Owner/Admin del tenant siempre pueden;
+            // los demas roles requieren el permiso "atencion.saltar-orden" en el
+            // claim CSV "perms" (mismo mecanismo que historias.reabrir).
+            var perms = st.User.FindFirst("perms")?.Value;
+            var tienePermisoEscape = !string.IsNullOrEmpty(perms)
+                && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Any(p => string.Equals(p.Trim(), "atencion.saltar-orden", StringComparison.OrdinalIgnoreCase));
+            _puedeSaltarOrden = _esAdmin || tienePermisoEscape;
             _todos = (await Svc.GetMisServiciosAsync(puId, incluirCompletados: _mostrarVencidas)).ToList();
             // Config de columnas (overrides del tenant). Nulos = usar default.
             try { _configColumnas = (await ColSvc.ListarAsync()).ToList(); }
@@ -795,26 +840,39 @@ else
                 __b.CloseElement();
                 break;
             case "historia":
+            {
+                var bloqueoHc = _puedeSaltarOrden ? null : MotivoBloqueoOrden(s);
                 __b.OpenElement(seq++, "td");
                 __b.OpenElement(seq++, "button");
                 __b.AddAttribute(seq++, "class", "btn btn-outline-secondary btn-sm");
-                __b.AddAttribute(seq++, "title", "Abrir Historias Clinicas del paciente");
+                __b.AddAttribute(seq++, "title", bloqueoHc ?? "Abrir Historias Clinicas del paciente");
+                if (bloqueoHc is not null) { __b.AddAttribute(seq++, "disabled", true); }
                 __b.AddAttribute(seq++, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => AbrirHistoria(s)));
                 __b.AddMarkupContent(seq++, "&#9998;");
                 __b.CloseElement();
                 __b.CloseElement();
                 break;
+            }
             case "notas":
+            {
+                // Doble motivo posible: ya completada (HC Cerrada existente) o
+                // sesion anterior pendiente. El primero manda: si la sesion ya
+                // esta cerrada no tiene sentido mostrar orden. El escape del
+                // permiso NO desbloquea "completada", solo el orden.
+                var bloqueoNotas = s.Completado
+                    ? "Esta sesion ya tiene HC Cerrada vinculada."
+                    : (_puedeSaltarOrden ? null : MotivoBloqueoOrden(s));
                 __b.OpenElement(seq++, "td");
                 __b.OpenElement(seq++, "button");
                 __b.AddAttribute(seq++, "class", "btn btn-outline-primary btn-sm");
-                __b.AddAttribute(seq++, "title", "Abrir Notas Medicas (registrar atencion)");
-                __b.AddAttribute(seq++, "disabled", s.Completado);
+                __b.AddAttribute(seq++, "title", bloqueoNotas ?? "Abrir Notas Medicas (registrar atencion)");
+                if (bloqueoNotas is not null) { __b.AddAttribute(seq++, "disabled", true); }
                 __b.AddAttribute(seq++, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => AbrirNotas(s)));
                 __b.AddMarkupContent(seq++, "&#9998;");
                 __b.CloseElement();
                 __b.CloseElement();
                 break;
+            }
             case "cod_int":
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "class", "mono");

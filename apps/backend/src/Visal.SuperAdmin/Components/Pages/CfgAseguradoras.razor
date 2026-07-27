@@ -188,8 +188,13 @@
                             <span class="ase-tools">
                                 <input class="form-control form-control-sm ase-filter" placeholder="Filtrar servicios..." value="@_filtro" @oninput="OnFiltroInput" />
                                 <select class="form-select form-select-sm ase-filter" title="Filtrar por paquete" @bind="_filtroPaqueteId">
-                                    <option value="">Todos los paquetes</option>
+                                    <option value="">Todos</option>
                                     <option value="@Guid.Empty">Sin paquete</option>
+                                    <option value="@_sentinelConPaquete">Con paquete</option>
+                                    @if (_paquetes.Count > 0)
+                                    {
+                                        <option disabled>&mdash; Paquete especifico &mdash;</option>
+                                    }
                                     @foreach (var p in _paquetes)
                                     {
                                         <option value="@p.Id">@p.Codigo</option>
@@ -632,15 +637,20 @@
 
     private void OnFiltroInput(ChangeEventArgs e) => _filtro = e.Value?.ToString() ?? "";
 
+    // Sentinel para la opcion "Con paquete" del filtro: cualquier servicio con PaqueteId != null.
+    // (Guid.Empty ya esta usado por "Sin paquete"; este all-ones no colisiona con ningun paquete real.)
+    private static readonly Guid _sentinelConPaquete = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
+
     private IEnumerable<ServicioEdit> FilteredServicios()
     {
         IEnumerable<ServicioEdit> q = _servicios;
         if (_filtroPaqueteId is Guid pid)
         {
-            // Guid.Empty = "sin paquete" (para revisar servicios huerfanos); Guid real = ese paquete.
-            q = pid == Guid.Empty
-                ? q.Where(s => s.PaqueteId is null)
-                : q.Where(s => s.PaqueteId == pid);
+            // Guid.Empty = "sin paquete"; _sentinelConPaquete = "con paquete (cualquiera)";
+            // Guid real = ese paquete especifico.
+            q = pid == Guid.Empty ? q.Where(s => s.PaqueteId is null)
+              : pid == _sentinelConPaquete ? q.Where(s => s.PaqueteId is not null)
+              : q.Where(s => s.PaqueteId == pid);
         }
         if (string.IsNullOrWhiteSpace(_filtro)) { return q; }
         var f = _filtro.Trim().ToLowerInvariant();

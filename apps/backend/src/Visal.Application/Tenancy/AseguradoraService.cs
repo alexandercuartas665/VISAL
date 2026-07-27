@@ -94,7 +94,7 @@ public sealed class AseguradoraService : IAseguradoraService
         return await _db.ContratosAseguradora.AsNoTracking()
             .Where(c => c.AseguradoraId == aseguradoraId)
             .OrderBy(c => c.CodigoContrato)
-            .Select(c => new ContratoDto(c.Id, c.AseguradoraId, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga, c.RequierePdfAutorizacion))
+            .Select(c => new ContratoDto(c.Id, c.AseguradoraId, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga, c.RequierePdfAutorizacion, c.Cucon, c.TipoContrato))
             .ToListAsync(ct);
     }
 
@@ -102,6 +102,7 @@ public sealed class AseguradoraService : IAseguradoraService
     {
         var codigo = (req.CodigoContrato ?? "").Trim();
         if (codigo.Length == 0) { throw new InvalidOperationException("El codigo del contrato es obligatorio."); }
+        if (req.TipoContrato is null) { throw new InvalidOperationException("El tipo de contrato es obligatorio (Subsidiado o Contributivo)."); }
 
         ContratoAseguradora entity;
         if (req.Id is Guid id)
@@ -124,9 +125,11 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.Estado = string.IsNullOrWhiteSpace(req.Estado) ? "ACTIVO" : req.Estado.Trim();
         entity.Prorroga = req.Prorroga;
         entity.RequierePdfAutorizacion = req.RequierePdfAutorizacion;
+        entity.Cucon = string.IsNullOrWhiteSpace(req.Cucon) ? null : req.Cucon.Trim();
+        entity.TipoContrato = req.TipoContrato;
 
         await _db.SaveChangesAsync(ct);
-        return new ContratoDto(entity.Id, entity.AseguradoraId, entity.CodigoContrato, entity.FechaInicial, entity.FechaFinal, entity.Estado, entity.Prorroga, entity.RequierePdfAutorizacion);
+        return new ContratoDto(entity.Id, entity.AseguradoraId, entity.CodigoContrato, entity.FechaInicial, entity.FechaFinal, entity.Estado, entity.Prorroga, entity.RequierePdfAutorizacion, entity.Cucon, entity.TipoContrato);
     }
 
     public async Task<bool> DeleteContratoAsync(Guid id, Guid actor, CancellationToken ct = default)

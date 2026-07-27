@@ -990,6 +990,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.CodigoContrato).HasMaxLength(60).IsRequired();
             b.Property(x => x.Estado).HasMaxLength(20).IsRequired();
+            b.Property(x => x.Cucon).HasMaxLength(60);
+            b.Property(x => x.TipoContrato).HasConversion<string?>().HasMaxLength(20);
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.AseguradoraId });
             b.HasIndex(x => new { x.TenantId, x.CodigoContrato });
@@ -1121,6 +1123,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
             b.Property(x => x.Nombre).HasMaxLength(500).IsRequired();
             b.Property(x => x.Precio).HasPrecision(14, 2);
+            b.Property(x => x.Observacion).HasMaxLength(500);
             // FK opcional al PaqueteServicio representativo para facturacion (spec §5.9).
             b.HasOne(x => x.CupsRepresentativoServicio)
                 .WithMany()

@@ -14,11 +14,13 @@ public sealed record SaveAseguradoraRequest(
 
 public sealed record ContratoDto(
     Guid Id, Guid AseguradoraId, string CodigoContrato, DateOnly? FechaInicial,
-    DateOnly? FechaFinal, string Estado, bool Prorroga, bool RequierePdfAutorizacion);
+    DateOnly? FechaFinal, string Estado, bool Prorroga, bool RequierePdfAutorizacion,
+    string? Cucon, Visal.Domain.Entities.TipoContrato? TipoContrato);
 
 public sealed record SaveContratoRequest(
     Guid? Id, Guid AseguradoraId, string CodigoContrato, DateOnly? FechaInicial,
-    DateOnly? FechaFinal, string Estado, bool Prorroga, bool RequierePdfAutorizacion);
+    DateOnly? FechaFinal, string Estado, bool Prorroga, bool RequierePdfAutorizacion,
+    string? Cucon, Visal.Domain.Entities.TipoContrato? TipoContrato);
 
 public sealed record ServicioDto(
     Guid Id, Guid ContratoId, string? Sede, string? Historia,

@@ -19,14 +19,27 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             sedeNombre = await db.Sucursales.AsNoTracking().Where(s => s.Id == sid).Select(s => s.Nombre).FirstOrDefaultAsync(ct);
         }
 
-        // Contratos: solo los 3 contratos configurados en el modulo Admision
-        // (Contrato1Id, Contrato2Id, Contrato3Id) en ese orden. El primero
-        // (Contrato1) es el que la UI debe auto-seleccionar; los otros 2 estan
-        // disponibles pero opcionales.
-        var idsOrdenados = new[] { p.Contrato1Id, p.Contrato2Id, p.Contrato3Id }
-            .Where(g => g is not null)
-            .Select(g => g!.Value)
-            .ToArray();
+        // Contratos: lee la tabla N:M paciente_contratos (fuente de verdad
+        // post-PC1) ordenada por Orden. El orden=1 es el default que auto-
+        // selecciona la UI de /asignacion. Los contratos pueden pertenecer
+        // a aseguradoras distintas (multi-EPS por paciente).
+        //
+        // Fallback: si la lista N esta vacia (paciente viejo migrado antes de
+        // que backfill llegara, o dato manual con slots pero sin lista), leer
+        // los slots Contrato1/2/3Id como antes. Esto mantiene compat hasta
+        // que PC-4 borre los slots.
+        var idsOrdenados = await db.PacienteContratos.AsNoTracking()
+            .Where(pc => pc.PacienteId == p.Id)
+            .OrderBy(pc => pc.Orden)
+            .Select(pc => pc.ContratoAseguradoraId)
+            .ToArrayAsync(ct);
+        if (idsOrdenados.Length == 0)
+        {
+            idsOrdenados = new[] { p.Contrato1Id, p.Contrato2Id, p.Contrato3Id }
+                .Where(g => g is not null)
+                .Select(g => g!.Value)
+                .ToArray();
+        }
         var contratos = new List<ContratoMiniDto>();
         if (idsOrdenados.Length > 0)
         {
@@ -35,7 +48,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 .Join(db.Aseguradoras.AsNoTracking(), c => c.AseguradoraId, a => a.Id,
                     (c, a) => new ContratoMiniDto(c.Id, a.Id, a.Nombre, c.CodigoContrato, c.Estado, c.RequierePdfAutorizacion))
                 .ToDictionaryAsync(c => c.ContratoId, ct);
-            // Mantener el orden Contrato1 → Contrato2 → Contrato3 que viene del paciente.
+            // Preserva el orden real (orden 1..N de paciente_contratos, o slots 1/2/3).
             foreach (var cid in idsOrdenados)
             {
                 if (lookup.TryGetValue(cid, out var dto)) { contratos.Add(dto); }

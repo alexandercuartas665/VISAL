@@ -229,11 +229,11 @@ public sealed class AseguradoraService : IAseguradoraService
         return true;
     }
 
-    public async Task<int> ImportServiciosAsync(Guid contratoId, IReadOnlyList<ServicioImportRow> rows, Guid actor, CancellationToken ct = default)
+    public async Task<ServiciosImportResult> ImportServiciosAsync(Guid contratoId, IReadOnlyList<ServicioImportRow> rows, Guid actor, CancellationToken ct = default)
     {
-        if (_tenant.TenantId is not Guid tid) { return 0; }
+        if (_tenant.TenantId is not Guid tid) { return new ServiciosImportResult(0, Array.Empty<string>()); }
         var contrato = await _db.ContratosAseguradora.FirstOrDefaultAsync(c => c.Id == contratoId, ct);
-        if (contrato is null) { return 0; }
+        if (contrato is null) { return new ServiciosImportResult(0, Array.Empty<string>()); }
 
         // Precargar mapa codigo -> paqueteId para no golpear la BD en cada fila.
         var codigosPaquete = rows.Select(r => (r.PaqueteCodigo ?? "").Trim())
@@ -246,9 +246,37 @@ public sealed class AseguradoraService : IAseguradoraService
                 .Where(p => codigosPaquete.Contains(p.Codigo))
                 .ToDictionaryAsync(p => p.Codigo, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
 
+        // TS6: precargar catalogo tipos_servicio del tenant para validar la
+        // columna MODULO. Set normalizado (upper + sin "s" final) para tolerar
+        // plural/singular igual que TS8. Reglas:
+        // - Catalogo vacio -> no valida (todos los MODULO pasan silenciosos).
+        // - Fila con MODULO conocido -> se importa normal.
+        // - Fila con MODULO desconocido -> se importa igual (no perder datos)
+        //   pero el valor se agrega al set de "desconocidos" para reportar.
+        var tiposCatalogoNormalizados = await _db.CatalogosTipoServicio.AsNoTracking()
+            .Where(t => t.Activo)
+            .Select(t => t.Nombre)
+            .ToListAsync(ct);
+        var setValidoNormalizado = new HashSet<string>(
+            tiposCatalogoNormalizados
+                .Select(NormalizarModulo)
+                .Where(s => s.Length > 0),
+            StringComparer.OrdinalIgnoreCase);
+        var modulosDesconocidos = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
         var n = 0;
         foreach (var r in rows)
         {
+            // Validacion soft del MODULO. Si el catalogo esta poblado y la fila
+            // trae un valor que no matchea, lo agregamos al reporte pero seguimos.
+            var mod = (r.Modulo ?? "").Trim();
+            if (setValidoNormalizado.Count > 0 && mod.Length > 0)
+            {
+                if (!setValidoNormalizado.Contains(NormalizarModulo(mod)))
+                {
+                    modulosDesconocidos.Add(mod);
+                }
+            }
             if (string.IsNullOrWhiteSpace(r.CodigoServicio) && string.IsNullOrWhiteSpace(r.Descripcion)) { continue; }
             Guid? paqueteId = null;
             var codPaq = (r.PaqueteCodigo ?? "").Trim();
@@ -273,7 +301,15 @@ public sealed class AseguradoraService : IAseguradoraService
             n++;
         }
         if (n > 0) { await _db.SaveChangesAsync(ct); }
-        return n;
+        return new ServiciosImportResult(n, modulosDesconocidos.ToList());
+    }
+
+    /// <summary>Normaliza un modulo a UPPER sin la "s" final para comparar
+    /// contra el catalogo (TS6). Mismo criterio plural/singular de TS8.</summary>
+    private static string NormalizarModulo(string s)
+    {
+        var t = (s ?? "").Trim().ToUpperInvariant();
+        return t.Length > 1 && t.EndsWith("S") ? t[..^1] : t;
     }
 
     public async Task<int> EliminarServiciosDeContratoAsync(Guid contratoId, Guid actor, CancellationToken ct = default)

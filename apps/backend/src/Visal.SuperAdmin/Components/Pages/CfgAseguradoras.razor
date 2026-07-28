@@ -779,9 +779,21 @@
                     Col(r, "CODIGO_INTERNO"), Col(r, "DESCRIPCION"), Num(r, "TARIFA"), Col(r, "MODULO"),
                     Col(r, "ESPECIALIDAD"), Col(r, "MODALIDAD"), Col(r, "CLASIFICACION"), Col(r, "OBSERVACIONES")));
             }
-            var n = await Svc.ImportServiciosAsync(id, rows, await Actor());
+            var res = await Svc.ImportServiciosAsync(id, rows, await Actor());
             await LoadServicios();
-            _ok = $"{n} servicio(s) importado(s) desde Excel.";
+            if (res.ModulosDesconocidos.Count > 0)
+            {
+                // TS6: los servicios se importaron igual, pero avisamos que
+                // algunos MODULO no matchean el catalogo. El admin decide si
+                // renombra en el Excel o agrega tipos nuevos en Configuracion.
+                _ok = $"{res.Importados} servicio(s) importado(s) desde Excel. "
+                    + $"Aviso: {res.ModulosDesconocidos.Count} MODULO(s) no estan en el catalogo tipos_servicio: "
+                    + string.Join(", ", res.ModulosDesconocidos);
+            }
+            else
+            {
+                _ok = $"{res.Importados} servicio(s) importado(s) desde Excel.";
+            }
         }
         catch (Exception ex) { _error = "No se pudo importar el Excel: " + ex.Message; }
         finally { _busy = false; }

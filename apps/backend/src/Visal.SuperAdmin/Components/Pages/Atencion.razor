@@ -10,6 +10,7 @@
 @inject IHistoriaClinicaService HcSvc
 @inject INotaMedicaService NotaSvc
 @inject IAtencionColumnaConfigService ColSvc
+@inject ICatalogoTipoServicioService TipoSvcCat
 @inject IJSRuntime JS
 
 <PageTitle>Mis Servicios Asignados - Visal</PageTitle>
@@ -505,7 +506,10 @@ else
     private string _filFecha = "";               // "" | "hoy" | "7d" | "30d" | "rango"
     private DateOnly? _filFechaDesde, _filFechaHasta;
 
-    private static readonly string[] TiposServicioDisponibles = new[] { "CONSULTA", "TERAPIA", "ENFERMERIA", "EQUIPOS", "INSUMOS" };
+    // TS5: catalogo dinamico del tenant activo. Fallback al set canonico
+    // si el catalogo aun no esta sembrado (evita chips vacios en pantalla).
+    private List<string> _tiposServicioCat = new() { "CONSULTA", "TERAPIA", "ENFERMERIA", "EQUIPOS", "INSUMOS" };
+    private IReadOnlyList<string> TiposServicioDisponibles => _tiposServicioCat;
     private List<string> ServiciosDisponibles => _todos.Select(x => x.NombreServicio).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
     private List<string> ProfesionalesDisponibles => _todos.Select(x => x.NombreProfesional).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
     private List<string> PaquetesCodigosDisponibles => _todos.Where(x => !string.IsNullOrWhiteSpace(x.PaqueteCodigo)).Select(x => x.PaqueteCodigo!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
@@ -711,6 +715,14 @@ else
             // Config de columnas (overrides del tenant). Nulos = usar default.
             try { _configColumnas = (await ColSvc.ListarAsync()).ToList(); }
             catch { _configColumnas = new(); }
+            // TS5: catalogo de tipos servicio del tenant. Si trae items, sustituye
+            // el fallback estatico; si viene vacio o falla, se mantiene el default.
+            try
+            {
+                var cat = (await TipoSvcCat.ListarAsync()).Select(c => c.Nombre).ToList();
+                if (cat.Count > 0) { _tiposServicioCat = cat; }
+            }
+            catch { /* mantener fallback */ }
             // Llenar header con el primer registro (todos comparten profesional).
             if (_todos.Count > 0)
             {

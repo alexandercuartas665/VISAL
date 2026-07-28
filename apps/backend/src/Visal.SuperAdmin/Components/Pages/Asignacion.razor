@@ -8,6 +8,7 @@
 @inject IPaqueteService PaqSvc
 @inject IAseguradoraService AseSvc
 @inject ICuotaCopagoService CuotaSvc
+@inject ICatalogoTipoServicioService TipoSvcCat
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
 
@@ -419,11 +420,12 @@ else
                 <div class="ase-f"><label>Tipo servicio (modulo)</label>
                     <select class="form-select form-select-sm" @bind="_fModulo">
                         <option value="">(todos)</option>
-                        <option value="CONSULTA">CONSULTA</option>
-                        <option value="ENFERMERIA">ENFERMERIA</option>
-                        <option value="EQUIPOS">EQUIPOS</option>
-                        <option value="INSUMOS">INSUMOS</option>
-                        <option value="TERAPIA">TERAPIA</option>
+                        @* TS5: opciones vienen del catalogo tipos_servicio del tenant,
+                           no del hardcode. Si el catalogo esta vacio, cae al set canonico. *@
+                        @foreach (var t in _tiposServicioCat)
+                        {
+                            <option value="@t.Nombre">@t.Nombre</option>
+                        }
                     </select>
                 </div>
                 <div class="ase-f"><label>Paciente (documento)</label>
@@ -1049,6 +1051,10 @@ else
     private string _fAseId = "";
     private string _fContratoCod = "";
     private string _fModulo = "";
+    // TS5: catalogo dinamico de tipos de servicio (reemplaza hardcode
+    // CONSULTA/TERAPIA/ENFERMERIA/EQUIPOS/INSUMOS del select). Se carga
+    // desde ICatalogoTipoServicioService en OnInitializedAsync.
+    private List<CatalogoTipoServicioDto> _tiposServicioCat = new();
     private string _fDocumento = "";
     private string _fNombreServ = "";
     private List<AsignacionListadoDto> _listado = new();
@@ -1131,6 +1137,10 @@ else
     {
         // Carga la lista global de contratos activos (la dropdown CONTRATOS muestra TODOS, no solo los del paciente).
         _todosContratos = (await Svc.ListContratosDisponiblesAsync()).ToList();
+        // TS5: catalogo de tipos de servicio del tenant activo. Silencioso en
+        // errores para no bloquear la carga del wizard.
+        try { _tiposServicioCat = (await TipoSvcCat.ListarAsync()).ToList(); }
+        catch { _tiposServicioCat = new(); }
     }
 
     private async Task BuscarPorDocumento()

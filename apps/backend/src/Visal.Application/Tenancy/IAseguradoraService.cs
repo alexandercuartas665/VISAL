@@ -56,6 +56,13 @@ public sealed record ServicioImportRow(
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
 
+/// <summary>Resultado del import Excel de servicios (TS6).</summary>
+/// <param name="Importados">Filas persistidas.</param>
+/// <param name="ModulosDesconocidos">Valores unicos de MODULO que no matchean
+/// (tras normalizar plural/singular) contra el catalogo tipos_servicio del
+/// tenant. Vacio = todos los modulos son validos. La UI puede mostrar aviso.</param>
+public sealed record ServiciosImportResult(int Importados, IReadOnlyList<string> ModulosDesconocidos);
+
 /// <summary>Modulo Entidades Aseguradoras: aseguradoras, contratos y servicios. Tenant-scoped.</summary>
 public interface IAseguradoraService
 {
@@ -71,7 +78,14 @@ public interface IAseguradoraService
     Task<IReadOnlyList<ServicioDto>> ListServiciosAsync(Guid contratoId, string? filtro, CancellationToken ct = default);
     Task<ServicioDto?> SaveServicioAsync(SaveServicioRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteServicioAsync(Guid id, Guid actor, CancellationToken ct = default);
-    Task<int> ImportServiciosAsync(Guid contratoId, IReadOnlyList<ServicioImportRow> rows, Guid actor, CancellationToken ct = default);
+    /// <summary>
+    /// Importa servicios al contrato desde filas de Excel. TS6: valida que la
+    /// columna MODULO exista en el catalogo dinamico tipos_servicio del tenant.
+    /// Filas con MODULO desconocido igualmente se importan (para no perder
+    /// datos) pero el DTO devuelve la lista de valores no reconocidos para que
+    /// la UI muestre un aviso al admin.
+    /// </summary>
+    Task<ServiciosImportResult> ImportServiciosAsync(Guid contratoId, IReadOnlyList<ServicioImportRow> rows, Guid actor, CancellationToken ct = default);
 
     /// <summary>Borra todos los servicios de un contrato. Devuelve cantidad borrada.
     /// Pensado para corregir un import erroneo (ej. cargar de nuevo sin codigo de

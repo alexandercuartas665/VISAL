@@ -419,8 +419,21 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
         if (!string.IsNullOrWhiteSpace(filtro.Modulo))
         {
+            // Match tolerante a plural/singular final "s" (TS8). El catalogo
+            // canonico es singular (TERAPIA, SERVICIO...) pero registros
+            // legacy y del import Excel pueden traer plural. Comparo ambas
+            // formas quitando la "s" final para que el filtro no pierda
+            // datos por diferencia trivial de sufijo.
             var m = filtro.Modulo.Trim().ToLower();
-            q = q.Where(x => (x.a.Modulo != null && x.a.Modulo.ToLower() == m) || x.a.TipoServicio.ToLower() == m);
+            var mSin = m.EndsWith("s") ? m[..^1] : m;
+            q = q.Where(x =>
+                (x.a.Modulo != null && (
+                    x.a.Modulo.ToLower() == m ||
+                    x.a.Modulo.ToLower() == mSin ||
+                    (x.a.Modulo.ToLower().EndsWith("s") ? x.a.Modulo.ToLower().Substring(0, x.a.Modulo.Length - 1) : x.a.Modulo.ToLower()) == mSin))
+                || x.a.TipoServicio.ToLower() == m
+                || x.a.TipoServicio.ToLower() == mSin
+                || (x.a.TipoServicio.ToLower().EndsWith("s") ? x.a.TipoServicio.ToLower().Substring(0, x.a.TipoServicio.Length - 1) : x.a.TipoServicio.ToLower()) == mSin);
         }
         if (!string.IsNullOrWhiteSpace(filtro.NombreServicio))
         {
@@ -613,10 +626,16 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var moduloUpper = (modulo ?? "").Trim().ToUpperInvariant();
         if (moduloUpper.Length == 0) { return Array.Empty<EspecialistaDto>(); }
 
-        // 1) tipos que matchean por nombre
+        // 1) tipos que matchean por nombre. Match tolerante plural/singular
+        // final "s" (TS8): "TERAPIAS" del filtro debe encontrar tipos
+        // catalogo "TERAPIA" y viceversa.
+        var moduloSin = moduloUpper.EndsWith("S") ? moduloUpper[..^1] : moduloUpper;
         var tipoIdsMatch = await db.TiposProfesional.AsNoTracking()
             .Where(t => t.Activo)
-            .Where(t => t.Nombre.ToUpper() == moduloUpper)
+            .Where(t =>
+                t.Nombre.ToUpper() == moduloUpper ||
+                t.Nombre.ToUpper() == moduloSin ||
+                (t.Nombre.ToUpper().EndsWith("S") ? t.Nombre.ToUpper().Substring(0, t.Nombre.Length - 1) : t.Nombre.ToUpper()) == moduloSin)
             .Select(t => t.Id)
             .ToListAsync(ct);
 

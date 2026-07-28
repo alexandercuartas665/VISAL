@@ -114,6 +114,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Sucursal> Sucursales => Set<Sucursal>();
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
+    public DbSet<PacienteContrato> PacienteContratos => Set<PacienteContrato>();
     public DbSet<PacienteContactoEmergencia> PacienteContactosEmergencia => Set<PacienteContactoEmergencia>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
     public DbSet<AsignacionLote> AsignacionLotes => Set<AsignacionLote>();
@@ -995,6 +996,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.AseguradoraId });
             b.HasIndex(x => new { x.TenantId, x.CodigoContrato });
+        });
+
+        // Relacion N:M paciente<->contratos (reemplaza slots fijos Contrato1/2/3Id).
+        // Un paciente puede tener N contratos; cada uno puede ser de aseguradora distinta.
+        // Unique (paciente_id, contrato_aseguradora_id) evita duplicar el mismo contrato.
+        // El orden preserva el orden manual del admin y sirve para default en /asignacion.
+        modelBuilder.Entity<PacienteContrato>(b =>
+        {
+            b.ToTable("paciente_contratos");
+            b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.ContratoAseguradora).WithMany().HasForeignKey(x => x.ContratoAseguradoraId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.PacienteId, x.ContratoAseguradoraId }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.PacienteId, x.Orden });
         });
 
         // Cuenta medica: singleton por aseguradora + N items ordenados.

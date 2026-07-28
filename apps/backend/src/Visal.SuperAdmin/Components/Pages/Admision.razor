@@ -151,23 +151,57 @@
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.ClasificacionGrupoPatologia)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
                         </div>
-                        <div class="ase-f"><label>Contrato 1</label>
-                            <select class="form-select form-select-sm" @bind="_contrato1" disabled="@(_contratosAse.Count == 0)">
-                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona IPS que comenta" : "Seleccione Elemento")</option>
-                                @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
-                            </select>
-                        </div>
-                        <div class="ase-f"><label>Contrato 2</label>
-                            <select class="form-select form-select-sm" @bind="_contrato2" disabled="@(_contratosAse.Count == 0)">
-                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona IPS que comenta" : "Seleccione Elemento")</option>
-                                @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
-                            </select>
-                        </div>
-                        <div class="ase-f"><label>Contrato 3</label>
-                            <select class="form-select form-select-sm" @bind="_contrato3" disabled="@(_contratosAse.Count == 0)">
-                                <option value="">@(_contratosAse.Count == 0 ? "Selecciona IPS que comenta" : "Seleccione Elemento")</option>
-                                @foreach (var c in _contratosAse) { <option value="@c.Id">@c.CodigoContrato</option> }
-                            </select>
+                        <div class="ase-f" style="grid-column: 1 / -1;">
+                            <label>Contratos del paciente <span class="text-muted small">(N contratos, pueden ser de EPS distintas)</span></label>
+                            <table class="table table-sm mb-1" style="background:#fff;">
+                                <thead>
+                                    <tr class="small text-muted">
+                                        <th style="width:38px;">#</th>
+                                        <th>Aseguradora</th>
+                                        <th>Contrato</th>
+                                        <th style="width:110px;">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                @if (_contratosEdit.Count == 0)
+                                {
+                                    <tr><td colspan="4" class="text-center text-muted small py-2">Sin contratos. Usa "+ Agregar contrato" para vincular una EPS al paciente.</td></tr>
+                                }
+                                @for (var i = 0; i < _contratosEdit.Count; i++)
+                                {
+                                    var idx = i; var row = _contratosEdit[idx];
+                                    <tr>
+                                        <td class="small text-muted">@(idx + 1)</td>
+                                        <td>
+                                            <select class="form-select form-select-sm"
+                                                    value="@(row.AseguradoraId?.ToString() ?? "")"
+                                                    @onchange="@(e => OnContratoRowAseChangedAsync(idx, e.Value?.ToString()))">
+                                                <option value="">Seleccione aseguradora</option>
+                                                @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <select class="form-select form-select-sm"
+                                                    value="@(row.ContratoId?.ToString() ?? "")"
+                                                    disabled="@(row.AseguradoraId is null)"
+                                                    @onchange="@(e => OnContratoRowContratoChanged(idx, e.Value?.ToString()))">
+                                                <option value="">@(row.AseguradoraId is null ? "Primero elige aseguradora" : "Seleccione contrato")</option>
+                                                @if (row.AseguradoraId is Guid aid && _contratosPorAseguradora.TryGetValue(aid, out var lst))
+                                                {
+                                                    @foreach (var c in lst) { <option value="@c.Id">@c.CodigoContrato</option> }
+                                                }
+                                            </select>
+                                        </td>
+                                        <td class="text-nowrap">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" title="Subir" disabled="@(idx == 0)" @onclick="@(() => MoveContratoRow(idx, -1))">^</button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" title="Bajar" disabled="@(idx == _contratosEdit.Count - 1)" @onclick="@(() => MoveContratoRow(idx, +1))">v</button>
+                                            <button type="button" class="btn btn-outline-danger btn-sm" title="Eliminar" @onclick="@(() => RemoveContratoRow(idx))">x</button>
+                                        </td>
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
+                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="AddContratoRow">+ Agregar contrato</button>
                         </div>
                         <div class="ase-f"><label>Estrato Social</label>
                             <select class="form-select form-select-sm" @bind="_estrato">
@@ -1300,6 +1334,12 @@
     private string? _incapacidad, _grupoRh, _estado;
     private string _tipoUsuario = "", _clasifPaciente = "", _clasifGrupo = "";
     private string _contrato1 = "", _contrato2 = "", _contrato3 = "";
+    // Lista N de contratos del paciente. Reemplaza los slots _contrato1/2/3
+    // como fuente de verdad; los slots quedan para dual-write del backend.
+    private readonly List<ContratoPacienteEdit> _contratosEdit = new();
+    // Cache lazy de contratos por aseguradora. Cada aseguradora que un row de
+    // _contratosEdit toca se pide una sola vez al backend y se guarda aqui.
+    private readonly Dictionary<Guid, List<ContratoDto>> _contratosPorAseguradora = new();
     private string? _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen;
 
     // Diagnostico
@@ -1407,6 +1447,73 @@
         _contactos.Add(new ContactoEmergenciaEdit { CodigoPais = "+57", Orden = _contactos.Count + 1 });
     }
 
+    // =========================================================================
+    // Contratos del paciente (lista N) - handlers de la mini tabla
+    // =========================================================================
+
+    private void AddContratoRow()
+    {
+        _contratosEdit.Add(new ContratoPacienteEdit { Orden = _contratosEdit.Count + 1 });
+    }
+
+    private void RemoveContratoRow(int idx)
+    {
+        if (idx < 0 || idx >= _contratosEdit.Count) { return; }
+        _contratosEdit.RemoveAt(idx);
+        // Renumerar Orden despues del remove.
+        for (int i = 0; i < _contratosEdit.Count; i++) { _contratosEdit[i].Orden = i + 1; }
+    }
+
+    private void MoveContratoRow(int idx, int delta)
+    {
+        var dst = idx + delta;
+        if (idx < 0 || idx >= _contratosEdit.Count || dst < 0 || dst >= _contratosEdit.Count) { return; }
+        (_contratosEdit[idx], _contratosEdit[dst]) = (_contratosEdit[dst], _contratosEdit[idx]);
+        for (int i = 0; i < _contratosEdit.Count; i++) { _contratosEdit[i].Orden = i + 1; }
+    }
+
+    private async Task OnContratoRowAseChangedAsync(int idx, string? aseIdStr)
+    {
+        if (idx < 0 || idx >= _contratosEdit.Count) { return; }
+        var row = _contratosEdit[idx];
+        row.ContratoId = null;
+        row.ContratoCodigo = null;
+        if (!Guid.TryParse(aseIdStr, out var aseId))
+        {
+            row.AseguradoraId = null;
+            row.AseguradoraNombre = null;
+            return;
+        }
+        row.AseguradoraId = aseId;
+        row.AseguradoraNombre = _aseguradoras.FirstOrDefault(a => a.Id == aseId)?.Nombre;
+        await EnsureContratosAseguradoraAsync(aseId);
+    }
+
+    private void OnContratoRowContratoChanged(int idx, string? contratoIdStr)
+    {
+        if (idx < 0 || idx >= _contratosEdit.Count) { return; }
+        var row = _contratosEdit[idx];
+        if (!Guid.TryParse(contratoIdStr, out var cid)) { row.ContratoId = null; row.ContratoCodigo = null; return; }
+        row.ContratoId = cid;
+        if (row.AseguradoraId is Guid a && _contratosPorAseguradora.TryGetValue(a, out var lst))
+        {
+            row.ContratoCodigo = lst.FirstOrDefault(c => c.Id == cid)?.CodigoContrato;
+        }
+    }
+
+    /// <summary>Trae y cachea los contratos de una aseguradora. Idempotente:
+    /// segunda llamada no golpea BD. Silencioso en errores para no romper la UI.</summary>
+    private async Task EnsureContratosAseguradoraAsync(Guid aseId)
+    {
+        if (_contratosPorAseguradora.ContainsKey(aseId)) { return; }
+        try
+        {
+            var lst = (await AseSvc.ListContratosAsync(aseId)).ToList();
+            _contratosPorAseguradora[aseId] = lst;
+        }
+        catch { _contratosPorAseguradora[aseId] = new(); }
+    }
+
     private void QuitarContactoEmergencia(int idx)
     {
         if (idx < 0 || idx >= _contactos.Count) { return; }
@@ -1473,6 +1580,18 @@
         {
             try { await JS.InvokeVoidAsync("visalFirma.init", canvasId); } catch { }
         }
+    }
+
+    /// <summary>Modelo editable de UI para un contrato del paciente (fila de la
+    /// mini tabla). En Save se convierte a PacienteContratoDto.</summary>
+    private sealed class ContratoPacienteEdit
+    {
+        public Guid? Id { get; set; }
+        public Guid? AseguradoraId { get; set; }
+        public string? AseguradoraNombre { get; set; }
+        public Guid? ContratoId { get; set; }
+        public string? ContratoCodigo { get; set; }
+        public int Orden { get; set; }
     }
 
     /// <summary>Modelo editable de UI para un contacto de emergencia. No persiste
@@ -1691,6 +1810,7 @@
         _incapacidad = _grupoRh = _estado = null;
         _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
         _contrato1 = _contrato2 = _contrato3 = "";
+        _contratosEdit.Clear();
         _estrato = _sexo = _estadoCivil = _zona = _ocupacion = _regimen = null;
         _dxPrincipal = _tutela = null;
         _tipoTutela = "";
@@ -1734,6 +1854,23 @@
         _contrato1 = d.Contrato1Id?.ToString() ?? "";
         _contrato2 = d.Contrato2Id?.ToString() ?? "";
         _contrato3 = d.Contrato3Id?.ToString() ?? "";
+        // Cargar lista N de contratos (fuente de verdad post-PC1).
+        _contratosEdit.Clear();
+        foreach (var c in d.Contratos.OrderBy(x => x.Orden))
+        {
+            _contratosEdit.Add(new ContratoPacienteEdit
+            {
+                Id = c.Id,
+                AseguradoraId = c.AseguradoraId,
+                AseguradoraNombre = c.AseguradoraNombre,
+                ContratoId = c.ContratoAseguradoraId,
+                ContratoCodigo = c.ContratoCodigo,
+                Orden = c.Orden
+            });
+            // Precarga los contratos de esta aseguradora para que el segundo
+            // select tenga la opcion visible en el primer render.
+            if (c.AseguradoraId is Guid aid) { await EnsureContratosAseguradoraAsync(aid); }
+        }
         _estrato = d.EstratoSocial; _sexo = d.Sexo; _estadoCivil = d.EstadoCivil; _zona = d.Zona;
         _ocupacion = d.Ocupacion; _regimen = d.Regimen;
         _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela;
@@ -1801,6 +1938,13 @@
                 Try(_clasifPaciente), Try(_clasifGrupo),
                 _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen,
                 Try(_contrato1), Try(_contrato2), Try(_contrato3),
+                _contratosEdit
+                    .Where(c => c.ContratoId is Guid)
+                    .Select((c, i) => new PacienteContratoDto(
+                        c.Id, c.ContratoId!.Value,
+                        c.AseguradoraId, c.AseguradoraNombre, c.ContratoCodigo,
+                        c.Orden > 0 ? c.Orden : i + 1))
+                    .ToList(),
                 null, _cie10Codigo, _dxPrincipal,
                 _tutela, Try(_tipoTutela), Try(_medContratado),
                 Try(_paisResidencia), Try(_paisOrigen), Try(_departamento), Try(_municipio),
@@ -2228,6 +2372,7 @@
                         Contrato1Id: PickG(c1, prev?.Contrato1Id),
                         Contrato2Id: PickG(c2, prev?.Contrato2Id),
                         Contrato3Id: PickG(c3, prev?.Contrato3Id),
+                        Contratos: null, // import Excel: dual-write via slots hasta migrar plantilla a lista N
                         Cie10Id: prev?.Cie10Id,
                         Cie10Codigo: Trunc(Pick(cieCodigo, prev?.Cie10Codigo), 30),
                         DiagnosticoPrincipal: Trunc(Pick(diag, prev?.DiagnosticoPrincipal), 500),

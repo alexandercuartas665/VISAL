@@ -7,6 +7,24 @@ public sealed record PacienteContactoEmergenciaDto(
     // Opcional; null si el contacto no firmo.
     string? FirmaUrl);
 
+/// <summary>
+/// Un contrato asociado al paciente. Un paciente puede tener N contratos y
+/// pueden ser de aseguradoras distintas. Reemplaza los slots fijos
+/// Contrato1/2/3Id del modelo viejo (que quedan como dual-write por
+/// compatibilidad hasta que /asignacion consuma la lista N).
+///
+/// Los campos AseguradoraId/AseguradoraNombre/ContratoCodigo son de solo
+/// lectura (los llena el servidor); el cliente solo necesita mandar
+/// ContratoAseguradoraId + Orden al guardar.
+/// </summary>
+public sealed record PacienteContratoDto(
+    Guid? Id,
+    Guid ContratoAseguradoraId,
+    Guid? AseguradoraId,
+    string? AseguradoraNombre,
+    string? ContratoCodigo,
+    int Orden);
+
 public sealed record PacienteDto(
     Guid Id, string NumeroDocumento, string NombreCompleto, string? Ciudad, string? Telefono,
     string? Aseguradora, string? Sede, string? Estado, DateOnly? FechaIngresoPad);
@@ -25,8 +43,11 @@ public sealed record PacienteDetailDto(
     Guid? ClasificacionPacienteId, Guid? ClasificacionGrupoPatologiaId,
     string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
     string? Ocupacion, string? Regimen,
-    // Contratos
+    // Contratos legacy (slots fijos - los mantiene el dual-write hasta que
+    // /asignacion consuma la lista N; leer Contratos para ver el modelo real).
     Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
+    // Lista N de contratos del paciente (fuente de verdad post-PC1).
+    IReadOnlyList<PacienteContratoDto> Contratos,
     // Diagnostico
     Guid? Cie10Id, string? Cie10Codigo, string? DiagnosticoPrincipal,
     // Tutela
@@ -62,8 +83,14 @@ public sealed record SavePacienteRequest(
     Guid? ClasificacionPacienteId, Guid? ClasificacionGrupoPatologiaId,
     string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
     string? Ocupacion, string? Regimen,
-    // Contratos
+    // Contratos legacy (slots fijos, ignorados si Contratos != null).
+    // Cuando la UI nueva envia Contratos, el servidor toma los primeros 3
+    // por Orden y los replica aqui para dual-write hasta que /asignacion migre.
     Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
+    // Lista N de contratos del paciente (fuente de verdad para el save).
+    // Null en llamadas de sistemas viejos: se ignora la lista y se dual-writea
+    // desde los slots 1/2/3. Vacio: se limpian los contratos.
+    IReadOnlyList<PacienteContratoDto>? Contratos,
     // Diagnostico
     Guid? Cie10Id, string? Cie10Codigo, string? DiagnosticoPrincipal,
     // Tutela

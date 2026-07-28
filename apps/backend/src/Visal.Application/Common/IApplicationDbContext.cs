@@ -56,6 +56,7 @@ public interface IApplicationDbContext
     DbSet<Sucursal> Sucursales { get; }
     DbSet<TenantUserSucursal> TenantUserSucursales { get; }
     DbSet<Paciente> Pacientes { get; }
+    DbSet<PacienteContrato> PacienteContratos { get; }
     DbSet<PacienteContactoEmergencia> PacienteContactosEmergencia { get; }
     DbSet<CatalogoPaciente> CatalogosPaciente { get; }
     DbSet<AsignacionLote> AsignacionLotes { get; }

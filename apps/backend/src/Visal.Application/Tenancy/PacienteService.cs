@@ -43,6 +43,18 @@ public sealed class PacienteService : IPacienteService
             .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
             .Select(c => new PacienteContactoEmergenciaDto(c.Id, c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden, c.FirmaUrl))
             .ToListAsync(ct);
+        // Traigo la lista N de contratos con nombre/codigo del contrato+aseguradora
+        // (no solo el Id) para pintarlos en la tabla mini de /admision sin round-trips.
+        var contratos = await (from pc in _db.PacienteContratos.AsNoTracking()
+                               join c in _db.ContratosAseguradora.AsNoTracking() on pc.ContratoAseguradoraId equals c.Id
+                               join a in _db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
+                               where pc.PacienteId == id
+                               orderby pc.Orden
+                               select new PacienteContratoDto(
+                                   pc.Id, pc.ContratoAseguradoraId,
+                                   a.Id, a.Nombre, c.CodigoContrato,
+                                   pc.Orden))
+                              .ToListAsync(ct);
         return new PacienteDetailDto(
             p.Id, p.NumeroDocumento, p.TipoDocumento,
             p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido,
@@ -55,6 +67,7 @@ public sealed class PacienteService : IPacienteService
             p.EstratoSocial, p.Sexo, p.EstadoCivil, p.Zona,
             p.Ocupacion, p.Regimen,
             p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
+            contratos,
             p.Cie10Id, p.Cie10Codigo, p.DiagnosticoPrincipal,
             p.Tutela, p.TipoTutelaId, p.MedContratadoId,
             p.PaisResidenciaId, p.PaisOrigenId, p.DepartamentoId, p.MunicipioId,
@@ -126,10 +139,29 @@ public sealed class PacienteService : IPacienteService
         p.Ocupacion = req.Ocupacion?.Trim();
         p.Regimen = req.Regimen?.Trim();
 
-        // Contratos
-        p.Contrato1Id = req.Contrato1Id;
-        p.Contrato2Id = req.Contrato2Id;
-        p.Contrato3Id = req.Contrato3Id;
+        // Contratos: si la UI nueva envio la lista N (Contratos != null), es
+        // la fuente de verdad y los slots 1/2/3 se derivan de los primeros 3
+        // ordenados por Orden. Si la lista viene null (payload viejo), se
+        // respetan los slots como llegaron — dual-write compatible con la
+        // migracion incremental.
+        if (req.Contratos is IReadOnlyList<PacienteContratoDto> listaContratos)
+        {
+            var top3 = listaContratos
+                .Where(c => c.ContratoAseguradoraId != Guid.Empty)
+                .OrderBy(c => c.Orden)
+                .Take(3)
+                .Select(c => (Guid?)c.ContratoAseguradoraId)
+                .ToList();
+            p.Contrato1Id = top3.Count > 0 ? top3[0] : null;
+            p.Contrato2Id = top3.Count > 1 ? top3[1] : null;
+            p.Contrato3Id = top3.Count > 2 ? top3[2] : null;
+        }
+        else
+        {
+            p.Contrato1Id = req.Contrato1Id;
+            p.Contrato2Id = req.Contrato2Id;
+            p.Contrato3Id = req.Contrato3Id;
+        }
 
         // Diagnostico
         p.Cie10Id = req.Cie10Id;
@@ -201,6 +233,32 @@ public sealed class PacienteService : IPacienteService
                 })
                 .ToList();
             if (nuevos.Count > 0) { _db.PacienteContactosEmergencia.AddRange(nuevos); }
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // Sincronizar lista N de contratos si la UI nueva la envio. Mismo
+        // patron que contactos: borrar todo + reescribir. Es seguro porque
+        // no hay FKs entrantes a paciente_contratos.
+        if (req.Contratos is IReadOnlyList<PacienteContratoDto> listaCtr && _tenant.TenantId is Guid tidCtr)
+        {
+            var anteriores = await _db.PacienteContratos
+                .Where(x => x.PacienteId == p.Id)
+                .ToListAsync(ct);
+            if (anteriores.Count > 0) { _db.PacienteContratos.RemoveRange(anteriores); }
+
+            var nuevos = listaCtr
+                .Where(c => c.ContratoAseguradoraId != Guid.Empty)
+                .Select((c, i) => new PacienteContrato
+                {
+                    TenantId = tidCtr,
+                    PacienteId = p.Id,
+                    ContratoAseguradoraId = c.ContratoAseguradoraId,
+                    Orden = c.Orden > 0 ? c.Orden : i + 1
+                })
+                .GroupBy(c => c.ContratoAseguradoraId) // dedup por unique (paciente, contrato)
+                .Select(g => g.First())
+                .ToList();
+            if (nuevos.Count > 0) { _db.PacienteContratos.AddRange(nuevos); }
             await _db.SaveChangesAsync(ct);
         }
 

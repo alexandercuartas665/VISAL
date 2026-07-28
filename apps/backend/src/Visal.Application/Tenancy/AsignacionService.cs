@@ -1439,4 +1439,185 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         ["EQUIPO"] = new[] { "EQUIPOS" },
         ["EQUIPOS"] = new[] { "EQUIPO" },
     };
+
+    // ================== TAB "COORDINACIONES" ==================
+    // Lista de asignaciones ya coordinadas pero SIN ningun artefacto clinico
+    // downstream (HC/nota). La UI las agrupa por asignacion_id y ofrece un
+    // boton eliminar. La eliminacion re-valida antes de tocar la BD.
+
+    public async Task<IReadOnlyList<CoordinacionEliminableDto>> ListarCoordinacionesEliminablesAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        string? sucursalNombre = null,
+        CancellationToken ct = default)
+    {
+        if (modulosPermitidos is null || modulosPermitidos.Count == 0)
+        {
+            return Array.Empty<CoordinacionEliminableDto>();
+        }
+        var permisos = ExpandirSinonimosModulo(modulosPermitidos);
+
+        // Ids de asignaciones que YA tienen algun artefacto clinico downstream
+        // (HC ligada por pivote, o nota medica ligada al turno). Se calculan
+        // por separado y luego se restan de la lista de "con turnos".
+        // NotaMedica no tiene navigation a AsignacionTurno; se usa join manual.
+        var asigsConHc = db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Select(pv => pv.Sesion!.AsignacionTurno!.AsignacionId)
+            .Distinct();
+        var turnosConNota = db.NotasMedicas.AsNoTracking()
+            .Where(n => n.AsignacionTurnoId != null)
+            .Select(n => n.AsignacionTurnoId!.Value)
+            .Distinct();
+        var asigsConNota = db.AsignacionTurnos.AsNoTracking()
+            .Where(t => turnosConNota.Contains(t.Id))
+            .Select(t => t.AsignacionId)
+            .Distinct();
+
+        // Base: asignaciones con turnos coordinados que NO estan en las dos listas anteriores.
+        var q = db.Asignaciones.AsNoTracking()
+            .Where(a => (a.Modulo != null && permisos.Contains(a.Modulo.ToUpper()))
+                     || permisos.Contains(a.TipoServicio.ToUpper()))
+            .Where(a => a.Estado != AsignacionEstado.Pendiente)
+            .Where(a => db.AsignacionTurnos.Any(t => t.AsignacionId == a.Id))
+            .Where(a => !asigsConHc.Contains(a.Id))
+            .Where(a => !asigsConNota.Contains(a.Id));
+
+        if (!string.IsNullOrWhiteSpace(sucursalNombre))
+        {
+            var s = sucursalNombre.Trim();
+            q = q.Where(a => a.Sucursal == s);
+        }
+
+        var asigs = await q
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(500)
+            .ToListAsync(ct);
+
+        if (asigs.Count == 0) { return Array.Empty<CoordinacionEliminableDto>(); }
+
+        var asigIds = asigs.Select(a => a.Id).ToList();
+        var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
+
+        // Enriquecimiento: paciente + turnos agregados (count + especialistas + fechas + sesiones).
+        var pacs = await db.Pacientes.AsNoTracking()
+            .Where(p => pacIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto })
+            .ToDictionaryAsync(p => p.Id, p => p, ct);
+
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => asigIds.Contains(t.AsignacionId))
+            .Select(t => new { t.Id, t.AsignacionId, t.ProfesionalId, t.Cantidad })
+            .ToListAsync(ct);
+
+        var profIds = turnos.Where(t => t.ProfesionalId != Guid.Empty).Select(t => t.ProfesionalId).Distinct().ToList();
+        var profs = await db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NombreCompleto })
+            .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+
+        // Sesiones + fechas min/max por asignacion (una query, groupby).
+        var turnoIds = turnos.Select(t => t.Id).ToList();
+        var sesionesInfo = await db.AsignacionTurnoSesiones.AsNoTracking()
+            .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
+            .Select(s => new { s.AsignacionTurnoId, s.FechaAtencion })
+            .ToListAsync(ct);
+
+        // Agrupar turnos por asignacion y sesiones por asignacion
+        var turnosPorAsig = turnos.GroupBy(t => t.AsignacionId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        var turnoToAsig = turnos.ToDictionary(t => t.Id, t => t.AsignacionId);
+        var sesionesPorAsig = sesionesInfo
+            .GroupBy(s => turnoToAsig[s.AsignacionTurnoId])
+            .ToDictionary(g => g.Key, g => g.Select(x => x.FechaAtencion).ToList());
+
+        var result = new List<CoordinacionEliminableDto>(asigs.Count);
+        foreach (var a in asigs)
+        {
+            pacs.TryGetValue(a.PacienteId, out var pac);
+            var tList = turnosPorAsig.TryGetValue(a.Id, out var tl) ? tl : new();
+            var sesList = sesionesPorAsig.TryGetValue(a.Id, out var sl) ? sl : new();
+            var espNombres = tList
+                .Select(t => profs.TryGetValue(t.ProfesionalId, out var n) ? n : null)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct()
+                .ToArray();
+
+            result.Add(new CoordinacionEliminableDto(
+                AsignacionId: a.Id,
+                PacienteDoc: pac?.NumeroDocumento ?? "-",
+                PacienteNombre: pac?.NombreCompleto ?? "-",
+                ContratoCodigo: a.ContratoCodigo,
+                TipoServicio: a.TipoServicio,
+                NombreServicio: a.NombreServicio,
+                Sucursal: a.Sucursal,
+                Cantidad: a.Cantidad,
+                TurnosCoordinados: tList.Count,
+                SesionesProgramadas: sesList.Count,
+                EspecialistasNombres: string.Join(", ", espNombres),
+                PrimeraFecha: sesList.Count > 0 ? sesList.Min() : null,
+                UltimaFecha: sesList.Count > 0 ? sesList.Max() : null,
+                CreadoEn: a.CreatedAt));
+        }
+        return result;
+    }
+
+    public async Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default)
+    {
+        // Helper local: chequea si la asignacion tiene HC o nota downstream.
+        // Se usa dos veces: al entrar (rechazo temprano) y justo antes del
+        // delete (guarda contra carreras entre lista y borrado).
+        async Task<string?> ValidarAsync()
+        {
+            var tieneHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .AnyAsync(pv => pv.Sesion!.AsignacionTurno!.AsignacionId == asignacionId, ct);
+            if (tieneHc) { return "No se puede eliminar: alguna sesion de esta coordinacion ya tiene historia clinica registrada."; }
+
+            var turnoIdsLocal = await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => t.AsignacionId == asignacionId)
+                .Select(t => t.Id)
+                .ToListAsync(ct);
+            var tieneNota = turnoIdsLocal.Count > 0 && await db.NotasMedicas.AsNoTracking()
+                .AnyAsync(n => n.AsignacionTurnoId != null && turnoIdsLocal.Contains(n.AsignacionTurnoId!.Value), ct);
+            if (tieneNota) { return "No se puede eliminar: algun turno de esta coordinacion ya tiene notas medicas."; }
+            return null;
+        }
+
+        // PASO 1 - Validacion previa (feedback rapido antes de cargar todo).
+        var err1 = await ValidarAsync();
+        if (err1 is not null) { throw new InvalidOperationException(err1); }
+
+        var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
+        if (asig is null) { return false; }
+
+        // PASO 2 - Re-validacion justo antes del delete: entre listar y borrar
+        // pudo haberse creado una HC/nota; sin re-check quedaria un delete
+        // parcial huerfano de la HC.
+        var err2 = await ValidarAsync();
+        if (err2 is not null)
+        {
+            throw new InvalidOperationException(
+                "No se puede eliminar: durante el proceso aparecio actividad clinica en esta coordinacion. Recarga la lista e intenta de nuevo.");
+        }
+
+        // Cascada explicita: sesiones -> turnos -> asignacion. Todo va en un
+        // solo SaveChangesAsync (transaccion implicita de EF Core).
+        var turnoIds = await db.AsignacionTurnos
+            .Where(t => t.AsignacionId == asignacionId)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (turnoIds.Count > 0)
+        {
+            var sesiones = await db.AsignacionTurnoSesiones
+                .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
+                .ToListAsync(ct);
+            db.AsignacionTurnoSesiones.RemoveRange(sesiones);
+
+            var turnos = await db.AsignacionTurnos
+                .Where(t => turnoIds.Contains(t.Id))
+                .ToListAsync(ct);
+            db.AsignacionTurnos.RemoveRange(turnos);
+        }
+        db.Asignaciones.Remove(asig);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
 }

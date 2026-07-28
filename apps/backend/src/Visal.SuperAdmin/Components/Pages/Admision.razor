@@ -153,55 +153,50 @@
                         </div>
                         <div class="ase-f" style="grid-column: 1 / -1;">
                             <label>Contratos del paciente <span class="text-muted small">(N contratos, pueden ser de EPS distintas)</span></label>
-                            <table class="table table-sm mb-1" style="background:#fff;">
-                                <thead>
-                                    <tr class="small text-muted">
-                                        <th style="width:38px;">#</th>
-                                        <th>Aseguradora</th>
-                                        <th>Contrato</th>
-                                        <th style="width:110px;">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
+                            @* Contenedor limitado a 7/12 de ancho; grid interno de 7 cols (# 1 / Ase 3 / Con 2 / Acc 1). *@
+                            <div class="pac-contratos-wrap">
+                            <div class="pac-contratos-grid">
+                                <div class="pac-contratos-h">#</div>
+                                <div class="pac-contratos-h pac-contratos-c-ase">Aseguradora</div>
+                                <div class="pac-contratos-h pac-contratos-c-con">Contrato</div>
+                                <div class="pac-contratos-h pac-contratos-c-acc">Acciones</div>
                                 @if (_contratosEdit.Count == 0)
                                 {
-                                    <tr><td colspan="4" class="text-center text-muted small py-2">Sin contratos. Usa "+ Agregar contrato" para vincular una EPS al paciente.</td></tr>
+                                    <div class="pac-contratos-empty">Sin contratos. Usa "+ Agregar contrato" para vincular una EPS al paciente.</div>
                                 }
                                 @for (var i = 0; i < _contratosEdit.Count; i++)
                                 {
                                     var idx = i; var row = _contratosEdit[idx];
-                                    <tr>
-                                        <td class="small text-muted">@(idx + 1)</td>
-                                        <td>
-                                            <select class="form-select form-select-sm"
-                                                    value="@(row.AseguradoraId?.ToString() ?? "")"
-                                                    @onchange="@(e => OnContratoRowAseChangedAsync(idx, e.Value?.ToString()))">
-                                                <option value="">Seleccione aseguradora</option>
-                                                @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
-                                            </select>
-                                        </td>
-                                        <td>
-                                            <select class="form-select form-select-sm"
-                                                    value="@(row.ContratoId?.ToString() ?? "")"
-                                                    disabled="@(row.AseguradoraId is null)"
-                                                    @onchange="@(e => OnContratoRowContratoChanged(idx, e.Value?.ToString()))">
-                                                <option value="">@(row.AseguradoraId is null ? "Primero elige aseguradora" : "Seleccione contrato")</option>
-                                                @if (row.AseguradoraId is Guid aid && _contratosPorAseguradora.TryGetValue(aid, out var lst))
-                                                {
-                                                    @foreach (var c in lst) { <option value="@c.Id">@c.CodigoContrato</option> }
-                                                }
-                                            </select>
-                                        </td>
-                                        <td class="text-nowrap">
-                                            <button type="button" class="btn btn-outline-secondary btn-sm" title="Subir" disabled="@(idx == 0)" @onclick="@(() => MoveContratoRow(idx, -1))">^</button>
-                                            <button type="button" class="btn btn-outline-secondary btn-sm" title="Bajar" disabled="@(idx == _contratosEdit.Count - 1)" @onclick="@(() => MoveContratoRow(idx, +1))">v</button>
-                                            <button type="button" class="btn btn-outline-danger btn-sm" title="Eliminar" @onclick="@(() => RemoveContratoRow(idx))">x</button>
-                                        </td>
-                                    </tr>
+                                    <div class="pac-contratos-idx">@(idx + 1)</div>
+                                    <div class="pac-contratos-c-ase">
+                                        <select class="form-select form-select-sm"
+                                                value="@(row.AseguradoraId?.ToString() ?? "")"
+                                                @onchange="@(e => OnContratoRowAseChangedAsync(idx, e.Value?.ToString()))">
+                                            <option value="">Seleccione aseguradora</option>
+                                            @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                                        </select>
+                                    </div>
+                                    <div class="pac-contratos-c-con">
+                                        <select class="form-select form-select-sm"
+                                                value="@(row.ContratoId?.ToString() ?? "")"
+                                                disabled="@(row.AseguradoraId is null)"
+                                                @onchange="@(e => OnContratoRowContratoChanged(idx, e.Value?.ToString()))">
+                                            <option value="">@(row.AseguradoraId is null ? "Primero elige aseguradora" : "Seleccione contrato")</option>
+                                            @if (row.AseguradoraId is Guid aid && _contratosPorAseguradora.TryGetValue(aid, out var lst))
+                                            {
+                                                @foreach (var c in lst) { <option value="@c.Id">@c.CodigoContrato</option> }
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="pac-contratos-c-acc">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" title="Subir" disabled="@(idx == 0)" @onclick="@(() => MoveContratoRow(idx, -1))">^</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" title="Bajar" disabled="@(idx == _contratosEdit.Count - 1)" @onclick="@(() => MoveContratoRow(idx, +1))">v</button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm" title="Eliminar" @onclick="@(() => RemoveContratoRow(idx))">x</button>
+                                    </div>
                                 }
-                                </tbody>
-                            </table>
-                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="AddContratoRow">+ Agregar contrato</button>
+                            </div>
+                            <button type="button" class="btn btn-outline-primary btn-sm mt-1 w-100" @onclick="AddContratoRow">+ Agregar contrato</button>
+                            </div>
                         </div>
                         <div class="ase-f"><label>Estrato Social</label>
                             <select class="form-select form-select-sm" @bind="_estrato">
@@ -834,6 +829,21 @@
 <style>
     .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
     .pac-tab:disabled { opacity: .5; cursor: not-allowed; }
+    /* Grid contratos del paciente: 7 columnas visuales (# 1 / Aseguradora 3 / Contrato 2 / Acciones 1).
+       Envuelto en un contenedor limitado al 58.333% (7/12) del ancho disponible. */
+    .pac-contratos-wrap { max-width: 58.3333%; }
+    .pac-contratos-grid { display: grid; grid-template-columns: 1fr 3fr 2fr 1fr; gap: 8px 12px; align-items: center; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
+    .pac-contratos-h { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; padding-bottom: 4px; border-bottom: 1px solid #e2e8f0; }
+    .pac-contratos-idx { font-size: 13px; color: #64748b; font-weight: 600; }
+    .pac-contratos-c-acc { display: flex; gap: 4px; }
+    .pac-contratos-empty { grid-column: 1 / -1; text-align: center; color: #94a3b8; font-size: 12px; padding: 8px 0; }
+    @@media (max-width: 1200px) {
+        .pac-contratos-wrap { max-width: 100%; }
+    }
+    @@media (max-width: 900px) {
+        .pac-contratos-grid { grid-template-columns: 40px 1fr 1fr; }
+        .pac-contratos-h.pac-contratos-c-acc, .pac-contratos-c-acc { grid-column: 1 / -1; justify-content: flex-end; }
+    }
     .pac-docs-tbl { font-size: 12.5px; }
     .pac-docs-tbl thead th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; background: #f1f5f9; }
     .pac-doc-cat { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }

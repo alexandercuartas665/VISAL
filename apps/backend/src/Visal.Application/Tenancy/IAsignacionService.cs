@@ -189,6 +189,28 @@ public sealed record SesionCalendarioDto(
     int SessionNo,
     bool TieneNota, bool NotaDefinitiva);
 
+/// <summary>
+/// Coordinacion candidata a eliminarse desde el tab "Coordinaciones" del modulo
+/// Coordinacion. Cada fila representa UNA asignacion con turnos coordinados pero
+/// sin ningun artefacto clinico downstream (HC ni notas medicas). La UI la agrupa
+/// por AsignacionId (no repite filas por turno) y ofrece un boton eliminar.
+/// </summary>
+public sealed record CoordinacionEliminableDto(
+    Guid AsignacionId,
+    string PacienteDoc,
+    string PacienteNombre,
+    string ContratoCodigo,
+    string TipoServicio,
+    string NombreServicio,
+    string Sucursal,
+    int Cantidad,
+    int TurnosCoordinados,
+    int SesionesProgramadas,
+    string EspecialistasNombres,
+    DateOnly? PrimeraFecha,
+    DateOnly? UltimaFecha,
+    DateTimeOffset CreadoEn);
+
 /// <summary>Filtro de estado para el grid de Coordinacion. Equivale al cmbEstado del legacy.</summary>
 public enum AsignacionEstadoFiltro
 {
@@ -427,4 +449,31 @@ public interface IAsignacionService
         int anio, int mes,
         string? sucursalNombre = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Lista las asignaciones **coordinadas pero no atendidas** — feed del tab
+    /// "Coordinaciones" del modulo Coordinacion. Criterios:
+    ///   - Tiene al menos un asignacion_turno (fue coordinada).
+    ///   - Ninguna de sus sesiones aparece en asignacion_turno_sesion_hc
+    ///     (nunca se abrio HC — ni siquiera en estado abierta/descartada).
+    ///   - Ningun turno tiene notas medicas asociadas.
+    /// El resultado se puede eliminar con seguridad porque no hay artefacto
+    /// clinico downstream.
+    /// </summary>
+    Task<IReadOnlyList<CoordinacionEliminableDto>> ListarCoordinacionesEliminablesAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        string? sucursalNombre = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Elimina una coordinacion completa (asignacion + turnos + sesiones) con
+    /// doble validacion:
+    ///   Paso 1: verifica que la asignacion aparece en la lista eliminable.
+    ///   Paso 2: re-verifica dentro de la transaccion, justo antes del delete,
+    ///           que no aparecio ninguna HC/nota en la ventana (carrera).
+    /// Si algun paso falla lanza <see cref="InvalidOperationException"/>.
+    /// La asignacion vuelve al estado "no coordinado": se puede volver a coordinar
+    /// (o eliminar del lote desde /asignacion).
+    /// </summary>
+    Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default);
 }

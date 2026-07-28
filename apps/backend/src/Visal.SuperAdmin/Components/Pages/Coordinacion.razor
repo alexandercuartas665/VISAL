@@ -292,6 +292,128 @@
         </div>
     }
 }
+else if (_tabSel == "Coordinaciones")
+{
+    @if (_modulos.Count == 0)
+    {
+        <div class="ase-card"><div class="ase-empty cd-no-perm">Sin permisos de coordinacion.</div></div>
+    }
+    else
+    {
+        <div class="ase-card">
+            <div class="cd-coord-h">
+                <div>
+                    <div class="ase-card-h" style="margin-bottom:2px;">Coordinaciones eliminables</div>
+                    <div class="small text-muted">Asignaciones ya coordinadas (con turnos programados) pero sin ninguna atencion iniciada. Se pueden eliminar completas mientras no exista ninguna historia clinica ni nota — abierta, cerrada o descartada. El sistema re-valida al momento de eliminar para evitar carreras.</div>
+                </div>
+                <button class="btn btn-primary btn-sm" @onclick="CargarCoordinaciones" disabled="@_busy">
+                    @(_busy ? "Cargando..." : "Refrescar")
+                </button>
+            </div>
+
+            @if (_coordList is null)
+            {
+                <div class="ase-empty">Presiona "Refrescar" para cargar la lista.</div>
+            }
+            else if (_coordList.Count == 0)
+            {
+                <div class="ase-empty">No hay coordinaciones eliminables. Cualquier asignacion coordinada ya tiene HC o notas asociadas (no se puede borrar sin perder datos clinicos).</div>
+            }
+            else
+            {
+                <div class="cd-coord-count">@_coordList.Count coordinacion(es) sin actividad clinica.</div>
+                <div class="table-responsive">
+                    <table class="table table-sm cd-coord-tbl">
+                        <thead>
+                            <tr>
+                                <th>Paciente</th>
+                                <th>Contrato</th>
+                                <th>Servicio</th>
+                                <th>Sede</th>
+                                <th class="text-end">Cant.</th>
+                                <th class="text-end">Turnos</th>
+                                <th class="text-end">Sesiones</th>
+                                <th>Especialistas</th>
+                                <th>Ventana</th>
+                                <th class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var c in _coordList)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="fw-600">@c.PacienteNombre</div>
+                                    <div class="small text-muted">@c.PacienteDoc</div>
+                                </td>
+                                <td>@c.ContratoCodigo</td>
+                                <td>
+                                    <div>@c.NombreServicio</div>
+                                    <div class="small text-muted">@c.TipoServicio</div>
+                                </td>
+                                <td class="small">@c.Sucursal</td>
+                                <td class="text-end">@c.Cantidad</td>
+                                <td class="text-end">@c.TurnosCoordinados</td>
+                                <td class="text-end">@c.SesionesProgramadas</td>
+                                <td class="small">@(string.IsNullOrWhiteSpace(c.EspecialistasNombres) ? "-" : c.EspecialistasNombres)</td>
+                                <td class="small">
+                                    @if (c.PrimeraFecha is DateOnly pf && c.UltimaFecha is DateOnly uf)
+                                    {
+                                        @(pf.ToString("yyyy-MM-dd"))<text> </text><span class="text-muted">→</span><text> </text>@(uf.ToString("yyyy-MM-dd"))
+                                    }
+                                    else { <span class="text-muted">-</span> }
+                                </td>
+                                <td class="text-center">
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => AbrirModalEliminarCoord(c)" title="Eliminar coordinacion">
+                                        Eliminar
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        @if (_coordEliminar is not null)
+        {
+            @* Doble confirmacion: primero se pide teclear "ELIMINAR", segundo el
+               backend re-valida ausencia de HC/nota. *@
+            <div class="cd-coord-overlay" @onclick="CerrarModalEliminarCoord">
+                <div class="cd-coord-modal" @onclick:stopPropagation>
+                    <div class="cd-coord-modal-h">Confirmar eliminacion de coordinacion</div>
+                    <div class="cd-coord-modal-b">
+                        <div class="alert alert-warning small mb-2">
+                            Esta operacion elimina la asignacion y todos sus turnos/sesiones. No es reversible.
+                            El sistema verifica antes de eliminar que no haya historias clinicas ni notas medicas asociadas.
+                        </div>
+                        <div class="small mb-2">
+                            <strong>Paciente:</strong> @_coordEliminar.PacienteNombre (@_coordEliminar.PacienteDoc)<br />
+                            <strong>Servicio:</strong> @_coordEliminar.NombreServicio (@_coordEliminar.Cantidad) &middot;
+                            <strong>Turnos:</strong> @_coordEliminar.TurnosCoordinados &middot;
+                            <strong>Sesiones:</strong> @_coordEliminar.SesionesProgramadas<br />
+                            <strong>Especialistas:</strong> @(string.IsNullOrWhiteSpace(_coordEliminar.EspecialistasNombres) ? "-" : _coordEliminar.EspecialistasNombres)
+                        </div>
+                        <label class="small fw-600">Para confirmar, escribe <code>ELIMINAR</code>:</label>
+                        <input class="form-control form-control-sm" @bind="_coordConfirmText" @bind:event="oninput" />
+                        @if (_coordEliminarErr is not null)
+                        {
+                            <div class="alert alert-danger small mt-2 mb-0">@_coordEliminarErr</div>
+                        }
+                    </div>
+                    <div class="cd-coord-modal-f">
+                        <button class="btn btn-secondary btn-sm" @onclick="CerrarModalEliminarCoord" disabled="@_coordEliminarBusy">Cancelar</button>
+                        <button class="btn btn-danger btn-sm" @onclick="ConfirmarEliminarCoord"
+                                disabled="@(_coordEliminarBusy || _coordConfirmText != "ELIMINAR")">
+                            @(_coordEliminarBusy ? "Eliminando..." : "Confirmar eliminacion")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+}
 else if (_tabSel == "Kanban")
 {
     @if (_modulos.Count == 0)
@@ -441,6 +563,17 @@ else if (_tabSel == "Calendario")
 }
 
 <style>
+    /* Tab Coordinaciones */
+    .cd-coord-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+    .cd-coord-count { font-size: 12px; color: #64748b; margin-bottom: 6px; font-weight: 600; }
+    .cd-coord-tbl thead th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .03em; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    .cd-coord-tbl td { vertical-align: middle; font-size: 13px; }
+    .cd-coord-tbl .fw-600 { font-weight: 600; color: #0f172a; }
+    .cd-coord-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; z-index: 1050; padding: 20px; }
+    .cd-coord-modal { background: #fff; border-radius: 10px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.25); overflow: hidden; }
+    .cd-coord-modal-h { padding: 14px 18px; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-size: 15px; color: #0f172a; }
+    .cd-coord-modal-b { padding: 16px 18px; }
+    .cd-coord-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px; background: #f8fafc; }
     .cd-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 14px; }
     .cd-tab { padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 13px; font-weight: 600; cursor: pointer; }
     .cd-tab.sel { color: #1565c0; border-bottom-color: #1565c0; }
@@ -648,7 +781,7 @@ else if (_tabSel == "Calendario")
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private readonly string[] _tabs = new[] { "Solicitudes", "Kanban", "Calendario" };
+    private readonly string[] _tabs = new[] { "Solicitudes", "Coordinaciones", "Kanban", "Calendario" };
     private string _tabSel = "Solicitudes";
 
     // Permisos del usuario logueado (que modulos puede coordinar).
@@ -1102,6 +1235,60 @@ else if (_tabSel == "Calendario")
         _error = null; _ok = null;
         if (tab == "Kanban" && _kbCards.Count == 0) { await CargarKanban(); }
         else if (tab == "Calendario" && _calChips.Count == 0) { await CargarCalendario(); }
+        else if (tab == "Coordinaciones" && _coordList is null) { await CargarCoordinaciones(); }
+    }
+
+    // ============ Tab Coordinaciones (asignaciones eliminables) ============
+    private List<CoordinacionEliminableDto>? _coordList;
+    private CoordinacionEliminableDto? _coordEliminar;
+    private string _coordConfirmText = "";
+    private bool _coordEliminarBusy;
+    private string? _coordEliminarErr;
+
+    private async Task CargarCoordinaciones()
+    {
+        if (_modulos.Count == 0) { return; }
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var raw = await Svc.ListarCoordinacionesEliminablesAsync(_modulos, _miSucursalNombre);
+            _coordList = raw.ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void AbrirModalEliminarCoord(CoordinacionEliminableDto c)
+    {
+        _coordEliminar = c;
+        _coordConfirmText = "";
+        _coordEliminarErr = null;
+    }
+
+    private void CerrarModalEliminarCoord()
+    {
+        if (_coordEliminarBusy) { return; }
+        _coordEliminar = null;
+        _coordConfirmText = "";
+        _coordEliminarErr = null;
+    }
+
+    private async Task ConfirmarEliminarCoord()
+    {
+        if (_coordEliminar is null || _coordConfirmText != "ELIMINAR") { return; }
+        _coordEliminarBusy = true; _coordEliminarErr = null;
+        try
+        {
+            await Svc.EliminarCoordinacionAsync(_coordEliminar.AsignacionId, Guid.Empty);
+            var eliminadoId = _coordEliminar.AsignacionId;
+            _coordEliminar = null;
+            _coordConfirmText = "";
+            _coordList?.RemoveAll(x => x.AsignacionId == eliminadoId);
+            _ok = "Coordinacion eliminada correctamente.";
+        }
+        catch (InvalidOperationException ex) { _coordEliminarErr = ex.Message; }
+        catch (Exception ex) { _coordEliminarErr = "Error inesperado: " + ex.Message; }
+        finally { _coordEliminarBusy = false; }
     }
 
     private async Task CargarKanban()

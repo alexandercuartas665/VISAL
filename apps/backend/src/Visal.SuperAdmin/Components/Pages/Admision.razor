@@ -1333,9 +1333,9 @@
     // Clasificacion
     private string? _incapacidad, _grupoRh, _estado;
     private string _tipoUsuario = "", _clasifPaciente = "", _clasifGrupo = "";
-    private string _contrato1 = "", _contrato2 = "", _contrato3 = "";
-    // Lista N de contratos del paciente. Reemplaza los slots _contrato1/2/3
-    // como fuente de verdad; los slots quedan para dual-write del backend.
+    // Lista N de contratos del paciente (fuente de verdad — post-PC4 no
+    // hay slots fijos). Cada fila conserva la aseguradora y el contrato
+    // seleccionados via cascada en la mini tabla.
     private readonly List<ContratoPacienteEdit> _contratosEdit = new();
     // Cache lazy de contratos por aseguradora. Cada aseguradora que un row de
     // _contratosEdit toca se pide una sola vez al backend y se guarda aqui.
@@ -1709,7 +1709,6 @@
     private async Task OnIpsComentaChanged(ChangeEventArgs e)
     {
         _ipsComenta = e.Value?.ToString() ?? "";
-        _contrato1 = _contrato2 = _contrato3 = "";
         if (Guid.TryParse(_ipsComenta, out var iid))
         {
             _contratosAse = (await AseSvc.ListContratosAsync(iid)).ToList();
@@ -1809,7 +1808,6 @@
         _diasEst = _opIngreso = null;
         _incapacidad = _grupoRh = _estado = null;
         _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
-        _contrato1 = _contrato2 = _contrato3 = "";
         _contratosEdit.Clear();
         _estrato = _sexo = _estadoCivil = _zona = _ocupacion = _regimen = null;
         _dxPrincipal = _tutela = null;
@@ -1851,9 +1849,6 @@
         _tipoUsuario = d.TipoUsuarioId?.ToString() ?? "";
         _clasifPaciente = d.ClasificacionPacienteId?.ToString() ?? "";
         _clasifGrupo = d.ClasificacionGrupoPatologiaId?.ToString() ?? "";
-        _contrato1 = d.Contrato1Id?.ToString() ?? "";
-        _contrato2 = d.Contrato2Id?.ToString() ?? "";
-        _contrato3 = d.Contrato3Id?.ToString() ?? "";
         // Cargar lista N de contratos (fuente de verdad post-PC1).
         _contratosEdit.Clear();
         foreach (var c in d.Contratos.OrderBy(x => x.Orden))
@@ -1937,7 +1932,6 @@
                 _incapacidad, _grupoRh, Try(_tipoUsuario), _estado,
                 Try(_clasifPaciente), Try(_clasifGrupo),
                 _estrato, _sexo, _estadoCivil, _zona, _ocupacion, _regimen,
-                Try(_contrato1), Try(_contrato2), Try(_contrato3),
                 _contratosEdit
                     .Where(c => c.ContratoId is Guid)
                     .Select((c, i) => new PacienteContratoDto(
@@ -2334,6 +2328,25 @@
                     DateOnly? PickD(DateOnly? excel, DateOnly? actual) => excel ?? actual;
                     Guid? PickG(Guid? excel, Guid? actual) => excel ?? actual;
 
+                    // PC-4: convierte los 3 slots del Excel en la lista N que
+                    // espera SavePacienteRequest. Cada slot del Excel que trae
+                    // Guid arma un PacienteContratoDto con Orden 1/2/3. Si el
+                    // Excel no trae c1/c2/c3, arrastra la lista previa del
+                    // paciente para no perder datos existentes en un merge.
+                    IReadOnlyList<PacienteContratoDto> BuildContratosListFromImport(
+                        Guid? c1, Guid? c2, Guid? c3, PacienteDetailDto? prev)
+                    {
+                        var slotsExcel = new[] { c1, c2, c3 }
+                            .Where(g => g is Guid)
+                            .Select((g, i) => new PacienteContratoDto(
+                                null, g!.Value, null, null, null, i + 1))
+                            .ToList();
+                        if (slotsExcel.Count > 0) { return slotsExcel; }
+                        // Merge fallback: sin slots del Excel, preservamos la
+                        // lista que ya tenia el paciente en paciente_contratos.
+                        return prev?.Contratos ?? Array.Empty<PacienteContratoDto>();
+                    }
+
                     activo = activoExplicito
                         ? string.Equals(activoCell, "SI", StringComparison.OrdinalIgnoreCase)
                         : (prev?.Activo ?? true);
@@ -2369,10 +2382,10 @@
                         Zona: Trunc(Pick(zona, prev?.Zona), 120),
                         Ocupacion: Trunc(Pick(ocupacion, prev?.Ocupacion), 120),
                         Regimen: Trunc(Pick(regimen, prev?.Regimen), 120),
-                        Contrato1Id: PickG(c1, prev?.Contrato1Id),
-                        Contrato2Id: PickG(c2, prev?.Contrato2Id),
-                        Contrato3Id: PickG(c3, prev?.Contrato3Id),
-                        Contratos: null, // import Excel: dual-write via slots hasta migrar plantilla a lista N
+                        // PC-4: los slots viejos ya no existen. Convertimos c1/c2/c3
+                        // del Excel + los contratos previos del paciente en la lista N
+                        // que espera SavePacienteRequest.
+                        Contratos: BuildContratosListFromImport(c1, c2, c3, prev),
                         Cie10Id: prev?.Cie10Id,
                         Cie10Codigo: Trunc(Pick(cieCodigo, prev?.Cie10Codigo), 30),
                         DiagnosticoPrincipal: Trunc(Pick(diag, prev?.DiagnosticoPrincipal), 500),

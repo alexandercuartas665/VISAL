@@ -66,11 +66,20 @@ public sealed class RelacionFacturasSelectorV3Tests
             Id = Guid.NewGuid(), TenantId = TenantId,
             TipoDocumento = "CC", NumeroDocumento = doc,
             NombreCompleto = "PAC " + doc,
-            Contrato1Id = contratoId,
             AseguradoraId = s.AseguradoraId,
             SedeAtencionId = sedeId
         };
         s.Ctx.Pacientes.Add(p);
+        // Post-PC4: el contrato del paciente se persiste en paciente_contratos,
+        // no en slots fijos. Sembramos una fila orden=1 apuntando al contrato.
+        s.Ctx.PacienteContratos.Add(new PacienteContrato
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            PacienteId = p.Id,
+            ContratoAseguradoraId = contratoId,
+            Orden = 1
+        });
         await s.Ctx.SaveChangesAsync();
         return p.Id;
     }

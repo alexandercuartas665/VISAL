@@ -19,27 +19,14 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             sedeNombre = await db.Sucursales.AsNoTracking().Where(s => s.Id == sid).Select(s => s.Nombre).FirstOrDefaultAsync(ct);
         }
 
-        // Contratos: lee la tabla N:M paciente_contratos (fuente de verdad
-        // post-PC1) ordenada por Orden. El orden=1 es el default que auto-
-        // selecciona la UI de /asignacion. Los contratos pueden pertenecer
-        // a aseguradoras distintas (multi-EPS por paciente).
-        //
-        // Fallback: si la lista N esta vacia (paciente viejo migrado antes de
-        // que backfill llegara, o dato manual con slots pero sin lista), leer
-        // los slots Contrato1/2/3Id como antes. Esto mantiene compat hasta
-        // que PC-4 borre los slots.
+        // Contratos: unica fuente de verdad es la tabla N:M paciente_contratos
+        // ordenada por Orden. El orden=1 es el default que auto-selecciona
+        // la UI de /asignacion. Post-PC4 los slots viejos ya no existen.
         var idsOrdenados = await db.PacienteContratos.AsNoTracking()
             .Where(pc => pc.PacienteId == p.Id)
             .OrderBy(pc => pc.Orden)
             .Select(pc => pc.ContratoAseguradoraId)
             .ToArrayAsync(ct);
-        if (idsOrdenados.Length == 0)
-        {
-            idsOrdenados = new[] { p.Contrato1Id, p.Contrato2Id, p.Contrato3Id }
-                .Where(g => g is not null)
-                .Select(g => g!.Value)
-                .ToArray();
-        }
         var contratos = new List<ContratoMiniDto>();
         if (idsOrdenados.Length > 0)
         {

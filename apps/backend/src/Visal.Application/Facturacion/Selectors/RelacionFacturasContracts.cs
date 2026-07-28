@@ -24,11 +24,11 @@ public sealed record RelacionFacturasFiltros(
 ///
 /// Criterio actual (v3): 1 hecho = 1 <see cref="HistoriaClinica"/> con
 /// <c>Estado = Cerrada</c> cuya <c>fecha_cierre</c> cae en el rango. El
-/// vinculo con la aseguradora se resuelve por el contrato principal del
-/// paciente (<c>Paciente.Contrato1Id</c> / 2 / 3) o por <c>Paciente.AseguradoraId</c>
-/// directo, en ese orden. Los campos de sesion/turno/asignacion/servicio/paquete
-/// se dejan nullable — v3 no los usa, pero el record los mantiene para
-/// backward-compat con builders/tests que puedan haberlos referenciado antes.
+/// vinculo con la aseguradora se resuelve por el primer contrato del paciente
+/// en <c>paciente_contratos</c> que apunte a la aseguradora filtrada. Los
+/// campos de sesion/turno/asignacion/servicio/paquete se dejan nullable — v3
+/// no los usa, pero el record los mantiene para backward-compat con builders
+/// y tests que puedan haberlos referenciado antes.
 /// </summary>
 public sealed record RelacionFacturasHecho(
     HistoriaClinica Hc,

@@ -61,10 +61,9 @@ public class Paciente : TenantEntity
     public string? Ocupacion { get; set; }
     public string? Regimen { get; set; }
 
-    // ===== Contratos (FK a catalogos_paciente tipo=Contrato) =====
-    public Guid? Contrato1Id { get; set; }
-    public Guid? Contrato2Id { get; set; }
-    public Guid? Contrato3Id { get; set; }
+    // ===== Contratos =====
+    // (Los slots fijos Contrato1/2/3Id fueron reemplazados por la tabla N:M
+    // paciente_contratos en PC-1..PC-4. Ver la entidad PacienteContrato.)
 
     // ===== Diagnostico =====
     /// <summary>FK a tabla local cie10_diagnosticos (deprecated: usar Cie10Codigo).</summary>

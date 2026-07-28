@@ -9,14 +9,14 @@ using Xunit;
 namespace Visal.Application.Tests;
 
 /// <summary>
-/// Tests del modelo N:M paciente_contratos (PC-1..PC-3). Verifica:
-///   - Save con lista Contratos deriva los slots 1/2/3 en el orden correcto
-///     (dual-write hasta que PC-4 borre los slots).
-///   - Sincronizacion: al reguardar con lista distinta se refresca la tabla.
-///   - Contratos != null pero vacio limpia la tabla y los slots.
-///   - Contratos == null preserva los slots del request (payload viejo).
-///   - GetPacienteAsync de /asignacion lee la tabla N ordenada por Orden y
-///     cae en fallback a los slots si la tabla esta vacia.
+/// Tests del modelo N:M paciente_contratos (post-PC4, sin slots viejos).
+/// Verifica:
+///   - Save con lista N crea filas en paciente_contratos por Orden.
+///   - Resave con lista distinta borra + recrea (dedup por unique).
+///   - Save con lista vacia limpia todas las filas.
+///   - GetPacienteAsync de /asignacion devuelve la lista N ordenada.
+///   - Paciente sin contratos devuelve Contratos vacio (sin fallback a slots
+///     porque los slots ya no existen).
 /// </summary>
 public sealed class PacienteContratosTests
 {
@@ -46,9 +46,7 @@ public sealed class PacienteContratosTests
         return new VisalDbContext(opts, new FakeTenantContext { TenantId = Tenant });
     }
 
-    /// <summary>Siembra una aseguradora + N contratos activos. Devuelve la lista
-    /// de contratos creados en el orden pedido.</summary>
-    private static async Task<List<Guid>> SembrarContratos(VisalDbContext db, int n, string prefijoCodigo = "C-")
+    private static async Task<List<Guid>> SembrarContratos(VisalDbContext db, int n)
     {
         var ase = new Aseguradora { Id = Guid.NewGuid(), TenantId = Tenant, Codigo = "EPS-1", Nombre = "EPS Test" };
         db.Aseguradoras.Add(ase);
@@ -60,7 +58,7 @@ public sealed class PacienteContratosTests
                 Id = Guid.NewGuid(),
                 TenantId = Tenant,
                 AseguradoraId = ase.Id,
-                CodigoContrato = $"{prefijoCodigo}{i:D3}",
+                CodigoContrato = $"C-{i:D3}",
                 Estado = "Activo",
                 RequierePdfAutorizacion = false
             };
@@ -72,8 +70,7 @@ public sealed class PacienteContratosTests
     }
 
     private static SavePacienteRequest Req(Guid? id, string doc,
-        IReadOnlyList<PacienteContratoDto>? contratos,
-        Guid? c1 = null, Guid? c2 = null, Guid? c3 = null)
+        IReadOnlyList<PacienteContratoDto> contratos)
     {
         return new SavePacienteRequest(
             id, doc, "CC",
@@ -85,7 +82,6 @@ public sealed class PacienteContratosTests
             null, null, null, null,
             null, null,
             null, null, null, null, null, null,
-            c1, c2, c3,
             contratos,
             null, null, null,
             null, null, null,
@@ -99,13 +95,13 @@ public sealed class PacienteContratosTests
     }
 
     [Fact]
-    public async Task Save_con_lista_N_deriva_slots_en_orden()
+    public async Task Save_persiste_lista_N_por_orden()
     {
-        using var db = NewCtx(nameof(Save_con_lista_N_deriva_slots_en_orden));
+        using var db = NewCtx(nameof(Save_persiste_lista_N_por_orden));
         var cs = await SembrarContratos(db, 3);
         var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
-        // Envio los contratos en orden 3, 1, 2 -> los slots deben quedar 3, 1, 2.
+        // Envio los contratos en orden 3, 1, 2 -> el DTO devuelve en ese mismo orden.
         var lista = new List<PacienteContratoDto>
         {
             new(null, cs[2], null, null, null, 1),
@@ -115,27 +111,23 @@ public sealed class PacienteContratosTests
         var saved = await svc.SaveAsync(Req(null, "111", lista), Actor);
 
         Assert.NotNull(saved);
-        Assert.Equal(cs[2], saved!.Contrato1Id);
-        Assert.Equal(cs[0], saved.Contrato2Id);
-        Assert.Equal(cs[1], saved.Contrato3Id);
-        Assert.Equal(3, saved.Contratos.Count);
+        Assert.Equal(3, saved!.Contratos.Count);
         Assert.Equal(cs[2], saved.Contratos[0].ContratoAseguradoraId);
+        Assert.Equal(cs[0], saved.Contratos[1].ContratoAseguradoraId);
+        Assert.Equal(cs[1], saved.Contratos[2].ContratoAseguradoraId);
     }
 
     [Fact]
-    public async Task Save_lista_de_5_solo_pobla_los_3_slots_y_persiste_los_5_en_tabla()
+    public async Task Save_lista_de_5_persiste_los_5()
     {
-        using var db = NewCtx(nameof(Save_lista_de_5_solo_pobla_los_3_slots_y_persiste_los_5_en_tabla));
+        using var db = NewCtx(nameof(Save_lista_de_5_persiste_los_5));
         var cs = await SembrarContratos(db, 5);
         var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         var lista = cs.Select((cid, i) => new PacienteContratoDto(null, cid, null, null, null, i + 1)).ToList();
         var saved = await svc.SaveAsync(Req(null, "222", lista), Actor);
 
-        Assert.Equal(cs[0], saved!.Contrato1Id);
-        Assert.Equal(cs[1], saved.Contrato2Id);
-        Assert.Equal(cs[2], saved.Contrato3Id);
-        Assert.Equal(5, saved.Contratos.Count);
+        Assert.Equal(5, saved!.Contratos.Count);
     }
 
     [Fact]
@@ -156,45 +148,22 @@ public sealed class PacienteContratosTests
         Assert.Equal(2, saved2!.Contratos.Count);
         Assert.Equal(cs[2], saved2.Contratos[0].ContratoAseguradoraId);
         Assert.Equal(cs[0], saved2.Contratos[1].ContratoAseguradoraId);
-        Assert.Equal(cs[2], saved2.Contrato1Id);
-        Assert.Equal(cs[0], saved2.Contrato2Id);
-        Assert.Null(saved2.Contrato3Id);
     }
 
     [Fact]
-    public async Task Save_lista_vacia_limpia_tabla_y_slots()
+    public async Task Save_lista_vacia_limpia_todas_las_filas()
     {
-        using var db = NewCtx(nameof(Save_lista_vacia_limpia_tabla_y_slots));
+        using var db = NewCtx(nameof(Save_lista_vacia_limpia_todas_las_filas));
         var cs = await SembrarContratos(db, 2);
         var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         var saved1 = await svc.SaveAsync(Req(null, "444",
             new List<PacienteContratoDto> { new(null, cs[0], null, null, null, 1) }), Actor);
-        Assert.NotNull(saved1!.Contrato1Id);
+        Assert.Single(saved1!.Contratos);
 
         var saved2 = await svc.SaveAsync(Req(saved1.Id, "444",
             Array.Empty<PacienteContratoDto>()), Actor);
-        Assert.Null(saved2!.Contrato1Id);
-        Assert.Null(saved2.Contrato2Id);
-        Assert.Null(saved2.Contrato3Id);
-        Assert.Empty(saved2.Contratos);
-    }
-
-    [Fact]
-    public async Task Save_con_lista_null_respeta_slots_del_request()
-    {
-        // Simula caller viejo (import Excel) que aun pasa slots posicionales.
-        using var db = NewCtx(nameof(Save_con_lista_null_respeta_slots_del_request));
-        var cs = await SembrarContratos(db, 2);
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
-
-        var saved = await svc.SaveAsync(Req(null, "555", null, c1: cs[0], c2: cs[1]), Actor);
-
-        Assert.Equal(cs[0], saved!.Contrato1Id);
-        Assert.Equal(cs[1], saved.Contrato2Id);
-        // Sin lista N -> paciente_contratos queda vacia (dependera de PC-3
-        // fallback a slots para /asignacion).
-        Assert.Empty(saved.Contratos);
+        Assert.Empty(saved2!.Contratos);
     }
 
     [Fact]
@@ -225,22 +194,19 @@ public sealed class PacienteContratosTests
     }
 
     [Fact]
-    public async Task Asignacion_fallback_a_slots_si_tabla_N_vacia()
+    public async Task Asignacion_paciente_sin_contratos_devuelve_lista_vacia()
     {
-        // Paciente creado con slots pero sin filas en paciente_contratos
-        // (payload viejo o dato manual): /asignacion cae al fallback y
-        // devuelve los 3 slots en orden 1/2/3.
-        using var db = NewCtx(nameof(Asignacion_fallback_a_slots_si_tabla_N_vacia));
-        var cs = await SembrarContratos(db, 3);
+        // Post-PC4 ya no hay slots viejos ni fallback: paciente sin filas en
+        // paciente_contratos aparece con Contratos vacio en /asignacion.
+        using var db = NewCtx(nameof(Asignacion_paciente_sin_contratos_devuelve_lista_vacia));
+        await SembrarContratos(db, 3); // creo contratos pero no los asocio al paciente.
         var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
-        var saved = await svc.SaveAsync(Req(null, "777", null, c1: cs[2], c2: cs[0]), Actor);
+        var saved = await svc.SaveAsync(Req(null, "777", Array.Empty<PacienteContratoDto>()), Actor);
 
         var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant });
         var pAsig = await asig.GetPacienteAsync(saved!.Id);
 
         Assert.NotNull(pAsig);
-        Assert.Equal(2, pAsig!.Contratos.Count);
-        Assert.Equal(cs[2], pAsig.Contratos[0].ContratoId);
-        Assert.Equal(cs[0], pAsig.Contratos[1].ContratoId);
+        Assert.Empty(pAsig!.Contratos);
     }
 }

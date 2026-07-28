@@ -18,8 +18,8 @@ namespace Visal.Application.Facturacion.Selectors;
 /// - Unidad base: <see cref="HistoriaClinica"/> con Estado = Cerrada.
 /// - Filtro fecha: <c>fecha_cierre</c> en [FechaInicio, FechaFin].
 /// - Filtro EPS: el paciente pertenece a la aseguradora filtrada por alguno
-///   de sus 3 contratos (<c>Paciente.Contrato1Id/2/3</c>). Si el paciente no
-///   tiene ninguno de esos 3, se descarta.
+///   de sus contratos en <c>paciente_contratos</c>. Si el paciente no tiene
+///   ningun contrato de esa EPS, se descarta.
 /// - Filtro sucursal: <c>Paciente.SedeAtencionId</c> debe estar en la lista;
 ///   lista vacia = todas.
 /// - Gate HC-revisada-por-sede: si la sede exige revision (Sucursal.
@@ -94,6 +94,20 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         }
         var pacientePorId = pacientes.ToDictionary(p => p.Id);
 
+        // 3.2) Contratos de los pacientes (tabla N post-PC4). Precargamos
+        //      lookup pacienteId -> lista ordenada de contrato_ids para
+        //      resolver luego cual apunta a la EPS filtrada.
+        var pacIds = pacientes.Select(p => p.Id).ToList();
+        var pacContratosOrdenados = pacIds.Count == 0
+            ? new Dictionary<Guid, List<Guid>>()
+            : (await db.PacienteContratos.AsNoTracking()
+                .Where(pc => pacIds.Contains(pc.PacienteId))
+                .OrderBy(pc => pc.PacienteId).ThenBy(pc => pc.Orden)
+                .Select(pc => new { pc.PacienteId, pc.ContratoAseguradoraId })
+                .ToListAsync(ct))
+                .GroupBy(x => x.PacienteId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.ContratoAseguradoraId).ToList());
+
         // 4) Sucursales + prep del gate de revision.
         var sucursales = await db.Sucursales.AsNoTracking().ToListAsync(ct);
         var sucursalPorId = sucursales.ToDictionary(s => s.Id);
@@ -121,9 +135,10 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         {
             if (!pacientePorId.TryGetValue(hc.PacienteId, out var paciente)) { continue; }
 
-            // Aseguradora del paciente: uno de los 3 contratos debe apuntar a la
-            // aseguradora filtrada. Sin match = no facturable a esta EPS.
-            var contratoIdPaciente = ResolverContratoDelPaciente(paciente, contratoIdsSet);
+            // Aseguradora del paciente: alguno de sus contratos (orden 1..N)
+            // debe apuntar a la aseguradora filtrada. Preferimos el orden mas
+            // bajo si multiples matchean. Sin match = no facturable a esta EPS.
+            var contratoIdPaciente = ResolverContratoDelPaciente(paciente.Id, pacContratosOrdenados, contratoIdsSet);
             if (contratoIdPaciente is not Guid cid || !contratoPorId.TryGetValue(cid, out var contrato)) { continue; }
 
             // Sucursal del paciente.
@@ -355,14 +370,19 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
     /// <summary>
     /// Devuelve el ContratoAseguradora.Id del paciente que apunta a la aseguradora
     /// filtrada (representada por <paramref name="contratoIdsPermitidos"/>).
-    /// Prioridad: Contrato1 -> Contrato2 -> Contrato3. Devuelve null si ninguno
-    /// coincide (el paciente no factura a esa EPS).
+    /// Recorre la lista N de contratos del paciente ordenada por Orden y
+    /// devuelve el primero que matchee. Null si ninguno coincide.
     /// </summary>
-    private static Guid? ResolverContratoDelPaciente(Paciente p, HashSet<Guid> contratoIdsPermitidos)
+    private static Guid? ResolverContratoDelPaciente(
+        Guid pacienteId,
+        IReadOnlyDictionary<Guid, List<Guid>> pacContratosOrdenados,
+        HashSet<Guid> contratoIdsPermitidos)
     {
-        if (p.Contrato1Id is Guid c1 && contratoIdsPermitidos.Contains(c1)) { return c1; }
-        if (p.Contrato2Id is Guid c2 && contratoIdsPermitidos.Contains(c2)) { return c2; }
-        if (p.Contrato3Id is Guid c3 && contratoIdsPermitidos.Contains(c3)) { return c3; }
+        if (!pacContratosOrdenados.TryGetValue(pacienteId, out var lista)) { return null; }
+        foreach (var cid in lista)
+        {
+            if (contratoIdsPermitidos.Contains(cid)) { return cid; }
+        }
         return null;
     }
 

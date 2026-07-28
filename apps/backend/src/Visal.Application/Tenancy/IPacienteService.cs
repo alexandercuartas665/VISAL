@@ -43,10 +43,7 @@ public sealed record PacienteDetailDto(
     Guid? ClasificacionPacienteId, Guid? ClasificacionGrupoPatologiaId,
     string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
     string? Ocupacion, string? Regimen,
-    // Contratos legacy (slots fijos - los mantiene el dual-write hasta que
-    // /asignacion consuma la lista N; leer Contratos para ver el modelo real).
-    Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
-    // Lista N de contratos del paciente (fuente de verdad post-PC1).
+    // Contratos: lista N via tabla paciente_contratos (fuente de verdad).
     IReadOnlyList<PacienteContratoDto> Contratos,
     // Diagnostico
     Guid? Cie10Id, string? Cie10Codigo, string? DiagnosticoPrincipal,
@@ -83,14 +80,9 @@ public sealed record SavePacienteRequest(
     Guid? ClasificacionPacienteId, Guid? ClasificacionGrupoPatologiaId,
     string? EstratoSocial, string? Sexo, string? EstadoCivil, string? Zona,
     string? Ocupacion, string? Regimen,
-    // Contratos legacy (slots fijos, ignorados si Contratos != null).
-    // Cuando la UI nueva envia Contratos, el servidor toma los primeros 3
-    // por Orden y los replica aqui para dual-write hasta que /asignacion migre.
-    Guid? Contrato1Id, Guid? Contrato2Id, Guid? Contrato3Id,
-    // Lista N de contratos del paciente (fuente de verdad para el save).
-    // Null en llamadas de sistemas viejos: se ignora la lista y se dual-writea
-    // desde los slots 1/2/3. Vacio: se limpian los contratos.
-    IReadOnlyList<PacienteContratoDto>? Contratos,
+    // Contratos: lista N (fuente de verdad post-PC4). Vacio limpia; el
+    // servidor persiste en paciente_contratos.
+    IReadOnlyList<PacienteContratoDto> Contratos,
     // Diagnostico
     Guid? Cie10Id, string? Cie10Codigo, string? DiagnosticoPrincipal,
     // Tutela

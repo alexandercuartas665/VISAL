@@ -66,7 +66,6 @@ public sealed class PacienteService : IPacienteService
             p.ClasificacionPacienteId, p.ClasificacionGrupoPatologiaId,
             p.EstratoSocial, p.Sexo, p.EstadoCivil, p.Zona,
             p.Ocupacion, p.Regimen,
-            p.Contrato1Id, p.Contrato2Id, p.Contrato3Id,
             contratos,
             p.Cie10Id, p.Cie10Codigo, p.DiagnosticoPrincipal,
             p.Tutela, p.TipoTutelaId, p.MedContratadoId,
@@ -139,29 +138,8 @@ public sealed class PacienteService : IPacienteService
         p.Ocupacion = req.Ocupacion?.Trim();
         p.Regimen = req.Regimen?.Trim();
 
-        // Contratos: si la UI nueva envio la lista N (Contratos != null), es
-        // la fuente de verdad y los slots 1/2/3 se derivan de los primeros 3
-        // ordenados por Orden. Si la lista viene null (payload viejo), se
-        // respetan los slots como llegaron — dual-write compatible con la
-        // migracion incremental.
-        if (req.Contratos is IReadOnlyList<PacienteContratoDto> listaContratos)
-        {
-            var top3 = listaContratos
-                .Where(c => c.ContratoAseguradoraId != Guid.Empty)
-                .OrderBy(c => c.Orden)
-                .Take(3)
-                .Select(c => (Guid?)c.ContratoAseguradoraId)
-                .ToList();
-            p.Contrato1Id = top3.Count > 0 ? top3[0] : null;
-            p.Contrato2Id = top3.Count > 1 ? top3[1] : null;
-            p.Contrato3Id = top3.Count > 2 ? top3[2] : null;
-        }
-        else
-        {
-            p.Contrato1Id = req.Contrato1Id;
-            p.Contrato2Id = req.Contrato2Id;
-            p.Contrato3Id = req.Contrato3Id;
-        }
+        // Contratos: la sincronizacion de la tabla N ocurre post-SaveChanges
+        // del paciente (mas abajo). Ya no hay slots fijos que actualizar.
 
         // Diagnostico
         p.Cie10Id = req.Cie10Id;
@@ -236,17 +214,17 @@ public sealed class PacienteService : IPacienteService
             await _db.SaveChangesAsync(ct);
         }
 
-        // Sincronizar lista N de contratos si la UI nueva la envio. Mismo
-        // patron que contactos: borrar todo + reescribir. Es seguro porque
+        // Sincronizar lista N de contratos. Estrategia simple: borrar todos
+        // los existentes y reescribir desde la request. Es seguro porque
         // no hay FKs entrantes a paciente_contratos.
-        if (req.Contratos is IReadOnlyList<PacienteContratoDto> listaCtr && _tenant.TenantId is Guid tidCtr)
+        if (_tenant.TenantId is Guid tidCtr)
         {
             var anteriores = await _db.PacienteContratos
                 .Where(x => x.PacienteId == p.Id)
                 .ToListAsync(ct);
             if (anteriores.Count > 0) { _db.PacienteContratos.RemoveRange(anteriores); }
 
-            var nuevos = listaCtr
+            var nuevos = req.Contratos
                 .Where(c => c.ContratoAseguradoraId != Guid.Empty)
                 .Select((c, i) => new PacienteContrato
                 {
@@ -426,7 +404,10 @@ public sealed class PacienteService : IPacienteService
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return new CerrarPacienteResult(false, new[] { "Paciente no existe" }); }
 
-        var faltantes = ValidarCamposObligatorios(p);
+        // PC-4: al menos un contrato en paciente_contratos (reemplaza check Contrato1Id).
+        var tieneContrato = await _db.PacienteContratos.AsNoTracking()
+            .AnyAsync(pc => pc.PacienteId == p.Id, ct);
+        var faltantes = ValidarCamposObligatorios(p, tieneContrato);
         if (faltantes.Count > 0)
         {
             return new CerrarPacienteResult(false, faltantes);
@@ -470,7 +451,7 @@ public sealed class PacienteService : IPacienteService
     /// son legibles para mostrarlos al usuario en el modal de error.
     /// EXCLUIDOS (opcionales): DiasEstancia, OpIngresoDias, GrupoRh, Email.
     /// </summary>
-    private static List<string> ValidarCamposObligatorios(Paciente p)
+    private static List<string> ValidarCamposObligatorios(Paciente p, bool tieneContrato)
     {
         var faltantes = new List<string>();
         // Identificacion
@@ -488,7 +469,7 @@ public sealed class PacienteService : IPacienteService
         if (p.FechaComentan is null) { faltantes.Add("Fecha comentan"); }
         if (p.AseguradoraId is null) { faltantes.Add("Aseguradora"); }
         if (p.FechaIngresoPad is null) { faltantes.Add("Fecha ingreso PAD"); }
-        if (p.Contrato1Id is null) { faltantes.Add("Contrato 1"); }
+        if (!tieneContrato) { faltantes.Add("Contrato del paciente (al menos uno)"); }
         if (string.IsNullOrWhiteSpace(p.Cie10Codigo)) { faltantes.Add("Codigo CIE-10 / diagnostico"); }
         if (string.IsNullOrWhiteSpace(p.DiagnosticoPrincipal)) { faltantes.Add("Diagnostico principal"); }
         // Clasificaciones

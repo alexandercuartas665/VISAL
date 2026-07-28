@@ -38,7 +38,8 @@ public sealed record OrdenClinicaItemDto(
     /// <summary>Ultima nota o motivo del agente — resumen para el tooltip del chip pre-revision.</summary>
     string? RevisionAgenteResumen = null,
     /// <summary>Aseguradora (EPS) del contrato principal del paciente bajo el cual se
-    /// ejecuto la atencion. Resuelta via Paciente.Contrato1Id -> Contrato.AseguradoraId.
+    /// ejecuto la atencion. Resuelta via el primer contrato del paciente en
+    /// paciente_contratos (orden=1) -> Contrato.AseguradoraId.
     /// Null cuando el paciente no tiene Contrato1 configurado o esta huerfano.</summary>
     string? AseguradoraNombre = null,
     Guid? AseguradoraId = null,

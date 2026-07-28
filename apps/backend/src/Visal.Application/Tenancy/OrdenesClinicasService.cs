@@ -57,16 +57,17 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 x.p.NumeroDocumento.ToLower().Contains(t));
         }
 
-        // Filtro EPS: aplicado antes de OrderBy/Take. Resuelto via subconsulta —
-        // el paciente tiene que tener Contrato1 apuntando a un contrato cuya
-        // aseguradora sea la filtrada. Se hace con IDs pre-calculados para
-        // evitar el mismo problema de traduccion que en el LEFT JOIN.
+        // Filtro EPS: paciente tiene que tener AL MENOS un contrato en la EPS
+        // filtrada (via paciente_contratos, no via los slots viejos). Se
+        // resuelve subquery: contratos_de_esa_ase -> pacientes con al menos
+        // uno de esos contratos en paciente_contratos.
         if (filtro.AseguradoraId is Guid aseFiltro)
         {
-            var contratosDeEsaAse = db.ContratosAseguradora.AsNoTracking()
-                .Where(c => c.AseguradoraId == aseFiltro)
-                .Select(c => (Guid?)c.Id);
-            joined = joined.Where(x => x.p.Contrato1Id != null && contratosDeEsaAse.Contains(x.p.Contrato1Id));
+            var pacientesConEsaAse = db.PacienteContratos.AsNoTracking()
+                .Where(pc => db.ContratosAseguradora.AsNoTracking()
+                    .Any(c => c.Id == pc.ContratoAseguradoraId && c.AseguradoraId == aseFiltro))
+                .Select(pc => pc.PacienteId);
+            joined = joined.Where(x => pacientesConEsaAse.Contains(x.p.Id));
         }
 
         // Filtro Sede: la sucursal esta directamente en el paciente
@@ -190,14 +191,20 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 x => x.Ultimo.Nota ?? x.Ultimo.Motivo);
         }
 
-        // Lookup EPS por paciente: Paciente.Contrato1Id -> Contrato -> Aseguradora.
-        // Resuelto en memoria para evitar problemas de traduccion EF Core con joins
-        // en cascada tras query filters. Solo IDs unicos van al roundtrip.
-        var contrato1Ids = rows
-            .Where(r => r.Pa.Contrato1Id.HasValue)
-            .Select(r => r.Pa.Contrato1Id!.Value)
-            .Distinct()
-            .ToList();
+        // Lookup EPS por paciente: primer contrato del paciente por Orden en
+        // paciente_contratos -> Contrato -> Aseguradora. Post-PC4 no existen
+        // slots fijos; el contrato "principal" es el orden=1.
+        var pacienteIds = rows.Select(r => r.Pa.Id).Distinct().ToList();
+        var pacienteToContratoPrincipal = pacienteIds.Count == 0
+            ? new Dictionary<Guid, Guid>()
+            : (await db.PacienteContratos.AsNoTracking()
+                .Where(pc => pacienteIds.Contains(pc.PacienteId))
+                .OrderBy(pc => pc.PacienteId).ThenBy(pc => pc.Orden)
+                .Select(pc => new { pc.PacienteId, pc.ContratoAseguradoraId })
+                .ToListAsync(ct))
+                .GroupBy(x => x.PacienteId)
+                .ToDictionary(g => g.Key, g => g.First().ContratoAseguradoraId);
+        var contrato1Ids = pacienteToContratoPrincipal.Values.Distinct().ToList();
         var contratoToAse = contrato1Ids.Count == 0
             ? new Dictionary<Guid, Guid>()
             : await db.ContratosAseguradora.AsNoTracking()
@@ -229,7 +236,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         {
             Guid? aseId = null;
             string? aseNombre = null;
-            if (r.Pa.Contrato1Id is Guid c1 && contratoToAse.TryGetValue(c1, out var aId))
+            if (pacienteToContratoPrincipal.TryGetValue(r.Pa.Id, out var c1)
+                && contratoToAse.TryGetValue(c1, out var aId))
             {
                 aseId = aId;
                 aseIdToNombre.TryGetValue(aId, out aseNombre);
@@ -285,21 +293,26 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<IReadOnlyList<AseguradoraOpcionDto>> ListarAseguradorasAsync(CancellationToken ct = default)
     {
-        // Solo aseguradoras que realmente aparecen en el listado — HCs -> Paciente
-        // -> Contrato1 -> Aseguradora. Evita ensuciar el filtro con EPSes que el
-        // tenant configuro pero que nadie usa clinicamente.
+        // Solo aseguradoras que realmente aparecen en el listado — HCs ->
+        // Paciente -> paciente_contratos -> Contrato -> Aseguradora. Evita
+        // ensuciar el filtro con EPSes que el tenant configuro pero que
+        // nadie usa clinicamente.
         //
-        // Partido en dos queries porque EF Core no traduce Distinct()+Join en
-        // cadena tras aplicar query filters de tenant (falla en runtime).
-        var contratoIds = await db.HistoriasClinicas.AsNoTracking()
-            .Join(db.Pacientes.AsNoTracking(), h => h.PacienteId, p => p.Id,
-                (h, p) => p.Contrato1Id)
-            .Where(cid => cid != null)
+        // Partido en dos queries porque EF Core no traduce Distinct()+Join
+        // en cadena tras aplicar query filters de tenant (falla en runtime).
+        // Con lista N: un mismo paciente puede tener N contratos y por lo
+        // tanto contribuir N EPSes al filtro — todas se incluyen.
+        var pacienteIdsConHc = await db.HistoriasClinicas.AsNoTracking()
+            .Select(h => h.PacienteId).Distinct().ToListAsync(ct);
+        if (pacienteIdsConHc.Count == 0) { return Array.Empty<AseguradoraOpcionDto>(); }
+
+        var contratoIdValues = await db.PacienteContratos.AsNoTracking()
+            .Where(pc => pacienteIdsConHc.Contains(pc.PacienteId))
+            .Select(pc => pc.ContratoAseguradoraId)
             .Distinct()
             .ToListAsync(ct);
-        if (contratoIds.Count == 0) { return Array.Empty<AseguradoraOpcionDto>(); }
+        if (contratoIdValues.Count == 0) { return Array.Empty<AseguradoraOpcionDto>(); }
 
-        var contratoIdValues = contratoIds.Select(c => c!.Value).ToList();
         var aseguradoraIds = await db.ContratosAseguradora.AsNoTracking()
             .Where(c => contratoIdValues.Contains(c.Id))
             .Select(c => c.AseguradoraId)

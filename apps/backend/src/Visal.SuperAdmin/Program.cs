@@ -884,7 +884,7 @@ app.MapGet("/api/pacientes/plantilla.xlsx", async (
 
     // Cargar catalogos en paralelo (cada uno es una query independiente).
     var sedes = await sucSvc.ListAsync(soloActivas: true, ct);
-    var aseguradoras = await aseSvc.ListAseguradorasAsync(ct);
+    var aseguradoras = await aseSvc.ListAseguradorasAsync(ct: ct);
     var tiposUsuario = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.TipoUsuario, ct);
     var clasifPac = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionPaciente, ct);
     var clasifGrp = await catSvc.ListAsync(Visal.Domain.Enums.CatalogoPacienteTipo.ClasificacionGrupoPatologia, ct);
@@ -1226,6 +1226,7 @@ app.MapGet("/ordenes/export.xlsx", async (
     Guid? aseguradoraId,
     Guid? sucursalId,
     string? estado,
+    string? formatoCodigo,
     Visal.Application.Tenancy.IOrdenesClinicasService svc,
     CancellationToken ct) =>
 {
@@ -1236,7 +1237,8 @@ app.MapGet("/ordenes/export.xlsx", async (
         Especialista: string.IsNullOrWhiteSpace(especialista) ? null : especialista,
         SoloCerradas: string.Equals(estado, "Cerrada", StringComparison.OrdinalIgnoreCase),
         AseguradoraId: aseguradoraId,
-        SucursalId: sucursalId);
+        SucursalId: sucursalId,
+        FormatoCodigo: string.IsNullOrWhiteSpace(formatoCodigo) ? null : formatoCodigo);
     var archivo = await svc.ExportarExcelAsync(f, ct);
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();

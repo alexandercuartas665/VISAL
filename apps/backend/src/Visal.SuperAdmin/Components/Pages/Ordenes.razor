@@ -472,6 +472,16 @@ else
                 }
             </select>
         </div>
+        <div class="oc-f oc-f-wide">
+            <label>Formato HC</label>
+            <select class="form-select form-select-sm" @bind="_formatoFiltro">
+                <option value="">(Todos)</option>
+                @foreach (var f in _formatos)
+                {
+                    <option value="@f.Codigo">@f.Codigo — @f.Nombre</option>
+                }
+            </select>
+        </div>
         <div class="oc-f">
             <label>Estado</label>
             <select class="form-select form-select-sm" @bind="_estadoFiltro">
@@ -496,6 +506,24 @@ else
                title="Descargar el listado filtrado a Excel">
                 📊 Excel
             </a>
+            @* HCs-Print: imprime todas las HCs Cerradas del paciente en un solo PDF.
+               Cada HC se renderiza con su propio schema y valores. Respeta los
+               filtros de Formato HC y rango de fechas. Habilitado solo cuando el
+               listado esta acotado a un unico paciente. *@
+            @{
+                var pacientesUnicos = _rows.Select(r => r.PacienteId).Distinct().Take(2).ToList();
+                var unicoPacienteId = pacientesUnicos.Count == 1 ? pacientesUnicos[0] : (Guid?)null;
+                var nombreUnicoPaciente = unicoPacienteId is null ? null
+                    : _rows.First(r => r.PacienteId == unicoPacienteId).PacienteNombre;
+            }
+            <button class="btn btn-outline-primary btn-sm"
+                    disabled="@(unicoPacienteId is null || _buscando)"
+                    title="@(unicoPacienteId is null
+                        ? "Filtra por un solo paciente (nombre o documento) para habilitar la impresion masiva de HCs"
+                        : $"Imprimir todas las HCs Cerradas de {nombreUnicoPaciente}")"
+                    @onclick="() => ImprimirHcsPacienteAsync(unicoPacienteId!.Value)">
+                🖨 HCs del paciente
+            </button>
         </div>
     </div>
 
@@ -1214,6 +1242,8 @@ else
     private string _aseguradoraFiltro = "";
     private List<SucursalOpcionDto> _sucursales = new();
     private string _sucursalFiltro = "";
+    private List<FormatoHcOpcionDto> _formatos = new();
+    private string _formatoFiltro = "";
     private List<OrdenClinicaItemDto> _rows = new();
     private bool _buscando;
 
@@ -1238,6 +1268,7 @@ else
         _especialistas = (await OcSvc.ListarEspecialistasAsync()).ToList();
         _aseguradoras = (await OcSvc.ListarAseguradorasAsync()).ToList();
         _sucursales = (await OcSvc.ListarSucursalesAsync()).ToList();
+        _formatos = (await OcSvc.ListarFormatosAsync()).ToList();
         await ResolverPermisosAsync();
         await Buscar();
     }
@@ -1294,7 +1325,8 @@ else
                 Especialista: string.IsNullOrWhiteSpace(_especialista) ? null : _especialista,
                 SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase),
                 AseguradoraId: Guid.TryParse(_aseguradoraFiltro, out var aseId) ? aseId : (Guid?)null,
-                SucursalId: Guid.TryParse(_sucursalFiltro, out var sedeId) ? sedeId : (Guid?)null);
+                SucursalId: Guid.TryParse(_sucursalFiltro, out var sedeId) ? sedeId : (Guid?)null,
+                FormatoCodigo: string.IsNullOrWhiteSpace(_formatoFiltro) ? null : _formatoFiltro);
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -1312,8 +1344,24 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = "";
+        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = "";
         await Buscar();
+    }
+
+    /// <summary>HCs-Print: abre la vista imprimible con TODAS las HCs Cerradas del
+    /// paciente en un solo PDF. Cada HC se renderiza con su schema y valores.
+    /// Respeta el filtro Formato HC + rango de fechas del listado — se pasan por
+    /// query string para acotar el set.</summary>
+    private async Task ImprimirHcsPacienteAsync(Guid pacienteId)
+    {
+        var qs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
+        if (_desde is DateTime d1) { qs.Add($"desde={d1:yyyy-MM-dd}"); }
+        if (_hasta is DateTime d2) { qs.Add($"hasta={d2:yyyy-MM-dd}"); }
+        var url = qs.Count == 0
+            ? $"/imprimir-hcs-paciente/{pacienteId}"
+            : $"/imprimir-hcs-paciente/{pacienteId}?{string.Join("&", qs)}";
+        await JS.InvokeVoidAsync("open", url, "_blank");
     }
 
     /// <summary>Consultar: abre el paquete completo (todos los docs) en vista read-only.</summary>
@@ -1336,6 +1384,7 @@ else
         if (Guid.TryParse(_aseguradoraFiltro, out var aseId)) { qs.Add($"aseguradoraId={aseId}"); }
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
+        if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
         return qs.Count == 0 ? "/ordenes/export.xlsx" : $"/ordenes/export.xlsx?{string.Join("&", qs)}";
     }
 

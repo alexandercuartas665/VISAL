@@ -146,6 +146,18 @@ public interface INotaMedicaService
     Task<IReadOnlyList<NotaMedicaTarjetaDto>> ListarHistorialPacienteAsync(
         Guid pacienteId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Devuelve las notas Definitivas del paciente con contenido completo, para
+    /// impresion masiva ("Imprimir notas del paciente" en /ordenes). Filtros
+    /// opcionales: formatoCodigo restringe a HCs de ese formato (via Codigo o
+    /// CodigoSecundario del FormDefinition); desde/hasta acotan por FechaNota.
+    /// Ordenado por fecha desc para que la impresion muestre lo mas reciente
+    /// primero. Solo notas Definitivas — las Parciales/borrador quedan fuera.
+    /// </summary>
+    Task<IReadOnlyList<NotaMedicaDto>> ListarNotasCompletasPorPacienteAsync(
+        Guid pacienteId, string? formatoCodigo, DateOnly? desde, DateOnly? hasta,
+        CancellationToken ct = default);
+
     Task<NotaMedicaDto?> GetAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>

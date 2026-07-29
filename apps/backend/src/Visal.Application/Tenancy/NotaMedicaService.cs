@@ -58,6 +58,36 @@ public sealed class NotaMedicaService(
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<IReadOnlyList<NotaMedicaDto>> ListarNotasCompletasPorPacienteAsync(
+        Guid pacienteId, string? formatoCodigo, DateOnly? desde, DateOnly? hasta,
+        CancellationToken ct = default)
+    {
+        // Base query: notas Definitivas del paciente. Join opcional con HC +
+        // FormDefinition solo cuando hay filtro por formato.
+        var q = db.NotasMedicas.AsNoTracking()
+            .Where(n => n.PacienteId == pacienteId && n.Estado == NotaMedicaEstado.Definitivo);
+
+        if (desde is DateOnly d1) { q = q.Where(n => n.FechaNota >= d1); }
+        if (hasta is DateOnly d2) { q = q.Where(n => n.FechaNota <= d2); }
+
+        if (!string.IsNullOrWhiteSpace(formatoCodigo))
+        {
+            var code = formatoCodigo.Trim();
+            var hcIds = db.HistoriasClinicas.AsNoTracking()
+                .Join(db.FormDefinitions.AsNoTracking(),
+                      h => h.FormDefinitionId, f => f.Id,
+                      (h, f) => new { h.Id, f.Codigo, f.CodigoSecundario })
+                .Where(x => x.Codigo == code || x.CodigoSecundario == code)
+                .Select(x => x.Id);
+            q = q.Where(n => hcIds.Contains(n.HistoriaClinicaId));
+        }
+
+        return await q
+            .OrderByDescending(n => n.FechaNota).ThenByDescending(n => n.HoraNota)
+            .Select(n => Map(n))
+            .ToListAsync(ct);
+    }
+
     public async Task<ValidarHcParaNotaResult> ValidarHcParaNotaAsync(
         Guid pacienteId, string? formatoCodigo, CancellationToken ct = default)
     {

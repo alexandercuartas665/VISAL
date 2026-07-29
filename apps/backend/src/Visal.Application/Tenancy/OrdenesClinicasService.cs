@@ -77,6 +77,14 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             joined = joined.Where(x => x.p.SedeAtencionId == sedeFiltro);
         }
 
+        // Filtro Formato HC: por Codigo o CodigoSecundario del FormDefinition
+        // (mismo criterio que ListarNotasCompletasPorPacienteAsync para consistencia).
+        if (!string.IsNullOrWhiteSpace(filtro.FormatoCodigo))
+        {
+            var code = filtro.FormatoCodigo.Trim();
+            joined = joined.Where(x => x.f.Codigo == code || x.f.CodigoSecundario == code);
+        }
+
         // Orden: paciente alfabetico ascendente, secundario por fecha de cierre desc
         // (las mas recientes arriba dentro del mismo paciente). El usuario pidio "orden
         // alfabetico por la fecha de cierre" — interpretamos: alfabetico por paciente,
@@ -345,6 +353,24 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             .Where(s => sedeIdValues.Contains(s.Id))
             .OrderBy(s => s.Nombre)
             .Select(s => new SucursalOpcionDto(s.Id, s.Nombre))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<FormatoHcOpcionDto>> ListarFormatosAsync(CancellationToken ct = default)
+    {
+        // Formatos que efectivamente aparecen en HCs del tenant. Distinct por Id
+        // para no listar el mismo formato N veces. Ordenados por codigo para que
+        // el dropdown quede predecible (HC-FO-01, HC-FO-02, ...).
+        var formatoIds = await db.HistoriasClinicas.AsNoTracking()
+            .Select(h => h.FormDefinitionId)
+            .Distinct()
+            .ToListAsync(ct);
+        if (formatoIds.Count == 0) { return Array.Empty<FormatoHcOpcionDto>(); }
+
+        return await db.FormDefinitions.AsNoTracking()
+            .Where(f => formatoIds.Contains(f.Id))
+            .OrderBy(f => f.Codigo)
+            .Select(f => new FormatoHcOpcionDto(f.Codigo, f.Nombre))
             .ToListAsync(ct);
     }
 

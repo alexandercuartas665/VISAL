@@ -60,10 +60,14 @@ public sealed record OrdenesClinicasFiltro(
     /// <summary>Filtra HCs cuya EPS (via Contrato1 del paciente) sea esta aseguradora.</summary>
     Guid? AseguradoraId = null,
     /// <summary>Filtra HCs cuyo paciente atienda en esta sede (SedeAtencionId).</summary>
-    Guid? SucursalId = null);
+    Guid? SucursalId = null,
+    /// <summary>Filtra HCs por Codigo (o CodigoSecundario) del FormDefinition.
+    /// Ejemplo: "HC-FO-08". Vacio = todos los formatos.</summary>
+    string? FormatoCodigo = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);
+public sealed record FormatoHcOpcionDto(string Codigo, string Nombre);
 
 public interface IOrdenesClinicasService
 {
@@ -81,6 +85,10 @@ public interface IOrdenesClinicasService
     /// <summary>Lista de sucursales que aparecen realmente en /ordenes (via
     /// SedeAtencionId de los pacientes que tienen HCs). Ordenadas por nombre.</summary>
     Task<IReadOnlyList<SucursalOpcionDto>> ListarSucursalesAsync(CancellationToken ct = default);
+
+    /// <summary>Lista de formatos (FormDefinition) que aparecen realmente en las
+    /// HCs del tenant. Sirve para el dropdown Formato HC. Ordenados por codigo.</summary>
+    Task<IReadOnlyList<FormatoHcOpcionDto>> ListarFormatosAsync(CancellationToken ct = default);
 
     /// <summary>Exporta el listado filtrado a Excel (.xlsx). Aplica los mismos
     /// filtros que <see cref="BuscarAsync"/> — el archivo refleja exactamente

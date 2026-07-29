@@ -1,0 +1,200 @@
+@page "/imprimir-hcs-paciente/{PacienteId:guid}"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Text.Json
+@using Microsoft.AspNetCore.WebUtilities
+@using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Forms
+@using Visal.SuperAdmin.Components.Forms
+@inject IHistoriaClinicaService HcSvc
+@inject IFormDefinitionService FormsSvc
+@inject IPacienteService PacSvc
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@*
+   HCs-Print — Impresion masiva de HCs Cerradas de un paciente.
+   Recibe por query:
+     - formatoCodigo : opcional, filtra por Codigo o CodigoSecundario del FormDefinition
+     - desde / hasta : opcionales, rango de FechaCierre (o FechaApertura si no hay cierre)
+   Renderiza cada HC con su propio schema (FormViewer read-only), page-break entre ellas.
+*@
+
+<PageTitle>HCs del paciente - Visal</PageTitle>
+
+<style>
+    .doc-actions { display:flex; gap:8px; align-items:center; margin:14px auto; max-width:960px; }
+    .doc-actions .dbtn { padding:8px 14px; border:1px solid var(--border); border-radius:8px; background:var(--card); font-size:13px; font-weight:600; cursor:pointer; color:var(--foreground); text-decoration:none; }
+    .doc-actions .dbtn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+    .doc-actions .spacer { flex:1; }
+    .doc-actions .meta { font-size:12px; color:var(--muted-foreground); }
+
+    .hcs-summary { max-width:960px; margin:0 auto 12px; padding:10px 14px; background:#f3f6fb; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; }
+    .hcs-summary b { color:#1565c0; }
+    .hcs-empty { max-width:960px; margin:40px auto; padding:32px; background:#fff; border:1px dashed #cbd5e1; border-radius:8px; text-align:center; color:#64748b; }
+
+    .hc-doc { max-width:960px; margin:0 auto 22px; background:#fff; color:#000; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; }
+    .hc-doc-head { background:#dde7f3; padding:8px 14px; font-size:13px; display:flex; justify-content:space-between; align-items:center; }
+    .hc-doc-head b { color:#1565c0; }
+    .hc-doc-body { padding:12px 14px; }
+
+    /* Page-break entre HCs al imprimir. */
+    .hc-doc { page-break-after: always; break-after: page; }
+    .hc-doc:last-child { page-break-after: auto; break-after: auto; }
+
+    @@media print {
+        .visal-sidebar, .visal-topbar, .doc-actions, .hcs-summary { display:none !important; }
+        .visal-main, .visal-shell { margin:0 !important; padding:0 !important; }
+        .hc-doc { max-width:none; margin-bottom:0; border:1px solid #000; border-radius:0; }
+        .hc-doc-head { border-bottom:1px solid #000; }
+        body { background:#fff !important; }
+        @@page { size: A4; margin: 12mm; }
+    }
+</style>
+
+@if (_loading)
+{
+    <p class="doc-actions">Cargando HCs del paciente...</p>
+}
+else if (_paciente is null)
+{
+    <p class="doc-actions">Paciente no encontrado.</p>
+}
+else
+{
+    <div class="doc-actions">
+        <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
+        <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir todo / Guardar PDF</button>
+        <span class="spacer"></span>
+        <span class="meta">@_hcs.Count HC(s) cerrada(s)</span>
+    </div>
+
+    <div class="hcs-summary">
+        <b>Paciente:</b> @_paciente.NombreCompleto
+        &nbsp;·&nbsp; <b>Doc:</b> @_paciente.TipoDocumento @_paciente.NumeroDocumento
+        @if (!string.IsNullOrWhiteSpace(_formatoCodigoFiltro))
+        {
+            <text> &nbsp;·&nbsp; <b>Formato HC:</b> @_formatoCodigoFiltro</text>
+        }
+        @if (_desdeFiltro is DateOnly dd)
+        {
+            <text> &nbsp;·&nbsp; <b>Desde:</b> @dd.ToString("yyyy-MM-dd")</text>
+        }
+        @if (_hastaFiltro is DateOnly dh)
+        {
+            <text> &nbsp;·&nbsp; <b>Hasta:</b> @dh.ToString("yyyy-MM-dd")</text>
+        }
+    </div>
+
+    @if (_hcs.Count == 0)
+    {
+        <div class="hcs-empty">
+            No hay HCs cerradas para este paciente con los filtros indicados.
+        </div>
+    }
+    else
+    {
+        @foreach (var item in _hcs)
+        {
+            <div class="hc-doc">
+                <div class="hc-doc-head">
+                    <div>
+                        <b>@item.Detail.FormatoCodigo</b> — @item.Detail.FormatoNombre
+                    </div>
+                    <div>
+                        Cerrada: <b>@((item.Detail.FechaCierre ?? item.Detail.FechaApertura).ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</b>
+                        @if (!string.IsNullOrWhiteSpace(item.Detail.EspecialistaNombre))
+                        {
+                            <text> &nbsp;·&nbsp; Atiende: <b>@item.Detail.EspecialistaNombre</b></text>
+                        }
+                    </div>
+                </div>
+                <div class="hc-doc-body">
+                    @if (item.Schema is not null)
+                    {
+                        <FormViewer Schema="item.Schema"
+                                    Valores="item.Values"
+                                    ReadOnly="true" />
+                    }
+                    else
+                    {
+                        <p class="text-muted"><em>No se pudo cargar el schema del formato.</em></p>
+                    }
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Guid PacienteId { get; set; }
+
+    private bool _loading = true;
+    private PacienteDetailDto? _paciente;
+    private List<HcRender> _hcs = new();
+
+    private string? _formatoCodigoFiltro;
+    private DateOnly? _desdeFiltro;
+    private DateOnly? _hastaFiltro;
+
+    private record HcRender(HistoriaClinicaDetailDto Detail, FormSchema? Schema, Dictionary<string, string?> Values);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var uri = Nav.ToAbsoluteUri(Nav.Uri);
+            var q = QueryHelpers.ParseQuery(uri.Query);
+            _formatoCodigoFiltro = q.TryGetValue("formatoCodigo", out var fc) ? fc.ToString() : null;
+            if (string.IsNullOrWhiteSpace(_formatoCodigoFiltro)) { _formatoCodigoFiltro = null; }
+            if (q.TryGetValue("desde", out var dd) && DateOnly.TryParse(dd.ToString(), out var d1)) { _desdeFiltro = d1; }
+            if (q.TryGetValue("hasta", out var dh) && DateOnly.TryParse(dh.ToString(), out var d2)) { _hastaFiltro = d2; }
+
+            _paciente = await PacSvc.GetAsync(PacienteId);
+            if (_paciente is null) { return; }
+
+            // Resolver formatoCodigo -> formDefinitionId (si viene) para pasar al service.
+            // Match por Codigo o CodigoSecundario, mismo criterio que Ordenes.razor.
+            Guid? formDefId = null;
+            if (_formatoCodigoFiltro is not null)
+            {
+                var forms = await FormsSvc.ListAsync();
+                var match = forms.FirstOrDefault(f =>
+                    string.Equals(f.Codigo, _formatoCodigoFiltro, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(f.CodigoSecundario, _formatoCodigoFiltro, StringComparison.OrdinalIgnoreCase));
+                if (match is not null) { formDefId = match.Id; }
+            }
+
+            // HCs del paciente, filtro por fechas + formato. Solo Cerradas.
+            var resumenes = await HcSvc.ListarPorPacienteAsync(PacienteId, _desdeFiltro, _hastaFiltro, formDefId);
+            var cerradas = resumenes
+                .Where(h => string.Equals(h.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(h => h.FechaCierre ?? h.FechaApertura)
+                .ToList();
+
+            // Detail + schema por cada HC. Loop secuencial simple: N getAsync + parse.
+            // Para N grande se puede optimizar despues (batch service o cache de schemas).
+            foreach (var r in cerradas)
+            {
+                var detail = await HcSvc.GetAsync(r.Id);
+                if (detail is null) { continue; }
+                FormSchema? schema = null;
+                if (!string.IsNullOrWhiteSpace(detail.SchemaJson))
+                {
+                    try { schema = JsonSerializer.Deserialize<FormSchema>(detail.SchemaJson); }
+                    catch { schema = null; }
+                }
+                Dictionary<string, string?> values = new();
+                if (!string.IsNullOrWhiteSpace(detail.ValoresJson))
+                {
+                    try { values = JsonSerializer.Deserialize<Dictionary<string, string?>>(detail.ValoresJson) ?? new(); }
+                    catch { values = new(); }
+                }
+                _hcs.Add(new HcRender(detail, schema, values));
+            }
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
+}

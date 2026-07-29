@@ -63,15 +63,32 @@ public sealed record ServicioImportRow(
 /// tenant. Vacio = todos los modulos son validos. La UI puede mostrar aviso.</param>
 public sealed record ServiciosImportResult(int Importados, IReadOnlyList<string> ModulosDesconocidos);
 
+/// <summary>Sedes en las que un contrato esta activo (N:M). Solo informativo por ahora,
+/// no filtra operaciones. Se muestra en el modal "Sedes" del contrato.</summary>
+public sealed record ContratoSucursalDto(Guid ContratoAseguradoraId, Guid SucursalId, string SucursalNombre);
+
 /// <summary>Modulo Entidades Aseguradoras: aseguradoras, contratos y servicios. Tenant-scoped.</summary>
 public interface IAseguradoraService
 {
-    Task<IReadOnlyList<AseguradoraDto>> ListAseguradorasAsync(CancellationToken ct = default);
+    /// <summary>Lista aseguradoras del tenant. Si <paramref name="soloConContratoVigente"/>
+    /// es true, filtra a solo aquellas con al menos un contrato Activo cuya vigencia
+    /// cubra la fecha actual (fecha_inicial &lt;= hoy AND (fecha_final IS NULL OR &gt;= hoy)).</summary>
+    Task<IReadOnlyList<AseguradoraDto>> ListAseguradorasAsync(bool soloConContratoVigente = false, CancellationToken ct = default);
     Task<AseguradoraDetailDto?> GetAseguradoraAsync(Guid id, CancellationToken ct = default);
     Task<AseguradoraDetailDto?> SaveAseguradoraAsync(SaveAseguradoraRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteAseguradoraAsync(Guid id, Guid actor, CancellationToken ct = default);
 
-    Task<IReadOnlyList<ContratoDto>> ListContratosAsync(Guid aseguradoraId, CancellationToken ct = default);
+    /// <summary>Lista contratos de la aseguradora. Si <paramref name="soloVigentes"/> es
+    /// true, filtra a solo Activos + vigentes por fecha (mismo criterio que ListAseguradorasAsync).</summary>
+    Task<IReadOnlyList<ContratoDto>> ListContratosAsync(Guid aseguradoraId, bool soloVigentes = false, CancellationToken ct = default);
+
+    /// <summary>Sedes activas para el contrato. Vacio = no configurado (por ahora
+    /// interpretado como "todas"). Ordenado por nombre de sede.</summary>
+    Task<IReadOnlyList<ContratoSucursalDto>> ListContratoSucursalesAsync(Guid contratoId, CancellationToken ct = default);
+
+    /// <summary>Reemplaza el set de sedes del contrato. Delete+Insert transaccional.
+    /// <paramref name="sucursalIds"/> vacio = borra todas y deja "sin sedes configuradas".</summary>
+    Task GuardarContratoSucursalesAsync(Guid contratoId, IReadOnlyList<Guid> sucursalIds, Guid actor, CancellationToken ct = default);
     Task<ContratoDto?> SaveContratoAsync(SaveContratoRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteContratoAsync(Guid id, Guid actor, CancellationToken ct = default);
 

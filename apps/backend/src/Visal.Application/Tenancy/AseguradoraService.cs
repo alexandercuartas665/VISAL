@@ -16,10 +16,21 @@ public sealed class AseguradoraService : IAseguradoraService
     }
 
     // ── Aseguradoras ──
-    public async Task<IReadOnlyList<AseguradoraDto>> ListAseguradorasAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<AseguradoraDto>> ListAseguradorasAsync(bool soloConContratoVigente = false, CancellationToken ct = default)
     {
-        return await _db.Aseguradoras.AsNoTracking()
-            .OrderBy(a => a.Nombre)
+        // Contrato vigente = Estado ACTIVO Y (fecha_inicial NULL o <= hoy) Y (fecha_final NULL o >= hoy).
+        // Cuando soloConContratoVigente=false devolvemos todas (comportamiento legacy).
+        var hoy = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        var q = _db.Aseguradoras.AsNoTracking();
+        if (soloConContratoVigente)
+        {
+            q = q.Where(a => _db.ContratosAseguradora.Any(c =>
+                c.AseguradoraId == a.Id
+                && c.Estado.ToUpper() == "ACTIVO"
+                && (c.FechaInicial == null || c.FechaInicial <= hoy)
+                && (c.FechaFinal == null || c.FechaFinal >= hoy)));
+        }
+        return await q.OrderBy(a => a.Nombre)
             .Select(a => new AseguradoraDto(a.Id, a.Codigo, a.Tipo, a.Nombre, a.Nit, a.Regimen,
                 _db.ContratosAseguradora.Count(c => c.AseguradoraId == a.Id)))
             .ToListAsync(ct);
@@ -89,13 +100,52 @@ public sealed class AseguradoraService : IAseguradoraService
     }
 
     // ── Contratos ──
-    public async Task<IReadOnlyList<ContratoDto>> ListContratosAsync(Guid aseguradoraId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ContratoDto>> ListContratosAsync(Guid aseguradoraId, bool soloVigentes = false, CancellationToken ct = default)
     {
-        return await _db.ContratosAseguradora.AsNoTracking()
-            .Where(c => c.AseguradoraId == aseguradoraId)
-            .OrderBy(c => c.CodigoContrato)
+        var hoy = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        var q = _db.ContratosAseguradora.AsNoTracking()
+            .Where(c => c.AseguradoraId == aseguradoraId);
+        if (soloVigentes)
+        {
+            q = q.Where(c => c.Estado.ToUpper() == "ACTIVO"
+                          && (c.FechaInicial == null || c.FechaInicial <= hoy)
+                          && (c.FechaFinal == null || c.FechaFinal >= hoy));
+        }
+        return await q.OrderBy(c => c.CodigoContrato)
             .Select(c => new ContratoDto(c.Id, c.AseguradoraId, c.CodigoContrato, c.FechaInicial, c.FechaFinal, c.Estado, c.Prorroga, c.RequierePdfAutorizacion, c.Cucon, c.TipoContrato))
             .ToListAsync(ct);
+    }
+
+    // ── Contrato x Sucursales (CS-1) ──
+    public async Task<IReadOnlyList<ContratoSucursalDto>> ListContratoSucursalesAsync(Guid contratoId, CancellationToken ct = default)
+    {
+        return await (from cs in _db.ContratoSucursales.AsNoTracking()
+                      join s in _db.Sucursales.AsNoTracking() on cs.SucursalId equals s.Id
+                      where cs.ContratoAseguradoraId == contratoId
+                      orderby s.Nombre
+                      select new ContratoSucursalDto(cs.ContratoAseguradoraId, cs.SucursalId, s.Nombre))
+                     .ToListAsync(ct);
+    }
+
+    public async Task GuardarContratoSucursalesAsync(Guid contratoId, IReadOnlyList<Guid> sucursalIds, Guid actor, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Tenant no detectado."); }
+        var existentes = await _db.ContratoSucursales
+            .Where(cs => cs.ContratoAseguradoraId == contratoId)
+            .ToListAsync(ct);
+        if (existentes.Count > 0) { _db.ContratoSucursales.RemoveRange(existentes); }
+        foreach (var sid in sucursalIds.Distinct())
+        {
+            _db.ContratoSucursales.Add(new ContratoSucursal
+            {
+                TenantId = tid,
+                ContratoAseguradoraId = contratoId,
+                SucursalId = sid,
+                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedBy = actor,
+            });
+        }
+        await _db.SaveChangesAsync(ct);
     }
 
     public async Task<ContratoDto?> SaveContratoAsync(SaveContratoRequest req, Guid actor, CancellationToken ct = default)

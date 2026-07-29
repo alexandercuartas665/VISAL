@@ -1518,7 +1518,8 @@
         if (_contratosPorAseguradora.ContainsKey(aseId)) { return; }
         try
         {
-            var lst = (await AseSvc.ListContratosAsync(aseId)).ToList();
+            // EPS-Filtro-2: cascada solo contratos vigentes al agregar EPS al paciente.
+            var lst = (await AseSvc.ListContratosAsync(aseId, soloVigentes: true)).ToList();
             _contratosPorAseguradora[aseId] = lst;
         }
         catch { _contratosPorAseguradora[aseId] = new(); }
@@ -1626,7 +1627,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _aseguradoras = (await AseSvc.ListAseguradorasAsync()).ToList();
+        // EPS-Filtro-1: solo aseguradoras con al menos 1 contrato vigente (Estado ACTIVO + fecha OK).
+        _aseguradoras = (await AseSvc.ListAseguradorasAsync(soloConContratoVigente: true)).ToList();
         _sedes = (await SucSvc.ListAsync()).ToList();
         _catalogos = (await CatSvc.ListAsync(null)).ToList();
         _paises = (await GeoSvc.ListPaisesAsync()).ToList();

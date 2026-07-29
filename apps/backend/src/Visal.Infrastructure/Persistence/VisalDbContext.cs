@@ -96,6 +96,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
+    public DbSet<ContratoSucursal> ContratoSucursales => Set<ContratoSucursal>();
     public DbSet<AseguradoraCuentaMedicaConfig> AseguradoraCuentaMedicaConfigs => Set<AseguradoraCuentaMedicaConfig>();
     public DbSet<AseguradoraInformeItem> AseguradoraInformeItems => Set<AseguradoraInformeItem>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
@@ -1009,6 +1010,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.ContratoAseguradora).WithMany().HasForeignKey(x => x.ContratoAseguradoraId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.PacienteId, x.ContratoAseguradoraId }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.PacienteId, x.Orden });
+        });
+
+        // CS-1: sedes por contrato (N:M informativo). Unique por (tenant, contrato, sucursal)
+        // evita duplicados. CASCADE si se borra el contrato o la sucursal.
+        modelBuilder.Entity<ContratoSucursal>(b =>
+        {
+            b.ToTable("contrato_sucursales");
+            b.HasOne(x => x.ContratoAseguradora).WithMany().HasForeignKey(x => x.ContratoAseguradoraId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.ContratoAseguradoraId, x.SucursalId }).IsUnique();
         });
 
         // Cuenta medica: singleton por aseguradora + N items ordenados.

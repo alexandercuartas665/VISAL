@@ -8,7 +8,9 @@
 @inject IAseguradoraService Svc
 @inject IPaqueteService PaqSvc
 @inject IServicioBulkUpdateService BulkSvc
+@inject ISucursalService SucSvc
 @inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthProvider
 
 <PageTitle>Entidades Aseguradoras - Visal</PageTitle>
 
@@ -168,6 +170,7 @@
                                             @if (c.Id is not null)
                                             {
                                                 <button class="btn @(c.Id == _contratoId ? "btn-primary" : "btn-outline-secondary") btn-sm" title="Ver servicios" @onclick="() => SelectContrato(c.Id!.Value)">Servicios</button>
+                                                <button class="btn btn-outline-secondary btn-sm" title="Sedes donde aplica el contrato" @onclick="() => AbrirModalSedes(c.Id!.Value, c.CodigoContrato)">Sedes</button>
                                                 <button class="btn btn-outline-danger btn-sm" title="Eliminar" @onclick="() => DeleteContrato(c)">&times;</button>
                                             }
                                         </td>
@@ -456,6 +459,49 @@
                             Aplicar a @(_bulkBusqueda?.TotalCoincidencias ?? 0) servicios
                         </button>
                     }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* CS-2: modal Sedes por contrato. Chico, checkboxes sobre las sucursales del tenant.
+   Guardado solo informativo por ahora (no filtra operaciones). *@
+@if (_sedesModalOpen)
+{
+    <div class="sn-modal-back" @onclick="CerrarModalSedes">
+        <div class="sn-modal sn-modal-sm" @onclick:stopPropagation>
+            <div class="sn-modal-h">
+                <div>
+                    <div class="sn-modal-eyebrow">Contrato</div>
+                    <h3>Sedes del contrato <small>@_sedesModalCodigo</small></h3>
+                </div>
+                <button class="sn-modal-x" @onclick="CerrarModalSedes">&times;</button>
+            </div>
+            <div class="sn-modal-body">
+                @if (_sedesModalCatalogo.Count == 0)
+                {
+                    <p class="text-muted">No hay sucursales activas para este tenant.</p>
+                }
+                else
+                {
+                    <p class="text-muted small">Marca las sedes en las que este contrato esta vigente. Por ahora es solo informativo (no filtra operaciones).</p>
+                    @foreach (var s in _sedesModalCatalogo)
+                    {
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="@($"sede-{s.Id}")"
+                                   checked="@_sedesModalSeleccion.Contains(s.Id)"
+                                   @onchange="@(e => ToggleSedeModal(s.Id, e.Value is bool b && b))" />
+                            <label class="form-check-label" for="@($"sede-{s.Id}")">@s.Nombre</label>
+                        </div>
+                    }
+                }
+            </div>
+            <div class="sn-modal-f">
+                <span></span>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-outline-secondary" @onclick="CerrarModalSedes">Cancelar</button>
+                    <button class="btn btn-primary" @onclick="GuardarSedesModal" disabled="@_sedesModalBusy">Guardar</button>
                 </div>
             </div>
         </div>
@@ -1044,5 +1090,51 @@
             GrupoServicioFacturacion = d.GrupoServicioFacturacion,
             ServicioFacturacion = d.ServicioFacturacion
         };
+    }
+
+    // ── CS-2: Modal Sedes por contrato ──
+    private bool _sedesModalOpen;
+    private bool _sedesModalBusy;
+    private Guid _sedesModalContratoId;
+    private string? _sedesModalCodigo;
+    private List<SucursalDto> _sedesModalCatalogo = new();
+    private HashSet<Guid> _sedesModalSeleccion = new();
+
+    private async Task AbrirModalSedes(Guid contratoId, string? codigo)
+    {
+        _sedesModalContratoId = contratoId;
+        _sedesModalCodigo = codigo;
+        _sedesModalOpen = true;
+        _sedesModalSeleccion.Clear();
+        _sedesModalCatalogo = (await SucSvc.ListAsync(soloActivas: true)).ToList();
+        var actuales = await Svc.ListContratoSucursalesAsync(contratoId);
+        foreach (var s in actuales) { _sedesModalSeleccion.Add(s.SucursalId); }
+    }
+
+    private void CerrarModalSedes()
+    {
+        _sedesModalOpen = false;
+        _sedesModalCatalogo = new();
+        _sedesModalSeleccion = new();
+    }
+
+    private void ToggleSedeModal(Guid sucursalId, bool marcada)
+    {
+        if (marcada) { _sedesModalSeleccion.Add(sucursalId); }
+        else { _sedesModalSeleccion.Remove(sucursalId); }
+    }
+
+    private async Task GuardarSedesModal()
+    {
+        _sedesModalBusy = true;
+        try
+        {
+            var actor = await Actor();
+            await Svc.GuardarContratoSucursalesAsync(_sedesModalContratoId, _sedesModalSeleccion.ToList(), actor);
+            _ok = $"Sedes del contrato {_sedesModalCodigo} actualizadas.";
+            CerrarModalSedes();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _sedesModalBusy = false; }
     }
 }

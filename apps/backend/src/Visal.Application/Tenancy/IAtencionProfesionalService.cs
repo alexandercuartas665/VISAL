@@ -48,7 +48,14 @@ public sealed record MiServicioAsignadoDto(
     /// <summary>Timestamp de la ultima accion del ciclo — para orden secundario en el grid.</summary>
     DateTimeOffset? RevisionUltimaAccionEn = null,
     /// <summary>Motivo del ultimo rechazo — tooltip del chip rojo.</summary>
-    string? RevisionMotivoRechazo = null);
+    string? RevisionMotivoRechazo = null,
+    /// <summary>
+    /// Timestamp del cierre de la HC vinculada a esta sesion via el pivote
+    /// AsignacionTurnoSesionHc. Se toma de HistoriaClinica.FechaCierre cuando
+    /// la HC esta Cerrada. Null cuando no hay HC vinculada o la HC aun no
+    /// se cierra — la UI la muestra como HH:mm en la columna "Hora Cierre".
+    /// </summary>
+    DateTimeOffset? HoraCierre = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

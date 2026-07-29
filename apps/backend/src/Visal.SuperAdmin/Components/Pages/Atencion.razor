@@ -70,6 +70,14 @@ else
                 }
             </div>
             <div class="at-fbar-sort">
+                <span class="at-fbar-sort-lbl">Estado:</span>
+                <select @bind="_filtroEstado" @bind:after="OnFiltroEstadoChangedAsync">
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="Terminado">Terminado</option>
+                    <option value="Todos">Todos</option>
+                </select>
+            </div>
+            <div class="at-fbar-sort">
                 <span class="at-fbar-sort-lbl">Ordenar:</span>
                 <select @bind="_sortBy">
                     <option value="recent">Mas recientes primero</option>
@@ -99,18 +107,6 @@ else
                                     <button class="at-fbar-fchip @(_filTipos.Contains(t) ? "on" : "")" @onclick="() => ToggleTipo(t)">@t</button>
                                 }
                             </div>
-                        </div>
-
-                        <div class="at-fbar-filt-group">
-                            <div class="at-fbar-filt-lbl">Estado</div>
-                            <div class="at-fbar-chips">
-                                <button class="at-fbar-fchip @(_filEstado == "pendientes" ? "on" : "")" @onclick='() => SetEstado("pendientes")'>Pendientes</button>
-                                <button class="at-fbar-fchip @(_filEstado == "completados" ? "on" : "")" @onclick='() => SetEstado("completados")'>Completados</button>
-                            </div>
-                            <label class="at-fbar-toggle" style="margin-top:6px;">
-                                <input type="checkbox" checked="@_mostrarVencidas" @onchange="OnVencidasChanged" />
-                                <span>Mostrar notas vencidas</span>
-                            </label>
                         </div>
 
                         @if (ServiciosDisponibles.Count > 0)
@@ -291,7 +287,9 @@ else
             <HistoriasClinicasModulo PacienteContexto="@_pacienteCtx"
                                      FormatoForzadoCodigo="@hs.FormatoHistoria"
                                      TipoServicio="@hs.TipoServicio"
-                                     AsignacionId="@hs.AsignacionId" />
+                                     AsignacionId="@hs.AsignacionId"
+                                     AsignacionTurnoId="@hs.AsignacionTurnoId"
+                                     SessionNo="@hs.SessionNo" />
         </div>
     </div>
 }
@@ -483,17 +481,17 @@ else
 
     private List<MiServicioAsignadoDto> _todos = new();
     private string _filtroPac = "";
-    private bool _mostrarVencidas = true;
+    // Selector principal Pendiente / Terminado / Todos en la toolbar. Vive en
+    // el toolbar visible para que la decision "que esta pendiente" no requiera
+    // abrir el popover de filtros. "Pendiente" (default) llama al backend con
+    // incluirCompletados=false; los otros dos traen todo y filtran en cliente.
+    private string _filtroEstado = "Pendiente";
 
     // Estado del toolbar de filtros (portado del pipeline CUBOT). Solo vive en
     // memoria de la sesion; si el usuario recarga la pagina, se pierde.
     private bool _filtrosOpen;
     private string _sortBy = "recent";
     private HashSet<string> _filTipos = new(StringComparer.OrdinalIgnoreCase);
-    // Ola 4 orden secuencial: la parrilla es una lista de trabajo pendiente,
-    // no un log historico. Por defecto solo muestra sesiones sin HC Cerrada
-    // vinculada; el usuario puede alternar a Completados o volver a "" (todos).
-    private string _filEstado = "pendientes";    // "" = ambos, "pendientes", "completados"
     // True cuando el usuario tiene rol Owner/Admin del tenant o el permiso
     // "atencion.saltar-orden" marcado en /cfg-roles. Cuando es true, la UI
     // no bloquea los botones HC/Notas por orden secuencial (el backend gate
@@ -574,8 +572,12 @@ else
                               || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase));
             }
             if (_filTipos.Count > 0) { q = q.Where(s => _filTipos.Contains(s.TipoServicio)); }
-            if (_filEstado == "pendientes") { q = q.Where(s => !s.Completado); }
-            else if (_filEstado == "completados") { q = q.Where(s => s.Completado); }
+            // Dropdown principal Pendiente / Terminado / Todos. Cuando esta en
+            // "Pendiente" el backend ya solo devuelve pendientes (ver Cargar);
+            // igual reforzamos aqui en cliente para consistencia si _todos vino
+            // con completados por un cambio de _filtroEstado sin recarga aun.
+            if (string.Equals(_filtroEstado, "Pendiente", StringComparison.OrdinalIgnoreCase)) { q = q.Where(s => !s.Completado); }
+            else if (string.Equals(_filtroEstado, "Terminado", StringComparison.OrdinalIgnoreCase)) { q = q.Where(s => s.Completado); }
             if (_filServicios.Count > 0) { q = q.Where(s => _filServicios.Contains(s.NombreServicio)); }
             if (_filProfesionales.Count > 0) { q = q.Where(s => _filProfesionales.Contains(s.NombreProfesional)); }
             if (_filPaquete == "con") { q = q.Where(s => !string.IsNullOrWhiteSpace(s.PaqueteCodigo)); }
@@ -632,10 +634,10 @@ else
         return MotivoBloqueoOrden(s) is null;
     }
 
-    private bool FiltrosActivos => _filTipos.Count > 0 || !string.IsNullOrEmpty(_filEstado)
+    private bool FiltrosActivos => _filTipos.Count > 0
                                    || _filServicios.Count > 0 || _filProfesionales.Count > 0
                                    || !string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0
-                                   || !string.IsNullOrEmpty(_filFecha) || !_mostrarVencidas;
+                                   || !string.IsNullOrEmpty(_filFecha);
 
     private int CuentaFiltrosActivos
     {
@@ -643,12 +645,10 @@ else
         {
             var n = 0;
             if (_filTipos.Count > 0) { n++; }
-            if (!string.IsNullOrEmpty(_filEstado)) { n++; }
             if (_filServicios.Count > 0) { n++; }
             if (_filProfesionales.Count > 0) { n++; }
             if (!string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0) { n++; }
             if (!string.IsNullOrEmpty(_filFecha)) { n++; }
-            if (!_mostrarVencidas) { n++; }
             return n;
         }
     }
@@ -657,13 +657,14 @@ else
     private void ToggleServicio(string s) { if (!_filServicios.Add(s)) { _filServicios.Remove(s); } }
     private void ToggleProfesional(string p) { if (!_filProfesionales.Add(p)) { _filProfesionales.Remove(p); } }
     private void TogglePaqueteCodigo(string c) { if (!_filPaquetesCodigos.Add(c)) { _filPaquetesCodigos.Remove(c); } }
-    private void SetEstado(string v) => _filEstado = _filEstado == v ? "" : v;
     private void SetPaquete(string v) => _filPaquete = _filPaquete == v ? "" : v;
     private void SetFecha(string v) => _filFecha = _filFecha == v ? "" : v;
 
-    private async Task OnVencidasChanged(ChangeEventArgs e)
+    /// <summary>Recarga cuando el usuario cambia el selector Pendiente/Terminado/Todos
+    /// porque el default Pendiente pide al backend solo lo no completado — al pasar
+    /// a Terminado/Todos hay que traer tambien los completados.</summary>
+    private async Task OnFiltroEstadoChangedAsync()
     {
-        _mostrarVencidas = e.Value is bool b && b;
         await Cargar();
     }
 
@@ -673,7 +674,6 @@ else
         _filServicios.Clear();
         _filProfesionales.Clear();
         _filPaquetesCodigos.Clear();
-        _filEstado = "";
         _filPaquete = "";
         _filFecha = "";
         _filFechaDesde = _filFechaHasta = null;
@@ -711,7 +711,12 @@ else
                 && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
                         .Any(p => string.Equals(p.Trim(), "atencion.saltar-orden", StringComparison.OrdinalIgnoreCase));
             _puedeSaltarOrden = _esAdmin || tienePermisoEscape;
-            _todos = (await Svc.GetMisServiciosAsync(puId, incluirCompletados: _mostrarVencidas)).ToList();
+            // "Pendiente" solo trae lo no completado del backend (query eficiente en
+            // tenants con miles de sesiones). Los otros dos casos traen todo y la
+            // pantalla filtra en cliente — asi cambiar entre "Terminado"/"Todos"
+            // no gasta round-trip extra.
+            var incluirCompletadosBackend = !string.Equals(_filtroEstado, "Pendiente", StringComparison.OrdinalIgnoreCase);
+            _todos = (await Svc.GetMisServiciosAsync(puId, incluirCompletados: incluirCompletadosBackend)).ToList();
             // Config de columnas (overrides del tenant). Nulos = usar default.
             try { _configColumnas = (await ColSvc.ListarAsync()).ToList(); }
             catch { _configColumnas = new(); }
@@ -813,8 +818,12 @@ else
         new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                16),
         new ColDef("profesional",   "Profesional",     "Profesional",                             17),
         new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          18),
+        // HH:mm de HistoriaClinica.FechaCierre — cuando la HC vinculada a esta
+        // sesion ya esta Cerrada. Colocado a la derecha de FechaNota (misma
+        // sesion, mismo evento) para que el operador vea fecha + hora juntos.
+        new ColDef("hora_cierre",   "HoraCierre",      "Hora<br/>Cierre",                         19),
         // Capa 08 Ola 3 — chip del estado del ciclo de revision de la HC del paciente.
-        new ColDef("revision_estado","Revision",        "Revision",                                19),
+        new ColDef("revision_estado","Revision",        "Revision",                                20),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -968,6 +977,12 @@ else
             case "fec_nota":
                 __b.OpenElement(seq++, "td");
                 __b.AddContent(seq++, s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "");
+                __b.CloseElement();
+                break;
+            case "hora_cierre":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "class", "mono text-center");
+                __b.AddContent(seq++, s.HoraCierre is DateTimeOffset hc ? hc.ToLocalTime().ToString("HH:mm") : "-");
                 __b.CloseElement();
                 break;
             case "revision_estado":

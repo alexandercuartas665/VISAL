@@ -11,7 +11,11 @@ public sealed record HistoriaClinicaResumenDto(
     DateTimeOffset? FechaCierre,
     string? EspecialistaNombre,
     string? MotivoInactivacion,
-    Guid? ProfesionalId);
+    Guid? ProfesionalId,
+    // Numero de sesion (SessionNo) del AsignacionTurnoSesion vinculado via el
+    // pivote AsignacionTurnoSesionHc. Null cuando la HC no nacio desde una
+    // sesion de /atencion (por ejemplo, HC creada libremente desde admision).
+    int? SesionNumero = null);
 
 /// <summary>Detalle completo de una historia (incluye valores diligenciados).</summary>
 public sealed record HistoriaClinicaDetailDto(
@@ -54,7 +58,14 @@ public sealed record CrearHistoriaRequest(
     // service crea el pivote AsignacionTurnoSesionHc para que el modulo
     // Atencion pueda calcular el flag Completado y el orden secuencial.
     // Null cuando la HC se crea fuera del flow de Atencion (Admision u otros).
-    Guid? SesionId = null);
+    Guid? SesionId = null,
+    // Alternativa a SesionId: la UI /atencion conoce el turno y el numero
+    // interno de sesion (1..Cantidad) pero no siempre el Id de la fila
+    // AsignacionTurnoSesion (puede no existir aun). Cuando llegan estos
+    // dos, el service la resuelve o la crea, y usa su Id para el pivote
+    // y la validacion 1 sesion <-> 1 HC.
+    Guid? AsignacionTurnoId = null,
+    int? SessionNo = null);
 
 public interface IHistoriaClinicaService
 {

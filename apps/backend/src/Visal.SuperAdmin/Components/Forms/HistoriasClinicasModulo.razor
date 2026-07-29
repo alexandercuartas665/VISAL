@@ -156,6 +156,10 @@
                             <div>
                                 <div class="hc-item-prof">Especialista: <strong>@h.Especialista</strong></div>
                                 <div class="hc-item-fecha">Fecha inicial: @h.Fecha.ToString("dd/MM/yyyy")</div>
+                                @if (h.SesionNumero.HasValue)
+                                {
+                                    <div class="hc-item-sesion">Sesion #@h.SesionNumero.Value</div>
+                                }
                             </div>
                             <div class="dropdown">
                                 <button class="btn btn-link btn-sm hc-item-menu" @onclick="() => ToggleMenu(h.Id)">&#8942;</button>
@@ -845,6 +849,7 @@
     .hc-item-h { display: flex; justify-content: space-between; align-items: flex-start; }
     .hc-item-prof { font-size: 12.5px; color: #0f172a; }
     .hc-item-fecha { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .hc-item-sesion { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 1px 8px; border-radius: 999px; }
     .hc-item-obs { font-size: 11px; color: #475569; font-style: italic; margin-top: 6px; }
     .hc-item-pill { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-top: 6px; text-transform: uppercase; }
     .hc-est-abierta { background: #dbeafe; color: #1e40af; }
@@ -1019,6 +1024,16 @@
     /// banner (el modulo puede abrirse fuera de /atencion, p. ej. /admision).
     /// </summary>
     [Parameter] public Guid? AsignacionId { get; set; }
+
+    /// <summary>Turno especifico (AsignacionTurno.Id) que dispara la HC desde
+    /// /atencion. Junto con SessionNo permite al backend resolver/crear la fila
+    /// AsignacionTurnoSesion y aplicar el pivote HC<->Sesion para el bloqueo
+    /// 1:1. Null cuando el modulo se abre fuera de /atencion.</summary>
+    [Parameter] public Guid? AsignacionTurnoId { get; set; }
+
+    /// <summary>Numero interno de sesion dentro del turno (1..Cantidad). Se
+    /// combina con AsignacionTurnoId para identificar la sesion origen.</summary>
+    [Parameter] public int? SessionNo { get; set; }
 
     /// <summary>Set con los identificadores (PestanaKey) actualmente ocultos para
     /// el TipoServicio activo. Se recarga al cambiar el parametro. Vacio =
@@ -1530,7 +1545,8 @@
             Fecha = DateOnly.FromDateTime(r.FechaApertura.LocalDateTime),
             Estado = r.Estado,
             Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : ""),
-            ProfesionalId = r.ProfesionalId
+            ProfesionalId = r.ProfesionalId,
+            SesionNumero = r.SesionNumero
         }).ToList();
     }
 
@@ -2023,7 +2039,10 @@
                     p.Id, fid, SerializeValores(_valores), especialista, miProf,
                     via.Codigo, via.Nombre,
                     fin.Codigo, fin.Nombre,
-                    cau.Codigo, cau.Nombre),
+                    cau.Codigo, cau.Nombre,
+                    SesionId: null,
+                    AsignacionTurnoId: AsignacionTurnoId,
+                    SessionNo: SessionNo),
                 Guid.Empty);
 
             stage = "HeaderAutoFillHelper.Aplicar";
@@ -2560,5 +2579,8 @@
         public string? RipsViaNombre { get; set; }
         public string? RipsFinalidadNombre { get; set; }
         public string? RipsCausaNombre { get; set; }
+        /// <summary>SessionNo del turno vinculado via el pivote — null cuando la
+        /// HC no nacio desde una sesion (por ejemplo, admision libre).</summary>
+        public int? SesionNumero { get; set; }
     }
 }

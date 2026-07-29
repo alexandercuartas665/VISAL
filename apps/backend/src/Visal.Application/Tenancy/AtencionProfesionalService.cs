@@ -17,14 +17,17 @@ public sealed class AtencionProfesionalService(
             .FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
         if (tu is null) { return Array.Empty<MiServicioAsignadoDto>(); }
 
-        // Admin = TenantRole.Owner o Rol.Nombre = "Administrador". Los admin ven TODOS los
-        // turnos del tenant (no se restringe por profesional). Los demas (especialistas) ven
-        // solo lo coordinado a su propio profesional vinculado.
+        // Admin = TenantRole.Owner o Rol.Nombre en {"Administrador","Profesional Administrativo"}.
+        // Los admin ven TODOS los turnos del tenant (vista supervisora); los demas
+        // (especialistas de campo) ven solo lo coordinado a su propio profesional vinculado.
+        // "Profesional Administrativo" es un rol operativo: el usuario tiene profesional_id
+        // (lo usa como firmante en HC) pero necesita ver todo, no solo lo suyo.
         var rolNombre = tu.RolId is Guid rolId
             ? await db.Roles.AsNoTracking().Where(r => r.Id == rolId).Select(r => r.Nombre).FirstOrDefaultAsync(ct)
             : null;
         var esAdmin = tu.TenantRole == TenantRole.Owner
-                    || string.Equals(rolNombre, "Administrador", StringComparison.OrdinalIgnoreCase);
+                    || string.Equals(rolNombre, "Administrador", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(rolNombre, "Profesional Administrativo", StringComparison.OrdinalIgnoreCase);
 
         // Construimos la query base (filtrada por tenant via el global filter de EF).
         var turnosQ = db.AsignacionTurnos.AsNoTracking().AsQueryable();
@@ -84,6 +87,22 @@ public sealed class AtencionProfesionalService(
         var sesionesDict = sesiones
             .GroupBy(s => s.AsignacionTurnoId)
             .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.SessionNo));
+
+        // Hora de cierre de la HC vinculada a cada sesion (via el pivote
+        // AsignacionTurnoSesionHc). Se muestra en la columna "Hora Cierre" de
+        // la parrilla como HH:mm. Solo cuando la HC ya esta Cerrada; HCs
+        // Abiertas o Inactivas quedan sin hora.
+        var sesionIds = sesiones.Select(s => s.Id).ToList();
+        var horaCierrePorSesion = sesionIds.Count == 0
+            ? new Dictionary<Guid, DateTimeOffset>()
+            : (await (
+                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+                where sesionIds.Contains(p.SesionId) && h.FechaCierre != null
+                select new { p.SesionId, h.FechaCierre })
+                .ToListAsync(ct))
+                .GroupBy(x => x.SesionId)
+                .ToDictionary(g => g.Key, g => g.Max(x => x.FechaCierre!.Value));
 
         // Capa 08 Ola 3 — Chip de revision por fila del grid.
         // Para cada paciente traemos la HC MAS RECIENTE (Abierta o Cerrada) y su
@@ -168,11 +187,14 @@ public sealed class AtencionProfesionalService(
                 // en estado Cerrada). Si aun no existe la fila AsignacionTurnoSesion
                 // (sesion nunca atendida), el flag es false por definicion.
                 var completado = sesion?.Completado ?? false;
-                if (!incluirCompletados && completado) { continue; }
 
-                // Incremento del numero de sesion GLOBAL por asignacion.
+                // Numero de sesion GLOBAL por asignacion. Se calcula ANTES del filtro
+                // Pendiente para que sea estable: la sesion 2 debe verse siempre como
+                // "Sesion 2" aunque la 1 este completada y oculta por el filtro.
                 var nGlobal = contadorPorAsignacion.TryGetValue(t.AsignacionId, out var c) ? c + 1 : 1;
                 contadorPorAsignacion[t.AsignacionId] = nGlobal;
+
+                if (!incluirCompletados && completado) { continue; }
 
                 // Capa 08 Ola 3 — resolver chip de revision para esta fila del grid.
                 RevisionEstadoAgregado? revEstado = null;
@@ -187,6 +209,12 @@ public sealed class AtencionProfesionalService(
                     {
                         motivosDic.TryGetValue(rev.Id, out revMotivo);
                     }
+                }
+
+                DateTimeOffset? horaCierre = null;
+                if (sesion is not null && horaCierrePorSesion.TryGetValue(sesion.Id, out var hcCierre))
+                {
+                    horaCierre = hcCierre;
                 }
 
                 result.Add(new MiServicioAsignadoDto(
@@ -212,7 +240,8 @@ public sealed class AtencionProfesionalService(
                     a.PaqueteCodigo != null && paqueteNombres.TryGetValue(a.PaqueteCodigo, out var pn) ? pn : null,
                     revEstado,
                     revUltima,
-                    revMotivo));
+                    revMotivo,
+                    horaCierre));
             }
         }
         return result;

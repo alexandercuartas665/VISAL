@@ -46,11 +46,37 @@ public sealed class HistoriaClinicaService(
             .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
             .OrderByDescending(x => x.h.FechaApertura)
             .Take(200)
+            // EF Core traduce esto a SQL — el ctor debe llamarse con TODOS los
+            // args (los expression trees no permiten opcionales), asi que
+            // pasamos SesionNumero=null aqui y lo enriquecemos abajo con un
+            // JOIN al pivote AsignacionTurnoSesionHc.
             .Select(x => new HistoriaClinicaResumenDto(
                 x.h.Id, x.f.Id, x.f.Codigo, x.f.Nombre,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
-                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId))
+                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
+                (int?)null))
             .ToListAsync(ct);
+
+        // Enriquecer con SesionNumero via el pivote AsignacionTurnoSesionHc.
+        // Regla 1 sesion <-> 1 HC (ver CrearAsync) hace que a lo sumo haya un
+        // resultado por HC — igual protegemos con Take(1) para HCs viejas que
+        // pudieran tener mas de un pivote antes de la validacion.
+        if (rows.Count > 0)
+        {
+            var hcIds = rows.Select(r => r.Id).ToList();
+            var sesionNumPorHc = await (
+                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                where hcIds.Contains(p.HistoriaClinicaId)
+                select new { p.HistoriaClinicaId, s.SessionNo })
+                .ToListAsync(ct);
+            var mapa = sesionNumPorHc
+                .GroupBy(x => x.HistoriaClinicaId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(x => x.SessionNo).First().SessionNo);
+            rows = rows
+                .Select(r => mapa.TryGetValue(r.Id, out var sn) ? r with { SesionNumero = sn } : r)
+                .ToList();
+        }
 
         return rows;
     }
@@ -95,18 +121,61 @@ public sealed class HistoriaClinicaService(
                 "Debes indicar Via de ingreso, Finalidad de la consulta y Causa externa (datos RIPS obligatorios).");
         }
 
+        // Resolvemos el Id de la sesion (AsignacionTurnoSesion). La UI /atencion
+        // envia (AsignacionTurnoId, SessionNo) — la fila puede no existir aun
+        // porque solo se crea al cerrar la sesion. La creamos aqui como parte
+        // del flujo de apertura de HC para tener un ancla estable en el pivote.
+        Guid? sesionResuelta = req.SesionId;
+        if (sesionResuelta is null
+            && req.AsignacionTurnoId is Guid atId
+            && req.SessionNo is int sno && sno >= 1)
+        {
+            var existente = await db.AsignacionTurnoSesiones
+                .FirstOrDefaultAsync(s => s.AsignacionTurnoId == atId && s.SessionNo == sno, ct);
+            if (existente is not null)
+            {
+                sesionResuelta = existente.Id;
+            }
+            else
+            {
+                var nueva = new AsignacionTurnoSesion
+                {
+                    TenantId = tid,
+                    AsignacionTurnoId = atId,
+                    SessionNo = sno,
+                    Completado = false
+                };
+                db.AsignacionTurnoSesiones.Add(nueva);
+                await db.SaveChangesAsync(ct);
+                sesionResuelta = nueva.Id;
+            }
+        }
+
         // Gate de orden secuencial /atencion: cuando la HC viene desde una sesion
         // programada, la UI ya bloqueo el boton pero validamos de nuevo aqui como
         // defensa contra clientes que evadan la UI (Blazor Server + eventos JS
         // manipulados, o llamadas via consola). Si el usuario tiene permiso
         // "atencion.saltar-orden" o es Owner/Admin, el servicio devuelve null y
         // pasamos libre.
-        if (req.SesionId is Guid sesionValidar)
+        if (sesionResuelta is Guid sesionValidar)
         {
             var bloqueo = await atencionOrden.ValidarAperturaAsync(sesionValidar, actor, ct);
             if (bloqueo is not null)
             {
                 throw new InvalidOperationException(bloqueo.Motivo);
+            }
+
+            // Regla 1 sesion <-> 1 HC: bloqueamos crear una segunda HC para la
+            // misma sesion. La tabla pivote AsignacionTurnoSesionHc es M:N por
+            // diseño (ver entidad) pero el modulo /atencion requiere unicidad
+            // aqui — si ya existe alguna HC vinculada, el profesional debe
+            // consultar el historial en vez de crear otra.
+            var yaTieneHc = await db.AsignacionTurnoSesionHcs
+                .AnyAsync(p => p.SesionId == sesionValidar, ct);
+            if (yaTieneHc)
+            {
+                throw new InvalidOperationException(
+                    "Ya existe una historia clinica para esta sesion. Consulta el historial del paciente para verla.");
             }
         }
 
@@ -134,7 +203,7 @@ public sealed class HistoriaClinicaService(
         // el modulo no puede marcar Completado ni bloquear el orden secuencial.
         // La sesion queda Pendiente (Completado=false) porque la HC arranca Abierta;
         // se marcara Completada cuando se llame CerrarAsync.
-        if (req.SesionId is Guid sesionId)
+        if (sesionResuelta is Guid sesionId)
         {
             await VincularSesionYRecalcularAsync(entity.Id, sesionId, tid, ct);
         }
@@ -196,10 +265,12 @@ public sealed class HistoriaClinicaService(
             previousValue: new { estado = estadoPrev.ToString() },
             newValue: new { estado = e.Estado.ToString(), fechaCierre = e.FechaCierre, pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
             tenantId: e.TenantId);
-        // Recalcular Completado de las sesiones vinculadas: ahora hay una HC
-        // Cerrada en el pivote asi que las sesiones se marcan Completado=true.
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        // Persistir el nuevo estado ANTES del recalculo — el recalculo consulta
+        // db.HistoriasClinicas para decidir si la sesion pasa a Completada; si
+        // guardamos despues, la query lee el estado viejo (Abierta) y no marca
+        // la sesion. Mismo patron en Reabrir/Descartar/Activar mas abajo.
         await db.SaveChangesAsync(ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
 
         // Capa 08 Ola 4 — trigger automatico del ciclo de revision al cerrar la HC.
         // Solo si el tenant tiene `AutoTriggerCierre = true` en `RevisionPolicy`.
@@ -285,9 +356,9 @@ public sealed class HistoriaClinicaService(
             newValue: new { estado = e.Estado.ToString(), pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
             tenantId: e.TenantId);
         // La HC volvio a Abierta: si era la unica Cerrada en las sesiones vinculadas,
-        // esas sesiones vuelven a Pendiente. El recalc verifica cada una.
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        // esas sesiones vuelven a Pendiente. Save antes del recalc (ver CerrarAsync).
         await db.SaveChangesAsync(ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
         return true;
     }
 
@@ -304,9 +375,9 @@ public sealed class HistoriaClinicaService(
             newValue: new { estado = e.Estado.ToString(), motivo = e.MotivoInactivacion, fechaCierre = e.FechaCierre, pacienteId = e.PacienteId },
             tenantId: e.TenantId);
         // HC descartada: si era la unica Cerrada de sus sesiones vinculadas,
-        // las sesiones vuelven a Pendiente y el sistema permite crear una HC nueva.
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        // las sesiones vuelven a Pendiente. Save antes del recalc (ver CerrarAsync).
         await db.SaveChangesAsync(ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
         return true;
     }
 
@@ -332,9 +403,9 @@ public sealed class HistoriaClinicaService(
             tenantId: e.TenantId);
         // La HC volvio al flujo (Abierta) desde Inactiva: si estaba sirviendo como
         // "Completado=true" por alguna razon en el pivote, ahora ya no cuenta.
-        // Y si estaba desbloqueando otra HC nueva, ahora se re-bloquea.
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        // Save antes del recalc (ver CerrarAsync).
         await db.SaveChangesAsync(ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
         return true;
     }
 
@@ -585,6 +656,16 @@ public sealed class HistoriaClinicaService(
         if (sesion.Completado != deberiaEstarCompletada)
         {
             sesion.Completado = deberiaEstarCompletada;
+            // Al pasar de Pendiente a Completada, si la sesion nunca fue
+            // registrada via RegistrarSesionAsync (viene default(DateOnly)),
+            // fijamos la fecha con el momento del cierre — asi la parrilla
+            // /atencion muestra la fecha real del cierre en vez de 0001-01-01.
+            // No sobreescribimos cuando ya venia con fecha (registro manual
+            // previo del profesional o import).
+            if (deberiaEstarCompletada && sesion.FechaAtencion == default)
+            {
+                sesion.FechaAtencion = DateOnly.FromDateTime(DateTime.Today);
+            }
             await db.SaveChangesAsync(ct);
         }
     }

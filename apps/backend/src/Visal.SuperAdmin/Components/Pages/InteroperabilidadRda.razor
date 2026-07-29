@@ -484,10 +484,13 @@
     private bool _generando;
     private Guid? _generandoHcId;
     private List<string> _advertenciasUltimo = new();
-    // Serializa BuscarHc() para evitar "A second operation was started on this
-    // context instance" — el @bind:after="BuscarHc" dispara una query por keystroke
-    // y todas comparten el DbContext scoped del circuito Blazor.
-    private readonly SemaphoreSlim _buscarHcLock = new(1, 1);
+    // Serializa TODAS las operaciones sobre el DbContext scoped del circuito
+    // Blazor. Sin este lock global, si el usuario abre el probador mientras
+    // CargarLista aun corre, o dispara Refrescar antes de que responda la
+    // primera consulta, EF Core revienta con "A second operation was started on
+    // this context instance". El semaforo cubre CargarLista/BuscarHc/AbrirVerJson/
+    // GenerarParaHc/EliminarRdaAsync — todo lo que toque Svc.*.
+    private readonly SemaphoreSlim _dbLock = new(1, 1);
 
     // ----- Modal Ver JSON -----
     private RdaEventoDetailDto? _detail;
@@ -521,6 +524,7 @@
     {
         _error = null;
         _cargando = true;
+        await _dbLock.WaitAsync();
         try
         {
             var filtro = new RdaConsoleFiltro(
@@ -532,7 +536,7 @@
             _rows = (await Svc.ListarAsync(filtro)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _cargando = false; }
+        finally { _cargando = false; _dbLock.Release(); }
     }
 
     private async Task AbrirGenerar()
@@ -552,19 +556,20 @@
         // y todas las llamadas comparten el DbContext scoped del circuito Blazor.
         // Sin este lock el usuario tipea "MARIA" y se lanzan 5 queries en paralelo,
         // reventando con "A second operation was started on this context instance".
-        await _buscarHcLock.WaitAsync();
+        await _dbLock.WaitAsync();
         try
         {
             _hcCandidatas = (await Svc.ListarHcCandidatasAsync(_buscarHc)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _buscarHcLock.Release(); }
+        finally { _dbLock.Release(); }
     }
 
     private async Task GenerarParaHc(Guid hcId)
     {
         _error = null; _ok = null;
         _generando = true; _generandoHcId = hcId;
+        await _dbLock.WaitAsync();
         try
         {
             var actor = await ActorAsync();
@@ -576,26 +581,32 @@
             _ok = res.YaExistia
                 ? $"Bundle ya existia (hash {res.BundleHash[..12]}…). No se duplico."
                 : $"RDA generado: {res.RecursosCount} recursos, hash {res.BundleHash[..12]}…";
-            await CargarLista();
+            // Ojo: CargarLista tambien pide _dbLock; para no deadlockear liberamos primero.
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _generando = false; _generandoHcId = null; }
+        finally { _generando = false; _generandoHcId = null; _dbLock.Release(); }
+        await CargarLista();
     }
 
     private async Task VerJson(Guid id)
     {
+        await _dbLock.WaitAsync();
         try
         {
             _detail = await Svc.ObtenerAsync(id);
         }
         catch (Exception ex) { _error = ex.Message; }
+        finally { _dbLock.Release(); }
     }
 
     private void CerrarDetalle() => _detail = null;
 
     private async Task DescargarJson(Guid id)
     {
-        var det = await Svc.ObtenerAsync(id);
+        RdaEventoDetailDto? det = null;
+        await _dbLock.WaitAsync();
+        try { det = await Svc.ObtenerAsync(id); }
+        finally { _dbLock.Release(); }
         if (det is null) { _error = $"Evento {id} no encontrado."; return; }
         var dataUrl = "data:application/json;charset=utf-8;base64," +
             Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(det.BundleJson));
@@ -608,14 +619,15 @@
     {
         _error = null; _ok = null; _envioResult = null;
         _enviandoId = id;
+        await _dbLock.WaitAsync();
         try
         {
             var actor = await ActorAsync();
             _envioResult = await Sender.EnviarRdaAsync(id, actor);
-            await CargarLista();
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _enviandoId = null; }
+        finally { _enviandoId = null; _dbLock.Release(); }
+        await CargarLista();
     }
 
     private void CerrarEnvio() => _envioResult = null;
@@ -655,14 +667,16 @@
     private async Task Eliminar(Guid id)
     {
         if (!await JS.InvokeAsync<bool>("confirm", "Eliminar este Borrador? La accion no se puede deshacer.")) { return; }
+        await _dbLock.WaitAsync();
         try
         {
             var actor = await ActorAsync();
             await Svc.EliminarAsync(id, actor);
             _ok = "Evento eliminado.";
-            await CargarLista();
         }
         catch (Exception ex) { _error = ex.Message; }
+        finally { _dbLock.Release(); }
+        await CargarLista();
     }
 
     private static RenderFragment RenderEstado(EstadoRdaEvento e) => __builder =>

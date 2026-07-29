@@ -39,11 +39,12 @@
 </div>
 
 <nav class="visal-nav">
-    @if (_showTenant && _esProfesional && !_esAdminAgencia)
+    @if (_showTenant && _esProfesional && !_esAdminAgencia && !_esAdminOperativo)
     {
-        @* Usuario derivado de un profesional que NO es admin de agencia: solo ve
-           el modulo de Atencion (sus servicios asignados). Los profesionales que
-           tambien son Owner/Admin/Administrador ven el menu completo. *@
+        @* Usuario derivado de un profesional que NO es admin de agencia ni admin operativo:
+           solo ve el modulo de Atencion (sus servicios asignados). Los profesionales que
+           tambien son Owner/Admin/Administrador (bypass total) o "Profesional Administrativo"
+           (respeta perms del rol) ven el menu completo. *@
         <div class="visal-nav-label">Mi trabajo</div>
 
         <NavLink class="visal-nav-link" href="atencion">
@@ -79,11 +80,11 @@
             </NavLink>
         }
 
-        @* Atencion visible para profesionales (ven sus turnos) y admin de agencia
+        @* Atencion visible para profesionales (ven sus turnos) y admin de agencia/operativo
            (ven todos los turnos del tenant — vista supervisora). El permiso
            "profesionales" gate el CRUD del catalogo de Profesionales, no este
            modulo — antes lo gateaba por error y bloqueaba a admins sin ese permiso. *@
-        @if (_esProfesional || _esAdminAgencia)
+        @if (_esProfesional || _esAdminAgencia || _esAdminOperativo)
         {
             <NavLink class="visal-nav-link" href="atencion">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
@@ -121,12 +122,15 @@
             </NavLink>
         }
 
-        <div class="visal-nav-label">Interoperabilidad</div>
+        @if (Puede("interoperabilidad.rda"))
+        {
+            <div class="visal-nav-label">Interoperabilidad</div>
 
-        <NavLink class="visal-nav-link" href="interoperabilidad/rda">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7"/><path d="M3 7l9 6 9-6"/><path d="M3 7l9-4 9 4"/><circle cx="18" cy="18" r="3" fill="#22c55e"/></svg>
-            <span>Consola RDA</span>
-        </NavLink>
+            <NavLink class="visal-nav-link" href="interoperabilidad/rda">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7"/><path d="M3 7l9 6 9-6"/><path d="M3 7l9-4 9 4"/><circle cx="18" cy="18" r="3" fill="#22c55e"/></svg>
+                <span>Consola RDA</span>
+            </NavLink>
+        }
 
         @if (Puede("facturacion.snapshots"))
         {
@@ -138,141 +142,244 @@
             </NavLink>
         }
 
-        <div class="visal-nav-label">Infraestructura & IA</div>
+        @* Cada NavLink de Infraestructura & IA / Config del Sistema esta gateado con
+           Puede("<slug>"). El slug es el mismo string que se guarda en rol_permisos.modulo.
+           _esAdminAgencia (Owner/Admin/Administrador) sigue bypasseando Puede() → ve todo.
+           Solo los roles no-admin (ej. "Profesional Administrativo") ven exactamente lo que
+           su rol tenga marcado en la tabla de permisos. *@
+        var _showIaGroup = Puede("whatsapp.lineas") || Puede("whatsapp.plantillas")
+                        || Puede("agentes-ia") || Puede("automatizaciones")
+                        || Puede("metricas") || Puede("admin.ai-usage");
+        if (_showIaGroup)
+        {
+            <div class="visal-nav-label">Infraestructura & IA</div>
 
-        @* Match=All para que /lineas/plantillas no encienda tambien este item. *@
-        <NavLink class="visal-nav-link" href="lineas" Match="NavLinkMatch.All">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-            <span>Lineas WhatsApp</span>
-        </NavLink>
-        <NavLink class="visal-nav-link" href="lineas/plantillas">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
-            <span>Plantillas WhatsApp</span>
-        </NavLink>
+            @* Match=All para que /lineas/plantillas no encienda tambien este item. *@
+            @if (Puede("whatsapp.lineas"))
+            {
+                <NavLink class="visal-nav-link" href="lineas" Match="NavLinkMatch.All">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+                    <span>Lineas WhatsApp</span>
+                </NavLink>
+            }
+            @if (Puede("whatsapp.plantillas"))
+            {
+                <NavLink class="visal-nav-link" href="lineas/plantillas">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                    <span>Plantillas WhatsApp</span>
+                </NavLink>
+            }
+            @if (Puede("agentes-ia"))
+            {
+                <NavLink class="visal-nav-link" href="agentes">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+                    <span>Agentes IA</span>
+                </NavLink>
+            }
+            @if (Puede("automatizaciones"))
+            {
+                <NavLink class="visal-nav-link" href="automatizaciones">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+                    <span>Automatizaciones</span>
+                </NavLink>
+            }
+            @if (Puede("metricas"))
+            {
+                <NavLink class="visal-nav-link" href="metricas">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                    <span>Metricas</span>
+                </NavLink>
+            }
+            @if (Puede("admin.ai-usage"))
+            {
+                <NavLink class="visal-nav-link" href="admin/ai-usage">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M12 9v6"/><circle cx="12" cy="12" r="9"/></svg>
+                    <span>Auditoria uso IA</span>
+                </NavLink>
+            }
+        }
 
-        <NavLink class="visal-nav-link" href="agentes">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-            <span>Agentes IA</span>
-        </NavLink>
+        var _showSysCfgGroup = Puede("cfg-turnos") || Puede("cfg-profesionales")
+                            || Puede("cfg-aseguradoras") || Puede("cfg-tipos-profesional")
+                            || Puede("cfg-subcategorias") || Puede("cfg-paquetes")
+                            || Puede("cfg-cuotas-copagos") || Puede("cfg-pacientes")
+                            || Puede("cie11") || Puede("medicamentos") || Puede("diagnosticos")
+                            || Puede("catalogo.rx") || Puede("catalogo.laboratorios")
+                            || Puede("catalogo.servicios") || Puede("catalogo.insumos")
+                            || Puede("relaciones-formularios") || Puede("cfg-tipos-servicio")
+                            || Puede("cfg-menu-hc") || Puede("cfg-tipologia-archivos")
+                            || Puede("admin.sql-console");
+        if (_showSysCfgGroup)
+        {
+            <div class="visal-nav-label">Configuracion del Sistema</div>
 
-        <NavLink class="visal-nav-link" href="automatizaciones">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
-            <span>Automatizaciones</span>
-        </NavLink>
+            @if (Puede("cfg-turnos"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-turnos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>
+                    <span>Programaciones de turnos</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="metricas">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-            <span>Metricas</span>
-        </NavLink>
+            @if (Puede("cfg-profesionales"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-profesionales">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Profesionales</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="admin/ai-usage">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M12 9v6"/><circle cx="12" cy="12" r="9"/></svg>
-            <span>Auditoria uso IA</span>
-        </NavLink>
+            @if (Puede("cfg-aseguradoras"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-aseguradoras">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <span>Entidades Aseguradoras</span>
+                </NavLink>
+            }
 
-        <div class="visal-nav-label">Configuracion del Sistema</div>
+            @if (Puede("cfg-tipos-profesional"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-tipos-profesional">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+                    <span>Tipos de Profesional</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-turnos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>
-            <span>Programaciones de turnos</span>
-        </NavLink>
+            @if (Puede("cfg-subcategorias"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-subcategorias">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+                    <span>Subcategorias</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-profesionales">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <span>Profesionales</span>
-        </NavLink>
+            @* Servicios: ocultado del menu hasta que la pagina /cfg-servicios deje de ser
+               placeholder. Ojo: NO confundir con "Catalogo Servicios" (/catalogo/servicios)
+               que si es funcional y sigue en el menu. *@
 
-        <NavLink class="visal-nav-link" href="cfg-aseguradoras">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span>Entidades Aseguradoras</span>
-        </NavLink>
+            @if (Puede("cfg-paquetes"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-paquetes">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                    <span>Paquetes</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-tipos-profesional">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
-            <span>Tipos de Profesional</span>
-        </NavLink>
+            @if (Puede("cfg-cuotas-copagos"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-cuotas-copagos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    <span>Cuotas / Copagos</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-subcategorias">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
-            <span>Subcategorias</span>
-        </NavLink>
+            @if (Puede("cfg-pacientes"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-pacientes">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg>
+                    <span>Configuracion Pacientes</span>
+                </NavLink>
+            }
 
-        @* Servicios: ocultado del menu hasta que la pagina /cfg-servicios deje de ser
-           placeholder. Ojo: NO confundir con "Catalogo Servicios" (/catalogo/servicios)
-           que si es funcional y sigue en el menu. *@
+            @if (Puede("cie11"))
+            {
+                <NavLink class="visal-nav-link" href="cie11">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+                    <span>Configuracion CIE-11</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-paquetes">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
-            <span>Paquetes</span>
-        </NavLink>
+            @if (Puede("medicamentos"))
+            {
+                <NavLink class="visal-nav-link" href="medicamentos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 14-7 7-7-7"/><path d="M12 21V3"/><circle cx="12" cy="6" r="3"/></svg>
+                    <span>Base de datos Medicamentos</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-cuotas-copagos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            <span>Cuotas / Copagos</span>
-        </NavLink>
+            @if (Puede("diagnosticos"))
+            {
+                <NavLink class="visal-nav-link" href="diagnosticos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+                    <span>Base de datos Diagnosticos</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cfg-pacientes">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg>
-            <span>Configuracion Pacientes</span>
-        </NavLink>
+            @if (Puede("catalogo.rx"))
+            {
+                <NavLink class="visal-nav-link" href="catalogo/rx-imagenologia">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2v20"/></svg>
+                    <span>Catalogo RX Imagenologia</span>
+                </NavLink>
+            }
+            @if (Puede("catalogo.laboratorios"))
+            {
+                <NavLink class="visal-nav-link" href="catalogo/laboratorios">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4l4 8a3 3 0 0 1-3 4H8a3 3 0 0 1-3-4l4-8V3z"/></svg>
+                    <span>Catalogo Laboratorios</span>
+                </NavLink>
+            }
+            @if (Puede("catalogo.servicios"))
+            {
+                <NavLink class="visal-nav-link" href="catalogo/servicios">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M12 9v6"/><circle cx="12" cy="12" r="10"/></svg>
+                    <span>Catalogo Servicios</span>
+                </NavLink>
+            }
+            @if (Puede("catalogo.insumos"))
+            {
+                <NavLink class="visal-nav-link" href="catalogo/insumos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    <span>Catalogo Insumos</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="cie11">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
-            <span>Configuracion CIE-11</span>
-        </NavLink>
+            @if (Puede("relaciones-formularios"))
+            {
+                <NavLink class="visal-nav-link" href="relaciones-formularios">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="6" x="2" y="4" rx="1"/><rect width="8" height="6" x="14" y="14" rx="1"/><path d="M10 7h4"/><path d="M14 7l-4 10"/></svg>
+                    <span>Relaciones de formularios</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="medicamentos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 14-7 7-7-7"/><path d="M12 21V3"/><circle cx="12" cy="6" r="3"/></svg>
-            <span>Base de datos Medicamentos</span>
-        </NavLink>
+            @if (Puede("cfg-tipos-servicio"))
+            {
+                <NavLink class="visal-nav-link" href="config/tipos-servicio">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
+                    <span>Tipos de servicio</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="diagnosticos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
-            <span>Base de datos Diagnosticos</span>
-        </NavLink>
+            @if (Puede("cfg-menu-hc"))
+            {
+                <NavLink class="visal-nav-link" href="config/menu-hc">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    <span>Menu HC por servicio</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="catalogo/rx-imagenologia">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2v20"/></svg>
-            <span>Catalogo RX Imagenologia</span>
-        </NavLink>
-        <NavLink class="visal-nav-link" href="catalogo/laboratorios">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4l4 8a3 3 0 0 1-3 4H8a3 3 0 0 1-3-4l4-8V3z"/></svg>
-            <span>Catalogo Laboratorios</span>
-        </NavLink>
-        <NavLink class="visal-nav-link" href="catalogo/servicios">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"/><path d="M12 9v6"/><circle cx="12" cy="12" r="10"/></svg>
-            <span>Catalogo Servicios</span>
-        </NavLink>
-        <NavLink class="visal-nav-link" href="catalogo/insumos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            <span>Catalogo Insumos</span>
-        </NavLink>
+            @if (Puede("cfg-tipologia-archivos"))
+            {
+                <NavLink class="visal-nav-link" href="cfg-tipologia-archivos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                    <span>Tipologia Archivos</span>
+                </NavLink>
+            }
 
-        <NavLink class="visal-nav-link" href="relaciones-formularios">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="6" x="2" y="4" rx="1"/><rect width="8" height="6" x="14" y="14" rx="1"/><path d="M10 7h4"/><path d="M14 7l-4 10"/></svg>
-            <span>Relaciones de formularios</span>
-        </NavLink>
+            @if (Puede("admin.sql-console"))
+            {
+                <NavLink class="visal-nav-link" href="admin/sql-console">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                    <span>Consola SQL</span>
+                </NavLink>
+            }
+        }
 
-        <NavLink class="visal-nav-link" href="config/tipos-servicio">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
-            <span>Tipos de servicio</span>
-        </NavLink>
-
-        <NavLink class="visal-nav-link" href="config/menu-hc">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-            <span>Menu HC por servicio</span>
-        </NavLink>
-
-        <NavLink class="visal-nav-link" href="cfg-tipologia-archivos">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-            <span>Tipologia Archivos</span>
-        </NavLink>
-
-        <NavLink class="visal-nav-link" href="admin/sql-console">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-            <span>Consola SQL</span>
-        </NavLink>
-
+        var _showEntCfgGroup = Puede("cfg-empresa") || Puede("cfg-interoperabilidad")
+                            || Puede("cfg-revision-policy") || Puede("cfg-roles")
+                            || Puede("cfg-usuarios");
+        if (_showEntCfgGroup)
+        {
         <div class="visal-nav-label">Configuracion de la Entidad</div>
 
         @if (Puede("cfg-empresa"))
@@ -291,12 +398,16 @@
             </NavLink>
         }
 
-        @* Politica de Revision Clinica (Capa 08 Ola 4) — solo Owner + SuperAdmin.
-           No hay permiso granular; la pagina misma valida con AuthState. *@
-        <NavLink class="visal-nav-link" href="config/revision-policy">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            <span>Politica de Revision Clinica</span>
-        </NavLink>
+        @* Politica de Revision Clinica (Capa 08 Ola 4) — la pagina misma valida
+           con AuthState que el usuario sea Owner + SuperAdmin; en el nav le agregamos
+           gate por permiso "cfg-revision-policy" para que no salga a roles operativos. *@
+        @if (Puede("cfg-revision-policy"))
+        {
+            <NavLink class="visal-nav-link" href="config/revision-policy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <span>Politica de Revision Clinica</span>
+            </NavLink>
+        }
 
         @if (Puede("cfg-roles"))
         {
@@ -312,6 +423,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21a8 8 0 0 0-16 0"/><circle cx="10" cy="8" r="5"/><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/></svg>
                 <span>Administracion de Usuarios</span>
             </NavLink>
+        }
         }
 
         @* MI AGENCIA: ultimo grupo del sidebar, contiene plantillas y mi cuenta. *@
@@ -419,6 +531,11 @@
     /// <summary>True cuando el tenant_role es Owner o Admin. Solo estos perfiles ven
     /// "Mi cuenta" (datos de la agencia, plan, facturacion).</summary>
     private bool _esAdminAgencia;
+    /// <summary>True cuando el rol es "Profesional Administrativo": profesional
+    /// vinculado que ademas necesita menu completo (sin colapso a solo Atencion).
+    /// A diferencia de _esAdminAgencia, NO bypassea Puede() — respeta los permisos
+    /// configurados en el rol, asi los modulos de Configuracion salen solo lectura.</summary>
+    private bool _esAdminOperativo;
     private string? _userName;
     private string? _tenantName;
     private string? _tenantLogoUrl;
@@ -465,6 +582,7 @@
             || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase)
             || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase)
             || rolNombre.Equals("Administrador", StringComparison.OrdinalIgnoreCase);
+        _esAdminOperativo = rolNombre.Equals("Profesional Administrativo", StringComparison.OrdinalIgnoreCase);
 
         _userName = state.User.Identity?.Name;
         _avatar = Initials(_userName);

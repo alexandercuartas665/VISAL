@@ -258,12 +258,13 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             Profesional? profesional = null;
             if (hc.ProfesionalId is Guid pid) { profesionales.TryGetValue(pid, out profesional); }
 
-            string? cupsCodigo = paciente.Cie10Codigo;
+            // CUPS del servicio contratado (ServicioContrato.CodigoServicio) — no
+            // del CIE-10 del paciente. La EPS factura por procedimiento CUPS
+            // (890101 = Atencion domiciliaria por medicina general), NO por el
+            // diagnostico. Se resuelve mas abajo cuando encontramos la
+            // asignacion relevante + su servicio contratado.
+            string? cupsCodigo = null;
             string? cupsDescripcion = null;
-            if (!string.IsNullOrEmpty(cupsCodigo) && catalogo.TryGetValue(cupsCodigo, out var cn))
-            {
-                cupsDescripcion = cn;
-            }
 
             string? deptoNombre = paciente.DepartamentoId is Guid dId && depts.TryGetValue(dId, out var dn) ? dn : null;
             string? munNombre = paciente.MunicipioId is Guid mId && muns.TryGetValue(mId, out var mn) ? mn : null;
@@ -336,6 +337,8 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 modalidadFacturacion = sc.ModalidadFacturacion;
                 grupoServicioFacturacion = sc.GrupoServicioFacturacion;
                 servicioFacturacion = sc.ServicioFacturacion;
+                cupsCodigo = sc.CodigoServicio;
+                cupsDescripcion = sc.Descripcion;
             }
 
             // Cuota moderadora / copago — mutuamente excluyentes segun TipoPago

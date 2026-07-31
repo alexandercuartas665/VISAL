@@ -137,7 +137,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Sede"] = h.Sucursal?.Nombre,                                     //  5  — nombre de la sede que atendio
             ["Regimen"] = h.Paciente.Regimen,                                  //  6
             ["Archivo json"] = h.TipoArchivoRips,                              //  7  — TipoArchivoRips del catalogo tipo servicio (AC/AP/AT/AM)
-            ["Autorizacion"] = h.CodigoAutorizacion,                           //  8  — Asignacion.CodigoAutorizacion
+            ["Autorizacion"] = NormalizarAutorizacion(h.CodigoAutorizacion),   //  8  — Asignacion.CodigoAutorizacion (null si es "." o vacio)
             ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  9
             ["Identificación"] = h.Paciente.NumeroDocumento,                   // 10
             ["Primer Apellido"] = h.Paciente.PrimerApellido,                   // 11
@@ -145,16 +145,16 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Primer Nombre"] = h.Paciente.PrimerNombre,                       // 13
             ["Segundo Nombre"] = h.Paciente.SegundoNombre,                     // 14
             ["Fecha de Nacimiento"] = h.Paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 15
-            ["Sexo"] = h.Paciente.Sexo,                                        // 16
+            ["Sexo"] = NormalizarSexo(h.Paciente.Sexo),                        // 16 — RIPS pide 1 letra (F/M)
             ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 17 — fecha de cierre de la HC
-            ["Hora"] = fechaLocal.ToString("HH:mm:ss"),                        // 18
+            ["Hora"] = fechaLocal.ToString("HH:mm"),                           // 18 — RIPS pide HH:mm (sin segundos)
             ["CUPS"] = h.CupsCodigo,                                           // 19
             ["Codigo Externo (Factura)"] = h.CupsCodigo,                       // 20 — misma clave que CUPS (spec EPS)
             ["Cantidad"] = 1,                                                  // 21 — 1 HC = 1 fila
             ["Descripción del procedimiento (Factura)"] = h.NombreServicio ?? h.CupsDescripcion, // 22 — nombre del servicio asignado
             ["Valor Unitario"] = h.ValorUnitario,                              // 23 — ServicioContrato.Tarifa
-            ["Vr Cuota Moderadora "] = h.ValorCuotaModeradora,                 // 24 — Asignacion (TipoPago=CUOTA)
-            ["Copago o Pago Compartido"] = h.ValorCopago,                     // 25 — Asignacion (TipoPago=COPAGO)
+            ["Vr Cuota Moderadora "] = h.ValorCuotaModeradora ?? 0m,           // 24 — Asignacion (TipoPago=CUOTA); default 0 si no aplica
+            ["Copago o Pago Compartido"] = h.ValorCopago ?? 0m,                // 25 — Asignacion (TipoPago=COPAGO); default 0 si no aplica
             ["Valor Total"] = h.ValorUnitario,                                 // 26 — Cantidad(1) x Tarifa
             ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 27
             ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 28
@@ -173,6 +173,27 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Telefono"] = h.Paciente.Telefono,                                // 41
             ["Correo electrónico"] = h.Paciente.Email,                         // 42 — correo del paciente (Paciente.Email)
         };
+    }
+
+    // Autorizacion viene de Asignacion.CodigoAutorizacion. Legacy tiene "." como
+    // placeholder de "sin autorizacion" — la EPS lo quiere en blanco/null. Lo
+    // colapsamos aqui para no ensuciar cada snapshot generado.
+    private static string? NormalizarAutorizacion(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return null; }
+        var trimmed = raw.Trim();
+        if (trimmed == "." || trimmed == "-" || trimmed == "0") { return null; }
+        return trimmed;
+    }
+
+    // RIPS acepta un solo caracter para sexo: F o M. En BD se guarda como
+    // "FEMENINO"/"MASCULINO" (o mixto historico) — normalizamos a la letra
+    // inicial mayuscula. Cualquier cosa que no empiece con F/M sale null.
+    private static string? NormalizarSexo(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return null; }
+        var c = char.ToUpperInvariant(raw.Trim()[0]);
+        return c == 'F' || c == 'M' ? c.ToString() : null;
     }
 
     private static RelacionFacturasFiltros ParsearFiltros(string json)

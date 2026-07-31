@@ -1320,6 +1320,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Estado).HasMaxLength(30).IsRequired();
             b.Property(x => x.PaqueteCodigo).HasMaxLength(40);
             b.Property(x => x.PaqueteValorPactado).HasPrecision(14, 2);
+            // RIPS Via de ingreso (Res. 202/2021). Nullable en BD por backfill;
+            // el servicio la exige not-null en operaciones nuevas.
+            b.Property(x => x.RipsViaIngresoCodigo).HasMaxLength(10);
+            b.Property(x => x.RipsViaIngresoNombre).HasMaxLength(200);
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasCheckConstraint("ck_asignaciones_cantidad", "cantidad > 0");
             b.HasIndex(x => new { x.TenantId, x.PacienteId });

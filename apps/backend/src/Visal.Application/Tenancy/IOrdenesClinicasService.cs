@@ -47,7 +47,13 @@ public sealed record OrdenClinicaItemDto(
     /// Paciente.SedeAtencionId -> Sucursal.Nombre. Null si el paciente no
     /// tiene sede configurada.</summary>
     string? SedeNombre = null,
-    Guid? SedeId = null);
+    Guid? SedeId = null,
+    /// <summary>Numero global de sesion dentro de la asignacion que origino
+    /// esta HC (1..N ordenado por CreatedAt de los turnos hermanos). Se
+    /// resuelve via el pivote AsignacionTurnoSesionHc -> AsignacionTurnoSesion
+    /// -> AsignacionTurno y la posicion del turno en su asignacion. Null
+    /// cuando la HC no vino de /atencion o quedo huerfana.</summary>
+    int? SesionNumero = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

@@ -57,24 +57,57 @@ public sealed class HistoriaClinicaService(
                 (int?)null))
             .ToListAsync(ct);
 
-        // Enriquecer con SesionNumero via el pivote AsignacionTurnoSesionHc.
+        // Enriquecer con SesionNumero (nGlobal cronologico) via el pivote
+        // AsignacionTurnoSesionHc -> AsignacionTurnoSesion -> AsignacionTurno.
         // Regla 1 sesion <-> 1 HC (ver CrearAsync) hace que a lo sumo haya un
-        // resultado por HC — igual protegemos con Take(1) para HCs viejas que
-        // pudieran tener mas de un pivote antes de la validacion.
+        // resultado por HC. NOTA: no leemos s.SessionNo (siempre 1 desde
+        // Cantidad=1 por turno, task #147); calculamos la posicion del turno
+        // dentro de su asignacion ordenando por CreatedAt asc (base 1) para
+        // que el badge coincida con la parrilla /atencion y con /ordenes.
         if (rows.Count > 0)
         {
             var hcIds = rows.Select(r => r.Id).ToList();
-            var sesionNumPorHc = await (
-                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
-                join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-                where hcIds.Contains(p.HistoriaClinicaId)
-                select new { p.HistoriaClinicaId, s.SessionNo })
+            var pivotes = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .Where(p => hcIds.Contains(p.HistoriaClinicaId))
+                .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                      p => p.SesionId, s => s.Id,
+                      (p, s) => new { p.HistoriaClinicaId, s.AsignacionTurnoId })
                 .ToListAsync(ct);
-            var mapa = sesionNumPorHc
+            var hcToTurno = pivotes
                 .GroupBy(x => x.HistoriaClinicaId)
-                .ToDictionary(g => g.Key, g => g.OrderBy(x => x.SessionNo).First().SessionNo);
+                .ToDictionary(g => g.Key, g => g.First().AsignacionTurnoId);
+            var turnoIds = hcToTurno.Values.Distinct().ToList();
+            var turnoToAsig = turnoIds.Count == 0
+                ? new Dictionary<Guid, Guid>()
+                : await db.AsignacionTurnos.AsNoTracking()
+                    .Where(t => turnoIds.Contains(t.Id))
+                    .Select(t => new { t.Id, t.AsignacionId })
+                    .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
+            var asigIds = turnoToAsig.Values.Distinct().ToList();
+            var turnoOrden = new Dictionary<Guid, int>();
+            if (asigIds.Count > 0)
+            {
+                var todosTurnos = await db.AsignacionTurnos.AsNoTracking()
+                    .Where(t => asigIds.Contains(t.AsignacionId))
+                    .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt })
+                    .ToListAsync(ct);
+                foreach (var grp in todosTurnos.GroupBy(x => x.AsignacionId))
+                {
+                    // Tiebreaker por Id cuando CreatedAt colisiona (seeds masivos):
+                    // asegura que el badge muestre el mismo nGlobal que la grilla
+                    // /atencion y que el validador de orden secuencial.
+                    var lista = grp.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
+                    for (int i = 0; i < lista.Count; i++)
+                    {
+                        turnoOrden[lista[i].Id] = i + 1;
+                    }
+                }
+            }
             rows = rows
-                .Select(r => mapa.TryGetValue(r.Id, out var sn) ? r with { SesionNumero = sn } : r)
+                .Select(r => hcToTurno.TryGetValue(r.Id, out var turnoIdHc)
+                             && turnoOrden.TryGetValue(turnoIdHc, out var nGlobal)
+                    ? r with { SesionNumero = nGlobal }
+                    : r)
                 .ToList();
         }
 
@@ -110,15 +143,37 @@ public sealed class HistoriaClinicaService(
             .FirstOrDefaultAsync(p => p.Id == req.PacienteId, ct)
             ?? throw new InvalidOperationException("Paciente no encontrado.");
 
-        // Validacion de RIPS: la Res. 202/2021 exige via + finalidad + causa externa
-        // como datos obligatorios para reportar. Bloqueamos aqui para que ninguna HC
-        // se persista sin ellos.
-        if (string.IsNullOrWhiteSpace(req.RipsViaIngresoCodigo)
+        // RIPS Via de ingreso: se movio al modulo /asignacion (se captura una sola
+        // vez por servicio contratado). Si la HC nace desde un turno, la Via viene
+        // de la Asignacion como snapshot inmutable — la que envie el request se
+        // ignora. Cuando no hay turno (HC libre desde admision), seguimos aceptando
+        // la Via del request para no romper ese flujo.
+        string? viaCodigoResuelto = req.RipsViaIngresoCodigo;
+        string? viaNombreResuelto = req.RipsViaIngresoNombre;
+        if (req.AsignacionTurnoId is Guid turnoId0)
+        {
+            var viaAsig = await (
+                from t in db.AsignacionTurnos.AsNoTracking()
+                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                where t.Id == turnoId0
+                select new { a.RipsViaIngresoCodigo, a.RipsViaIngresoNombre })
+                .FirstOrDefaultAsync(ct);
+            if (viaAsig is not null
+                && !string.IsNullOrWhiteSpace(viaAsig.RipsViaIngresoCodigo))
+            {
+                viaCodigoResuelto = viaAsig.RipsViaIngresoCodigo;
+                viaNombreResuelto = viaAsig.RipsViaIngresoNombre;
+            }
+        }
+
+        // Validacion RIPS: Finalidad + Causa siempre; Via debe venir de la Asignacion
+        // (o del request en flujos legacy).
+        if (string.IsNullOrWhiteSpace(viaCodigoResuelto)
             || string.IsNullOrWhiteSpace(req.RipsFinalidadCodigo)
             || string.IsNullOrWhiteSpace(req.RipsCausaExternaCodigo))
         {
             throw new InvalidOperationException(
-                "Debes indicar Via de ingreso, Finalidad de la consulta y Causa externa (datos RIPS obligatorios).");
+                "Debes indicar Via de ingreso (en la Asignacion), Finalidad de la consulta y Causa externa (datos RIPS obligatorios).");
         }
 
         // Resolvemos el Id de la sesion (AsignacionTurnoSesion). La UI /atencion
@@ -189,8 +244,8 @@ public sealed class HistoriaClinicaService(
             FechaApertura = DateTimeOffset.UtcNow,
             EspecialistaNombre = req.EspecialistaNombre,
             ProfesionalId = req.ProfesionalId,
-            RipsViaIngresoCodigo = req.RipsViaIngresoCodigo,
-            RipsViaIngresoNombre = req.RipsViaIngresoNombre,
+            RipsViaIngresoCodigo = viaCodigoResuelto,
+            RipsViaIngresoNombre = viaNombreResuelto,
             RipsFinalidadCodigo = req.RipsFinalidadCodigo,
             RipsFinalidadNombre = req.RipsFinalidadNombre,
             RipsCausaExternaCodigo = req.RipsCausaExternaCodigo,

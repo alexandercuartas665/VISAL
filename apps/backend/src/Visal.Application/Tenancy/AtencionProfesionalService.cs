@@ -38,7 +38,13 @@ public sealed class AtencionProfesionalService(
             turnosQ = turnosQ.Where(t => t.ProfesionalId == profId);
         }
 
-        var turnos = await turnosQ.OrderBy(t => t.CreatedAt).ToListAsync(ct);
+        // Tiebreaker Id: en seeds masivos varios turnos comparten CreatedAt al
+        // microsegundo (mismo INSERT). Sin este ThenBy el orden es no-determinista
+        // y el nGlobal calculado aqui difiere del que calcula AtencionOrdenService
+        // al validar apertura → UI muestra "Sesion #1" y backend cree que es "#2".
+        // UUID v7 codifica timestamp en la parte alta: ordenar por Id respeta el
+        // orden real de insercion aunque el CreatedAt este pisado al mismo instante.
+        var turnos = await turnosQ.OrderBy(t => t.CreatedAt).ThenBy(t => t.Id).ToListAsync(ct);
         if (turnos.Count == 0) { return Array.Empty<MiServicioAsignadoDto>(); }
 
         var turnoIds = turnos.Select(t => t.Id).ToList();

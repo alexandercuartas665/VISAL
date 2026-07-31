@@ -52,6 +52,17 @@ public class Asignacion : TenantEntity
     /// <summary>Formato de historia ligado al servicio (FormDefinition.Codigo, p.ej.).</summary>
     public string? FormatoHistoria { get; set; }
 
+    /// <summary>Codigo RIPS de la Via de ingreso al servicio de salud (Res. 202/2021,
+    /// tabla RIPS_VIA_INGRESO). Se captura al crear la asignacion y viaja a la HC
+    /// como snapshot inmutable al iniciar la historia — antes se preguntaba en el
+    /// modal RIPS de HC. Nullable en BD por compatibilidad con asignaciones legacy
+    /// (backfill via HC mas reciente); el servicio lo exige not-null al guardar.</summary>
+    public string? RipsViaIngresoCodigo { get; set; }
+
+    /// <summary>Nombre RIPS de la Via de ingreso (denormalizado del catalogo para
+    /// evitar JOIN en snapshots/reportes). Se guarda en paralelo al codigo.</summary>
+    public string? RipsViaIngresoNombre { get; set; }
+
     /// <summary>URL / ruta relativa del PDF de autorizacion adjunto. Opcional; solo se
     /// vuelve obligatorio cuando el ContratoAseguradora.RequierePdfAutorizacion es true.</summary>
     public string? PdfAutorizacionUrl { get; set; }

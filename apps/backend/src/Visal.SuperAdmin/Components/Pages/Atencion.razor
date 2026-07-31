@@ -289,7 +289,8 @@ else
                                      TipoServicio="@hs.TipoServicio"
                                      AsignacionId="@hs.AsignacionId"
                                      AsignacionTurnoId="@hs.AsignacionTurnoId"
-                                     SessionNo="@hs.SessionNo" />
+                                     SessionNo="@hs.SessionNo"
+                                     NumeroSesionMostrar="@hs.NumeroSesionMostrar" />
         </div>
     </div>
 }
@@ -607,23 +608,27 @@ else
 
     /// <summary>
     /// Devuelve motivo del bloqueo por orden secuencial, o null si la sesion
-    /// puede atenderse. Regla: dentro del mismo AsignacionTurnoId, para atender
-    /// SessionNo N deben estar Completadas todas las 1..N-1. Se calcula sobre
-    /// <see cref="_todos"/> (lo que la UI ya tiene cargado): no hay round-trip.
-    /// El backend gate en HistoriaClinicaService.CrearAsync valida la misma
-    /// regla al crear la HC, este chequeo es solo UX (tooltip + disabled).
-    /// El escape por permiso se hace en el caller (PuedeAtender).
+    /// puede atenderse. Regla: dentro de la misma AsignacionId (mismo servicio
+    /// contratado), para atender la sesion global N deben estar Completadas
+    /// todas las 1..N-1. Ordena por NumeroSesionMostrar (el nGlobal cronologico
+    /// que la grilla ya calcula) — NO por SessionNo del pivote (siempre 1
+    /// desde task #147). Se calcula sobre <see cref="_todos"/>: no hay
+    /// round-trip. El backend gate en HistoriaClinicaService.CrearAsync valida
+    /// la misma regla al crear la HC, este chequeo es solo UX (tooltip +
+    /// disabled). El escape por permiso se hace en el caller (PuedeAtender).
     /// </summary>
     private string? MotivoBloqueoOrden(MiServicioAsignadoDto s)
     {
-        if (s.SessionNo <= 1) { return null; }
+        if (s.NumeroSesionMostrar <= 1) { return null; }
         var anterioresPendientes = _todos
-            .Where(x => x.AsignacionTurnoId == s.AsignacionTurnoId && x.SessionNo < s.SessionNo && !x.Completado)
-            .OrderBy(x => x.SessionNo)
+            .Where(x => x.AsignacionId == s.AsignacionId
+                     && x.NumeroSesionMostrar < s.NumeroSesionMostrar
+                     && !x.Completado)
+            .OrderBy(x => x.NumeroSesionMostrar)
             .ToList();
         if (anterioresPendientes.Count == 0) { return null; }
         var primera = anterioresPendientes[0];
-        return $"Debes cerrar la sesion {primera.SessionNo} antes de abrir la sesion {s.SessionNo}.";
+        return $"Debes cerrar la sesion {primera.NumeroSesionMostrar} antes de abrir la sesion {s.NumeroSesionMostrar}.";
     }
 
     /// <summary>True si el user puede abrir HC/Notas de esta sesion. False cuando

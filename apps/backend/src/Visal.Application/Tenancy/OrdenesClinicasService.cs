@@ -227,6 +227,46 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(a => new { a.Id, a.Nombre })
                 .ToDictionaryAsync(x => x.Id, x => x.Nombre, ct);
 
+        // Numero global de sesion por HC: pivote HC->Sesion->Turno + posicion
+        // del turno en la asignacion (ordenada por CreatedAt asc, base 1). Se
+        // hace en 3 pasos porque encadenar Group+OrderBy con query filters
+        // rompe la traduccion EF Core. Costo bajo: max ~500 HCs por busqueda.
+        var pivotes = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => hcIds.Contains(p.HistoriaClinicaId))
+            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                  p => p.SesionId, s => s.Id,
+                  (p, s) => new { p.HistoriaClinicaId, s.AsignacionTurnoId })
+            .ToListAsync(ct);
+        var hcToTurno = pivotes
+            .GroupBy(x => x.HistoriaClinicaId)
+            .ToDictionary(g => g.Key, g => g.First().AsignacionTurnoId);
+        var turnoIds = hcToTurno.Values.Distinct().ToList();
+        var turnoToAsig = turnoIds.Count == 0
+            ? new Dictionary<Guid, Guid>()
+            : await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => turnoIds.Contains(t.Id))
+                .Select(t => new { t.Id, t.AsignacionId })
+                .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
+        var asigIds = turnoToAsig.Values.Distinct().ToList();
+        var turnoOrden = new Dictionary<Guid, int>();
+        if (asigIds.Count > 0)
+        {
+            var todosTurnos = await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => asigIds.Contains(t.AsignacionId))
+                .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt })
+                .ToListAsync(ct);
+            foreach (var grp in todosTurnos.GroupBy(x => x.AsignacionId))
+            {
+                // Tiebreaker por Id: mismo criterio que /atencion y el validador
+                // de orden. UUID v7 preserva orden real cuando CreatedAt colisiona.
+                var lista = grp.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
+                for (int i = 0; i < lista.Count; i++)
+                {
+                    turnoOrden[lista[i].Id] = i + 1;
+                }
+            }
+        }
+
         // Lookup Sede por paciente: Paciente.SedeAtencionId -> Sucursal.Nombre.
         var sedeIds = rows
             .Where(r => r.Pa.SedeAtencionId.HasValue)
@@ -253,6 +293,12 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             Guid? sedeId = r.Pa.SedeAtencionId;
             string? sedeNombre = null;
             if (sedeId is Guid sid) { sedeIdToNombre.TryGetValue(sid, out sedeNombre); }
+            int? sesionNumero = null;
+            if (hcToTurno.TryGetValue(r.Hc.Id, out var turnoIdHc)
+                && turnoOrden.TryGetValue(turnoIdHc, out var nGlobal))
+            {
+                sesionNumero = nGlobal;
+            }
             return new OrdenClinicaItemDto(
                 r.Hc.Id,
                 r.Pa.Id,
@@ -284,7 +330,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 aseNombre,
                 aseId,
                 sedeNombre,
-                sedeId
+                sedeId,
+                sesionNumero
             );
         }).ToList();
     }
@@ -383,8 +430,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
         // Headers (linea 1): mismos titulos que la tabla en pantalla.
         string[] headers = {
-            "Paciente", "Documento", "Formato", "Especialista", "Aseguradora", "Sede",
-            "Estado", "Fecha", "Total ordenes", "Revision", "Agente IA",
+            "Paciente", "Documento", "Formato", "Sesion", "Especialista", "Aseguradora", "Sede",
+            "Estado", "Fecha", "Fecha cierre", "Hora cierre", "Total ordenes", "Revision", "Agente IA",
             "Medicamentos", "Servicios", "Insumos", "Remisiones", "Incapacidades",
             "Certificaciones", "RxImag", "Laboratorios", "Insumos externos",
             "Escalas", "Evoluciones", "Consentimientos",
@@ -411,26 +458,29 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             hoja.Cell(row, 1).Value = it.PacienteNombre;
             hoja.Cell(row, 2).Value = $"{it.PacienteTipoDoc} {it.PacienteDoc}".Trim();
             hoja.Cell(row, 3).Value = it.FormatoNombre;
-            hoja.Cell(row, 4).Value = it.EspecialistaNombre ?? "";
-            hoja.Cell(row, 5).Value = it.AseguradoraNombre ?? "";
-            hoja.Cell(row, 6).Value = it.SedeNombre ?? "";
-            hoja.Cell(row, 7).Value = it.Estado;
-            hoja.Cell(row, 8).Value = fecha;
-            hoja.Cell(row, 9).Value = totalOrdenes;
-            hoja.Cell(row, 10).Value = it.RevisionEstado?.ToString() ?? "";
-            hoja.Cell(row, 11).Value = it.RevisionAgente?.ToString() ?? "";
-            hoja.Cell(row, 12).Value = it.MedicamentosCount;
-            hoja.Cell(row, 13).Value = it.ServiciosCount;
-            hoja.Cell(row, 14).Value = it.InsumosCount;
-            hoja.Cell(row, 15).Value = it.RemisionesCount;
-            hoja.Cell(row, 16).Value = it.IncapacidadesCount;
-            hoja.Cell(row, 17).Value = it.CertificacionesCount;
-            hoja.Cell(row, 18).Value = it.RxImagCount;
-            hoja.Cell(row, 19).Value = it.LabExtCount;
-            hoja.Cell(row, 20).Value = it.InsExtCount;
-            hoja.Cell(row, 21).Value = it.EscalasCount;
-            hoja.Cell(row, 22).Value = it.EvolucionesCount;
-            hoja.Cell(row, 23).Value = it.ConsentimientosCount;
+            hoja.Cell(row, 4).Value = it.SesionNumero.HasValue ? $"#{it.SesionNumero.Value}" : "";
+            hoja.Cell(row, 5).Value = it.EspecialistaNombre ?? "";
+            hoja.Cell(row, 6).Value = it.AseguradoraNombre ?? "";
+            hoja.Cell(row, 7).Value = it.SedeNombre ?? "";
+            hoja.Cell(row, 8).Value = it.Estado;
+            hoja.Cell(row, 9).Value = fecha;
+            hoja.Cell(row, 10).Value = it.FechaCierre?.ToLocalTime().ToString("yyyy-MM-dd") ?? "";
+            hoja.Cell(row, 11).Value = it.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "";
+            hoja.Cell(row, 12).Value = totalOrdenes;
+            hoja.Cell(row, 13).Value = it.RevisionEstado?.ToString() ?? "";
+            hoja.Cell(row, 14).Value = it.RevisionAgente?.ToString() ?? "";
+            hoja.Cell(row, 15).Value = it.MedicamentosCount;
+            hoja.Cell(row, 16).Value = it.ServiciosCount;
+            hoja.Cell(row, 17).Value = it.InsumosCount;
+            hoja.Cell(row, 18).Value = it.RemisionesCount;
+            hoja.Cell(row, 19).Value = it.IncapacidadesCount;
+            hoja.Cell(row, 20).Value = it.CertificacionesCount;
+            hoja.Cell(row, 21).Value = it.RxImagCount;
+            hoja.Cell(row, 22).Value = it.LabExtCount;
+            hoja.Cell(row, 23).Value = it.InsExtCount;
+            hoja.Cell(row, 24).Value = it.EscalasCount;
+            hoja.Cell(row, 25).Value = it.EvolucionesCount;
+            hoja.Cell(row, 26).Value = it.ConsentimientosCount;
         }
 
         hoja.Columns().AdjustToContents(1, Math.Max(1, rows.Count + 1));

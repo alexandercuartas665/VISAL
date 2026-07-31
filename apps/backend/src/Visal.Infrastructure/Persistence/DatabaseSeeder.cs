@@ -180,11 +180,20 @@ public sealed class DatabaseSeeder
             }
 
             // 2) Sincronizar permisos: borrar y reinsertar con todo en true.
+            // Excepcion: "atencion.saltar-orden" NO se marca por default en
+            // Administrador — es un escape de politica clinica que debe
+            // habilitarse explicitamente en /config/roles. Sin esto, cualquier
+            // rol admin del tenant sorteaba el orden secuencial de sesiones.
+            var permisosSinAutoAsignar = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "atencion.saltar-orden"
+            };
             var existentes = await _db.RolPermisos.IgnoreQueryFilters()
                 .Where(p => p.RolId == rol.Id).ToListAsync(cancellationToken);
             _db.RolPermisos.RemoveRange(existentes);
             foreach (var modulo in ModuloCatalogo.Todos)
             {
+                if (permisosSinAutoAsignar.Contains(modulo.Key)) { continue; }
                 _db.RolPermisos.Add(new RolPermiso
                 {
                     TenantId = tenant.Id,

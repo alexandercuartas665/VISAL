@@ -271,7 +271,12 @@ public sealed record AsignacionItemRequest(
     string? Observaciones, string? FormatoHistoria,
     Guid? PaqueteInstanciaId = null,
     string? PaqueteCodigo = null,
-    decimal? PaqueteValorPactado = null);
+    decimal? PaqueteValorPactado = null,
+    // Datos RIPS que antes se preguntaban en el modal al iniciar HC. Via se pide
+    // aqui una sola vez por asignacion y viaja como snapshot inmutable al crear
+    // la HC. Requerido en servicio nuevo — el UI /asignacion valida bloqueante.
+    string? RipsViaIngresoCodigo = null,
+    string? RipsViaIngresoNombre = null);
 
 public sealed record CrearLoteRequest(
     Guid PacienteId, string ContratoCodigo, string Sucursal,
@@ -313,7 +318,9 @@ public sealed record ActualizarAsignacionRequest(
     int Cantidad, string? CodigoAutorizacion,
     short? AnioServicio, short MesVigencia, short? MesFinal,
     DateOnly FechaInicio, DateOnly? FechaFinal,
-    string? Observaciones, string? FormatoHistoria);
+    string? Observaciones, string? FormatoHistoria,
+    string? RipsViaIngresoCodigo = null,
+    string? RipsViaIngresoNombre = null);
 
 public sealed record LoteCreadoDto(Guid LoteId, int CantidadServicios);
 

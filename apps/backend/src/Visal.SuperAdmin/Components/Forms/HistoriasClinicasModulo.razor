@@ -749,27 +749,17 @@
     <div class="rips-backdrop" @onclick="CerrarModalRips"></div>
     <div class="rips-modal">
         <div class="rips-modal-h">
-            <h3>&#128203; Datos RIPS obligatorios</h3>
+            <h3>&#128203; Datos RIPS obligatorios@(NumeroSesionMostrar is int _rn ? $" - Sesion #{_rn}" : "")</h3>
             <button class="rips-modal-close" @onclick="CerrarModalRips" title="Cerrar">&times;</button>
         </div>
         <div class="rips-modal-body">
             <div class="rips-intro">
-                Selecciona los tres datos obligatorios de la Resolucion 202/2021 de MinSalud.
+                Selecciona los dos datos obligatorios de la Resolucion 202/2021 de MinSalud.
+                La Via de ingreso se toma automaticamente de la Asignacion del servicio.
                 Estos datos quedan atados a la Historia Clinica y no pueden cambiar despues.
             </div>
 
             @if (_ripsError is not null) { <div class="ase-alert" style="margin-bottom:12px;">@_ripsError</div> }
-
-            <div class="rips-row">
-                <label class="rips-lbl">Via de ingreso al servicio de salud <span class="rips-req">*</span></label>
-                <select class="form-select" @bind="_ripsViaCod">
-                    <option value="">-- Selecciona --</option>
-                    @foreach (var v in _ripsVias)
-                    {
-                        <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
-                    }
-                </select>
-            </div>
 
             <div class="rips-row">
                 <label class="rips-lbl">Finalidad de la consulta <span class="rips-req">*</span></label>
@@ -1034,6 +1024,13 @@
     /// <summary>Numero interno de sesion dentro del turno (1..Cantidad). Se
     /// combina con AsignacionTurnoId para identificar la sesion origen.</summary>
     [Parameter] public int? SessionNo { get; set; }
+
+    /// <summary>Numero de sesion GLOBAL por asignacion (nGlobal cronologico
+    /// del turno dentro de la asignacion, base 1). Es el "Sesion N" que la
+    /// parrilla /atencion muestra al profesional. Se propaga al badge de la
+    /// tarjeta recien creada para que coincida con la grilla sin esperar
+    /// al refresco del listado.</summary>
+    [Parameter] public int? NumeroSesionMostrar { get; set; }
 
     /// <summary>Set con los identificadores (PestanaKey) actualmente ocultos para
     /// el TipoServicio activo. Se recarga al cambiar el parametro. Vacio =
@@ -1987,9 +1984,11 @@
     private async Task ConfirmarRipsYCrearAsync()
     {
         _ripsError = null;
-        if (string.IsNullOrWhiteSpace(_ripsViaCod) || string.IsNullOrWhiteSpace(_ripsFinCod) || string.IsNullOrWhiteSpace(_ripsCausaCod))
+        // Via de ingreso: se movio al modulo /asignacion — se hereda del servicio.
+        // Aqui solo se piden Finalidad + Causa externa.
+        if (string.IsNullOrWhiteSpace(_ripsFinCod) || string.IsNullOrWhiteSpace(_ripsCausaCod))
         {
-            _ripsError = "Selecciona Via, Finalidad y Causa externa para continuar.";
+            _ripsError = "Selecciona Finalidad y Causa externa para continuar.";
             return;
         }
         if (PacienteActivo is not PacienteAsignacionDto p) { _showRipsModal = false; return; }
@@ -2002,10 +2001,9 @@
         var stage = "init";
         try
         {
-            var via = _ripsVias.FirstOrDefault(v => v.Codigo == _ripsViaCod);
             var fin = _ripsFinalidades.FirstOrDefault(v => v.Codigo == _ripsFinCod);
             var cau = _ripsCausas.FirstOrDefault(v => v.Codigo == _ripsCausaCod);
-            if (via is null || fin is null || cau is null)
+            if (fin is null || cau is null)
             {
                 _ripsError = "Alguna de las opciones seleccionadas ya no esta activa. Recarga la pagina.";
                 return;
@@ -2034,16 +2032,22 @@
             var miProf = await ResolverMiProfesionalIdAsync();
 
             stage = "HcSvc.CrearAsync";
+            // Pasamos el actor real (platform_user_id) para que el gate de
+            // orden secuencial en AtencionOrdenService lea el permiso del rol
+            // del usuario. Guid.Empty haria fail-open y saltaria el bloqueo.
+            var actorUid = await ResolverActorAsync();
             var creada = await HcSvc.CrearAsync(
                 new CrearHistoriaRequest(
                     p.Id, fid, SerializeValores(_valores), especialista, miProf,
-                    via.Codigo, via.Nombre,
+                    // Via se pasa vacia: el backend la resuelve desde la Asignacion
+                    // via AsignacionTurnoId como snapshot inmutable.
+                    RipsViaIngresoCodigo: null, RipsViaIngresoNombre: null,
                     fin.Codigo, fin.Nombre,
                     cau.Codigo, cau.Nombre,
                     SesionId: null,
                     AsignacionTurnoId: AsignacionTurnoId,
                     SessionNo: SessionNo),
-                Guid.Empty);
+                actorUid);
 
             stage = "HeaderAutoFillHelper.Aplicar";
             _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura);
@@ -2061,7 +2065,12 @@
                 ProfesionalId = creada.ProfesionalId,
                 RipsViaNombre = creada.RipsViaIngresoNombre,
                 RipsFinalidadNombre = creada.RipsFinalidadNombre,
-                RipsCausaNombre = creada.RipsCausaExternaNombre
+                RipsCausaNombre = creada.RipsCausaExternaNombre,
+                // El backend recalcula este nGlobal en ListarPorPacienteAsync
+                // via join AsignacionTurnoSesionHc -> Sesion -> Turno. Aqui lo
+                // sembramos con lo que /atencion ya sabe (parametro), para que
+                // el badge aparezca sin esperar refresco del listado.
+                SesionNumero = NumeroSesionMostrar
             };
             _historias.Insert(0, nueva);
             _historiaSel = nueva;
@@ -2073,8 +2082,8 @@
         catch (Exception ex)
         {
             Log.LogError(ex,
-                "ConfirmarRipsYCrearAsync CRASH stage={Stage} PacienteId={PacienteId} PacienteDoc={PacienteDoc} FormatoId={FormatoId} viaCod={Via} finCod={Fin} causaCod={Causa}",
-                stage, p.Id, p.NumeroDocumento, fid, _ripsViaCod, _ripsFinCod, _ripsCausaCod);
+                "ConfirmarRipsYCrearAsync CRASH stage={Stage} PacienteId={PacienteId} PacienteDoc={PacienteDoc} FormatoId={FormatoId} finCod={Fin} causaCod={Causa} AsigTurnoId={AtId}",
+                stage, p.Id, p.NumeroDocumento, fid, _ripsFinCod, _ripsCausaCod, AsignacionTurnoId);
             _ripsError = $"Error al iniciar la historia ({stage}): {ex.Message}";
             // No rethrow: el banner del circuito se evita y el usuario ve el error
             // adentro del modal RIPS con contexto util.

@@ -230,6 +230,15 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             if (it.Cantidad <= 0) { throw new InvalidOperationException("La cantidad debe ser mayor a cero."); }
             if (it.MesVigencia < 1 || it.MesVigencia > 12) { throw new InvalidOperationException("Mes de vigencia invalido."); }
             if (it.MesFinal is short mf && (mf < 1 || mf > 12)) { throw new InvalidOperationException("Mes final invalido."); }
+            // RIPS Via de ingreso: exigido en el flujo /asignacion nuevo. Se movio
+            // aqui desde el modal RIPS de HC para capturarlo una sola vez por
+            // asignacion y evitar preguntarlo en cada apertura de historia.
+            if (string.IsNullOrWhiteSpace(it.RipsViaIngresoCodigo)
+                || string.IsNullOrWhiteSpace(it.RipsViaIngresoNombre))
+            {
+                throw new InvalidOperationException(
+                    "Debes indicar Via de ingreso del servicio (dato RIPS obligatorio, Res. 202/2021).");
+            }
         }
         // Validar que el paciente exista en el tenant.
         var paciente = await db.Pacientes.FirstOrDefaultAsync(p => p.Id == req.PacienteId, ct)
@@ -300,7 +309,9 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 Estado = AsignacionEstado.Pendiente,
                 PaqueteInstanciaId = it.PaqueteInstanciaId,
                 PaqueteCodigo = it.PaqueteCodigo,
-                PaqueteValorPactado = valorPactado
+                PaqueteValorPactado = valorPactado,
+                RipsViaIngresoCodigo = it.RipsViaIngresoCodigo,
+                RipsViaIngresoNombre = it.RipsViaIngresoNombre
             });
         }
         await db.SaveChangesAsync(ct);
@@ -369,6 +380,12 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (req.Cantidad <= 0) { throw new InvalidOperationException("La cantidad debe ser mayor a cero."); }
         if (req.MesVigencia < 1 || req.MesVigencia > 12) { throw new InvalidOperationException("Mes de vigencia invalido."); }
         if (req.MesFinal is short mf && (mf < 1 || mf > 12)) { throw new InvalidOperationException("Mes final invalido."); }
+        if (string.IsNullOrWhiteSpace(req.RipsViaIngresoCodigo)
+            || string.IsNullOrWhiteSpace(req.RipsViaIngresoNombre))
+        {
+            throw new InvalidOperationException(
+                "Debes indicar Via de ingreso del servicio (dato RIPS obligatorio, Res. 202/2021).");
+        }
 
         a.ServicioId = req.ServicioId;
         a.NombreServicio = req.NombreServicio;
@@ -384,6 +401,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         a.FechaFinal = req.FechaFinal;
         a.Observaciones = req.Observaciones;
         a.FormatoHistoria = req.FormatoHistoria;
+        a.RipsViaIngresoCodigo = req.RipsViaIngresoCodigo;
+        a.RipsViaIngresoNombre = req.RipsViaIngresoNombre;
 
         await db.SaveChangesAsync(ct);
         return true;

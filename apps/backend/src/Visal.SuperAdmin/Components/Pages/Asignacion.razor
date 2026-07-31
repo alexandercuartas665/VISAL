@@ -9,6 +9,7 @@
 @inject IAseguradoraService AseSvc
 @inject ICuotaCopagoService CuotaSvc
 @inject ICatalogoTipoServicioService TipoSvcCat
+@inject ICatalogoPacienteService CatPacSvc
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
 
@@ -359,6 +360,18 @@
                     </select>
                 </div>
                 <div class="ase-f ase-f-wide"><label>Observaciones</label><textarea class="form-control form-control-sm" @bind="_obs" rows="2" disabled="@(_paciente == null)"></textarea></div>
+                @* RIPS Via de ingreso (Res. 202/2021): se mueve aqui desde el modal
+                   RIPS de HC. Se captura una sola vez por asignacion y viaja al HC
+                   como snapshot inmutable. *@
+                <div class="ase-f ase-f-wide"><label>Via de ingreso al servicio de salud <span style="color:#dc3545;">*</span></label>
+                    <select class="form-select form-select-sm" @bind="_ripsViaCod" disabled="@(_paciente == null)">
+                        <option value="">-- Selecciona --</option>
+                        @foreach (var v in _ripsVias)
+                        {
+                            <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
+                        }
+                    </select>
+                </div>
                 @* Fila final: Cantidad + Agregar (de la izquierda) y Guardar registro a la
                    derecha, todos en linea. Ocupamos el ancho completo (ase-f-wide) y
                    dejamos que asg-input-row distribuya los 3 controles. *@
@@ -1027,6 +1040,12 @@ else
     private int _mesFin;
     private string? _obs;
     private int _cantidad = 1;
+    // RIPS Via de ingreso: catalogo cargado en OnInitialized + seleccion actual
+    // del form col 3. Se copia al CartItem al agregar el servicio, y de ahi viaja
+    // al AsignacionItemRequest cuando se guarda el lote. Default "01" (Demanda
+    // espontanea) para agilizar el flujo comun.
+    private List<CatalogoPacienteDto> _ripsVias = new();
+    private string _ripsViaCod = "";
 
     private bool _busy;
     private string? _error, _ok;
@@ -1141,6 +1160,15 @@ else
         // errores para no bloquear la carga del wizard.
         try { _tiposServicioCat = (await TipoSvcCat.ListarAsync()).ToList(); }
         catch { _tiposServicioCat = new(); }
+        // Catalogo RIPS Via de ingreso (Res. 202/2021). Silencioso: sin catalogo
+        // el dropdown queda vacio y el backend bloquea al guardar el lote.
+        try
+        {
+            _ripsVias = (await CatPacSvc.ListAsync(CatalogoPacienteTipo.RipsViaIngreso))
+                .OrderBy(v => v.Codigo, StringComparer.Ordinal).ToList();
+            _ripsViaCod = _ripsVias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? "";
+        }
+        catch { _ripsVias = new(); }
     }
 
     private async Task BuscarPorDocumento()
@@ -1270,6 +1298,7 @@ else
         if (!short.TryParse(_anio, out var anio) || anio < 2000 || anio > 2100) { _error = "Debe seleccionar un anio del servicio."; return; }
         if (_servicioSel is null) { _error = "Debe seleccionar un servicio de la grilla."; return; }
         if (string.IsNullOrWhiteSpace(_paciente.Sede)) { _error = "El paciente no tiene una sede asignada, consulta el paciente."; return; }
+        if (string.IsNullOrWhiteSpace(_ripsViaCod)) { _error = "Debe seleccionar la Via de ingreso al servicio de salud (dato RIPS obligatorio)."; return; }
 
         // Paquete: NO auto-expandimos el paquete al carrito. El coordinador decide
         // manualmente que servicios del paquete agregar (uno por uno). Solo etiquetamos
@@ -1315,6 +1344,9 @@ else
             }
         }
 
+        // Snapshot de la Via seleccionada al momento de agregar el chip.
+        // Se busca por codigo en el catalogo cargado en OnInitialized.
+        var viaSel = _ripsVias.FirstOrDefault(v => v.Codigo == _ripsViaCod);
         _carrito.Add(new CartItem
         {
             Servicio = _servicioSel,
@@ -1330,7 +1362,9 @@ else
             Observaciones = _obs?.Trim(),
             PaqueteInstanciaId = paqueteInstanciaId,
             PaqueteCodigo = paqueteCodigo,
-            PaqueteValorPactado = paqueteValor
+            PaqueteValorPactado = paqueteValor,
+            RipsViaIngresoCodigo = viaSel?.Codigo,
+            RipsViaIngresoNombre = viaSel?.Nombre
         });
         // Limpieza posterior al estilo legacy: deja listo para preseleccionar/agregar otro.
         _servicioSel = null;
@@ -1483,6 +1517,8 @@ else
             if (_contratoSel is null) { _error = "Selecciona un contrato."; return; }
             if (_mesVig < 1) { _error = "Selecciona un mes de vigencia."; return; }
 
+            if (string.IsNullOrWhiteSpace(_ripsViaCod)) { _error = "Selecciona la Via de ingreso (dato RIPS obligatorio)."; return; }
+            var viaSelEd = _ripsVias.FirstOrDefault(v => v.Codigo == _ripsViaCod);
             var req = new ActualizarAsignacionRequest(
                 id,
                 _contratoSel.CodigoContrato,
@@ -1498,7 +1534,9 @@ else
                 _fechaInicio ?? DateOnly.FromDateTime(DateTime.Now),
                 _fechaFinal,
                 _obs,
-                _servicioSel.Historia);
+                _servicioSel.Historia,
+                viaSelEd?.Codigo,
+                viaSelEd?.Nombre);
 
             await Svc.ActualizarAsignacionAsync(req, await Actor());
             _ok = "Cambios guardados.";
@@ -1608,7 +1646,9 @@ else
                     c.Servicio.Historia,
                     c.PaqueteInstanciaId,
                     c.PaqueteCodigo,
-                    c.PaqueteValorPactado)).ToList();
+                    c.PaqueteValorPactado,
+                    c.RipsViaIngresoCodigo,
+                    c.RipsViaIngresoNombre)).ToList();
 
             var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items,
                 _pdfAutorizacionUrl,
@@ -1716,5 +1756,11 @@ else
         public Guid? PaqueteInstanciaId { get; set; }
         public string? PaqueteCodigo { get; set; }
         public decimal? PaqueteValorPactado { get; set; }
+
+        // RIPS Via de ingreso (Res. 202/2021). Antes se pedia en el modal RIPS
+        // al iniciar HC. Ahora se captura aqui una sola vez por servicio y viaja
+        // como snapshot inmutable a la HC. Obligatorio para poder guardar el lote.
+        public string? RipsViaIngresoCodigo { get; set; }
+        public string? RipsViaIngresoNombre { get; set; }
     }
 }

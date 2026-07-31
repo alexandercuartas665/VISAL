@@ -554,11 +554,13 @@ else
                         <th style="min-width:220px">Paciente</th>
                         <th style="width:160px">Documento</th>
                         <th>Formato HC</th>
+                        <th class="text-center" style="width:70px" title="Numero global de sesion dentro de la asignacion que origino la HC">Sesion</th>
                         <th style="width:180px">Especialista</th>
                         <th style="width:180px" title="EPS bajo la cual se ejecuto la atencion (contrato principal del paciente)">EPS</th>
                         <th style="width:160px" title="Sede (sucursal) donde se atiende al paciente">Agencia</th>
                         <th class="text-center" style="width:110px">Estado</th>
-                        <th class="text-center" style="width:130px">Fecha</th>
+                        <th class="text-center" style="width:110px" title="Fecha de cierre de la HC">Fecha cierre</th>
+                        <th class="text-center" style="width:80px" title="Hora local del cierre">Hora cierre</th>
                         <th class="text-center" style="width:320px">Documentos</th>
                         <th class="text-center" style="width:130px" title="Estado del ciclo de revision (Capa 08)">Revision</th>
                         <th class="text-center" style="width:130px" title="Ultimo veredicto del agente IA">Pre-revision agente</th>
@@ -582,6 +584,7 @@ else
                             </td>
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
                             <td>@r.FormatoNombre</td>
+                            <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
                             <td>@(r.EspecialistaNombre ?? "-")</td>
                             <td>@(r.AseguradoraNombre ?? "-")</td>
                             <td>@(r.SedeNombre ?? "-")</td>
@@ -600,7 +603,10 @@ else
                                 }
                             </td>
                             <td class="text-center">
-                                @fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy")
+                                @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
+                            </td>
+                            <td class="text-center">
+                                @(r.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "-")
                             </td>
                             <td class="text-center">
                                 <div class="oc-pills">

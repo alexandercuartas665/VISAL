@@ -1,0 +1,9 @@
+# Solo el .env.example va al repo; el .env real con claves se queda en el servidor.
+.env
+
+# Dumps de BD - pueden contener datos reales (BCrypt hashes, PHI de pacientes).
+# Se generan localmente con copia_base_datos.ps1 y se transfieren via scp.
+dumps/*.dump
+
+# Backups defensivos que hace actualizar-en-linux.sh en el server.
+backups/

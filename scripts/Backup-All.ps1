@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Wrapper que dispara los dos flujos de respaldo diario:
+    Wrapper que dispara los flujos de respaldo diario:
       1. Bases de datos de contenedores Docker LOCALES  -> D:\Backups\Docker
       2. Base de datos de PRODUCCION Visal (via SSH)    -> D:\Backups\Produccion\Visal
+      3. Sesiones de Claude Code (.jsonl comprimidos)   -> D:\Backups\Claude
 
 .DESCRIPTION
-    Los dos scripts corren en secuencia. Si el primero falla, igual se intenta
-    el segundo (los backups son independientes). El codigo de salida es 0 solo
-    si ambos terminaron OK.
+    Los scripts corren en secuencia. Si uno falla, igual se intentan los siguientes
+    (los backups son independientes). El codigo de salida es 0 solo si todos
+    terminaron OK.
 
     Este es el script que llama la tarea programada de Windows
     "Visal - Backup Docker Databases".
@@ -41,8 +42,11 @@ function Run-Step {
     }
 }
 
-Run-Step "Backup Docker locales"      (Join-Path $here "Backup-DockerDatabases.ps1")
-Run-Step "Backup Produccion Visal"    (Join-Path $here "Backup-VisalProdDatabase.ps1")
+Run-Step "Backup Docker locales"        (Join-Path $here "Backup-DockerDatabases.ps1")
+Run-Step "Backup Produccion Visal"      (Join-Path $here "Backup-VisalProdDatabase.ps1")
+Run-Step "Backup Produccion Ecorex.tareas" (Join-Path $here "Backup-EcorexTareasProdDatabase.ps1")
+# Las transcripciones de Claude Code solo viven en disco local; sin esto no hay copia.
+Run-Step "Backup sesiones Claude"       (Join-Path $here "Backup-ClaudeSessions.ps1")
 
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor Cyan

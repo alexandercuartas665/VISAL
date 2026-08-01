@@ -215,7 +215,7 @@ public sealed class AseguradoraService : IAseguradoraService
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
                 s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal,
                 s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion,
-                s.CodOtroServicio))
+                s.CodOtroServicio, s.TipoArchivoRips))
             .ToListAsync(ct);
     }
 
@@ -259,6 +259,7 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.GrupoServicioFacturacion = req.GrupoServicioFacturacion?.Trim();
         entity.ServicioFacturacion = req.ServicioFacturacion?.Trim();
         entity.CodOtroServicio = req.CodOtroServicio?.Trim();
+        entity.TipoArchivoRips = string.IsNullOrWhiteSpace(req.TipoArchivoRips) ? null : req.TipoArchivoRips.Trim().ToUpperInvariant();
 
         await _db.SaveChangesAsync(ct);
         var paqueteCod = entity.PaqueteId is Guid pid
@@ -270,7 +271,7 @@ public sealed class AseguradoraService : IAseguradoraService
             entity.Descripcion, entity.Tarifa, entity.Modulo, entity.Especialidad, entity.Modalidad, entity.Clasificacion, entity.Observaciones,
             entity.Finalidad, entity.CausaExterna, entity.ModalidadAtencion, entity.ViaIngreso, entity.GrupoServicios, entity.Servicios, entity.ValorTotal,
             entity.ModalidadFacturacion, entity.GrupoServicioFacturacion, entity.ServicioFacturacion,
-            entity.CodOtroServicio);
+            entity.CodOtroServicio, entity.TipoArchivoRips);
     }
 
     public async Task<bool> DeleteServicioAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -356,7 +357,9 @@ public sealed class AseguradoraService : IAseguradoraService
                 // COD MODALIDAD ATENCION / COD GRUPO SERVICIO / COD SERVICIO.
                 ModalidadFacturacion = r.ModalidadFacturacion?.Trim(),
                 GrupoServicioFacturacion = r.GrupoServicioFacturacion?.Trim(),
-                ServicioFacturacion = r.ServicioFacturacion?.Trim()
+                ServicioFacturacion = r.ServicioFacturacion?.Trim(),
+                // TIPO ARCHIVO override (AC/AP/AT/AM). Si vacio, cae al catalogo del modulo.
+                TipoArchivoRips = string.IsNullOrWhiteSpace(r.TipoArchivoRips) ? null : r.TipoArchivoRips.Trim().ToUpperInvariant()
             });
             n++;
         }

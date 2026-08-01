@@ -35,7 +35,9 @@ public sealed record ServicioDto(
     string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
     string? ServicioFacturacion = null,
     // COD OTRO SERVICIO (Res 202/2021, alineacion Excel EPS ASMET 2026-08-01).
-    string? CodOtroServicio = null);
+    string? CodOtroServicio = null,
+    // TIPO ARCHIVO RIPS override por servicio (AC/AP/AT/AM). Si null, cae al catalogo.
+    string? TipoArchivoRips = null);
 
 public sealed record SaveServicioRequest(
     Guid? Id, Guid ContratoId, string? Sede, string? Historia,
@@ -48,7 +50,8 @@ public sealed record SaveServicioRequest(
     decimal? ValorTotal = null,
     string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
     string? ServicioFacturacion = null,
-    string? CodOtroServicio = null);
+    string? CodOtroServicio = null,
+    string? TipoArchivoRips = null);
 
 /// <summary>Fila de servicio leida del Excel de carga (Hoja1). El campo PaqueteCodigo
 /// es opcional; si viene y matchea un Paquete existente por codigo, se enlaza.
@@ -63,7 +66,8 @@ public sealed record ServicioImportRow(
     string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones,
     string? Finalidad = null, string? CodOtroServicio = null,
     string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
-    string? ServicioFacturacion = null);
+    string? ServicioFacturacion = null,
+    string? TipoArchivoRips = null);
 
 /// <summary>Resultado del import Excel de servicios (TS6).</summary>
 /// <param name="Importados">Filas persistidas.</param>

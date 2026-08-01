@@ -47,6 +47,11 @@ public class ServicioContrato : TenantEntity
     /// Res. 202/2021 lo llama codOtroServicio. Ejemplo del contrato ASMET: columna
     /// COD OTRO SERVICIO — usualmente vacio, se llena solo cuando la EPS lo pide.</summary>
     public string? CodOtroServicio { get; set; }
+    /// <summary>Tipo de archivo RIPS override por servicio (AC/AP/AT/AM). Si null, se
+    /// deriva del CatalogoTipoServicio del Modulo. Permite que un servicio individual
+    /// se facture bajo un archivo distinto al default del modulo (raro pero necesario
+    /// segun contrato). Se guarda en 2 chars MAYUSCULAS.</summary>
+    public string? TipoArchivoRips { get; set; }
     /// <summary>Valor Total del servicio segun contrato (Tarifa * cantidad tope). Nullable — si no se define, el builder cae a Tarifa.</summary>
     public decimal? ValorTotal { get; set; }
 

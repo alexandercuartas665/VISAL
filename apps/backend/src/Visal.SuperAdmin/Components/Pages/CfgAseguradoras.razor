@@ -256,7 +256,16 @@
                                             <td><input class="form-control form-control-sm" @bind="s.Especialidad" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Modalidad" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Sede" /></td>
-                                            <td class="mono" style="font-size:12px;color:var(--muted);">@(TipoArchivoDe(s.Modulo) ?? "-")</td>
+                                            <td>
+                                                <select class="form-select form-select-sm ase-td-fact mono" @bind="s.TipoArchivoRips"
+                                                        title="@(string.IsNullOrWhiteSpace(s.TipoArchivoRips) ? $"Default del catalogo: {TipoArchivoDe(s.Modulo) ?? "(sin definir)"}" : "Override del servicio")">
+                                                    <option value="">(@(TipoArchivoDe(s.Modulo) ?? "-"))</option>
+                                                    <option value="AC">AC</option>
+                                                    <option value="AP">AP</option>
+                                                    <option value="AT">AT</option>
+                                                    <option value="AM">AM</option>
+                                                </select>
+                                            </td>
                                             <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="2" @bind="s.ModalidadFacturacion" placeholder="03" /></td>
                                             <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="2" @bind="s.GrupoServicioFacturacion" placeholder="01" /></td>
                                             <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="5" @bind="s.ServicioFacturacion" placeholder="740" /></td>
@@ -756,7 +765,7 @@
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
                 s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal,
                 s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion,
-                s.CodOtroServicio);
+                s.CodOtroServicio, s.TipoArchivoRips);
             var saved = await Svc.SaveServicioAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar el servicio."; return; }
             s.Id = saved.Id;
@@ -863,6 +872,7 @@
                 var servicioCod  = PickCol(r, "COD SERVICIO", "SERVICIO FACTURACION");
                 var finalidadCod = PickCol(r, "COD FINALIDAD", "FINALIDAD");
                 var otroServCod  = PickCol(r, "COD OTRO SERVICIO", "OTRO SERVICIO");
+                var tipoArchivo  = PickCol(r, "TIPO ARCHIVO", "TIPO_ARCHIVO", "TIPO ARCHIVO RIPS");
                 rows.Add(new ServicioImportRow(
                     Col(r, "CONTRATO"), Col(r, "SEDE"), Col(r, "HISTORIA"),
                     Col(r, "PAQUETE"),
@@ -872,7 +882,8 @@
                     Finalidad: finalidadCod, CodOtroServicio: otroServCod,
                     ModalidadFacturacion: modalidadCod,
                     GrupoServicioFacturacion: grupoCod,
-                    ServicioFacturacion: servicioCod));
+                    ServicioFacturacion: servicioCod,
+                    TipoArchivoRips: tipoArchivo));
             }
             var res = await Svc.ImportServiciosAsync(id, rows, await Actor());
             await LoadServicios();
@@ -923,7 +934,7 @@
                 ("DESCRIPCION",           "Descripcion del servicio que aparecera en el listado.", "HC-FO-08 FORMATO HC GENERAL VERSION 02"),
                 ("TARIFA",                "Valor unitario en pesos (solo numero, sin separadores).", "65000"),
                 ("MODULO",                "Modulo operativo: CONSULTA / TERAPIA / ENFERMERIA / EQUIPOS / INSUMOS.", "CONSULTA"),
-                ("TIPO ARCHIVO",          "Derivado del Modulo (AC/AP/AT/AM). Informativo. Se define en /config/tipos-servicio.", "AC"),
+                ("TIPO ARCHIVO",          "Tipo de archivo RIPS del servicio (AC/AP/AT/AM). Dejar vacio para heredar del Modulo definido en /config/tipos-servicio; llenar solo si el servicio requiere un archivo distinto al default.", "AC"),
                 ("MODALIDAD",             "Modalidad de atencion en texto (ambulatoria, domiciliaria, etc.). Opcional.", "DOMICILIARIA"),
                 ("COD MODALIDAD ATENCION","Codigo Res 202/2021 modalidadAtencion (01 Intramural, 02 Extramural, 03 Extramural domiciliaria).", "03"),
                 ("COD GRUPO SERVICIO",    "Codigo Res 202/2021 grupoServicios (2 digitos).", "01"),
@@ -1137,6 +1148,8 @@
         public string? ServicioFacturacion { get; set; }
         // Res 202/2021: codOtroServicio (alineacion Excel EPS ASMET 2026-08-01).
         public string? CodOtroServicio { get; set; }
+        // TIPO ARCHIVO override por servicio (AC/AP/AT/AM). Null = usar default del catalogo del modulo.
+        public string? TipoArchivoRips { get; set; }
         public static ServicioEdit From(ServicioDto d) => new()
         {
             Id = d.Id, Sede = d.Sede, Historia = d.Historia, PaqueteId = d.PaqueteId,
@@ -1149,7 +1162,8 @@
             ModalidadFacturacion = d.ModalidadFacturacion,
             GrupoServicioFacturacion = d.GrupoServicioFacturacion,
             ServicioFacturacion = d.ServicioFacturacion,
-            CodOtroServicio = d.CodOtroServicio
+            CodOtroServicio = d.CodOtroServicio,
+            TipoArchivoRips = d.TipoArchivoRips
         };
     }
 

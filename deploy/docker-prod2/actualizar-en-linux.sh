@@ -176,7 +176,7 @@ fi
 
 # ---------- Probe HTTP --------------------------------------------------
 step "Probe HTTP a localhost"
-VISAL_PORT="$(grep -E '^VISAL_PORT=' .env | head -n1 | cut -d= -f2- | xargs || echo 5380)"
+VISAL_PORT="$(grep -E '^VISAL_PORT=' .env | head -n1 | cut -d= -f2- | xargs || echo 5580)"
 for i in $(seq 1 20); do
     if curl -fsS -o /dev/null -m 5 "http://localhost:$VISAL_PORT/login"; then
         ok "App responde en http://localhost:$VISAL_PORT/login"

@@ -31,7 +31,7 @@
 #  Parametros (flags estilo --flag valor):
 #    --deploy-dir   carpeta del deploy (default: pwd)
 #    --dump         ruta al .dump (default: el .dump mas reciente en ./dumps)
-#    --port         puerto local que expone visal-app (default: 5380)
+#    --port         puerto local que expone visal-app (default: 5580)
 #    --db           nombre de la BD (default: visal)
 #    --user         usuario de la BD (default: visal)
 #    --image        imagen visal (default: ghcr.io/alexandercuartas665/visal/superadmin:latest)
@@ -46,7 +46,7 @@ set -euo pipefail
 # ---------- defaults ----------------------------------------------------
 DEPLOY_DIR="$(pwd)"
 DUMP_PATH=""
-VISAL_PORT="5380"
+VISAL_PORT="5580"
 POSTGRES_DB="visal"
 POSTGRES_USER="visal"
 VISAL_IMAGE="ghcr.io/alexandercuartas665/visal/superadmin:latest"

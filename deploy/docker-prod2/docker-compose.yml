@@ -44,10 +44,10 @@ services:
       #   - SistemaPrefillHelper (fecha/hora del formulario) devuelve hora local
       TZ: America/Bogota
     ports:
-      # Publica al host en un puerto uncommon. Por default 5380 (Caddy del server
-      # 10.0.0.4 esta configurado para forwardear ahi). Tu reverse proxy global
-      # apunta a http://localhost:${VISAL_PORT}.
-      - "${VISAL_PORT:-5380}:8080"
+      # Publica al host en un puerto uncommon. Por default 5580 (el Caddy del
+      # server 10.0.0.4 apunta ahi). Tu reverse proxy global apunta a
+      # http://localhost:${VISAL_PORT}.
+      - "${VISAL_PORT:-5580}:8080"
     volumes:
       # Persistencia de archivos subidos por los usuarios:
       #   - firmas de profesionales   (/uploads/firmas)

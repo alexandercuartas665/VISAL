@@ -4,6 +4,12 @@
 
 # --- build ---
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+# GIT_SHA lo pasa el workflow via --build-arg. MSBuild lo lee de la env var
+# VISAL_GIT_SHA y lo emite como AssemblyMetadata (chip de version en el sidebar).
+# Aca no hay .git (el COPY solo trae apps/backend/), asi que git rev-parse falla
+# y el fallback via ARG es la fuente confiable en CI.
+ARG GIT_SHA=nogit
+ENV VISAL_GIT_SHA=$GIT_SHA
 WORKDIR /src
 COPY apps/backend/ ./
 RUN dotnet publish src/Visal.SuperAdmin/Visal.SuperAdmin.csproj \

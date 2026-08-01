@@ -54,5 +54,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # GIT_SHA se propaga al build para que MSBuild inyecte el SHA real como
+          # AssemblyMetadata (el chip del sidebar lo lee). Sin esto, dentro del
+          # contenedor de build no hay .git y git rev-parse falla, quedando el
+          # mensaje de error como version.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

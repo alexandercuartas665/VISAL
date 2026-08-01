@@ -31,15 +31,30 @@
     Inyecta el SHA de git y la fecha del build como AssemblyMetadata para que
     el sidebar muestre siempre que version esta corriendo. Sin esto, cada
     deploy queda a ciegas: la app se ve igual y no hay forma rapida de saber
-    si el binario nuevo entro o no. El SHA sale de git rev-parse; si git no
-    esta disponible (build en Docker sin .git), cae a "nogit" y no rompe.
+    si el binario nuevo entro o no.
+
+    Resolucion en tres pasos:
+      1. VISAL_GIT_SHA env var (la CI la setea via Dockerfile ARG).
+      2. git rev-parse (build local con .git presente); valida exit code para
+         no capturar "fatal: not a git repository" como si fuera el SHA.
+      3. Fallback "nogit".
   -->
   <Target Name="SetVersionMetadata" BeforeTargets="GetAssemblyAttributes">
-    <Exec Command="git rev-parse --short=7 HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
-      <Output TaskParameter="ConsoleOutput" PropertyName="_GitSha" />
+    <PropertyGroup>
+      <_GitShaEnv>$([System.Environment]::GetEnvironmentVariable('VISAL_GIT_SHA'))</_GitShaEnv>
+    </PropertyGroup>
+    <Exec Command="git rev-parse --short=7 HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low" Condition="'$(_GitShaEnv)' == ''">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShaCmd" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
     </Exec>
     <PropertyGroup>
+      <!-- Env var gana. Sino, cmd solo si exit code 0. Sino, nogit. Sanitiza a 7 chars alfanumericos. -->
+      <_GitShaRaw Condition="'$(_GitShaEnv)' != ''">$(_GitShaEnv)</_GitShaRaw>
+      <_GitShaRaw Condition="'$(_GitShaRaw)' == '' AND '$(_GitExitCode)' == '0'">$(_GitShaCmd)</_GitShaRaw>
+      <_GitShaRaw Condition="'$(_GitShaRaw)' == ''">nogit</_GitShaRaw>
+      <_GitSha>$([System.Text.RegularExpressions.Regex]::Match($(_GitShaRaw.Trim()), '^[a-f0-9]{7,40}').Value)</_GitSha>
       <_GitSha Condition="'$(_GitSha)' == ''">nogit</_GitSha>
+      <_GitSha Condition="$(_GitSha.Length) &gt; 7">$(_GitSha.Substring(0, 7))</_GitSha>
       <_BuildDate>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm"))</_BuildDate>
     </PropertyGroup>
     <ItemGroup>

@@ -1108,6 +1108,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ViaIngreso).HasMaxLength(10);
             b.Property(x => x.GrupoServicios).HasMaxLength(10);
             b.Property(x => x.Servicios).HasMaxLength(10);
+            b.Property(x => x.CodOtroServicio).HasMaxLength(10);
             b.Property(x => x.ValorTotal).HasPrecision(14, 2);
             // Campos comerciales de facturacion (bulk-editables).
             b.Property(x => x.ModalidadFacturacion).HasMaxLength(80);

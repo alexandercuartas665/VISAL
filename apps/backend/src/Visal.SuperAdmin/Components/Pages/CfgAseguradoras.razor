@@ -9,6 +9,7 @@
 @inject IPaqueteService PaqSvc
 @inject IServicioBulkUpdateService BulkSvc
 @inject ISucursalService SucSvc
+@inject ICatalogoTipoServicioService TiposSvc
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthProvider
 
@@ -225,9 +226,12 @@
                                     <th style="min-width:150px;">Especialidad</th>
                                     <th style="min-width:130px;">Modalidad</th>
                                     <th style="min-width:110px;">Sede</th>
-                                    <th style="min-width:150px;" class="ase-th-fact">Modalidad Fact.</th>
-                                    <th style="min-width:170px;" class="ase-th-fact">Grupo Servicio Fact.</th>
-                                    <th style="min-width:200px;" class="ase-th-fact">Servicio Facturacion</th>
+                                    <th style="min-width:95px;" title="Derivado del Modulo (AC/AP/AT/AM). Editable en /config/tipos-servicio.">Tipo Archivo</th>
+                                    <th style="min-width:160px;" class="ase-th-fact" title="Res 202/2021: codModalidadAtencion (ej. 03 = extramural domiciliaria).">Cod Modalidad Atencion</th>
+                                    <th style="min-width:150px;" class="ase-th-fact" title="Res 202/2021: grupoServicios (ej. 01, 02).">Cod Grupo Servicio</th>
+                                    <th style="min-width:130px;" class="ase-th-fact" title="Res 202/2021: codServicio (ej. 740, 312).">Cod Servicio</th>
+                                    <th style="min-width:120px;" class="ase-th-fact" title="Res 202/2021: finalidadTecnologiaSalud (ej. 44).">Cod Finalidad</th>
+                                    <th style="min-width:130px;" class="ase-th-fact" title="Res 202/2021: codOtroServicio (opcional).">Cod Otro Servicio</th>
                                     <th style="min-width:140px;"></th>
                                 </tr></thead>
                                 <tbody>
@@ -252,9 +256,12 @@
                                             <td><input class="form-control form-control-sm" @bind="s.Especialidad" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Modalidad" /></td>
                                             <td><input class="form-control form-control-sm" @bind="s.Sede" /></td>
-                                            <td><input class="form-control form-control-sm ase-td-fact" @bind="s.ModalidadFacturacion" /></td>
-                                            <td><input class="form-control form-control-sm ase-td-fact" @bind="s.GrupoServicioFacturacion" /></td>
-                                            <td><input class="form-control form-control-sm ase-td-fact" @bind="s.ServicioFacturacion" /></td>
+                                            <td class="mono" style="font-size:12px;color:var(--muted);">@(TipoArchivoDe(s.Modulo) ?? "-")</td>
+                                            <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="2" @bind="s.ModalidadFacturacion" placeholder="03" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="2" @bind="s.GrupoServicioFacturacion" placeholder="01" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="5" @bind="s.ServicioFacturacion" placeholder="740" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="2" @bind="s.Finalidad" placeholder="44" /></td>
+                                            <td><input class="form-control form-control-sm ase-td-fact mono" maxlength="6" @bind="s.CodOtroServicio" placeholder="" /></td>
                                             <td class="ase-row-actions">
                                                 <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => SaveServicio(s)">&#10003;</button>
                                                 <button class="btn @(TieneRips(s) ? "btn-info" : "btn-outline-info") btn-sm"
@@ -373,7 +380,7 @@
                                 <table class="table table-sm bulk-preview">
                                     <thead><tr>
                                         <th>Aseguradora</th><th>Contrato</th><th>Descripcion</th>
-                                        <th>Modalidad Fact.</th><th>Grupo Serv. Fact.</th><th>Servicio Fact.</th>
+                                        <th>Cod Modalidad Aten.</th><th>Cod Grupo Serv.</th><th>Cod Servicio</th>
                                     </tr></thead>
                                     <tbody>
                                         @foreach (var f in _bulkBusqueda.Preview)
@@ -395,12 +402,12 @@
 
                     <div class="bulk-sep">Nuevos valores <small class="text-muted">(deja vacio los campos que no quieres cambiar)</small></div>
                     <div class="bulk-row">
-                        <div class="bulk-grow"><label class="bulk-lbl">Modalidad Fact.</label>
-                            <input class="form-control form-control-sm" placeholder="Ej: PGP" @bind="_bulkNuevaModalidad" /></div>
-                        <div class="bulk-grow"><label class="bulk-lbl">Grupo Servicio Fact.</label>
-                            <input class="form-control form-control-sm" placeholder="Ej: TERAPIAS" @bind="_bulkNuevoGrupo" /></div>
-                        <div class="bulk-grow"><label class="bulk-lbl">Servicio Facturacion</label>
-                            <input class="form-control form-control-sm" placeholder="Ej: TERAPIA FISICA POR SESION" @bind="_bulkNuevoServicio" /></div>
+                        <div class="bulk-grow"><label class="bulk-lbl">Cod Modalidad Atencion</label>
+                            <input class="form-control form-control-sm mono" maxlength="2" placeholder="03" @bind="_bulkNuevaModalidad" /></div>
+                        <div class="bulk-grow"><label class="bulk-lbl">Cod Grupo Servicio</label>
+                            <input class="form-control form-control-sm mono" maxlength="2" placeholder="01" @bind="_bulkNuevoGrupo" /></div>
+                        <div class="bulk-grow"><label class="bulk-lbl">Cod Servicio</label>
+                            <input class="form-control form-control-sm mono" maxlength="5" placeholder="740" @bind="_bulkNuevoServicio" /></div>
                     </div>
                     <div class="bulk-row">
                         <div class="bulk-grow"><label class="bulk-lbl">Motivo <span style="color:#dc2626;">*</span></label>
@@ -575,6 +582,11 @@
 
     private List<ServicioEdit> _servicios = new();
     private List<PaqueteDto> _paquetes = new();
+    // Mapa Modulo (normalizado) -> TipoArchivoRips (AC/AP/AT/AM). Cargado en
+    // OnInitializedAsync desde el catalogo de tipos de servicio del tenant.
+    // Se muestra en la columna "Tipo Archivo" de la tabla de servicios y en
+    // la plantilla Excel. Editable en /config/tipos-servicio.
+    private Dictionary<string, string?> _tipoArchivoPorModulo = new(StringComparer.OrdinalIgnoreCase);
     private string _filtro = "";
     // Filtro por Paquete de los servicios del contrato. null = todos los paquetes,
     // Guid.Empty = solo servicios SIN paquete asignado, otro Guid = ese paquete.
@@ -587,6 +599,23 @@
     {
         await LoadAseguradoras();
         _paquetes = (await PaqSvc.ListarAsync(soloActivos: true)).ToList();
+        var tipos = await TiposSvc.ListarAsync(incluirInactivos: true);
+        _tipoArchivoPorModulo = tipos
+            .Where(t => !string.IsNullOrWhiteSpace(t.Codigo))
+            .ToDictionary(t => t.Codigo, t => t.TipoArchivoRips, StringComparer.OrdinalIgnoreCase);
+    }
+
+    // Derivado del catalogo de tipos de servicio del tenant. Match tolerante:
+    // 1) exacto, 2) tolerante plural/singular (misma logica que ImportServicios).
+    // Retorna null si el Modulo no matchea ningun tipo del catalogo.
+    private string? TipoArchivoDe(string? modulo)
+    {
+        if (string.IsNullOrWhiteSpace(modulo)) { return null; }
+        var k = modulo.Trim();
+        if (_tipoArchivoPorModulo.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v)) { return v; }
+        // Fallback tolerante plural: "TERAPIAS" vs "TERAPIA".
+        var alt = k.EndsWith("S", StringComparison.OrdinalIgnoreCase) ? k[..^1] : k + "S";
+        return _tipoArchivoPorModulo.TryGetValue(alt, out var v2) ? v2 : null;
     }
 
     private async Task LoadAseguradoras() => _aseguradoras = (await Svc.ListAseguradorasAsync()).ToList();
@@ -726,7 +755,8 @@
                 s.CodigoServicio, s.CodigoInterno,
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
                 s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal,
-                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion);
+                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion,
+                s.CodOtroServicio);
             var saved = await Svc.SaveServicioAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar el servicio."; return; }
             s.Id = saved.Id;
@@ -818,12 +848,31 @@
             for (var i = 2; i <= last; i++)
             {
                 var r = ws.Row(i);
+                // Alineacion 2026-08-01 al Excel EPS ASMET: la plantilla ahora
+                // exporta ademas COD MODALIDAD ATENCION / COD GRUPO SERVICIO /
+                // COD SERVICIO / COD FINALIDAD / COD OTRO SERVICIO. Se acepta
+                // tolerantemente cabeceras en formato ASMET (con espacios) y
+                // las cabeceras historicas del sistema (MODALIDAD FACT, etc).
+                string? PickCol(IXLRow rr, params string[] aliases)
+                {
+                    foreach (var a in aliases) { var v = Col(rr, a); if (!string.IsNullOrWhiteSpace(v)) { return v; } }
+                    return null;
+                }
+                var modalidadCod = PickCol(r, "COD MODALIDAD ATENCION", "MODALIDAD FACT", "MODALIDAD FACT.");
+                var grupoCod     = PickCol(r, "COD GRUPO SERVICIO", "GRUPO SERVICIO FACT", "GRUPO SERVICIO FACT.");
+                var servicioCod  = PickCol(r, "COD SERVICIO", "SERVICIO FACTURACION");
+                var finalidadCod = PickCol(r, "COD FINALIDAD", "FINALIDAD");
+                var otroServCod  = PickCol(r, "COD OTRO SERVICIO", "OTRO SERVICIO");
                 rows.Add(new ServicioImportRow(
                     Col(r, "CONTRATO"), Col(r, "SEDE"), Col(r, "HISTORIA"),
                     Col(r, "PAQUETE"),
                     Col(r, "CODIGO_SERVICIO"),
                     Col(r, "CODIGO_INTERNO"), Col(r, "DESCRIPCION"), Num(r, "TARIFA"), Col(r, "MODULO"),
-                    Col(r, "ESPECIALIDAD"), Col(r, "MODALIDAD"), Col(r, "CLASIFICACION"), Col(r, "OBSERVACIONES")));
+                    Col(r, "ESPECIALIDAD"), Col(r, "MODALIDAD"), Col(r, "CLASIFICACION"), Col(r, "OBSERVACIONES"),
+                    Finalidad: finalidadCod, CodOtroServicio: otroServCod,
+                    ModalidadFacturacion: modalidadCod,
+                    GrupoServicioFacturacion: grupoCod,
+                    ServicioFacturacion: servicioCod));
             }
             var res = await Svc.ImportServiciosAsync(id, rows, await Actor());
             await LoadServicios();
@@ -860,21 +909,30 @@
         {
             // Columnas EN EL MISMO ORDEN que espera OnImportExcel para que el
             // usuario llene la plantilla y reimporte sin renombrar nada.
+            // Alineacion 2026-08-01 con Excel EPS ASMET: TIPO ARCHIVO informativo
+            // + 3 codigos facturacion (COD MODALIDAD ATENCION / COD GRUPO SERVICIO
+            // / COD SERVICIO) + COD FINALIDAD + COD OTRO SERVICIO.
             var columnas = new (string Cabecera, string Significado, string Ejemplo)[]
             {
-                ("CONTRATO",        "Codigo del contrato (informativo, no se importa).", "NAC-006-25-PGP"),
-                ("SEDE",            "Sede o sucursal del servicio. Opcional.",            "IBAGUE"),
-                ("HISTORIA",        "Codigo del formato de historia clinica (HC-FO-XX). Conecta este servicio con la HC que se abre al atenderlo.", "HC-FO-08"),
-                ("PAQUETE",         "Codigo del paquete al que pertenece el servicio (ver /cfg-paquetes). Opcional: dejalo vacio si el servicio no esta agrupado en ningun paquete.", "E890167"),
-                ("CODIGO_SERVICIO", "Codigo CUPS o interno del servicio.",                "890201"),
-                ("CODIGO_INTERNO",  "Codigo interno de la aseguradora. Opcional.",        "S001"),
-                ("DESCRIPCION",     "Descripcion del servicio que aparecera en el listado.", "HC-FO-08 FORMATO HC GENERAL VERSION 02"),
-                ("TARIFA",          "Valor unitario en pesos (solo numero, sin separadores).", "65000"),
-                ("MODULO",          "Modulo operativo: CONSULTA / TERAPIA / ENFERMERIA / EQUIPOS / INSUMOS.", "CONSULTA"),
-                ("ESPECIALIDAD",    "Especialidad medica si aplica. Opcional.",           "GENERAL"),
-                ("MODALIDAD",       "Modalidad de atencion (ambulatoria, domiciliaria, etc.). Opcional.", "DOMICILIARIA"),
-                ("CLASIFICACION",   "Clasificacion interna. Opcional.",                   ""),
-                ("OBSERVACIONES",   "Notas libres. Opcional.",                            "")
+                ("CONTRATO",              "Codigo del contrato (informativo, no se importa).", "NAC-006-25-PGP"),
+                ("SEDE",                  "Sede o sucursal del servicio. Opcional.",            "IBAGUE"),
+                ("HISTORIA",              "Codigo del formato de historia clinica (HC-FO-XX). Conecta este servicio con la HC que se abre al atenderlo.", "HC-FO-08"),
+                ("PAQUETE",               "Codigo del paquete al que pertenece el servicio (ver /cfg-paquetes). Opcional: dejalo vacio si el servicio no esta agrupado en ningun paquete.", "E890167"),
+                ("CODIGO_SERVICIO",       "Codigo CUPS o interno del servicio.",                "890201"),
+                ("CODIGO_INTERNO",        "Codigo interno de la aseguradora. Opcional.",        "S001"),
+                ("DESCRIPCION",           "Descripcion del servicio que aparecera en el listado.", "HC-FO-08 FORMATO HC GENERAL VERSION 02"),
+                ("TARIFA",                "Valor unitario en pesos (solo numero, sin separadores).", "65000"),
+                ("MODULO",                "Modulo operativo: CONSULTA / TERAPIA / ENFERMERIA / EQUIPOS / INSUMOS.", "CONSULTA"),
+                ("TIPO ARCHIVO",          "Derivado del Modulo (AC/AP/AT/AM). Informativo. Se define en /config/tipos-servicio.", "AC"),
+                ("MODALIDAD",             "Modalidad de atencion en texto (ambulatoria, domiciliaria, etc.). Opcional.", "DOMICILIARIA"),
+                ("COD MODALIDAD ATENCION","Codigo Res 202/2021 modalidadAtencion (01 Intramural, 02 Extramural, 03 Extramural domiciliaria).", "03"),
+                ("COD GRUPO SERVICIO",    "Codigo Res 202/2021 grupoServicios (2 digitos).", "01"),
+                ("COD SERVICIO",          "Codigo Res 202/2021 codServicio (obligatorio para archivo AC).", "740"),
+                ("COD FINALIDAD",         "Codigo Res 202/2021 finalidadTecnologiaSalud (2 digitos).", "44"),
+                ("COD OTRO SERVICIO",     "Codigo Res 202/2021 codOtroServicio. Opcional.", ""),
+                ("ESPECIALIDAD",          "Especialidad medica si aplica. Opcional.",           "GENERAL"),
+                ("CLASIFICACION",         "Clasificacion interna. Opcional.",                   ""),
+                ("OBSERVACIONES",         "Notas libres. Opcional.",                            "")
             };
 
             using var wb = new XLWorkbook();
@@ -1077,6 +1135,8 @@
         public string? ModalidadFacturacion { get; set; }
         public string? GrupoServicioFacturacion { get; set; }
         public string? ServicioFacturacion { get; set; }
+        // Res 202/2021: codOtroServicio (alineacion Excel EPS ASMET 2026-08-01).
+        public string? CodOtroServicio { get; set; }
         public static ServicioEdit From(ServicioDto d) => new()
         {
             Id = d.Id, Sede = d.Sede, Historia = d.Historia, PaqueteId = d.PaqueteId,
@@ -1088,7 +1148,8 @@
             ValorTotal = d.ValorTotal,
             ModalidadFacturacion = d.ModalidadFacturacion,
             GrupoServicioFacturacion = d.GrupoServicioFacturacion,
-            ServicioFacturacion = d.ServicioFacturacion
+            ServicioFacturacion = d.ServicioFacturacion,
+            CodOtroServicio = d.CodOtroServicio
         };
     }
 

@@ -42,6 +42,11 @@ public class ServicioContrato : TenantEntity
     public string? GrupoServicios { get; set; }
     /// <summary>Codigo REPS del servicio (ej. 312 = atencion domiciliaria).</summary>
     public string? Servicios { get; set; }
+    /// <summary>Codigo RIPS "otro servicio" — para casos donde el servicio no cae en las
+    /// clasificaciones estandar (medicamentos/otros servicios del archivo AT). Opcional.
+    /// Res. 202/2021 lo llama codOtroServicio. Ejemplo del contrato ASMET: columna
+    /// COD OTRO SERVICIO — usualmente vacio, se llena solo cuando la EPS lo pide.</summary>
+    public string? CodOtroServicio { get; set; }
     /// <summary>Valor Total del servicio segun contrato (Tarifa * cantidad tope). Nullable — si no se define, el builder cae a Tarifa.</summary>
     public decimal? ValorTotal { get; set; }
 

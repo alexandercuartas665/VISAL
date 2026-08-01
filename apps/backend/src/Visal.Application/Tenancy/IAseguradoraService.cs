@@ -33,7 +33,9 @@ public sealed record ServicioDto(
     string? ViaIngreso, string? GrupoServicios, string? Servicios, decimal? ValorTotal,
     // Campos comerciales bulk-editables (spec BulkUpdate 2026-07-23).
     string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
-    string? ServicioFacturacion = null);
+    string? ServicioFacturacion = null,
+    // COD OTRO SERVICIO (Res 202/2021, alineacion Excel EPS ASMET 2026-08-01).
+    string? CodOtroServicio = null);
 
 public sealed record SaveServicioRequest(
     Guid? Id, Guid ContratoId, string? Sede, string? Historia,
@@ -45,16 +47,23 @@ public sealed record SaveServicioRequest(
     string? ViaIngreso = null, string? GrupoServicios = null, string? Servicios = null,
     decimal? ValorTotal = null,
     string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
-    string? ServicioFacturacion = null);
+    string? ServicioFacturacion = null,
+    string? CodOtroServicio = null);
 
 /// <summary>Fila de servicio leida del Excel de carga (Hoja1). El campo PaqueteCodigo
-/// es opcional; si viene y matchea un Paquete existente por codigo, se enlaza.</summary>
+/// es opcional; si viene y matchea un Paquete existente por codigo, se enlaza.
+/// Alineacion 2026-08-01 con Excel EPS ASMET: los 3 codigos de facturacion
+/// (ModalidadFacturacion, GrupoServicioFacturacion, ServicioFacturacion) mas
+/// Finalidad y CodOtroServicio se leen del Excel y se persisten al servicio.</summary>
 public sealed record ServicioImportRow(
     string? Contrato, string? Sede, string? Historia,
     string? PaqueteCodigo,
     string? CodigoServicio,
     string? CodigoInterno, string? Descripcion, decimal? Tarifa, string? Modulo,
-    string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones);
+    string? Especialidad, string? Modalidad, string? Clasificacion, string? Observaciones,
+    string? Finalidad = null, string? CodOtroServicio = null,
+    string? ModalidadFacturacion = null, string? GrupoServicioFacturacion = null,
+    string? ServicioFacturacion = null);
 
 /// <summary>Resultado del import Excel de servicios (TS6).</summary>
 /// <param name="Importados">Filas persistidas.</param>

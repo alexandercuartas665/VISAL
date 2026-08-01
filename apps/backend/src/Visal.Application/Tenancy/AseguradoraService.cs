@@ -214,7 +214,8 @@ public sealed class AseguradoraService : IAseguradoraService
                 s.CodigoServicio, s.CodigoInterno,
                 s.Descripcion, s.Tarifa, s.Modulo, s.Especialidad, s.Modalidad, s.Clasificacion, s.Observaciones,
                 s.Finalidad, s.CausaExterna, s.ModalidadAtencion, s.ViaIngreso, s.GrupoServicios, s.Servicios, s.ValorTotal,
-                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion))
+                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion,
+                s.CodOtroServicio))
             .ToListAsync(ct);
     }
 
@@ -257,6 +258,7 @@ public sealed class AseguradoraService : IAseguradoraService
         entity.ModalidadFacturacion = req.ModalidadFacturacion?.Trim();
         entity.GrupoServicioFacturacion = req.GrupoServicioFacturacion?.Trim();
         entity.ServicioFacturacion = req.ServicioFacturacion?.Trim();
+        entity.CodOtroServicio = req.CodOtroServicio?.Trim();
 
         await _db.SaveChangesAsync(ct);
         var paqueteCod = entity.PaqueteId is Guid pid
@@ -267,7 +269,8 @@ public sealed class AseguradoraService : IAseguradoraService
             entity.CodigoServicio, entity.CodigoInterno,
             entity.Descripcion, entity.Tarifa, entity.Modulo, entity.Especialidad, entity.Modalidad, entity.Clasificacion, entity.Observaciones,
             entity.Finalidad, entity.CausaExterna, entity.ModalidadAtencion, entity.ViaIngreso, entity.GrupoServicios, entity.Servicios, entity.ValorTotal,
-            entity.ModalidadFacturacion, entity.GrupoServicioFacturacion, entity.ServicioFacturacion);
+            entity.ModalidadFacturacion, entity.GrupoServicioFacturacion, entity.ServicioFacturacion,
+            entity.CodOtroServicio);
     }
 
     public async Task<bool> DeleteServicioAsync(Guid id, Guid actor, CancellationToken ct = default)
@@ -346,7 +349,14 @@ public sealed class AseguradoraService : IAseguradoraService
                 Especialidad = r.Especialidad?.Trim(),
                 Modalidad = r.Modalidad?.Trim(),
                 Clasificacion = r.Clasificacion?.Trim(),
-                Observaciones = r.Observaciones?.Trim()
+                Observaciones = r.Observaciones?.Trim(),
+                // COD FINALIDAD y COD OTRO SERVICIO (Res 202/2021, Excel EPS ASMET).
+                Finalidad = r.Finalidad?.Trim(),
+                CodOtroServicio = r.CodOtroServicio?.Trim(),
+                // COD MODALIDAD ATENCION / COD GRUPO SERVICIO / COD SERVICIO.
+                ModalidadFacturacion = r.ModalidadFacturacion?.Trim(),
+                GrupoServicioFacturacion = r.GrupoServicioFacturacion?.Trim(),
+                ServicioFacturacion = r.ServicioFacturacion?.Trim()
             });
             n++;
         }

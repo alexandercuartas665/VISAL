@@ -335,8 +335,8 @@ Write-Host " Si tu admin del server ya engancho el reverse proxy, abre:" -Foregr
 Write-Host "   https://<tu-dominio>" -ForegroundColor Gray
 Write-Host ""
 Write-Host " Si todavia no, prueba con tunel SSH:" -ForegroundColor Gray
-Write-Host "   ssh -i $keyPath -L 5580:localhost:5580 $target" -ForegroundColor Gray
-Write-Host "   (y abre http://localhost:5580 en tu navegador)" -ForegroundColor Gray
+Write-Host "   ssh -i $keyPath -L 5380:localhost:5380 $target" -ForegroundColor Gray
+Write-Host "   (y abre http://localhost:5380 en tu navegador)" -ForegroundColor Gray
 Write-Host ""
 
 if ($deployExit -ne 0) { exit $deployExit }

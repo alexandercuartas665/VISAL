@@ -263,6 +263,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .visal-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, oklch(0.82 0.13 70), oklch(0.74 0.15 70)); color: var(--gold-foreground); display: grid; place-items: center; font-weight: 700; font-size: 12px; flex-shrink: 0; }
 .visal-user .nm { font-size: 12.5px; font-weight: 600; }
 .visal-user .rl { font-size: 11px; color: var(--muted-foreground); }
+.visal-user .ver { font-size: 10px; color: var(--muted-foreground); opacity: 0.7; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; margin-top: 2px; }
 .visal-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-left: auto; }
 
 /* topbar user chip */

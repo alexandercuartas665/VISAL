@@ -510,9 +510,13 @@
 
 <div class="visal-user">
     <div class="visal-avatar">@_avatar</div>
-    <div>
+    <div style="min-width:0;">
         <div class="nm">@(_userName ?? "Usuario")</div>
         <div class="rl">@_roleLabel</div>
+        @* Version chip: git SHA + fecha del build. Sirve para saber de un
+           vistazo si el deploy trajo la version esperada; sin esto, cada
+           deploy queda a ciegas. Metadatos inyectados por MSBuild al csproj. *@
+        <div class="ver" title="Build @_buildDate UTC">v @_gitSha</div>
     </div>
     <span class="visal-dot"></span>
 </div>
@@ -542,6 +546,26 @@
     private string? _tenantSlogan;
     private string _roleLabel = "Operador de plataforma";
     private string _avatar = "SA";
+
+    // Version del build: se calcula una sola vez al cargar la clase leyendo
+    // los AssemblyMetadata que MSBuild inyecta en el csproj (GitSha, BuildDate).
+    // Si el binario se compilo sin git disponible, sale "nogit".
+    private static readonly (string Sha, string Date) _version = LeerVersion();
+    private string _gitSha => _version.Sha;
+    private string _buildDate => _version.Date;
+    private static (string, string) LeerVersion()
+    {
+        var attrs = typeof(NavMenu).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .Cast<System.Reflection.AssemblyMetadataAttribute>();
+        string sha = "?", date = "?";
+        foreach (var a in attrs)
+        {
+            if (a.Key == "GitSha" && !string.IsNullOrWhiteSpace(a.Value)) { sha = a.Value.Trim(); }
+            else if (a.Key == "BuildDate" && !string.IsNullOrWhiteSpace(a.Value)) { date = a.Value.Trim(); }
+        }
+        return (sha, date);
+    }
     /// <summary>Lista de modulos con permiso Ver que trae el claim "perms".
     /// null = usuario sin rol/permisos → damos acceso total (compat legacy).</summary>
     private HashSet<string>? _perms;

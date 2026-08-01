@@ -27,4 +27,25 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!--
+    Inyecta el SHA de git y la fecha del build como AssemblyMetadata para que
+    el sidebar muestre siempre que version esta corriendo. Sin esto, cada
+    deploy queda a ciegas: la app se ve igual y no hay forma rapida de saber
+    si el binario nuevo entro o no. El SHA sale de git rev-parse; si git no
+    esta disponible (build en Docker sin .git), cae a "nogit" y no rompe.
+  -->
+  <Target Name="SetVersionMetadata" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse --short=7 HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitSha" />
+    </Exec>
+    <PropertyGroup>
+      <_GitSha Condition="'$(_GitSha)' == ''">nogit</_GitSha>
+      <_BuildDate>$([System.DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm"))</_BuildDate>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="GitSha" Value="$(_GitSha)" />
+      <AssemblyMetadata Include="BuildDate" Value="$(_BuildDate)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

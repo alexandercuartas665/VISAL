@@ -115,6 +115,10 @@ public sealed class RdaConsultaBuilderService(
         // problema es puramente autorizacion del ClientID contra el REPS en el
         // portal MinSalud (task #600). Se revierte a usar solo el REPS que cumple
         // Manual v1.4 seccion 5.3 (c): "#NumeroDeHabilitacion".
+        // 2026-08-03: se revertido al REPS puro tras experimentos B3 (NIT+DV-REPS)
+        // y B4 (NIT-REPS). Ambos formatos "#NIT-Sede" (interpretacion literal del
+        // Correo03) dieron mismo err-000 exacto que "#REPS" puro. El manual v1.4
+        // §5.3 (c) exige "#NumeroDeHabilitacion" — cumplimos con REPS puro.
         var orgId = codigoRep;
         // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
         // distinguirse del `id` de la Organization dentro del contained/bundle

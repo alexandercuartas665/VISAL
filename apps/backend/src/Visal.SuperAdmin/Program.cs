@@ -1310,6 +1310,102 @@ app.MapGet("/admin/ai-usage/export.csv", async (
     return Results.File(bytes, "text/csv; charset=utf-8", nombre);
 }).RequireAuthorization();
 
+// Descarga de un RDA evento. ?format=json -> solo el bundle FHIR. ?format=zip
+// (default cuando el evento esta Rechazado/Error) -> ZIP con envio/rda-<id>.json
+// y error/error-<id>.json separados, listo para adjuntar al ticket de MinSalud
+// sin tener que armar los archivos a mano.
+app.MapGet("/interoperabilidad/rda/{id:guid}/download", async (
+    Guid id,
+    string? format,
+    Visal.Application.Tenancy.IRdaConsoleService svc,
+    CancellationToken ct) =>
+{
+    var det = await svc.ObtenerAsync(id, ct);
+    if (det is null) { return Results.NotFound(); }
+
+    var tieneError = !string.IsNullOrWhiteSpace(det.ErroresJson);
+    var fmt = (format ?? (tieneError ? "zip" : "json")).ToLowerInvariant();
+
+    if (fmt == "json")
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(det.BundleJson);
+        return Results.File(bytes, "application/json; charset=utf-8", $"rda-{id:N}.json");
+    }
+
+    using var ms = new MemoryStream();
+    using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+    {
+        var envioEntry = zip.CreateEntry($"envio/rda-{id:N}.json", System.IO.Compression.CompressionLevel.Optimal);
+        using (var w = new StreamWriter(envioEntry.Open(), System.Text.Encoding.UTF8)) { await w.WriteAsync(det.BundleJson); }
+
+        if (tieneError)
+        {
+            var errEntry = zip.CreateEntry($"error/error-{id:N}.json", System.IO.Compression.CompressionLevel.Optimal);
+            using var w = new StreamWriter(errEntry.Open(), System.Text.Encoding.UTF8);
+            await w.WriteAsync(det.ErroresJson);
+        }
+
+        // Un README corto para que el destinatario ubique rapido cada carpeta.
+        var readme = zip.CreateEntry("README.txt", System.IO.Compression.CompressionLevel.Optimal);
+        using (var w = new StreamWriter(readme.Open(), System.Text.Encoding.UTF8))
+        {
+            await w.WriteLineAsync($"RDA Evento {id}");
+            await w.WriteLineAsync($"Estado: {det.Estado}");
+            await w.WriteLineAsync($"Bundle hash: {det.BundleHash}");
+            await w.WriteLineAsync($"Intentos: {det.Intentos}");
+            if (det.FechaEnvio is not null) { await w.WriteLineAsync($"Ultimo envio: {det.FechaEnvio:O}"); }
+            await w.WriteLineAsync();
+            await w.WriteLineAsync("envio/  - Bundle FHIR enviado al IHCE de MinSalud.");
+            if (tieneError) { await w.WriteLineAsync("error/  - Respuesta de error recibida (OperationOutcome + contexto)."); }
+        }
+    }
+    return Results.File(ms.ToArray(), "application/zip", $"rda-{id:N}.zip");
+}).RequireAuthorization();
+
+// ============================================================================
+// DEV-ONLY: endpoint para disparar RDA Consulta contra sandbox MinSalud sin UI.
+// Uso: soporte del ticket 2027403652 con MinSalud (bitacora Correo03). Permite
+// reejecutar N pruebas identicas y capturar el request+response completo para
+// adjuntar al ticket. NO SE REGISTRA fuera de Development.
+// ============================================================================
+if (app.Environment.IsDevelopment())
+{
+    app.MapPost("/api/dev/rda-consulta/enviar/{hcId:guid}", async (
+        Guid hcId,
+        Guid tenantId,
+        Visal.Application.Tenancy.IRdaConsultaBuilderService builder,
+        Visal.Application.Tenancy.IIhceSenderService sender,
+        CancellationToken ct) =>
+    {
+        var actor = Guid.NewGuid();
+        using var _ = Visal.Application.Common.TenantAmbient.Scope(tenantId, actor, null);
+        try
+        {
+            var build = await builder.ConstruirAsync(hcId, actor, ct);
+            var envio = await sender.EnviarRdaAsync(build.RdaEventoId, actor, ct);
+            return Results.Json(new
+            {
+                hcId,
+                tenantId,
+                rdaEventoId = build.RdaEventoId,
+                bundleHash = build.BundleHash,
+                yaExistia = build.YaExistia,
+                recursos = build.RecursosCount,
+                estadoFinal = envio.NuevoEstado.ToString(),
+                httpStatus = envio.Call?.HttpStatus ?? 0,
+                elapsedMs = envio.Call?.ElapsedMs ?? 0,
+                responseBody = envio.Call?.ResponseBody,
+                referenciaMinsalud = envio.ReferenciaMinsalud,
+                mensaje = envio.Call?.Mensaje
+            });
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(new { hcId, error = ex.GetType().Name, message = ex.Message }, statusCode: 500);
+        }
+    }).AllowAnonymous();
+}
+
 try
 {
     app.Run();

@@ -51,6 +51,21 @@ public sealed record HcCandidataRdaDto(
     string? FormatoCodigo,
     string Estado);
 
+/// <summary>Credenciales EXACTAS usadas por un envio (ya descifradas). Este DTO
+/// sale del backend solo bajo un endpoint autenticado y esta pensado para que el
+/// operador copie/compare al abrir un ticket con MinSalud. NO se persiste, NO se
+/// loggea. Enmascarar en UI por defecto.</summary>
+public sealed record RdaEventoCredencialesDto(
+    string? CodigoHabilitacion,
+    string? ClientId,
+    string? ClientSecret,
+    string? ApimSubskey,
+    string? AzureTenantId,
+    string? Scope,
+    string? EndpointBase,
+    string? PathEnvio,
+    string Ambiente);
+
 public interface IRdaConsoleService
 {
     /// <summary>Lista paginada de RdaEventos del tenant activo, ordenada por fecha de generacion desc.</summary>
@@ -58,6 +73,11 @@ public interface IRdaConsoleService
 
     /// <summary>Detalle de un evento incluyendo el Bundle JSON completo.</summary>
     Task<RdaEventoDetailDto?> ObtenerAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Credenciales y parametros de API que se usaron en el envio (client secret,
+    /// apim subskey descifrados). Se usa para diagnosticar tickets con MinSalud sin
+    /// tener que sacar los valores de la BD a mano. Devuelve null si no existe.</summary>
+    Task<RdaEventoCredencialesDto?> ObtenerCredencialesUsadasAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Lista HCs candidatas para generar RDA (cerradas o abiertas del tenant).</summary>
     Task<IReadOnlyList<HcCandidataRdaDto>> ListarHcCandidatasAsync(string? buscar, CancellationToken ct = default);

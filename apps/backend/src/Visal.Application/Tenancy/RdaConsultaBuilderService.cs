@@ -108,7 +108,20 @@ public sealed class RdaConsultaBuilderService(
         {
             advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo (sera rechazado por ReTHUS).");
         }
+        // Nota (2026-08-03): experimento B3 probo custodian.reference con patron
+        // "#NIT-REPS" ({tenantE.TaxId}-{codigoRep}) siguiendo la sugerencia textual
+        // del Correo03 de MinSalud (patron #NIT-Sede). Resultado: mismo err-000
+        // que con "#{codigoRep}" puro. Descarta que el patron sea la causa; el
+        // problema es puramente autorizacion del ClientID contra el REPS en el
+        // portal MinSalud (task #600). Se revierte a usar solo el REPS que cumple
+        // Manual v1.4 seccion 5.3 (c): "#NumeroDeHabilitacion".
         var orgId = codigoRep;
+        // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
+        // distinguirse del `id` de la Organization dentro del contained/bundle
+        // (dos recursos no pueden compartir id). Pero el `identifier.value` del
+        // Location — que MinSalud interpreta como REPS oficial — va sin sufijo:
+        // el REPS oficial es el codigo puro (7300103531), no la construccion
+        // local (7300103531-01). Ver BuildLocation.
         var locationId = $"{codigoRep}-01";
         var payerOrgId = aseguradora is not null ? $"PAYER-{aseguradora.Codigo}" : "PAYER-DESCONOCIDO";
         var encounterId = "Encounter-0";
@@ -140,6 +153,15 @@ public sealed class RdaConsultaBuilderService(
             condition?.Id, allergyId, payerOrgId, occupationId, riskId, meds.Select(m => m.Id!).ToList(),
             services.Select(s => s.Id!).ToList(), disabilityObs.Select(o => o.Id!).ToList());
 
+        // EXPERIMENTO A (2026-08-03): mover Organizations a Composition.contained[]
+        // en vez de dejarlas como entry top-level. El manual v1.4 §5.3 (c) exige el
+        // patron #NumeroDeHabilitacion en references que FHIR resuelve contra
+        // contained. Hasta ahora las teniamos en entry top-level y MinSalud aun asi
+        // devolvia err-000 "no corresponde con el usuario del token"; probamos si
+        // moverlas a contained cambia la respuesta.
+        composition.Contained.Add(organization);
+        composition.Contained.Add(payerOrg);
+
         // ---------- Bundle ----------
         var bundle = new Bundle
         {
@@ -154,8 +176,7 @@ public sealed class RdaConsultaBuilderService(
         // MinSalud valida estructura y cardinalidades, no el meta.profile especifico).
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = composition });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = patient });
-        bundle.Entry.Add(new Bundle.EntryComponent { Resource = organization });
-        bundle.Entry.Add(new Bundle.EntryComponent { Resource = payerOrg });
+        // Organizations van dentro de composition.contained (ver arriba, Experimento A).
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = practitioner });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = location });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = encounter });
@@ -420,7 +441,11 @@ public sealed class RdaConsultaBuilderService(
         {
             Use = Identifier.IdentifierUse.Official,
             System = RepsSystem,
-            Value = locationId
+            // El identifier.value ES el REPS oficial (10 digitos) — no el id
+            // compuesto local. El id compuesto (con -01) lo usa FHIR para
+            // diferenciar el Location del Organization; MinSalud lee identifier
+            // para cruzarlo con el directorio REPS.
+            Value = codigoRep
         });
         return loc;
     }
@@ -788,7 +813,9 @@ public sealed class RdaConsultaBuilderService(
             Use = Identifier.IdentifierUse.Official,
             Type = taxType,
             System = DianSystem,
-            Value = string.IsNullOrWhiteSpace(tenantE.TaxId) ? "Desconocido" : tenantE.TaxId
+            // NIT normalizado: solo digitos (DIAN espera NIT+DV pegado sin guion,
+            // ej "9001234567" en vez de "900123456-7"). Probado 2026-08-03.
+            Value = NormalizarNit(tenantE.TaxId) ?? "Desconocido"
         });
         var prnType = new CodeableConcept();
         prnType.Coding.Add(new Coding(V2Terminology, "PRN", "Provider number"));
@@ -826,7 +853,8 @@ public sealed class RdaConsultaBuilderService(
             ElementId = "TaxIdentifier-0",
             Use = Identifier.IdentifierUse.Official,
             Type = taxType,
-            Value = a?.Nit ?? "000000000"
+            // Ver nota en BuildOrganization: NIT sin guion DV para DIAN.
+            Value = NormalizarNit(a?.Nit) ?? "000000000"
         });
         var epsType = new CodeableConcept();
         epsType.Coding.Add(new Coding(V2Terminology, "PRN", "Provider number"));
@@ -845,6 +873,23 @@ public sealed class RdaConsultaBuilderService(
     // ===================== Helpers =====================
 
     private static ResourceReference ContainedRef(string id) => new($"#{id}");
+
+    /// <summary>
+    /// Devuelve solo el NIT SIN digito de verificacion. Si el input trae guion
+    /// (formato "NIT-DV" comun en Colombia), corta antes del guion y descarta
+    /// el DV. Si no trae guion, devuelve todos los digitos tal cual.
+    /// Ej: "900123456-7" -> "900123456"; "9001234567" -> "9001234567" (sin guion, no sabemos donde esta el DV).
+    /// null / vacio / sin digitos -> null.
+    /// Probado 2026-08-03: MinSalud rechaza tanto con DV como sin DV — el err-000
+    /// no depende de este formato.
+    /// </summary>
+    private static string? NormalizarNit(string? nit)
+    {
+        if (string.IsNullOrWhiteSpace(nit)) { return null; }
+        var sinDv = nit.Contains('-') ? nit.Split('-')[0] : nit;
+        var digits = new string(sinDv.Where(char.IsDigit).ToArray());
+        return digits.Length == 0 ? null : digits;
+    }
 
     private static Composition.SectionComponent MakeSection(string title, string loincCode, string display)
         => new() { Title = title, Code = MakeCC(new Coding(LoincSystem, loincCode, display)) };

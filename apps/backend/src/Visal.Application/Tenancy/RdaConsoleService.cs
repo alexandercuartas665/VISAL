@@ -11,6 +11,7 @@ namespace Visal.Application.Tenancy;
 /// </summary>
 public sealed class RdaConsoleService(
     IApplicationDbContext db,
+    ISecretProtector secrets,
     ILogger<RdaConsoleService> log) : IRdaConsoleService
 {
     public async Task<IReadOnlyList<RdaEventoRowDto>> ListarAsync(RdaConsoleFiltro filtro, CancellationToken ct = default)
@@ -86,6 +87,66 @@ public sealed class RdaConsoleService(
         if (e is null) { return null; }
         return new RdaEventoDetailDto(e.Id, e.BundleJson, e.BundleHash, e.Estado,
             e.Intentos, e.ErroresJson, e.ReferenciaMinsalud, e.FechaGeneracion, e.FechaEnvio);
+    }
+
+    public async Task<RdaEventoCredencialesDto?> ObtenerCredencialesUsadasAsync(Guid id, CancellationToken ct = default)
+    {
+        // Devuelve las credenciales EXACTAS que uso (o usaria) este envio. Descifra
+        // ClientSecret y APIMsubskey con ISecretProtector — se hace on-demand y NO se
+        // persiste en logs (los strings sensibles nunca se pasan a log.Log*).
+        //
+        // Uso: al abrir un ticket con MinSalud, el operador necesita mostrar los
+        // valores exactos que emitio el envio fallido, sin tener que sacarlos de la
+        // BD a mano ni desde el codigo. La UI enmascara por defecto con toggle.
+        var e = await db.RdaEventos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (e is null) { return null; }
+
+        var cfg = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+        var cred = await db.InteroperabilidadCredencialesSede.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.SucursalId == e.SucursalId && c.Ambiente == e.Ambiente, ct);
+
+        string? clientSecret = null;
+        try
+        {
+            if (cred is not null && !string.IsNullOrEmpty(cred.ClientSecretCifrado))
+            {
+                clientSecret = secrets.Unprotect(cred.ClientSecretCifrado);
+            }
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Fallo Unprotect ClientSecret evento {Id}", id);
+        }
+
+        string? apimSubskey = null;
+        try
+        {
+            var cifrado = e.Ambiente == AmbienteIhce.Produccion
+                ? cfg?.ApimSubskeyProduccionCifrada
+                : cfg?.ApimSubskeySandboxCifrada;
+            if (!string.IsNullOrEmpty(cifrado))
+            {
+                apimSubskey = secrets.Unprotect(cifrado);
+            }
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Fallo Unprotect ApimSubskey evento {Id}", id);
+        }
+
+        var endpointBase = e.Ambiente == AmbienteIhce.Produccion ? cfg?.EndpointProduccion : cfg?.EndpointSandbox;
+        var pathEnvio = e.TipoRda == TipoRdaIhce.Consulta ? cfg?.PathEnvioRdaConsulta : cfg?.PathEnvioRda;
+
+        return new RdaEventoCredencialesDto(
+            CodigoHabilitacion: cred?.CodigoHabilitacion,
+            ClientId: cred?.ClientId,
+            ClientSecret: clientSecret,
+            ApimSubskey: apimSubskey,
+            AzureTenantId: cfg?.AzureTenantId,
+            Scope: cfg?.Scope,
+            EndpointBase: endpointBase,
+            PathEnvio: pathEnvio,
+            Ambiente: e.Ambiente.ToString());
     }
 
     public async Task<IReadOnlyList<HcCandidataRdaDto>> ListarHcCandidatasAsync(string? buscar, CancellationToken ct = default)

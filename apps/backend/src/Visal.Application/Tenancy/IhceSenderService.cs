@@ -556,6 +556,11 @@ public sealed class IhceSenderService(
     /// </summary>
     private static string ParametersPayload(string tipoDoc, string numero)
     {
+        // MinSalud exige el parametro 'humanuser' incluso en pre-flight de consultar
+        // profesional; sin el, devuelve HTTP 400 err-000 "Hay parametros faltantes o
+        // vacios: humanuser" (evidenciado 2026-08-03). Usamos el propio documento del
+        // consultado como identificador del operador (patron CC-<numero>) igual que
+        // ConsultarPacienteAsync cuando no se pasa un CC de operador distinto.
         var payload = new
         {
             resourceType = "Parameters",
@@ -569,7 +574,8 @@ public sealed class IhceSenderService(
                         new { name = "type",  valueString = tipoDoc },
                         new { name = "value", valueString = numero }
                     }
-                }
+                },
+                new { name = "humanuser", valueString = $"CC-{numero}" }
             }
         };
         return JsonSerializer.Serialize(payload);
@@ -680,7 +686,27 @@ public sealed class IhceSenderService(
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
             req.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 
-            using var resp = await client.SendAsync(req, ct);
+            // Suprimir la propagacion W3C Trace Context. El APIM de MinSalud rechaza
+            // requests que traigan traceparent/tracestate/baggage con "Unspecified
+            // header ... is not allowed" (HTTP 400). Sin esto cada POST muere en el
+            // gateway antes de llegar al backend FHIR (evidenciado 2026-08-03 con 3
+            // HCs Ibague en Anexo B de la bitacora Correo03).
+            //
+            // HttpClient inyecta traceparent desde Activity.Current en el momento
+            // del SendAsync. La forma limpia de suprimirlo por-request es correr el
+            // Send fuera de cualquier Activity ambiente.
+            var savedActivity = System.Diagnostics.Activity.Current;
+            System.Diagnostics.Activity.Current = null;
+            HttpResponseMessage resp;
+            try
+            {
+                resp = await client.SendAsync(req, ct);
+            }
+            finally
+            {
+                System.Diagnostics.Activity.Current = savedActivity;
+            }
+            using var _respScope = resp;
             sw.Stop();
             var body = await resp.Content.ReadAsStringAsync(ct);
             var ct2 = resp.Content.Headers.ContentType?.ToString();

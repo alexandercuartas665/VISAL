@@ -10,6 +10,7 @@
 @inject IIhceSenderService Sender
 @inject AuthenticationStateProvider AuthState
 @inject Microsoft.JSInterop.IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>Consola RDA - Visal</PageTitle>
 
@@ -262,7 +263,14 @@
                         <td class="mono"><small>@r.BundleHash.Substring(0, 12)…</small></td>
                         <td class="ase-row-actions" style="text-align:right;white-space:nowrap;">
                             <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerJson(r.Id)">Ver JSON</button>
-                            <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(r.Id)">Descargar</button>
+                            @if (r.Estado is EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => DescargarZip(r.Id)" title="ZIP con envio + error">Descargar ZIP</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(r.Id)">Descargar</button>
+                            }
                             @if (r.Estado is EstadoRdaEvento.Borrador or EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
                             {
                                 <button class="btn btn-success btn-sm" @onclick="() => EnviarAlIhce(r.Id)"
@@ -429,24 +437,139 @@
 @* ===================== Modal Ver JSON ===================== *@
 @if (_detail is not null)
 {
+    var tieneError = !string.IsNullOrWhiteSpace(_detail.ErroresJson);
     <div class="ase-modal-bg" @onclick="CerrarDetalle">
-        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:880px;max-width:1180px;max-height:80vh;display:flex;flex-direction:column;">
+        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:880px;max-width:1180px;max-height:85vh;display:flex;flex-direction:column;">
             <div class="ase-modal-h">
                 Bundle FHIR — @_detail.Estado
                 <span class="badge bg-secondary ms-2 mono"><small>@_detail.BundleHash.Substring(0,16)…</small></span>
             </div>
-            <div style="padding:0 18px 12px;overflow:auto;flex:1;">
-                <pre style="background:#0d1117;color:#e6edf3;padding:14px;border-radius:8px;font-size:12px;max-height:55vh;overflow:auto;"><code>@_detail.BundleJson</code></pre>
-                @if (!string.IsNullOrWhiteSpace(_detail.ErroresJson))
+            <ul class="nav nav-tabs" style="padding:0 18px;margin-top:8px;">
+                <li class="nav-item">
+                    <button class="nav-link @(_detailTab=="bundle"?"active":"")" @onclick='() => _detailTab="bundle"'>
+                        Envio (Bundle FHIR)
+                    </button>
+                </li>
+                @if (tieneError)
                 {
-                    <details style="margin-top:10px;">
-                        <summary style="cursor:pointer;color:#c0392b;">Ver errores reportados</summary>
-                        <pre style="background:#fff5f5;color:#7a0c0c;padding:12px;border-radius:6px;font-size:12px;margin-top:6px;">@_detail.ErroresJson</pre>
-                    </details>
+                    <li class="nav-item">
+                        <button class="nav-link @(_detailTab=="error"?"active":"") text-danger" @onclick='() => _detailTab="error"'>
+                            Error recibido
+                        </button>
+                    </li>
+                }
+                @if (_cred is not null)
+                {
+                    <li class="nav-item">
+                        <button class="nav-link @(_detailTab=="cred"?"active":"")" @onclick='() => _detailTab="cred"'>
+                            Credenciales usadas
+                        </button>
+                    </li>
+                }
+            </ul>
+            <div style="padding:12px 18px 12px;overflow:auto;flex:1;">
+                @if (_detailTab == "cred" && _cred is not null)
+                {
+                    <div style="font-size:12px;color:#666;margin-bottom:8px;">
+                        Estas son las credenciales y parametros que uso (o usaria) este envio.
+                        Click en el ojito para revelar los valores sensibles.
+                    </div>
+                    <table class="table table-sm mb-0" style="font-size:12px;">
+                        <tbody>
+                            @RenderCredRow("Ambiente", _cred.Ambiente, sensitive: false)
+                            @RenderCredRow("Endpoint base", _cred.EndpointBase, sensitive: false)
+                            @RenderCredRow("Path envio", _cred.PathEnvio, sensitive: false)
+                            @RenderCredRow("Codigo Habilitacion (REPS)", _cred.CodigoHabilitacion, sensitive: false)
+                            @RenderCredRow("Azure Tenant ID", _cred.AzureTenantId, sensitive: true)
+                            @RenderCredRow("Scope", _cred.Scope, sensitive: true)
+                            @RenderCredRow("Client ID", _cred.ClientId, sensitive: true)
+                            @RenderCredRow("Client Secret", _cred.ClientSecret, sensitive: true)
+                            @RenderCredRow("APIM Subscription Key", _cred.ApimSubskey, sensitive: true)
+                        </tbody>
+                    </table>
+                }
+                else if (!tieneError || _detailTab == "bundle")
+                {
+                    <pre style="background:#0d1117;color:#e6edf3;padding:14px;border-radius:8px;font-size:12px;max-height:60vh;overflow:auto;margin:0;"><code>@_detail.BundleJson</code></pre>
+                }
+                else
+                {
+                    var parsed = ParseErrorSummary(_detail.ErroresJson!);
+                    <div style="max-height:62vh;overflow:auto;padding-right:4px;">
+                        @* Chip row: HTTP + elapsed + contentType *@
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                            @if (parsed.HttpStatus is int http)
+                            {
+                                var httpClass = http >= 400 ? "bg-danger" : (http >= 300 ? "bg-warning text-dark" : "bg-success");
+                                <span class="badge @httpClass">HTTP @http</span>
+                            }
+                            @if (parsed.ElapsedMs is int ms)
+                            {
+                                <span class="badge bg-secondary">@ms ms</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(parsed.ContentType))
+                            {
+                                <span class="badge bg-light text-dark mono" style="border:1px solid #ddd;">@parsed.ContentType</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(parsed.Categoria))
+                            {
+                                <span class="badge bg-light text-dark" style="border:1px solid #ddd;">@parsed.Categoria</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(parsed.Preflight))
+                            {
+                                <span class="badge bg-warning text-dark" title="Fallo en pre-flight, RDA no enviado">preflight: @parsed.Preflight</span>
+                            }
+                        </div>
+
+                        @* Mensaje *@
+                        @if (!string.IsNullOrWhiteSpace(parsed.Mensaje))
+                        {
+                            <div class="alert alert-danger" style="padding:10px 12px;margin-bottom:10px;font-size:13px;">
+                                <strong>Mensaje:</strong> @parsed.Mensaje
+                            </div>
+                        }
+
+                        @* Response body (OperationOutcome u otro JSON) - pretty *@
+                        @if (!string.IsNullOrWhiteSpace(parsed.BodyPretty))
+                        {
+                            <div style="font-size:12px;color:#666;margin-bottom:4px;">Respuesta del servidor (body):</div>
+                            <pre style="background:#2d1414;color:#ffdada;padding:12px;border-radius:6px;font-size:12px;max-height:32vh;overflow:auto;margin:0 0 10px 0;"><code>@parsed.BodyPretty</code></pre>
+                        }
+
+                        @* Contexto (sede/REPS/ClientID) - grilla clave:valor *@
+                        @if (parsed.Contexto.Count > 0)
+                        {
+                            <div style="font-size:12px;color:#666;margin-bottom:4px;">Contexto del envio:</div>
+                            <table class="table table-sm mb-2" style="font-size:12px;background:#fafafa;">
+                                <tbody>
+                                @foreach (var kv in parsed.Contexto)
+                                {
+                                    <tr>
+                                        <th style="width:200px;background:#f0f0f0;">@kv.Key</th>
+                                        <td class="mono">@kv.Value</td>
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
+                        }
+
+                        @* Fallback / raw *@
+                        <details style="margin-top:8px;">
+                            <summary style="cursor:pointer;font-size:11px;color:#888;">Ver JSON crudo</summary>
+                            <pre style="background:#f5f5f5;color:#333;padding:8px;border-radius:4px;font-size:11px;max-height:20vh;overflow:auto;margin-top:6px;"><code>@parsed.RawPretty</code></pre>
+                        </details>
+                    </div>
                 }
             </div>
             <div class="ase-modal-f">
-                <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(_detail.Id)">Descargar</button>
+                @if (tieneError)
+                {
+                    <button class="btn btn-outline-danger btn-sm" @onclick="() => DescargarZip(_detail.Id)">Descargar ZIP (envio + error)</button>
+                }
+                else
+                {
+                    <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(_detail.Id)">Descargar bundle</button>
+                }
                 <button class="btn btn-primary btn-sm" @onclick="CerrarDetalle">Cerrar</button>
             </div>
         </div>
@@ -494,6 +617,9 @@
 
     // ----- Modal Ver JSON -----
     private RdaEventoDetailDto? _detail;
+    private RdaEventoCredencialesDto? _cred;
+    private string _detailTab = "bundle";  // "bundle" | "error" | "cred"
+    private readonly HashSet<string> _reveladas = new();
 
     // ----- Envio al IHCE -----
     private Guid? _enviandoId;
@@ -590,29 +716,169 @@
 
     private async Task VerJson(Guid id)
     {
+        _detailTab = "bundle";
+        _reveladas.Clear();
+        _cred = null;
         await _dbLock.WaitAsync();
         try
         {
             _detail = await Svc.ObtenerAsync(id);
+            if (_detail is not null)
+            {
+                // Descifra credenciales para mostrar en el tab "Credenciales
+                // usadas". El servidor devuelve valores planos, la UI decide
+                // enmascarar o revelar via el toggle 👁.
+                _cred = await Svc.ObtenerCredencialesUsadasAsync(id);
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _dbLock.Release(); }
     }
 
-    private void CerrarDetalle() => _detail = null;
+    private void CerrarDetalle() { _detail = null; _cred = null; _reveladas.Clear(); }
 
-    private async Task DescargarJson(Guid id)
+    private void ToggleRevelar(string campo)
     {
-        RdaEventoDetailDto? det = null;
-        await _dbLock.WaitAsync();
-        try { det = await Svc.ObtenerAsync(id); }
-        finally { _dbLock.Release(); }
-        if (det is null) { _error = $"Evento {id} no encontrado."; return; }
-        var dataUrl = "data:application/json;charset=utf-8;base64," +
-            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(det.BundleJson));
-        var filename = $"rda-{id:N}.json";
-        await JS.InvokeVoidAsync("eval",
-            $"(function(){{var a=document.createElement('a');a.href='{dataUrl}';a.download='{filename}';document.body.appendChild(a);a.click();a.remove();}})();");
+        if (!_reveladas.Add(campo)) { _reveladas.Remove(campo); }
+    }
+
+    // ----- Parseo de ErroresJson para render bonito en el tab "Error recibido" -----
+    // El JSON puede venir en 2 formas: (a) fallo en el envio POST del bundle
+    // (SerializeError -> {body, mensaje, elapsedMs, httpStatus, contentType}), o
+    // (b) fallo en pre-flight (extendido con contexto, categoria, preflight).
+    // El campo "body" suele ser a su vez un JSON string (FHIR OperationOutcome);
+    // lo re-parseamos para pretty-print anidado.
+    private sealed class ErrorSummary
+    {
+        public string? Mensaje { get; set; }
+        public int? HttpStatus { get; set; }
+        public int? ElapsedMs { get; set; }
+        public string? ContentType { get; set; }
+        public string? BodyPretty { get; set; }
+        public string? Categoria { get; set; }
+        public string? Preflight { get; set; }
+        public List<KeyValuePair<string, string>> Contexto { get; } = new();
+        public string RawPretty { get; set; } = "";
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions _pretty =
+        new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    private static ErrorSummary ParseErrorSummary(string json)
+    {
+        var r = new ErrorSummary();
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            r.RawPretty = System.Text.Json.JsonSerializer.Serialize(doc.RootElement, _pretty);
+            var root = doc.RootElement;
+
+            static string? Str(System.Text.Json.JsonElement el, string name)
+                => el.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+            static int? Int(System.Text.Json.JsonElement el, string name)
+                => el.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) ? i : (int?)null;
+
+            r.Mensaje = Str(root, "mensaje");
+            r.Categoria = Str(root, "categoria");
+            r.Preflight = Str(root, "preflight");
+
+            // Rama (a): campos al nivel raiz.
+            r.HttpStatus = Int(root, "httpStatus");
+            r.ElapsedMs = Int(root, "elapsedMs");
+            r.ContentType = Str(root, "contentType");
+            var bodyStr = Str(root, "body");
+
+            // Rama (b): sub-objeto "consulta" tiene body/elapsed/httpStatus.
+            if (root.TryGetProperty("consulta", out var consulta) && consulta.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                r.HttpStatus ??= Int(consulta, "httpStatus");
+                r.ElapsedMs ??= Int(consulta, "elapsedMs");
+                r.ContentType ??= Str(consulta, "contentType");
+                bodyStr ??= Str(consulta, "body");
+            }
+
+            if (!string.IsNullOrWhiteSpace(bodyStr))
+            {
+                r.BodyPretty = TryPrettyJson(bodyStr) ?? bodyStr.Trim();
+            }
+
+            if (root.TryGetProperty("contexto", out var ctx) && ctx.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (var p in ctx.EnumerateObject())
+                {
+                    var val = p.Value.ValueKind switch
+                    {
+                        System.Text.Json.JsonValueKind.String => p.Value.GetString() ?? "",
+                        System.Text.Json.JsonValueKind.Number => p.Value.GetRawText(),
+                        System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False => p.Value.GetRawText(),
+                        System.Text.Json.JsonValueKind.Null => "(null)",
+                        _ => p.Value.GetRawText()
+                    };
+                    r.Contexto.Add(new(p.Name, val));
+                }
+            }
+        }
+        catch
+        {
+            // Si el JSON no parsea, mostramos el texto tal cual como fallback en RawPretty.
+            r.RawPretty = json;
+        }
+        return r;
+    }
+
+    private static string? TryPrettyJson(string s)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(s);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement, _pretty);
+        }
+        catch { return null; }
+    }
+
+    // Fila de credencial en la tabla del tab. Enmascarada por defecto para los
+    // campos sensitive; el toggle 👁 muestra el valor real. Los valores nunca
+    // salen del server sin auth (el endpoint que los descifra es RequireAuth).
+    private RenderFragment RenderCredRow(string label, string? value, bool sensitive) => __builder =>
+    {
+        var revelado = !sensitive || _reveladas.Contains(label);
+        var display = string.IsNullOrEmpty(value)
+            ? "(sin cargar)"
+            : (revelado ? value : new string('*', Math.Min(value.Length, 24)));
+        <tr>
+            <th style="width:220px;background:#f5f5f5;font-weight:500;">@label</th>
+            <td class="mono" style="word-break:break-all;">
+                <span style="user-select:@(revelado ? "text" : "none");">@display</span>
+            </td>
+            <td style="width:80px;white-space:nowrap;text-align:right;">
+                @if (sensitive && !string.IsNullOrEmpty(value))
+                {
+                    <button class="btn btn-link btn-sm p-0 me-2" @onclick="() => ToggleRevelar(label)"
+                            title="@(revelado ? "Ocultar" : "Mostrar")"
+                            style="font-size:14px;text-decoration:none;">
+                        @(revelado ? "🙈" : "👁")
+                    </button>
+                }
+                @if (revelado && !string.IsNullOrEmpty(value))
+                {
+                    <button class="btn btn-link btn-sm p-0" @onclick="@(() => JS.InvokeVoidAsync("navigator.clipboard.writeText", value))"
+                            title="Copiar" style="font-size:12px;text-decoration:none;">📋</button>
+                }
+            </td>
+        </tr>
+    };
+
+    // Descarga en 2 sabores: bundle plano (JSON) o paquete completo (ZIP con
+    // envio/ + error/ + README) cuando el evento tiene errores reportados.
+    // Ambas usan el endpoint /interoperabilidad/rda/{id}/download.
+    private void DescargarJson(Guid id)
+    {
+        Nav.NavigateTo($"/interoperabilidad/rda/{id}/download?format=json", forceLoad: true);
+    }
+
+    private void DescargarZip(Guid id)
+    {
+        Nav.NavigateTo($"/interoperabilidad/rda/{id}/download?format=zip", forceLoad: true);
     }
 
     private async Task EnviarAlIhce(Guid id)

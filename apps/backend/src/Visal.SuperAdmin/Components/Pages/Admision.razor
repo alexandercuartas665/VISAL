@@ -98,7 +98,7 @@
                         <div class="ase-f"><label>IPS Que Comenta</label>
                             <select class="form-select form-select-sm" value="@_ipsComenta" @onchange="OnIpsComentaChanged">
                                 <option value="">Seleccione Elemento</option>
-                                @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                                @foreach (var a in _aseguradorasTodas) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>
@@ -106,7 +106,7 @@
                         <div class="ase-f"><label>Entidad Aseguradora</label>
                             <select class="form-select form-select-sm" @bind="_aseId">
                                 <option value="">Seleccione Elemento</option>
-                                @foreach (var a in _aseguradoras) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
+                                @foreach (var a in _aseguradorasTodas) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
                         </div>
                         <div class="ase-f"><label>FECHA INGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fIngreso" /></div>
@@ -1033,6 +1033,14 @@
 
     private List<PacienteDto> _lista = new();
     private List<AseguradoraDto> _aseguradoras = new();
+    // 2026-08-03: catalogo completo (sin filtro por contrato vigente) para los
+    // 2 selects administrativos (IPS que comenta / Entidad aseguradora). En
+    // esos campos el usuario puede necesitar registrar la aseguradora aunque
+    // no tenga contratos activos en el sistema. El select DENTRO del bloque
+    // "Contratos del paciente" sigue usando `_aseguradoras` (filtrado) porque
+    // ahi solo tiene sentido elegir aseguradoras con contratos vigentes para
+    // luego seleccionar el contrato en cascada.
+    private List<AseguradoraDto> _aseguradorasTodas = new();
     private List<SucursalDto> _sedes = new();
     private List<CatalogoPacienteDto> _catalogos = new();
     private string _filtro = "";
@@ -1627,7 +1635,13 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // EPS-Filtro-1: solo aseguradoras con al menos 1 contrato vigente (Estado ACTIVO + fecha OK).
+        // Catalogo completo (para IPS Que Comenta + Entidad Aseguradora — ver
+        // comentario del campo _aseguradorasTodas).
+        _aseguradorasTodas = (await AseSvc.ListAseguradorasAsync()).ToList();
+        // Filtrado: solo aseguradoras con al menos 1 contrato vigente (Estado
+        // ACTIVO + fecha OK). Se usa dentro del sub-form "Contratos del paciente"
+        // para que el usuario solo pueda elegir aseguradoras con contratos
+        // disponibles para asignar en cascada.
         _aseguradoras = (await AseSvc.ListAseguradorasAsync(soloConContratoVigente: true)).ToList();
         _sedes = (await SucSvc.ListAsync()).ToList();
         _catalogos = (await CatSvc.ListAsync(null)).ToList();

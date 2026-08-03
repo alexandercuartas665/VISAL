@@ -109,16 +109,13 @@ public sealed class RdaConsultaBuilderService(
             advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo (sera rechazado por ReTHUS).");
         }
         // Custodian.reference — patron "#NIT-CodigoSedePrestador-NumeroSede"
-        // Combina la sugerencia del Correo03 MinSalud ("#NIT-Sede") con la
-        // definicion formal del manual v1.4 §5.3 (d) donde Sede =
-        // "CodigoSedePrestador-NumeroSede" (ej: 0987654321-00). "NumeroSede"
-        // son los 2 digitos finales que MinSalud asigna al enrolar cada sede
-        // fisica de la IPS en el portal REPS.
+        // NIT completo con DV pegado sin guion (formato "9001234567" no
+        // "900123456-7"). El correo03 MinSalud sugirio "#NIT-Sede" y el manual
+        // v1.4 §5.3 (d) define Sede = "CodigoSedePrestador-NumeroSede".
         // TODO: agregar campo NumeroSede a InteroperabilidadCredencialSede y
-        // capturarlo por sucursal en /config/interoperabilidad. Por ahora se
-        // hardcodea "00" (valor por defecto REPS cuando la IPS tiene una sola
-        // sede fisica bajo el mismo codigo de habilitacion).
-        var nitBase = NormalizarNit(tenantE.TaxId) ?? "SINNIT";
+        // capturarlo por sucursal en /config/interoperabilidad. Por ahora "00"
+        // (default REPS mono-sede).
+        var nitBase = NitConDvPegado(tenantE.TaxId) ?? "SINNIT";
         const string numeroSede = "00";
         var orgId = $"{nitBase}-{codigoRep}-{numeroSede}";
         // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
@@ -893,6 +890,18 @@ public sealed class RdaConsultaBuilderService(
         if (string.IsNullOrWhiteSpace(nit)) { return null; }
         var sinDv = nit.Contains('-') ? nit.Split('-')[0] : nit;
         var digits = new string(sinDv.Where(char.IsDigit).ToArray());
+        return digits.Length == 0 ? null : digits;
+    }
+
+    /// <summary>
+    /// Devuelve el NIT con digito de verificacion pegado sin guion.
+    /// Ej: "900123456-7" → "9001234567". Usado en custodian.reference que
+    /// necesita el NIT completo, no solo la raiz sin DV.
+    /// </summary>
+    private static string? NitConDvPegado(string? nit)
+    {
+        if (string.IsNullOrWhiteSpace(nit)) { return null; }
+        var digits = new string(nit.Where(char.IsDigit).ToArray());
         return digits.Length == 0 ? null : digits;
     }
 

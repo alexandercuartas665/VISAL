@@ -99,6 +99,63 @@ public sealed class AseguradoraService : IAseguradoraService
         return true;
     }
 
+    /// <summary>Import Excel de aseguradoras. MERGE por CODIGO (case-insensitive).</summary>
+    public async Task<AseguradorasImportResult> ImportAseguradorasAsync(IReadOnlyList<AseguradoraImportRow> rows, Guid actor, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tid) { return new AseguradorasImportResult(0, 0, rows.Count); }
+        int creadas = 0, actualizadas = 0, omitidas = 0;
+        // Cargar existentes indexados por codigo UPPER
+        var existentes = await _db.Aseguradoras
+            .Where(a => a.TenantId == tid)
+            .ToDictionaryAsync(a => a.Codigo.Trim().ToUpperInvariant(), a => a, ct);
+        foreach (var r in rows)
+        {
+            var codigo = r.Codigo?.Trim();
+            var tipo   = r.Tipo?.Trim();
+            var nombre = r.Nombre?.Trim();
+            if (string.IsNullOrWhiteSpace(codigo) || string.IsNullOrWhiteSpace(tipo) || string.IsNullOrWhiteSpace(nombre))
+            {
+                omitidas++;
+                continue;
+            }
+            var key = codigo.ToUpperInvariant();
+            if (existentes.TryGetValue(key, out var e))
+            {
+                // Actualizar solo campos con valor (no vaciar los existentes).
+                e.Tipo = tipo;
+                e.Nombre = nombre;
+                if (!string.IsNullOrWhiteSpace(r.Nit))               { e.Nit = r.Nit.Trim(); }
+                if (!string.IsNullOrWhiteSpace(r.Regimen))           { e.Regimen = r.Regimen.Trim(); }
+                if (!string.IsNullOrWhiteSpace(r.CodigoMovilidad))   { e.CodigoMovilidad = r.CodigoMovilidad.Trim(); }
+                if (!string.IsNullOrWhiteSpace(r.CodInt))            { e.CodInt = r.CodInt.Trim(); }
+                if (!string.IsNullOrWhiteSpace(r.Descripcion))       { e.Descripcion = r.Descripcion.Trim(); }
+                if (!string.IsNullOrWhiteSpace(r.CorreoFacturacion)) { e.CorreoFacturacion = r.CorreoFacturacion.Trim(); }
+                actualizadas++;
+            }
+            else
+            {
+                var nueva = new Aseguradora
+                {
+                    TenantId = tid,
+                    Codigo = codigo,
+                    Tipo = tipo,
+                    Nombre = nombre,
+                    Nit = string.IsNullOrWhiteSpace(r.Nit) ? null : r.Nit.Trim(),
+                    Regimen = string.IsNullOrWhiteSpace(r.Regimen) ? null : r.Regimen.Trim(),
+                    CodigoMovilidad = string.IsNullOrWhiteSpace(r.CodigoMovilidad) ? null : r.CodigoMovilidad.Trim(),
+                    CodInt = string.IsNullOrWhiteSpace(r.CodInt) ? null : r.CodInt.Trim(),
+                    Descripcion = string.IsNullOrWhiteSpace(r.Descripcion) ? null : r.Descripcion.Trim(),
+                    CorreoFacturacion = string.IsNullOrWhiteSpace(r.CorreoFacturacion) ? null : r.CorreoFacturacion.Trim(),
+                };
+                _db.Aseguradoras.Add(nueva);
+                existentes[key] = nueva; // evita duplicados dentro del mismo import
+                creadas++;
+            }
+        }
+        if (creadas + actualizadas > 0) { await _db.SaveChangesAsync(ct); }
+        return new AseguradorasImportResult(creadas, actualizadas, omitidas);
+    }
+
     // ── Contratos ──
     public async Task<IReadOnlyList<ContratoDto>> ListContratosAsync(Guid aseguradoraId, bool soloVigentes = false, CancellationToken ct = default)
     {

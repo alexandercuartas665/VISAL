@@ -22,6 +22,9 @@
     </div>
     <div class="ase-head-actions">
         <button class="btn btn-outline-secondary btn-sm" title="Actualizar en masa MODALIDAD, GRUPO SERVICIO y SERVICIO FACTURACION de todos los servicios que coincidan con la busqueda por Descripcion. Guarda snapshot para deshacer." @onclick="AbrirBulk">&#128736; Actualizar en masa</button>
+        <button class="btn btn-outline-secondary btn-sm" title="Descargar plantilla Excel para carga masiva de aseguradoras" @onclick="DescargarPlantillaAseguradoras">&#8595; Plantilla</button>
+        <InputFile OnChange="OnImportAseguradorasExcel" accept=".xlsx" style="display:none;" id="aseg-import-file" />
+        <label for="aseg-import-file" class="btn btn-outline-primary btn-sm" style="cursor:pointer;margin-bottom:0;" title="Importar aseguradoras desde Excel. MERGE por CODIGO (actualiza si existe, crea si no).">&#8593; Importar</label>
         <button class="btn btn-primary btn-sm" @onclick="NewAseguradora">+ Nueva aseguradora</button>
     </div>
 </div>
@@ -986,6 +989,128 @@
             _ok = "Plantilla descargada.";
         }
         catch (Exception ex) { _error = "No se pudo generar la plantilla: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ── Plantilla + Import de ASEGURADORAS (cabecera) ──
+    private async Task DescargarPlantillaAseguradoras()
+    {
+        _error = _ok = null;
+        _busy = true;
+        try
+        {
+            var columnas = new (string Cabecera, string Significado, string Ejemplo)[]
+            {
+                ("CODIGO",             "Codigo unico. Alineado a Res 202/2021 (EPS001, ESS118, CCF033, 14-23, etc.). Es la llave del import: si ya existe con este codigo, se ACTUALIZA; si no, se CREA.", "EPS001"),
+                ("TIPO",               "Tipo de aseguradora. Sugerencia: EPS, EPSI, ESS, CCF, EAS, EMP, ARL, RES, UT, MIN, PEC, Aseg.", "EPS"),
+                ("NOMBRE",             "Razon social / nombre comercial.", "Salud Colmena E.P.S. S.A."),
+                ("NIT",                "NIT sin puntos ni guiones. Opcional.", "800088702"),
+                ("REGIMEN",            "Contributivo / Subsidiado / Especial / Prepagada / Riesgos Laborales / Empresarial / Poliza. Opcional.", "Contributivo"),
+                ("COD MOVILIDAD",      "Codigo de movilidad si aplica. Opcional.", ""),
+                ("COD INT",            "Codigo interno de la aseguradora en su sistema. Opcional.", ""),
+                ("DESCRIPCION",        "Notas libres. Opcional.", ""),
+                ("CORREO FACTURACION", "Correo destino para radicar facturas (Fase 4). Opcional.", "facturacion@eps.com")
+            };
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Aseguradoras");
+            for (var i = 0; i < columnas.Length; i++)
+            {
+                ws.Cell(1, i + 1).Value = columnas[i].Cabecera;
+                ws.Cell(2, i + 1).Value = columnas[i].Ejemplo;
+            }
+            // Fila descriptiva
+            ws.Cell(3, 1).Value = "REGLAS:";
+            ws.Cell(3, 2).Value = "Ver fila 2 (ejemplo). CODIGO+TIPO+NOMBRE obligatorios; el resto opcional. MERGE por CODIGO.";
+            ws.Range(3, 2, 3, columnas.Length).Merge();
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.FromHtml("#1E40AF");
+            ws.Row(1).Style.Font.FontColor = XLColor.White;
+            ws.Row(1).Height = 24;
+            ws.Row(2).Style.Fill.BackgroundColor = XLColor.FromHtml("#EFF6FF");
+            // Formato TEXTO en la col CODIGO para preservar guiones tipo 14-23 y UT-002
+            ws.Column(1).Style.NumberFormat.Format = "@";
+            for (var i = 0; i < columnas.Length; i++)
+            {
+                ws.Column(i + 1).Width = i switch { 0 => 14, 1 => 8, 2 => 55, 3 => 14, 4 => 20, 5 => 14, 6 => 12, 7 => 30, 8 => 30, _ => 15 };
+            }
+            ws.SheetView.FreezeRows(1);
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var b64 = Convert.ToBase64String(ms.ToArray());
+            var dataUrl = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + b64;
+            await JS.InvokeVoidAsync("eval",
+                $"(()=>{{const a=document.createElement('a');a.href='{dataUrl}';a.download='plantilla-aseguradoras.xlsx';document.body.appendChild(a);a.click();a.remove();}})()");
+            _ok = "Plantilla de aseguradoras descargada.";
+        }
+        catch (Exception ex) { _error = "No se pudo generar la plantilla: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task OnImportAseguradorasExcel(InputFileChangeEventArgs e)
+    {
+        _error = _ok = null; _busy = true;
+        try
+        {
+            var f = e.File;
+            using var stream = f.OpenReadStream(maxAllowedSize: 20 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+            using var wb = new XLWorkbook(ms);
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Aseguradoras", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.First();
+
+            // Detectar cabeceras en la fila 1
+            var cabeceras = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+            for (var c = 1; c <= lastCol; c++)
+            {
+                var h = ws.Cell(1, c).GetString().Trim();
+                if (!string.IsNullOrEmpty(h) && !cabeceras.ContainsKey(h)) { cabeceras[h] = c; }
+            }
+            string? Col(IXLRow row, params string[] aliases)
+            {
+                foreach (var a in aliases)
+                {
+                    if (cabeceras.TryGetValue(a, out var idx))
+                    {
+                        var v = row.Cell(idx).GetString().Trim();
+                        if (!string.IsNullOrWhiteSpace(v)) { return v; }
+                    }
+                }
+                return null;
+            }
+
+            var rows = new List<AseguradoraImportRow>();
+            var last = ws.LastRowUsed()?.RowNumber() ?? 1;
+            for (var i = 2; i <= last; i++)
+            {
+                var r = ws.Row(i);
+                var cod = Col(r, "CODIGO", "COD");
+                if (string.IsNullOrWhiteSpace(cod)) { continue; }
+                // Descartar filas de reglas/instrucciones
+                if (cod.Equals("REGLAS:", StringComparison.OrdinalIgnoreCase)) { continue; }
+                rows.Add(new AseguradoraImportRow(
+                    Codigo:            cod,
+                    Tipo:              Col(r, "TIPO"),
+                    Nombre:            Col(r, "NOMBRE", "RAZON SOCIAL"),
+                    Nit:               Col(r, "NIT"),
+                    Regimen:           Col(r, "REGIMEN"),
+                    CodigoMovilidad:   Col(r, "COD MOVILIDAD", "CODIGO MOVILIDAD"),
+                    CodInt:            Col(r, "COD INT", "CODIGO INTERNO"),
+                    Descripcion:       Col(r, "DESCRIPCION"),
+                    CorreoFacturacion: Col(r, "CORREO FACTURACION", "CORREO", "EMAIL")));
+            }
+            if (rows.Count == 0)
+            {
+                _error = "El archivo no tiene filas con CODIGO.";
+                return;
+            }
+            var res = await Svc.ImportAseguradorasAsync(rows, await Actor());
+            await LoadAseguradoras();
+            _ok = $"Import OK - Creadas: {res.Creadas} | Actualizadas: {res.Actualizadas} | Omitidas (sin CODIGO/TIPO/NOMBRE): {res.Omitidas}";
+        }
+        catch (Exception ex) { _error = "Fallo al importar: " + ex.Message; }
         finally { _busy = false; }
     }
 

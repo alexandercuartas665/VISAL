@@ -76,6 +76,20 @@ public sealed record ServicioImportRow(
 /// tenant. Vacio = todos los modulos son validos. La UI puede mostrar aviso.</param>
 public sealed record ServiciosImportResult(int Importados, IReadOnlyList<string> ModulosDesconocidos);
 
+/// <summary>Fila del Excel de aseguradoras. Todas las columnas salvo CODIGO / TIPO / NOMBRE
+/// son opcionales. El import hace MERGE por CODIGO (case-insensitive): si existe una
+/// aseguradora con ese codigo, se actualiza; si no, se crea.</summary>
+public sealed record AseguradoraImportRow(
+    string? Codigo, string? Tipo, string? Nombre,
+    string? Nit = null, string? Regimen = null, string? CodigoMovilidad = null,
+    string? CodInt = null, string? Descripcion = null, string? CorreoFacturacion = null);
+
+/// <summary>Resultado del import Excel de aseguradoras.</summary>
+/// <param name="Creadas">Filas nuevas insertadas.</param>
+/// <param name="Actualizadas">Filas existentes cuyo CODIGO empato y se sobreescribieron.</param>
+/// <param name="Omitidas">Filas descartadas por faltar CODIGO, TIPO o NOMBRE.</param>
+public sealed record AseguradorasImportResult(int Creadas, int Actualizadas, int Omitidas);
+
 /// <summary>Sedes en las que un contrato esta activo (N:M). Solo informativo por ahora,
 /// no filtra operaciones. Se muestra en el modal "Sedes" del contrato.</summary>
 public sealed record ContratoSucursalDto(Guid ContratoAseguradoraId, Guid SucursalId, string SucursalNombre);
@@ -90,6 +104,10 @@ public interface IAseguradoraService
     Task<AseguradoraDetailDto?> GetAseguradoraAsync(Guid id, CancellationToken ct = default);
     Task<AseguradoraDetailDto?> SaveAseguradoraAsync(SaveAseguradoraRequest req, Guid actor, CancellationToken ct = default);
     Task<bool> DeleteAseguradoraAsync(Guid id, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Importa aseguradoras del tenant desde Excel. MERGE por CODIGO:
+    /// si existe se actualiza, si no se crea. Solo omite filas sin CODIGO/TIPO/NOMBRE.</summary>
+    Task<AseguradorasImportResult> ImportAseguradorasAsync(IReadOnlyList<AseguradoraImportRow> rows, Guid actor, CancellationToken ct = default);
 
     /// <summary>Lista contratos de la aseguradora. Si <paramref name="soloVigentes"/> es
     /// true, filtra a solo Activos + vigentes por fecha (mismo criterio que ListAseguradorasAsync).</summary>

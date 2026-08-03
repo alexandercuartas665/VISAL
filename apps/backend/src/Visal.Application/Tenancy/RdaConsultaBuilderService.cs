@@ -108,22 +108,19 @@ public sealed class RdaConsultaBuilderService(
         {
             advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo (sera rechazado por ReTHUS).");
         }
-        // Nota (2026-08-03): experimento B3 probo custodian.reference con patron
-        // "#NIT-REPS" ({tenantE.TaxId}-{codigoRep}) siguiendo la sugerencia textual
-        // del Correo03 de MinSalud (patron #NIT-Sede). Resultado: mismo err-000
-        // que con "#{codigoRep}" puro. Descarta que el patron sea la causa; el
-        // problema es puramente autorizacion del ClientID contra el REPS en el
-        // portal MinSalud (task #600). Se revierte a usar solo el REPS que cumple
-        // Manual v1.4 seccion 5.3 (c): "#NumeroDeHabilitacion".
-        // 2026-08-03: patron "#NIT-CodigoHabilitacion" — sigue literalmente la
-        // sugerencia del Correo03 de MinSalud (patron #NIT-Sede) con NIT sin DV.
-        // Aunque el manual v1.4 §5.3 (c) dice "#NumeroDeHabilitacion", el soporte
-        // MinSalud en el ticket 2027403652 sugirio explicitamente el formato
-        // compuesto. Ambos formatos dan la misma respuesta del servidor (probado
-        // en 9 rondas — el error es autorizacion externa del ClientID, no del
-        // patron), asi que preferimos seguir la sugerencia mas reciente.
+        // Custodian.reference — patron "#NIT-CodigoSedePrestador-NumeroSede"
+        // Combina la sugerencia del Correo03 MinSalud ("#NIT-Sede") con la
+        // definicion formal del manual v1.4 §5.3 (d) donde Sede =
+        // "CodigoSedePrestador-NumeroSede" (ej: 0987654321-00). "NumeroSede"
+        // son los 2 digitos finales que MinSalud asigna al enrolar cada sede
+        // fisica de la IPS en el portal REPS.
+        // TODO: agregar campo NumeroSede a InteroperabilidadCredencialSede y
+        // capturarlo por sucursal en /config/interoperabilidad. Por ahora se
+        // hardcodea "00" (valor por defecto REPS cuando la IPS tiene una sola
+        // sede fisica bajo el mismo codigo de habilitacion).
         var nitBase = NormalizarNit(tenantE.TaxId) ?? "SINNIT";
-        var orgId = $"{nitBase}-{codigoRep}";
+        const string numeroSede = "00";
+        var orgId = $"{nitBase}-{codigoRep}-{numeroSede}";
         // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
         // distinguirse del `id` de la Organization dentro del contained/bundle
         // (dos recursos no pueden compartir id). Pero el `identifier.value` del

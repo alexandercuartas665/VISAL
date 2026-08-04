@@ -281,6 +281,11 @@ else
     private async Task DeleteAsync()
     {
         if (_editingId is not Guid id) { return; }
+        // Confirmacion equivalente a la del boton "x" por item (DeleteByIdAsync).
+        // Antes este boton borraba sin preguntar — accion destructiva sin red de proteccion.
+        var etiqueta = string.IsNullOrWhiteSpace(_name) ? "esta plantilla" : $"\"{_name}\"";
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar la plantilla {etiqueta}? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
         _busy = true;
         try
         {

@@ -506,24 +506,22 @@ else
                title="Descargar el listado filtrado a Excel">
                 📊 Excel
             </a>
-            @* HCs-Print: imprime todas las HCs Cerradas del paciente en un solo PDF.
-               Cada HC se renderiza con su propio schema y valores. Respeta los
-               filtros de Formato HC y rango de fechas. Habilitado solo cuando el
-               listado esta acotado a un unico paciente. *@
-            @{
-                var pacientesUnicos = _rows.Select(r => r.PacienteId).Distinct().Take(2).ToList();
-                var unicoPacienteId = pacientesUnicos.Count == 1 ? pacientesUnicos[0] : (Guid?)null;
-                var nombreUnicoPaciente = unicoPacienteId is null ? null
-                    : _rows.First(r => r.PacienteId == unicoPacienteId).PacienteNombre;
-            }
-            <button class="btn btn-outline-primary btn-sm"
-                    disabled="@(unicoPacienteId is null || _buscando)"
-                    title="@(unicoPacienteId is null
-                        ? "Filtra por un solo paciente (nombre o documento) para habilitar la impresion masiva de HCs"
-                        : $"Imprimir todas las HCs Cerradas de {nombreUnicoPaciente}")"
-                    @onclick="() => ImprimirHcsPacienteAsync(unicoPacienteId!.Value)">
-                🖨 HCs del paciente
-            </button>
+            @* HCs-Print (listado): imprime TODAS las HCs del listado filtrado
+               actual en un solo PDF (multi-paciente). Cada HC se renderiza con
+               su propio schema y valores, respetando el flag HideIfEmpty del
+               disenador. Habilitado siempre que haya filas y no se este
+               buscando; la pagina destino tiene su propio tope (MaxHcs=100)
+               que avisa al usuario si excede. Usa <a target="_blank"> con href
+               construido en getter — patron del boton Excel para no perder el
+               user-gesture (Blazor Server + JS.open sufre popup blocker). *@
+            <a class="btn btn-outline-primary btn-sm @(_buscando || _rows.Count == 0 ? "disabled" : "")"
+               href="@ConstruirImprimirListadoUrl()"
+               target="_blank" rel="noopener"
+               title="@(_rows.Count == 0
+                   ? "Ajusta los filtros y presiona Buscar; luego imprime el listado."
+                   : $"Imprimir las {_rows.Count} HC(s) del listado filtrado (todos los pacientes que aparecen)")">
+                🖨 Imprimir listado
+            </a>
         </div>
     </div>
 
@@ -1354,20 +1352,27 @@ else
         await Buscar();
     }
 
-    /// <summary>HCs-Print: abre la vista imprimible con TODAS las HCs Cerradas del
-    /// paciente en un solo PDF. Cada HC se renderiza con su schema y valores.
-    /// Respeta el filtro Formato HC + rango de fechas del listado — se pasan por
-    /// query string para acotar el set.</summary>
-    private async Task ImprimirHcsPacienteAsync(Guid pacienteId)
+    /// <summary>HCs-Print (listado): URL de la vista imprimible masiva del
+    /// LISTADO filtrado actual (multi-paciente). Serializa todos los filtros
+    /// visibles como query string para que la pagina destino
+    /// (/imprimir-ordenes-filtradas) reproduzca la misma busqueda. Se usa como
+    /// href del ancla "Imprimir listado" — target=_blank abre en nueva pestana
+    /// con user-gesture directo (evita el bloqueo de popup que sufre
+    /// JS.InvokeVoidAsync("open") en Blazor Server).</summary>
+    private string ConstruirImprimirListadoUrl()
     {
         var qs = new List<string>();
-        if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
+        if (!string.IsNullOrWhiteSpace(_filtroPaciente)) { qs.Add($"paciente={Uri.EscapeDataString(_filtroPaciente.Trim())}"); }
         if (_desde is DateTime d1) { qs.Add($"desde={d1:yyyy-MM-dd}"); }
         if (_hasta is DateTime d2) { qs.Add($"hasta={d2:yyyy-MM-dd}"); }
-        var url = qs.Count == 0
-            ? $"/imprimir-hcs-paciente/{pacienteId}"
-            : $"/imprimir-hcs-paciente/{pacienteId}?{string.Join("&", qs)}";
-        await JS.InvokeVoidAsync("open", url, "_blank");
+        if (!string.IsNullOrWhiteSpace(_especialista)) { qs.Add($"especialista={Uri.EscapeDataString(_especialista)}"); }
+        if (Guid.TryParse(_aseguradoraFiltro, out var aseId)) { qs.Add($"aseguradoraId={aseId}"); }
+        if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
+        if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
+        if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
+        return qs.Count == 0
+            ? "/imprimir-ordenes-filtradas"
+            : $"/imprimir-ordenes-filtradas?{string.Join("&", qs)}";
     }
 
     /// <summary>Consultar: abre el paquete completo (todos los docs) en vista read-only.</summary>

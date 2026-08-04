@@ -198,6 +198,18 @@ public sealed class FormNode
     [JsonPropertyName("visibleWhen")]
     public VisibleWhenRule? VisibleWhen { get; set; }
 
+    /// <summary>
+    /// Si true, el campo se omite en la IMPRESION (HistoriaDoc,
+    /// ImprimirPaquete, ImprimirHcsPaciente/FormViewer read-only) cuando su
+    /// valor esta vacio. En modo captura (FormViewer editable) el campo
+    /// siempre aparece — el flag solo afecta al render impreso. Util para
+    /// campos "activadores" tipo checkboxes o flags que solo tienen sentido
+    /// cuando el usuario los diligencio. Default false. Aplica solo a
+    /// nodos de tipo "field"; en secciones/bloques de texto se ignora.
+    /// </summary>
+    [JsonPropertyName("hideIfEmpty")]
+    public bool HideIfEmpty { get; set; }
+
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";

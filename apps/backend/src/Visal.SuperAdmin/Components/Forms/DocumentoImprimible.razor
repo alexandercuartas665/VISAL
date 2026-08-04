@@ -1,0 +1,261 @@
+@using System.Text.Json
+@using Visal.Application.Tenancy.Forms
+
+@*
+    DocumentoImprimible — renderer compartido tipo "documento imprimible"
+    para HCs y ordenes. Antes cada pagina de impresion (ImprimirPaquete,
+    ImprimirHcsPaciente, ImprimirOrdenesFiltradas) tenia su propio renderer:
+    - ImprimirPaquete usaba clases .pack-* (documento denso)
+    - Las otras dos usaban <FormViewer ReadOnly> (formulario editable con
+      textareas de altura fija, que en impresion se cortaban)
+
+    Este componente centraliza el renderer .pack-* para que todas las vistas
+    de impresion produzcan el mismo look-and-feel de documento (tabla con
+    celdas expandibles, sin scrollbars) y respeten VisibleWhen + HideIfEmpty.
+
+    Parametros:
+      Schema           — FormSchema del formato (obligatorio)
+      Values           — Diccionario name -> valor
+      PacienteNombre   — Para la meta del header
+      PacienteTipoDoc  — CC/TI/RC/etc.
+      PacienteDoc      — numero de documento
+      EspecialistaNombre — sale como "Atiende:" si no es null
+      OrdenNum         — texto del "HC N°" (top-right); ej. "019F9A07"
+      FechaLinea       — segunda linea del top-right (Apertura/Cerrada + fecha)
+      TipoCortoHeader  — prefijo del top-right (default "HC")
+      TituloFallback   — usado cuando FormSchema.Header.Titulo esta vacio
+      SeccionesOpcionalesIncluidas — set de ids de secciones PrintOptional
+                        que el usuario marco para imprimir; el resto se omite
+*@
+
+<div class="pack-doc">
+    @{
+        var hd = Schema?.Header ?? new FormHeader();
+        var tituloFinal = !string.IsNullOrWhiteSpace(hd.Titulo) ? hd.Titulo! : (TituloFallback ?? "");
+    }
+    <div class="pack-header">
+        <div class="pack-hdr-top">
+            <div class="pack-hdr-brand">
+                @if (!string.IsNullOrWhiteSpace(hd.LogoUrl))
+                {
+                    <img class="pack-hdr-logo" src="@hd.LogoUrl" alt="logo" />
+                }
+                else
+                {
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                }
+                <div>
+                    <div class="pack-hdr-inst">@hd.Institucion</div>
+                    <div class="pack-hdr-tag">@hd.Tagline</div>
+                </div>
+            </div>
+            <div class="pack-hdr-nohist">
+                @if (!string.IsNullOrWhiteSpace(OrdenNum))
+                {
+                    @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b>
+
+                    <br />
+                }
+                @if (!string.IsNullOrWhiteSpace(FechaLinea))
+                {
+                    @FechaLinea<br />
+                }
+            </div>
+        </div>
+        <div class="pack-hdr-title">@tituloFinal</div>
+        <div class="pack-hdr-meta">
+            @if (!string.IsNullOrWhiteSpace(PacienteNombre))
+            {
+                <span><b>Paciente:</b> @PacienteNombre</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(PacienteDoc))
+            {
+                <span><b>Doc:</b> @PacienteTipoDoc @PacienteDoc</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(EspecialistaNombre))
+            {
+                <span><b>Atiende:</b> @EspecialistaNombre</span>
+            }
+        </div>
+    </div>
+
+    @if (Schema is not null)
+    {
+        @foreach (var node in Schema.Children)
+        {
+            @RenderTopNode(node)
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public FormSchema? Schema { get; set; }
+    [Parameter, EditorRequired] public Dictionary<string, string?> Values { get; set; } = new();
+    [Parameter] public string? PacienteNombre { get; set; }
+    [Parameter] public string? PacienteTipoDoc { get; set; }
+    [Parameter] public string? PacienteDoc { get; set; }
+    [Parameter] public string? EspecialistaNombre { get; set; }
+    [Parameter] public string? OrdenNum { get; set; }
+    [Parameter] public string? FechaLinea { get; set; }
+    [Parameter] public string TipoCortoHeader { get; set; } = "HC";
+    [Parameter] public string? TituloFallback { get; set; }
+    [Parameter] public HashSet<string>? SeccionesOpcionalesIncluidas { get; set; }
+
+    // ── Renderer (copia fiel del que vivia en ImprimirPaquete.razor) ─────
+
+    private RenderFragment RenderTopNode(FormNode n) => __builder =>
+    {
+        if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, Values)) { return; }
+        if (n.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(n, Values)) { return; }
+        if (n.IsSection && n.PrintOptional
+            && (SeccionesOpcionalesIncluidas is null || !SeccionesOpcionalesIncluidas.Contains(n.Id)))
+        {
+            return;
+        }
+
+        if (n.IsText)
+        {
+            <div class="pack-para">@(n.Content ?? "")</div>
+            return;
+        }
+        if (n.IsSection)
+        {
+            if (!string.IsNullOrWhiteSpace(n.Label))
+            {
+                <div class="pack-sub">@n.Label</div>
+            }
+            <div class="pack-grid">
+                @foreach (var ch in n.Children ?? new())
+                {
+                    if (!VisibleWhenEvaluator.ShouldShow(ch.VisibleWhen, Values)) { continue; }
+                    if (ch.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(ch, Values)) { continue; }
+                    @RenderDocNode(ch)
+                }
+            </div>
+            return;
+        }
+        <div class="pack-grid">
+            @RenderDocNode(n)
+        </div>
+    };
+
+    private RenderFragment RenderDocNode(FormNode n) => __builder =>
+    {
+        var span = Math.Clamp(n.WidthColumns <= 0 ? 12 : n.WidthColumns, 1, 12);
+        if (n.IsText)
+        {
+            <div class="pack-para" style="grid-column: span @span;">@(n.Content ?? "")</div>
+            return;
+        }
+        if (n.IsTable)
+        {
+            var tblKey = $"tbl:{n.Id}";
+            var seedCount = n.SeedRows?.Count ?? 0;
+            int extraRows = 0;
+            if (!n.LockRows && Values.TryGetValue($"{tblKey}:_rows", out var rs)
+                && int.TryParse(rs, out var parsed) && parsed > 0)
+            {
+                extraRows = parsed;
+            }
+            var totalRows = seedCount + extraRows;
+            if (totalRows == 0 && !n.LockRows) { totalRows = 1; }
+            <div style="grid-column: span @span; border-bottom:1px solid #000;">
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            @foreach (var col in n.Columns ?? new()) { <th>@col.Label</th> }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var r = 0; r < totalRows; r++)
+                        {
+                            var idx = r;
+                            var isSeed = r < seedCount;
+                            var seedRow = isSeed ? n.SeedRows![r] : null;
+                            var _pBannerAlign = isSeed && n.SeedRowBanner is not null
+                                && n.SeedRowBanner.TryGetValue(r.ToString(), out var _pba) ? _pba : null;
+                            if (_pBannerAlign is not null && seedRow is not null)
+                            {
+                                var _pText = seedRow.Count > 0 ? seedRow[0] ?? "" : "";
+                                var _pCols = (n.Columns?.Count ?? 0);
+                                var _pAlign = _pBannerAlign == "left" || _pBannerAlign == "right" ? _pBannerAlign : "center";
+                                <tr>
+                                    <td colspan="@_pCols" style="text-align:@_pAlign; font-weight:700; background:#eff6ff; color:#1e3a8a; padding:6px 10px; letter-spacing:.04em;">
+                                        @_pText
+                                    </td>
+                                </tr>
+                                continue;
+                            }
+                            <tr>
+                                @{ var colIdx = 0; }
+                                @foreach (var col in n.Columns ?? new())
+                                {
+                                    var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
+                                    string? cellVal;
+                                    if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
+                                    else { Values.TryGetValue($"{tblKey}:{idx}:{col.Id}", out cellVal); }
+                                    var displayVal = FormatCellForPrint(cellVal, col.FieldType);
+                                    <td>@(string.IsNullOrWhiteSpace(displayVal) ? new MarkupString("&nbsp;") : (MarkupString)System.Net.WebUtility.HtmlEncode(displayVal))</td>
+                                    colIdx++;
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            return;
+        }
+        var key = n.Name ?? $"fld:{n.Id}";
+        var val = Values.TryGetValue(key, out var vv) ? vv : null;
+        var fieldDisplay = FormatCellForPrint(val, n.FieldType);
+        <div class="pack-cell" style="grid-column: span @span;">
+            <div class="pack-label">@n.Label</div>
+            @if (IsImageUrl(val))
+            {
+                <img class="pack-firma-img" src="@val" alt="firma" />
+            }
+            else
+            {
+                <div class="pack-value">@(fieldDisplay ?? "")</div>
+            }
+        </div>
+    };
+
+    private static bool IsImageUrl(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) { return false; }
+        var s = v.Trim();
+        if (s.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        if (s.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        if (s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            var lower = s.ToLowerInvariant();
+            return lower.EndsWith(".png") || lower.EndsWith(".jpg") || lower.EndsWith(".jpeg")
+                || lower.EndsWith(".svg") || lower.EndsWith(".gif") || lower.EndsWith(".webp");
+        }
+        return false;
+    }
+
+    private static string? FormatCellForPrint(string? raw, string? fieldType)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return raw; }
+        if (string.Equals(fieldType, "date", StringComparison.OrdinalIgnoreCase))
+        {
+            if (DateOnly.TryParseExact(raw, "yyyy-MM-dd", out var d))
+            {
+                return d.ToString("dd/MM/yyyy");
+            }
+            return raw;
+        }
+        if (string.Equals(fieldType, "datetime", StringComparison.OrdinalIgnoreCase))
+        {
+            if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeLocal, out var dt))
+            {
+                return dt.ToString("dd/MM/yyyy HH:mm");
+            }
+            return raw;
+        }
+        return raw;
+    }
+}

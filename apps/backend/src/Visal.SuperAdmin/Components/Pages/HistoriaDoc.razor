@@ -199,10 +199,16 @@ else
     private string? GetValor(FormNode n) =>
         _valores.TryGetValue(KeyOf(n), out var v) ? v : null;
 
-    /// <summary>Filtro de visibilidad condicional (mismo evaluador que el FormViewer).
-    /// Un nodo con VisibleWhen que no cumple la regla no debe aparecer impreso.</summary>
-    private bool ShouldShow(FormNode n) =>
-        VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, _valores);
+    /// <summary>Filtro de visibilidad condicional (mismo evaluador que el FormViewer)
+    /// combinado con el flag HideIfEmpty del disenador. Un nodo con VisibleWhen
+    /// que no cumple la regla no aparece impreso; un CAMPO con HideIfEmpty=true
+    /// tampoco se imprime si su valor esta vacio.</summary>
+    private bool ShouldShow(FormNode n)
+    {
+        if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, _valores)) { return false; }
+        if (n.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(n, _valores)) { return false; }
+        return true;
+    }
 
     private RenderFragment RenderDocNode(FormNode n) =>
         n.IsText ? RenderDocText(n) : (n.IsTable ? RenderDocTable(n) : RenderDocField(n));

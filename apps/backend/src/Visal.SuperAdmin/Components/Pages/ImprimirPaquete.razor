@@ -824,6 +824,11 @@ else
         // no se imprime (equivalente al FormViewer).
         if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, vals)) { return; }
 
+        // HideIfEmpty (campos): si el disenador marco el campo con "No imprimir
+        // si vacio" y el valor esta en blanco, se omite. Aplica solo a fields;
+        // secciones se ignoran (no aplica el flag).
+        if (n.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(n, vals)) { return; }
+
         // Seccion opcional al imprimir: si el disenador la marco como
         // PrintOptional y el usuario NO la selecciono en el modal (?secs=), la
         // omitimos. El default es "no imprimir opcionales" — el usuario debe
@@ -848,6 +853,7 @@ else
                 @foreach (var ch in n.Children ?? new())
                 {
                     if (!VisibleWhenEvaluator.ShouldShow(ch.VisibleWhen, vals)) { continue; }
+                    if (ch.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(ch, vals)) { continue; }
                     @RenderDocNode(ch, vals)
                 }
             </div>

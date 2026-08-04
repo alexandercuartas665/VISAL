@@ -547,6 +547,7 @@
                 {
                     <div class="fb-prop"><label>Placeholder</label><input class="fb-input" @bind="_selected.Placeholder" @bind:event="oninput" /></div>
                     <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
+                    <label class="fb-check" title="Si el campo esta vacio, no aparece en la impresion (HC individual, paquete, HCs del paciente, ordenes clinicas). En captura siempre se muestra."><input type="checkbox" @bind="_selected.HideIfEmpty" /> No imprimir si vacio</label>
 
                     @* Dictado por voz: solo tiene sentido en areas de texto largas.
                        El visor mostrara un boton flotante para iniciar la transcripcion. *@

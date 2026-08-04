@@ -696,7 +696,13 @@ else
     /// vuelve a correr.
     /// </summary>
     private bool ShouldShow(FormNode node)
-        => VisibleWhenEvaluator.ShouldShow(node.VisibleWhen, Valores);
+    {
+        if (!VisibleWhenEvaluator.ShouldShow(node.VisibleWhen, Valores)) { return false; }
+        // HideIfEmpty solo aplica en modo lectura (impresion). En captura el
+        // campo siempre se muestra para que el profesional pueda diligenciarlo.
+        if (ReadOnly && node.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(node, Valores)) { return false; }
+        return true;
+    }
 
     private RenderFragment RenderField(FormNode node) => __builder =>
     {

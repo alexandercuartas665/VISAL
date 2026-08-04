@@ -88,6 +88,53 @@ public static class VisibleWhenEvaluator
         }
     }
 
+    /// <summary>
+    /// Determina si un campo esta "vacio" para efectos del flag HideIfEmpty
+    /// de la impresion. Reglas:
+    /// - Nodos que no son campos (secciones, texto) => nunca vacios (no aplica).
+    /// - Tabla (fieldType="table"): vacia si no tiene seedRows con contenido y
+    ///   no hay filas extras registradas via el marcador "tbl:{id}:_rows".
+    /// - Cualquier otro campo: vacio si su valor bajo la key habitual
+    ///   (Name o "fld:{Id}") es null o whitespace.
+    /// El evaluador consume el MISMO diccionario que HistoriaDoc/ImprimirPaquete
+    /// pasan a VisibleWhenEvaluator, asi que no necesita metadatos extra.
+    /// </summary>
+    public static bool IsFieldEmpty(FormNode node, IReadOnlyDictionary<string, string?> values)
+    {
+        // El flag solo aplica a campos (type="field"); secciones y bloques
+        // de texto se ignoran (nunca son "vacios" en el sentido del flag).
+        if (node is null || node.Type != "field") { return false; }
+
+        if (node.IsTable)
+        {
+            var tblKey = $"tbl:{node.Id}";
+            var seedHasContent = node.SeedRows is not null
+                && node.SeedRows.Any(row => row is not null
+                    && row.Any(c => !string.IsNullOrWhiteSpace(c)));
+            var extraRows = 0;
+            if (values.TryGetValue($"{tblKey}:_rows", out var rs)
+                && int.TryParse(rs, out var parsed) && parsed > 0)
+            {
+                extraRows = parsed;
+            }
+            if (seedHasContent || extraRows > 0)
+            {
+                // Con filas semilla o filas agregadas, revisamos si alguna celda
+                // capturada tiene contenido. Si el usuario agrego filas pero
+                // dejo todas las celdas en blanco, la tabla se considera vacia.
+                var hasAnyCell = values.Any(kv => kv.Key.StartsWith(tblKey + ":", StringComparison.Ordinal)
+                    && !kv.Key.EndsWith(":_rows", StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(kv.Value));
+                return !hasAnyCell && !seedHasContent;
+            }
+            return true;
+        }
+
+        var key = string.IsNullOrWhiteSpace(node.Name) ? $"fld:{node.Id}" : node.Name!;
+        if (!values.TryGetValue(key, out var val)) { return true; }
+        return string.IsNullOrWhiteSpace(val);
+    }
+
     /// <summary>Compara numericamente si ambos parsean; de lo contrario, ordinal.</summary>
     private static bool TryCompare(string? a, string b, out int cmp)
     {

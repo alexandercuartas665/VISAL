@@ -992,7 +992,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.CodigoContrato).HasMaxLength(60).IsRequired();
             b.Property(x => x.Estado).HasMaxLength(20).IsRequired();
-            b.Property(x => x.Cucon).HasMaxLength(60);
+            b.Property(x => x.Cucon).HasMaxLength(256);
             b.Property(x => x.TipoContrato).HasConversion<string?>().HasMaxLength(20);
             b.HasOne(x => x.Aseguradora).WithMany().HasForeignKey(x => x.AseguradoraId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.AseguradoraId });

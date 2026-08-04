@@ -155,7 +155,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Valor Unitario"] = h.ValorUnitario,                              // 23 — ServicioContrato.Tarifa
             ["Vr Cuota Moderadora "] = h.ValorCuotaModeradora ?? 0m,           // 24 — Asignacion (TipoPago=CUOTA); default 0 si no aplica
             ["Copago o Pago Compartido"] = h.ValorCopago ?? 0m,                // 25 — Asignacion (TipoPago=COPAGO); default 0 si no aplica
-            ["Valor Total"] = h.ValorUnitario,                                 // 26 — Cantidad(1) x Tarifa
+            ["Valor Total"] = h.ValorTotal ?? h.ValorUnitario,                 // 26 — ServicioContrato.ValorTotal (Tarifa x cant tope) o fallback a Tarifa unitaria
             ["Diagnóstico"] = h.Paciente.Cie10Codigo ?? h.Paciente.DiagnosticoPrincipal, // 27
             ["TipoDocProfesional"] = h.Profesional?.TipoDocumento,             // 28
             ["DocumentoProf"] = h.Profesional?.NumeroDocumento,                // 29

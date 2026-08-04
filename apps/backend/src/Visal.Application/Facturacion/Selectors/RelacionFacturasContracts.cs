@@ -59,6 +59,10 @@ public sealed record RelacionFacturasHecho(
     string? NombreServicio,
     /// <summary>Tarifa unitaria del servicio segun el contrato (ServicioContrato.Tarifa).</summary>
     decimal? ValorUnitario,
+    /// <summary>Valor total pre-calculado en el ServicioContrato (col 26). Se
+    /// prefiere sobre ValorUnitario para permitir "tarifa x cantidad tope"
+    /// configurada en el contrato; si esta null, el builder cae a ValorUnitario.</summary>
+    decimal? ValorTotal,
     /// <summary>Cuota moderadora pagada por el paciente (solo si Asignacion.TipoPago == CUOTA).</summary>
     decimal? ValorCuotaModeradora,
     /// <summary>Copago pagado por el paciente (solo si Asignacion.TipoPago == COPAGO).</summary>

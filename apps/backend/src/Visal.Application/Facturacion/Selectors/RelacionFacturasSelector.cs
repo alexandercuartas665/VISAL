@@ -326,6 +326,7 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             // ServicioContrato (config una vez por servicio del contrato).
             string? nombreServicio = asigRelevante?.NombreServicio;
             decimal? valorUnitario = null;
+            decimal? valorTotal = null;
             string? modalidadFacturacion = null;
             string? grupoServicioFacturacion = null;
             string? servicioFacturacion = null;
@@ -334,11 +335,24 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 && serviciosContrato.TryGetValue(sid, out var sc))
             {
                 valorUnitario = sc.Tarifa;
+                // Valor Total (col 26): preferimos el ValorTotal explicito del
+                // servicio del contrato (Tarifa x cantidad tope si esta
+                // capturado). Si no esta configurado, cae a la Tarifa unitaria
+                // — comportamiento historico "Cantidad(1) x Tarifa".
+                valorTotal = sc.ValorTotal ?? sc.Tarifa;
                 modalidadFacturacion = sc.ModalidadFacturacion;
                 grupoServicioFacturacion = sc.GrupoServicioFacturacion;
                 servicioFacturacion = sc.ServicioFacturacion;
                 cupsCodigo = sc.CodigoServicio;
                 cupsDescripcion = sc.Descripcion;
+                // Tipo Archivo RIPS (col 7 "Archivo json"): override por
+                // servicio del contrato. Si no esta configurado, mantenemos el
+                // valor derivado del catalogo por el modulo/tipoServicio de la
+                // asignacion (cadena calculada arriba en `tipoArchivoRips`).
+                if (!string.IsNullOrWhiteSpace(sc.TipoArchivoRips))
+                {
+                    tipoArchivoRips = sc.TipoArchivoRips;
+                }
             }
 
             // Cuota moderadora / copago — mutuamente excluyentes segun TipoPago
@@ -364,7 +378,7 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 cupsCodigo, cupsDescripcion,
                 deptoNombre, munNombre, nacNombre,
                 codHabResuelto, tipoArchivoRips, codigoAutorizacion,
-                nombreServicio, valorUnitario, cuotaModeradora, copago,
+                nombreServicio, valorUnitario, valorTotal, cuotaModeradora, copago,
                 modalidadFacturacion, grupoServicioFacturacion, servicioFacturacion));
         }
         return hechos;

@@ -108,16 +108,12 @@ public sealed class RdaConsultaBuilderService(
         {
             advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo (sera rechazado por ReTHUS).");
         }
-        // Custodian.reference — patron "#NIT-CodigoSedePrestador-NumeroSede"
-        // NIT completo con DV pegado sin guion (formato "9001234567" no
-        // "900123456-7"). El correo03 MinSalud sugirio "#NIT-Sede" y el manual
-        // v1.4 §5.3 (d) define Sede = "CodigoSedePrestador-NumeroSede".
-        // TODO: agregar campo NumeroSede a InteroperabilidadCredencialSede y
-        // capturarlo por sucursal en /config/interoperabilidad. Por ahora "00"
-        // (default REPS mono-sede).
+        // Custodian.reference — ronda 13 (2026-08-04): NIT completo con DV
+        // pegado + REPS, sin NumeroSede. Combina interpretacion Correo03
+        // ("#NIT-Sede") con NIT en formato colombiano oficial (10 digitos
+        // incluyendo DV, sin guion).
         var nitBase = NitConDvPegado(tenantE.TaxId) ?? "SINNIT";
-        const string numeroSede = "00";
-        var orgId = $"{nitBase}-{codigoRep}-{numeroSede}";
+        var orgId = $"{nitBase}-{codigoRep}";
         // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
         // distinguirse del `id` de la Organization dentro del contained/bundle
         // (dos recursos no pueden compartir id). Pero el `identifier.value` del

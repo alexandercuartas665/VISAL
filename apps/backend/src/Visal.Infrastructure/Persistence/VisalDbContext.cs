@@ -70,6 +70,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaMedicamento> HistoriaClinicaMedicamentos => Set<HistoriaClinicaMedicamento>();
     public DbSet<HistoriaClinicaOrdenServicio> HistoriaClinicaOrdenesServicio => Set<HistoriaClinicaOrdenServicio>();
     public DbSet<HistoriaClinicaInsumo> HistoriaClinicaInsumos => Set<HistoriaClinicaInsumo>();
+    public DbSet<HistoriaClinicaSuministroMedicamento> HistoriaClinicaSuministroMedicamentos => Set<HistoriaClinicaSuministroMedicamento>();
     public DbSet<SqlConsoleLog> SqlConsoleLogs => Set<SqlConsoleLog>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
@@ -742,6 +743,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+        });
+
+        modelBuilder.Entity<HistoriaClinicaSuministroMedicamento>(b =>
+        {
+            b.Property(x => x.Presentacion).HasColumnType("text").IsRequired();
+            b.Property(x => x.Dosis).HasColumnType("text");
+            b.Property(x => x.Cantidad).HasColumnType("text");
+            b.Property(x => x.Via).HasColumnType("text");
+            b.Property(x => x.UsuarioCreacionNombre).HasMaxLength(200);
+            b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Index compuesto para consulta por HC + orden cronologico (FechaHora es el eje natural del PDF).
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.FechaHora });
         });
 
         modelBuilder.Entity<SqlConsoleLog>(b =>

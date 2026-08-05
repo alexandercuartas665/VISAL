@@ -11,6 +11,7 @@
 @inject IOrdenServicioService SrvSvc
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
+@inject ISuministroMedicamentoService SumMedSvc
 @inject IJSRuntime JS
 
 @*
@@ -77,8 +78,11 @@ else if (_hc is null)
 {
     <p class="doc-actions">Historia clinica no encontrada.</p>
 }
-else if (_form is null)
+else if (_form is null && !string.Equals(Tipo, "REGISTRO_MEDICAMENTOS", StringComparison.OrdinalIgnoreCase))
 {
+    @* REGISTRO_MEDICAMENTOS es autocontenido — no depende de un FormDefinition
+       porque el layout es fijo (bitacora de administracion). Para todos los
+       demas tipos exigimos el form activo (header + firmas del formato). *@
     <p class="doc-actions">
         No hay un formulario activo del tipo <b>@Tipo</b> en este tenant.
         Crea uno desde <a href="/formularios" target="_blank">/formularios</a> antes de imprimir.
@@ -90,7 +94,7 @@ else
         <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
         <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir / Guardar PDF</button>
         <span class="spacer"></span>
-        <span class="meta">Formato: <b>@_form.Codigo</b> &middot; @_tipoLabel</span>
+        <span class="meta">Formato: <b>@(_form?.Codigo ?? "REGMED")</b> &middot; @_tipoLabel</span>
     </div>
 
     <div class="doc">
@@ -117,7 +121,7 @@ else
                     HC: <b>@_hc.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
                 </div>
             </div>
-            <div class="doc-hdr-title">@(_form.Nombre ?? _tipoLabel)</div>
+            <div class="doc-hdr-title">@(_form?.Nombre ?? _tipoLabel)</div>
             <div class="doc-hdr-meta">
                 <span><b>Paciente:</b> @(_paciente?.NombreCompleto ?? "-")</span>
                 <span><b>Doc:</b> @(_paciente?.TipoDocumento) @(_paciente?.NumeroDocumento)</span>
@@ -257,6 +261,42 @@ else
                 </div>
                 break;
 
+            case "REGISTRO_MEDICAMENTOS":
+                @* Bitacora de medicamentos suministrados — replica el layout del
+                   PDF "REG MEDICAMENTOS": Fecha y Hora | Presentacion | Dosis |
+                   Via | Usuario Creacion. Sin firmas: es un registro operativo. *@
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th style="width:120px">Fecha y Hora</th>
+                            <th>Presentacion</th>
+                            <th style="width:90px">Dosis</th>
+                            <th style="width:130px">Via</th>
+                            <th style="width:180px">Usuario Creacion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_sumMed.Count == 0)
+                        {
+                            <tr><td colspan="5" class="doc-empty-row">No hay registros de suministros en esta historia.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var s in _sumMed)
+                            {
+                                <tr>
+                                    <td class="mono">@s.FechaHora.LocalDateTime.ToString("dd/MM/yy HH:mm")</td>
+                                    <td><b>@s.Presentacion</b></td>
+                                    <td>@(string.IsNullOrWhiteSpace(s.Dosis) ? "-" : s.Dosis)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(s.Via) ? "-" : s.Via)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(s.UsuarioCreacionNombre) ? "-" : s.UsuarioCreacionNombre)</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                break;
+
             default:
                 <div class="doc-section">
                     Tipo de orden desconocido: <b>@Tipo</b>.
@@ -296,13 +336,14 @@ else
     private List<OrdenServicioItemDto> _srv = new();
     private List<IncapacidadItemDto> _inc = new();
     private List<CertificacionItemDto> _cert = new();
+    private List<SuministroMedicamentoItemDto> _sumMed = new();
 
     private FormHeader Hdr => _schema.Header ?? FormHeader.Default();
 
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
-        _meds = new(); _srv = new(); _inc = new(); _cert = new();
+        _meds = new(); _srv = new(); _inc = new(); _cert = new(); _sumMed = new();
 
         _tipoLabel = TipoLabel(Tipo);
         _titulo = $"{_tipoLabel}";
@@ -337,6 +378,9 @@ else
             case "REMISIONES":
                 /* sin servicio aun */
                 break;
+            case "REGISTRO_MEDICAMENTOS":
+                _sumMed = (await SumMedSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                break;
         }
 
         _loading = false;
@@ -351,6 +395,7 @@ else
         "REMISIONES"         => "Orden de Remision",
         "INCAPACIDADES"      => "Orden de Incapacidad",
         "CERTIFICADOS"       => "Certificacion Medica",
+        "REGISTRO_MEDICAMENTOS" => "Medicamentos",
         _                    => "Orden"
     };
 }

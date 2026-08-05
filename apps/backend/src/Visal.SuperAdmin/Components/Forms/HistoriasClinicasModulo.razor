@@ -15,6 +15,7 @@
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
 @inject IInsumoService InsumoSvc
+@inject ISuministroMedicamentoService SumMedSvc
 @inject IOrdenExternaService OrdExtSvc
 @inject IEscalaService EscSvc
 @inject IDocumentoHcService DocSvc
@@ -469,6 +470,13 @@
                                               OnCountChanged="@(c => _insCount = c)"
                                               OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                             }
+                            else if (_tabSel == "Suministros medicamentos")
+                            {
+                                @* Bitacora de administracion de medicamentos — cada fila = una toma
+                                   individual (fecha/hora + presentacion + dosis + via + usuario snapshot). *@
+                                <RegistroSuministrosMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
+                                                                  OnCountChanged="@(c => _sumMedCount = c)" />
+                            }
                             else if (_tabSel == "Remisiones")
                             {
                                 <OrdenRemisiones HistoriaClinicaId="@_historiaSel?.Id"
@@ -571,6 +579,15 @@
                     </label>
                 </div>
             }
+            @if (_imprRegMedCount > 0)
+            {
+                <div class="hc-impr-opt">
+                    <label>
+                        <input type="checkbox" @bind="_imprIncluirRegMed" />
+                        <span><b>Medicamentos suministrados</b> <em>(@_imprRegMedCount fila@(_imprRegMedCount == 1 ? "" : "s"))</em></span>
+                    </label>
+                </div>
+            }
             @if (_imprRemCount > 0)
             {
                 <div class="hc-impr-opt">
@@ -655,7 +672,8 @@
             @if (_imprMedCount == 0 && _imprSrvCount == 0 && _imprInsCount == 0 && _imprRemCount == 0
                  && _imprRxExtCount == 0 && _imprLabExtCount == 0 && _imprInsExtCount == 0
                  && _imprIncCount == 0 && _imprCertCount == 0
-                 && _imprEscCount == 0 && _imprEvoCount == 0 && _imprConCount == 0)
+                 && _imprEscCount == 0 && _imprEvoCount == 0 && _imprConCount == 0
+                 && _imprRegMedCount == 0)
             {
                 <div style="font-size:12px; color:#94a3b8; font-style:italic; padding:10px 0;">
                     Esta historia no tiene ordenes, escalas, evoluciones ni consentimientos registrados.
@@ -1052,7 +1070,8 @@
         "Revision", // Capa 08 Ola 2 — bitacora del ciclo de revision de la HC.
         "Documentos externos",
         "Ordenes medicamento", "Ordenes servicios",
-        "Insumos", "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
+        "Insumos", "Suministros medicamentos",
+        "Remisiones", "Ordenes incapacidad", "Ordenes certificaciones",
         // Ordenes externas por tipo. "Ordenes servicios" arriba ya incluye tanto
         // los servicios propios (de contratos) como los del catalogo externo CUPS
         // — se unifican en la misma tabla. La pestana "Insumos Externos" se
@@ -1116,6 +1135,7 @@
         "Ordenes medicamento" => ("\U0001F48A", _medCount),    // pill
         "Ordenes servicios" => ("\U0001F3E5", _servCount), // hospital
         "Insumos" => ("\U0001F4E6", _insCount),                // box
+        "Suministros medicamentos" => ("\U0001F489", _sumMedCount), // syringe — bitacora de administracion
         "Remisiones" => ("↗", _remCount),                 // arrow up-right
         "Ordenes incapacidad" => ("\U0001F4C4", _incCount),    // page facing up
         "Ordenes certificaciones" => ("\U0001F4DC", _certCount), // scroll
@@ -1210,6 +1230,10 @@
     private int _remCount;
     /// <summary>Conteo de insumos para badge en la pestana "Insumos".</summary>
     private int _insCount;
+    /// <summary>Conteo del registro de medicamentos suministrados para la pestana
+    /// "Suministros medicamentos". Se refresca al Add/Remove de una fila y al
+    /// abrir la HC.</summary>
+    private int _sumMedCount;
     /// <summary>Conteo de escalas para badge en la pestana "Escalas".</summary>
     private int _escCount;
     /// <summary>Conteo de evoluciones diligenciadas para badge en la pestana "Evoluciones".</summary>
@@ -1258,14 +1282,14 @@
     private bool _imprIncluirEsc;
     private bool _imprIncluirEvo;
     private bool _imprIncluirCon;
-    private bool _imprIncluirIns, _imprIncluirRem, _imprIncluirRxExt, _imprIncluirLabExt, _imprIncluirInsExt;
+    private bool _imprIncluirIns, _imprIncluirRem, _imprIncluirRxExt, _imprIncluirLabExt, _imprIncluirInsExt, _imprIncluirRegMed;
     private int _imprMedCount, _imprSrvCount, _imprIncCount, _imprCertCount, _imprEscCount, _imprEvoCount, _imprConCount;
     /// <summary>Secciones del formato HC marcadas como PrintOptional en el schema.
     /// Se cargan al abrir el modal de imprimir. El usuario decide cuales incluir
     /// via _imprSeccionesOpcionalesSel (default: ninguna).</summary>
     private List<(string Id, string Label)> _imprSeccionesOpcionales = new();
     private HashSet<string> _imprSeccionesOpcionalesSel = new(StringComparer.OrdinalIgnoreCase);
-    private int _imprInsCount, _imprRemCount, _imprRxExtCount, _imprLabExtCount, _imprInsExtCount;
+    private int _imprInsCount, _imprRemCount, _imprRxExtCount, _imprLabExtCount, _imprInsExtCount, _imprRegMedCount;
 
     // ---- Modal RIPS obligatorio al iniciar HC ----
     // Res. 202/2021 de MinSalud exige capturar VIA + FINALIDAD + CAUSA EXTERNA
@@ -1648,6 +1672,7 @@
         _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
         _servCount = await OrdSrvSvc.ContarPorHistoriaAsync(h.Id);
         _insCount = await InsumoSvc.ContarPorHistoriaAsync(h.Id);
+        _sumMedCount = await SumMedSvc.ContarPorHistoriaAsync(h.Id);
         _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
         _incCount = await IncSvc.ContarPorHistoriaAsync(h.Id);
         _certCount = await CertSvc.ContarPorHistoriaAsync(h.Id);
@@ -2077,6 +2102,7 @@
             _hcEsDeOtroDoctor = false;
             _imprimirMsg = null;
             _medCount = 0;
+            _sumMedCount = 0;
             _showRipsModal = false;
         }
         catch (Exception ex)
@@ -2409,6 +2435,7 @@
             _imprMedCount  = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
             _imprSrvCount  = await OrdSrvSvc.ContarPorHistoriaAsync(h.Id);
             _imprInsCount  = await InsumoSvc.ContarPorHistoriaAsync(h.Id);
+            _imprRegMedCount = await SumMedSvc.ContarPorHistoriaAsync(h.Id);
             _imprRemCount  = await RemSvc.ContarPorHistoriaAsync(h.Id);
             _imprIncCount  = await IncSvc.ContarPorHistoriaAsync(h.Id);
             _imprCertCount = await CertSvc.ContarPorHistoriaAsync(h.Id);
@@ -2425,6 +2452,7 @@
             _imprIncluirMed    = _imprMedCount    > 0;
             _imprIncluirSrv    = _imprSrvCount    > 0;
             _imprIncluirIns    = _imprInsCount    > 0;
+            _imprIncluirRegMed = _imprRegMedCount > 0;
             _imprIncluirRem    = _imprRemCount    > 0;
             _imprIncluirInc    = _imprIncCount    > 0;
             _imprIncluirCert   = _imprCertCount   > 0;
@@ -2466,6 +2494,7 @@
         if (_imprIncluirMed)    { docs.Add("MED");    }
         if (_imprIncluirSrv)    { docs.Add("SRV");    }
         if (_imprIncluirIns)    { docs.Add("INS");    }
+        if (_imprIncluirRegMed) { docs.Add("REGMED"); }
         if (_imprIncluirRem)    { docs.Add("REM");    }
         if (_imprIncluirRxExt)  { docs.Add("RXEXT");  }
         if (_imprIncluirLabExt) { docs.Add("LABEXT"); }

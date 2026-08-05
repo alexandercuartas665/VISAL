@@ -1,0 +1,251 @@
+@using Visal.Application.Tenancy
+@using Visal.Application.Common
+@inject ISuministroMedicamentoService SuministroSvc
+@inject IJSRuntime JS
+
+@*
+   Pestana "Suministros medicamentos" de la HC. Bitacora de administracion:
+   cada fila registra una TOMA individual con su fecha y hora exacta, la
+   presentacion del medicamento, la dosis, la via y el usuario que la
+   registro (snapshot al momento de crear). No hay autocomplete ni catalogo
+   — el profesional escribe el nombre como aparece en la etiqueta que
+   suministro. Se diferencia de "Ordenes medicamento" que es la prescripcion.
+*@
+
+<div class="sm-bar">
+    <div class="sm-bar-left">
+        <label>Registro de Medicamentos Suministrados:</label>
+        <span class="sm-bar-count">@_items.Count fila(s)</span>
+    </div>
+    <div class="sm-bar-right">
+        <button class="btn btn-outline-primary btn-sm" title="Imprimir registro"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#128424; Imprimir</button>
+    </div>
+</div>
+
+@if (HistoriaClinicaId is null)
+{
+    <div class="sm-card sm-empty-hc">
+        Selecciona o inicia una historia para registrar medicamentos suministrados.
+    </div>
+}
+else
+{
+    <div class="sm-card">
+        <div class="sm-row">
+            <div class="sm-f sm-c-3">
+                <label>Fecha y hora</label>
+                <input class="form-control form-control-sm"
+                       type="datetime-local"
+                       @bind="_borrador.FechaHoraLocal" />
+            </div>
+            <div class="sm-f sm-c-5">
+                <label>Presentacion (nombre)</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: CLINDAMICINA 600MG"
+                       @bind="_borrador.Presentacion" @bind:event="oninput" />
+            </div>
+            <div class="sm-f sm-c-2">
+                <label>Dosis</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: 600MG"
+                       @bind="_borrador.Dosis" @bind:event="oninput" />
+            </div>
+            <div class="sm-f sm-c-2">
+                <label>Cantidad</label>
+                <input class="form-control form-control-sm"
+                       placeholder="Ej: 1 amp"
+                       @bind="_borrador.Cantidad" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="sm-row">
+            <div class="sm-f sm-c-4">
+                <label>Via de administracion</label>
+                <select class="form-select form-select-sm" @bind="_borrador.Via">
+                    <option value=""></option>
+                    <option value="ORAL">ORAL</option>
+                    <option value="INTRAVENOSA">INTRAVENOSA</option>
+                    <option value="INTRAMUSCULAR">INTRAMUSCULAR</option>
+                    <option value="SUBCUTANEA">SUBCUTANEA</option>
+                    <option value="TOPICA">TOPICA</option>
+                    <option value="INHALADA">INHALADA</option>
+                    <option value="RECTAL">RECTAL</option>
+                    <option value="OFTALMICA">OFTALMICA</option>
+                    <option value="OTICA">OTICA</option>
+                    <option value="NASAL">NASAL</option>
+                    <option value="SUBLINGUAL">SUBLINGUAL</option>
+                    <option value="OTRA">OTRA</option>
+                </select>
+            </div>
+            <div class="sm-f sm-c-8 sm-row-action">
+                <button class="btn btn-primary btn-sm"
+                        @onclick="AgregarAsync"
+                        disabled="@(string.IsNullOrWhiteSpace(_borrador.Presentacion) || _agregando)">
+                    @(_agregando ? "Guardando..." : "+ Agregar registro")
+                </button>
+            </div>
+        </div>
+
+        <div class="sm-list">
+            @if (_items.Count == 0)
+            {
+                <div class="sm-empty-row">Sin medicamentos suministrados registrados.</div>
+            }
+            else
+            {
+                <table class="table table-sm sm-table">
+                    <thead>
+                        <tr>
+                            <th style="width:130px;">Fecha y Hora</th>
+                            <th>Presentacion</th>
+                            <th style="width:100px;">Dosis</th>
+                            <th style="width:100px;">Cantidad</th>
+                            <th style="width:140px;">Via</th>
+                            <th>Usuario Creacion</th>
+                            <th style="width:60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var it in _items)
+                        {
+                            <tr>
+                                <td class="sm-mono">@FormatearFecha(it.FechaHora)</td>
+                                <td><b>@it.Presentacion</b></td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Dosis) ? "—" : it.Dosis)</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Cantidad) ? "—" : it.Cantidad)</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.Via) ? "—" : it.Via)</td>
+                                <td>@(string.IsNullOrWhiteSpace(it.UsuarioCreacionNombre) ? "—" : it.UsuarioCreacionNombre)</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            @onclick="() => EliminarAsync(it)"
+                                            title="Quitar">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .sm-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
+    .sm-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
+    .sm-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .sm-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; }
+    .sm-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
+    .sm-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
+    .sm-row-action { display:flex; justify-content:flex-end; }
+    .sm-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .sm-c-2 { grid-column: span 2; }
+    .sm-c-3 { grid-column: span 3; }
+    .sm-c-4 { grid-column: span 4; }
+    .sm-c-5 { grid-column: span 5; }
+    .sm-c-8 { grid-column: span 8; }
+    .sm-list { margin-top:16px; }
+    .sm-empty-row { padding:30px; text-align:center; font-style:italic; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px; }
+    .sm-table { font-size:12.5px; }
+    .sm-mono { font-family: 'JetBrains Mono','Consolas',monospace; font-size:11.5px; }
+</style>
+
+@code {
+    [Parameter] public Guid? HistoriaClinicaId { get; set; }
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private Guid? _ultimoIdCargado;
+    private List<SuministroMedicamentoItemDto> _items = new();
+    private bool _agregando;
+
+    private Borrador _borrador = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (HistoriaClinicaId != _ultimoIdCargado)
+        {
+            _ultimoIdCargado = HistoriaClinicaId;
+            _borrador = new();
+            await CargarItemsAsync();
+        }
+    }
+
+    private async Task CargarItemsAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
+        _items = (await SuministroSvc.ListarPorHistoriaAsync(hid)).ToList();
+        await NotifyCount();
+    }
+
+    private async Task NotifyCount()
+    {
+        if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
+    }
+
+    private async Task AgregarAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (string.IsNullOrWhiteSpace(_borrador.Presentacion)) { return; }
+        _agregando = true;
+        try
+        {
+            var fechaHora = ParseFechaHora(_borrador.FechaHoraLocal);
+            var creado = await SuministroSvc.AgregarAsync(hid, new AgregarSuministroMedicamentoRequest(
+                fechaHora,
+                _borrador.Presentacion!,
+                _borrador.Dosis,
+                _borrador.Cantidad,
+                _borrador.Via), Guid.Empty);
+            _items.Add(creado);
+            _items = _items.OrderBy(x => x.FechaHora).ThenBy(x => x.Orden).ToList();
+            await NotifyCount();
+            _borrador = new();
+        }
+        finally { _agregando = false; }
+    }
+
+    private async Task EliminarAsync(SuministroMedicamentoItemDto it)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Quitar el registro de \"{it.Presentacion}\" del {FormatearFecha(it.FechaHora)}?");
+        if (!ok) { return; }
+        await SuministroSvc.EliminarAsync(it.Id, Guid.Empty);
+        _items.RemoveAll(x => x.Id == it.Id);
+        await NotifyCount();
+    }
+
+    private async Task ImprimirAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/REGISTRO_MEDICAMENTOS", "_blank");
+    }
+
+    private static string FormatearFecha(DateTimeOffset f)
+    {
+        // Formato del PDF: "31/7/26 6:00 a.m." — usamos "dd/MM/yy HH:mm" que es
+        // consistente y no depende de cultura para el rendering de a.m./p.m.
+        return f.LocalDateTime.ToString("dd/MM/yy HH:mm");
+    }
+
+    /// <summary>Convierte el DateTime? del input datetime-local a DateTimeOffset
+    /// con el offset local del servidor. Si el campo esta vacio, usa "ahora" —
+    /// es lo natural: registro justo cuando se suministro.</summary>
+    private static DateTimeOffset ParseFechaHora(DateTime? local)
+    {
+        if (local is DateTime dt)
+        {
+            return new DateTimeOffset(dt, TimeZoneInfo.Local.GetUtcOffset(dt));
+        }
+        return DateTimeOffset.Now;
+    }
+
+    private sealed class Borrador
+    {
+        /// <summary>Bindeado al input datetime-local. Null = usar "ahora" al guardar.</summary>
+        public DateTime? FechaHoraLocal { get; set; }
+        public string? Presentacion { get; set; }
+        public string? Dosis { get; set; }
+        public string? Cantidad { get; set; }
+        public string? Via { get; set; }
+    }
+}

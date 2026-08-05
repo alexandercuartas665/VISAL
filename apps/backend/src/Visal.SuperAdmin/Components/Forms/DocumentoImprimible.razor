@@ -49,7 +49,11 @@
                     <div class="pack-hdr-tag">@hd.Tagline</div>
                 </div>
             </div>
-            <div class="pack-hdr-nohist">
+            @* Bloque HC N° / Apertura: visible en pantalla como referencia rapida
+               para el operador, pero se oculta en la impresion — la fecha y el id
+               interno no van en el PDF que se entrega al paciente / la EPS.
+               d-print-none es utility de Bootstrap 5 (display:none @media print). *@
+            <div class="pack-hdr-nohist d-print-none">
                 @if (!string.IsNullOrWhiteSpace(OrdenNum))
                 {
                     @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b>

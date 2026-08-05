@@ -37,6 +37,16 @@ public class HistoriaClinica : TenantEntity
     public DateTimeOffset FechaApertura { get; set; }
     public DateTimeOffset? FechaCierre { get; set; }
 
+    /// <summary>
+    /// Fecha real de la atencion clinica, calculada a partir de los campos del
+    /// formulario marcados con <c>IsFechaAtencion=true</c> (mayor entre los que
+    /// tengan valor). Se recalcula al Guardar valores y al Cerrar. Es
+    /// independiente de FechaApertura (que registra cuando se abrio el modal)
+    /// y de FechaCierre (cuando el profesional finalizo). Puede ser null si
+    /// el schema no marca ningun campo o ninguno tiene valor.
+    /// </summary>
+    public DateTimeOffset? FechaAtencion { get; set; }
+
     /// <summary>Motivo de inactivacion cuando Estado = Inactiva.</summary>
     public string? MotivoInactivacion { get; set; }
 

@@ -549,6 +549,15 @@
                     <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
                     <label class="fb-check" title="Si el campo esta vacio, no aparece en la impresion (HC individual, paquete, HCs del paciente, ordenes clinicas). En captura siempre se muestra."><input type="checkbox" @bind="_selected.HideIfEmpty" /> No imprimir si vacio</label>
 
+                    @* Fecha real de atencion: se puede marcar en varios campos date/datetime.
+                       Al guardar/cerrar la HC, se toma la mayor entre los marcados con valor y se
+                       copia a historias_clinicas.fecha_atencion. Usado en /ordenes (orden y filtro)
+                       e impresion en grupo. *@
+                    @if (_selected.FieldType is "date" or "datetime")
+                    {
+                        <label class="fb-check" title="Al guardar/cerrar la HC, el valor de este campo se copia a HistoriaClinica.FechaAtencion. Se puede marcar en varios campos: el mayor valor no vacio gana."><input type="checkbox" @bind="_selected.IsFechaAtencion" /> &#128197; Es fecha de atencion</label>
+                    }
+
                     @* Dictado por voz: solo tiene sentido en areas de texto largas.
                        El visor mostrara un boton flotante para iniciar la transcripcion. *@
                     @if (_selected.FieldType == "textarea")

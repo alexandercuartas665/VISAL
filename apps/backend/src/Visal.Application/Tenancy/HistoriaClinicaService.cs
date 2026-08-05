@@ -279,6 +279,7 @@ public sealed class HistoriaClinicaService(
         // hidratacion al abrir. Idempotente y sin sobrescribir vaciados
         // deliberados del doctor. Ver DefaultValuesHelper.HidratarDefaultsAusentes.
         e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, valoresJson, ct);
+        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct) ?? e.FechaAtencion;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -310,6 +311,10 @@ public sealed class HistoriaClinicaService(
         // menos en el momento del cierre.
         var jsonBase = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
         e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, jsonBase, ct);
+        // Refuerzo del FechaAtencion al Cerrar: recalcula desde el JSON final.
+        // Preserva el valor previo si el nuevo calculo es null (para no perder
+        // una fecha ya seteada si el doctor limpio los campos marcados al final).
+        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct) ?? e.FechaAtencion;
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
         // Auditoria antes de SaveChanges: audit.Write solo agrega la entrada al
@@ -628,6 +633,9 @@ public sealed class HistoriaClinicaService(
         // Enriquecer los valores copiados con defaults ausentes por si el schema
         // evoluciono despues de que se guardo la HC origen. Idempotente.
         nueva.ValoresJson = await EnriquecerConDefaultsAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct);
+        // FechaAtencion se recalcula sobre el JSON copiado — hereda la del origen
+        // si el schema no cambio, o queda null si el campo marcado ya no existe.
+        nueva.FechaAtencion = await CalcularFechaAtencionAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct);
 
         audit.Write(actor, "historia-clinica.copiar", nameof(HistoriaClinica), nueva.Id,
             previousValue: null,
@@ -759,5 +767,29 @@ public sealed class HistoriaClinicaService(
         if (!cambio) { return jsonSaneado; }
 
         return JsonSerializer.Serialize(valores);
+    }
+
+    /// <summary>
+    /// Carga el schema del FormDefinition, parsea el JSON de valores y devuelve
+    /// la fecha calculada por <see cref="FechaAtencionHelper"/>. null si no hay
+    /// campos marcados con IsFechaAtencion o ninguno tiene valor.
+    /// </summary>
+    private async Task<DateTimeOffset?> CalcularFechaAtencionAsync(Guid formDefinitionId, string? valoresJson, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(valoresJson)) { return null; }
+        var schemaJson = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Id == formDefinitionId)
+            .Select(f => f.SchemaJson)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(schemaJson)) { return null; }
+        Dictionary<string, string?>? valores;
+        try
+        {
+            valores = JsonSerializer.Deserialize<Dictionary<string, string?>>(valoresJson);
+        }
+        catch { return null; }
+        if (valores is null) { return null; }
+        var schema = FormSchema.FromJson(schemaJson);
+        return FechaAtencionHelper.Calcular(schema, valores);
     }
 }

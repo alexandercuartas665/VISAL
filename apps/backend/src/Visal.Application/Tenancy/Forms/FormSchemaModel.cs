@@ -210,6 +210,16 @@ public sealed class FormNode
     [JsonPropertyName("hideIfEmpty")]
     public bool HideIfEmpty { get; set; }
 
+    /// <summary>
+    /// Si true, el valor de este campo se toma como "fecha real de la atencion"
+    /// y se copia al campo <c>HistoriaClinica.FechaAtencion</c> al guardar y al
+    /// cerrar. Solo aplica a campos fieldType = "date" | "datetime". Se puede
+    /// marcar en varios campos del mismo formulario; el helper toma la mayor
+    /// fecha entre los campos marcados que tengan valor. Default false.
+    /// </summary>
+    [JsonPropertyName("isFechaAtencion")]
+    public bool IsFechaAtencion { get; set; }
+
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";

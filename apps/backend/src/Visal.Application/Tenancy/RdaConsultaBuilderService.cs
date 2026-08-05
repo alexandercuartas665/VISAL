@@ -108,10 +108,23 @@ public sealed class RdaConsultaBuilderService(
         {
             advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo (sera rechazado por ReTHUS).");
         }
-        // Custodian.reference — ronda 13 (2026-08-04): NIT completo con DV
-        // pegado + REPS, sin NumeroSede. Combina interpretacion Correo03
-        // ("#NIT-Sede") con NIT en formato colombiano oficial (10 digitos
-        // incluyendo DV, sin guion).
+        // Custodian.reference — formato FINAL adoptado ronda 13 (2026-08-04):
+        // NIT completo con DV pegado + REPS, patron `#NIT-Sede` del Correo03
+        // combinado con NIT colombiano oficial (10 digitos incluyendo DV).
+        //
+        // Historial completo de hipotesis probadas contra MinSalud sandbox
+        // (todas rechazadas — ver bitacora Obsidian Capa 5):
+        //   R3  #7300103531              (REPS puro, patron manual v1.4)   -> err-000
+        //   R5  #900123456-7-7300103531  (NIT con guion DV + REPS)         -> err-000
+        //   R9  #900123456-7300103531    (NIT sin DV + REPS)               -> err-000
+        //   R10 #900123456-7300103531-00 (NIT sin DV + REPS + NumeroSede)  -> err-000
+        //   R11 #9001234567-7300103531-00(NIT+DV pegado + REPS + sede)     -> err-000
+        //   R13 #9001234567-7300103531   (NIT+DV pegado + REPS)  [ACTUAL]  -> err-000
+        //   B1  #7300103531-01           (REPS + sufijo sede fisica)       -> err-000
+        //   B2  urn:uuid:{guid} externo  (Org fuera de contained)          -> HTTP 500
+        // Todas las variantes con hash-ref dan err-000 identico; la variante
+        // externa (urn:uuid) rompe el parser de MinSalud. Conclusion: el formato
+        // NO es la causa. Blocker externo — ver task #600 (portal MinSalud).
         var nitBase = NitConDvPegado(tenantE.TaxId) ?? "SINNIT";
         var orgId = $"{nitBase}-{codigoRep}";
         // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
@@ -151,12 +164,6 @@ public sealed class RdaConsultaBuilderService(
             condition?.Id, allergyId, payerOrgId, occupationId, riskId, meds.Select(m => m.Id!).ToList(),
             services.Select(s => s.Id!).ToList(), disabilityObs.Select(o => o.Id!).ToList());
 
-        // EXPERIMENTO A (2026-08-03): mover Organizations a Composition.contained[]
-        // en vez de dejarlas como entry top-level. El manual v1.4 §5.3 (c) exige el
-        // patron #NumeroDeHabilitacion en references que FHIR resuelve contra
-        // contained. Hasta ahora las teniamos en entry top-level y MinSalud aun asi
-        // devolvia err-000 "no corresponde con el usuario del token"; probamos si
-        // moverlas a contained cambia la respuesta.
         composition.Contained.Add(organization);
         composition.Contained.Add(payerOrg);
 
@@ -174,7 +181,6 @@ public sealed class RdaConsultaBuilderService(
         // MinSalud valida estructura y cardinalidades, no el meta.profile especifico).
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = composition });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = patient });
-        // Organizations van dentro de composition.contained (ver arriba, Experimento A).
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = practitioner });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = location });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = encounter });
@@ -870,7 +876,11 @@ public sealed class RdaConsultaBuilderService(
 
     // ===================== Helpers =====================
 
-    private static ResourceReference ContainedRef(string id) => new($"#{id}");
+    // INT-B2 — si el id ya viene como urn:uuid o URL absoluta, es una
+    // referencia externa (a bundle.entry.fullUrl) y NO lleva prefijo "#".
+    // Los ids cortos siguen resolviendo contra composition.contained[].
+    private static ResourceReference ContainedRef(string id) =>
+        new ResourceReference($"#{id}");
 
     /// <summary>
     /// Devuelve solo el NIT SIN digito de verificacion. Si el input trae guion

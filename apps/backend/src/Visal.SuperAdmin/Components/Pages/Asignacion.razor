@@ -93,6 +93,10 @@
                         }
                         else
                         {
+                            <label class="asg-mod-radio">
+                                <input type="radio" name="modSvc" checked="@(_moduloSel == ModuloTodos)" @onchange="() => OnModuloChanged(ModuloTodos)" />
+                                <span>TODOS</span>
+                            </label>
                             @foreach (var m in _modulos)
                             {
                                 <label class="asg-mod-radio">
@@ -111,7 +115,7 @@
             <div class="ase-form">
                 <div class="ase-f ase-f-full">
                     <label>Paquete</label>
-                    <select class="form-select form-select-sm" @bind="_paqueteSel" @bind:after="StateHasChanged">
+                    <select class="form-select form-select-sm" @bind="_paqueteSel" @bind:after="OnPaqueteChanged">
                         <option value="">(todos)</option>
                         @foreach (var p in _paquetesDisponibles)
                         {
@@ -142,7 +146,7 @@
                 {
                     <div class="ase-empty">
                         @(_contratoIdSel == "" ? "Selecciona un contrato primero." :
-                          _moduloSel == "" ? "Selecciona un modulo arriba (EQUIPOS, INSUMOS, ...)." :
+                          _moduloSel == "" ? "Selecciona un modulo arriba (TODOS, EQUIPOS, INSUMOS, ...)." :
                           "Sin servicios para esta combinacion.")
                     </div>
                 }
@@ -152,14 +156,9 @@
                         <thead>
                             <tr>
                                 <th style="width:90px">Accion</th>
-                                <th>CodServicio</th>
-                                <th>CodInterno</th>
-                                <th>Historia</th>
-                                <th>Paquete</th>
+                                <th>Codigos</th>
                                 <th>Descripcion</th>
-                                <th>Clasificacion</th>
-                                <th>Modulo</th>
-                                <th>Modalidad</th>
+                                <th>Clase</th>
                                 <th class="text-end">Tarifa</th>
                             </tr>
                         </thead>
@@ -168,14 +167,40 @@
                             {
                                 <tr class="@(_servicioSel?.Id == s.Id ? "asg-row-sel" : "")">
                                     <td><button class="btn btn-primary btn-sm" @onclick="() => PreseleccionarServicio(s)">Seleccionar</button></td>
-                                    <td class="mono">@s.Codigo</td>
-                                    <td class="mono">@s.CodigoInterno</td>
-                                    <td class="mono">@s.Historia</td>
-                                    <td class="mono">@s.PaqueteCodigo</td>
+                                    <td>
+                                        <div class="asg-stack">
+                                            <div class="asg-stack-row"><span class="asg-stack-lbl">Cod</span><span class="mono">@s.Codigo</span></div>
+                                            @if (!string.IsNullOrWhiteSpace(s.CodigoInterno) && s.CodigoInterno != s.Codigo)
+                                            {
+                                                <div class="asg-stack-row"><span class="asg-stack-lbl">Int</span><span class="mono">@s.CodigoInterno</span></div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(s.Historia))
+                                            {
+                                                <div class="asg-stack-row"><span class="asg-stack-lbl">HC</span><span class="mono">@s.Historia</span></div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(s.PaqueteCodigo))
+                                            {
+                                                <div class="asg-stack-row"><span class="asg-stack-lbl">Pkg</span><span class="mono">@s.PaqueteCodigo</span></div>
+                                            }
+                                        </div>
+                                    </td>
                                     <td>@s.Descripcion</td>
-                                    <td>@s.Clasificacion</td>
-                                    <td>@s.Modulo</td>
-                                    <td>@s.Modalidad</td>
+                                    <td>
+                                        <div class="asg-stack">
+                                            @if (!string.IsNullOrWhiteSpace(s.Clasificacion))
+                                            {
+                                                <div class="asg-stack-row"><span class="asg-stack-lbl">Clas</span><span>@s.Clasificacion</span></div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(s.Modulo))
+                                            {
+                                                <div class="asg-stack-row"><span class="asg-stack-lbl">Mod</span><span>@s.Modulo</span></div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(s.Modalidad))
+                                            {
+                                                <div class="asg-stack-row"><span class="asg-stack-lbl">Modal</span><span>@s.Modalidad</span></div>
+                                            }
+                                        </div>
+                                    </td>
                                     <td class="text-end">@(s.Tarifa is decimal t ? $"$ {t:N0}" : "")</td>
                                 </tr>
                             }
@@ -796,6 +821,9 @@ else
     .asg-row-sel { background: #eff6ff; }
     .asg-row-sel td { border-left: 2px solid #1565c0; }
     .asg-tbl td:first-child, .asg-tbl th:first-child { border-left: none; padding-left: 8px; }
+    .asg-stack { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
+    .asg-stack-row { display: flex; align-items: baseline; gap: 6px; }
+    .asg-stack-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.02em; color: #64748b; min-width: 30px; font-weight: 600; }
     .asg-tar { color: #1565c0; font-weight: 600; }
     .asg-historico, .asg-carrito { max-height: 480px; overflow: auto; }
     .asg-hist, .asg-cart-row { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; background: #fff; }
@@ -893,7 +921,12 @@ else
     private string _paqueteSel = "";
     // Paquetes disponibles en el contrato actual (derivados de los servicios cargados).
     private List<PaqueteDto> _paquetesDisponibles = new();
+    // Sentinel para la opcion "TODOS" del selector de modulo. No colisiona con
+    // un nombre real del catalogo tipos_servicio porque este ultimo es case-sensitive.
+    private const string ModuloTodos = "__TODOS__";
+
     // Lista visible en el grid: filtrada por modulo elegido, por paquete y luego por texto libre.
+    // Cuando _moduloSel == ModuloTodos, no filtra por modulo (util para paquetes multi-tipo).
     private List<ServicioCatalogoDto> _serviciosVisibles
     {
         get
@@ -901,7 +934,7 @@ else
             if (_servicios.Count == 0 || string.IsNullOrEmpty(_moduloSel)) { return new(); }
             var f = _filtroSvc?.Trim().ToLower() ?? "";
             return _servicios
-                .Where(s => s.Modulo == _moduloSel)
+                .Where(s => _moduloSel == ModuloTodos || s.Modulo == _moduloSel)
                 .Where(s => string.IsNullOrEmpty(_paqueteSel) || s.PaqueteCodigo == _paqueteSel)
                 .Where(s => f.Length == 0
                     || (s.Descripcion ?? "").ToLower().Contains(f)
@@ -1267,6 +1300,20 @@ else
         _ok = null; _error = null;
     }
 
+    // Al elegir un paquete en el select, activamos automaticamente el radio "TODOS"
+    // para que se vean sin filtrar los servicios del paquete (que suelen mezclar
+    // modulos: CONSULTA + ENFERMERIA + TERAPIA + EQUIPOS, etc.). Si el usuario
+    // limpia el paquete no tocamos el radio: queda en TODOS o el que tuviera.
+    private void OnPaqueteChanged()
+    {
+        if (!string.IsNullOrEmpty(_paqueteSel))
+        {
+            _moduloSel = ModuloTodos;
+            _servicioSel = null;
+        }
+        StateHasChanged();
+    }
+
     // Equivalente al gvServicios.RowCommand "Select" del legacy: marca el servicio elegido y muestra mensaje.
     private void PreseleccionarServicio(ServicioCatalogoDto s)
     {
@@ -1524,7 +1571,7 @@ else
                 _contratoSel.CodigoContrato,
                 _servicioSel.Id.ToString(),
                 _servicioSel.Descripcion,
-                _servicioSel.Modulo ?? _moduloSel,
+                _servicioSel.Modulo ?? (_moduloSel == ModuloTodos ? "" : _moduloSel),
                 _servicioSel.Modulo,
                 _cantidad,
                 string.IsNullOrWhiteSpace(_autorizacion) ? null : _autorizacion,

@@ -339,7 +339,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 sedeNombre,
                 sedeId,
                 sesionNumero,
-                srvExt.GetValueOrDefault(r.Hc.Id, 0)
+                srvExt.GetValueOrDefault(r.Hc.Id, 0),
+                r.Hc.FechaAtencion
             );
         }).ToList();
     }

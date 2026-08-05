@@ -59,7 +59,13 @@ public sealed record OrdenClinicaItemDto(
     /// separa de <see cref="ServiciosCount"/> (esa es la tabla propia de
     /// servicios). Usado por <c>BuildAllDocsQuery</c> para decidir si incluir
     /// el bloque SRVEXT en el paquete de impresion.</summary>
-    int SrvExtCount = 0);
+    int SrvExtCount = 0,
+    /// <summary>FAT — Fecha real de la atencion clinica, calculada por
+    /// <c>FechaAtencionHelper</c> a partir de los campos del formulario marcados
+    /// con <c>IsFechaAtencion=true</c>. Null cuando el formato no marca ningun
+    /// campo o ninguno tiene valor. En /ordenes el usuario puede elegir ordenar
+    /// por esta fecha o por FechaCierre.</summary>
+    DateTimeOffset? FechaAtencion = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

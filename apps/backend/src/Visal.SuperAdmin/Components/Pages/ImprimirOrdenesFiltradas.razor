@@ -247,6 +247,13 @@ else
             {
                 todas = todas.Where(x => string.Equals(x.Estado, "Abierta", StringComparison.OrdinalIgnoreCase)).ToList();
             }
+            // FAT-4 — orden que respeta la eleccion del usuario en /ordenes.
+            // "atencion" = FechaAtencion (fallback cierre/apertura), "cierre" = FechaCierre (fallback apertura).
+            // Descendente para que las HCs mas recientes salgan primero — igual que Ordenes.razor.
+            var ordenarPor = Get(q, "ordenarPor") ?? "atencion";
+            todas = ordenarPor == "atencion"
+                ? todas.OrderByDescending(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura).ToList()
+                : todas.OrderByDescending(x => x.FechaCierre ?? x.FechaApertura).ToList();
 
             _totalEncontrado = todas.Count;
             _pacientesUnicos = todas.Select(x => x.PacienteId).Distinct().Count();

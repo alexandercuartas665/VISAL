@@ -827,7 +827,9 @@ else
                         <div class="pack-hdr-tag">@hd.Tagline</div>
                     </div>
                 </div>
-                <div class="pack-hdr-nohist">
+                @* Ver DocumentoImprimible.razor — HC N° / Apertura solo pantalla,
+                   se oculta al imprimir con d-print-none. *@
+                <div class="pack-hdr-nohist d-print-none">
                     @tipoCorto N°: <b>@ordenNum</b><br />
                     @fechaLinea<br />
                     HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>

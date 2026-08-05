@@ -536,6 +536,20 @@ else
                 }
             </select>
         </div>
+        @* FAT-4 — Selector de fecha usada para orden y para impresion en grupo.
+           - "Fecha de atencion" ordena por HistoriaClinica.FechaAtencion (fallback
+             a FechaCierre si la HC no tiene fecha configurada en el schema).
+           - "Fecha de cierre" mantiene el comportamiento historico.
+           Ademas la columna "Fecha" muestra el criterio elegido (siempre uno solo,
+           para no llenar la tabla con dos columnas repetidas). *@
+        <div class="oc-f oc-f-wide">
+            <label>Ordenar por</label>
+            <select class="form-select form-select-sm" @bind="_ordenarPor"
+                    title="Fecha usada para ordenar la tabla y el paquete de impresion en grupo. Si la HC no tiene Fecha de atencion configurada, usa la de cierre.">
+                <option value="atencion">Fecha de atencion</option>
+                <option value="cierre">Fecha de cierre</option>
+            </select>
+        </div>
         <div class="oc-f oc-f-acts">
             <button class="btn btn-primary btn-sm" @onclick="Buscar" disabled="@_buscando">
                 @(_buscando ? "Buscando..." : "🔍 Buscar")
@@ -669,8 +683,18 @@ else
                         <th style="width:180px" title="EPS bajo la cual se ejecuto la atencion (contrato principal del paciente)">EPS</th>
                         <th style="width:160px" title="Sede (sucursal) donde se atiende al paciente">Agencia</th>
                         <th class="text-center" style="width:110px">Estado</th>
-                        <th class="text-center" style="width:110px" title="Fecha de cierre de la HC">Fecha cierre</th>
-                        <th class="text-center" style="width:80px" title="Hora local del cierre">Hora cierre</th>
+                        @* FAT-4 — Cabecera cambia segun el criterio Ordenar por.
+                           Cuando el criterio es "atencion" muestra la fecha capturada por el
+                           profesional en el schema (mayor entre campos con IsFechaAtencion);
+                           cuando es "cierre" muestra la fecha del cierre definitivo. *@
+                        <th class="text-center" style="width:110px"
+                            title="@(_ordenarPor == "atencion" ? "Fecha real de la atencion (schema del formulario). Fallback a fecha de cierre si no esta configurada." : "Fecha de cierre de la HC")">
+                            @(_ordenarPor == "atencion" ? "Fecha atencion" : "Fecha cierre")
+                        </th>
+                        <th class="text-center" style="width:80px"
+                            title="@(_ordenarPor == "atencion" ? "Hora local de la atencion" : "Hora local del cierre")">
+                            Hora
+                        </th>
                         <th class="text-center" style="width:320px">Documentos</th>
                         <th class="text-center" style="width:130px" title="Estado del ciclo de revision (Capa 08)">Revision</th>
                         <th class="text-center" style="width:130px" title="Ultimo veredicto del agente IA">Pre-revision agente</th>
@@ -808,11 +832,19 @@ else
                                     <span class="oc-est oc-est-inactiva" title="@(r.Estado)">@r.Estado</span>
                                 }
                             </td>
+                            @{
+                                // FAT-4 — mostramos la fecha del criterio elegido.
+                                // Cuando es "atencion" y no hay FechaAtencion, caemos a cierre
+                                // (el header hace la misma promesa via su titulo/tooltip).
+                                var fechaCol = _ordenarPor == "atencion"
+                                    ? (r.FechaAtencion ?? r.FechaCierre)
+                                    : r.FechaCierre;
+                            }
                             <td class="text-center">
-                                @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
+                                @(fechaCol?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
                             </td>
                             <td class="text-center">
-                                @(r.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "-")
+                                @(fechaCol?.ToLocalTime().ToString("HH:mm") ?? "-")
                             </td>
                             <td class="text-center">
                                 <div class="oc-pills">
@@ -1485,6 +1517,12 @@ else
     /// Cuando el usuario necesite un universo mayor, combina con los filtros
     /// que si viajan al servidor (fechas / EPS / sede / formato / estado / paciente).</summary>
     private string _filtroRevision = "";
+
+    /// <summary>FAT-4 — Criterio de orden y de columna Fecha en la tabla.
+    /// "atencion" = OrderByDescending(FechaAtencion ?? FechaCierre ?? FechaApertura).
+    /// "cierre" (default historico) = OrderByDescending(FechaCierre ?? FechaApertura).
+    /// El mismo criterio se propaga al listado de impresion en grupo (ImprimirHcsPaciente).</summary>
+    private string _ordenarPor = "atencion";
     private List<string> _especialistas = new();
     private List<AseguradoraOpcionDto> _aseguradoras = new();
     private string _aseguradoraFiltro = "";
@@ -1649,6 +1687,8 @@ else
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
+        // FAT-4 — el orden del listado impreso respeta el criterio elegido en el toolbar.
+        qs.Add($"ordenarPor={Uri.EscapeDataString(_ordenarPor)}");
         return qs.Count == 0
             ? "/imprimir-ordenes-filtradas"
             : $"/imprimir-ordenes-filtradas?{string.Join("&", qs)}";
@@ -2344,31 +2384,42 @@ else
     /// nunca corrio (campo null).</summary>
     private IEnumerable<OrdenClinicaItemDto> FilasFiltradas()
     {
-        if (string.IsNullOrEmpty(_filtroRevision)) { return _rows; }
-        if (_filtroRevision.StartsWith("rev:", StringComparison.Ordinal))
+        IEnumerable<OrdenClinicaItemDto> baseSet = _rows;
+        if (!string.IsNullOrEmpty(_filtroRevision))
         {
-            var estadoStr = _filtroRevision.Substring(4);
-            if (Enum.TryParse<RevisionEstadoAgregado>(estadoStr, out var estado))
+            if (_filtroRevision.StartsWith("rev:", StringComparison.Ordinal))
             {
-                return _rows.Where(r => r.RevisionEstado == estado);
+                var estadoStr = _filtroRevision.Substring(4);
+                if (Enum.TryParse<RevisionEstadoAgregado>(estadoStr, out var estado))
+                {
+                    baseSet = _rows.Where(r => r.RevisionEstado == estado);
+                }
             }
-            return _rows;
+            else if (_filtroRevision.StartsWith("ia:", StringComparison.Ordinal))
+            {
+                var verd = _filtroRevision.Substring(3);
+                if (string.Equals(verd, "SinCorrer", StringComparison.Ordinal))
+                {
+                    baseSet = _rows.Where(r => r.RevisionAgente is null);
+                }
+                else if (Enum.TryParse<RevisionResultado>(verd, out var v))
+                {
+                    baseSet = _rows.Where(r => r.RevisionAgente == v);
+                }
+            }
         }
-        if (_filtroRevision.StartsWith("ia:", StringComparison.Ordinal))
-        {
-            var verd = _filtroRevision.Substring(3);
-            if (string.Equals(verd, "SinCorrer", StringComparison.Ordinal))
-            {
-                return _rows.Where(r => r.RevisionAgente is null);
-            }
-            if (Enum.TryParse<RevisionResultado>(verd, out var v))
-            {
-                return _rows.Where(r => r.RevisionAgente == v);
-            }
-            return _rows;
-        }
-        return _rows;
+        // FAT-4 — re-ordenamos en cliente segun el criterio elegido en el toolbar.
+        // FechaOrden(r) hace el fallback: atencion -> cierre -> apertura.
+        return baseSet.OrderByDescending(r => FechaOrden(r));
     }
+
+    /// <summary>FAT-4 — Fecha efectiva para ordenar/mostrar segun el criterio del toolbar.
+    /// Fallback: si el criterio es "atencion" pero la HC no tiene FechaAtencion, cae a
+    /// FechaCierre y luego a FechaApertura (para que la fila no desaparezca al arriba/abajo).</summary>
+    private DateTimeOffset FechaOrden(OrdenClinicaItemDto r) =>
+        _ordenarPor == "atencion"
+            ? (r.FechaAtencion ?? r.FechaCierre ?? r.FechaApertura)
+            : (r.FechaCierre ?? r.FechaApertura);
 
     /// <summary>Construye la query de docs incluyendo TODOS los tipos con count > 0. Uso por Consultar.</summary>
     private static string BuildAllDocsQuery(OrdenClinicaItemDto r)

@@ -42,16 +42,32 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         _policy = policy;
     }
 
-    public async Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, CancellationToken ct = default)
+    public async Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, Guid? agenteId = null, CancellationToken ct = default)
     {
         var revision = await _db.RevisionesClinica.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == revisionClinicaId, ct);
         if (revision is null) { return Err("El ciclo de revision no existe."); }
 
-        var agent = await _db.AiAgents.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Name == IPreRevisionIaService.AgenteNombre, ct);
-        if (agent is null) { return Err($"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
-        if (!agent.IsActive) { return Err($"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
+        // Resolucion del agente:
+        //   - Si viene agenteId (usuario eligio en el selector) buscamos por Id.
+        //     El global query filter por tenant garantiza que no se pueda usar
+        //     un agente de otro tenant aunque el Id se conozca.
+        //   - Sin agenteId (triggers automaticos, botones legacy) caemos al
+        //     canonico REVISOR CLINICO IA por nombre.
+        AiAgent? agent;
+        if (agenteId is Guid aid)
+        {
+            agent = await _db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid, ct);
+            if (agent is null) { return Err("El agente seleccionado no existe o no pertenece a este tenant."); }
+            if (!agent.IsActive) { return Err($"El agente '{agent.Name}' esta apagado."); }
+        }
+        else
+        {
+            agent = await _db.AiAgents.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Name == IPreRevisionIaService.AgenteNombre, ct);
+            if (agent is null) { return Err($"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
+            if (!agent.IsActive) { return Err($"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
+        }
 
         var providerCfg = await _db.AiProviderConfigs.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Provider == agent.Provider, ct);

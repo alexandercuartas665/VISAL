@@ -1,4 +1,5 @@
 @page "/imprimir-ordenes-filtradas"
+@layout Visal.SuperAdmin.Components.Layout.EmptyLayout
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
@@ -182,9 +183,13 @@ else
 }
 
 @code {
-    // Tope duro para no colgar el navegador. 100 HCs con schema real ya son
-    // ~15-30MB de DOM. Si el usuario necesita mas, que refine filtros.
-    private const int MaxHcs = 100;
+    // REV-18 — Tope duro para no colgar el navegador. Subido a 2000: el usuario
+    // reporto que 100 dejaba fuera muchas HCs del filtro (170+ en pruebas). Con
+    // 2000 se cubren la mayoria de casos operativos (auditoria mensual completa
+    // por sede/formato). Con schema real cada HC pesa ~150-300KB de DOM asi
+    // que 2000 = ~300-600MB — pesado pero manejable en un equipo moderno con
+    // la advertencia visible. Si el usuario necesita mas, que refine filtros.
+    private const int MaxHcs = 2000;
 
     private bool _loading = true;
     private List<HcRender> _hcs = new();

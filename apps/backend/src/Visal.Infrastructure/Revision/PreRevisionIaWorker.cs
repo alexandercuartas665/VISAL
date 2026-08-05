@@ -91,7 +91,10 @@ public sealed class PreRevisionIaWorker : BackgroundService
         try
         {
             var svc = scope.ServiceProvider.GetRequiredService<IPreRevisionIaService>();
-            await svc.EjecutarAsync(job.RevisionClinicaId, ct);
+            // agenteId=null => usa el agente canonico REVISOR CLINICO IA
+            // (el worker corre triggers automaticos; el selector de agente
+            // solo aplica a invocaciones manuales desde /ordenes).
+            await svc.EjecutarAsync(job.RevisionClinicaId, agenteId: null, ct);
         }
         catch (Exception ex)
         {

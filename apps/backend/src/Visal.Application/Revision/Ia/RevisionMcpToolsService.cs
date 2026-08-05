@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
+using Visal.Domain.Enums;
 
 namespace Visal.Application.Revision.Ia;
 
@@ -70,6 +71,7 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
                 RevisionMcpToolNames.ListAsignacionesRelacionadas => await ListAsignacionesRelacionadasAsync(
                     historiaClinicaId, ventanaAsignacionesDias ?? 30, ct),
                 RevisionMcpToolNames.GetFormDefinition => await GetFormDefinitionAsync(historiaClinicaId, ct),
+                RevisionMcpToolNames.ListDocumentosHc => await ListDocumentosHcAsync(historiaClinicaId, ct),
                 _ => null,
             };
             if (payload is null)
@@ -173,9 +175,29 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones })
             .ToListAsync(ct);
+
+        // REV-9 — Ordenes EXTERNAS (a otra IPS): la misma tabla
+        // HistoriaClinicaOrdenesExternas discrimina por Tipo. Cargamos las 4
+        // en una sola query y particionamos en memoria para no repetir I/O.
+        // Sin esto, el agente REVISOR CLINICO IA no ve nada de lo que se pide
+        // por fuera de la propia IPS.
+        var externas = await _db.HistoriaClinicaOrdenesExternas.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == hcId)
+            .Select(x => new { x.Tipo, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones })
+            .ToListAsync(ct);
+        var rxExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.RxImagenologia)
+            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
+        var laboratoriosExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.Laboratorio)
+            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
+        var serviciosExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.ServicioGeneral)
+            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
+        var insumosExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.Insumo)
+            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
+
         var payload = new
         {
             medicamentos, servicios, incapacidades, certificaciones, remisiones, insumos,
+            rxExternos, laboratoriosExternos, serviciosExternos, insumosExternos,
         };
         return JsonSerializer.Serialize(payload, JsonOpts);
     }
@@ -250,6 +272,32 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
             })
             .ToListAsync(ct);
         return JsonSerializer.Serialize(asigs, JsonOpts);
+    }
+
+    /// <summary>REV-13 — Metadata de los archivos subidos al tab "Documentos
+    /// externos" de la HC (entidad <see cref="NotaMedicaDocumento"/> con
+    /// <c>HistoriaClinicaId</c> seteado). Se devuelve solo la metadata (nombre,
+    /// tipologia/categoria, tipo MIME, tamano, url servible) — nunca el binario.
+    /// Sin esto el agente no ve resultados de laboratorio adjuntos, consentimientos
+    /// escaneados, fotos de la valoracion, etc.</summary>
+    private async Task<string> ListDocumentosHcAsync(Guid hcId, CancellationToken ct)
+    {
+        var docs = await _db.NotaMedicaDocumentos.AsNoTracking()
+            .Where(d => d.HistoriaClinicaId == hcId)
+            .OrderByDescending(d => d.CreatedAt)
+            .Select(d => new
+            {
+                d.Id,
+                d.NombreOriginal,
+                d.Categoria,
+                d.TipoMime,
+                d.Tamano,
+                d.RutaArchivo,
+                d.Anotaciones,
+                d.CreatedAt,
+            })
+            .ToListAsync(ct);
+        return JsonSerializer.Serialize(docs, JsonOpts);
     }
 
     private async Task<string?> GetFormDefinitionAsync(Guid hcId, CancellationToken ct)

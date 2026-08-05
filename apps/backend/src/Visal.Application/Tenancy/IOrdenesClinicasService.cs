@@ -53,7 +53,13 @@ public sealed record OrdenClinicaItemDto(
     /// resuelve via el pivote AsignacionTurnoSesionHc -> AsignacionTurnoSesion
     /// -> AsignacionTurno y la posicion del turno en su asignacion. Null
     /// cuando la HC no vino de /atencion o quedo huerfana.</summary>
-    int? SesionNumero = null);
+    int? SesionNumero = null,
+    /// <summary>REV-12 — Cantidad de items en la tabla externa
+    /// <c>HistoriaClinicaOrdenesExternas</c> con Tipo=ServicioGeneral. Se
+    /// separa de <see cref="ServiciosCount"/> (esa es la tabla propia de
+    /// servicios). Usado por <c>BuildAllDocsQuery</c> para decidir si incluir
+    /// el bloque SRVEXT en el paquete de impresion.</summary>
+    int SrvExtCount = 0);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

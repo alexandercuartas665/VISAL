@@ -92,7 +92,11 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         var rows = await joined
             .OrderBy(x => x.p.NombreCompleto)
             .ThenByDescending(x => x.h.FechaCierre ?? x.h.FechaApertura)
-            .Take(500)
+            // REV-18 — Subido de 500 a 5000. El usuario necesita listar y
+            // procesar (imprimir/revisar-masivamente) universos amplios de un
+            // filtro (mes completo por sede/formato). El aviso "mostrando
+            // primeros N. Refina filtros" ya prepara al usuario si topa.
+            .Take(5000)
             .Select(x => new
             {
                 Hc = x.h,
@@ -169,6 +173,9 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
         var insExt = extCounts
             .Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.Insumo)
+            .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
+        var srvExt = extCounts
+            .Where(x => x.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral)
             .ToDictionary(x => x.HistoriaClinicaId, x => x.N);
         var evo = docCounts
             .Where(x => x.Tipo == "EVOLUCION")
@@ -331,7 +338,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 aseId,
                 sedeNombre,
                 sedeId,
-                sesionNumero
+                sesionNumero,
+                srvExt.GetValueOrDefault(r.Hc.Id, 0)
             );
         }).ToList();
     }

@@ -1,4 +1,5 @@
 @page "/imprimir-paquete/{HcId:guid}"
+@layout Visal.SuperAdmin.Components.Layout.EmptyLayout
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
@@ -335,6 +336,41 @@ else
             </div>
         }
 
+        @* ============ SERVICIOS EXTERNOS (catalogo externo) ============ *@
+        @if (_incluirSrvExt && _srvExt.Count > 0)
+        {
+            <div class="pack-doc">
+                @RenderHeader(HdrTenant("Orden de Servicios Externos"), "Orden de Servicios Externos", "SRVEXT",
+                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRVX",
+                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                <div class="pack-band">Detalle de la orden</div>
+                <table class="pack-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:120px">Codigo</th>
+                            <th>Descripcion</th>
+                            <th style="width:80px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in _srvExt)
+                        {
+                            <tr>
+                                <td class="num">@s.Orden</td>
+                                <td class="mono">@(s.Codigo ?? "-")</td>
+                                <td><b>@s.Descripcion</b></td>
+                                <td class="num">@(string.IsNullOrWhiteSpace(s.Cantidad) ? "-" : s.Cantidad)</td>
+                                <td>@(s.Observaciones ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
+            </div>
+        }
+
         @* ============ INSUMOS EXTERNOS (catalogo externo) ============ *@
         @if (_incluirInsExt && _insExt.Count > 0)
         {
@@ -507,7 +543,7 @@ else
     // Que docs incluir, calculados desde ?docs=
     private List<string> _docs = new();
     private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc, _incluirEvo, _incluirCon;
-    private bool _incluirIns, _incluirRxExt, _incluirLabExt, _incluirInsExt;
+    private bool _incluirIns, _incluirRxExt, _incluirLabExt, _incluirInsExt, _incluirSrvExt;
 
     /// <summary>Ids de secciones opcionales que el usuario decidio INCLUIR en la
     /// impresion (?secs=id1,id2). Default vacio: no incluir ninguna opcional.
@@ -539,7 +575,7 @@ else
     private List<CertificacionItemDto> _cert = new();
     private List<RemisionItemDto> _rem = new();
     private List<InsumoItemDto> _insumos = new();
-    private List<OrdenExternaItemDto> _rxExt = new(), _labExt = new(), _insExt = new();
+    private List<OrdenExternaItemDto> _rxExt = new(), _labExt = new(), _insExt = new(), _srvExt = new();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -562,6 +598,7 @@ else
         _incluirRxExt  = _docs.Contains("RXEXT");
         _incluirLabExt = _docs.Contains("LABEXT");
         _incluirInsExt = _docs.Contains("INSEXT");
+        _incluirSrvExt = _docs.Contains("SRVEXT");
 
         // Secciones opcionales incluidas por el usuario (?secs=). Vacio o ausente
         // = no incluir ninguna. Case-insensitive por si el consumidor URL-encode
@@ -641,6 +678,10 @@ else
         if (_incluirInsExt)
         {
             _insExt = (await OrdExtSvc.ListarPorHistoriaAsync(HcId, Visal.Domain.Enums.TipoCatalogoServicio.Insumo)).ToList();
+        }
+        if (_incluirSrvExt)
+        {
+            _srvExt = (await OrdExtSvc.ListarPorHistoriaAsync(HcId, Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral)).ToList();
         }
         if (_incluirEsc)
         {

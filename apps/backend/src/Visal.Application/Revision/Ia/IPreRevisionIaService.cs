@@ -32,9 +32,17 @@ public sealed record PreRevisionIaResult(
 /// </summary>
 public interface IPreRevisionIaService
 {
-    /// <summary>Nombre canonico del agente que ejecuta la pre-revision.</summary>
+    /// <summary>Nombre canonico del agente que ejecuta la pre-revision cuando
+    /// el llamador no elige uno especifico. Fallback usado por triggers
+    /// automaticos (auto-revision al cerrar HC) y por el boton legacy del Kanban.</summary>
     public const string AgenteNombre = "REVISOR CLINICO IA";
 
-    /// <summary>Ejecuta la pre-revision para el ciclo indicado.</summary>
-    Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, CancellationToken ct = default);
+    /// <summary>
+    /// Ejecuta la pre-revision para el ciclo indicado.
+    /// <paramref name="agenteId"/> permite forzar un agente distinto al canonico
+    /// (por ejemplo, cuando el usuario elige otro desde el selector de /ordenes).
+    /// Si es null, se resuelve por <see cref="AgenteNombre"/> — comportamiento
+    /// historico usado por triggers automaticos.
+    /// </summary>
+    Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, Guid? agenteId = null, CancellationToken ct = default);
 }

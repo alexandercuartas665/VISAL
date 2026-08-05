@@ -10,6 +10,7 @@
 @inject IRevisionKanbanService KanbanSvc
 @inject Visal.Application.Revision.Ia.IPreRevisionIaService PreIaSvc
 @inject IRevisionDashboardService DashboardSvc
+@inject IAiAgentService AgentSvc
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthProvider
@@ -212,7 +213,7 @@
 else if (_tabActivo == "archivo")
 {
     <div class="ase-card">
-        <div class="oc-filtros" style="grid-template-columns:1.5fr 1fr 1fr 1fr auto;">
+        <div class="oc-filtros">
             <div class="oc-f oc-f-wide">
                 <label>Paciente</label>
                 <input class="form-control form-control-sm"
@@ -490,6 +491,51 @@ else
                 <option value="Abierta">Solo Abiertas</option>
             </select>
         </div>
+        @* REV-14 — Filtro combinado del ciclo de revision + veredicto del agente IA.
+           Se aplica en cliente sobre _rows: sencillo y suficiente para el tope de 500
+           HCs que ya trae el servidor. Cuando el usuario quiera cubrir mas alla,
+           puede combinar con los filtros que si van al backend (paciente / fecha /
+           especialista / EPS / sede / formato / estado). *@
+        <div class="oc-f oc-f-wide">
+            <label>Revision</label>
+            <select class="form-select form-select-sm" @bind="_filtroRevision" title="Filtra por estado del ciclo de revision o por veredicto del agente IA">
+                <option value="">(Todas)</option>
+                <optgroup label="Estado del ciclo">
+                    <option value="rev:SinRevisar">Sin revisar</option>
+                    <option value="rev:PreRevision">Pre-revision</option>
+                    <option value="rev:EnRevision">En revision (humano)</option>
+                    <option value="rev:Aprobada">Aprobada</option>
+                    <option value="rev:Rechazada">Rechazada</option>
+                </optgroup>
+                <optgroup label="Veredicto del agente IA">
+                    <option value="ia:Aprobado">IA sugiere aprobar</option>
+                    <option value="ia:Rechazado">IA sugiere rechazar</option>
+                    <option value="ia:Neutral">IA neutral</option>
+                    <option value="ia:SinCorrer">IA sin correr</option>
+                </optgroup>
+            </select>
+        </div>
+        @* Selector de agente IA para el boton "Revision por agente" que aparece
+           en la columna de acciones (sticky) de cada fila cerrada. La primera
+           opcion "(Default)" delega al agente canonico REVISOR CLINICO IA —
+           util cuando el tenant no tiene otros agentes configurados. *@
+        <div class="oc-f oc-f-wide">
+            <label>Agente revisor</label>
+            <select class="form-select form-select-sm" @bind="_agenteRevisorId"
+                    disabled="@(_agentesRevisores.Count == 0)">
+                @if (_agentesRevisores.Count == 0)
+                {
+                    <option value="">(Sin agentes IA configurados)</option>
+                }
+                else
+                {
+                    @foreach (var a in _agentesRevisores)
+                    {
+                        <option value="@a.Id">@a.Name @(string.IsNullOrWhiteSpace(a.Role) ? "" : " - " + a.Role)</option>
+                    }
+                }
+            </select>
+        </div>
         <div class="oc-f oc-f-acts">
             <button class="btn btn-primary btn-sm" @onclick="Buscar" disabled="@_buscando">
                 @(_buscando ? "Buscando..." : "🔍 Buscar")
@@ -522,14 +568,76 @@ else
                    : $"Imprimir las {_rows.Count} HC(s) del listado filtrado (todos los pacientes que aparecen)")">
                 🖨 Imprimir listado
             </a>
+            @* Revisar TODO el listado con el agente IA seleccionado en el toolbar.
+               Solo HCs cerradas del listado actual (se filtran en el handler).
+               Deshabilitado si no hay agente, no hay filas o ya hay una corriendo. *@
+            @{
+                var cerradasEnListado = FilasFiltradas().Count(r => string.Equals(r.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase));
+                var puedeRevisarMasivo = !_procesandoRevisionMasiva
+                    && !_buscando
+                    && cerradasEnListado > 0
+                    && _agenteRevisorId is not null;
+            }
+            <button class="btn btn-outline-info btn-sm"
+                    disabled="@(!puedeRevisarMasivo)"
+                    title="@(cerradasEnListado == 0
+                        ? "No hay HCs cerradas en el listado filtrado"
+                        : _agenteRevisorId is null
+                            ? "Selecciona un agente arriba"
+                            : $"Revisar con el agente las {cerradasEnListado} HC(s) cerradas del listado (consume tokens)")"
+                    @onclick="EjecutarRevisionMasivaAsync">
+                🤖 Revisar con agente (@cerradasEnListado)
+            </button>
         </div>
     </div>
 
+    @* Barra de progreso — visible durante la revision masiva del agente.
+       Muestra HCs procesadas / total, ok, errores, y el paciente en curso. *@
+    @if (_procesandoRevisionMasiva || _revisionMasivaHechas > 0)
+    {
+        var pct = _revisionMasivaTotal == 0 ? 0 : (_revisionMasivaHechas * 100 / _revisionMasivaTotal);
+        <div class="oc-progress-wrap">
+            <div class="oc-progress-txt">
+                @if (_procesandoRevisionMasiva)
+                {
+                    <text>Revisando @_revisionMasivaHechas / @_revisionMasivaTotal (@(pct)%)</text>
+                    @if (!string.IsNullOrWhiteSpace(_revisionMasivaHcActual))
+                    {
+                        <div style="font-weight:400; font-size:11px; color:#3730a3; margin-top:2px;">
+                            Actual: @_revisionMasivaHcActual
+                        </div>
+                    }
+                }
+                else
+                {
+                    <text>Revision masiva finalizada: @_revisionMasivaOk OK / @_revisionMasivaTotal</text>
+                }
+                @if (_revisionMasivaErrores > 0)
+                {
+                    <span class="oc-progress-err">· @_revisionMasivaErrores error(es)</span>
+                }
+            </div>
+            <div class="oc-progress-bar">
+                <div class="oc-progress-fill" style="width: @(pct)%;"></div>
+            </div>
+            @if (_procesandoRevisionMasiva)
+            {
+                <button class="oc-progress-btn" @onclick="CancelarRevisionMasiva">Cancelar</button>
+            }
+            else
+            {
+                <button class="oc-progress-btn" @onclick="() => { _revisionMasivaHechas = 0; _revisionMasivaTotal = 0; }">Cerrar</button>
+            }
+        </div>
+    }
+
     <div class="oc-grid-h">
         Historias clinicas (@_rows.Count)
-        @if (_rows.Count >= 500)
+        @* REV-18 — Tope de listado ampliado a 5000 (antes 500). Alinear el
+           aviso con el nuevo tope del backend en OrdenesClinicasService.BuscarAsync. *@
+        @if (_rows.Count >= 5000)
         {
-            <span class="oc-warn">- mostrando primeros 500. Refina los filtros para ver mas.</span>
+            <span class="oc-warn">- mostrando primeros 5000. Refina los filtros para ver mas.</span>
         }
     </div>
 
@@ -549,6 +657,10 @@ else
             <table class="table table-sm oc-tbl">
                 <thead>
                     <tr>
+                        @* Acciones movida al INICIO y fijada con position:sticky
+                           (via CSS .oc-tbl :first-child). Ancho reducido a 60px
+                           porque ya no lleva botones inline — solo el kebab. *@
+                        <th class="text-center" style="width:60px">Acc.</th>
                         <th style="min-width:220px">Paciente</th>
                         <th style="width:160px">Documento</th>
                         <th>Formato HC</th>
@@ -562,101 +674,30 @@ else
                         <th class="text-center" style="width:320px">Documentos</th>
                         <th class="text-center" style="width:130px" title="Estado del ciclo de revision (Capa 08)">Revision</th>
                         <th class="text-center" style="width:130px" title="Ultimo veredicto del agente IA">Pre-revision agente</th>
-                        <th class="text-end" style="width:280px"></th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var r in _rows)
+                    @foreach (var r in FilasFiltradas())
                     {
                         var cerrada = string.Equals(r.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase);
                         var abierta = string.Equals(r.Estado, "Abierta", StringComparison.OrdinalIgnoreCase);
                         var fechaMostrar = r.FechaCierre ?? r.FechaApertura;
                         <tr class="@(abierta ? "oc-row-abierta" : "")">
-                            <td>
-                                <div class="oc-pname">@r.PacienteNombre</div>
-                                <div class="oc-pmeta">
-                                    @if (cerrada) { <text>HC cerrada el @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</text> }
-                                    else if (abierta) { <text>HC abierta el @(r.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
-                                    else { <text>HC @r.Estado.ToLower() el @(fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
-                                </div>
-                            </td>
-                            <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
-                            <td>@r.FormatoNombre</td>
-                            <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
-                            <td>@(r.EspecialistaNombre ?? "-")</td>
-                            <td>@(r.AseguradoraNombre ?? "-")</td>
-                            <td>@(r.SedeNombre ?? "-")</td>
-                            <td class="text-center">
-                                @if (cerrada)
-                                {
-                                    <span class="oc-est oc-est-cerrada" title="Cerrada definitivamente">&#10004; Cerrada</span>
-                                }
-                                else if (abierta)
-                                {
-                                    <span class="oc-est oc-est-abierta" title="La historia sigue abierta — el profesional aun no la ha cerrado">&#128276; Abierta</span>
-                                }
-                                else
-                                {
-                                    <span class="oc-est oc-est-inactiva" title="@(r.Estado)">@r.Estado</span>
-                                }
-                            </td>
-                            <td class="text-center">
-                                @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
-                            </td>
-                            <td class="text-center">
-                                @(r.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "-")
-                            </td>
-                            <td class="text-center">
-                                <div class="oc-pills">
-                                    <span class="oc-pill" title="Historia clinica">HC</span>
-                                    @if (r.MedicamentosCount > 0)   { <span class="oc-pill oc-pill-med"  title="@r.MedicamentosCount medicamento(s)">MED @r.MedicamentosCount</span> }
-                                    @if (r.ServiciosCount > 0)      { <span class="oc-pill oc-pill-srv"  title="@r.ServiciosCount servicio(s)">SRV @r.ServiciosCount</span> }
-                                    @if (r.InsumosCount > 0)        { <span class="oc-pill oc-pill-ins"  title="@r.InsumosCount insumo(s)">INS @r.InsumosCount</span> }
-                                    @if (r.RemisionesCount > 0)     { <span class="oc-pill oc-pill-rem"  title="@r.RemisionesCount remision(es)">REM @r.RemisionesCount</span> }
-                                    @if (r.IncapacidadesCount > 0)  { <span class="oc-pill oc-pill-inc"  title="@r.IncapacidadesCount incapacidad(es)">INC @r.IncapacidadesCount</span> }
-                                    @if (r.CertificacionesCount > 0){ <span class="oc-pill oc-pill-cert" title="@r.CertificacionesCount certificacion(es)">CRT @r.CertificacionesCount</span> }
-                                    @if (r.RxImagCount > 0)         { <span class="oc-pill oc-pill-rx"   title="@r.RxImagCount rx/imagenologia">RX @r.RxImagCount</span> }
-                                    @if (r.LabExtCount > 0)         { <span class="oc-pill oc-pill-lab"  title="@r.LabExtCount laboratorio(s)">LAB @r.LabExtCount</span> }
-                                    @if (r.InsExtCount > 0)         { <span class="oc-pill oc-pill-inx"  title="@r.InsExtCount insumo(s) externo(s)">INX @r.InsExtCount</span> }
-                                    @if (r.EscalasCount > 0)        { <span class="oc-pill oc-pill-esc"  title="@r.EscalasCount escala(s) diligenciada(s)">ESC @r.EscalasCount</span> }
-                                    @if (r.EvolucionesCount > 0)    { <span class="oc-pill oc-pill-evo"  title="@r.EvolucionesCount evolucion(es)">EVO @r.EvolucionesCount</span> }
-                                    @if (r.ConsentimientosCount > 0){ <span class="oc-pill oc-pill-con"  title="@r.ConsentimientosCount consentimiento(s)">CON @r.ConsentimientosCount</span> }
-                                </div>
-                            </td>
-                            <td class="text-center">
-                                @{
-                                    var (chipTxt, chipCls, chipTitle) = ChipRevisionEstado(r);
-                                }
-                                <span class="oc-rv-chip @chipCls" title="@chipTitle">@chipTxt</span>
-                                @if (r.RevisionIteracion is int it && it > 1)
-                                {
-                                    <div class="oc-rv-iter" title="Iteracion actual del ciclo">iter @it</div>
-                                }
-                            </td>
-                            <td class="text-center">
-                                @{
-                                    var (aChipTxt, aChipCls, aChipTitle) = ChipAgente(r);
-                                }
-                                @if (aChipTxt is not null)
-                                {
-                                    <span class="oc-ag-chip @aChipCls" title="@aChipTitle">@aChipTxt</span>
-                                }
-                                else
-                                {
-                                    <span class="oc-rv-chip oc-rv-none" title="El agente IA aun no ha revisado esta HC">—</span>
-                                }
-                            </td>
-                            <td class="text-end">
+                            @* Columna Acciones — movida al INICIO (sticky-left).
+                               Contiene solo el kebab con las acciones por HC.
+                               REV-15 — La clase oc-first-open eleva el z-index del TD
+                               cuando el kebab de ESTA fila esta desplegado, para que su
+                               menu no quede tapado por el TD sticky de la fila siguiente
+                               (ambos comparten z-index:4 y en empate gana el ultimo en DOM). *@
+                            <td class="text-center @(_kebabRowId == r.HistoriaClinicaId ? "oc-first-open" : "")">
                                 @{
                                     var revisableEstado = r.RevisionEstado is RevisionEstadoAgregado.SinRevisar
                                                                              or RevisionEstadoAgregado.PreRevision
                                                                              or RevisionEstadoAgregado.EnRevision
-                                                                             or null; // null = crea revision on-demand
+                                                                             or null;
                                     var puedeAprobar = cerrada && _puedeRevisar && revisableEstado;
                                     var puedeRechazar = cerrada && _puedeRevisar && revisableEstado;
                                     var esInactiva = string.Equals(r.Estado, "Inactiva", StringComparison.OrdinalIgnoreCase);
-                                    // Reabrir aplica solo a Cerradas; Activar aplica solo a Inactivas.
-                                    // Ambos requieren permiso historias.reabrir (mismo gate administrativo).
                                     var puedeReabrir = cerrada && _puedeReabrir;
                                     var puedeActivar = esInactiva && _puedeReabrir;
                                     var esteAbierto = _kebabRowId == r.HistoriaClinicaId;
@@ -738,6 +779,92 @@ else
                                         </div>
                                     }
                                 </div>
+                            </td>
+                            <td>
+                                <div class="oc-pname">@r.PacienteNombre</div>
+                                <div class="oc-pmeta">
+                                    @if (cerrada) { <text>HC cerrada el @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</text> }
+                                    else if (abierta) { <text>HC abierta el @(r.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
+                                    else { <text>HC @r.Estado.ToLower() el @(fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
+                                </div>
+                            </td>
+                            <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
+                            <td>@r.FormatoNombre</td>
+                            <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
+                            <td>@(r.EspecialistaNombre ?? "-")</td>
+                            <td>@(r.AseguradoraNombre ?? "-")</td>
+                            <td>@(r.SedeNombre ?? "-")</td>
+                            <td class="text-center">
+                                @if (cerrada)
+                                {
+                                    <span class="oc-est oc-est-cerrada" title="Cerrada definitivamente">&#10004; Cerrada</span>
+                                }
+                                else if (abierta)
+                                {
+                                    <span class="oc-est oc-est-abierta" title="La historia sigue abierta — el profesional aun no la ha cerrado">&#128276; Abierta</span>
+                                }
+                                else
+                                {
+                                    <span class="oc-est oc-est-inactiva" title="@(r.Estado)">@r.Estado</span>
+                                }
+                            </td>
+                            <td class="text-center">
+                                @(r.FechaCierre?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
+                            </td>
+                            <td class="text-center">
+                                @(r.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "-")
+                            </td>
+                            <td class="text-center">
+                                <div class="oc-pills">
+                                    <span class="oc-pill" title="Historia clinica">HC</span>
+                                    @if (r.MedicamentosCount > 0)   { <span class="oc-pill oc-pill-med"  title="@r.MedicamentosCount medicamento(s)">MED @r.MedicamentosCount</span> }
+                                    @if (r.ServiciosCount > 0)      { <span class="oc-pill oc-pill-srv"  title="@r.ServiciosCount servicio(s)">SRV @r.ServiciosCount</span> }
+                                    @if (r.InsumosCount > 0)        { <span class="oc-pill oc-pill-ins"  title="@r.InsumosCount insumo(s)">INS @r.InsumosCount</span> }
+                                    @if (r.RemisionesCount > 0)     { <span class="oc-pill oc-pill-rem"  title="@r.RemisionesCount remision(es)">REM @r.RemisionesCount</span> }
+                                    @if (r.IncapacidadesCount > 0)  { <span class="oc-pill oc-pill-inc"  title="@r.IncapacidadesCount incapacidad(es)">INC @r.IncapacidadesCount</span> }
+                                    @if (r.CertificacionesCount > 0){ <span class="oc-pill oc-pill-cert" title="@r.CertificacionesCount certificacion(es)">CRT @r.CertificacionesCount</span> }
+                                    @if (r.RxImagCount > 0)         { <span class="oc-pill oc-pill-rx"   title="@r.RxImagCount rx/imagenologia">RX @r.RxImagCount</span> }
+                                    @if (r.LabExtCount > 0)         { <span class="oc-pill oc-pill-lab"  title="@r.LabExtCount laboratorio(s)">LAB @r.LabExtCount</span> }
+                                    @if (r.InsExtCount > 0)         { <span class="oc-pill oc-pill-inx"  title="@r.InsExtCount insumo(s) externo(s)">INX @r.InsExtCount</span> }
+                                    @if (r.EscalasCount > 0)        { <span class="oc-pill oc-pill-esc"  title="@r.EscalasCount escala(s) diligenciada(s)">ESC @r.EscalasCount</span> }
+                                    @if (r.EvolucionesCount > 0)    { <span class="oc-pill oc-pill-evo"  title="@r.EvolucionesCount evolucion(es)">EVO @r.EvolucionesCount</span> }
+                                    @if (r.ConsentimientosCount > 0){ <span class="oc-pill oc-pill-con"  title="@r.ConsentimientosCount consentimiento(s)">CON @r.ConsentimientosCount</span> }
+                                </div>
+                            </td>
+                            <td class="text-center">
+                                @{
+                                    var (chipTxt, chipCls, chipTitle) = ChipRevisionEstado(r);
+                                }
+                                <span class="oc-rv-chip @chipCls" title="@chipTitle">@chipTxt</span>
+                                @if (r.RevisionIteracion is int it && it > 1)
+                                {
+                                    <div class="oc-rv-iter" title="Iteracion actual del ciclo">iter @it</div>
+                                }
+                            </td>
+                            <td class="text-center">
+                                @{
+                                    var (aChipTxt, aChipCls, aChipTitle) = ChipAgente(r);
+                                    // Chip clickeable — abre el modal HcRevisionPanel con la
+                                    // bitacora completa del agente (motivo, hallazgos, tokens).
+                                    // Mismo destino que "Ver revision" del kebab.
+                                    var tooltipConHint = (aChipTitle ?? aChipTxt ?? "sin revision") + " (click para ver detalles del agente)";
+                                }
+                                @if (aChipTxt is not null)
+                                {
+                                    <button type="button" class="oc-ag-chip @aChipCls oc-ag-chip-btn"
+                                            title="@tooltipConHint"
+                                            @onclick="() => AbrirRevision(r)">
+                                        @aChipTxt
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="oc-rv-chip oc-rv-none oc-ag-chip-btn"
+                                            title="El agente IA aun no ha revisado esta HC (click para abrir el panel de revision)"
+                                            @onclick="() => AbrirRevision(r)">
+                                        —
+                                    </button>
+                                }
                             </td>
                         </tr>
                     }
@@ -995,14 +1122,53 @@ else
    ========================================================================= *@
 @if (_showRevisionModal && _revisionModalHcId is Guid rmHcId)
 {
+    @* REV-17 — Header enriquecido con datos de la HC + navegacion prev/next
+       dentro del listado filtrado actual. Al navegar cambia HcId, docs y row
+       en un solo StateHasChanged; el iframe recarga con el nuevo src. *@
+    var filtradas = FilasFiltradas().ToList();
+    var idxActual = _revisionModalRow is null ? -1 : filtradas.FindIndex(x => x.HistoriaClinicaId == _revisionModalRow.HistoriaClinicaId);
+    var tienePrev = idxActual > 0;
+    var tieneNext = idxActual >= 0 && idxActual < filtradas.Count - 1;
+    var totalFiltradas = filtradas.Count;
+    var fechaHc = _revisionModalRow?.FechaCierre ?? _revisionModalRow?.FechaApertura;
+    var fechaTxt = fechaHc?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-";
     <div class="oc-rv-backdrop" @onclick="CerrarRevisionModalAsync"></div>
     <div class="oc-rv-modal" @onclick:stopPropagation>
         <div class="oc-rv-h">
-            <div>
-                <div class="oc-rv-eyebrow">Ordenes clinicas</div>
-                <h3 class="oc-rv-title">Ver revision de la HC</h3>
+            <div class="oc-rv-h-info">
+                <div class="oc-rv-eyebrow">Ordenes clinicas · Revision de HC</div>
+                <div class="oc-rv-title-row">
+                    <h3 class="oc-rv-title">@(_revisionModalRow?.PacienteNombre ?? "HC")</h3>
+                    @if (_revisionModalRow is not null)
+                    {
+                        <span class="oc-rv-doc">@_revisionModalRow.PacienteTipoDoc @_revisionModalRow.PacienteDoc</span>
+                    }
+                </div>
+                @if (_revisionModalRow is not null)
+                {
+                    <div class="oc-rv-meta">
+                        <span class="oc-rv-meta-item" title="Formato de la HC">📄 @_revisionModalRow.FormatoNombre</span>
+                        <span class="oc-rv-meta-sep">·</span>
+                        <span class="oc-rv-meta-item" title="Profesional que atendio">👤 @(_revisionModalRow.EspecialistaNombre ?? "-")</span>
+                        <span class="oc-rv-meta-sep">·</span>
+                        <span class="oc-rv-meta-item" title="Fecha de cierre / apertura">🕒 @fechaTxt</span>
+                        @if (_revisionModalRow.SesionNumero is int sn)
+                        {
+                            <span class="oc-rv-meta-sep">·</span>
+                            <span class="oc-rv-meta-item" title="Numero de sesion">#@sn</span>
+                        }
+                    </div>
+                }
             </div>
-            <button class="oc-rv-close" @onclick="CerrarRevisionModalAsync" title="Cerrar">&times;</button>
+            <div class="oc-rv-nav">
+                @if (idxActual >= 0)
+                {
+                    <span class="oc-rv-nav-idx" title="Posicion dentro del listado filtrado">@(idxActual + 1) / @totalFiltradas</span>
+                }
+                <button class="oc-rv-nav-btn" @onclick="NavegarRevisionPrev" disabled="@(!tienePrev)" title="HC anterior en el listado">&#8592;</button>
+                <button class="oc-rv-nav-btn" @onclick="NavegarRevisionNext" disabled="@(!tieneNext)" title="HC siguiente en el listado">&#8594;</button>
+                <button class="oc-rv-close" @onclick="CerrarRevisionModalAsync" title="Cerrar">&times;</button>
+            </div>
         </div>
         <div class="oc-rv-body">
             <div class="oc-rv-left">
@@ -1028,9 +1194,29 @@ else
         background:#fff; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.3);
         display:flex; flex-direction:column; overflow:hidden;
     }
-    .oc-rv-h { padding:14px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .oc-rv-h { padding:14px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+    .oc-rv-h-info { min-width:0; flex:1 1 auto; }
     .oc-rv-eyebrow { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#64748b; margin-bottom:2px; font-weight:600; }
+    .oc-rv-title-row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
     .oc-rv-title { margin:0; font-size:17px; font-weight:700; color:#0f172a; }
+    /* REV-17 — doc del paciente al lado del nombre */
+    .oc-rv-doc { font-size:12px; color:#64748b; font-weight:500; letter-spacing:.02em; }
+    /* REV-17 — metadatos (formato, profesional, fecha) en linea bajo el titulo */
+    .oc-rv-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; font-size:12.5px; color:#334155; }
+    .oc-rv-meta-item { display:inline-flex; align-items:center; gap:4px; }
+    .oc-rv-meta-sep { color:#cbd5e1; }
+    /* REV-17 — controles de navegacion + cierre agrupados a la derecha del header */
+    .oc-rv-nav { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+    .oc-rv-nav-idx { font-size:12px; color:#64748b; font-weight:600; padding:0 6px; user-select:none; }
+    .oc-rv-nav-btn {
+        background:#f1f5f9; border:1px solid #e2e8f0; color:#0f172a;
+        width:32px; height:32px; border-radius:6px; cursor:pointer;
+        font-size:16px; line-height:1; padding:0;
+        display:inline-flex; align-items:center; justify-content:center;
+        transition:background .1s, border-color .1s;
+    }
+    .oc-rv-nav-btn:hover:not(:disabled) { background:#e2e8f0; border-color:#cbd5e1; }
+    .oc-rv-nav-btn:disabled { opacity:.4; cursor:not-allowed; }
     .oc-rv-close { background:transparent; border:0; font-size:26px; color:#64748b; cursor:pointer; line-height:1; padding:0 6px; }
     .oc-rv-close:hover { color:#0f172a; }
     .oc-rv-body { flex:1 1 auto; display:grid; grid-template-columns: 1.6fr 1fr; min-height:0; }
@@ -1039,10 +1225,15 @@ else
     .oc-rv-iframe { width:100%; height:100%; border:0; background:#fff; }
     .oc-rv-right { padding:16px 20px; overflow-y:auto; background:#fff; }
 
-    .oc-filtros { display:grid; grid-template-columns: 1.5fr 1fr 1fr 1.4fr 1fr auto; gap:14px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; align-items:end; }
+    /* REV-16 — auto-fit responsive: cada campo pide >=160px y crece hasta 1fr.
+       Cuando no caben, wrappean a la fila siguiente. Sin overflow horizontal.
+       Antes tenia grid-template-columns con fracciones fijas y en pantalla
+       estrecha aplastaba los inputs o dejaba los botones fuera. */
+    .oc-filtros { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:14px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; align-items:end; }
     .oc-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; display:block; }
-    .oc-f-wide { min-width:200px; }
-    .oc-f-acts { display:flex; gap:8px; }
+    .oc-f { min-width:0; }  /* permite que el select shrink dentro del track */
+    .oc-f-wide { min-width:0; }
+    .oc-f-acts { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
     .oc-grid-h { padding:10px 6px; font-size:13px; font-weight:700; color:#0f172a; }
     .oc-warn { color:#b45309; font-weight:500; font-size:12px; margin-left:6px; }
     /* Wrap con max-height y overflow: crea el viewport de scroll dentro del
@@ -1054,6 +1245,40 @@ else
        inferior para reforzar la separacion visual al scrollear. */
     .oc-tbl thead th { position:sticky; top:0; z-index:5; background:#1565c0; color:#fff; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; box-shadow: 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 2px 4px rgba(0,0,0,0.08); }
     .oc-tbl td { padding:10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+
+    /* Primera columna (Acciones - kebab) sticky a la IZQUIERDA para que quede
+       siempre visible al hacer scroll horizontal en tablas anchas. La celda
+       lleva un pequeno border-right + box-shadow hacia la derecha para separarla
+       del resto. z-index arriba del sticky top del header en su interseccion. */
+    .oc-tbl thead th:first-child,
+    .oc-tbl tbody td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        background: #ffffff;
+        border-right: 1px solid #e2e8f0;
+        box-shadow: 4px 0 6px -3px rgba(0,0,0,0.08);
+    }
+    .oc-tbl thead th:first-child { z-index: 6; background:#1565c0; }
+    /* REV-15 — Fila con kebab desplegado gana z-index sobre las siguientes.
+       Sin este override, el TD sticky de la fila N+1 (mismo z-index:4) queda
+       encima del popup del kebab de la fila N por orden en el DOM. */
+    .oc-tbl tbody td:first-child.oc-first-open { z-index: 30 !important; overflow: visible; }
+    /* Match del fondo cuando la fila es de una HC abierta (color amarillo suave). */
+    .oc-tbl tbody tr.oc-row-abierta td:first-child { background:#fffbeb; }
+    /* Hover: mantener el mismo tinte del row cuando esta pintado */
+    .oc-tbl tbody tr:hover td:first-child { background:#f8fafc; }
+
+    /* Barra de progreso — se muestra durante la revision masiva con el
+       agente IA sobre todo el listado filtrado. Overlay sutil arriba de la
+       tabla con contador X/N y porcentaje. */
+    .oc-progress-wrap { display:flex; align-items:center; gap:12px; margin:10px 0; padding:10px 14px; background:#eff6ff; border:1px solid #93c5fd; border-radius:6px; font-size:12.5px; color:#1e3a8a; }
+    .oc-progress-bar { flex:1; height:10px; background:#dbeafe; border-radius:999px; overflow:hidden; }
+    .oc-progress-fill { height:100%; background:linear-gradient(90deg, #3b82f6, #1d4ed8); transition: width 0.3s ease; }
+    .oc-progress-txt { font-weight:600; min-width:180px; }
+    .oc-progress-err { color:#991b1b; margin-left:8px; }
+    .oc-progress-btn { padding:4px 10px; font-size:11px; border:1px solid #93c5fd; background:#fff; color:#1e3a8a; border-radius:4px; cursor:pointer; font-weight:600; }
+    .oc-progress-btn:hover { background:#fef2f2; border-color:#fca5a5; color:#991b1b; }
     .oc-row-abierta { background:#fffbeb; }
     .oc-pname { font-weight:700; color:#0f172a; }
     .oc-pmeta { font-size:11px; color:#64748b; }
@@ -1112,11 +1337,17 @@ else
     .oc-rv-inac { background:#374151; color:#f9fafb; }
     .oc-rv-iter { font-size:10px; color:#64748b; margin-top:2px; font-weight:500; }
 
-    /* Chip pre-revision agente */
+    /* Chip pre-revision agente — semaforo del veredicto del agente IA */
     .oc-ag-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
-    .oc-ag-neutral { background:#e0e7ff; color:#3730a3; }
+    .oc-ag-neutral { background:#fef3c7; color:#78350f; }
     .oc-ag-aprob { background:#d1fae5; color:#065f46; }
     .oc-ag-rech { background:#fee2e2; color:#991b1b; }
+    /* Chip clickeable — comportamiento boton: cursor, sin borde nativo, hover
+       sutil. Reemplaza al span para que el click abra el modal con la
+       bitacora del agente (mismo destino que Ver revision del kebab). */
+    .oc-ag-chip-btn { border:none; cursor:pointer; transition: filter .12s ease, transform .12s ease; }
+    .oc-ag-chip-btn:hover { filter:brightness(0.94); transform: translateY(-1px); }
+    .oc-ag-chip-btn:active { transform: translateY(0); }
 
     /* Tablero Kanban (Ola 2 RC2c) — KPIs + 4 columnas + cards con drag&drop */
     .oc-kpis { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid #e5e7eb; }
@@ -1173,9 +1404,14 @@ else
     .oc-kebab-btn:hover, .oc-kebab-btn.open {
         background:#f1f5f9; color:#0f172a; border-color:#e2e8f0;
     }
+    /* REV-15b — despliegue hacia la DERECHA del kebab (no izquierda). Antes
+       tenia right:0 y como el TD sticky mide 60px, el popup (min 180px) se
+       extendia hacia la izquierda y quedaba cortado por overflow:auto del
+       .oc-tbl-wrap. Con left:0 el menu crece hacia adentro de la tabla y
+       queda dentro del area visible. */
     .oc-kebab-menu {
-        position:absolute; right:0; top:calc(100% + 4px); z-index:20;
-        min-width:180px; background:#fff; border:1px solid #e2e8f0;
+        position:absolute; left:0; top:calc(100% + 4px); z-index:20;
+        min-width:200px; background:#fff; border:1px solid #e2e8f0;
         border-radius:8px; box-shadow:0 10px 25px rgba(15,23,42,.12);
         padding:4px; text-align:left;
     }
@@ -1241,6 +1477,14 @@ else
     private DateTime? _hasta;
     private string _especialista = "";
     private string _estadoFiltro = ""; // "", "Cerrada", "Abierta"
+
+    /// <summary>REV-14 — Filtro combinado del ciclo de revision + veredicto del
+    /// agente IA. Se aplica en cliente sobre <see cref="_rows"/>. Formato:
+    /// "" (todas), "rev:{EstadoAgregado}" o "ia:{Aprobado|Rechazado|Neutral|SinCorrer}".
+    /// Deliberadamente en cliente: el listado ya viene topado a 500 desde el backend.
+    /// Cuando el usuario necesite un universo mayor, combina con los filtros
+    /// que si viajan al servidor (fechas / EPS / sede / formato / estado / paciente).</summary>
+    private string _filtroRevision = "";
     private List<string> _especialistas = new();
     private List<AseguradoraOpcionDto> _aseguradoras = new();
     private string _aseguradoraFiltro = "";
@@ -1251,6 +1495,29 @@ else
     private List<OrdenClinicaItemDto> _rows = new();
     private bool _buscando;
 
+    // Selector "Agente revisor" para el boton "Revisar" por fila. Lista de
+    // agentes IA activos del tenant. Default: primero encontrado con nombre
+    // canonico "REVISOR CLINICO IA"; si no existe, primer activo. El
+    // servicio backend acepta agenteId opcional (REV-1) — cuando es null cae
+    // al canonico, patron usado por triggers automaticos.
+    private List<AiAgentDto> _agentesRevisores = new();
+    private Guid? _agenteRevisorId;
+    // Guard anti doble-click: mientras corre una revision no se puede
+    // disparar otra desde la misma pagina (evita gastar tokens duplicados).
+    private bool _procesandoRevision;
+
+    // Revision masiva (accion "Revisar listado") — corre el agente sobre
+    // TODAS las HCs cerradas del listado filtrado actual, con progreso en
+    // vivo y opcion de cancelar. La cancelacion es cooperativa: al terminar
+    // la HC actual el bucle sale.
+    private bool _procesandoRevisionMasiva;
+    private int _revisionMasivaTotal;
+    private int _revisionMasivaHechas;
+    private int _revisionMasivaOk;
+    private int _revisionMasivaErrores;
+    private string? _revisionMasivaHcActual;
+    private CancellationTokenSource? _revisionMasivaCts;
+
     // Kebab de acciones en cada fila: guarda el id de la HC cuyo menu esta abierto
     // (o null si ninguno). Solo un menu abierto a la vez para simplificar.
     private Guid? _kebabRowId;
@@ -1260,6 +1527,10 @@ else
     private bool _showRevisionModal;
     private Guid? _revisionModalHcId;
     private string _revisionModalDocs = "";
+    /// <summary>REV-17 — DTO completo del row abierto en el modal. Se usa para
+    /// pintar el header (paciente, doc, profesional, fecha, formato) y para
+    /// calcular la posicion actual y los vecinos al navegar prev/next.</summary>
+    private OrdenClinicaItemDto? _revisionModalRow;
 
     // Estado del modal de impresion
     private bool _showImprimirModal;
@@ -1273,6 +1544,14 @@ else
         _aseguradoras = (await OcSvc.ListarAseguradorasAsync()).ToList();
         _sucursales = (await OcSvc.ListarSucursalesAsync()).ToList();
         _formatos = (await OcSvc.ListarFormatosAsync()).ToList();
+        // Cargar agentes IA activos y preseleccionar el canonico revisor.
+        _agentesRevisores = (await AgentSvc.ListAsync())
+            .Where(a => a.IsActive)
+            .OrderBy(a => a.SortOrder).ThenBy(a => a.Name)
+            .ToList();
+        var canonico = _agentesRevisores.FirstOrDefault(a =>
+            string.Equals(a.Name, Visal.Application.Revision.Ia.IPreRevisionIaService.AgenteNombre, StringComparison.OrdinalIgnoreCase));
+        _agenteRevisorId = canonico?.Id ?? _agentesRevisores.FirstOrDefault()?.Id;
         await ResolverPermisosAsync();
         await Buscar();
     }
@@ -1583,24 +1862,130 @@ else
     /// </summary>
     private async Task EjecutarPreRevisionIa(RevisionKanbanCardDto card)
     {
-        if (_procesando) { return; }
-        _procesando = true;
-        _kanbanError = null;
+        // Handler del Kanban: reusa el helper compartido y refresca el tablero
+        // en vez del listado. Pasa el agente seleccionado en el toolbar de la
+        // Lista — si el usuario nunca abrio la Lista todavia, el getter cae al
+        // canonico REVISOR CLINICO IA.
+        var (ok, err) = await EjecutarPreRevisionIaCoreAsync(card.HistoriaClinicaId, card.RevisionId);
+        if (!ok) { _kanbanError = "Pre-revision IA: " + (err ?? "error desconocido"); }
+        await RefrescarKanban();
+    }
+
+    /// <summary>
+    /// Handler para el boton "Revision por agente" en la fila de la Lista
+    /// (REV-4). Reusa el helper core y refresca el listado para que el chip
+    /// del semaforo (columna Pre-revision agente) muestre el nuevo veredicto
+    /// sin recargar la pagina.
+    /// </summary>
+    private async Task EjecutarPreRevisionIaPorHcAsync(OrdenClinicaItemDto r)
+    {
+        var (ok, err) = await EjecutarPreRevisionIaCoreAsync(r.HistoriaClinicaId, r.RevisionId);
+        if (!ok)
+        {
+            await JS.InvokeVoidAsync("alert", "Pre-revision IA: " + (err ?? "error desconocido"));
+        }
+        await Buscar();
+    }
+
+    /// <summary>
+    /// Nucleo compartido: abre el ciclo de revision on-demand si no existe,
+    /// ejecuta el agente (el seleccionado en el toolbar) y devuelve
+    /// (ok, error). El caller decide como refrescar y como mostrar el error.
+    /// Usa <see cref="_procesandoRevision"/> como mutex para evitar doble
+    /// disparo con el consiguiente gasto de tokens.
+    /// </summary>
+    private async Task<(bool ok, string? err)> EjecutarPreRevisionIaCoreAsync(Guid hcId, Guid? revisionIdExistente)
+    {
+        if (_procesandoRevision) { return (false, "Hay otra revision en curso; espera a que termine."); }
+        _procesandoRevision = true;
         try
         {
-            var revisionId = card.RevisionId ?? (await KanbanSvc.SolicitarSiFaltaAsync(card.HistoriaClinicaId, _actorId)).Id;
-            var res = await PreIaSvc.EjecutarAsync(revisionId);
-            if (!res.Ok)
-            {
-                _kanbanError = "Pre-revision IA: " + (res.Error ?? "error desconocido");
-            }
-            await RefrescarKanban();
+            var revisionId = revisionIdExistente ?? (await KanbanSvc.SolicitarSiFaltaAsync(hcId, _actorId)).Id;
+            var res = await PreIaSvc.EjecutarAsync(revisionId, _agenteRevisorId);
+            return (res.Ok, res.Error);
         }
         catch (Exception ex)
         {
-            _kanbanError = "Pre-revision IA fallo: " + ex.Message;
+            return (false, ex.Message);
         }
-        finally { _procesando = false; }
+        finally { _procesandoRevision = false; }
+    }
+
+    /// <summary>
+    /// Revision masiva: corre el agente IA seleccionado sobre TODAS las HCs
+    /// cerradas del listado filtrado actual, secuencialmente. Actualiza
+    /// contadores en vivo (StateHasChanged por cada HC) para que la barra de
+    /// progreso avance. Al terminar refresca la lista para que los semaforos
+    /// muestren los veredictos frescos.
+    ///
+    /// Consumo de tokens: N * costo_por_HC. Pide confirmacion explicita antes
+    /// de arrancar y muestra el conteo en el mensaje.
+    /// </summary>
+    private async Task EjecutarRevisionMasivaAsync()
+    {
+        if (_procesandoRevisionMasiva) { return; }
+        if (_agenteRevisorId is null)
+        {
+            await JS.InvokeVoidAsync("alert", "Selecciona un agente en el toolbar antes de correr la revision masiva.");
+            return;
+        }
+
+        var cerradas = FilasFiltradas()
+            .Where(r => string.Equals(r.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (cerradas.Count == 0)
+        {
+            await JS.InvokeVoidAsync("alert", "No hay HCs Cerradas en el listado actual. Ajusta los filtros y presiona Buscar.");
+            return;
+        }
+
+        var agente = _agentesRevisores.FirstOrDefault(a => a.Id == _agenteRevisorId);
+        var nombreAgente = agente?.Name ?? "el agente seleccionado";
+        var confirm = await JS.InvokeAsync<bool>("confirm",
+            $"Se revisaran {cerradas.Count} HC(s) Cerradas con '{nombreAgente}'.\n\n" +
+            "Este proceso consume tokens de IA (uno por HC).\n\n" +
+            "¿Continuar?");
+        if (!confirm) { return; }
+
+        _procesandoRevisionMasiva = true;
+        _revisionMasivaTotal = cerradas.Count;
+        _revisionMasivaHechas = 0;
+        _revisionMasivaOk = 0;
+        _revisionMasivaErrores = 0;
+        _revisionMasivaHcActual = null;
+        _revisionMasivaCts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try
+        {
+            foreach (var r in cerradas)
+            {
+                if (_revisionMasivaCts.IsCancellationRequested) { break; }
+                _revisionMasivaHcActual = $"{r.PacienteNombre} - {r.FormatoNombre}";
+                StateHasChanged();
+                await Task.Yield();
+
+                var (ok, _) = await EjecutarPreRevisionIaCoreAsync(r.HistoriaClinicaId, r.RevisionId);
+                if (ok) { _revisionMasivaOk++; } else { _revisionMasivaErrores++; }
+                _revisionMasivaHechas++;
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            _revisionMasivaHcActual = null;
+            _procesandoRevisionMasiva = false;
+            _revisionMasivaCts?.Dispose();
+            _revisionMasivaCts = null;
+            await Buscar();  // refresca semaforos y estados
+        }
+    }
+
+    /// <summary>Cancela la revision masiva en curso. La cancelacion es
+    /// cooperativa: la HC actualmente en proceso termina antes de salir.</summary>
+    private void CancelarRevisionMasiva()
+    {
+        _revisionMasivaCts?.Cancel();
     }
 
     private async Task RefrescarKanban()
@@ -1795,14 +2180,35 @@ else
     private void AbrirRevision(OrdenClinicaItemDto r)
     {
         _revisionModalHcId = r.HistoriaClinicaId;
+        _revisionModalRow = r;
         _revisionModalDocs = BuildAllDocsQuery(r);
         _showRevisionModal = true;
+    }
+
+    /// <summary>REV-17 — Navega al hermano anterior/siguiente dentro del
+    /// listado filtrado actual. Los cambios de HcId + docs + row disparan
+    /// re-render del iframe (nueva src) y del header. Si el vecino no
+    /// existe, no hace nada (los botones ya vienen disabled desde el UI).</summary>
+    private void NavegarRevisionPrev() => NavegarRevision(-1);
+    private void NavegarRevisionNext() => NavegarRevision(+1);
+    private void NavegarRevision(int delta)
+    {
+        if (_revisionModalRow is null) { return; }
+        var filtradas = FilasFiltradas().ToList();
+        var idx = filtradas.FindIndex(x => x.HistoriaClinicaId == _revisionModalRow.HistoriaClinicaId);
+        var siguiente = idx + delta;
+        if (siguiente < 0 || siguiente >= filtradas.Count) { return; }
+        var target = filtradas[siguiente];
+        _revisionModalRow = target;
+        _revisionModalHcId = target.HistoriaClinicaId;
+        _revisionModalDocs = BuildAllDocsQuery(target);
     }
 
     private async Task CerrarRevisionModalAsync()
     {
         _showRevisionModal = false;
         _revisionModalHcId = null;
+        _revisionModalRow = null;
         _revisionModalDocs = "";
         // Refresca la tabla para reflejar cambios de estado (aprobado/rechazado
         // pudo ocurrir dentro del panel via HcRevisionPanel).
@@ -1930,6 +2336,40 @@ else
         };
     }
 
+    /// <summary>REV-14 — Aplica el filtro combinado revision+agente sobre
+    /// <see cref="_rows"/>. Vacio = sin filtro (devuelve _rows). Prefijo
+    /// "rev:" filtra por <see cref="OrdenClinicaItemDto.RevisionEstado"/>;
+    /// prefijo "ia:" filtra por <see cref="OrdenClinicaItemDto.RevisionAgente"/>
+    /// con la convencion adicional "ia:SinCorrer" para HCs donde el agente
+    /// nunca corrio (campo null).</summary>
+    private IEnumerable<OrdenClinicaItemDto> FilasFiltradas()
+    {
+        if (string.IsNullOrEmpty(_filtroRevision)) { return _rows; }
+        if (_filtroRevision.StartsWith("rev:", StringComparison.Ordinal))
+        {
+            var estadoStr = _filtroRevision.Substring(4);
+            if (Enum.TryParse<RevisionEstadoAgregado>(estadoStr, out var estado))
+            {
+                return _rows.Where(r => r.RevisionEstado == estado);
+            }
+            return _rows;
+        }
+        if (_filtroRevision.StartsWith("ia:", StringComparison.Ordinal))
+        {
+            var verd = _filtroRevision.Substring(3);
+            if (string.Equals(verd, "SinCorrer", StringComparison.Ordinal))
+            {
+                return _rows.Where(r => r.RevisionAgente is null);
+            }
+            if (Enum.TryParse<RevisionResultado>(verd, out var v))
+            {
+                return _rows.Where(r => r.RevisionAgente == v);
+            }
+            return _rows;
+        }
+        return _rows;
+    }
+
     /// <summary>Construye la query de docs incluyendo TODOS los tipos con count > 0. Uso por Consultar.</summary>
     private static string BuildAllDocsQuery(OrdenClinicaItemDto r)
     {
@@ -1941,6 +2381,7 @@ else
         if (r.RxImagCount > 0)          { parts.Add("RXEXT"); }
         if (r.LabExtCount > 0)          { parts.Add("LABEXT"); }
         if (r.InsExtCount > 0)          { parts.Add("INSEXT"); }
+        if (r.SrvExtCount > 0)          { parts.Add("SRVEXT"); }
         if (r.IncapacidadesCount > 0)   { parts.Add("INC"); }
         if (r.CertificacionesCount > 0) { parts.Add("CERT"); }
         if (r.EscalasCount > 0)         { parts.Add("ESC"); }

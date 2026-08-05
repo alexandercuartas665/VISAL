@@ -25,6 +25,10 @@ public static class RevisionMcpToolNames
     public const string ListConsentimientosHc = "list_consentimientos_hc";
     public const string ListAsignacionesRelacionadas = "list_asignaciones_relacionadas";
     public const string GetFormDefinition = "get_form_definition";
+    /// <summary>REV-13 — Metadata de los archivos subidos al tab "Documentos"
+    /// de la HC (tipologia, categoria, nombre, tamano, url servible). NO
+    /// devuelve el binario; el agente solo necesita saber que se adjunto.</summary>
+    public const string ListDocumentosHc = "list_documentos_hc";
 
     /// <summary>Todas las tools del catalogo. Utilizada por defecto en el seeder del agente.</summary>
     public static readonly IReadOnlyList<string> Todas = new[]
@@ -32,6 +36,7 @@ public static class RevisionMcpToolNames
         GetHistoriaClinica, GetPaciente, ListOrdenesHc, ListNotasHc,
         ListEscalasHc, ListEvolucionesHc, ListConsentimientosHc,
         ListAsignacionesRelacionadas, GetFormDefinition,
+        ListDocumentosHc,
     };
 }
 

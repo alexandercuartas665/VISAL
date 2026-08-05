@@ -25,7 +25,8 @@ public static class HistoriaMedicaPrefillHelper
         "insumos.lista_numerada",
         "rx_imagenologia.lista_numerada",
         "laboratorios.lista_numerada",
-        "insumos_externos.lista_numerada"
+        "insumos_externos.lista_numerada",
+        "suministros_medicamentos.lista_numerada"
     };
 
     /// <summary>Contenedor con todas las listas derivadas de la HC actual.</summary>
@@ -38,7 +39,8 @@ public static class HistoriaMedicaPrefillHelper
         IReadOnlyList<InsumoItemDto> Insumos,
         IReadOnlyList<OrdenExternaItemDto> RxImagenologia,
         IReadOnlyList<OrdenExternaItemDto> Laboratorios,
-        IReadOnlyList<OrdenExternaItemDto> InsumosExternos)
+        IReadOnlyList<OrdenExternaItemDto> InsumosExternos,
+        IReadOnlyList<SuministroMedicamentoItemDto> SuministrosMedicamentos)
     {
         public static HmFuentes Empty => new(
             Array.Empty<OrdenMedicamentoItemDto>(),
@@ -49,7 +51,8 @@ public static class HistoriaMedicaPrefillHelper
             Array.Empty<InsumoItemDto>(),
             Array.Empty<OrdenExternaItemDto>(),
             Array.Empty<OrdenExternaItemDto>(),
-            Array.Empty<OrdenExternaItemDto>());
+            Array.Empty<OrdenExternaItemDto>(),
+            Array.Empty<SuministroMedicamentoItemDto>());
     }
 
     /// <summary>
@@ -69,7 +72,8 @@ public static class HistoriaMedicaPrefillHelper
             ["insumos.lista_numerada"] = ListaNumeradaInsumos(fuentes.Insumos),
             ["rx_imagenologia.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.RxImagenologia),
             ["laboratorios.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.Laboratorios),
-            ["insumos_externos.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.InsumosExternos)
+            ["insumos_externos.lista_numerada"] = ListaNumeradaOrdenExterna(fuentes.InsumosExternos),
+            ["suministros_medicamentos.lista_numerada"] = ListaNumeradaSuministros(fuentes.SuministrosMedicamentos)
         };
     }
 
@@ -92,6 +96,7 @@ public static class HistoriaMedicaPrefillHelper
             ["rx_imagenologia"] = ListaNumeradaOrdenExterna(fuentes.RxImagenologia),
             ["laboratorios"] = ListaNumeradaOrdenExterna(fuentes.Laboratorios),
             ["insumos_externos"] = ListaNumeradaOrdenExterna(fuentes.InsumosExternos),
+            ["suministros_medicamentos"] = ListaNumeradaSuministros(fuentes.SuministrosMedicamentos),
             ["incapacidades"] = ListaNumeradaIncapacidades(fuentes.Incapacidades),
             ["certificaciones"] = ListaNumeradaCertificaciones(fuentes.Certificaciones)
         };
@@ -220,6 +225,28 @@ public static class HistoriaMedicaPrefillHelper
         return sb.ToString().TrimEnd();
     }
 
+    /// <summary>Formato: "1. 05/08/26 06:00 - CLINDAMICINA 600MG - 600MG - INTRAVENOSA - JHON MORALES".
+    /// Se ordena por FechaHora ascendente (orden cronologico de administracion),
+    /// que es como el enfermero espera leer la bitacora en un textarea de la HC
+    /// (ej. campo "Medicamentos administrados durante el turno").</summary>
+    public static string ListaNumeradaSuministros(IReadOnlyList<SuministroMedicamentoItemDto> items)
+    {
+        if (items is null || items.Count == 0) { return ""; }
+        var sb = new System.Text.StringBuilder();
+        var i = 1;
+        foreach (var s in items.OrderBy(x => x.FechaHora).ThenBy(x => x.Orden))
+        {
+            sb.Append(i++).Append(". ");
+            sb.Append(s.FechaHora.LocalDateTime.ToString("dd/MM/yy HH:mm")).Append(" - ");
+            sb.Append(s.Presentacion);
+            if (!string.IsNullOrWhiteSpace(s.Dosis)) { sb.Append(" - ").Append(s.Dosis); }
+            if (!string.IsNullOrWhiteSpace(s.Via)) { sb.Append(" - ").Append(s.Via); }
+            if (!string.IsNullOrWhiteSpace(s.UsuarioCreacionNombre)) { sb.Append(" - ").Append(s.UsuarioCreacionNombre); }
+            sb.Append('\n');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
     /// <summary>
     /// Aplica los mapeos de la ruta sourceModule = "historiaMedica" al diccionario
     /// de valores del formulario. Si el destino es un campo de texto, escribe la
@@ -311,6 +338,7 @@ public static class HistoriaMedicaPrefillHelper
             "rx_imagenologia.lista_numerada" => fuentes.RxImagenologia.OrderBy(m => m.Orden).Select(OrdenExternaToFields).ToList<Dictionary<string, string?>>(),
             "laboratorios.lista_numerada" => fuentes.Laboratorios.OrderBy(m => m.Orden).Select(OrdenExternaToFields).ToList<Dictionary<string, string?>>(),
             "insumos_externos.lista_numerada" => fuentes.InsumosExternos.OrderBy(m => m.Orden).Select(OrdenExternaToFields).ToList<Dictionary<string, string?>>(),
+            "suministros_medicamentos.lista_numerada" => fuentes.SuministrosMedicamentos.OrderBy(m => m.FechaHora).ThenBy(m => m.Orden).Select(SuministroToFields).ToList<Dictionary<string, string?>>(),
             _ => null
         };
 
@@ -536,6 +564,41 @@ public static class HistoriaMedicaPrefillHelper
             ["observacion"] = s.Observaciones,
             ["obs"] = s.Observaciones,
             ["observaciones"] = s.Observaciones
+        };
+    }
+
+    /// <summary>Mapeo del suministro a claves normalizadas para que el matcher de
+    /// tablas del FormViewer las coloque en la columna correcta. Cubre alias
+    /// comunes en espanol (fecha, hora, presentacion, medicamento, dosis, cantidad,
+    /// via, administrado_por, usuario, enfermero, firma).</summary>
+    private static Dictionary<string, string?> SuministroToFields(SuministroMedicamentoItemDto s)
+    {
+        var fechaHoraLocal = s.FechaHora.LocalDateTime;
+        var fecha = fechaHoraLocal.ToString("yyyy-MM-dd");
+        var hora = fechaHoraLocal.ToString("HH:mm");
+        var fechaHoraStr = fechaHoraLocal.ToString("dd/MM/yy HH:mm");
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["fecha_hora"] = fechaHoraStr,
+            ["fechahora"] = fechaHoraStr,
+            ["fecha"] = fecha,
+            ["hora"] = hora,
+            ["presentacion"] = s.Presentacion,
+            ["nombre"] = s.Presentacion,
+            ["medicamento"] = s.Presentacion,
+            ["descripcion"] = s.Presentacion,
+            ["dosis"] = s.Dosis,
+            ["cantidad"] = s.Cantidad,
+            ["via"] = s.Via,
+            ["via_administracion"] = s.Via,
+            ["viaadministracion"] = s.Via,
+            ["usuario"] = s.UsuarioCreacionNombre,
+            ["usuario_creacion"] = s.UsuarioCreacionNombre,
+            ["usuariocreacion"] = s.UsuarioCreacionNombre,
+            ["administrado_por"] = s.UsuarioCreacionNombre,
+            ["administradopor"] = s.UsuarioCreacionNombre,
+            ["enfermero"] = s.UsuarioCreacionNombre,
+            ["firma"] = s.UsuarioCreacionNombre
         };
     }
 

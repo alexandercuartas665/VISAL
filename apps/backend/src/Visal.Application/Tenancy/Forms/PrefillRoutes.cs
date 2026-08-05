@@ -134,6 +134,7 @@ public static class PrefillCategoriasHm
     public static readonly (string Codigo, string Titulo)[] Todas = new[]
     {
         ("medicamentos", "MEDICAMENTOS"),
+        ("suministros_medicamentos", "MEDICAMENTOS SUMINISTRADOS"),
         ("ordenes_servicio", "SERVICIOS"),
         ("insumos", "INSUMOS"),
         ("remisiones", "REMISIONES"),
@@ -204,7 +205,13 @@ public static class PrefillSourceCatalog
             "insumos.lista_numerada",
             "rx_imagenologia.lista_numerada",
             "laboratorios.lista_numerada",
-            "insumos_externos.lista_numerada"
+            "insumos_externos.lista_numerada",
+            // Registro de medicamentos SUMINISTRADOS (bitacora de administracion,
+            // pestana "Suministros medicamentos" — no confundir con la orden
+            // "medicamentos" que es la prescripcion). Formato lista: fecha/hora,
+            // presentacion, dosis, via, usuario. Se expande a tabla con columnas
+            // fecha_hora, presentacion, dosis, cantidad, via, usuario.
+            "suministros_medicamentos.lista_numerada"
         },
         // Firma del paciente: PNG/URL del archivo mas reciente en NotaMedicaDocumento
         // con categoria "Firma del Paciente" para el paciente activo. Se resuelve en

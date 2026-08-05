@@ -1,12 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
 public sealed class SuministroMedicamentoService(
     IApplicationDbContext db,
-    ITenantContext tenant) : ISuministroMedicamentoService
+    ITenantContext tenant,
+    IHistoriaPrefillService prefill) : ISuministroMedicamentoService
 {
     public async Task<IReadOnlyList<SuministroMedicamentoItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -64,6 +66,10 @@ public sealed class SuministroMedicamentoService(
         };
         db.HistoriaClinicaSuministroMedicamentos.Add(entity);
         await db.SaveChangesAsync(ct);
+        // Refrescar historiaMedica.suministros_medicamentos en el ValoresJson
+        // de la HC para que los campos/tablas configurados en el formulario se
+        // actualicen en vivo (mismo patron que Insumos/Medicamentos).
+        await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new SuministroMedicamentoItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.FechaHora, entity.Presentacion,
@@ -88,6 +94,7 @@ public sealed class SuministroMedicamentoService(
         entity.Cantidad = Trim(req.Cantidad);
         entity.Via = Trim(req.Via);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
     }
 
@@ -95,9 +102,11 @@ public sealed class SuministroMedicamentoService(
     {
         var entity = await db.HistoriaClinicaSuministroMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
-        await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
+        var hcId = entity.HistoriaClinicaId;
+        await db.EnsureAbiertaAsync(hcId, ct);
         db.HistoriaClinicaSuministroMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(hcId, ct);
         return true;
     }
 

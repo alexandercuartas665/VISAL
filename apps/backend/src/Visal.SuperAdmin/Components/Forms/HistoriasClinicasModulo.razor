@@ -473,9 +473,13 @@
                             else if (_tabSel == "Suministros medicamentos")
                             {
                                 @* Bitacora de administracion de medicamentos — cada fila = una toma
-                                   individual (fecha/hora + presentacion + dosis + via + usuario snapshot). *@
+                                   individual (fecha/hora + presentacion + dosis + via + usuario snapshot).
+                                   OnItemsChanged refresca el ValoresJson del tab Historial para que las
+                                   rutas de prefill "historiaMedica.suministros_medicamentos.*" se pinten
+                                   en vivo en textareas/tablas del formulario. *@
                                 <RegistroSuministrosMedicamentos HistoriaClinicaId="@_historiaSel?.Id"
-                                                                  OnCountChanged="@(c => _sumMedCount = c)" />
+                                                                  OnCountChanged="@(c => _sumMedCount = c)"
+                                                                  OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                             }
                             else if (_tabSel == "Remisiones")
                             {
@@ -1765,6 +1769,10 @@
             var cert = await RetryAsync(() => CertSvc.ListarPorHistoriaAsync(hcId));
             var ord = await RetryAsync(() => OrdSrvSvc.ListarPorHistoriaAsync(hcId));
             var ins = await RetryAsync(() => InsumoSvc.ListarPorHistoriaAsync(hcId));
+            // Suministros de medicamentos: bitacora de administracion — se refresca
+            // en vivo cuando el enfermero agrega/quita una toma en la pestana
+            // "Suministros medicamentos".
+            var sumMed = await RetryAsync(() => SumMedSvc.ListarPorHistoriaAsync(hcId));
 
             // Las 3 listas externas no las traemos aqui — el helper solo las usa
             // cuando el destino es una ruta rx_imagenologia/laboratorios/insumos_externos,
@@ -1772,7 +1780,8 @@
             var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins,
                 Array.Empty<OrdenExternaItemDto>(),
                 Array.Empty<OrdenExternaItemDto>(),
-                Array.Empty<OrdenExternaItemDto>());
+                Array.Empty<OrdenExternaItemDto>(),
+                sumMed);
             var medsKeys = HistoriaMedicaPrefillHelper.Aplicar(_valores, fuentes, _prefillRoutesActual, _schemaActual);
 
             // MERGE: las del header (No Historia / Fecha / Hora) NO se pierden cuando

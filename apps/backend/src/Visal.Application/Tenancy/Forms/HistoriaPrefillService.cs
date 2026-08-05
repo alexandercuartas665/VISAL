@@ -83,6 +83,18 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
                 o.Cantidad, o.Observaciones, o.MipresUrl, o.Orden))
             .ToListAsync(ct);
 
+        // Registro de medicamentos suministrados (bitacora tipo PP-FO-84 NOTAS
+        // DE ENFERMERIA). Se ordena por FechaHora asc — el enfermero espera leer
+        // las tomas en orden cronologico de administracion.
+        var sumMed = await db.HistoriaClinicaSuministroMedicamentos
+            .Where(s => s.HistoriaClinicaId == historiaId)
+            .OrderBy(s => s.FechaHora).ThenBy(s => s.Orden)
+            .Select(s => new SuministroMedicamentoItemDto(
+                s.Id, s.HistoriaClinicaId, s.FechaHora, s.Presentacion,
+                s.Dosis, s.Cantidad, s.Via,
+                s.UsuarioCreacionId, s.UsuarioCreacionNombre, s.Orden))
+            .ToListAsync(ct);
+
         // Ordenes externas por tipo (RX imagenologia, laboratorios, insumos externos).
         // Los "servicios externos" ya se unificaron en historia_clinica_ordenes_servicio
         // (arriba, `ord`), asi que no necesitan traerse aparte.
@@ -101,7 +113,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
                              .Select(x => new OrdenExternaItemDto(x.Id, x.Orden, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones))
                              .ToList();
 
-        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins, rxExt, labExt, insExt);
+        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(meds, rem, inc, cert, ord, ins, rxExt, labExt, insExt, sumMed);
 
         // Deserializar el ValoresJson actual, aplicar el helper, re-serializar.
         var valores = DeserializarValores(hc.ValoresJson);

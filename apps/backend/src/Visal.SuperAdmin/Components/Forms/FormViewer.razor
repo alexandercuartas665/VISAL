@@ -423,7 +423,90 @@ else
                 var key = n.Name ?? $"fld:{n.Id}";
                 Valores[key] = EvalFormula(n.Formula!, Valores);
             }
+            // Plantilla reactiva: expande {name} con valores actuales del formulario
+            // si el campo pasa VisibleWhen (cuando FormulaOnlyWhenVisible=true), NO
+            // ha sido editado manualmente por el usuario (dirty tracking) y TODOS
+            // los placeholders referenciados tienen valor. Ver FormNode.FormulaTemplate.
+            if (!string.IsNullOrWhiteSpace(n.FormulaTemplate) && !string.IsNullOrWhiteSpace(n.Name))
+            {
+                ApplyFormulaTemplate(n);
+            }
         }
+    }
+
+    /// <summary>Expande <see cref="FormNode.FormulaTemplate"/> del nodo si
+    /// procede. Reglas: (1) si <c>FormulaOnlyWhenVisible</c> y el nodo no pasa
+    /// VisibleWhen, no toca nada. (2) si algun placeholder {name} referenciado
+    /// esta vacio, no expande — evita renglones parciales tipo "TA: - FC: 72".
+    /// (3) dirty tracking: guarda una clave espejo <c>__tmpl:{key}</c> con el
+    /// ultimo texto expandido; si el valor actual difiere del espejo, el
+    /// usuario lo edito manualmente y no lo pisamos.</summary>
+    private void ApplyFormulaTemplate(FormNode n)
+    {
+        if (n.FormulaOnlyWhenVisible && !VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, Valores)) { return; }
+
+        var key = n.Name!;
+        var mirrorKey = $"__tmpl:{key}";
+        var actual = Valores.TryGetValue(key, out var a) ? a : null;
+        var espejo = Valores.TryGetValue(mirrorKey, out var m) ? m : null;
+
+        // Si hay valor actual distinto al ultimo expandido -> el usuario edito
+        // manualmente. Respetar y no re-expandir hasta que borre el campo.
+        if (!string.IsNullOrEmpty(actual) && !string.Equals(actual, espejo, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // Expandir el template. Si algun placeholder queda vacio, abortar.
+        var expandido = ExpandTemplate(n.FormulaTemplate!, Valores, out var todosPresentes);
+        if (!todosPresentes)
+        {
+            // Si el campo tenia valor auto-expandido y ahora falta un signo,
+            // NO lo borramos — dejamos el texto previo hasta que el enfermero
+            // lo complete de nuevo. Solo abortamos la nueva expansion.
+            return;
+        }
+
+        if (!string.Equals(actual, expandido, StringComparison.Ordinal))
+        {
+            Valores[key] = expandido;
+            Valores[mirrorKey] = expandido;
+        }
+    }
+
+    /// <summary>Sustituye placeholders <c>{name}</c> por <c>Valores[name]</c>.
+    /// Devuelve <paramref name="todosPresentes"/>=false si al menos uno no
+    /// existe o esta vacio (permite al caller abortar y dejar el destino
+    /// intacto). El match del name es case-insensitive.</summary>
+    private static string ExpandTemplate(string template, Dictionary<string, string?> valores, out bool todosPresentes)
+    {
+        todosPresentes = true;
+        // Regex simple: {nombre} donde nombre es [a-zA-Z0-9_].
+        // No permite anidamiento ni escapes — es un template plano de una linea.
+        var faltaUno = false;
+        var resultado = System.Text.RegularExpressions.Regex.Replace(
+            template,
+            @"\{([A-Za-z_][A-Za-z0-9_]*)\}",
+            m =>
+            {
+                var name = m.Groups[1].Value;
+                // Case-insensitive lookup: iteramos si el hit exacto falla.
+                if (!valores.TryGetValue(name, out var v))
+                {
+                    foreach (var kv in valores)
+                    {
+                        if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            v = kv.Value;
+                            break;
+                        }
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(v)) { faltaUno = true; return ""; }
+                return v!;
+            });
+        todosPresentes = !faltaUno;
+        return resultado;
     }
 
     private static IEnumerable<FormNode> WalkNodes(List<FormNode>? nodes)

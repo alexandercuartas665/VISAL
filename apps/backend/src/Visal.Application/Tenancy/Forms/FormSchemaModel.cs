@@ -220,6 +220,33 @@ public sealed class FormNode
     [JsonPropertyName("isFechaAtencion")]
     public bool IsFechaAtencion { get; set; }
 
+    /// <summary>
+    /// Plantilla reactiva para autorellenar el campo con valores derivados de
+    /// OTROS campos del mismo formulario. Sintaxis: <c>{nombreCampo}</c> se
+    /// sustituye por el valor actual del campo con ese Name. Ejemplo:
+    /// <c>"TA: {ta} - FC: {fc} - Temp: {temperatura} - SatO2: {sato2}"</c>
+    /// pega la lectura de signos vitales en un textarea de notas de turno.
+    /// Comportamiento en el FormViewer:
+    ///  - Se recalcula cada vez que cualquier campo referenciado cambia.
+    ///  - Si el usuario ya edito manualmente el campo (dirty), NO se sobrescribe.
+    ///  - Si CUALQUIER placeholder referenciado esta vacio, no expande — deja
+    ///    el campo intacto (evita renglones parciales del tipo "TA: - FC: 72").
+    ///  - Cuando <see cref="FormulaOnlyWhenVisible"/> es true (default), solo
+    ///    aplica si el campo pasa la evaluacion <c>VisibleWhen</c>.
+    /// El campo SIGUE siendo editable — el usuario puede modificar/agregar
+    /// texto al valor autoexpandido; el dirty tracking lo respeta.
+    /// </summary>
+    [JsonPropertyName("formulaTemplate")]
+    public string? FormulaTemplate { get; set; }
+
+    /// <summary>Si true (default), la <see cref="FormulaTemplate"/> solo se
+    /// aplica cuando el campo pasa su <see cref="VisibleWhen"/>. Utility para
+    /// formularios con secciones por turno (Recibe/Mañana/Tarde/Noche/Entrega)
+    /// donde cada textarea aparece condicionalmente y solo el activo debe
+    /// llenarse con los signos actuales.</summary>
+    [JsonPropertyName("formulaOnlyWhenVisible")]
+    public bool FormulaOnlyWhenVisible { get; set; } = true;
+
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";

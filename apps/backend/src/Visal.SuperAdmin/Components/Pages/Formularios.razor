@@ -613,6 +613,36 @@
                 }
 
                 @RenderVisibleWhenPanel(_selected)
+
+                @* Formula reactiva de plantilla: pega valores de OTROS campos del
+                   mismo formulario dentro de este. Solo aplica a fields (no a
+                   secciones ni tablas). El editor lo activa poniendo un template
+                   con placeholders {nombreCampo}. *@
+                @if (!_selected.IsSection && !_selected.IsText && !_selected.IsTable && _selected.FieldType != "calculated")
+                {
+                    <div class="fb-prop">
+                        <label title="Autorellenar con valores de OTROS campos del formulario. Usa {nombreCampo} como placeholder.">
+                            &#128200; Formula de plantilla
+                        </label>
+                        <textarea class="fb-input fb-mono" rows="2"
+                                  placeholder="TA: {ta} - FC: {fc} - Temp: {temperatura} - SatO2: {sato2}"
+                                  @bind="_selected.FormulaTemplate" @bind:event="oninput"></textarea>
+                        <div class="fb-hint">
+                            Escribe texto libre con placeholders <code>{nombreCampo}</code>. Se recalcula
+                            en vivo al cambiar cualquier campo referenciado. El campo sigue siendo
+                            editable — si el enfermero modifica el texto, la plantilla no lo sobrescribe.
+                            Si algun placeholder esta vacio, la plantilla no expande (evita renglones parciales).
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_selected.FormulaTemplate))
+                    {
+                        <label class="fb-check" title="Con VisibleWhen: solo aplica cuando el campo esta visible. Sin marcar: aplica siempre aunque el campo este oculto.">
+                            <input type="checkbox" @bind="_selected.FormulaOnlyWhenVisible" />
+                            Solo cuando el campo esta visible
+                        </label>
+                    }
+                }
+
                 @RenderMoveCopyPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">@(_selected.IsTable ? "Eliminar tabla" : "Eliminar campo")</button>
             }

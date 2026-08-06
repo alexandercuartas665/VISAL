@@ -220,17 +220,18 @@ public sealed class HistoriaClinicaService(
                 throw new InvalidOperationException(bloqueo.Motivo);
             }
 
-            // Regla 1 sesion <-> 1 HC: bloqueamos crear una segunda HC para la
-            // misma sesion. La tabla pivote AsignacionTurnoSesionHc es M:N por
-            // diseño (ver entidad) pero el modulo /atencion requiere unicidad
-            // aqui — si ya existe alguna HC vinculada, el profesional debe
-            // consultar el historial en vez de crear otra.
-            var yaTieneHc = await db.AsignacionTurnoSesionHcs
-                .AnyAsync(p => p.SesionId == sesionValidar, ct);
-            if (yaTieneHc)
+            // Regla 1 sesion <-> 1 HC ACTIVA: bloqueamos solo si ya existe una
+            // HC no descartada. Si la HC previa fue Inactiva (descartada), el
+            // profesional debe poder crear otra HC para la misma sesion — es
+            // el flujo normal de "descartar y rehacer".
+            var yaTieneHcActiva = await db.AsignacionTurnoSesionHcs
+                .Join(db.HistoriasClinicas, p => p.HistoriaClinicaId, h => h.Id, (p, h) => new { p, h })
+                .AnyAsync(x => x.p.SesionId == sesionValidar
+                            && x.h.Estado != HistoriaClinicaEstado.Inactiva, ct);
+            if (yaTieneHcActiva)
             {
                 throw new InvalidOperationException(
-                    "Ya existe una historia clinica para esta sesion. Consulta el historial del paciente para verla.");
+                    "Ya existe una historia clinica activa para esta sesion. Consulta el historial del paciente para verla.");
             }
         }
 

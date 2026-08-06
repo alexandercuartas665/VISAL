@@ -2,6 +2,9 @@
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Globalization
+@using System.Text
+@using System.Text.Json
+@using ClosedXML.Excel
 @using Visal.Application.Tenancy
 @using Visal.Application.Common
 @using Microsoft.EntityFrameworkCore
@@ -15,121 +18,184 @@
     <div class="rep-head">
         <div>
             <div class="rep-eyebrow">Consulta y descarga</div>
-            <h1 class="rep-title">Reportes</h1>
+            <h1 class="rep-title">Reportes disponibles</h1>
         </div>
-        <div class="rep-select">
-            <label>Reporte</label>
-            <select @bind="_reporteId">
-                <option value="">-- Seleccione --</option>
-                @foreach (var r in _reportes)
-                {
-                    <option value="@r.Id">@r.Nombre</option>
-                }
-            </select>
+        <div class="rep-search">
+            <input type="text" placeholder="Buscar reporte..." value="@_filtro" @oninput="OnFiltro" />
         </div>
     </div>
 
-    @if (_reporte is ReporteConfigDto sel)
+    @if (_reportes.Count == 0)
     {
-        <div class="rep-desc">@sel.Descripcion</div>
-        <div class="rep-filtros">
-            @if (sel.FiltraFechas)
-            {
-                <div>
-                    <label>Desde</label>
-                    <input type="date" @bind="_desde" />
-                </div>
-                <div>
-                    <label>Hasta</label>
-                    <input type="date" @bind="_hasta" />
-                </div>
-            }
-            @if (sel.FiltraSede)
-            {
-                <div>
-                    <label>Sede</label>
-                    <select @bind="_sedeId">
-                        <option value="">Todas las mias</option>
-                        @foreach (var s in _misSedes)
-                        {
-                            <option value="@s.Id">@s.Nombre</option>
-                        }
-                    </select>
-                </div>
-            }
-            <div class="rep-actions">
-                <button class="btn-primary" disabled="@_running" @onclick="EjecutarAsync">
-                    @(_running ? "Ejecutando..." : "Ejecutar")
-                </button>
-                @if (_resultado is not null && _resultado.TotalFilas > 0)
-                {
-                    <button class="btn-outline" @onclick="DescargarCsv">Descargar CSV</button>
-                }
-            </div>
-        </div>
-
-        @if (!string.IsNullOrEmpty(_error))
-        {
-            <div class="rep-error">@_error</div>
-        }
-
-        @if (_resultado is ReporteResultado res && res.TotalFilas > 0)
-        {
-            <div class="rep-meta">Filas: <b>@res.TotalFilas</b></div>
-            <div class="rep-tabla-wrap">
-                <table class="rep-tabla">
-                    <thead>
-                        <tr>@foreach (var c in res.Columnas) { <th>@c</th> }</tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var row in res.Filas)
-                        {
-                            <tr>
-                                @for (var i = 0; i < res.Columnas.Count; i++)
-                                {
-                                    var v = i < row.Count ? row[i] : null;
-                                    <td>@FormatoCelda(v)</td>
-                                }
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-        else if (_resultado is not null)
-        {
-            <div class="rep-vacio">La consulta no devolvio filas.</div>
-        }
+        <div class="rep-empty">No tiene reportes asignados. Contacte a su administrador.</div>
     }
     else
     {
-        <div class="rep-vacio">Seleccione un reporte para comenzar.</div>
+        <div class="rep-cards">
+            @foreach (var r in FiltrarReportes())
+            {
+                <div class="rep-card" @onclick="() => Abrir(r)">
+                    <div class="rep-card-icon">📊</div>
+                    <div class="rep-card-body">
+                        <div class="rep-card-title">@r.Nombre</div>
+                        <div class="rep-card-desc">@(string.IsNullOrWhiteSpace(r.Descripcion) ? "(Sin descripcion)" : r.Descripcion)</div>
+                        <div class="rep-card-tags">
+                            @if (r.FiltraFechas) { <span class="rep-tag">Fechas</span> }
+                            @if (r.FiltraSede) { <span class="rep-tag">Sede</span> }
+                            @if (!r.Habilitado) { <span class="rep-tag rep-tag-off">Deshabilitado</span> }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
     }
 </div>
 
+@if (_reporte is ReporteConfigDto sel)
+{
+    <div class="rep-modal-back" @onclick="Cerrar"></div>
+    <div class="rep-modal">
+        <div class="rep-modal-head">
+            <div>
+                <div class="rep-modal-eyebrow">Reporte</div>
+                <h3 class="rep-modal-title">@sel.Nombre</h3>
+                @if (!string.IsNullOrWhiteSpace(sel.Descripcion))
+                {
+                    <div class="rep-modal-sub">@sel.Descripcion</div>
+                }
+            </div>
+            <button class="rep-modal-close" @onclick="Cerrar">×</button>
+        </div>
+
+        <div class="rep-modal-body">
+            <div class="rep-filtros">
+                @if (sel.FiltraFechas)
+                {
+                    <div>
+                        <label>Desde</label>
+                        <input type="date" @bind="_desde" />
+                    </div>
+                    <div>
+                        <label>Hasta</label>
+                        <input type="date" @bind="_hasta" />
+                    </div>
+                }
+                @if (sel.FiltraSede)
+                {
+                    <div>
+                        <label>Sede</label>
+                        <select @bind="_sedeId">
+                            <option value="">Todas las mias</option>
+                            @foreach (var s in _misSedes)
+                            {
+                                <option value="@s.Id">@s.Nombre</option>
+                            }
+                        </select>
+                    </div>
+                }
+                <div class="rep-actions">
+                    <button class="btn-primary" disabled="@_running" @onclick="EjecutarAsync">
+                        @(_running ? "Ejecutando..." : "▶ Ejecutar")
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="rep-error">@_error</div>
+            }
+
+            @if (_resultado is ReporteResultado res && res.TotalFilas > 0)
+            {
+                <div class="rep-result-head">
+                    <div class="rep-meta">Filas: <b>@res.TotalFilas</b></div>
+                    <div class="rep-export">
+                        <span class="rep-export-lbl">Descargar:</span>
+                        <button class="btn-export" @onclick="DescargarExcel">📄 Excel</button>
+                        <button class="btn-export" @onclick="DescargarCsv">📄 CSV</button>
+                        <button class="btn-export" @onclick="DescargarJson">📄 JSON</button>
+                    </div>
+                </div>
+                <div class="rep-tabla-wrap">
+                    <table class="rep-tabla">
+                        <thead>
+                            <tr>@foreach (var c in res.Columnas) { <th>@c</th> }</tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in res.Filas)
+                            {
+                                <tr>
+                                    @for (var i = 0; i < res.Columnas.Count; i++)
+                                    {
+                                        var v = i < row.Count ? row[i] : null;
+                                        <td>@FormatoCelda(v)</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else if (_resultado is not null)
+            {
+                <div class="rep-vacio">La consulta no devolvio filas.</div>
+            }
+        </div>
+    </div>
+}
+
 <style>
 .rep-page { padding: 1rem 1.25rem; }
-.rep-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom: .75rem; }
+.rep-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom: 1rem; }
 .rep-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
 .rep-title { margin:.15rem 0 0 0; font-size:1.55rem; color:#0f172a; }
-.rep-select { display:flex; gap:.5rem; align-items:center; }
-.rep-select select { padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:6px; min-width:260px; }
-.rep-desc { color:#475569; margin: .25rem 0 1rem; }
-.rep-filtros { display:flex; gap:1rem; align-items:flex-end; margin-bottom: 1rem; flex-wrap:wrap; }
+.rep-search input { padding:.45rem .65rem; border:1px solid #cbd5e1; border-radius:8px; min-width:280px; }
+
+.rep-empty { padding:2rem; text-align:center; color:#94a3b8; }
+
+.rep-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:.85rem; }
+.rep-card { display:flex; gap:.75rem; background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:.85rem 1rem; cursor:pointer; transition: box-shadow .15s, transform .1s, border-color .15s; }
+.rep-card:hover { box-shadow: 0 4px 14px rgba(15,23,42,.08); transform: translateY(-1px); border-color:#93c5fd; }
+.rep-card-icon { font-size:1.8rem; line-height:1; }
+.rep-card-body { flex:1; min-width:0; }
+.rep-card-title { font-weight:600; color:#0f172a; margin-bottom:.15rem; }
+.rep-card-desc { color:#64748b; font-size:.8rem; line-height:1.35; margin-bottom:.35rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.rep-card-tags { display:flex; gap:.3rem; flex-wrap:wrap; }
+.rep-tag { background:#eff6ff; color:#1e3a8a; font-size:.7rem; padding:.1rem .45rem; border-radius:99px; }
+.rep-tag-off { background:#fee2e2; color:#991b1b; }
+
+.rep-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
+.rep-modal { position:fixed; top:3%; left:50%; transform:translateX(-50%); width:min(1100px, 96vw); max-height:94vh;
+            background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401;
+            display:flex; flex-direction:column; overflow:hidden; }
+.rep-modal-head { display:flex; justify-content:space-between; align-items:flex-start; padding:.9rem 1.15rem; border-bottom:1px solid #e5e7eb; }
+.rep-modal-eyebrow { color:#64748b; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; }
+.rep-modal-title { margin:.15rem 0 0; font-size:1.2rem; color:#0f172a; }
+.rep-modal-sub { color:#64748b; font-size:.82rem; margin-top:.15rem; }
+.rep-modal-close { background:transparent; border:none; font-size:1.6rem; line-height:1; color:#64748b; cursor:pointer; padding: 0 .3rem; }
+.rep-modal-body { padding:1rem 1.15rem; overflow:auto; }
+
+.rep-filtros { display:flex; gap:1rem; align-items:flex-end; margin-bottom: 1rem; flex-wrap:wrap; padding-bottom:.85rem; border-bottom:1px dashed #e5e7eb; }
 .rep-filtros label { display:block; font-size:.75rem; color:#334155; margin-bottom:.2rem; }
 .rep-filtros input, .rep-filtros select { padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; }
 .rep-actions { display:flex; gap:.5rem; }
 .rep-error { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:.6rem .85rem; border-radius:6px; margin-bottom:.75rem; }
-.rep-meta { color:#475569; margin-bottom:.35rem; font-size:.85rem; }
-.rep-tabla-wrap { border:1px solid #e5e7eb; border-radius:8px; overflow:auto; max-height: calc(100vh - 340px); }
+
+.rep-result-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem; }
+.rep-meta { color:#475569; font-size:.85rem; }
+.rep-export { display:flex; gap:.35rem; align-items:center; }
+.rep-export-lbl { font-size:.78rem; color:#64748b; margin-right:.25rem; }
+.btn-export { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.32rem .65rem; border-radius:6px; cursor:pointer; font-size:.82rem; }
+.btn-export:hover { background:#f8fafc; border-color:#94a3b8; }
+
+.rep-tabla-wrap { border:1px solid #e5e7eb; border-radius:8px; overflow:auto; max-height: calc(94vh - 260px); }
 .rep-tabla { width:100%; border-collapse: collapse; font-size:.85rem; }
 .rep-tabla thead th { position:sticky; top:0; background:#f1f5f9; text-align:left; padding:.5rem .6rem; border-bottom:1px solid #cbd5e1; }
 .rep-tabla tbody td { padding:.4rem .6rem; border-bottom:1px solid #f1f5f9; color:#0f172a; }
 .rep-tabla tbody tr:hover { background:#f8fafc; }
-.rep-vacio { color:#94a3b8; padding:1.25rem 0; }
+.rep-vacio { color:#94a3b8; padding:1.25rem 0; text-align:center; }
 .btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
 .btn-primary:disabled { opacity:.6; }
-.btn-outline { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.45rem .85rem; border-radius:6px; cursor:pointer; }
 </style>
 
 @code {
@@ -138,6 +204,7 @@
     private List<ReporteConfigDto> _reportes = new();
     private Guid? _reporteId;
     private ReporteConfigDto? _reporte => _reporteId is Guid id ? _reportes.FirstOrDefault(x => x.Id == id) : null;
+    private string _filtro = string.Empty;
     private DateTime? _desde;
     private DateTime? _hasta;
     private Guid? _sedeId;
@@ -164,6 +231,36 @@
                 select new SedeItem(suc.Id, suc.Nombre)
             ).ToListAsync();
         }
+    }
+
+    private IEnumerable<ReporteConfigDto> FiltrarReportes()
+    {
+        var q = _reportes.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_filtro))
+        {
+            var f = _filtro.Trim().ToLowerInvariant();
+            q = q.Where(r =>
+                (r.Nombre ?? "").ToLowerInvariant().Contains(f) ||
+                (r.Descripcion ?? "").ToLowerInvariant().Contains(f));
+        }
+        return q.OrderBy(r => r.Orden).ThenBy(r => r.Nombre);
+    }
+
+    private void OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; }
+
+    private void Abrir(ReporteConfigDto r)
+    {
+        _reporteId = r.Id;
+        _resultado = null;
+        _error = string.Empty;
+        _desde = null; _hasta = null; _sedeId = null;
+    }
+
+    private void Cerrar()
+    {
+        _reporteId = null;
+        _resultado = null;
+        _error = string.Empty;
     }
 
     private async Task EjecutarAsync()
@@ -202,20 +299,82 @@
     private async Task DescargarCsv()
     {
         if (_resultado is null || _reporte is null) { return; }
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine(string.Join(",", _resultado.Columnas.Select(EscapeCsv)));
         foreach (var row in _resultado.Filas)
         {
             sb.AppendLine(string.Join(",", row.Select(x => EscapeCsv(FormatoCelda(x)))));
         }
-        var fileName = $"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
-        var bytes = System.Text.Encoding.UTF8.GetPreamble()
-            .Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        var bytes = Encoding.UTF8.GetPreamble()
+            .Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        await Descargar($"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+                        "text/csv", bytes);
+    }
+
+    private async Task DescargarExcel()
+    {
+        if (_resultado is null || _reporte is null) { return; }
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add(Sanitize(_reporte.Nombre).PadRight(1).Substring(0, Math.Min(31, Math.Max(1, _reporte.Nombre.Length))));
+        for (var c = 0; c < _resultado.Columnas.Count; c++)
+        {
+            ws.Cell(1, c + 1).Value = _resultado.Columnas[c];
+            ws.Cell(1, c + 1).Style.Font.Bold = true;
+            ws.Cell(1, c + 1).Style.Fill.BackgroundColor = XLColor.LightGray;
+        }
+        for (var r = 0; r < _resultado.Filas.Count; r++)
+        {
+            var row = _resultado.Filas[r];
+            for (var c = 0; c < _resultado.Columnas.Count; c++)
+            {
+                var v = c < row.Count ? row[c] : null;
+                ws.Cell(r + 2, c + 1).Value = v switch
+                {
+                    null => XLCellValue.FromObject(null),
+                    DateTime dt => XLCellValue.FromObject(dt),
+                    DateTimeOffset dto => XLCellValue.FromObject(dto.LocalDateTime),
+                    DateOnly d => XLCellValue.FromObject(d.ToDateTime(TimeOnly.MinValue)),
+                    bool b => XLCellValue.FromObject(b),
+                    int i => XLCellValue.FromObject(i),
+                    long l => XLCellValue.FromObject(l),
+                    decimal m => XLCellValue.FromObject(m),
+                    double d2 => XLCellValue.FromObject(d2),
+                    _ => XLCellValue.FromObject(Convert.ToString(v, CultureInfo.InvariantCulture) ?? "")
+                };
+            }
+        }
+        ws.Columns().AdjustToContents();
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        await Descargar($"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ms.ToArray());
+    }
+
+    private async Task DescargarJson()
+    {
+        if (_resultado is null || _reporte is null) { return; }
+        var rows = _resultado.Filas.Select(row =>
+        {
+            var obj = new Dictionary<string, object?>();
+            for (var c = 0; c < _resultado.Columnas.Count; c++)
+            {
+                obj[_resultado.Columnas[c]] = c < row.Count ? row[c] : null;
+            }
+            return obj;
+        }).ToList();
+        var opts = new JsonSerializerOptions { WriteIndented = true };
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(rows, opts));
+        await Descargar($"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+                        "application/json", bytes);
+    }
+
+    private async Task Descargar(string fileName, string mime, byte[] bytes)
+    {
         var base64 = Convert.ToBase64String(bytes);
         await JS.InvokeVoidAsync("eval", $@"
             (function(){{
                 var a = document.createElement('a');
-                a.href = 'data:text/csv;base64,{base64}';
+                a.href = 'data:{mime};base64,{base64}';
                 a.download = '{fileName}';
                 document.body.appendChild(a); a.click(); a.remove();
             }})();");

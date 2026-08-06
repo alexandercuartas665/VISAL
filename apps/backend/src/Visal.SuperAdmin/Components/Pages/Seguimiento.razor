@@ -48,12 +48,28 @@
     <div class="seg-modal-back" @onclick="Cerrar"></div>
     <div class="seg-modal">
         <div class="seg-modal-head">
-            <div>
+            @{
+                var nav = NavContext(seleccionado);
+            }
+            <div class="seg-nav-left">
+                <button class="seg-nav-btn" title="Anterior" disabled="@(!nav.HasPrev)" @onclick="() => NavAsync(-1)">&lsaquo;</button>
+                <span class="seg-nav-pos">@(nav.Pos + 1) / @nav.Total</span>
+                <button class="seg-nav-btn" title="Siguiente" disabled="@(!nav.HasNext)" @onclick="() => NavAsync(1)">&rsaquo;</button>
+            </div>
+            <div class="seg-modal-title-wrap">
                 <div class="seg-modal-eyebrow">Encuesta SIAU · @FormatoMes(seleccionado.Mes)</div>
                 <h3 class="seg-modal-title">@seleccionado.PacienteNombre</h3>
                 <div class="seg-modal-sub">@seleccionado.PacienteTipoDoc @seleccionado.PacienteDocumento</div>
             </div>
-            <button class="seg-modal-close" @onclick="Cerrar">×</button>
+            <div class="seg-modal-actions">
+                <label class="seg-move-lbl">Mover a:</label>
+                <select class="seg-move-sel" value="@seleccionado.Estado" @onchange="OnMoverEstadoAsync">
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="NoContactado">No contactado</option>
+                    <option value="Realizada">Realizada</option>
+                </select>
+                <button class="seg-modal-close" @onclick="Cerrar">×</button>
+            </div>
         </div>
 
         <div class="seg-modal-body">
@@ -153,7 +169,16 @@
 .seg-modal { position:fixed; top:5%; left:50%; transform:translateX(-50%); width:min(720px, 96vw); max-height:90vh;
              background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401;
              display:flex; flex-direction:column; overflow:hidden; }
-.seg-modal-head { display:flex; justify-content:space-between; align-items:flex-start; padding:1rem 1.25rem; border-bottom:1px solid #e5e7eb; }
+.seg-modal-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; }
+.seg-nav-left { display:flex; align-items:center; gap:.4rem; }
+.seg-nav-btn { background:#f1f5f9; border:1px solid #cbd5e1; color:#334155; border-radius:6px; padding:.15rem .55rem; font-size:1.2rem; line-height:1; cursor:pointer; }
+.seg-nav-btn:hover { background:#e2e8f0; }
+.seg-nav-btn:disabled { opacity:.35; cursor:not-allowed; }
+.seg-nav-pos { font-size:.78rem; color:#64748b; min-width:52px; text-align:center; }
+.seg-modal-title-wrap { flex:1; min-width:0; text-align:center; }
+.seg-modal-actions { display:flex; align-items:center; gap:.5rem; }
+.seg-move-lbl { font-size:.75rem; color:#64748b; }
+.seg-move-sel { padding:.3rem .5rem; border:1px solid #cbd5e1; border-radius:6px; font-size:.85rem; background:#fff; }
 .seg-modal-eyebrow { color:#64748b; font-size:.75rem; text-transform:uppercase; letter-spacing:.06em; }
 .seg-modal-title { margin:.15rem 0; font-size:1.15rem; color:#0f172a; }
 .seg-modal-sub { color:#475569; font-size:.85rem; }
@@ -368,4 +393,50 @@
         return $"{m:00}/{y}";
     }
 
+    // === Navegacion y mover columna kanban desde el modal ===
+
+    private (int Pos, int Total, bool HasPrev, bool HasNext) NavContext(SeguimientoEncuestaDto cur)
+    {
+        var lista = _items
+            .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
+            .ThenBy(x => x.PacienteNombre)
+            .ToList();
+        var pos = lista.FindIndex(x => x.Id == cur.Id);
+        return (pos, lista.Count, pos > 0, pos >= 0 && pos < lista.Count - 1);
+    }
+
+    private async Task NavAsync(int delta)
+    {
+        if (_openId is not Guid id) { return; }
+        var cur = _items.FirstOrDefault(x => x.Id == id);
+        if (cur is null) { return; }
+        var nav = NavContext(cur);
+        if (delta < 0 && !nav.HasPrev) { return; }
+        if (delta > 0 && !nav.HasNext) { return; }
+        var lista = _items
+            .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
+            .ThenBy(x => x.PacienteNombre)
+            .ToList();
+        var next = lista[nav.Pos + delta];
+        Abrir(next.Id);
+        await Task.CompletedTask;
+    }
+
+    private async Task OnMoverEstadoAsync(ChangeEventArgs e)
+    {
+        if (_openId is not Guid id) { return; }
+        var nuevo = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(nuevo)) { return; }
+        try
+        {
+            await SegSvc.CambiarEstadoAsync(id, nuevo, Guid.Empty);
+            await RecargarAsync();
+            // Re-sincronizar la copia en memoria para que el modal siga abierto
+            // con el estado nuevo reflejado.
+            var actualizado = _items.FirstOrDefault(x => x.Id == id);
+            if (actualizado is null) { Cerrar(); }
+            _msg = $"Movido a {nuevo}.";
+        }
+        catch (Exception ex) { _msg = "Error al mover: " + ex.Message; }
+    }
 }

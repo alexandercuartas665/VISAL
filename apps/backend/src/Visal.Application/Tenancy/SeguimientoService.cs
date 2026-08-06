@@ -73,7 +73,16 @@ public sealed class SeguimientoService(
         var entity = await db.SeguimientoEncuestas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null) { return false; }
 
-        entity.FechaLlamada = req.FechaLlamada ?? entity.FechaLlamada;
+        // Postgres timestamp with time zone requiere DateTimeKind.Utc con Npgsql;
+        // la UI puede mandar Kind=Local (DateTime.Now) y romper el SaveChanges.
+        var fecha = req.FechaLlamada ?? entity.FechaLlamada;
+        if (fecha is DateTime f && f.Kind != DateTimeKind.Utc)
+        {
+            fecha = f.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(f, DateTimeKind.Utc)
+                : f.ToUniversalTime();
+        }
+        entity.FechaLlamada = fecha;
         entity.Pregunta1 = ClampScore(req.Pregunta1);
         entity.Pregunta2 = ClampScore(req.Pregunta2);
         entity.Pregunta3 = ClampScore(req.Pregunta3);

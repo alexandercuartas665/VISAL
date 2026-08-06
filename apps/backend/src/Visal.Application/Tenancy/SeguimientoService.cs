@@ -45,7 +45,8 @@ public sealed class SeguimientoService(
             if (faltantes.Count > 0) { await db.SaveChangesAsync(ct); }
         }
 
-        return await db.SeguimientoEncuestas.AsNoTracking()
+        // OrderBy dentro del Select no lo traduce EF; ordenamos client-side despues.
+        var filas = await db.SeguimientoEncuestas.AsNoTracking()
             .Where(x => x.Mes == mes)
             .Join(db.Pacientes.AsNoTracking(),
                 s => s.PacienteId,
@@ -54,16 +55,17 @@ public sealed class SeguimientoService(
                     s.Id, s.PacienteId,
                     p.NombreCompleto,
                     p.TipoDocumento, p.NumeroDocumento,
-                    // Telefono principal + codigo pais no viven todos en Paciente base;
-                    // dejamos null si el modelo no los expone directo (UI hace fallback).
                     null, null,
                     s.Mes, s.Estado, s.FechaLlamada,
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
                     s.PersonaAtiende, s.Observaciones))
+            .ToListAsync(ct);
+
+        return filas
             .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
             .ThenBy(x => x.PacienteNombre)
-            .ToListAsync(ct);
+            .ToList();
     }
 
     public async Task<bool> GuardarEncuestaAsync(Guid id, GuardarEncuestaRequest req, Guid actor, CancellationToken ct = default)

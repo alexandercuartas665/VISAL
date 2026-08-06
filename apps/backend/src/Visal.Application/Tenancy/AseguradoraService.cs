@@ -345,6 +345,8 @@ public sealed class AseguradoraService : IAseguradoraService
         if (_tenant.TenantId is not Guid tid) { return new ServiciosImportResult(0, Array.Empty<string>()); }
         var contrato = await _db.ContratosAseguradora.FirstOrDefaultAsync(c => c.Id == contratoId, ct);
         if (contrato is null) { return new ServiciosImportResult(0, Array.Empty<string>()); }
+        var paquetesInexistentes = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var filasSaltadasPaquete = 0;
 
         // Precargar mapa codigo -> paqueteId para no golpear la BD en cada fila.
         var codigosPaquete = rows.Select(r => (r.PaqueteCodigo ?? "").Trim())
@@ -391,7 +393,15 @@ public sealed class AseguradoraService : IAseguradoraService
             if (string.IsNullOrWhiteSpace(r.CodigoServicio) && string.IsNullOrWhiteSpace(r.Descripcion)) { continue; }
             Guid? paqueteId = null;
             var codPaq = (r.PaqueteCodigo ?? "").Trim();
-            if (codPaq.Length > 0 && mapaPaquetes.TryGetValue(codPaq, out var pid)) { paqueteId = pid; }
+            if (codPaq.Length > 0)
+            {
+                // Si el Excel trae un codigo de PAQUETE, debe existir en el catalogo.
+                // Antes se importaba silenciosamente con paqueteId=null perdiendo la
+                // referencia. Ahora saltamos la fila y la reportamos para que el
+                // usuario cree primero el paquete o corrija el codigo.
+                if (mapaPaquetes.TryGetValue(codPaq, out var pid)) { paqueteId = pid; }
+                else { paquetesInexistentes.Add(codPaq); filasSaltadasPaquete++; continue; }
+            }
             _db.ServiciosContrato.Add(new ServicioContrato
             {
                 TenantId = tid,
@@ -421,7 +431,7 @@ public sealed class AseguradoraService : IAseguradoraService
             n++;
         }
         if (n > 0) { await _db.SaveChangesAsync(ct); }
-        return new ServiciosImportResult(n, modulosDesconocidos.ToList());
+        return new ServiciosImportResult(n, modulosDesconocidos.ToList(), paquetesInexistentes.ToList(), filasSaltadasPaquete);
     }
 
     /// <summary>Normaliza un modulo a UPPER sin la "s" final para comparar

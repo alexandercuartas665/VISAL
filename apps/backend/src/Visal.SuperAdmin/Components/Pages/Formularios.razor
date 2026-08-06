@@ -189,7 +189,14 @@
                              @ondragleave="@(() => OnDragLeaveSection(node))"
                              @ondragover:preventDefault="true" @ondragover:stopPropagation="true"
                              @ondrop="@(() => OnDropOnSection(node))" @ondrop:stopPropagation="true">
-                            <div class="fb-section-head">
+                            @* Head y body replican preventDefault + ondrop para asegurar que el drop
+                               se acepte donde sea que caiga el cursor (titulo, botones o body),
+                               sin depender de que el evento burbujee y sin importar el hit-testing
+                               contra elementos internos. *@
+                            <div class="fb-section-head"
+                                 @ondragenter="@(() => OnDragEnterSection(node))"
+                                 @ondragover:preventDefault="true" @ondragover:stopPropagation="true"
+                                 @ondrop="@(() => OnDropOnSection(node))" @ondrop:stopPropagation="true">
                                 <span class="fb-section-title">@(string.IsNullOrWhiteSpace(node.Label) ? "Seccion" : node.Label)</span>
                                 <span class="fb-node-actions">
                                     <button class="fb-mini" title="Subir" @onclick="() => MoveUp(node, _schema.Children)" @onclick:stopPropagation="true">↑</button>
@@ -197,7 +204,10 @@
                                     <button class="fb-mini fb-mini-danger" title="Eliminar" @onclick="() => Delete(node)" @onclick:stopPropagation="true">×</button>
                                 </span>
                             </div>
-                            <div class="fb-section-body fb-grid">
+                            <div class="fb-section-body fb-grid"
+                                 @ondragenter="@(() => OnDragEnterSection(node))"
+                                 @ondragover:preventDefault="true" @ondragover:stopPropagation="true"
+                                 @ondrop="@(() => OnDropOnSection(node))" @ondrop:stopPropagation="true">
                                 @if (node.Children is null || node.Children.Count == 0)
                                 {
                                     <div class="fb-empty-sm">Seccion vacia. Selecciona y agrega campos.</div>

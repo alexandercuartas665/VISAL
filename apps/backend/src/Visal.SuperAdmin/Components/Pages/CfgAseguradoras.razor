@@ -245,7 +245,7 @@
                                             <td>
                                                 <select class="form-select form-select-sm mono" @bind="s.PaqueteId">
                                                     <option value="">(opcional)</option>
-                                                    @foreach (var p in _paquetes)
+                                                    @foreach (var p in PaquetesDelContrato(s.PaqueteId))
                                                     {
                                                         <option value="@p.Id">@p.Codigo</option>
                                                     }
@@ -728,6 +728,23 @@
     // (Guid.Empty ya esta usado por "Sin paquete"; este all-ones no colisiona con ningun paquete real.)
     private static readonly Guid _sentinelConPaquete = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
+    /// <summary>Paquetes que aparecen en al menos un servicio de este contrato,
+    /// mas el paquete actual del servicio en edicion (por si se acaba de importar
+    /// pero aun no es el "primer" que lo usa). Simple: no requiere config extra —
+    /// para dar de alta un paquete nuevo en un contrato basta con agregarlo a un
+    /// servicio via /config/paquetes + Excel o edicion manual con un paquete
+    /// preexistente.</summary>
+    private IEnumerable<PaqueteDto> PaquetesDelContrato(Guid? paqueteActualId)
+    {
+        var idsUsados = _servicios
+            .Where(s => s.PaqueteId is Guid gid && gid != Guid.Empty)
+            .Select(s => s.PaqueteId!.Value)
+            .ToHashSet();
+        if (paqueteActualId is Guid current && current != Guid.Empty) { idsUsados.Add(current); }
+        if (idsUsados.Count == 0) { return Enumerable.Empty<PaqueteDto>(); }
+        return _paquetes.Where(p => idsUsados.Contains(p.Id)).OrderBy(p => p.Codigo);
+    }
+
     private IEnumerable<ServicioEdit> FilteredServicios()
     {
         IEnumerable<ServicioEdit> q = _servicios;
@@ -890,19 +907,25 @@
             }
             var res = await Svc.ImportServiciosAsync(id, rows, await Actor());
             await LoadServicios();
+            var partes = new List<string> { $"{res.Importados} servicio(s) importado(s) desde Excel." };
+            if (res.PaquetesInexistentes is { Count: > 0 } paqInex)
+            {
+                // Paquetes que no existian en el catalogo: la fila NO se importo.
+                // El admin debe crearlos en /config/paquetes o corregir el codigo.
+                partes.Add($"BLOQUEADAS: {res.FilasSaltadasPaqueteInexistente} fila(s) con PAQUETE inexistente: "
+                    + string.Join(", ", paqInex));
+                _error = string.Join(" ", partes);
+                _ok = null;
+                return;
+            }
             if (res.ModulosDesconocidos.Count > 0)
             {
                 // TS6: los servicios se importaron igual, pero avisamos que
-                // algunos MODULO no matchean el catalogo. El admin decide si
-                // renombra en el Excel o agrega tipos nuevos en Configuracion.
-                _ok = $"{res.Importados} servicio(s) importado(s) desde Excel. "
-                    + $"Aviso: {res.ModulosDesconocidos.Count} MODULO(s) no estan en el catalogo tipos_servicio: "
-                    + string.Join(", ", res.ModulosDesconocidos);
+                // algunos MODULO no matchean el catalogo.
+                partes.Add($"Aviso: {res.ModulosDesconocidos.Count} MODULO(s) no estan en el catalogo tipos_servicio: "
+                    + string.Join(", ", res.ModulosDesconocidos));
             }
-            else
-            {
-                _ok = $"{res.Importados} servicio(s) importado(s) desde Excel.";
-            }
+            _ok = string.Join(" ", partes);
         }
         catch (Exception ex) { _error = "No se pudo importar el Excel: " + ex.Message; }
         finally { _busy = false; }

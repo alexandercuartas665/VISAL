@@ -74,7 +74,17 @@ public sealed record ServicioImportRow(
 /// <param name="ModulosDesconocidos">Valores unicos de MODULO que no matchean
 /// (tras normalizar plural/singular) contra el catalogo tipos_servicio del
 /// tenant. Vacio = todos los modulos son validos. La UI puede mostrar aviso.</param>
-public sealed record ServiciosImportResult(int Importados, IReadOnlyList<string> ModulosDesconocidos);
+/// <param name="PaquetesInexistentes">Codigos de PAQUETE presentes en el Excel
+/// que no existen en el catalogo de paquetes del tenant. Las filas con esos
+/// codigos NO se importan (se saltan) y se reportan aca para que el usuario
+/// cree los paquetes primero o corrija el codigo en el Excel.</param>
+/// <param name="FilasSaltadasPaqueteInexistente">Cantidad de filas del Excel
+/// que se saltaron por venir con un PAQUETE que no existe.</param>
+public sealed record ServiciosImportResult(
+    int Importados,
+    IReadOnlyList<string> ModulosDesconocidos,
+    IReadOnlyList<string>? PaquetesInexistentes = null,
+    int FilasSaltadasPaqueteInexistente = 0);
 
 /// <summary>Fila del Excel de aseguradoras. Todas las columnas salvo CODIGO / TIPO / NOMBRE
 /// son opcionales. El import hace MERGE por CODIGO (case-insensitive): si existe una

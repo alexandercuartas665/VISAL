@@ -110,6 +110,7 @@
     private RenderFragment RenderTopNode(FormNode n) => __builder =>
     {
         if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, Values)) { return; }
+        if (n.NoImprimir) { return; }
         if (n.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(n, Values)) { return; }
         if (n.IsSection && n.PrintOptional
             && (SeccionesOpcionalesIncluidas is null || !SeccionesOpcionalesIncluidas.Contains(n.Id)))
@@ -132,6 +133,7 @@
                 @foreach (var ch in n.Children ?? new())
                 {
                     if (!VisibleWhenEvaluator.ShouldShow(ch.VisibleWhen, Values)) { continue; }
+                    if (ch.NoImprimir) { continue; }
                     if (ch.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(ch, Values)) { continue; }
                     @RenderDocNode(ch)
                 }

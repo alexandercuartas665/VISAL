@@ -1,0 +1,371 @@
+@page "/seguimiento"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject ISeguimientoService SegSvc
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Seguimiento SIAU - Visal</PageTitle>
+
+<div class="seg-page">
+    <div class="seg-head">
+        <div>
+            <div class="seg-eyebrow">Encuestas de satisfaccion (SIAU)</div>
+            <h1 class="seg-title">Seguimiento <span>mensual</span></h1>
+        </div>
+        <div class="seg-filters">
+            <label>Periodo (AAAA-MM)</label>
+            <input type="month" value="@_mesInput" @onchange="OnMesChange" />
+            <button class="btn-outline" @onclick="RecargarAsync">Recargar</button>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="seg-loading">Cargando encuestas del mes...</div>
+    }
+    else
+    {
+        <div class="seg-kpis">
+            <div class="seg-kpi seg-kpi-pend"><b>@Count("Pendiente")</b> Pendientes</div>
+            <div class="seg-kpi seg-kpi-noc"><b>@Count("NoContactado")</b> No contactados</div>
+            <div class="seg-kpi seg-kpi-ok"><b>@Count("Realizada")</b> Realizadas</div>
+            <div class="seg-kpi seg-kpi-total"><b>@_items.Count</b> Total</div>
+        </div>
+
+        <div class="seg-kanban">
+            @RenderColumna("Pendiente", "Pendientes de llamar", "seg-col-pend")
+            @RenderColumna("NoContactado", "No contactados", "seg-col-noc")
+            @RenderColumna("Realizada", "Encuesta realizada", "seg-col-ok")
+        </div>
+    }
+</div>
+
+@if (_openId is Guid id && _items.FirstOrDefault(x => x.Id == id) is SeguimientoEncuestaDto seleccionado)
+{
+    <div class="seg-modal-back" @onclick="Cerrar"></div>
+    <div class="seg-modal">
+        <div class="seg-modal-head">
+            <div>
+                <div class="seg-modal-eyebrow">Encuesta SIAU · @FormatoMes(seleccionado.Mes)</div>
+                <h3 class="seg-modal-title">@seleccionado.PacienteNombre</h3>
+                <div class="seg-modal-sub">@seleccionado.PacienteTipoDoc @seleccionado.PacienteDocumento</div>
+            </div>
+            <button class="seg-modal-close" @onclick="Cerrar">×</button>
+        </div>
+
+        <div class="seg-modal-body">
+            <div class="seg-form-row">
+                <label>Fecha y hora de llamada</label>
+                <input type="datetime-local" @bind="_edit.FechaLlamada" />
+            </div>
+
+            <div class="seg-form-row">
+                <label>Responsable de la llamada (SIAU)</label>
+                <input type="text" value="@(seleccionado.ResponsableLlamadaNombre ?? _actorNombre)" readonly />
+                <small>Se toma automaticamente del usuario logueado al guardar.</small>
+            </div>
+
+            <div class="seg-form-row">
+                <label>Persona que atiende</label>
+                <input type="text" @bind="_edit.PersonaAtiende" placeholder="Nombre de quien contesta" />
+            </div>
+
+            <div class="seg-preguntas">
+                @foreach (var (idx, texto) in Preguntas)
+                {
+                    <div class="seg-pregunta">
+                        <div class="seg-pregunta-label">@idx. @texto</div>
+                        <div class="seg-escala">
+                            @for (var n = 1; n <= 5; n++)
+                            {
+                                var val = n;
+                                var actual = GetPregunta(idx);
+                                var sel = actual == val ? "seg-esc-sel" : "";
+                                <button type="button" class="seg-esc-btn @sel" @onclick="() => SetPregunta(idx, val)">@val</button>
+                            }
+                            @if (GetPregunta(idx).HasValue)
+                            {
+                                <button type="button" class="seg-esc-clr" title="Limpiar" @onclick="() => SetPregunta(idx, null)">×</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="seg-form-row">
+                <label>Observaciones</label>
+                <textarea rows="3" @bind="_edit.Observaciones" placeholder="Comentarios adicionales, motivos, quejas..."></textarea>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_msg))
+            {
+                <div class="seg-msg">@_msg</div>
+            }
+        </div>
+
+        <div class="seg-modal-foot">
+            <button class="btn-danger" @onclick="MarcarNoContactado">No pude contactar</button>
+            <button class="btn-outline" @onclick="Cerrar">Cancelar</button>
+            <button class="btn-primary" @onclick="Guardar">Guardar encuesta</button>
+        </div>
+    </div>
+}
+
+<style>
+.seg-page { padding: 1rem 1.25rem; }
+.seg-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom: 1rem; }
+.seg-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.seg-title { margin:.15rem 0 0 0; font-size:1.55rem; color:#0f172a; }
+.seg-title span { color:#2563eb; }
+.seg-filters { display:flex; gap:.5rem; align-items:center; }
+.seg-filters label { font-size:.8rem; color:#334155; }
+.seg-filters input[type="month"] { padding:.35rem .5rem; border:1px solid #cbd5e1; border-radius:6px; }
+
+.seg-kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:.75rem; margin-bottom:1rem; }
+.seg-kpi { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .85rem; font-size:.85rem; color:#475569; }
+.seg-kpi b { display:block; font-size:1.4rem; color:#0f172a; }
+.seg-kpi-pend b { color:#0369a1; }
+.seg-kpi-noc b  { color:#b45309; }
+.seg-kpi-ok b   { color:#16a34a; }
+.seg-kpi-total b{ color:#0f172a; }
+
+.seg-loading { text-align:center; color:#64748b; padding:2.5rem 0; }
+
+.seg-kanban { display:grid; grid-template-columns: repeat(3, 1fr); gap:.75rem; }
+.seg-col { background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; min-height:220px; }
+.seg-col-head { padding:.65rem .85rem; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; }
+.seg-col-head b { color:#0f172a; }
+.seg-col-body { padding:.5rem; display:flex; flex-direction:column; gap:.5rem; max-height:calc(100vh - 320px); overflow:auto; }
+.seg-col-pend { border-top: 4px solid #0369a1; }
+.seg-col-noc  { border-top: 4px solid #b45309; }
+.seg-col-ok   { border-top: 4px solid #16a34a; }
+
+.seg-card { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .75rem; cursor:pointer; transition:box-shadow .15s ease; }
+.seg-card:hover { box-shadow:0 4px 12px rgba(15,23,42,.08); }
+.seg-card b { color:#0f172a; }
+.seg-card small { display:block; color:#64748b; font-size:.72rem; margin-top:.15rem; }
+.seg-card-meta { display:flex; gap:.5rem; margin-top:.35rem; font-size:.72rem; color:#334155; }
+
+.seg-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
+.seg-modal { position:fixed; top:5%; left:50%; transform:translateX(-50%); width:min(720px, 96vw); max-height:90vh;
+             background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401;
+             display:flex; flex-direction:column; overflow:hidden; }
+.seg-modal-head { display:flex; justify-content:space-between; align-items:flex-start; padding:1rem 1.25rem; border-bottom:1px solid #e5e7eb; }
+.seg-modal-eyebrow { color:#64748b; font-size:.75rem; text-transform:uppercase; letter-spacing:.06em; }
+.seg-modal-title { margin:.15rem 0; font-size:1.15rem; color:#0f172a; }
+.seg-modal-sub { color:#475569; font-size:.85rem; }
+.seg-modal-close { background:transparent; border:none; font-size:1.6rem; line-height:1; color:#64748b; cursor:pointer; }
+.seg-modal-body { padding:1rem 1.25rem; overflow:auto; }
+.seg-modal-foot { padding:.85rem 1.25rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
+
+.seg-form-row { margin-bottom:.85rem; }
+.seg-form-row label { display:block; color:#334155; font-size:.8rem; margin-bottom:.2rem; }
+.seg-form-row input, .seg-form-row textarea { width:100%; padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; font: inherit; }
+.seg-form-row small { color:#64748b; font-size:.72rem; }
+
+.seg-preguntas { margin: .5rem 0 1rem; display:flex; flex-direction:column; gap:.55rem; }
+.seg-pregunta { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:.55rem .75rem; }
+.seg-pregunta-label { color:#0f172a; font-size:.88rem; margin-bottom:.35rem; }
+.seg-escala { display:flex; gap:.35rem; align-items:center; }
+.seg-esc-btn { width:2.1rem; height:2.1rem; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; font-weight:600; color:#334155; }
+.seg-esc-btn:hover { border-color:#2563eb; color:#2563eb; }
+.seg-esc-sel { background:#2563eb; border-color:#2563eb; color:#fff; }
+.seg-esc-clr { border:none; background:transparent; color:#94a3b8; cursor:pointer; font-size:1.1rem; margin-left:.35rem; }
+
+.seg-msg { padding:.5rem .75rem; background:#eff6ff; border-radius:6px; color:#1e3a8a; margin-top:.5rem; font-size:.85rem; }
+
+.btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
+.btn-outline { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.45rem .85rem; border-radius:6px; cursor:pointer; }
+.btn-danger  { background:#fff; color:#b45309; border:1px solid #fbbf24; padding:.45rem .85rem; border-radius:6px; cursor:pointer; }
+.btn-danger:hover { background:#fef3c7; }
+
+@@media (max-width: 900px) {
+  .seg-kanban { grid-template-columns: 1fr; }
+  .seg-kpis   { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+
+@code {
+    private static readonly (int idx, string texto)[] Preguntas = new[]
+    {
+        (1, "El profesional se presento oportunamente"),
+        (2, "Buena presentacion personal del profesional"),
+        (3, "Amable y respetuoso durante la atencion"),
+        (4, "Como calificaria su experiencia global con VISAL RT S.A.S"),
+        (5, "Recomendaria a VISAL RT S.A.S a un familiar o amigo")
+    };
+
+    private sealed class EditForm
+    {
+        public DateTime? FechaLlamada { get; set; }
+        public int? Pregunta1 { get; set; }
+        public int? Pregunta2 { get; set; }
+        public int? Pregunta3 { get; set; }
+        public int? Pregunta4 { get; set; }
+        public int? Pregunta5 { get; set; }
+        public string? PersonaAtiende { get; set; }
+        public string? Observaciones { get; set; }
+    }
+
+    private string _mesInput = string.Empty; // formato "YYYY-MM"
+    private int _mesActual;
+    private bool _loading = true;
+    private List<SeguimientoEncuestaDto> _items = new();
+    private Guid? _openId;
+    private EditForm _edit = new();
+    private string _msg = string.Empty;
+    private string _actorNombre = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = DateTime.UtcNow;
+        _mesInput = today.ToString("yyyy-MM");
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        _actorNombre = auth.User?.Identity?.Name ?? string.Empty;
+        await RecargarAsync();
+    }
+
+    private async Task OnMesChange(ChangeEventArgs e)
+    {
+        _mesInput = e.Value?.ToString() ?? _mesInput;
+        await RecargarAsync();
+    }
+
+    private async Task RecargarAsync()
+    {
+        if (!DateTime.TryParse(_mesInput + "-01", out var d)) { return; }
+        _mesActual = d.Year * 100 + d.Month;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _items = (await SegSvc.ListarPorMesAsync(_mesActual)).ToList();
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private int Count(string estado) => _items.Count(x => x.Estado == estado);
+
+    private RenderFragment RenderColumna(string estado, string titulo, string colClass) => __b =>
+    {
+        var filas = _items.Where(x => x.Estado == estado).ToList();
+        __b.OpenElement(0, "div"); __b.AddAttribute(1, "class", $"seg-col {colClass}");
+        __b.OpenElement(2, "div"); __b.AddAttribute(3, "class", "seg-col-head");
+        __b.AddMarkupContent(4, $"<b>{titulo}</b><span class=\"seg-col-count\">{filas.Count}</span>");
+        __b.CloseElement();
+        __b.OpenElement(5, "div"); __b.AddAttribute(6, "class", "seg-col-body");
+        foreach (var it in filas)
+        {
+            __b.OpenElement(7, "div");
+            __b.AddAttribute(8, "class", "seg-card");
+            __b.AddAttribute(9, "onclick", EventCallback.Factory.Create(this, () => Abrir(it.Id)));
+            __b.AddMarkupContent(10, $"<b>{System.Net.WebUtility.HtmlEncode(it.PacienteNombre)}</b><small>{it.PacienteTipoDoc} {it.PacienteDocumento}</small>");
+            var metaFecha = it.FechaLlamada?.ToString("dd/MM/yyyy HH:mm") ?? "sin llamar";
+            var metaResp = string.IsNullOrWhiteSpace(it.ResponsableLlamadaNombre) ? "" : $" · {System.Net.WebUtility.HtmlEncode(it.ResponsableLlamadaNombre)}";
+            __b.AddMarkupContent(11, $"<div class=\"seg-card-meta\">{metaFecha}{metaResp}</div>");
+            __b.CloseElement();
+        }
+        if (filas.Count == 0)
+        {
+            __b.AddMarkupContent(12, "<div style=\"padding:.75rem;color:#94a3b8;font-size:.85rem;\">Vacio</div>");
+        }
+        __b.CloseElement();
+        __b.CloseElement();
+    };
+
+    private void Abrir(Guid id)
+    {
+        _openId = id;
+        _msg = string.Empty;
+        var it = _items.First(x => x.Id == id);
+        _edit = new EditForm
+        {
+            FechaLlamada = it.FechaLlamada ?? DateTime.Now,
+            Pregunta1 = it.Pregunta1,
+            Pregunta2 = it.Pregunta2,
+            Pregunta3 = it.Pregunta3,
+            Pregunta4 = it.Pregunta4,
+            Pregunta5 = it.Pregunta5,
+            PersonaAtiende = it.PersonaAtiende,
+            Observaciones = it.Observaciones
+        };
+    }
+
+    private void Cerrar()
+    {
+        _openId = null;
+        _msg = string.Empty;
+    }
+
+    private int? GetPregunta(int idx) => idx switch
+    {
+        1 => _edit.Pregunta1,
+        2 => _edit.Pregunta2,
+        3 => _edit.Pregunta3,
+        4 => _edit.Pregunta4,
+        5 => _edit.Pregunta5,
+        _ => null
+    };
+
+    private void SetPregunta(int idx, int? val)
+    {
+        switch (idx)
+        {
+            case 1: _edit.Pregunta1 = val; break;
+            case 2: _edit.Pregunta2 = val; break;
+            case 3: _edit.Pregunta3 = val; break;
+            case 4: _edit.Pregunta4 = val; break;
+            case 5: _edit.Pregunta5 = val; break;
+        }
+    }
+
+    private async Task Guardar()
+    {
+        if (_openId is not Guid id) { return; }
+        try
+        {
+            var req = new GuardarEncuestaRequest(
+                _edit.FechaLlamada, _edit.Pregunta1, _edit.Pregunta2,
+                _edit.Pregunta3, _edit.Pregunta4, _edit.Pregunta5,
+                _edit.PersonaAtiende, _edit.Observaciones);
+            var ok = await SegSvc.GuardarEncuestaAsync(id, req, Guid.Empty);
+            if (ok)
+            {
+                _msg = "Encuesta guardada.";
+                Cerrar();
+                await RecargarAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _msg = "Error al guardar: " + ex.Message;
+        }
+    }
+
+    private async Task MarcarNoContactado()
+    {
+        if (_openId is not Guid id) { return; }
+        try
+        {
+            await SegSvc.CambiarEstadoAsync(id, "NoContactado", Guid.Empty);
+            Cerrar();
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _msg = "Error: " + ex.Message; }
+    }
+
+    private static string FormatoMes(int mes)
+    {
+        var y = mes / 100;
+        var m = mes % 100;
+        return $"{m:00}/{y}";
+    }
+
+}

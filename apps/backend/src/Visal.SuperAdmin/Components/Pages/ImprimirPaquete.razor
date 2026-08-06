@@ -910,6 +910,10 @@ else
         // no se imprime (equivalente al FormViewer).
         if (!VisibleWhenEvaluator.ShouldShow(n.VisibleWhen, vals)) { return; }
 
+        // No imprimir nunca: gate absoluto — la seccion/campo queda invisible
+        // en impresion sin importar visibilidad o valor.
+        if (n.NoImprimir) { return; }
+
         // HideIfEmpty (campos): si el disenador marco el campo con "No imprimir
         // si vacio" y el valor esta en blanco, se omite. Aplica solo a fields;
         // secciones se ignoran (no aplica el flag).
@@ -939,6 +943,7 @@ else
                 @foreach (var ch in n.Children ?? new())
                 {
                     if (!VisibleWhenEvaluator.ShouldShow(ch.VisibleWhen, vals)) { continue; }
+                    if (ch.NoImprimir) { continue; }
                     if (ch.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(ch, vals)) { continue; }
                     @RenderDocNode(ch, vals)
                 }

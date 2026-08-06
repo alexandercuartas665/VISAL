@@ -221,6 +221,21 @@ public sealed class FormNode
     public bool IsFechaAtencion { get; set; }
 
     /// <summary>
+    /// Si true, el nodo (seccion, campo o bloque de texto) NUNCA aparece en la
+    /// impresion — ni en HistoriaDoc, ImprimirPaquete, ImprimirHcsPaciente,
+    /// DocumentoImprimible ni ImprimirOrdenesFiltradas. En captura sigue visible
+    /// para que el profesional pueda diligenciarlo. Se diferencia de
+    /// <see cref="HideIfEmpty"/> (que solo oculta si el valor esta vacio) y de
+    /// <see cref="PrintOptional"/> (que ofrece un checkbox opcional en el modal
+    /// de impresion). Este flag es duro: el nodo simplemente no se renderiza al
+    /// imprimir. Util para secciones de trabajo interno tipo "Notas rapidas del
+    /// equipo" o campos administrativos que no son parte del documento final.
+    /// Default false. Aplica a todos los tipos de nodo (seccion, campo, texto).
+    /// </summary>
+    [JsonPropertyName("noImprimir")]
+    public bool NoImprimir { get; set; }
+
+    /// <summary>
     /// Plantilla reactiva para autorellenar el campo con valores derivados de
     /// OTROS campos del mismo formulario. Sintaxis: <c>{nombreCampo}</c> se
     /// sustituye por el valor actual del campo con ese Name. Ejemplo:

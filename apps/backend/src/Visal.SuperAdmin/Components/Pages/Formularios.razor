@@ -267,6 +267,12 @@
                         Opcional al imprimir
                     </label>
                 </div>
+                <div class="fb-prop">
+                    <label class="fb-check" title="Cuando esta marcado, la seccion NUNCA aparece en la impresion, aunque tenga datos. En captura sigue visible para diligenciar. Util para secciones de trabajo interno.">
+                        <input type="checkbox" @bind="_selected.NoImprimir" />
+                        &#128683; No imprimir nunca
+                    </label>
+                </div>
                 @RenderVisibleWhenPanel(_selected)
                 <button class="fb-btn fb-btn-danger" @onclick="() => Delete(_selected)">Eliminar seccion</button>
             }
@@ -548,6 +554,7 @@
                     <div class="fb-prop"><label>Placeholder</label><input class="fb-input" @bind="_selected.Placeholder" @bind:event="oninput" /></div>
                     <label class="fb-check"><input type="checkbox" @bind="_selected.Required" /> Requerido</label>
                     <label class="fb-check" title="Si el campo esta vacio, no aparece en la impresion (HC individual, paquete, HCs del paciente, ordenes clinicas). En captura siempre se muestra."><input type="checkbox" @bind="_selected.HideIfEmpty" /> No imprimir si vacio</label>
+                    <label class="fb-check" title="Cuando esta marcado, el campo NUNCA aparece en la impresion, aunque tenga valor. En captura sigue visible."><input type="checkbox" @bind="_selected.NoImprimir" /> &#128683; No imprimir nunca</label>
 
                     @* Fecha real de atencion: se puede marcar en varios campos date/datetime.
                        Al guardar/cerrar la HC, se toma la mayor entre los marcados con valor y se

@@ -784,6 +784,10 @@ else
         // HideIfEmpty solo aplica en modo lectura (impresion). En captura el
         // campo siempre se muestra para que el profesional pueda diligenciarlo.
         if (ReadOnly && node.HideIfEmpty && VisibleWhenEvaluator.IsFieldEmpty(node, Valores)) { return false; }
+        // NoImprimir: gate duro. El nodo desaparece en modo lectura (impresion)
+        // aunque tenga valor. En captura sigue visible para que el profesional
+        // pueda diligenciarlo — el flag solo afecta al render impreso.
+        if (ReadOnly && node.NoImprimir) { return false; }
         return true;
     }
 

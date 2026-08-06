@@ -50,4 +50,9 @@ public interface ISeguimientoService
 
     /// <summary>Cambia el estado (Pendiente / Realizada / NoContactado).</summary>
     Task<bool> CambiarEstadoAsync(Guid id, string estado, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Historial completo: todas las encuestas en estado Realizada del
+    /// tenant, ordenadas por FechaLlamada descendente. Usado por el tab "Historial"
+    /// del modulo Seguimiento para consulta y exportacion.</summary>
+    Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarHistorialRealizadasAsync(CancellationToken ct = default);
 }

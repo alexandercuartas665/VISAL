@@ -113,6 +113,29 @@ public sealed class SeguimientoService(
         return true;
     }
 
+    public async Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarHistorialRealizadasAsync(CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return []; }
+        var filas = await db.SeguimientoEncuestas.AsNoTracking()
+            .Where(x => x.TenantId == tid && x.Estado == "Realizada")
+            .Join(db.Pacientes.AsNoTracking(),
+                s => s.PacienteId,
+                p => p.Id,
+                (s, p) => new SeguimientoEncuestaDto(
+                    s.Id, s.PacienteId,
+                    p.NombreCompleto,
+                    p.TipoDocumento, p.NumeroDocumento,
+                    null, null,
+                    s.Mes, s.Estado, s.FechaLlamada,
+                    s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
+                    s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
+                    s.PersonaAtiende, s.Observaciones))
+            .ToListAsync(ct);
+        return filas
+            .OrderByDescending(x => x.FechaLlamada ?? DateTime.MinValue)
+            .ToList();
+    }
+
     public async Task<bool> CambiarEstadoAsync(Guid id, string estado, Guid actor, CancellationToken ct = default)
     {
         if (!EstadosValidos.Contains(estado)) { throw new InvalidOperationException($"Estado invalido: {estado}"); }

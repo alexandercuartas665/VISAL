@@ -6,6 +6,7 @@
 @using Visal.Application.Tenancy
 @inject ISeguimientoService SegSvc
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
 
 <PageTitle>Seguimiento SIAU - Visal</PageTitle>
 
@@ -22,11 +23,16 @@
         </div>
     </div>
 
+    <div class="seg-tabs">
+        <button class="seg-tab @(_tab == "kanban" ? "sel" : "")" @onclick='() => _tab = "kanban"'>Kanban</button>
+        <button class="seg-tab @(_tab == "historial" ? "sel" : "")" @onclick='() => _tab = "historial"'>Historial</button>
+    </div>
+
     @if (_loading)
     {
         <div class="seg-loading">Cargando encuestas del mes...</div>
     }
-    else
+    else if (_tab == "kanban")
     {
         <div class="seg-kpis">
             <div class="seg-kpi seg-kpi-pend"><b>@Count("Pendiente")</b> Pendientes</div>
@@ -40,6 +46,65 @@
             @RenderColumna("NoContactado", "No contactados", "seg-col-noc")
             @RenderColumna("Realizada", "Encuesta realizada", "seg-col-ok")
         </div>
+    }
+    else
+    {
+        @* Tab Historial: tabla con TODAS las realizadas de todos los meses *@
+        <div class="seg-hist-tools">
+            <label>Buscar</label>
+            <input type="text" placeholder="Paciente, documento, observaciones..." value="@_histFiltro" @oninput="OnHistFiltroInput" />
+            <button class="btn-outline" @onclick="RecargarHistorialAsync">Recargar</button>
+        </div>
+
+        @if (_histLoading)
+        {
+            <div class="seg-loading">Cargando historial...</div>
+        }
+        else
+        {
+            <div class="seg-hist-meta">Realizadas: <b>@FiltrarHistorial().Count()</b></div>
+            <div class="seg-hist-wrap">
+                <table class="seg-hist-tabla">
+                    <thead>
+                        <tr>
+                            <th>Fecha llamada</th>
+                            <th>Mes</th>
+                            <th>Paciente</th>
+                            <th>Documento</th>
+                            <th>Responsable</th>
+                            <th>Persona atiende</th>
+                            <th>P1</th><th>P2</th><th>P3</th><th>P4</th><th>P5</th>
+                            <th>Observaciones</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in FiltrarHistorial())
+                        {
+                            <tr>
+                                <td>@(h.FechaLlamada?.ToString("dd/MM/yyyy HH:mm") ?? "-")</td>
+                                <td>@FormatoMes(h.Mes)</td>
+                                <td>@h.PacienteNombre</td>
+                                <td class="mono">@h.PacienteTipoDoc @h.PacienteDocumento</td>
+                                <td>@(h.ResponsableLlamadaNombre ?? "-")</td>
+                                <td>@(h.PersonaAtiende ?? "-")</td>
+                                <td class="txt-c">@(h.Pregunta1?.ToString() ?? "-")</td>
+                                <td class="txt-c">@(h.Pregunta2?.ToString() ?? "-")</td>
+                                <td class="txt-c">@(h.Pregunta3?.ToString() ?? "-")</td>
+                                <td class="txt-c">@(h.Pregunta4?.ToString() ?? "-")</td>
+                                <td class="txt-c">@(h.Pregunta5?.ToString() ?? "-")</td>
+                                <td class="seg-hist-obs">@(h.Observaciones ?? "-")</td>
+                                <td><button class="btn-mini" @onclick="() => VerHistorialItem(h)">Ver</button></td>
+                            </tr>
+                        }
+                        @if (!FiltrarHistorial().Any())
+                        {
+                            <tr><td colspan="13" class="seg-hist-vacio">Sin encuestas realizadas.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
     }
 </div>
 
@@ -159,7 +224,33 @@
 .seg-col-noc  { border-top: 4px solid #b45309; }
 .seg-col-ok   { border-top: 4px solid #16a34a; }
 
-.seg-card { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .75rem; cursor:pointer; transition:box-shadow .15s ease; }
+.seg-card { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .75rem; cursor:grab; transition:box-shadow .15s ease, transform .1s; }
+.seg-card:active { cursor:grabbing; }
+.seg-col-drag { background: rgba(59,130,246,.08) !important; border-color:#93c5fd !important; box-shadow: inset 0 0 0 2px #3b82f6; }
+.seg-col-filter { display:flex; align-items:center; gap:.4rem; padding: .35rem .55rem; border-bottom: 1px dashed #e5e7eb; }
+.seg-col-filter label { font-size:.72rem; color:#64748b; }
+.seg-col-filter select { padding:.2rem .35rem; border:1px solid #cbd5e1; border-radius:5px; font-size:.75rem; background:#fff; }
+
+.seg-tabs { display:flex; gap:.25rem; border-bottom:1px solid #e5e7eb; margin-bottom:1rem; }
+.seg-tab { background:transparent; border:none; padding:.55rem 1rem; font-size:.9rem; color:#64748b; cursor:pointer; border-bottom:2px solid transparent; }
+.seg-tab:hover { color:#0f172a; }
+.seg-tab.sel { color:#2563eb; border-bottom-color:#2563eb; font-weight:600; }
+
+.seg-hist-tools { display:flex; gap:.5rem; align-items:center; margin-bottom:.75rem; }
+.seg-hist-tools label { font-size:.78rem; color:#334155; }
+.seg-hist-tools input { padding:.4rem .6rem; border:1px solid #cbd5e1; border-radius:6px; min-width:320px; }
+.seg-hist-meta { color:#475569; font-size:.85rem; margin-bottom:.35rem; }
+.seg-hist-wrap { border:1px solid #e5e7eb; border-radius:8px; overflow:auto; max-height: calc(100vh - 260px); }
+.seg-hist-tabla { width:100%; border-collapse: collapse; font-size:.8rem; }
+.seg-hist-tabla thead th { position:sticky; top:0; background:#f1f5f9; padding:.45rem .55rem; text-align:left; border-bottom:1px solid #cbd5e1; color:#334155; white-space:nowrap; }
+.seg-hist-tabla tbody td { padding:.4rem .55rem; border-bottom:1px solid #f1f5f9; color:#0f172a; }
+.seg-hist-tabla tbody tr:hover { background:#f8fafc; }
+.seg-hist-tabla .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.75rem; color:#475569; }
+.seg-hist-tabla .txt-c { text-align:center; }
+.seg-hist-obs { max-width:280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg-hist-vacio { text-align:center; color:#94a3b8; padding:1.5rem 0; }
+.btn-mini { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.2rem .55rem; border-radius:5px; cursor:pointer; font-size:.75rem; }
+.btn-mini:hover { background:#f8fafc; }
 .seg-card:hover { box-shadow:0 4px 12px rgba(15,23,42,.08); }
 .seg-card b { color:#0f172a; }
 .seg-card small { display:block; color:#64748b; font-size:.72rem; margin-top:.15rem; }
@@ -244,6 +335,22 @@
     private string _msg = string.Empty;
     private string _actorNombre = string.Empty;
 
+    // Tabs: "kanban" | "historial"
+    private string _tab = "kanban";
+
+    // Filtro dias hacia atras en columna Realizada. 0 = todas.
+    private int _diasRealizada = 7;
+
+    // Drag & drop entre columnas.
+    private Guid? _dragId;
+    private string? _dragOverCol;
+
+    // Historial (todas las realizadas del tenant).
+    private bool _histLoading = false;
+    private List<SeguimientoEncuestaDto> _historial = new();
+    private string _histFiltro = string.Empty;
+    private bool _histCargado = false;
+
     protected override async Task OnInitializedAsync()
     {
         var today = DateTime.UtcNow;
@@ -281,20 +388,48 @@
     private RenderFragment RenderColumna(string estado, string titulo, string colClass) => __b =>
     {
         var filas = _items.Where(x => x.Estado == estado).ToList();
-        __b.OpenElement(0, "div"); __b.AddAttribute(1, "class", $"seg-col {colClass}");
-        __b.OpenElement(2, "div"); __b.AddAttribute(3, "class", "seg-col-head");
-        __b.AddMarkupContent(4, $"<b>{titulo}</b><span class=\"seg-col-count\">{filas.Count}</span>");
+        // Filtro adicional para columna "Realizada": limitar a los ultimos N dias
+        // por FechaLlamada. _diasRealizada = 0 significa "todos".
+        if (estado == "Realizada" && _diasRealizada > 0)
+        {
+            var corte = DateTime.UtcNow.AddDays(-_diasRealizada);
+            filas = filas.Where(x => x.FechaLlamada is DateTime f && f >= corte).ToList();
+        }
+
+        __b.OpenElement(0, "div");
+        __b.AddAttribute(1, "class", $"seg-col {colClass} {(_dragOverCol == estado ? "seg-col-drag" : "")}");
+        __b.AddAttribute(2, "ondragover", "event.preventDefault()");
+        __b.AddEventPreventDefaultAttribute(3, "ondragover", true);
+        __b.AddAttribute(4, "ondragenter", EventCallback.Factory.Create(this, () => OnDragEnterCol(estado)));
+        __b.AddAttribute(5, "ondragleave", EventCallback.Factory.Create(this, () => OnDragLeaveCol(estado)));
+        __b.AddAttribute(6, "ondrop", EventCallback.Factory.Create(this, () => OnDropCol(estado)));
+        __b.OpenElement(7, "div"); __b.AddAttribute(8, "class", "seg-col-head");
+        __b.AddMarkupContent(9, $"<b>{titulo}</b><span class=\"seg-col-count\">{filas.Count}</span>");
         __b.CloseElement();
-        __b.OpenElement(5, "div"); __b.AddAttribute(6, "class", "seg-col-body");
+        if (estado == "Realizada")
+        {
+            __b.OpenElement(10, "div"); __b.AddAttribute(11, "class", "seg-col-filter");
+            __b.AddMarkupContent(12, "<label>Mostrar:</label>");
+            __b.OpenElement(13, "select");
+            __b.AddAttribute(14, "value", _diasRealizada.ToString());
+            __b.AddAttribute(15, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this, OnDiasRealizadaChange));
+            __b.AddMarkupContent(16, "<option value=\"7\">Ultimos 7 dias</option><option value=\"15\">Ultimos 15 dias</option><option value=\"30\">Ultimos 30 dias</option><option value=\"0\">Todas</option>");
+            __b.CloseElement();
+            __b.CloseElement();
+        }
+        __b.OpenElement(20, "div"); __b.AddAttribute(21, "class", "seg-col-body");
         foreach (var it in filas)
         {
-            __b.OpenElement(7, "div");
-            __b.AddAttribute(8, "class", "seg-card");
-            __b.AddAttribute(9, "onclick", EventCallback.Factory.Create(this, () => Abrir(it.Id)));
-            __b.AddMarkupContent(10, $"<b>{System.Net.WebUtility.HtmlEncode(it.PacienteNombre)}</b><small>{it.PacienteTipoDoc} {it.PacienteDocumento}</small>");
+            __b.OpenElement(22, "div");
+            __b.AddAttribute(23, "class", "seg-card");
+            __b.AddAttribute(24, "draggable", "true");
+            __b.AddAttribute(25, "ondragstart", EventCallback.Factory.Create(this, () => OnDragStart(it.Id)));
+            __b.AddAttribute(26, "ondragend", EventCallback.Factory.Create(this, OnDragEnd));
+            __b.AddAttribute(27, "onclick", EventCallback.Factory.Create(this, () => Abrir(it.Id)));
+            __b.AddMarkupContent(28, $"<b>{System.Net.WebUtility.HtmlEncode(it.PacienteNombre)}</b><small>{it.PacienteTipoDoc} {it.PacienteDocumento}</small>");
             var metaFecha = it.FechaLlamada?.ToString("dd/MM/yyyy HH:mm") ?? "sin llamar";
             var metaResp = string.IsNullOrWhiteSpace(it.ResponsableLlamadaNombre) ? "" : $" · {System.Net.WebUtility.HtmlEncode(it.ResponsableLlamadaNombre)}";
-            __b.AddMarkupContent(11, $"<div class=\"seg-card-meta\">{metaFecha}{metaResp}</div>");
+            __b.AddMarkupContent(29, $"<div class=\"seg-card-meta\">{metaFecha}{metaResp}</div>");
             __b.CloseElement();
         }
         if (filas.Count == 0)
@@ -420,6 +555,95 @@
         var next = lista[nav.Pos + delta];
         Abrir(next.Id);
         await Task.CompletedTask;
+    }
+
+    // === Drag & drop entre columnas kanban ===
+
+    private void OnDragStart(Guid id)
+    {
+        _dragId = id;
+        _ = JS.InvokeVoidAsync("visalDragAllow.enable");
+    }
+
+    private void OnDragEnd()
+    {
+        _dragId = null;
+        _dragOverCol = null;
+        _ = JS.InvokeVoidAsync("visalDragAllow.disable");
+    }
+
+    private void OnDragEnterCol(string estado) { _dragOverCol = estado; }
+    private void OnDragLeaveCol(string estado)
+    {
+        if (_dragOverCol == estado) { _dragOverCol = null; }
+    }
+
+    private async Task OnDropCol(string estadoDestino)
+    {
+        _dragOverCol = null;
+        if (_dragId is not Guid id) { return; }
+        var dragId = id; _dragId = null;
+        _ = JS.InvokeVoidAsync("visalDragAllow.disable");
+        var cur = _items.FirstOrDefault(x => x.Id == dragId);
+        if (cur is null || cur.Estado == estadoDestino) { return; }
+        try
+        {
+            await SegSvc.CambiarEstadoAsync(dragId, estadoDestino, Guid.Empty);
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _msg = "Error al mover: " + ex.Message; }
+    }
+
+    // === Filtro dias en columna Realizada ===
+
+    private void OnDiasRealizadaChange(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var n)) { _diasRealizada = n; }
+    }
+
+    // === Tab Historial: todas las Realizadas del tenant ===
+
+    private void OnHistFiltroInput(ChangeEventArgs e)
+    {
+        _histFiltro = e.Value?.ToString() ?? "";
+    }
+
+    private IEnumerable<SeguimientoEncuestaDto> FiltrarHistorial()
+    {
+        if (!_histCargado) { _ = RecargarHistorialAsync(); return Enumerable.Empty<SeguimientoEncuestaDto>(); }
+        var q = _historial.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_histFiltro))
+        {
+            var f = _histFiltro.Trim().ToLowerInvariant();
+            q = q.Where(x =>
+                (x.PacienteNombre ?? "").ToLowerInvariant().Contains(f) ||
+                (x.PacienteDocumento ?? "").ToLowerInvariant().Contains(f) ||
+                (x.Observaciones ?? "").ToLowerInvariant().Contains(f) ||
+                (x.PersonaAtiende ?? "").ToLowerInvariant().Contains(f));
+        }
+        return q.OrderByDescending(x => x.FechaLlamada ?? DateTime.MinValue);
+    }
+
+    private async Task RecargarHistorialAsync()
+    {
+        _histLoading = true;
+        StateHasChanged();
+        try
+        {
+            _historial = (await SegSvc.ListarHistorialRealizadasAsync()).ToList();
+            _histCargado = true;
+        }
+        catch (Exception ex) { _msg = "Error historial: " + ex.Message; }
+        finally { _histLoading = false; StateHasChanged(); }
+    }
+
+    private void VerHistorialItem(SeguimientoEncuestaDto h)
+    {
+        // Abre el modal Kanban con este id. Si no esta en _items (por ser de otro mes),
+        // lo agregamos temporalmente para que Abrir funcione.
+        if (!_items.Any(x => x.Id == h.Id)) { _items.Add(h); }
+        _tab = "kanban";
+        Abrir(h.Id);
     }
 
     private async Task OnMoverEstadoAsync(ChangeEventArgs e)

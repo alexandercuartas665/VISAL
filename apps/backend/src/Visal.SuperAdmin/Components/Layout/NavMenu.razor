@@ -113,6 +113,14 @@
             <span>Seguimiento</span>
         </NavLink>
 
+        @* Reportes: consulta tabular administrable por reporte + usuario. El servicio
+           filtra los reportes visibles segun ReporteUsuario; si no hay asignaciones
+           en un reporte, es publico dentro del tenant. *@
+        <NavLink class="visal-nav-link" href="reportes">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8"/><path d="M8 8h8"/><path d="M8 16h5"/></svg>
+            <span>Reportes</span>
+        </NavLink>
+
         @* Tableros: modulo colaborativo (Kanban), acceso por membership del propio
            tablero — no depende de un permiso global, cualquier usuario autenticado
            puede tener sus tableros o ser invitado. *@
@@ -364,6 +372,13 @@
                     <span>Menu HC por servicio</span>
                 </NavLink>
             }
+
+            @* Reportes: administracion. Sin permiso fino aun — solo admin llega
+               a esta seccion del menu. *@
+            <NavLink class="visal-nav-link" href="config/reportes">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 17V9"/><path d="M15 17v-5"/><path d="M12 17V7"/></svg>
+                <span>Configurar Reportes</span>
+            </NavLink>
 
             @if (Puede("cfg-tipologia-archivos"))
             {

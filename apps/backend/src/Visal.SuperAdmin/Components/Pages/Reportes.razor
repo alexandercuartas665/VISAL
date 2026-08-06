@@ -1,0 +1,235 @@
+@page "/reportes"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Globalization
+@using Visal.Application.Tenancy
+@using Visal.Application.Common
+@using Microsoft.EntityFrameworkCore
+@inject IReporteService ReportSvc
+@inject IApplicationDbContext Db
+@inject ITenantContext Tenant
+
+<PageTitle>Reportes - Visal</PageTitle>
+
+<div class="rep-page">
+    <div class="rep-head">
+        <div>
+            <div class="rep-eyebrow">Consulta y descarga</div>
+            <h1 class="rep-title">Reportes</h1>
+        </div>
+        <div class="rep-select">
+            <label>Reporte</label>
+            <select @bind="_reporteId">
+                <option value="">-- Seleccione --</option>
+                @foreach (var r in _reportes)
+                {
+                    <option value="@r.Id">@r.Nombre</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    @if (_reporte is ReporteConfigDto sel)
+    {
+        <div class="rep-desc">@sel.Descripcion</div>
+        <div class="rep-filtros">
+            @if (sel.FiltraFechas)
+            {
+                <div>
+                    <label>Desde</label>
+                    <input type="date" @bind="_desde" />
+                </div>
+                <div>
+                    <label>Hasta</label>
+                    <input type="date" @bind="_hasta" />
+                </div>
+            }
+            @if (sel.FiltraSede)
+            {
+                <div>
+                    <label>Sede</label>
+                    <select @bind="_sedeId">
+                        <option value="">Todas las mias</option>
+                        @foreach (var s in _misSedes)
+                        {
+                            <option value="@s.Id">@s.Nombre</option>
+                        }
+                    </select>
+                </div>
+            }
+            <div class="rep-actions">
+                <button class="btn-primary" disabled="@_running" @onclick="EjecutarAsync">
+                    @(_running ? "Ejecutando..." : "Ejecutar")
+                </button>
+                @if (_resultado is not null && _resultado.TotalFilas > 0)
+                {
+                    <button class="btn-outline" @onclick="DescargarCsv">Descargar CSV</button>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="rep-error">@_error</div>
+        }
+
+        @if (_resultado is ReporteResultado res && res.TotalFilas > 0)
+        {
+            <div class="rep-meta">Filas: <b>@res.TotalFilas</b></div>
+            <div class="rep-tabla-wrap">
+                <table class="rep-tabla">
+                    <thead>
+                        <tr>@foreach (var c in res.Columnas) { <th>@c</th> }</tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in res.Filas)
+                        {
+                            <tr>
+                                @for (var i = 0; i < res.Columnas.Count; i++)
+                                {
+                                    var v = i < row.Count ? row[i] : null;
+                                    <td>@FormatoCelda(v)</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else if (_resultado is not null)
+        {
+            <div class="rep-vacio">La consulta no devolvio filas.</div>
+        }
+    }
+    else
+    {
+        <div class="rep-vacio">Seleccione un reporte para comenzar.</div>
+    }
+</div>
+
+<style>
+.rep-page { padding: 1rem 1.25rem; }
+.rep-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom: .75rem; }
+.rep-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.rep-title { margin:.15rem 0 0 0; font-size:1.55rem; color:#0f172a; }
+.rep-select { display:flex; gap:.5rem; align-items:center; }
+.rep-select select { padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:6px; min-width:260px; }
+.rep-desc { color:#475569; margin: .25rem 0 1rem; }
+.rep-filtros { display:flex; gap:1rem; align-items:flex-end; margin-bottom: 1rem; flex-wrap:wrap; }
+.rep-filtros label { display:block; font-size:.75rem; color:#334155; margin-bottom:.2rem; }
+.rep-filtros input, .rep-filtros select { padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; }
+.rep-actions { display:flex; gap:.5rem; }
+.rep-error { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:.6rem .85rem; border-radius:6px; margin-bottom:.75rem; }
+.rep-meta { color:#475569; margin-bottom:.35rem; font-size:.85rem; }
+.rep-tabla-wrap { border:1px solid #e5e7eb; border-radius:8px; overflow:auto; max-height: calc(100vh - 340px); }
+.rep-tabla { width:100%; border-collapse: collapse; font-size:.85rem; }
+.rep-tabla thead th { position:sticky; top:0; background:#f1f5f9; text-align:left; padding:.5rem .6rem; border-bottom:1px solid #cbd5e1; }
+.rep-tabla tbody td { padding:.4rem .6rem; border-bottom:1px solid #f1f5f9; color:#0f172a; }
+.rep-tabla tbody tr:hover { background:#f8fafc; }
+.rep-vacio { color:#94a3b8; padding:1.25rem 0; }
+.btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
+.btn-primary:disabled { opacity:.6; }
+.btn-outline { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.45rem .85rem; border-radius:6px; cursor:pointer; }
+</style>
+
+@code {
+    [Inject] private Microsoft.JSInterop.IJSRuntime JS { get; set; } = default!;
+
+    private List<ReporteConfigDto> _reportes = new();
+    private Guid? _reporteId;
+    private ReporteConfigDto? _reporte => _reporteId is Guid id ? _reportes.FirstOrDefault(x => x.Id == id) : null;
+    private DateTime? _desde;
+    private DateTime? _hasta;
+    private Guid? _sedeId;
+    private bool _running;
+    private ReporteResultado? _resultado;
+    private string _error = string.Empty;
+    private record SedeItem(Guid Id, string Nombre);
+    private List<SedeItem> _misSedes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _reportes = (await ReportSvc.ListarMisReportesAsync()).ToList();
+        var userId = Tenant.UserId;
+        if (userId is Guid uid)
+        {
+            _misSedes = await (
+                from tus in ((DbContext)Db).Set<Visal.Domain.Entities.TenantUserSucursal>().AsNoTracking()
+                join tu in ((DbContext)Db).Set<Visal.Domain.Entities.TenantUser>().AsNoTracking()
+                    on tus.TenantUserId equals tu.Id
+                join suc in ((DbContext)Db).Set<Visal.Domain.Entities.Sucursal>().AsNoTracking()
+                    on tus.SucursalId equals suc.Id
+                where tu.PlatformUserId == uid
+                orderby suc.Nombre
+                select new SedeItem(suc.Id, suc.Nombre)
+            ).ToListAsync();
+        }
+    }
+
+    private async Task EjecutarAsync()
+    {
+        _error = string.Empty;
+        _resultado = null;
+        if (_reporteId is not Guid id) { return; }
+        _running = true;
+        try
+        {
+            var req = new EjecutarReporteRequest(
+                _sedeId,
+                _desde.HasValue ? DateOnly.FromDateTime(_desde.Value) : null,
+                _hasta.HasValue ? DateOnly.FromDateTime(_hasta.Value) : null);
+            _resultado = await ReportSvc.EjecutarAsync(id, req);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private static string FormatoCelda(object? v)
+    {
+        if (v is null) { return ""; }
+        if (v is DateTime dt) { return dt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); }
+        if (v is DateTimeOffset dto) { return dto.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); }
+        if (v is DateOnly d) { return d.ToString("yyyy-MM-dd"); }
+        return Convert.ToString(v, CultureInfo.InvariantCulture) ?? "";
+    }
+
+    private async Task DescargarCsv()
+    {
+        if (_resultado is null || _reporte is null) { return; }
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(string.Join(",", _resultado.Columnas.Select(EscapeCsv)));
+        foreach (var row in _resultado.Filas)
+        {
+            sb.AppendLine(string.Join(",", row.Select(x => EscapeCsv(FormatoCelda(x)))));
+        }
+        var fileName = $"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        var base64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("eval", $@"
+            (function(){{
+                var a = document.createElement('a');
+                a.href = 'data:text/csv;base64,{base64}';
+                a.download = '{fileName}';
+                document.body.appendChild(a); a.click(); a.remove();
+            }})();");
+    }
+
+    private static string EscapeCsv(string s)
+    {
+        if (s.Contains(',') || s.Contains('"') || s.Contains('\n'))
+        {
+            return "\"" + s.Replace("\"", "\"\"") + "\"";
+        }
+        return s;
+    }
+
+    private static string Sanitize(string s) =>
+        new(s.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_').ToArray());
+}

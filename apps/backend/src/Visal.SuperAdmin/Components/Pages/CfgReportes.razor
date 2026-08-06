@@ -1,0 +1,252 @@
+@page "/config/reportes"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@using Visal.Application.Common
+@using Microsoft.EntityFrameworkCore
+@inject IReporteService ReportSvc
+@inject IApplicationDbContext Db
+
+<PageTitle>Configuracion Reportes - Visal</PageTitle>
+
+<div class="cr-page">
+    <div class="cr-head">
+        <div>
+            <div class="cr-eyebrow">Administracion</div>
+            <h1 class="cr-title">Reportes configurables</h1>
+        </div>
+        <button class="btn-primary" @onclick="Nuevo">+ Nuevo reporte</button>
+    </div>
+
+    <div class="cr-tips">
+        <b>Tokens disponibles en el SQL:</b>
+        <code>@("{tenantId}")</code> · <code>@("{sedeId}")</code> · <code>@("{desde}")</code> · <code>@("{hasta}")</code>.
+        Solo se permite <b>SELECT</b> (o <b>WITH ... SELECT</b>). Ejemplo:
+        <pre>@EjemploSql</pre>
+    </div>
+
+    <table class="cr-tabla">
+        <thead>
+            <tr>
+                <th>#</th><th>Nombre</th><th>Descripcion</th><th>Filtros</th><th>Estado</th><th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _todos.OrderBy(x => x.Orden).ThenBy(x => x.Nombre))
+            {
+                <tr>
+                    <td>@r.Orden</td>
+                    <td><b>@r.Nombre</b></td>
+                    <td class="cr-desc">@r.Descripcion</td>
+                    <td>@(r.FiltraSede ? "Sede " : "")@(r.FiltraFechas ? "Fechas" : "")</td>
+                    <td>@(r.Habilitado ? "Activo" : "Deshabilitado")</td>
+                    <td class="cr-acts">
+                        <button class="btn-outline" @onclick="() => AbrirAsync(r.Id)">Editar</button>
+                        <button class="btn-danger" @onclick="() => EliminarAsync(r.Id)">Eliminar</button>
+                    </td>
+                </tr>
+            }
+            @if (_todos.Count == 0)
+            {
+                <tr><td colspan="6" class="cr-vacio">Sin reportes configurados.</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (_edit is not null)
+{
+    <div class="cr-modal-back" @onclick="Cerrar"></div>
+    <div class="cr-modal">
+        <div class="cr-modal-head">
+            <h3>@(_editId is null ? "Nuevo reporte" : "Editar reporte")</h3>
+            <button class="cr-close" @onclick="Cerrar">×</button>
+        </div>
+        <div class="cr-modal-body">
+            <div class="cr-grid">
+                <div><label>Nombre</label><input @bind="_edit.Nombre" /></div>
+                <div><label>Orden</label><input type="number" @bind="_edit.Orden" style="width:6rem" /></div>
+                <div><label><input type="checkbox" @bind="_edit.Habilitado" /> Habilitado</label></div>
+                <div><label><input type="checkbox" @bind="_edit.FiltraSede" /> Muestra filtro Sede</label></div>
+                <div><label><input type="checkbox" @bind="_edit.FiltraFechas" /> Muestra filtro Desde/Hasta</label></div>
+            </div>
+            <div><label>Descripcion</label><textarea rows="2" @bind="_edit.Descripcion"></textarea></div>
+            <div><label>Query SQL (SELECT solamente, usa {tenantId} {sedeId} {desde} {hasta})</label>
+                <textarea rows="10" @bind="_edit.QuerySql" style="font-family:monospace;font-size:.85rem"></textarea>
+            </div>
+
+            <div class="cr-users">
+                <label>Usuarios que pueden verlo (deja vacio = visible para todos con acceso al modulo):</label>
+                <div class="cr-users-list">
+                    @foreach (var u in _usuarios)
+                    {
+                        var yes = _edit.UsuariosAsignados.Contains(u.Id);
+                        <label class="cr-user">
+                            <input type="checkbox" checked="@yes" @onchange="e => ToggleUsuario(u.Id, (bool)(e.Value ?? false))" />
+                            @u.Nombre <small>@u.Email</small>
+                        </label>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_msg))
+            {
+                <div class="cr-msg @(_error?"cr-msg-err":"cr-msg-ok")">@_msg</div>
+            }
+        </div>
+        <div class="cr-modal-foot">
+            <button class="btn-outline" @onclick="Cerrar">Cancelar</button>
+            <button class="btn-primary" @onclick="GuardarAsync">Guardar</button>
+        </div>
+    </div>
+}
+
+<style>
+.cr-page { padding: 1rem 1.25rem; }
+.cr-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:.75rem; }
+.cr-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.cr-title { margin:.15rem 0 0 0; font-size:1.5rem; color:#0f172a; }
+.cr-tips { background:#eff6ff; border:1px solid #bfdbfe; padding:.65rem .85rem; border-radius:8px; color:#1e3a8a; margin-bottom:1rem; font-size:.85rem; }
+.cr-tips pre { background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:.5rem; margin:.35rem 0 0; overflow-x:auto; font-size:.78rem; color:#0f172a; }
+.cr-tabla { width:100%; border-collapse:collapse; font-size:.9rem; }
+.cr-tabla thead th { text-align:left; padding:.55rem .65rem; background:#f1f5f9; border-bottom:1px solid #cbd5e1; color:#334155; }
+.cr-tabla tbody td { padding:.5rem .65rem; border-bottom:1px solid #f1f5f9; color:#0f172a; }
+.cr-desc { color:#475569; max-width:340px; }
+.cr-acts { text-align:right; white-space:nowrap; }
+.cr-acts button { margin-left:.35rem; }
+.cr-vacio { color:#94a3b8; text-align:center; padding:1.5rem 0; }
+
+.cr-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
+.cr-modal { position:fixed; top:3%; left:50%; transform:translateX(-50%); width:min(820px, 96vw); max-height:94vh;
+            background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401;
+            display:flex; flex-direction:column; overflow:hidden; }
+.cr-modal-head { display:flex; justify-content:space-between; align-items:center; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; }
+.cr-close { background:transparent; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:#64748b; }
+.cr-modal-body { padding:1rem 1.15rem; overflow:auto; }
+.cr-modal-body label { display:block; font-size:.78rem; color:#334155; margin-bottom:.2rem; margin-top:.5rem; }
+.cr-modal-body input, .cr-modal-body textarea, .cr-modal-body select { width:100%; padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; font: inherit; }
+.cr-grid { display:grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap:.5rem; align-items:end; }
+.cr-users { margin-top:.5rem; }
+.cr-users-list { display:grid; grid-template-columns: repeat(2, 1fr); gap:.35rem; max-height:180px; overflow:auto; border:1px solid #e5e7eb; padding:.5rem; border-radius:6px; }
+.cr-user { display:flex; gap:.4rem; align-items:center; font-size:.85rem; }
+.cr-user small { color:#94a3b8; }
+.cr-modal-foot { padding:.75rem 1.15rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
+.cr-msg { padding:.5rem .75rem; border-radius:6px; margin-top:.5rem; font-size:.85rem; }
+.cr-msg-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
+.cr-msg-err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+.btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
+.btn-outline { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.4rem .75rem; border-radius:6px; cursor:pointer; }
+.btn-danger  { background:#fff; color:#b91c1c; border:1px solid #fecaca; padding:.4rem .75rem; border-radius:6px; cursor:pointer; }
+</style>
+
+@code {
+    private sealed class EditForm
+    {
+        public string Nombre { get; set; } = string.Empty;
+        public string? Descripcion { get; set; }
+        public string QuerySql { get; set; } = string.Empty;
+        public bool FiltraSede { get; set; } = true;
+        public bool FiltraFechas { get; set; } = true;
+        public bool Habilitado { get; set; } = true;
+        public int Orden { get; set; }
+        public HashSet<Guid> UsuariosAsignados { get; set; } = new();
+    }
+
+    private record UsuarioItem(Guid Id, string Nombre, string Email);
+
+    private const string EjemploSql = @"SELECT numero_documento, nombre_completo, creado_en
+FROM pacientes
+WHERE tenant_id = {tenantId} AND (@_desde IS NULL OR creado_en >= {desde})
+ORDER BY creado_en DESC LIMIT 500";
+
+    private List<ReporteConfigDto> _todos = new();
+    private List<UsuarioItem> _usuarios = new();
+    private EditForm? _edit;
+    private Guid? _editId;
+    private string _msg = string.Empty;
+    private bool _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RecargarAsync();
+        _usuarios = await ((DbContext)Db).Set<Visal.Domain.Entities.PlatformUser>().AsNoTracking()
+            .OrderBy(u => u.DisplayName ?? u.Username)
+            .Select(u => new UsuarioItem(u.Id, u.DisplayName ?? u.Username ?? "(sin nombre)", u.Email ?? ""))
+            .ToListAsync();
+    }
+
+    private async Task RecargarAsync()
+    {
+        _todos = (await ReportSvc.ListarTodosAsync()).ToList();
+    }
+
+    private void Nuevo()
+    {
+        _editId = null;
+        _edit = new EditForm { Orden = _todos.Count + 1 };
+        _msg = string.Empty; _error = false;
+    }
+
+    private async Task AbrirAsync(Guid id)
+    {
+        var det = await ReportSvc.ObtenerAsync(id);
+        if (det is null) { return; }
+        _editId = id;
+        _edit = new EditForm
+        {
+            Nombre = det.Nombre,
+            Descripcion = det.Descripcion,
+            QuerySql = det.QuerySql,
+            FiltraSede = det.FiltraSede,
+            FiltraFechas = det.FiltraFechas,
+            Habilitado = det.Habilitado,
+            Orden = det.Orden,
+            UsuariosAsignados = det.UsuariosAsignados.ToHashSet()
+        };
+        _msg = string.Empty; _error = false;
+    }
+
+    private void Cerrar() { _edit = null; _editId = null; }
+
+    private void ToggleUsuario(Guid uid, bool on)
+    {
+        if (_edit is null) { return; }
+        if (on) { _edit.UsuariosAsignados.Add(uid); }
+        else    { _edit.UsuariosAsignados.Remove(uid); }
+    }
+
+    private async Task GuardarAsync()
+    {
+        if (_edit is null) { return; }
+        try
+        {
+            var req = new GuardarReporteRequest(
+                _edit.Nombre?.Trim() ?? "",
+                _edit.Descripcion,
+                _edit.QuerySql ?? "",
+                _edit.FiltraSede, _edit.FiltraFechas, _edit.Habilitado, _edit.Orden,
+                _edit.UsuariosAsignados.ToList());
+            if (_editId is Guid id)
+            {
+                await ReportSvc.ActualizarAsync(id, req, Guid.Empty);
+            }
+            else
+            {
+                await ReportSvc.CrearAsync(req, Guid.Empty);
+            }
+            _msg = "Guardado."; _error = false;
+            await RecargarAsync();
+            Cerrar();
+        }
+        catch (Exception ex)
+        {
+            _msg = ex.Message; _error = true;
+        }
+    }
+
+    private async Task EliminarAsync(Guid id)
+    {
+        await ReportSvc.EliminarAsync(id, Guid.Empty);
+        await RecargarAsync();
+    }
+}

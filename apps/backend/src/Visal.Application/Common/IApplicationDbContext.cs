@@ -110,6 +110,8 @@ public interface IApplicationDbContext
     DbSet<PreRevisionIaPending> PreRevisionIaPendings { get; }
     DbSet<DocumentoNota> DocumentoNotas { get; }
     DbSet<SeguimientoEncuesta> SeguimientoEncuestas { get; }
+    DbSet<ReporteConfig> ReporteConfigs { get; }
+    DbSet<ReporteUsuario> ReporteUsuarios { get; }
 
     // Modulo Tableros (Kanban colaborativo)
     DbSet<TaskBoard> TaskBoards { get; }

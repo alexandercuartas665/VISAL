@@ -1751,6 +1751,11 @@
     private void OnDragStart(string dragType)
     {
         _dragType = dragType;
+        // JS puro: escuchar dragover en fase de captura y preventDefault
+        // globalmente. Sin esto, cualquier <button> nativo del header
+        // (↑↓×) rechaza el drop y muestra el cursor "prohibido" antes
+        // de que el bubbling llegue al .fb-section con nuestro handler.
+        _ = JS.InvokeVoidAsync("visalDragAllow.enable");
     }
 
     private void OnDragEnd()
@@ -1758,6 +1763,7 @@
         _dragType = null;
         _dragOverNode = null;
         _dragEnterCounts.Clear();
+        _ = JS.InvokeVoidAsync("visalDragAllow.disable");
     }
 
     private void OnDragEnterSection(FormNode section)

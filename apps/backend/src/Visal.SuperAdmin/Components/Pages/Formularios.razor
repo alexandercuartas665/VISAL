@@ -1732,6 +1732,11 @@
 
     private string? _dragType;          // ej. "field:text", "field:number", "structure:section", "text:heading"
     private FormNode? _dragOverNode;    // seccion sobre la que se esta hovering (para resaltarla)
+    // Contador enter-leave por seccion. Blazor dispara ondragleave cada vez que el
+    // cursor cruza a un hijo interno; usar solo el ultimo leave hace que el hover
+    // parpadee y el drop se pierda. Con el contador solo apagamos el hover cuando
+    // el contador vuelve a 0 (cursor salio realmente de la seccion).
+    private readonly Dictionary<FormNode, int> _dragEnterCounts = new();
 
     private void OnDragStart(string dragType)
     {
@@ -1742,17 +1747,29 @@
     {
         _dragType = null;
         _dragOverNode = null;
+        _dragEnterCounts.Clear();
     }
 
     private void OnDragEnterSection(FormNode section)
     {
         if (_dragType is null) { return; }
+        _dragEnterCounts[section] = _dragEnterCounts.TryGetValue(section, out var c) ? c + 1 : 1;
         _dragOverNode = section;
     }
 
     private void OnDragLeaveSection(FormNode section)
     {
-        if (ReferenceEquals(_dragOverNode, section)) { _dragOverNode = null; }
+        if (!_dragEnterCounts.TryGetValue(section, out var c)) { return; }
+        c--;
+        if (c <= 0)
+        {
+            _dragEnterCounts.Remove(section);
+            if (ReferenceEquals(_dragOverNode, section)) { _dragOverNode = null; }
+        }
+        else
+        {
+            _dragEnterCounts[section] = c;
+        }
     }
 
     private bool IsDragOver(FormNode? section) => ReferenceEquals(_dragOverNode, section);

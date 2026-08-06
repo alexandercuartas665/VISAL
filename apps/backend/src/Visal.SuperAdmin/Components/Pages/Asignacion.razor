@@ -817,10 +817,13 @@ else
     .asg-grid-wrap { border: 1px solid #e2e8f0; border-radius: 8px; max-height: 360px; overflow: auto; background: #fff; }
     .asg-tbl { margin: 0; font-size: 12px; min-width: 100%; }
     .asg-tbl thead th { position: sticky; top: 0; background: #f8fafc; color: #334155; font-size: 11px; font-weight: 600; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
-    .asg-tbl td { vertical-align: middle; font-size: 11.5px; }
-    .asg-row-sel { background: #eff6ff; }
-    .asg-row-sel td { border-left: 2px solid #1565c0; }
-    .asg-tbl td:first-child, .asg-tbl th:first-child { border-left: none; padding-left: 8px; }
+    .asg-tbl td { vertical-align: middle; font-size: 11.5px; transition: background-color .12s ease; }
+    .asg-tbl tbody tr:hover td { background: #f8fafc; }
+    /* Fila seleccionada: fondo azul claro + acento continuo solo en la primera celda
+       (evita la cadena de "lineas verticales" entre columnas). */
+    .asg-row-sel td { background: #dbeafe !important; font-weight: 500; }
+    .asg-row-sel td:first-child { box-shadow: inset 3px 0 0 0 #2563eb; }
+    .asg-tbl td:first-child, .asg-tbl th:first-child { padding-left: 10px; }
     .asg-stack { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
     .asg-stack-row { display: flex; align-items: baseline; gap: 6px; }
     .asg-stack-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.02em; color: #64748b; min-width: 30px; font-weight: 600; }
@@ -935,7 +938,14 @@ else
             var f = _filtroSvc?.Trim().ToLower() ?? "";
             return _servicios
                 .Where(s => _moduloSel == ModuloTodos || s.Modulo == _moduloSel)
-                .Where(s => string.IsNullOrEmpty(_paqueteSel) || s.PaqueteCodigo == _paqueteSel)
+                // Filtro paquete:
+                // - Con paquete elegido: solo los servicios de ese paquete.
+                // - Sin paquete elegido "(todos)": ocultamos los servicios que estan
+                //   dentro de algun paquete — se usa la seleccion explicita del paquete
+                //   para atraerlos. Asi la lista "suelta" queda limpia.
+                .Where(s => string.IsNullOrEmpty(_paqueteSel)
+                    ? string.IsNullOrEmpty(s.PaqueteCodigo)
+                    : s.PaqueteCodigo == _paqueteSel)
                 .Where(s => f.Length == 0
                     || (s.Descripcion ?? "").ToLower().Contains(f)
                     || (s.Codigo ?? "").ToLower().Contains(f)

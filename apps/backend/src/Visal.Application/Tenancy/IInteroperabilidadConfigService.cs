@@ -50,7 +50,8 @@ public sealed record InteroperabilidadCredencialSedeDto(
     string? NombreLlave,
     string? ClientId,
     bool TieneClientSecret,
-    DateTimeOffset? FechaExpiracion);
+    DateTimeOffset? FechaExpiracion,
+    int NumeroSede);
 
 /// <summary>
 /// Payload para crear/actualizar una credencial de sede. El <c>ClientSecretNuevo</c>
@@ -63,7 +64,8 @@ public sealed record InteroperabilidadCredencialSedeSaveRequest(
     string? NombreLlave,
     string? ClientId,
     string? ClientSecretNuevo,
-    DateTimeOffset? FechaExpiracion);
+    DateTimeOffset? FechaExpiracion,
+    int NumeroSede);
 
 /// <summary>
 /// Resultado de la prueba de conexion OAuth2 contra Azure AD para una credencial de sede.

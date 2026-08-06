@@ -89,13 +89,14 @@ public sealed class InteroperabilidadConfigService(
                 cr.NombreLlave,
                 cr.ClientId,
                 TieneClientSecret = !string.IsNullOrEmpty(cr.ClientSecretCifrado),
-                cr.FechaExpiracion
+                cr.FechaExpiracion,
+                cr.NumeroSede
             }).ToListAsync(ct);
 
         return rows.Select(r => new InteroperabilidadCredencialSedeDto(
             r.Id, r.SucursalId, r.SucursalNombre, r.Ambiente,
             r.CodigoHabilitacion, r.NombreLlave, r.ClientId,
-            r.TieneClientSecret, r.FechaExpiracion)).ToList();
+            r.TieneClientSecret, r.FechaExpiracion, r.NumeroSede)).ToList();
     }
 
     public async Task<InteroperabilidadCredencialSedeDto> GuardarCredencialAsync(InteroperabilidadCredencialSedeSaveRequest req, Guid actor, CancellationToken ct = default)
@@ -121,6 +122,7 @@ public sealed class InteroperabilidadConfigService(
         existe.NombreLlave = NullIfEmpty(req.NombreLlave);
         existe.ClientId = NullIfEmpty(req.ClientId);
         existe.FechaExpiracion = req.FechaExpiracion;
+        existe.NumeroSede = req.NumeroSede >= 1 ? req.NumeroSede : 1;
 
         if (!string.IsNullOrWhiteSpace(req.ClientSecretNuevo))
         {
@@ -138,7 +140,8 @@ public sealed class InteroperabilidadConfigService(
         return new InteroperabilidadCredencialSedeDto(
             existe.Id, existe.SucursalId, sucNombre, existe.Ambiente,
             existe.CodigoHabilitacion, existe.NombreLlave, existe.ClientId,
-            !string.IsNullOrEmpty(existe.ClientSecretCifrado), existe.FechaExpiracion);
+            !string.IsNullOrEmpty(existe.ClientSecretCifrado), existe.FechaExpiracion,
+            existe.NumeroSede);
     }
 
     public async Task<bool> EliminarCredencialAsync(Guid credencialId, Guid actor, CancellationToken ct = default)

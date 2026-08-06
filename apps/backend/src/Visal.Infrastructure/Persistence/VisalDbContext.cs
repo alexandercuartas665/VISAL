@@ -1426,6 +1426,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.NombreLlave).HasMaxLength(200);
             b.Property(x => x.ClientId).HasMaxLength(80);
             b.Property(x => x.ClientSecretCifrado).HasColumnType("text");
+            b.Property(x => x.NumeroSede).HasDefaultValue(1);
             b.HasOne(x => x.Sucursal).WithMany().HasForeignKey(x => x.SucursalId)
                 .OnDelete(DeleteBehavior.Cascade);
             // Una credencial por sucursal x ambiente.

@@ -123,12 +123,19 @@ public sealed class IhceSenderService(
             }
         }
 
-        // PASO CLAVE: resolver los UUIDs FHIR reales de las Organizations contra el directorio
-        // IHCE y reescribir el bundle. El builder pone REPS y PAYER-<codigo> como Ids, pero
-        // MinSalud rechaza con BUNDLE-005 si esos ids no existen en su directorio interno —
-        // en su lugar hay que usar los UUIDs FHIR asignados por su servidor. Al enviar, hacemos
-        // $consultar-organizacion / $consultar-eapb, cacheamos el uuid, y reemplazamos en el JSON.
-        var bundleJson = await ResolverOrganizationUuidsAsync(ev, urlBase, apimSubskey, bearer, ct);
+        // 2026-08-06 — REESCRITURA UUID DESACTIVADA (Correo04, caso 2027403862).
+        // La reescritura ResolverOrganizationUuidsAsync (Experimento C, era RDA Paciente)
+        // reemplazaba Organization.id y custodian.reference por UUIDs del directorio IHCE.
+        // Eso contradice frontalmente el Correo04, que exige LITERALMENTE:
+        //   - Organization prestador: id = "7300103531" (REPS puro, sin # ni prefijos)
+        //   - custodian.reference = "#7300103531" estricto
+        //   - Organization pagador: id = codigo oficial (ej. "ESS062"), no uuid
+        // La reescritura ademas explica el err-000 identico de las 13 rondas previas:
+        // sin importar que custodian generara el builder, el cable siempre llevaba el
+        // mismo #uuid — MinSalud comparaba uuid vs REPS del ClientID y rechazaba.
+        // El bundle ahora viaja EXACTAMENTE como lo persiste el builder (auditable 1:1
+        // contra rda_eventos.bundle_json).
+        var bundleJson = ev.BundleJson;
 
         log.LogInformation("Enviando RDA {Id} ({Ambiente}) a {Url}", ev.Id, ev.Ambiente, url);
 

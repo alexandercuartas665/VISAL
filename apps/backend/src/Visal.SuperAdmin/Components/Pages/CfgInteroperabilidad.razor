@@ -132,6 +132,7 @@
                     <th>Sede</th>
                     <th>Ambiente</th>
                     <th>Cod. Habilitacion</th>
+                    <th title="Numero de sede fisica dentro del REPS (default 01). Se usa en Location.id del RDA Consulta.">N° Sede</th>
                     <th>Nombre llave</th>
                     <th>Client ID</th>
                     <th>Secret</th>
@@ -155,6 +156,7 @@
                             }
                         </td>
                         <td class="mono">@c.CodigoHabilitacion</td>
+                        <td class="mono">@c.NumeroSede.ToString("D2")</td>
                         <td>@c.NombreLlave</td>
                         <td class="mono"><small>@c.ClientId</small></td>
                         <td>
@@ -273,6 +275,13 @@
                     <label>Codigo Habilitacion (REPS)</label>
                     <input class="form-control form-control-sm mono" @bind="_modal.CodigoHabilitacion"
                            placeholder="7600112543" />
+                </div>
+                <div class="ase-f">
+                    <label title="Numero de sede fisica dentro del REPS (default 01). MinSalud lo usa en Location.id del RDA Consulta con patron #{REPS}-{NumeroSede}. Solo cambia si esta sede es 02, 03, etc en el portal REPS.">
+                        N° Sede fisica
+                    </label>
+                    <input type="number" min="1" max="99" class="form-control form-control-sm mono"
+                           @bind="_modal.NumeroSede" placeholder="1" />
                 </div>
                 <div class="ase-f">
                     <label>Nombre de la llave</label>
@@ -428,7 +437,8 @@
             NombreLlave = c.NombreLlave,
             ClientId = c.ClientId,
             TieneClientSecret = c.TieneClientSecret,
-            FechaExpiracion = c.FechaExpiracion?.LocalDateTime.Date
+            FechaExpiracion = c.FechaExpiracion?.LocalDateTime.Date,
+            NumeroSede = c.NumeroSede
         };
     }
 
@@ -463,7 +473,8 @@
             var req = new InteroperabilidadCredencialSedeSaveRequest(
                 _modal.SucursalId, _modal.Ambiente,
                 _modal.CodigoHabilitacion, _modal.NombreLlave,
-                _modal.ClientId, _modal.ClientSecretNuevo, fe);
+                _modal.ClientId, _modal.ClientSecretNuevo, fe,
+                _modal.NumeroSede);
             await InterSvc.GuardarCredencialAsync(req, actor);
 
             // Mostrar confirmacion DENTRO del modal para que el usuario vea que si paso algo
@@ -547,5 +558,6 @@
         public string? ClientSecretNuevo { get; set; }
         public bool TieneClientSecret { get; set; }
         public DateTime? FechaExpiracion { get; set; }
+        public int NumeroSede { get; set; } = 1;
     }
 }

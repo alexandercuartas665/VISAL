@@ -90,6 +90,14 @@ public sealed class RdaConsultaBuilderService(
                 join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
                 select a).FirstOrDefaultAsync(ct);
         }
+        // Fallback: aseguradora del paciente. Sin esto, una HC sin asignacion
+        // relacionada emite pagador "DESCONOCIDO" y MinSalud rechaza con
+        // BUNDLE-005 (Organization inexistente en su directorio).
+        if (aseguradora is null && hc.Paciente.AseguradoraId is Guid asegId)
+        {
+            aseguradora = await db.Aseguradoras.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == asegId, ct);
+        }
 
         // Items clinicos de la HC
         var medicamentos = await db.HistoriaClinicaMedicamentos.AsNoTracking()
@@ -108,33 +116,41 @@ public sealed class RdaConsultaBuilderService(
         {
             advertencias.Add("HC sin profesional firmante; se incluye Practitioner anonimo (sera rechazado por ReTHUS).");
         }
-        // Custodian.reference — formato FINAL adoptado ronda 13 (2026-08-04):
-        // NIT completo con DV pegado + REPS, patron `#NIT-Sede` del Correo03
-        // combinado con NIT colombiano oficial (10 digitos incluyendo DV).
+        // Custodian.reference — formato FINAL adoptado (Correo04 - 2026-08-06):
+        // "#{REPS}" puro (10 digitos ligados al ClientID). MinSalud dice literal:
+        // "Debe colocar siempre el codigo de la sede principal (10 digitos).
+        //  Este debe ser el codigo REPS asociado a las llaves de acceso (Client
+        //  ID) entregadas a su institucion."
+        // El recurso Organization se emite en Bundle.entry top-level con
+        // Organization.id = "{REPS}" (mismo REPS, sin #, sin prefijos).
         //
-        // Historial completo de hipotesis probadas contra MinSalud sandbox
-        // (todas rechazadas — ver bitacora Obsidian Capa 5):
-        //   R3  #7300103531              (REPS puro, patron manual v1.4)   -> err-000
-        //   R5  #900123456-7-7300103531  (NIT con guion DV + REPS)         -> err-000
+        // Historial de hipotesis probadas y descartadas antes del Correo04:
+        //   R3  #7300103531              (REPS puro)                       -> err-000
+        //   R5  #900123456-7-7300103531  (NIT con guion + REPS)            -> err-000
         //   R9  #900123456-7300103531    (NIT sin DV + REPS)               -> err-000
         //   R10 #900123456-7300103531-00 (NIT sin DV + REPS + NumeroSede)  -> err-000
         //   R11 #9001234567-7300103531-00(NIT+DV pegado + REPS + sede)     -> err-000
-        //   R13 #9001234567-7300103531   (NIT+DV pegado + REPS)  [ACTUAL]  -> err-000
+        //   R13 #9001234567-7300103531   (NIT+DV pegado + REPS)            -> err-000
         //   B1  #7300103531-01           (REPS + sufijo sede fisica)       -> err-000
         //   B2  urn:uuid:{guid} externo  (Org fuera de contained)          -> HTTP 500
-        // Todas las variantes con hash-ref dan err-000 identico; la variante
-        // externa (urn:uuid) rompe el parser de MinSalud. Conclusion: el formato
-        // NO es la causa. Blocker externo — ver task #600 (portal MinSalud).
-        var nitBase = NitConDvPegado(tenantE.TaxId) ?? "SINNIT";
-        var orgId = $"{nitBase}-{codigoRep}";
-        // 2026-08-03: el `id` del Location conserva sufijo "-01" solo para
-        // distinguirse del `id` de la Organization dentro del contained/bundle
-        // (dos recursos no pueden compartir id). Pero el `identifier.value` del
-        // Location — que MinSalud interpreta como REPS oficial — va sin sufijo:
-        // el REPS oficial es el codigo puro (7300103531), no la construccion
-        // local (7300103531-01). Ver BuildLocation.
-        var locationId = $"{codigoRep}-01";
-        var payerOrgId = aseguradora is not null ? $"PAYER-{aseguradora.Codigo}" : "PAYER-DESCONOCIDO";
+        // Todas fallaban porque emitiamos Organization en Composition.contained[]
+        // en vez de Bundle.entry[]. Correo04 lo clarifico: "dentro de las entradas
+        // (entry) del Bundle no se encuentra ningun recurso de tipo Organization
+        // cuyo campo id sea exactamente 7300103531". Fix estructural incluido.
+        var orgId = codigoRep;
+        // Correo04 (2026-08-06): Location declara la sede efectiva donde se
+        // presto el servicio con el patron "{REPS}-{NumeroSede:D2}". NumeroSede
+        // (1..99) viene de la credencial de la sede — antes estaba hardcoded a
+        // "01"; ahora es configurable por sucursal en /config/interoperabilidad.
+        // El `identifier.value` sigue siendo el REPS puro (ver BuildLocation).
+        var numeroSede = credencial?.NumeroSede is int ns && ns >= 1 ? ns : 1;
+        var locationId = $"{codigoRep}-{numeroSede:D2}";
+        // Correo04 (2026-08-06): el id del pagador debe ser el codigo oficial
+        // asignado, SIN prefijos como "PAYER-". Ejemplo del correo: "id": "ESS062".
+        // Nuestra tabla `aseguradoras.codigo` guarda un codigo interno (ej. 1423,
+        // 13-14); si eventualmente MinSalud rechaza por el codigo mismo, hay que
+        // cargar el EAPB oficial en una columna dedicada (fuera de scope aqui).
+        var payerOrgId = aseguradora is not null ? aseguradora.Codigo : "DESCONOCIDO";
         var encounterId = "Encounter-0";
         var conditionId = "Condition-0";
         var allergyId = "AllergyIntolerance-0";
@@ -164,9 +180,6 @@ public sealed class RdaConsultaBuilderService(
             condition?.Id, allergyId, payerOrgId, occupationId, riskId, meds.Select(m => m.Id!).ToList(),
             services.Select(s => s.Id!).ToList(), disabilityObs.Select(o => o.Id!).ToList());
 
-        composition.Contained.Add(organization);
-        composition.Contained.Add(payerOrg);
-
         // ---------- Bundle ----------
         var bundle = new Bundle
         {
@@ -179,7 +192,23 @@ public sealed class RdaConsultaBuilderService(
         // Emitimos todos los recursos sin meta.profile (los perfiles especificos del IG
         // RDA Consulta son distintos a los de RDA Paciente y no estan documentados aun;
         // MinSalud valida estructura y cardinalidades, no el meta.profile especifico).
+        //
+        // Correo04 (2026-08-06): Organization Prestador y Organization Pagador van
+        // como recursos top-level en Bundle.entry[], NO en Composition.contained[].
+        // El error "Reference '#7300103531' in 'Composition' is missing in the
+        // Bundle" se disparaba porque MinSalud busca la Organization con id=REPS
+        // en las entradas del Bundle (no en contained). Composition.custodian.reference
+        // sigue siendo "#{REPS}" — FHIR permite hash-refs a recursos top-level cuando
+        // sus ids emparejan.
+        //
+        // fullUrl: NO EMITIR. Probado 2026-08-06: MinSalud rechaza con
+        // BUNDLE-003 "Only 'resource' property is allowed in bundle entries."
+        // Su parser exige que Bundle.entry contenga solo 'resource', contradiciendo
+        // la spec FHIR R4 estandar para Bundle.type=document. Mantenemos hash-refs
+        // simples ('#{Id}') apuntando al Resource.id de cada entry top-level.
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = composition });
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = organization });
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = payerOrg });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = patient });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = practitioner });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = location });

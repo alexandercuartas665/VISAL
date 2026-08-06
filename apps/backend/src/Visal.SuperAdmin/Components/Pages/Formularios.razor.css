@@ -78,11 +78,16 @@
 .fb-canvas { flex: 1; min-width: 0; height: 100%; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; transition: background .15s, border-color .15s; }
 .fb-canvas-drag { border-color: var(--primary); background: rgba(21,101,192,.04); box-shadow: inset 0 0 0 2px var(--primary); }
 .fb-section-drag { border-color: var(--primary) !important; border-style: solid !important; background: rgba(21,101,192,.08) !important; box-shadow: 0 0 0 3px rgba(21,101,192,.18); }
-/* Mientras la seccion esta recibiendo un drag, desactivamos los eventos de
-   puntero sobre los hijos internos. Sin esto, el cursor cruza sobre cada
-   campo interno y dispara dragenter/dragleave en cascada — el hover parpadea
-   y ondrop se pierde. Con pointer-events:none todos los eventos van al
-   contenedor .fb-section. */
+/* Durante CUALQUIER drag activo en el lienzo desactivamos los eventos de
+   puntero sobre los hijos internos de cada seccion (titulo, botones ↑↓×,
+   labels, campos). Sin esto (a) el cursor cruza sobre cada campo interno y
+   dispara dragenter/dragleave en cascada — el hover parpadea y ondrop se
+   pierde; (b) los <button> nativos del header cancelan implicitamente el
+   drop y muestran el cursor "prohibido" antes de que .fb-section-drag
+   alcance a aplicarse. Todos los eventos van al contenedor .fb-section
+   padre, que tiene ondragover:preventDefault. */
+.fb-canvas-drag .fb-section-head *,
+.fb-canvas-drag .fb-section-body > *:not(.fb-empty-sm) { pointer-events: none; }
 .fb-section-drag * { pointer-events: none; }
 .fb-empty { text-align: center; color: var(--muted-foreground); padding: 48px 0; font-size: 14px; }
 .fb-empty-sm { color: var(--muted-foreground); font-size: 12px; padding: 8px 2px; }

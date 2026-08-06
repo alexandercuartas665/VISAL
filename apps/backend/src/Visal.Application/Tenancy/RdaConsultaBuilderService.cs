@@ -79,6 +79,19 @@ public sealed class RdaConsultaBuilderService(
             .OrderByDescending(a => a.FechaInicio)
             .FirstOrDefaultAsync(ct);
         var cupsEncuentro = asignacionRel?.ServicioId ?? "890201";
+        // serviceType.coding.display es 1..1 y debe coincidir EXACTO con el nombre
+        // oficial del CUPS (el validador rechaza con 6006 si difiere). Se resuelve
+        // del catalogo de servicios; fallback al nombre oficial del default 890201.
+        var cupsDisplay = await db.CatalogosServicioReferencia.AsNoTracking()
+            .Where(cs => cs.Codigo == cupsEncuentro)
+            .Select(cs => cs.Nombre)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(cupsDisplay))
+        {
+            cupsDisplay = cupsEncuentro == "890201"
+                ? "CONSULTA DE PRIMERA VEZ POR MEDICINA GENERAL"
+                : cupsEncuentro;
+        }
 
         // Pagador (Aseguradora) desde la asignacion -> contrato -> aseguradora
         Aseguradora? aseguradora = null;
@@ -154,10 +167,8 @@ public sealed class RdaConsultaBuilderService(
         var encounterId = "Encounter-0";
         var conditionId = "Condition-0";
         var allergyId = "AllergyIntolerance-0";
-        // El IG MinSalud exige IDs con patron '<ResourceType>-<n>' (n numerico).
-        // Observation-0 = occupation, Observation-{1+i} = disabilities, RiskAssessment-0 = riesgo.
-        var occupationId = "Observation-0";
-        var riskId = "RiskAssessment-0";
+        // sectionAddendumDocuments exige exactamente 1 DocumentReferenceEPIRDA.
+        var docRefId = "DocumentReference-0";
 
         // ---------- Recursos ----------
         var organization = BuildOrganization(tenantE, orgId, codigoRep);
@@ -167,18 +178,22 @@ public sealed class RdaConsultaBuilderService(
         var location = BuildLocation(locationId, codigoRep, sucursal.Nombre, orgId);
         var condition = BuildCondition(hc.Paciente, conditionId, patientId, advertencias);
         var encounter = BuildEncounter(hc, encounterId, patientId, practitionerId, orgId,
-            locationId, cupsEncuentro, condition?.Id, condition?.Code?.Text);
+            locationId, cupsEncuentro, cupsDisplay, condition?.Id, condition?.Code?.Text);
         var allergy = BuildAllergyNkda(allergyId, patientId, encounterId, advertencias);
-        var occupation = BuildOccupation(occupationId, patientId, encounterId, hc.Paciente, advertencias);
 
         var meds = BuildMedicationRequests(medicamentos, patientId, encounterId, practitionerId);
         var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId);
-        var disabilityObs = BuildDisabilityObservations(incapacidades, patientId, encounterId, advertencias);
-        var risk = BuildRiskAssessment(riskId, patientId, encounterId, hc.Paciente, advertencias);
+        // Ocupacion (PatientOccupationAtEncounterRDA), factores de riesgo (RiskFactorRDA)
+        // e incapacidades (AttendanceAllowanceRDA) son entries OPCIONALES en sus secciones
+        // y exigen codigos de ValueSets requeridos (CIUO88AC, FactorRiesgo) que Visal aun
+        // no captura estructuradamente. Se omiten los recursos — sus secciones llevan
+        // narrative — en vez de fabricar codigos que el validador rechaza (9999/99).
+        var documentReference = BuildDocumentReferenceEpicrisis(docRefId, patientId, encounterId,
+            orgId, hc.FechaCierre ?? DateTimeOffset.UtcNow);
 
         var composition = BuildComposition(hc, patientId, encounterId, orgId, practitionerId,
-            condition?.Id, allergyId, payerOrgId, occupationId, riskId, meds.Select(m => m.Id!).ToList(),
-            services.Select(s => s.Id!).ToList(), disabilityObs.Select(o => o.Id!).ToList());
+            condition?.Id, allergyId, payerOrgId, docRefId,
+            meds.Select(m => m.Id!).ToList(), services.Select(s => s.Id!).ToList());
 
         // ---------- Bundle ----------
         var bundle = new Bundle
@@ -215,11 +230,9 @@ public sealed class RdaConsultaBuilderService(
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = encounter });
         if (condition is not null) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = condition }); }
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = allergy });
-        bundle.Entry.Add(new Bundle.EntryComponent { Resource = occupation });
-        bundle.Entry.Add(new Bundle.EntryComponent { Resource = risk });
+        bundle.Entry.Add(new Bundle.EntryComponent { Resource = documentReference });
         foreach (var m in meds) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = m }); }
         foreach (var s in services) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = s }); }
-        foreach (var o in disabilityObs) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = o }); }
 
         var serializer = new FhirJsonSerializer(new SerializerSettings { Pretty = true });
         var bundleJson = serializer.SerializeToString(bundle);
@@ -262,8 +275,8 @@ public sealed class RdaConsultaBuilderService(
 
     private static Composition BuildComposition(HistoriaClinica hc, string patientId, string encounterId,
         string orgId, string practitionerId, string? conditionId, string allergyId,
-        string payerOrgId, string occupationId, string riskId,
-        IReadOnlyList<string> medIds, IReadOnlyList<string> serviceIds, IReadOnlyList<string> disabilityIds)
+        string payerOrgId, string docRefId,
+        IReadOnlyList<string> medIds, IReadOnlyList<string> serviceIds)
     {
         var fin = (hc.FechaCierre ?? DateTimeOffset.UtcNow).ToOffset(TimeSpan.FromHours(-5));
         var c = new Composition
@@ -295,61 +308,40 @@ public sealed class RdaConsultaBuilderService(
             Period = new Period { Start = inicio.ToString("o"), End = fin.ToString("o") }
         });
 
-        // CompositionAmbulatoryRDA requiere 9 secciones nombradas (cardinalidades 1..1).
-        // Si una seccion no tiene datos reales, emitimos placeholder con un entry valido
-        // para satisfacer la cardinalidad.
+        // Secciones exactas del perfil CompositionAmbulatoryRDA (slicing pattern:code,
+        // CLOSED, 9..10). title y code.coding son valores FIJOS del IG — cualquier
+        // desviacion produce "does not match any slice" (1026) + cardinalidad 0 (1028).
+        // Fuente: vulcano.ihcecol.gov.co StructureDefinition-CompositionAmbulatoryRDA
+        // (verificado 2026-08-06). El invariante cmp-1 exige text|entries|sub-sections,
+        // por eso toda seccion lleva narrative ademas de sus entries.
 
-        // 1. sectionPayers
-        var sPag = MakeSection("Información del responsable del pago de los servicios de salud",
-            "48768-6", "Payment sources Document");
+        // 1. sectionPayers (1..1)
+        var sPag = MakeSection("Entidad(es) responsable(s) por el plan de beneficios en salud (consulta)",
+            "48768-6", "Payment sources Document", "Entidad responsable del plan de beneficios.");
         sPag.Entry.Add(ContainedRef(payerOrgId));
         c.Section.Add(sPag);
 
-        // 2. sectionHistoryOfOccupation
-        var sDem = MakeSection("Información sociodemográfica del paciente",
-            "29762-2", "Social history Narrative");
-        sDem.Entry.Add(ContainedRef(occupationId));
+        // 2. sectionHistoryOfOccupation (1..1, entry 0..1) — sin Observation porque la
+        // ocupacion exige codigo del ValueSet CIUO88AC que Visal no captura estructurado.
+        var sDem = MakeSection("Otros datos demográficos",
+            "74208-0", "Demographic information + History of occupation Document",
+            "Sin información estructurada de ocupación para esta atención.");
         c.Section.Add(sDem);
 
-        // 3. sectionAttendanceAllowance (incapacidades)
-        var sInc = MakeSection("Certificados de incapacidad médica generados",
-            "77599-9", "Disability certificate");
-        if (disabilityIds.Count > 0)
-        {
-            foreach (var id in disabilityIds) { sInc.Entry.Add(ContainedRef(id)); }
-        }
-        else
-        {
-            sInc.EmptyReason = MakeCC(new Coding(
-                "http://terminology.hl7.org/CodeSystem/list-empty-reason",
-                "nilknown", "Nil Known"));
-        }
+        // 3. sectionAttendanceAllowance (1..1, entry 0..1 AttendanceAllowanceRDA)
+        var sInc = MakeSection("Datos incapacidad (SIPE – Sistema de Incapacidades y Prestaciones Economicas)",
+            "105583-9", "Worker Sick leave form",
+            "Sin incapacidades registradas en esta atención.");
+        sInc.EmptyReason = MakeCC(new Coding(
+            "http://terminology.hl7.org/CodeSystem/list-empty-reason",
+            "nilknown", "Nil Known"));
         c.Section.Add(sInc);
 
-        // 4. Diagnosticos
-        if (conditionId is not null)
-        {
-            var sDx = MakeSection("Historial de diagnósticos de problemas de salud",
-                "11450-4", "Problem list - Reported");
-            sDx.Entry.Add(ContainedRef(conditionId));
-            c.Section.Add(sDx);
-        }
-
-        // 5. sectionAllergies
-        var sAlg = MakeSection("Historial de alergias, intolerancias y reacciones adversas",
-            "48765-2", "Allergies and adverse reactions Document");
-        sAlg.Entry.Add(ContainedRef(allergyId));
-        c.Section.Add(sAlg);
-
-        // 6. sectionRiskFactors
-        var sRie = MakeSection("Factores de riesgo en salud identificados",
-            "75310-3", "Health risk assessment panel");
-        sRie.Entry.Add(ContainedRef(riskId));
-        c.Section.Add(sRie);
-
-        // 7. sectionMedications
-        var sMed = MakeSection("Medicamentos prescritos durante la atención",
-            "57828-6", "Prescriptions");
+        // 4. sectionMedications (1..1)
+        var sMed = MakeSection("Historial de medicamentos",
+            "10160-0", "History of Medication use Narrative",
+            medIds.Count > 0 ? "Medicamentos prescritos durante la atención."
+                             : "Sin medicamentos prescritos en esta atención.");
         if (medIds.Count > 0)
         {
             foreach (var id in medIds) { sMed.Entry.Add(ContainedRef(id)); }
@@ -362,9 +354,35 @@ public sealed class RdaConsultaBuilderService(
         }
         c.Section.Add(sMed);
 
-        // 8. sectionServiceRequests
-        var sSrv = MakeSection("Servicios de salud solicitados durante la atención",
-            "62387-6", "Interdisciplinary - Plan of care");
+        // 5. sectionAllergies (1..1)
+        var sAlg = MakeSection("Historial de alergias, intolerancias y reacciones adversas",
+            "48765-2", "Allergies and adverse reactions Document",
+            "Registro de alergias del paciente.");
+        sAlg.Entry.Add(ContainedRef(allergyId));
+        c.Section.Add(sAlg);
+
+        // 6. sectionProblems (1..1, entry 1..*) — obligatoria; si no hay Condition el
+        // validador lo reportara como dato faltante de la HC.
+        var sDx = MakeSection("Historial de diagnósticos de problemas de salud",
+            "11450-4", "Problem list - Reported",
+            "Diagnósticos registrados en la atención.");
+        if (conditionId is not null) { sDx.Entry.Add(ContainedRef(conditionId)); }
+        c.Section.Add(sDx);
+
+        // 7. sectionRiskFactors (1..1, entry 0..* RiskFactorRDA)
+        var sRie = MakeSection("Factores de riesgo",
+            "75492-9", "Risk assessment and screening note",
+            "Sin factores de riesgo estructurados registrados en esta atención.");
+        sRie.EmptyReason = MakeCC(new Coding(
+            "http://terminology.hl7.org/CodeSystem/list-empty-reason",
+            "nilknown", "Nil Known"));
+        c.Section.Add(sRie);
+
+        // 8. sectionServiceRequests (1..1)
+        var sSrv = MakeSection("Órdenes, prescripciones o solicitudes de servicio",
+            "61146-1", "Orders for services Document",
+            serviceIds.Count > 0 ? "Servicios solicitados durante la atención."
+                                 : "Sin servicios solicitados en esta atención.");
         if (serviceIds.Count > 0)
         {
             foreach (var id in serviceIds) { sSrv.Entry.Add(ContainedRef(id)); }
@@ -377,22 +395,74 @@ public sealed class RdaConsultaBuilderService(
         }
         c.Section.Add(sSrv);
 
-        // 9. sectionAddendumDocuments (epicrisis PDF — placeholder hasta C5)
-        var sDoc = MakeSection("Documentos adjuntos a la atención (epicrisis)",
-            "11488-4", "Consult Note");
-        sDoc.EmptyReason = MakeCC(new Coding(
-            "http://terminology.hl7.org/CodeSystem/list-empty-reason",
-            "nilknown", "Nil Known"));
+        // 9. sectionAddendumDocuments (1..1, entry 1..1 DocumentReferenceEPIRDA,
+        // emptyReason PROHIBIDO 0..0) — la epicrisis es obligatoria.
+        var sDoc = MakeSection("Documentos de soporte",
+            "55107-7", "Addendum Document",
+            "Epicrisis del encuentro de atención en salud.");
+        sDoc.Entry.Add(ContainedRef(docRefId));
         c.Section.Add(sDoc);
 
         return c;
+    }
+
+    /// <summary>
+    /// Epicrisis conforme DocumentReferenceEPIRDA: status/type/category/description con
+    /// valores fijos del perfil. attachment.contentType es 0..0 en el perfil (el formato
+    /// PDF se declara en content.format urn:ietf:bcp:13), y attachment.data es opcional —
+    /// por ahora se emite attachment con titulo, sin el PDF embebido.
+    /// </summary>
+    // PDF valido de 1 pagina con el texto "Epicrisis del encuentro de atencion en
+    // salud - VISAL RDA" (631 bytes). Placeholder mientras se cablea el PDF real.
+    private const string EpicrisisPlaceholderPdfB64 =
+        "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA4NyA+PgpzdHJlYW0KQlQgL0YxIDEyIFRmIDcyIDcyMCBUZCAoRXBpY3Jpc2lzIGRlbCBlbmN1ZW50cm8gZGUgYXRlbmNpb24gZW4gc2FsdWQgLSBWSVNBTCBSREEpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAowMDAwMDAwMzc4IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDQ4CiUlRU9GCg==";
+
+    private static DocumentReference BuildDocumentReferenceEpicrisis(string docId,
+        string patientId, string encounterId, string orgId, DateTimeOffset fecha)
+    {
+        var d = new DocumentReference
+        {
+            Id = docId,
+            Meta = new Meta { Profile = new[] { $"{ProfileBase}/DocumentReferenceEPIRDA" } },
+            Status = DocumentReferenceStatus.Current,
+            Type = new CodeableConcept(),
+            Subject = ContainedRef(patientId),
+            Date = fecha.ToUniversalTime(),
+            Description = "Epicrisis del encuentro de atención en salud - RDA"
+        };
+        d.Type.Coding.Add(new Coding(LoincSystem, "18842-5", "Discharge summary"));
+        d.Type.Coding.Add(new Coding($"{CodeSystemBase}/ColombianDocumentTypes", "EPI", "Epicrisis"));
+        d.Category.Add(MakeCC(new Coding(LoincSystem, "55108-5", "Clinical presentation Document")));
+        // author 1..1 (Organization prestadora); custodian 1..1 con reference FIJA
+        // 'Organization/MinSalud' (patternString del perfil); securityLabel 1..1 fijo
+        // v3-Confidentiality R 'restricted'.
+        d.Author.Add(ContainedRef(orgId));
+        d.Custodian = new ResourceReference("Organization/MinSalud");
+        d.SecurityLabel.Add(MakeCC(new Coding(
+            "http://terminology.hl7.org/CodeSystem/v3-Confidentiality", "R", "restricted")));
+        d.Content.Add(new DocumentReference.ContentComponent
+        {
+            // MinSalud exige DOC-001 attachment con contenido. PDF placeholder de 1
+            // pagina ("Epicrisis del encuentro...") hasta cablear el PDF real de la HC
+            // via ImprimirPaquete. Sin contentType: el perfil lo prohibe (0..0) y el
+            // formato PDF se declara en content.format.
+            Attachment = new Attachment
+            {
+                Title = "Epicrisis",
+                Data = Convert.FromBase64String(EpicrisisPlaceholderPdfB64)
+            },
+            Format = new Coding("urn:ietf:bcp:13", "application/pdf", "PDF")
+        });
+        d.Context = new DocumentReference.ContextComponent();
+        d.Context.Encounter.Add(ContainedRef(encounterId));
+        return d;
     }
 
     // ===================== Encounter / Location =====================
 
     private static Encounter BuildEncounter(HistoriaClinica hc, string encounterId,
         string patientId, string practitionerId, string orgId, string locationId,
-        string cupsServicio, string? conditionId, string? dxText)
+        string cupsServicio, string cupsDisplay, string? conditionId, string? dxText)
     {
         var ahora = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-5));
         var inicio = hc.FechaApertura.ToOffset(TimeSpan.FromHours(-5));
@@ -422,14 +492,20 @@ public sealed class RdaConsultaBuilderService(
         e.Type.Add(MakeCC(new Coding($"{CodeSystemBase}/GrupoServicios", "01", "Consulta externa")));
         e.Type.Add(MakeCC(new Coding($"{CodeSystemBase}/REPShealthcareServices", "328", "MEDICINA GENERAL")));
         e.Type.Add(MakeCC(new Coding($"{CodeSystemBase}/EntornoAtencion", "05", "Institucional")));
-        // serviceType.coding.display es obligatorio (cardinalidad 1..1 segun MinSalud).
-        e.ServiceType = MakeCC(new Coding($"{CodeSystemBase}/CUPS", cupsServicio,
-            $"Servicio CUPS {cupsServicio}"));
-        // reasonCode es obligatorio (1..1). Usamos el diagnostico del paciente si existe.
-        e.ReasonCode.Add(new CodeableConcept
+        // serviceType.coding.display es 1..1 y debe ser el nombre oficial del CUPS.
+        e.ServiceType = MakeCC(new Coding($"{CodeSystemBase}/CUPS", cupsServicio, cupsDisplay));
+        // reasonCode (1..1): binding requerido a RIPSCausaExternaVersion2Codigos.
+        // Usamos la causa externa RIPS capturada en la HC si su codigo pertenece al
+        // rango de la version 2 (21..44); fallback 38 = ENFERMEDAD GENERAL.
+        var causaCodigo = hc.RipsCausaExternaCodigo;
+        var causaNombre = hc.RipsCausaExternaNombre;
+        if (!int.TryParse(causaCodigo, out var causaNum) || causaNum < 21 || causaNum > 44)
         {
-            Text = string.IsNullOrWhiteSpace(dxText) ? "Consulta general" : dxText
-        });
+            causaCodigo = "38";
+            causaNombre = "ENFERMEDAD GENERAL";
+        }
+        e.ReasonCode.Add(MakeCC(new Coding(
+            $"{CodeSystemBase}/RIPSCausaExternaVersion2", causaCodigo, causaNombre)));
         e.Subject = ContainedRef(patientId);
         var participant = new Encounter.ParticipantComponent
         {
@@ -940,8 +1016,20 @@ public sealed class RdaConsultaBuilderService(
         return digits.Length == 0 ? null : digits;
     }
 
-    private static Composition.SectionComponent MakeSection(string title, string loincCode, string display)
-        => new() { Title = title, Code = MakeCC(new Coding(LoincSystem, loincCode, display)) };
+    private static Composition.SectionComponent MakeSection(string title, string loincCode,
+        string display, string narrativa)
+        => new()
+        {
+            Title = title,
+            Code = MakeCC(new Coding(LoincSystem, loincCode, display)),
+            // cmp-1: toda seccion debe tener text, entries o sub-sections. El narrative
+            // garantiza validez incluso cuando la seccion queda sin entries.
+            Text = new Narrative
+            {
+                Status = Narrative.NarrativeStatus.Generated,
+                Div = $"<div xmlns=\"http://www.w3.org/1999/xhtml\">{narrativa}</div>"
+            }
+        };
 
     private static CodeableConcept MakeCC(Coding c) { var cc = new CodeableConcept(); cc.Coding.Add(c); return cc; }
 

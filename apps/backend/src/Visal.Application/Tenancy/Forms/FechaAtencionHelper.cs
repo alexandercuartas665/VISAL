@@ -50,6 +50,11 @@ public static class FechaAtencionHelper
 
                 if (TryParse(raw, out var dt))
                 {
+                    // Npgsql 6+ exige offset=0 (UTC) para timestamp with time zone.
+                    // Si el string vino sin timezone, TryParse aplica AssumeLocal
+                    // y quedaria con offset -05:00 (Bogota), lo que hace que
+                    // SaveChangesAsync tire InvalidCastException. Normalizamos.
+                    if (dt.Offset != TimeSpan.Zero) { dt = dt.ToUniversalTime(); }
                     if (mayor is null || dt > mayor) { mayor = dt; }
                 }
             }

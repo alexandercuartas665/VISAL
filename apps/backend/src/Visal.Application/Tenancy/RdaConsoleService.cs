@@ -86,7 +86,7 @@ public sealed class RdaConsoleService(
         var e = await db.RdaEventos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return null; }
         return new RdaEventoDetailDto(e.Id, e.BundleJson, e.BundleHash, e.Estado,
-            e.Intentos, e.ErroresJson, e.ReferenciaMinsalud, e.FechaGeneracion, e.FechaEnvio);
+            e.Intentos, e.ErroresJson, e.RespuestaMinsalud, e.ReferenciaMinsalud, e.FechaGeneracion, e.FechaEnvio);
     }
 
     public async Task<RdaEventoCredencialesDto?> ObtenerCredencialesUsadasAsync(Guid id, CancellationToken ct = default)

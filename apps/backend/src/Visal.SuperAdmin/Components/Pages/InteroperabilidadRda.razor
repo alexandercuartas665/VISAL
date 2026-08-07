@@ -438,6 +438,8 @@
 @if (_detail is not null)
 {
     var tieneError = !string.IsNullOrWhiteSpace(_detail.ErroresJson);
+    var tieneRespuesta = !string.IsNullOrWhiteSpace(_detail.RespuestaMinsalud);
+    var respAceptada = _detail.Estado == EstadoRdaEvento.Aceptado;
     <div class="ase-modal-bg" @onclick="CerrarDetalle">
         <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:880px;max-width:1180px;max-height:85vh;display:flex;flex-direction:column;">
             <div class="ase-modal-h">
@@ -455,6 +457,14 @@
                     <li class="nav-item">
                         <button class="nav-link @(_detailTab=="error"?"active":"") text-danger" @onclick='() => _detailTab="error"'>
                             Error recibido
+                        </button>
+                    </li>
+                }
+                @if (tieneRespuesta)
+                {
+                    <li class="nav-item">
+                        <button class="nav-link @(_detailTab=="resp"?"active":"") @(respAceptada?"text-success":"")" @onclick='() => _detailTab="resp"'>
+                            Respuesta MinSalud
                         </button>
                     </li>
                 }
@@ -487,6 +497,34 @@
                             @RenderCredRow("APIM Subscription Key", _cred.ApimSubskey, sensitive: true)
                         </tbody>
                     </table>
+                }
+                else if (_detailTab == "resp" && tieneRespuesta)
+                {
+                    var respPretty = TryPrettyJson(_detail.RespuestaMinsalud!) ?? _detail.RespuestaMinsalud!.Trim();
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+                        @if (respAceptada)
+                        {
+                            <span class="badge bg-success">ACEPTADO</span>
+                            <span style="font-size:12px;color:#666;">Cuerpo que devolvio la plataforma IHCE al aceptar el envio.</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger">@_detail.Estado.ToString().ToUpperInvariant()</span>
+                            <span style="font-size:12px;color:#666;">Cuerpo crudo que devolvio la plataforma IHCE.</span>
+                        }
+                    </div>
+                    @if (string.IsNullOrWhiteSpace(respPretty))
+                    {
+                        <div class="alert alert-secondary" style="font-size:13px;padding:10px 12px;">
+                            La plataforma IHCE respondio <strong>sin cuerpo</strong> (respuesta vacia). El envio fue aceptado por el codigo HTTP.
+                        </div>
+                    }
+                    else
+                    {
+                        var respBg = respAceptada ? "#0b1f14" : "#2d1414";
+                        var respFg = respAceptada ? "#c6f6d5" : "#ffdada";
+                        <pre style="background:@respBg;color:@respFg;padding:14px;border-radius:8px;font-size:12px;max-height:60vh;overflow:auto;margin:0;"><code>@respPretty</code></pre>
+                    }
                 }
                 else if (!tieneError || _detailTab == "bundle")
                 {

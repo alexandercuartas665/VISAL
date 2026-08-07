@@ -144,6 +144,9 @@ public sealed class IhceSenderService(
         // Actualizar estado del evento segun resultado.
         ev.UltimoIntento = DateTimeOffset.UtcNow;
         ev.Intentos += 1;
+        // Guardar SIEMPRE el cuerpo crudo de la respuesta IHCE (aceptado o rechazado),
+        // para poder auditar en la consola "que respondio MinSalud" aunque el envio pase.
+        ev.RespuestaMinsalud = call.ResponseBody;
         string? referencia = null;
         EstadoRdaEvento nuevo;
         if (call.Exito)

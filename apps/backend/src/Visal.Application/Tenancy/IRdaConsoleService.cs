@@ -29,6 +29,7 @@ public sealed record RdaEventoDetailDto(
     EstadoRdaEvento Estado,
     int Intentos,
     string? ErroresJson,
+    string? RespuestaMinsalud,
     string? ReferenciaMinsalud,
     DateTimeOffset FechaGeneracion,
     DateTimeOffset? FechaEnvio);

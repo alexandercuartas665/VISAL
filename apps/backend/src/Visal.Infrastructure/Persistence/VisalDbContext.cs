@@ -1443,6 +1443,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.BundleHash).HasMaxLength(64).IsRequired();
             b.Property(x => x.ReferenciaMinsalud).HasMaxLength(120);
             b.Property(x => x.ErroresJson).HasColumnType("jsonb");
+            // Cuerpo crudo de la respuesta IHCE (aceptado o rechazado). text, NO jsonb:
+            // MinSalud puede responder cuerpo vacio o no-JSON en aceptados y jsonb lo rechazaria.
+            b.Property(x => x.RespuestaMinsalud).HasColumnType("text");
 
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Restrict);

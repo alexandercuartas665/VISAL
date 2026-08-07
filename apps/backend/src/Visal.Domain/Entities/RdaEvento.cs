@@ -49,6 +49,15 @@ public class RdaEvento : TenantEntity
     /// <summary>JSON con errores de validacion local o respuesta de rechazo de MinSalud.</summary>
     public string? ErroresJson { get; set; }
 
+    /// <summary>
+    /// Cuerpo CRUDO de la respuesta que devolvio la plataforma IHCE, tal cual, para
+    /// CUALQUIER resultado (aceptado o rechazado). En aceptados es el OperationOutcome
+    /// de exito (o vacio si MinSalud no retorna cuerpo); en rechazados duplica lo que
+    /// <see cref="ErroresJson"/> ya resume. Sirve para auditar en la consola RDA "que
+    /// respondio el sistema" sin depender de que el envio fallara. Puede no ser JSON valido.
+    /// </summary>
+    public string? RespuestaMinsalud { get; set; }
+
     /// <summary>ID de recibo que devuelve la plataforma IHCE cuando acepta el Bundle.</summary>
     public string? ReferenciaMinsalud { get; set; }
 }

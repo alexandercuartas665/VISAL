@@ -2,8 +2,6 @@ using System.Data;
 using System.Data.Common;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
 
@@ -23,7 +21,6 @@ public sealed class ReporteService(
     };
 
     // Tokens whitelisted que se sustituyen por parametros de comando (@_tenantId etc).
-    // Cualquier otro placeholder queda tal cual y provocara error de SQL si no existe columna.
     private static readonly Dictionary<string, string> TokenMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["{tenantId}"] = "@_tenantId",
@@ -32,126 +29,194 @@ public sealed class ReporteService(
         ["{hasta}"]    = "@_hasta"
     };
 
-    public async Task<IReadOnlyList<ReporteConfigDto>> ListarMisReportesAsync(CancellationToken ct = default)
+    // ==================== Runner (usuario del tenant) ====================
+
+    public async Task<IReadOnlyList<ReporteDto>> ListarMisReportesAsync(CancellationToken ct = default)
     {
         var userId = tenant.UserId ?? Guid.Empty;
         if (userId == Guid.Empty) { return []; }
 
-        var q = from r in db.ReporteConfigs.AsNoTracking()
-                where r.Habilitado
-                let asignados = db.ReporteUsuarios.Any(u => u.ReporteConfigId == r.Id)
-                let esMio = db.ReporteUsuarios.Any(u => u.ReporteConfigId == r.Id && u.PlatformUserId == userId)
-                where !asignados || esMio
-                orderby r.Orden, r.Nombre
-                select new ReporteConfigDto(r.Id, r.Nombre, r.Descripcion,
-                    r.FiltraSede, r.FiltraFechas, r.Habilitado, r.Orden);
+        // Catalogo global (sin filtro) x activaciones/asignaciones del tenant (auto-filtradas).
+        var q = from c in db.ReporteCatalogos.AsNoTracking()
+                where c.Habilitado
+                join a in db.ReporteTenantActivaciones.AsNoTracking() on c.Id equals a.ReporteCatalogoId
+                where a.Activo
+                let tieneAsign = db.ReporteUsuarios.Any(u => u.ReporteCatalogoId == c.Id)
+                let esMio = db.ReporteUsuarios.Any(u => u.ReporteCatalogoId == c.Id && u.PlatformUserId == userId)
+                where !tieneAsign || esMio
+                orderby c.Orden, c.Nombre
+                select new ReporteDto(c.Id, c.Nombre, c.Descripcion, c.Categoria, c.FiltraSede, c.FiltraFechas, c.Orden);
 
         return await q.ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<ReporteConfigDto>> ListarTodosAsync(CancellationToken ct = default)
+    // ==================== Galeria (admin del tenant) ====================
+
+    public async Task<IReadOnlyList<ReporteGaleriaDto>> ListarGaleriaAsync(CancellationToken ct = default)
     {
-        return await db.ReporteConfigs.AsNoTracking()
-            .OrderBy(x => x.Orden).ThenBy(x => x.Nombre)
-            .Select(r => new ReporteConfigDto(r.Id, r.Nombre, r.Descripcion,
-                r.FiltraSede, r.FiltraFechas, r.Habilitado, r.Orden))
+        var cats = await db.ReporteCatalogos.AsNoTracking()
+            .Where(c => c.Habilitado)
+            .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
             .ToListAsync(ct);
+
+        // Estas dos estan auto-filtradas por tenant (ITenantScoped).
+        var activaciones = await db.ReporteTenantActivaciones.AsNoTracking().ToListAsync(ct);
+        var asignaciones = await db.ReporteUsuarios.AsNoTracking().ToListAsync(ct);
+
+        return cats.Select(c => new ReporteGaleriaDto(
+            c.Id, c.Nombre, c.Descripcion, c.Categoria, c.FiltraSede, c.FiltraFechas, c.Orden,
+            activaciones.Any(a => a.ReporteCatalogoId == c.Id && a.Activo),
+            asignaciones.Where(u => u.ReporteCatalogoId == c.Id).Select(u => u.PlatformUserId).ToList()
+        )).ToList();
     }
 
-    public async Task<ReporteConfigDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
-    {
-        var r = await db.ReporteConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (r is null) { return null; }
-        var usuarios = await db.ReporteUsuarios.AsNoTracking()
-            .Where(u => u.ReporteConfigId == id)
-            .Select(u => u.PlatformUserId)
-            .ToListAsync(ct);
-        return new ReporteConfigDetalleDto(r.Id, r.Nombre, r.Descripcion, r.QuerySql,
-            r.FiltraSede, r.FiltraFechas, r.Habilitado, r.Orden, usuarios);
-    }
-
-    public async Task<Guid> CrearAsync(GuardarReporteRequest req, Guid actor, CancellationToken ct = default)
+    public async Task SetActivoAsync(Guid catalogoId, bool activo, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
-        ValidarSql(req.QuerySql);
-        var e = new ReporteConfig
+        // El catalogo debe existir y estar habilitado globalmente.
+        var existe = await db.ReporteCatalogos.AsNoTracking().AnyAsync(c => c.Id == catalogoId && c.Habilitado, ct);
+        if (!existe) { throw new InvalidOperationException("Reporte no disponible en el catalogo."); }
+
+        var a = await db.ReporteTenantActivaciones.FirstOrDefaultAsync(x => x.ReporteCatalogoId == catalogoId, ct);
+        if (a is null)
         {
-            TenantId = tid,
-            Nombre = req.Nombre.Trim(),
-            Descripcion = string.IsNullOrWhiteSpace(req.Descripcion) ? null : req.Descripcion.Trim(),
-            QuerySql = req.QuerySql.Trim(),
-            FiltraSede = req.FiltraSede,
-            FiltraFechas = req.FiltraFechas,
-            Habilitado = req.Habilitado,
-            Orden = req.Orden
-        };
-        db.ReporteConfigs.Add(e);
+            db.ReporteTenantActivaciones.Add(new ReporteTenantActivacion
+            {
+                TenantId = tid,
+                ReporteCatalogoId = catalogoId,
+                Activo = activo
+            });
+        }
+        else
+        {
+            a.Activo = activo;
+        }
         await db.SaveChangesAsync(ct);
-        await MergeUsuariosAsync(e.Id, req.UsuariosAsignados, tid, ct);
-        return e.Id;
     }
 
-    public async Task<bool> ActualizarAsync(Guid id, GuardarReporteRequest req, Guid actor, CancellationToken ct = default)
+    public async Task SetUsuariosAsync(Guid catalogoId, IReadOnlyList<Guid> usuarios, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
-        var e = await db.ReporteConfigs.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (e is null) { return false; }
-        ValidarSql(req.QuerySql);
-        e.Nombre = req.Nombre.Trim();
-        e.Descripcion = string.IsNullOrWhiteSpace(req.Descripcion) ? null : req.Descripcion.Trim();
-        e.QuerySql = req.QuerySql.Trim();
-        e.FiltraSede = req.FiltraSede;
-        e.FiltraFechas = req.FiltraFechas;
-        e.Habilitado = req.Habilitado;
-        e.Orden = req.Orden;
-        await db.SaveChangesAsync(ct);
-        await MergeUsuariosAsync(e.Id, req.UsuariosAsignados, tid, ct);
-        return true;
-    }
 
-    public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
-    {
-        var e = await db.ReporteConfigs.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (e is null) { return false; }
-        var links = db.ReporteUsuarios.Where(u => u.ReporteConfigId == id);
-        db.ReporteUsuarios.RemoveRange(links);
-        db.ReporteConfigs.Remove(e);
-        await db.SaveChangesAsync(ct);
-        return true;
-    }
+        var actuales = await db.ReporteUsuarios.Where(u => u.ReporteCatalogoId == catalogoId).ToListAsync(ct);
+        var nuevoSet = new HashSet<Guid>(usuarios ?? []);
+        var actualSet = actuales.Select(a => a.PlatformUserId).ToHashSet();
 
-    private async Task MergeUsuariosAsync(Guid reporteId, IReadOnlyList<Guid>? nuevos, Guid tid, CancellationToken ct)
-    {
-        var actuales = await db.ReporteUsuarios.Where(u => u.ReporteConfigId == reporteId).ToListAsync(ct);
-        var conjuntoNuevo = new HashSet<Guid>(nuevos ?? []);
-        var conjuntoActual = actuales.Select(a => a.PlatformUserId).ToHashSet();
-
-        foreach (var a in actuales.Where(x => !conjuntoNuevo.Contains(x.PlatformUserId)))
+        foreach (var a in actuales.Where(x => !nuevoSet.Contains(x.PlatformUserId)))
         {
             db.ReporteUsuarios.Remove(a);
         }
-        foreach (var uid in conjuntoNuevo.Where(x => !conjuntoActual.Contains(x)))
+        foreach (var uid in nuevoSet.Where(x => !actualSet.Contains(x)))
         {
             db.ReporteUsuarios.Add(new ReporteUsuario
             {
                 TenantId = tid,
-                ReporteConfigId = reporteId,
+                ReporteCatalogoId = catalogoId,
                 PlatformUserId = uid
             });
         }
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<ReporteResultado> EjecutarAsync(Guid reporteId, EjecutarReporteRequest req, CancellationToken ct = default)
+    // ==================== Catalogo (Super Admin) ====================
+
+    public async Task<IReadOnlyList<ReporteCatalogoDto>> ListarCatalogoAsync(CancellationToken ct = default)
+    {
+        return await db.ReporteCatalogos.AsNoTracking()
+            .OrderBy(x => x.Orden).ThenBy(x => x.Nombre)
+            .Select(c => new ReporteCatalogoDto(c.Id, c.Nombre, c.Descripcion, c.Categoria,
+                c.FiltraSede, c.FiltraFechas, c.Habilitado, c.Orden))
+            .ToListAsync(ct);
+    }
+
+    public async Task<ReporteCatalogoDetalleDto?> ObtenerCatalogoAsync(Guid id, CancellationToken ct = default)
+    {
+        var c = await db.ReporteCatalogos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null) { return null; }
+        return new ReporteCatalogoDetalleDto(c.Id, c.Nombre, c.Descripcion, c.Categoria, c.QuerySql,
+            c.FiltraSede, c.FiltraFechas, c.Habilitado, c.Orden);
+    }
+
+    public async Task<Guid> CrearCatalogoAsync(GuardarCatalogoRequest req, Guid actor, CancellationToken ct = default)
+    {
+        ValidarSql(req.QuerySql);
+        var c = new ReporteCatalogo
+        {
+            Nombre = req.Nombre.Trim(),
+            Descripcion = string.IsNullOrWhiteSpace(req.Descripcion) ? null : req.Descripcion.Trim(),
+            Categoria = string.IsNullOrWhiteSpace(req.Categoria) ? null : req.Categoria.Trim(),
+            QuerySql = req.QuerySql.Trim(),
+            FiltraSede = req.FiltraSede,
+            FiltraFechas = req.FiltraFechas,
+            Habilitado = req.Habilitado,
+            Orden = req.Orden
+        };
+        db.ReporteCatalogos.Add(c);
+        await db.SaveChangesAsync(ct);
+        return c.Id;
+    }
+
+    public async Task<bool> ActualizarCatalogoAsync(Guid id, GuardarCatalogoRequest req, Guid actor, CancellationToken ct = default)
+    {
+        var c = await db.ReporteCatalogos.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null) { return false; }
+        ValidarSql(req.QuerySql);
+        c.Nombre = req.Nombre.Trim();
+        c.Descripcion = string.IsNullOrWhiteSpace(req.Descripcion) ? null : req.Descripcion.Trim();
+        c.Categoria = string.IsNullOrWhiteSpace(req.Categoria) ? null : req.Categoria.Trim();
+        c.QuerySql = req.QuerySql.Trim();
+        c.FiltraSede = req.FiltraSede;
+        c.FiltraFechas = req.FiltraFechas;
+        c.Habilitado = req.Habilitado;
+        c.Orden = req.Orden;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> EliminarCatalogoAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var c = await db.ReporteCatalogos.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null) { return false; }
+        // Borra activaciones y asignaciones de TODOS los tenants (ignora el filtro de tenant).
+        var acts = await db.ReporteTenantActivaciones.IgnoreQueryFilters()
+            .Where(a => a.ReporteCatalogoId == id).ToListAsync(ct);
+        var asigs = await db.ReporteUsuarios.IgnoreQueryFilters()
+            .Where(u => u.ReporteCatalogoId == id).ToListAsync(ct);
+        db.ReporteTenantActivaciones.RemoveRange(acts);
+        db.ReporteUsuarios.RemoveRange(asigs);
+        db.ReporteCatalogos.Remove(c);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    // ==================== Ejecucion ====================
+
+    public async Task<ReporteResultado> EjecutarAsync(Guid catalogoId, EjecutarReporteRequest req, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
-        var r = await db.ReporteConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == reporteId, ct);
-        if (r is null) { throw new InvalidOperationException("Reporte no encontrado."); }
-        if (!r.Habilitado) { throw new InvalidOperationException("Reporte deshabilitado."); }
-        ValidarSql(r.QuerySql);
+        var userId = tenant.UserId ?? Guid.Empty;
 
-        // Sustituye tokens por placeholders parametrizados
-        var sql = r.QuerySql;
+        var c = await db.ReporteCatalogos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == catalogoId, ct);
+        if (c is null || !c.Habilitado) { throw new InvalidOperationException("Reporte no encontrado o deshabilitado."); }
+
+        // El tenant debe tenerlo activo.
+        var activo = await db.ReporteTenantActivaciones.AsNoTracking()
+            .AnyAsync(a => a.ReporteCatalogoId == catalogoId && a.Activo, ct);
+        if (!activo) { throw new InvalidOperationException("El reporte no esta activo para esta agencia."); }
+
+        // Si hay asignaciones, el usuario debe estar en la lista.
+        var tieneAsign = await db.ReporteUsuarios.AsNoTracking().AnyAsync(u => u.ReporteCatalogoId == catalogoId, ct);
+        if (tieneAsign)
+        {
+            var permitido = await db.ReporteUsuarios.AsNoTracking()
+                .AnyAsync(u => u.ReporteCatalogoId == catalogoId && u.PlatformUserId == userId, ct);
+            if (!permitido) { throw new InvalidOperationException("No tiene permiso para ver este reporte."); }
+        }
+
+        ValidarSql(c.QuerySql);
+
+        // Sustituye tokens por placeholders parametrizados.
+        var sql = c.QuerySql;
         foreach (var (token, param) in TokenMap)
         {
             sql = Regex.Replace(sql, Regex.Escape(token), param, RegexOptions.IgnoreCase);
@@ -214,6 +279,11 @@ public sealed class ReporteService(
         if (sql.Contains(';'))
         {
             throw new InvalidOperationException("El SQL no debe contener ';' (una sola sentencia por reporte).");
+        }
+        // Hardening multi-tenant: el SQL DEBE aislar por tenant con el token {tenantId}.
+        if (!sql.Contains("{tenantId}", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("El SQL debe incluir el token {tenantId} para aislar los datos por agencia (multi-tenant).");
         }
     }
 }

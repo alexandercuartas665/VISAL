@@ -373,12 +373,22 @@
                 </NavLink>
             }
 
-            @* Reportes: administracion. Sin permiso fino aun — solo admin llega
-               a esta seccion del menu. *@
+            @* Reportes: galeria del tenant. El admin de la agencia activa reportes del
+               catalogo (publicado por el Super Admin) y asigna usuarios. NO edita SQL. *@
             <NavLink class="visal-nav-link" href="config/reportes">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 17V9"/><path d="M15 17v-5"/><path d="M12 17V7"/></svg>
-                <span>Configurar Reportes</span>
+                <span>Galeria de Reportes</span>
             </NavLink>
+
+            @* Catalogo de Reportes: SOLO operador de plataforma (Super Admin). Aqui se
+               escribe el SQL de los reportes disponibles para todas las agencias. *@
+            @if (_showAdmin)
+            {
+                <NavLink class="visal-nav-link" href="admin/reportes-catalogo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M2 7h20"/><path d="M2 17h20"/><path d="M7 2v20"/><path d="M17 2v20"/></svg>
+                    <span>Catalogo de Reportes</span>
+                </NavLink>
+            }
 
             @if (Puede("cfg-tipologia-archivos"))
             {

@@ -40,9 +40,9 @@
                         <div class="rep-card-title">@r.Nombre</div>
                         <div class="rep-card-desc">@(string.IsNullOrWhiteSpace(r.Descripcion) ? "(Sin descripcion)" : r.Descripcion)</div>
                         <div class="rep-card-tags">
+                            @if (!string.IsNullOrWhiteSpace(r.Categoria)) { <span class="rep-tag rep-tag-cat">@r.Categoria</span> }
                             @if (r.FiltraFechas) { <span class="rep-tag">Fechas</span> }
                             @if (r.FiltraSede) { <span class="rep-tag">Sede</span> }
-                            @if (!r.Habilitado) { <span class="rep-tag rep-tag-off">Deshabilitado</span> }
                         </div>
                     </div>
                 </div>
@@ -51,7 +51,7 @@
     }
 </div>
 
-@if (_reporte is ReporteConfigDto sel)
+@if (_reporte is ReporteDto sel)
 {
     <div class="rep-modal-back" @onclick="Cerrar"></div>
     <div class="rep-modal">
@@ -201,9 +201,9 @@
 @code {
     [Inject] private Microsoft.JSInterop.IJSRuntime JS { get; set; } = default!;
 
-    private List<ReporteConfigDto> _reportes = new();
+    private List<ReporteDto> _reportes = new();
     private Guid? _reporteId;
-    private ReporteConfigDto? _reporte => _reporteId is Guid id ? _reportes.FirstOrDefault(x => x.Id == id) : null;
+    private ReporteDto? _reporte => _reporteId is Guid id ? _reportes.FirstOrDefault(x => x.Id == id) : null;
     private string _filtro = string.Empty;
     private DateTime? _desde;
     private DateTime? _hasta;
@@ -233,7 +233,7 @@
         }
     }
 
-    private IEnumerable<ReporteConfigDto> FiltrarReportes()
+    private IEnumerable<ReporteDto> FiltrarReportes()
     {
         var q = _reportes.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(_filtro))
@@ -248,7 +248,7 @@
 
     private void OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; }
 
-    private void Abrir(ReporteConfigDto r)
+    private void Abrir(ReporteDto r)
     {
         _reporteId = r.Id;
         _resultado = null;

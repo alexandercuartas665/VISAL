@@ -7,162 +7,147 @@
 @inject IReporteService ReportSvc
 @inject IApplicationDbContext Db
 
-<PageTitle>Configuracion Reportes - Visal</PageTitle>
+<PageTitle>Reportes - Visal</PageTitle>
 
-<div class="cr-page">
-    <div class="cr-head">
+<div class="gr-page">
+    <div class="gr-head">
         <div>
-            <div class="cr-eyebrow">Administracion</div>
-            <h1 class="cr-title">Reportes configurables</h1>
+            <div class="gr-eyebrow">Administracion</div>
+            <h1 class="gr-title">Galeria de reportes</h1>
+            <div class="gr-sub">Activa los reportes que quieres usar en tu agencia y define que usuarios pueden verlos.
+                Los reportes los define y publica el equipo de plataforma.</div>
         </div>
-        <button class="btn-primary" @onclick="Nuevo">+ Nuevo reporte</button>
     </div>
 
-    <div class="cr-tips">
-        <b>Tokens disponibles en el SQL:</b>
-        <code>@("{tenantId}")</code> · <code>@("{sedeId}")</code> · <code>@("{desde}")</code> · <code>@("{hasta}")</code>.
-        Solo se permite <b>SELECT</b> (o <b>WITH ... SELECT</b>). Ejemplo:
-        <pre>@EjemploSql</pre>
-    </div>
+    @if (_items.Count == 0)
+    {
+        <div class="gr-empty">No hay reportes publicados en el catalogo todavia.</div>
+    }
+    else
+    {
+        <div class="gr-cards">
+            @foreach (var r in _items)
+            {
+                <div class="gr-card @(r.Activo ? "gr-on" : "")">
+                    <div class="gr-card-top">
+                        <div class="gr-card-icon">📊</div>
+                        <label class="gr-switch" title="@(r.Activo ? "Activo" : "Inactivo")">
+                            <input type="checkbox" checked="@r.Activo" @onchange="e => ToggleActivoAsync(r, (bool)(e.Value ?? false))" />
+                            <span class="gr-slider"></span>
+                        </label>
+                    </div>
+                    <div class="gr-card-title">@r.Nombre</div>
+                    <div class="gr-card-desc">@(string.IsNullOrWhiteSpace(r.Descripcion) ? "(Sin descripcion)" : r.Descripcion)</div>
+                    <div class="gr-card-tags">
+                        @if (!string.IsNullOrWhiteSpace(r.Categoria)) { <span class="gr-tag gr-tag-cat">@r.Categoria</span> }
+                        @if (r.FiltraFechas) { <span class="gr-tag">Fechas</span> }
+                        @if (r.FiltraSede) { <span class="gr-tag">Sede</span> }
+                    </div>
+                    <div class="gr-card-foot">
+                        <span class="gr-users-count">
+                            @(r.UsuariosAsignados.Count == 0 ? "Visible para todos" : $"{r.UsuariosAsignados.Count} usuario(s)")
+                        </span>
+                        <button class="btn-outline btn-sm" disabled="@(!r.Activo)" @onclick="() => AbrirUsuarios(r)">Usuarios</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
 
-    <table class="cr-tabla">
-        <thead>
-            <tr>
-                <th>#</th><th>Nombre</th><th>Descripcion</th><th>Filtros</th><th>Estado</th><th></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var r in _todos.OrderBy(x => x.Orden).ThenBy(x => x.Nombre))
-            {
-                <tr>
-                    <td>@r.Orden</td>
-                    <td><b>@r.Nombre</b></td>
-                    <td class="cr-desc">@r.Descripcion</td>
-                    <td>@(r.FiltraSede ? "Sede " : "")@(r.FiltraFechas ? "Fechas" : "")</td>
-                    <td>@(r.Habilitado ? "Activo" : "Deshabilitado")</td>
-                    <td class="cr-acts">
-                        <button class="btn-outline" @onclick="() => AbrirAsync(r.Id)">Editar</button>
-                        <button class="btn-danger" @onclick="() => EliminarAsync(r.Id)">Eliminar</button>
-                    </td>
-                </tr>
-            }
-            @if (_todos.Count == 0)
-            {
-                <tr><td colspan="6" class="cr-vacio">Sin reportes configurados.</td></tr>
-            }
-        </tbody>
-    </table>
+    @if (!string.IsNullOrEmpty(_msg))
+    {
+        <div class="gr-toast @(_error ? "gr-toast-err" : "gr-toast-ok")">@_msg</div>
+    }
 </div>
 
-@if (_edit is not null)
+@if (_editUsuarios is not null)
 {
-    <div class="cr-modal-back" @onclick="Cerrar"></div>
-    <div class="cr-modal">
-        <div class="cr-modal-head">
-            <h3>@(_editId is null ? "Nuevo reporte" : "Editar reporte")</h3>
-            <button class="cr-close" @onclick="Cerrar">×</button>
+    <div class="gr-modal-back" @onclick="CerrarUsuarios"></div>
+    <div class="gr-modal">
+        <div class="gr-modal-head">
+            <div>
+                <div class="gr-modal-eyebrow">Permisos de visualizacion</div>
+                <h3>@_editUsuarios.Nombre</h3>
+            </div>
+            <button class="gr-close" @onclick="CerrarUsuarios">×</button>
         </div>
-        <div class="cr-modal-body">
-            <div class="cr-grid">
-                <div><label>Nombre</label><input @bind="_edit.Nombre" /></div>
-                <div><label>Orden</label><input type="number" @bind="_edit.Orden" style="width:6rem" /></div>
-                <div><label><input type="checkbox" @bind="_edit.Habilitado" /> Habilitado</label></div>
-                <div><label><input type="checkbox" @bind="_edit.FiltraSede" /> Muestra filtro Sede</label></div>
-                <div><label><input type="checkbox" @bind="_edit.FiltraFechas" /> Muestra filtro Desde/Hasta</label></div>
+        <div class="gr-modal-body">
+            <label class="gr-hint">Usuarios que pueden ver este reporte (deja vacio = visible para todos con acceso al modulo):</label>
+            <div class="gr-users-list">
+                @foreach (var u in _usuarios)
+                {
+                    var yes = _seleccion.Contains(u.Id);
+                    <label class="gr-user">
+                        <input type="checkbox" checked="@yes" @onchange="e => ToggleUsuario(u.Id, (bool)(e.Value ?? false))" />
+                        @u.Nombre <small>@u.Email</small>
+                    </label>
+                }
             </div>
-            <div><label>Descripcion</label><textarea rows="2" @bind="_edit.Descripcion"></textarea></div>
-            <div><label>Query SQL (SELECT solamente, usa {tenantId} {sedeId} {desde} {hasta})</label>
-                <textarea rows="10" @bind="_edit.QuerySql" style="font-family:monospace;font-size:.85rem"></textarea>
-            </div>
-
-            <div class="cr-users">
-                <label>Usuarios que pueden verlo (deja vacio = visible para todos con acceso al modulo):</label>
-                <div class="cr-users-list">
-                    @foreach (var u in _usuarios)
-                    {
-                        var yes = _edit.UsuariosAsignados.Contains(u.Id);
-                        <label class="cr-user">
-                            <input type="checkbox" checked="@yes" @onchange="e => ToggleUsuario(u.Id, (bool)(e.Value ?? false))" />
-                            @u.Nombre <small>@u.Email</small>
-                        </label>
-                    }
-                </div>
-            </div>
-
-            @if (!string.IsNullOrEmpty(_msg))
-            {
-                <div class="cr-msg @(_error?"cr-msg-err":"cr-msg-ok")">@_msg</div>
-            }
         </div>
-        <div class="cr-modal-foot">
-            <button class="btn-outline" @onclick="Cerrar">Cancelar</button>
-            <button class="btn-primary" @onclick="GuardarAsync">Guardar</button>
+        <div class="gr-modal-foot">
+            <button class="btn-outline" @onclick="CerrarUsuarios">Cancelar</button>
+            <button class="btn-primary" @onclick="GuardarUsuariosAsync">Guardar</button>
         </div>
     </div>
 }
 
 <style>
-.cr-page { padding: 1rem 1.25rem; }
-.cr-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:.75rem; }
-.cr-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
-.cr-title { margin:.15rem 0 0 0; font-size:1.5rem; color:#0f172a; }
-.cr-tips { background:#eff6ff; border:1px solid #bfdbfe; padding:.65rem .85rem; border-radius:8px; color:#1e3a8a; margin-bottom:1rem; font-size:.85rem; }
-.cr-tips pre { background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:.5rem; margin:.35rem 0 0; overflow-x:auto; font-size:.78rem; color:#0f172a; }
-.cr-tabla { width:100%; border-collapse:collapse; font-size:.9rem; }
-.cr-tabla thead th { text-align:left; padding:.55rem .65rem; background:#f1f5f9; border-bottom:1px solid #cbd5e1; color:#334155; }
-.cr-tabla tbody td { padding:.5rem .65rem; border-bottom:1px solid #f1f5f9; color:#0f172a; }
-.cr-desc { color:#475569; max-width:340px; }
-.cr-acts { text-align:right; white-space:nowrap; }
-.cr-acts button { margin-left:.35rem; }
-.cr-vacio { color:#94a3b8; text-align:center; padding:1.5rem 0; }
+.gr-page { padding: 1rem 1.25rem; }
+.gr-head { margin-bottom: 1rem; }
+.gr-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.gr-title { margin:.15rem 0 0 0; font-size:1.55rem; color:#0f172a; }
+.gr-sub { color:#64748b; font-size:.85rem; margin-top:.35rem; max-width:720px; }
+.gr-empty { padding:2rem; text-align:center; color:#94a3b8; }
 
-.cr-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
-.cr-modal { position:fixed; top:3%; left:50%; transform:translateX(-50%); width:min(820px, 96vw); max-height:94vh;
-            background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401;
-            display:flex; flex-direction:column; overflow:hidden; }
-.cr-modal-head { display:flex; justify-content:space-between; align-items:center; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; }
-.cr-close { background:transparent; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:#64748b; }
-.cr-modal-body { padding:1rem 1.15rem; overflow:auto; }
-.cr-modal-body label { display:block; font-size:.78rem; color:#334155; margin-bottom:.2rem; margin-top:.5rem; }
-.cr-modal-body input, .cr-modal-body textarea, .cr-modal-body select { width:100%; padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; font: inherit; }
-.cr-grid { display:grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap:.5rem; align-items:end; }
-.cr-users { margin-top:.5rem; }
-.cr-users-list { display:grid; grid-template-columns: repeat(2, 1fr); gap:.35rem; max-height:180px; overflow:auto; border:1px solid #e5e7eb; padding:.5rem; border-radius:6px; }
-.cr-user { display:flex; gap:.4rem; align-items:center; font-size:.85rem; }
-.cr-user small { color:#94a3b8; }
-.cr-modal-foot { padding:.75rem 1.15rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
-.cr-msg { padding:.5rem .75rem; border-radius:6px; margin-top:.5rem; font-size:.85rem; }
-.cr-msg-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
-.cr-msg-err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+.gr-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:.85rem; }
+.gr-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:.9rem 1rem; display:flex; flex-direction:column; gap:.4rem; transition: box-shadow .15s, border-color .15s; }
+.gr-card.gr-on { border-color:#93c5fd; box-shadow: 0 2px 10px rgba(37,99,235,.08); }
+.gr-card-top { display:flex; justify-content:space-between; align-items:center; }
+.gr-card-icon { font-size:1.7rem; line-height:1; }
+.gr-card-title { font-weight:600; color:#0f172a; }
+.gr-card-desc { color:#64748b; font-size:.8rem; line-height:1.35; min-height:2.1em; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.gr-card-tags { display:flex; gap:.3rem; flex-wrap:wrap; }
+.gr-tag { background:#eff6ff; color:#1e3a8a; font-size:.7rem; padding:.1rem .45rem; border-radius:99px; }
+.gr-tag-cat { background:#f1f5f9; color:#334155; }
+.gr-card-foot { display:flex; justify-content:space-between; align-items:center; margin-top:.35rem; padding-top:.55rem; border-top:1px solid #f1f5f9; }
+.gr-users-count { font-size:.76rem; color:#64748b; }
+
+.gr-switch { position:relative; display:inline-block; width:42px; height:22px; }
+.gr-switch input { opacity:0; width:0; height:0; }
+.gr-slider { position:absolute; cursor:pointer; inset:0; background:#cbd5e1; border-radius:99px; transition:.15s; }
+.gr-slider:before { content:""; position:absolute; height:16px; width:16px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.15s; }
+.gr-switch input:checked + .gr-slider { background:#2563eb; }
+.gr-switch input:checked + .gr-slider:before { transform:translateX(20px); }
+
+.gr-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
+.gr-modal { position:fixed; top:5%; left:50%; transform:translateX(-50%); width:min(640px, 96vw); max-height:90vh;
+            background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401; display:flex; flex-direction:column; overflow:hidden; }
+.gr-modal-head { display:flex; justify-content:space-between; align-items:flex-start; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; }
+.gr-modal-eyebrow { color:#64748b; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; }
+.gr-modal-head h3 { margin:.15rem 0 0; font-size:1.15rem; color:#0f172a; }
+.gr-close { background:transparent; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:#64748b; }
+.gr-modal-body { padding:1rem 1.15rem; overflow:auto; }
+.gr-hint { display:block; font-size:.8rem; color:#334155; margin-bottom:.5rem; }
+.gr-users-list { display:grid; grid-template-columns: repeat(2, 1fr); gap:.35rem; max-height:320px; overflow:auto; border:1px solid #e5e7eb; padding:.5rem; border-radius:8px; }
+.gr-user { display:flex; gap:.4rem; align-items:center; font-size:.85rem; }
+.gr-user small { color:#94a3b8; }
+.gr-modal-foot { padding:.75rem 1.15rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
+.gr-toast { position:fixed; bottom:1.25rem; left:50%; transform:translateX(-50%); padding:.55rem 1rem; border-radius:8px; font-size:.85rem; z-index:1500; box-shadow:0 6px 20px rgba(0,0,0,.15); }
+.gr-toast-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
+.gr-toast-err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
 .btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
 .btn-outline { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.4rem .75rem; border-radius:6px; cursor:pointer; }
-.btn-danger  { background:#fff; color:#b91c1c; border:1px solid #fecaca; padding:.4rem .75rem; border-radius:6px; cursor:pointer; }
+.btn-outline:disabled { opacity:.5; cursor:not-allowed; }
+.btn-sm { padding:.25rem .6rem; font-size:.8rem; }
 </style>
 
 @code {
-    private sealed class EditForm
-    {
-        public string Nombre { get; set; } = string.Empty;
-        public string? Descripcion { get; set; }
-        public string QuerySql { get; set; } = string.Empty;
-        public bool FiltraSede { get; set; } = true;
-        public bool FiltraFechas { get; set; } = true;
-        public bool Habilitado { get; set; } = true;
-        public int Orden { get; set; }
-        public HashSet<Guid> UsuariosAsignados { get; set; } = new();
-    }
-
     private record UsuarioItem(Guid Id, string Nombre, string Email);
 
-    private const string EjemploSql = @"SELECT numero_documento, nombre_completo, creado_en
-FROM pacientes
-WHERE tenant_id = {tenantId} AND (@_desde IS NULL OR creado_en >= {desde})
-ORDER BY creado_en DESC LIMIT 500";
-
-    private List<ReporteConfigDto> _todos = new();
+    private List<ReporteGaleriaDto> _items = new();
     private List<UsuarioItem> _usuarios = new();
-    private EditForm? _edit;
-    private Guid? _editId;
+    private ReporteGaleriaDto? _editUsuarios;
+    private HashSet<Guid> _seleccion = new();
     private string _msg = string.Empty;
     private bool _error;
 
@@ -177,76 +162,45 @@ ORDER BY creado_en DESC LIMIT 500";
 
     private async Task RecargarAsync()
     {
-        _todos = (await ReportSvc.ListarTodosAsync()).ToList();
+        _items = (await ReportSvc.ListarGaleriaAsync()).ToList();
     }
 
-    private void Nuevo()
+    private async Task ToggleActivoAsync(ReporteGaleriaDto r, bool on)
     {
-        _editId = null;
-        _edit = new EditForm { Orden = _todos.Count + 1 };
-        _msg = string.Empty; _error = false;
-    }
-
-    private async Task AbrirAsync(Guid id)
-    {
-        var det = await ReportSvc.ObtenerAsync(id);
-        if (det is null) { return; }
-        _editId = id;
-        _edit = new EditForm
+        try
         {
-            Nombre = det.Nombre,
-            Descripcion = det.Descripcion,
-            QuerySql = det.QuerySql,
-            FiltraSede = det.FiltraSede,
-            FiltraFechas = det.FiltraFechas,
-            Habilitado = det.Habilitado,
-            Orden = det.Orden,
-            UsuariosAsignados = det.UsuariosAsignados.ToHashSet()
-        };
-        _msg = string.Empty; _error = false;
+            await ReportSvc.SetActivoAsync(r.Id, on, Guid.Empty);
+            await RecargarAsync();
+            Toast(on ? $"'{r.Nombre}' activado." : $"'{r.Nombre}' desactivado.", false);
+        }
+        catch (Exception ex) { Toast(ex.Message, true); await RecargarAsync(); }
     }
 
-    private void Cerrar() { _edit = null; _editId = null; }
+    private void AbrirUsuarios(ReporteGaleriaDto r)
+    {
+        _editUsuarios = r;
+        _seleccion = r.UsuariosAsignados.ToHashSet();
+    }
+
+    private void CerrarUsuarios() { _editUsuarios = null; _seleccion = new(); }
 
     private void ToggleUsuario(Guid uid, bool on)
     {
-        if (_edit is null) { return; }
-        if (on) { _edit.UsuariosAsignados.Add(uid); }
-        else    { _edit.UsuariosAsignados.Remove(uid); }
+        if (on) { _seleccion.Add(uid); } else { _seleccion.Remove(uid); }
     }
 
-    private async Task GuardarAsync()
+    private async Task GuardarUsuariosAsync()
     {
-        if (_edit is null) { return; }
+        if (_editUsuarios is null) { return; }
         try
         {
-            var req = new GuardarReporteRequest(
-                _edit.Nombre?.Trim() ?? "",
-                _edit.Descripcion,
-                _edit.QuerySql ?? "",
-                _edit.FiltraSede, _edit.FiltraFechas, _edit.Habilitado, _edit.Orden,
-                _edit.UsuariosAsignados.ToList());
-            if (_editId is Guid id)
-            {
-                await ReportSvc.ActualizarAsync(id, req, Guid.Empty);
-            }
-            else
-            {
-                await ReportSvc.CrearAsync(req, Guid.Empty);
-            }
-            _msg = "Guardado."; _error = false;
+            await ReportSvc.SetUsuariosAsync(_editUsuarios.Id, _seleccion.ToList(), Guid.Empty);
             await RecargarAsync();
-            Cerrar();
+            CerrarUsuarios();
+            Toast("Permisos actualizados.", false);
         }
-        catch (Exception ex)
-        {
-            _msg = ex.Message; _error = true;
-        }
+        catch (Exception ex) { Toast(ex.Message, true); }
     }
 
-    private async Task EliminarAsync(Guid id)
-    {
-        await ReportSvc.EliminarAsync(id, Guid.Empty);
-        await RecargarAsync();
-    }
+    private void Toast(string m, bool err) { _msg = m; _error = err; }
 }

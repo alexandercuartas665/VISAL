@@ -1,0 +1,222 @@
+@page "/admin/reportes-catalogo"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IReporteService ReportSvc
+@inject AuthenticationStateProvider AuthProvider
+
+<PageTitle>Catalogo de Reportes - Visal</PageTitle>
+
+@if (!_esPlataforma)
+{
+    <div class="rc-noauth">Esta seccion es exclusiva del operador de plataforma (Super Admin).</div>
+}
+else
+{
+    <div class="rc-page">
+        <div class="rc-head">
+            <div>
+                <div class="rc-eyebrow">Plataforma - Super Admin</div>
+                <h1 class="rc-title">Catalogo de Reportes</h1>
+                <div class="rc-sub">Reportes SQL disponibles para TODAS las agencias. Cada agencia decide cuales activar
+                    y a que usuarios permitir en su galeria. Aqui vive el SQL: los tenants nunca lo ven ni lo editan.</div>
+            </div>
+            <button class="btn-primary" @onclick="Nuevo">+ Nuevo reporte</button>
+        </div>
+
+        <div class="rc-tips">
+            <b>Tokens disponibles en el SQL:</b>
+            <code>@("{tenantId}")</code> · <code>@("{sedeId}")</code> · <code>@("{desde}")</code> · <code>@("{hasta}")</code>.
+            Solo <b>SELECT</b> (o <b>WITH ... SELECT</b>). <b>Obligatorio</b> incluir <code>@("{tenantId}")</code> para aislar por agencia. Ejemplo:
+            <pre>@EjemploSql</pre>
+        </div>
+
+        <table class="rc-tabla">
+            <thead>
+                <tr><th>#</th><th>Nombre</th><th>Categoria</th><th>Descripcion</th><th>Filtros</th><th>Estado</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _todos)
+                {
+                    <tr>
+                        <td>@r.Orden</td>
+                        <td><b>@r.Nombre</b></td>
+                        <td>@r.Categoria</td>
+                        <td class="rc-desc">@r.Descripcion</td>
+                        <td>@(r.FiltraSede ? "Sede " : "")@(r.FiltraFechas ? "Fechas" : "")</td>
+                        <td>@(r.Habilitado ? "Publicado" : "Oculto")</td>
+                        <td class="rc-acts">
+                            <button class="btn-outline btn-sm" @onclick="() => AbrirAsync(r.Id)">Editar</button>
+                            <button class="btn-danger btn-sm" @onclick="() => EliminarAsync(r.Id)">Eliminar</button>
+                        </td>
+                    </tr>
+                }
+                @if (_todos.Count == 0)
+                {
+                    <tr><td colspan="7" class="rc-vacio">Sin reportes en el catalogo.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_edit is not null)
+    {
+        <div class="rc-modal-back" @onclick="Cerrar"></div>
+        <div class="rc-modal">
+            <div class="rc-modal-head">
+                <h3>@(_editId is null ? "Nuevo reporte" : "Editar reporte")</h3>
+                <button class="rc-close" @onclick="Cerrar">×</button>
+            </div>
+            <div class="rc-modal-body">
+                <div class="rc-grid">
+                    <div><label>Nombre</label><input @bind="_edit.Nombre" /></div>
+                    <div><label>Categoria</label><input @bind="_edit.Categoria" placeholder="Opcional" /></div>
+                    <div><label>Orden</label><input type="number" @bind="_edit.Orden" style="width:6rem" /></div>
+                    <div><label><input type="checkbox" @bind="_edit.Habilitado" /> Publicado</label></div>
+                    <div><label><input type="checkbox" @bind="_edit.FiltraSede" /> Filtro Sede</label></div>
+                    <div><label><input type="checkbox" @bind="_edit.FiltraFechas" /> Filtro Fechas</label></div>
+                </div>
+                <div><label>Descripcion</label><textarea rows="2" @bind="_edit.Descripcion"></textarea></div>
+                <div><label>Query SQL (SELECT; usa {tenantId} {sedeId} {desde} {hasta})</label>
+                    <textarea rows="12" @bind="_edit.QuerySql" style="font-family:monospace;font-size:.85rem"></textarea>
+                </div>
+                @if (!string.IsNullOrEmpty(_msg))
+                {
+                    <div class="rc-msg @(_error ? "rc-msg-err" : "rc-msg-ok")">@_msg</div>
+                }
+            </div>
+            <div class="rc-modal-foot">
+                <button class="btn-outline" @onclick="Cerrar">Cancelar</button>
+                <button class="btn-primary" @onclick="GuardarAsync">Guardar</button>
+            </div>
+        </div>
+    }
+}
+
+<style>
+.rc-noauth { padding:2rem; text-align:center; color:#b91c1c; }
+.rc-page { padding: 1rem 1.25rem; }
+.rc-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:.75rem; gap:1rem; }
+.rc-eyebrow { color:#7c3aed; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+.rc-title { margin:.15rem 0 0 0; font-size:1.5rem; color:#0f172a; }
+.rc-sub { color:#64748b; font-size:.85rem; margin-top:.35rem; max-width:760px; }
+.rc-tips { background:#faf5ff; border:1px solid #e9d5ff; padding:.65rem .85rem; border-radius:8px; color:#6b21a8; margin-bottom:1rem; font-size:.85rem; }
+.rc-tips pre { background:#fff; border:1px solid #e9d5ff; border-radius:6px; padding:.5rem; margin:.35rem 0 0; overflow-x:auto; font-size:.78rem; color:#0f172a; }
+.rc-tabla { width:100%; border-collapse:collapse; font-size:.9rem; }
+.rc-tabla thead th { text-align:left; padding:.55rem .65rem; background:#f1f5f9; border-bottom:1px solid #cbd5e1; color:#334155; }
+.rc-tabla tbody td { padding:.5rem .65rem; border-bottom:1px solid #f1f5f9; color:#0f172a; }
+.rc-desc { color:#475569; max-width:320px; }
+.rc-acts { text-align:right; white-space:nowrap; }
+.rc-acts button { margin-left:.35rem; }
+.rc-vacio { color:#94a3b8; text-align:center; padding:1.5rem 0; }
+.rc-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
+.rc-modal { position:fixed; top:3%; left:50%; transform:translateX(-50%); width:min(860px, 96vw); max-height:94vh;
+            background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401; display:flex; flex-direction:column; overflow:hidden; }
+.rc-modal-head { display:flex; justify-content:space-between; align-items:center; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; }
+.rc-close { background:transparent; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:#64748b; }
+.rc-modal-body { padding:1rem 1.15rem; overflow:auto; }
+.rc-modal-body label { display:block; font-size:.78rem; color:#334155; margin-bottom:.2rem; margin-top:.5rem; }
+.rc-modal-body input, .rc-modal-body textarea { width:100%; padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; font: inherit; }
+.rc-grid { display:grid; grid-template-columns: 2fr 1.4fr 1fr 1fr 1fr 1fr; gap:.5rem; align-items:end; }
+.rc-modal-foot { padding:.75rem 1.15rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
+.rc-msg { padding:.5rem .75rem; border-radius:6px; margin-top:.5rem; font-size:.85rem; }
+.rc-msg-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
+.rc-msg-err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+.btn-primary { background:#7c3aed; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
+.btn-outline { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.4rem .75rem; border-radius:6px; cursor:pointer; }
+.btn-danger  { background:#fff; color:#b91c1c; border:1px solid #fecaca; padding:.4rem .75rem; border-radius:6px; cursor:pointer; }
+.btn-sm { padding:.28rem .6rem; font-size:.8rem; }
+</style>
+
+@code {
+    private sealed class EditForm
+    {
+        public string Nombre { get; set; } = string.Empty;
+        public string? Categoria { get; set; }
+        public string? Descripcion { get; set; }
+        public string QuerySql { get; set; } = string.Empty;
+        public bool FiltraSede { get; set; } = true;
+        public bool FiltraFechas { get; set; } = true;
+        public bool Habilitado { get; set; } = true;
+        public int Orden { get; set; }
+    }
+
+    private const string EjemploSql = @"SELECT numero_documento AS ""Documento"", nombre_completo AS ""Nombre""
+FROM pacientes
+WHERE tenant_id = {tenantId} AND (@_desde IS NULL OR created_at >= {desde})
+ORDER BY created_at DESC LIMIT 500";
+
+    private bool _esPlataforma;
+    private List<ReporteCatalogoDto> _todos = new();
+    private EditForm? _edit;
+    private Guid? _editId;
+    private string _msg = string.Empty;
+    private bool _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthProvider.GetAuthenticationStateAsync();
+        _esPlataforma = state.User.FindFirst("platform_role") is not null;
+        if (_esPlataforma) { await RecargarAsync(); }
+    }
+
+    private async Task RecargarAsync()
+    {
+        _todos = (await ReportSvc.ListarCatalogoAsync()).ToList();
+    }
+
+    private void Nuevo()
+    {
+        _editId = null;
+        _edit = new EditForm { Orden = _todos.Count + 1 };
+        _msg = string.Empty; _error = false;
+    }
+
+    private async Task AbrirAsync(Guid id)
+    {
+        var det = await ReportSvc.ObtenerCatalogoAsync(id);
+        if (det is null) { return; }
+        _editId = id;
+        _edit = new EditForm
+        {
+            Nombre = det.Nombre,
+            Categoria = det.Categoria,
+            Descripcion = det.Descripcion,
+            QuerySql = det.QuerySql,
+            FiltraSede = det.FiltraSede,
+            FiltraFechas = det.FiltraFechas,
+            Habilitado = det.Habilitado,
+            Orden = det.Orden
+        };
+        _msg = string.Empty; _error = false;
+    }
+
+    private void Cerrar() { _edit = null; _editId = null; }
+
+    private async Task GuardarAsync()
+    {
+        if (_edit is null) { return; }
+        try
+        {
+            var req = new GuardarCatalogoRequest(
+                _edit.Nombre?.Trim() ?? "",
+                _edit.Descripcion,
+                _edit.Categoria,
+                _edit.QuerySql ?? "",
+                _edit.FiltraSede, _edit.FiltraFechas, _edit.Habilitado, _edit.Orden);
+            if (_editId is Guid id) { await ReportSvc.ActualizarCatalogoAsync(id, req, Guid.Empty); }
+            else { await ReportSvc.CrearCatalogoAsync(req, Guid.Empty); }
+            _msg = "Guardado."; _error = false;
+            await RecargarAsync();
+            Cerrar();
+        }
+        catch (Exception ex) { _msg = ex.Message; _error = true; }
+    }
+
+    private async Task EliminarAsync(Guid id)
+    {
+        await ReportSvc.EliminarCatalogoAsync(id, Guid.Empty);
+        await RecargarAsync();
+    }
+}

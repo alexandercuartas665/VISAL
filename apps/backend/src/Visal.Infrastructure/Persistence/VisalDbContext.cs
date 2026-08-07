@@ -72,7 +72,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HistoriaClinicaInsumo> HistoriaClinicaInsumos => Set<HistoriaClinicaInsumo>();
     public DbSet<HistoriaClinicaSuministroMedicamento> HistoriaClinicaSuministroMedicamentos => Set<HistoriaClinicaSuministroMedicamento>();
     public DbSet<SeguimientoEncuesta> SeguimientoEncuestas => Set<SeguimientoEncuesta>();
-    public DbSet<ReporteConfig> ReporteConfigs => Set<ReporteConfig>();
+    public DbSet<ReporteCatalogo> ReporteCatalogos => Set<ReporteCatalogo>();
+    public DbSet<ReporteTenantActivacion> ReporteTenantActivaciones => Set<ReporteTenantActivacion>();
     public DbSet<ReporteUsuario> ReporteUsuarios => Set<ReporteUsuario>();
     public DbSet<SqlConsoleLog> SqlConsoleLogs => Set<SqlConsoleLog>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();

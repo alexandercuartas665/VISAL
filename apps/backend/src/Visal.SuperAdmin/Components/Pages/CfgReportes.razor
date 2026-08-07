@@ -73,8 +73,11 @@
         </div>
         <div class="gr-modal-body">
             <label class="gr-hint">Usuarios que pueden ver este reporte (deja vacio = visible para todos con acceso al modulo):</label>
+            <input class="gr-user-search" type="text" placeholder="Buscar usuario por nombre o correo..."
+                   value="@_userFilter" @oninput="e => _userFilter = e.Value?.ToString() ?? string.Empty" />
+            @{ var visibles = FiltrarUsuarios().ToList(); }
             <div class="gr-users-list">
-                @foreach (var u in _usuarios)
+                @foreach (var u in visibles)
                 {
                     var yes = _seleccion.Contains(u.Id);
                     <label class="gr-user">
@@ -82,7 +85,12 @@
                         @u.Nombre <small>@u.Email</small>
                     </label>
                 }
+                @if (visibles.Count == 0)
+                {
+                    <div class="gr-user-empty">Sin coincidencias para "@_userFilter".</div>
+                }
             </div>
+            <div class="gr-user-count">@_seleccion.Count usuario(s) seleccionado(s)</div>
         </div>
         <div class="gr-modal-foot">
             <button class="btn-outline" @onclick="CerrarUsuarios">Cancelar</button>
@@ -131,6 +139,9 @@
 .gr-users-list { display:grid; grid-template-columns: repeat(2, 1fr); gap:.35rem; max-height:320px; overflow:auto; border:1px solid #e5e7eb; padding:.5rem; border-radius:8px; }
 .gr-user { display:flex; gap:.4rem; align-items:center; font-size:.85rem; }
 .gr-user small { color:#94a3b8; }
+.gr-user-search { width:100%; padding:.5rem .65rem; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:.5rem; font:inherit; }
+.gr-user-empty { grid-column:1/-1; color:#94a3b8; text-align:center; padding:.75rem 0; font-size:.85rem; }
+.gr-user-count { margin-top:.5rem; font-size:.78rem; color:#64748b; }
 .gr-modal-foot { padding:.75rem 1.15rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
 .gr-toast { position:fixed; bottom:1.25rem; left:50%; transform:translateX(-50%); padding:.55rem 1rem; border-radius:8px; font-size:.85rem; z-index:1500; box-shadow:0 6px 20px rgba(0,0,0,.15); }
 .gr-toast-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
@@ -148,8 +159,20 @@
     private List<UsuarioItem> _usuarios = new();
     private ReporteGaleriaDto? _editUsuarios;
     private HashSet<Guid> _seleccion = new();
+    private string _userFilter = string.Empty;
     private string _msg = string.Empty;
     private bool _error;
+
+    private IEnumerable<UsuarioItem> FiltrarUsuarios()
+    {
+        var q = _usuarios.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_userFilter))
+        {
+            var f = _userFilter.Trim().ToLowerInvariant();
+            q = q.Where(u => u.Nombre.ToLowerInvariant().Contains(f) || u.Email.ToLowerInvariant().Contains(f));
+        }
+        return q;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -180,9 +203,10 @@
     {
         _editUsuarios = r;
         _seleccion = r.UsuariosAsignados.ToHashSet();
+        _userFilter = string.Empty;
     }
 
-    private void CerrarUsuarios() { _editUsuarios = null; _seleccion = new(); }
+    private void CerrarUsuarios() { _editUsuarios = null; _seleccion = new(); _userFilter = string.Empty; }
 
     private void ToggleUsuario(Guid uid, bool on)
     {

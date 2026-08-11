@@ -49,7 +49,14 @@ public sealed record ColumnaConfigItemDto(
     bool Visible,
     string? Alias,
     string? Descripcion,
-    string? RutaOrigen);
+    string? RutaOrigen,
+    SnapshotColumnaFormato FormatoTipo = SnapshotColumnaFormato.General,
+    string? FormatoPatron = null,
+    bool EnError = false);
 
 /// <summary>Info compacta usada por el exportador (ya filtrada + ordenada).</summary>
-public sealed record ColumnaExportInfo(string ColumnaOriginal, string HeaderExport);
+public sealed record ColumnaExportInfo(
+    string ColumnaOriginal,
+    string HeaderExport,
+    SnapshotColumnaFormato FormatoTipo = SnapshotColumnaFormato.General,
+    string? FormatoPatron = null);

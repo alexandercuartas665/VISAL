@@ -671,6 +671,48 @@ app.MapPost("/api/public/leads", async (
         : Results.Json(new { ok = false, error = result.Error }, statusCode: 400);
 }).AllowAnonymous().DisableAntiforgery();
 
+// Webhook publico de formularios web (WordPress: Contactanos + PQRS). El token va EN LA URL
+// porque el webhook de Elementor no envia headers custom de forma fiable; identifica y autentica
+// al tenant (TenantFormWebhookConfig, secreto distinto del API key de leads). Crea una tarjeta en
+// la etapa "PQRS" del embudo. Acepta application/x-www-form-urlencoded (Elementor) y application/json.
+// El token NO se loggea. Ver ADR docs/decisiones/0009.
+app.MapPost("/webhooks/formularios/{token}", async (
+    string token,
+    HttpRequest request,
+    Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+    Visal.Application.Tenancy.IFormWebhookService svc,
+    CancellationToken ct) =>
+{
+    // Rate limiting basico: ventana fija por IP (defensa ante flood / adivinanza de token).
+    var ip = request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var bucket = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmm");
+    var rlKey = $"formwh-rl:{ip}:{bucket}";
+    var count = cache.TryGetValue(rlKey, out var existing) && existing is int c ? c : 0;
+    if (count >= 60) { return Results.StatusCode(429); }
+    using (var rlEntry = cache.CreateEntry(rlKey))
+    {
+        rlEntry.Value = count + 1;
+        rlEntry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+    }
+
+    // Cuerpo crudo: el servicio decide form-urlencoded vs JSON (no dependemos del binding automatico).
+    string bodyText;
+    using (var reader = new StreamReader(request.Body, System.Text.Encoding.UTF8))
+    {
+        bodyText = await reader.ReadToEndAsync(ct);
+    }
+
+    var result = await svc.ProcessAsync(token, request.ContentType, bodyText, ct);
+    return result.StatusCode switch
+    {
+        201 => Results.Json(new { ok = true, cardId = result.CardId }, statusCode: 201),
+        200 => Results.Json(new { ok = true, cardId = result.CardId, duplicate = true }, statusCode: 200),
+        401 => Results.Json(new { error = result.Error }, statusCode: 401),
+        429 => Results.StatusCode(429),
+        _ => Results.Json(new { ok = false, error = result.Error }, statusCode: result.StatusCode),
+    };
+}).AllowAnonymous().DisableAntiforgery();
+
 // Pagina publica de la cotizacion de un lead (HTML del diseno con los datos del lead). La usa el
 // boton "Ver cotizacion" y tambien el render de PDF (Chromium navega aqui). Clave: el id del lead.
 app.MapGet("/cotizacion/{leadId:guid}", async (

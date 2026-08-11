@@ -40,6 +40,9 @@ public sealed class AtencionRevisionChipTests
         public Task SetMesesValidezHistoriaClinicaAsync(int meses, Guid actor, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> GetBloquearOverloadTurnosAsync(CancellationToken ct = default) => Task.FromResult(false);
         public Task SetBloquearOverloadTurnosAsync(bool bloquear, Guid actor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string?> GetEtapaFormularioWebAsync(string tipo, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task SetEtapaFormularioWebAsync(string tipo, string? etapa, Guid actor, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<string>> ListEtapasEmbudoAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(new List<string>());
     }
 
     private sealed class FakeTimeProvider : TimeProvider

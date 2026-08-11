@@ -503,18 +503,10 @@ public sealed class FacturacionSnapshotService(
         {
             for (var c = 0; c < ctx.Columnas.Count; c++)
             {
-                var col = ctx.Columnas[c].ColumnaOriginal;
-                if (!fila.TryGetValue(col, out var val) || val is null) { continue; }
+                var colInfo = ctx.Columnas[c];
+                if (!fila.TryGetValue(colInfo.ColumnaOriginal, out var val) || val is null) { continue; }
                 var cell = hoja.Cell(row, c + 1);
-                switch (val)
-                {
-                    case long lv: cell.Value = lv; break;
-                    case int iv: cell.Value = iv; break;
-                    case decimal dv: cell.Value = dv; break;
-                    case double db: cell.Value = db; break;
-                    case bool bv: cell.Value = bv; break;
-                    default: cell.Value = val.ToString(); break;
-                }
+                AplicarValorFormato(cell, val, colInfo.FormatoTipo, colInfo.FormatoPatron);
             }
             row++;
         }
@@ -528,6 +520,60 @@ public sealed class FacturacionSnapshotService(
             ms.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".xlsx");
+    }
+
+    /// <summary>
+    /// Escribe una celda Excel aplicando el formato configurado por el tenant. General mantiene el
+    /// comportamiento historico (tipar el valor tal cual). Los demas parsean el valor a numero/fecha
+    /// y le ponen el patron Excel; si el parseo falla, escriben el texto crudo sin patron.
+    /// </summary>
+    private static void AplicarValorFormato(ClosedXML.Excel.IXLCell cell, object val, SnapshotColumnaFormato tipo, string? patron)
+    {
+        if (tipo == SnapshotColumnaFormato.General)
+        {
+            switch (val)
+            {
+                case long lv: cell.Value = lv; break;
+                case int iv: cell.Value = iv; break;
+                case decimal dv: cell.Value = dv; break;
+                case double dbl: cell.Value = dbl; break;
+                case bool bv: cell.Value = bv; break;
+                default: cell.Value = val.ToString(); break;
+            }
+            return;
+        }
+
+        var patronExcel = SnapshotColumnaFormatter.ExcelPattern(tipo, patron);
+        switch (tipo)
+        {
+            case SnapshotColumnaFormato.Texto:
+                cell.Value = val.ToString();
+                break;
+            case SnapshotColumnaFormato.NumeroEntero:
+            case SnapshotColumnaFormato.NumeroDecimal:
+            case SnapshotColumnaFormato.Moneda:
+            case SnapshotColumnaFormato.Porcentaje:
+                if (SnapshotColumnaFormatter.TryNumero(val, out var num)) { cell.Value = num; }
+                else { cell.Value = val.ToString(); patronExcel = null; }
+                break;
+            case SnapshotColumnaFormato.Fecha:
+            case SnapshotColumnaFormato.FechaHora:
+                if (SnapshotColumnaFormatter.TryFecha(val, out var fecha)) { cell.Value = fecha; }
+                else { cell.Value = val.ToString(); patronExcel = null; }
+                break;
+            case SnapshotColumnaFormato.Personalizado:
+                if (SnapshotColumnaFormatter.TryNumero(val, out var pn)) { cell.Value = pn; }
+                else if (SnapshotColumnaFormatter.TryFecha(val, out var pf)) { cell.Value = pf; }
+                else { cell.Value = val.ToString(); }
+                break;
+            default:
+                cell.Value = val.ToString();
+                break;
+        }
+        if (!string.IsNullOrWhiteSpace(patronExcel))
+        {
+            cell.Style.NumberFormat.Format = patronExcel;
+        }
     }
 
     public async Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, bool ignorarValidacion = false, CancellationToken ct = default)
@@ -637,8 +683,9 @@ public sealed class FacturacionSnapshotService(
             var partes = new string[ctx.Columnas.Count];
             for (var c = 0; c < ctx.Columnas.Count; c++)
             {
-                var col = ctx.Columnas[c].ColumnaOriginal;
-                var val = fila.TryGetValue(col, out var v) && v is not null ? v.ToString() ?? "" : "";
+                var colInfo = ctx.Columnas[c];
+                var raw = fila.TryGetValue(colInfo.ColumnaOriginal, out var v) ? v : null;
+                var val = SnapshotColumnaFormatter.FormatoCsv(raw, colInfo.FormatoTipo, colInfo.FormatoPatron);
                 partes[c] = EscaparCsv(val);
             }
             sb.AppendLine(string.Join(';', partes));

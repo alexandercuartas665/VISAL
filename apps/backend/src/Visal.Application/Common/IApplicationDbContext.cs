@@ -137,6 +137,8 @@ public interface IApplicationDbContext
     DbSet<EmailConfig> EmailConfigs { get; }
     DbSet<GoogleAuthConfig> GoogleAuthConfigs { get; }
     DbSet<TenantApiConfig> TenantApiConfigs { get; }
+    DbSet<TenantFormWebhookConfig> TenantFormWebhookConfigs { get; }
+    DbSet<FormWebhookEvent> FormWebhookEvents { get; }
     DbSet<PasswordResetToken> PasswordResetTokens { get; }
     DbSet<SuperAdminAuditLog> SuperAdminAuditLogs { get; }
     DbSet<SqlConsoleLog> SqlConsoleLogs { get; }

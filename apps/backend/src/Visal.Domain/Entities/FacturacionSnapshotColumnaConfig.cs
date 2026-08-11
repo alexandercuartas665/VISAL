@@ -44,4 +44,23 @@ public class FacturacionSnapshotColumnaConfig : TenantEntity
 
     /// <summary>Ruta/origen del dato (ej. "Paciente.NumeroDocumento" o "Asignacion.ContratoCodigo -> ContratoAseguradora.Codigo").</summary>
     public string? RutaOrigen { get; set; }
+
+    /// <summary>
+    /// Formato de salida de la celda en el archivo (Excel/CSV). General = sin formato (tal cual).
+    /// Los demas parsean el valor y aplican formato de fecha/numero/moneda al exportar.
+    /// </summary>
+    public SnapshotColumnaFormato FormatoTipo { get; set; } = SnapshotColumnaFormato.General;
+
+    /// <summary>
+    /// Patron Excel a usar cuando FormatoTipo = Personalizado (p.ej. "dd/mm/yyyy" o "#,##0.00").
+    /// Ignorado para los demas tipos (que traen su patron predefinido).
+    /// </summary>
+    public string? FormatoPatron { get; set; }
+
+    /// <summary>
+    /// Marca de trabajo del tenant para senalar que esta columna esta "en error"
+    /// (dato mal mapeado, formato equivocado, etc.). Es solo indicativa: se guarda
+    /// y se muestra en el configurador, pero NO altera la exportacion.
+    /// </summary>
+    public bool EnError { get; set; }
 }

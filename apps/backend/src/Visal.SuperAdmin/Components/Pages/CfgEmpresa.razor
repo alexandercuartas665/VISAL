@@ -100,6 +100,37 @@
     </div>
 </div>
 
+@* ===== Formularios web (PQRS / Contactanos) ===== *@
+<div class="ase-card">
+    <div class="ase-card-h">Formularios web (PQRS / Contactanos)</div>
+    <div class="ase-form">
+        <div class="ase-f">
+            <label>Etapa del embudo para PQRS</label>
+            <div class="ase-input-row">
+                <select class="form-control form-control-sm" style="max-width:260px;" @bind="_etapaPqrs">
+                    @foreach (var e in _etapasEmbudo) { <option value="@e">@e</option> }
+                </select>
+            </div>
+        </div>
+        <div class="ase-f">
+            <label>Etapa del embudo para Contactanos</label>
+            <div class="ase-input-row">
+                <select class="form-control form-control-sm" style="max-width:260px;" @bind="_etapaContacto">
+                    @foreach (var e in _etapasEmbudo) { <option value="@e">@e</option> }
+                </select>
+                <button class="btn btn-primary btn-sm" @onclick="SaveFormularios" disabled="@_busyForm">
+                    @(_busyForm ? "Guardando..." : "Guardar")
+                </button>
+            </div>
+            <small class="text-muted">
+                Las tarjetas que llegan por el webhook de formularios del sitio caen en la etapa elegida.
+                PQRS y Contactanos pueden ir a la misma etapa o a etapas distintas. Si la etapa no existe
+                aun, se crea automaticamente al recibir el primer envio.
+            </small>
+        </div>
+    </div>
+</div>
+
 <style>
     .ase-input-row { display: flex; gap: 6px; align-items: center; }
     .ase-input-row > input { max-width: 120px; }
@@ -113,12 +144,55 @@
     private bool _busyClinica;
     private bool _bloquearOverload;
     private bool _busyOverload;
+    private List<string> _etapasEmbudo = new();
+    private string _etapaPqrs = "PQRS";
+    private string _etapaContacto = "PQRS";
+    private bool _busyForm;
 
     protected override async Task OnInitializedAsync()
     {
         await Load();
         _mesesHC = await ClinicaSvc.GetMesesValidezHistoriaClinicaAsync();
         _bloquearOverload = await ClinicaSvc.GetBloquearOverloadTurnosAsync();
+
+        _etapasEmbudo = BuildEtapaOptions(await ClinicaSvc.ListEtapasEmbudoAsync());
+        _etapaPqrs = await ClinicaSvc.GetEtapaFormularioWebAsync("pqrs") ?? "PQRS";
+        _etapaContacto = await ClinicaSvc.GetEtapaFormularioWebAsync("contacto") ?? "PQRS";
+        // Asegura que el valor guardado siempre este entre las opciones del select.
+        EnsureOption(_etapaPqrs);
+        EnsureOption(_etapaContacto);
+    }
+
+    // Opciones = etapas existentes + los defaults PQRS/Contacto (que el webhook auto-crea si faltan).
+    private static List<string> BuildEtapaOptions(IReadOnlyList<string> existentes)
+    {
+        var lista = new List<string>(existentes);
+        foreach (var def in new[] { "PQRS", "Contacto" })
+        {
+            if (!lista.Any(s => string.Equals(s, def, StringComparison.OrdinalIgnoreCase))) { lista.Add(def); }
+        }
+        return lista;
+    }
+
+    private void EnsureOption(string valor)
+    {
+        if (!string.IsNullOrWhiteSpace(valor) && !_etapasEmbudo.Any(s => string.Equals(s, valor, StringComparison.OrdinalIgnoreCase)))
+        {
+            _etapasEmbudo.Add(valor);
+        }
+    }
+
+    private async Task SaveFormularios()
+    {
+        _error = _ok = null; _busyForm = true;
+        try
+        {
+            await ClinicaSvc.SetEtapaFormularioWebAsync("pqrs", _etapaPqrs, await Actor());
+            await ClinicaSvc.SetEtapaFormularioWebAsync("contacto", _etapaContacto, await Actor());
+            _ok = $"Formularios web: PQRS -> '{_etapaPqrs}', Contactanos -> '{_etapaContacto}'.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busyForm = false; }
     }
     private async Task Load() => _items = (await Svc.ListAsync()).Select(Row.From).ToList();
 

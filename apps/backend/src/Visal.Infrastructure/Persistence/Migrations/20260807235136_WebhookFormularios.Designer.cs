@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807235136_WebhookFormularios")]
+    partial class WebhookFormularios
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2293,18 +2296,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("descripcion");
-
-                    b.Property<bool>("EnError")
-                        .HasColumnType("boolean")
-                        .HasColumnName("en_error");
-
-                    b.Property<string>("FormatoPatron")
-                        .HasColumnType("text")
-                        .HasColumnName("formato_patron");
-
-                    b.Property<int>("FormatoTipo")
-                        .HasColumnType("integer")
-                        .HasColumnName("formato_tipo");
 
                     b.Property<int>("Orden")
                         .HasColumnType("integer")

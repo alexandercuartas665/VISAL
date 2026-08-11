@@ -25,7 +25,11 @@ public sealed record ApiCreateLeadRequest(
     string? Destination,
     decimal? EstimatedValue,
     string? Currency,
-    Dictionary<string, JsonElement>? Fields);
+    Dictionary<string, JsonElement>? Fields,
+    // Etapa destino opcional por nombre (case-insensitive). Si es null se usa la primera por
+    // SortOrder (comportamiento historico de /api/public/leads). El webhook de formularios lo
+    // usa para enrutar a la etapa "PQRS".
+    string? StageName = null);
 
 public sealed record ApiLeadResult(bool Ok, Guid? LeadId = null, string? Error = null);
 
@@ -138,13 +142,29 @@ public sealed class TenantApiService : ITenantApiService
         }
 
         // Sin contexto de sesion: se ignora el filtro global y se busca por tenant explicito.
-        var stage = await _db.PipelineStages.IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenantId)
-            .OrderBy(s => s.SortOrder)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (stage is null)
+        var stagesForTenant = _db.PipelineStages.IgnoreQueryFilters().Where(s => s.TenantId == tenantId);
+        PipelineStage? stage;
+        if (!string.IsNullOrWhiteSpace(request.StageName))
         {
-            return new ApiLeadResult(false, null, "La agencia no tiene etapas de embudo configuradas.");
+            var target = request.StageName.Trim().ToLower();
+            stage = await stagesForTenant
+                .Where(s => s.Name.ToLower() == target)
+                .OrderBy(s => s.SortOrder)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (stage is null)
+            {
+                return new ApiLeadResult(false, null, $"La agencia no tiene una etapa '{request.StageName}'.");
+            }
+        }
+        else
+        {
+            stage = await stagesForTenant
+                .OrderBy(s => s.SortOrder)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (stage is null)
+            {
+                return new ApiLeadResult(false, null, "La agencia no tiene etapas de embudo configuradas.");
+            }
         }
 
         var now = _timeProvider.GetUtcNow();

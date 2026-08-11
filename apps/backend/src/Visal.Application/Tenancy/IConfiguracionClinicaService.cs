@@ -23,4 +23,15 @@ public interface IConfiguracionClinicaService
     Task<bool> GetBloquearOverloadTurnosAsync(CancellationToken ct = default);
 
     Task SetBloquearOverloadTurnosAsync(bool bloquear, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Etapa del embudo a la que se enruta cada formulario web (webhook /webhooks/formularios).
+    /// tipo: "pqrs" o "contacto". Devuelve null si no esta configurado (el webhook cae a "PQRS").
+    /// </summary>
+    Task<string?> GetEtapaFormularioWebAsync(string tipo, CancellationToken ct = default);
+
+    Task SetEtapaFormularioWebAsync(string tipo, string? etapa, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Nombres de las etapas del embudo del tenant, para poblar los selects de la config.</summary>
+    Task<IReadOnlyList<string>> ListEtapasEmbudoAsync(CancellationToken ct = default);
 }

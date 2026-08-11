@@ -32,6 +32,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<EmailConfig> EmailConfigs => Set<EmailConfig>();
     public DbSet<GoogleAuthConfig> GoogleAuthConfigs => Set<GoogleAuthConfig>();
     public DbSet<TenantApiConfig> TenantApiConfigs => Set<TenantApiConfig>();
+    public DbSet<TenantFormWebhookConfig> TenantFormWebhookConfigs => Set<TenantFormWebhookConfig>();
+    public DbSet<FormWebhookEvent> FormWebhookEvents => Set<FormWebhookEvent>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<PlatformUser> PlatformUsers => Set<PlatformUser>();
     public DbSet<SuperAdminAuditLog> SuperAdminAuditLogs => Set<SuperAdminAuditLog>();
@@ -324,6 +326,21 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ApiKeyHash).HasMaxLength(80);
             b.HasIndex(x => x.ApiKeyHash);
             b.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        modelBuilder.Entity<TenantFormWebhookConfig>(b =>
+        {
+            b.Property(x => x.TokenHash).HasMaxLength(80);
+            b.HasIndex(x => x.TokenHash);
+            b.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        modelBuilder.Entity<FormWebhookEvent>(b =>
+        {
+            b.Property(x => x.DedupHash).HasMaxLength(80).IsRequired();
+            // Idempotencia por (tenant + payload) dentro de una ventana de tiempo.
+            b.HasIndex(x => new { x.TenantId, x.DedupHash });
+            b.HasIndex(x => x.ReceivedAt);
         });
 
         modelBuilder.Entity<WompiMasterConfig>(b =>

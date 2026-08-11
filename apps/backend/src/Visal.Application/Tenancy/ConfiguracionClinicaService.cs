@@ -10,6 +10,10 @@ public sealed class ConfiguracionClinicaService(IApplicationDbContext db, ITenan
     private const int DefaultMeses = 3;
     private const string KeyBloquearOverloadTurnos = "turnos.bloquear_overload";
 
+    // Etapa destino del embudo por tipo de formulario web. Los lee FormWebhookService por tenant.
+    public const string KeyEtapaFormPqrs = "formularios.etapa_pqrs";
+    public const string KeyEtapaFormContacto = "formularios.etapa_contacto";
+
     public async Task<int> GetMesesValidezHistoriaClinicaAsync(CancellationToken ct = default)
     {
         var cfg = await db.TenantConfigurations.AsNoTracking()
@@ -69,4 +73,35 @@ public sealed class ConfiguracionClinicaService(IApplicationDbContext db, ITenan
         }
         await db.SaveChangesAsync(ct);
     }
+
+    private static string KeyEtapaPorTipo(string tipo)
+        => string.Equals(tipo, "contacto", StringComparison.OrdinalIgnoreCase) ? KeyEtapaFormContacto : KeyEtapaFormPqrs;
+
+    public async Task<string?> GetEtapaFormularioWebAsync(string tipo, CancellationToken ct = default)
+    {
+        var key = KeyEtapaPorTipo(tipo);
+        var cfg = await db.TenantConfigurations.AsNoTracking().FirstOrDefaultAsync(c => c.ConfigKey == key, ct);
+        return string.IsNullOrWhiteSpace(cfg?.ConfigValue) ? null : cfg!.ConfigValue!.Trim();
+    }
+
+    public async Task SetEtapaFormularioWebAsync(string tipo, string? etapa, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        var key = KeyEtapaPorTipo(tipo);
+        var valor = etapa?.Trim() ?? string.Empty;
+
+        var cfg = await db.TenantConfigurations.FirstOrDefaultAsync(c => c.ConfigKey == key, ct);
+        if (cfg is null)
+        {
+            db.TenantConfigurations.Add(new TenantConfiguration { TenantId = tid, ConfigKey = key, ConfigValue = valor });
+        }
+        else
+        {
+            cfg.ConfigValue = valor;
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> ListEtapasEmbudoAsync(CancellationToken ct = default)
+        => await db.PipelineStages.AsNoTracking().OrderBy(s => s.SortOrder).Select(s => s.Name).ToListAsync(ct);
 }

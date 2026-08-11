@@ -13,6 +13,7 @@
 @inject IJSRuntime JS
 @inject Visal.Application.Auth.IAuthService AuthSvc
 @inject Visal.Application.Tenancy.ITenantApiService TenantApiSvc
+@inject Visal.Application.Tenancy.IFormWebhookService FormWebhookSvc
 
 <PageTitle>Mi cuenta - Visal</PageTitle>
 
@@ -232,6 +233,58 @@ else
             <p class="text-muted" style="font-size:11px;margin-top:8px;">
                 En <code>fields</code> puedes enviar cualquier campo del embudo por su clave (ej. adultos, ninos, comentarios).
                 La clave se muestra solo aqui; si la regeneras, la anterior deja de funcionar.
+            </p>
+        }
+        </div>
+    </details>
+
+    <details class="card acct-api-card" style="max-width:1040px;margin-top:14px;">
+        <summary class="acct-api-summary">
+            <span style="font-weight:700;font-size:1.05rem;">Webhook de formularios web
+                <span class="text-muted" style="font-weight:400;font-size:12px;">(opcional &middot; recibe Contactanos y PQRS desde tu sitio)</span>
+            </span>
+            <span class="text-muted" style="font-size:12px;">Ver configuracion</span>
+        </summary>
+        <div style="padding:4px 20px 20px;">
+        <p class="text-muted" style="font-size:13px;margin-bottom:14px;">
+            Recibe los envios de los formularios de tu sitio (WordPress) y crea una tarjeta en la etapa
+            <strong>PQRS</strong> del embudo. El token viaja en la URL del webhook (no en un header), por lo
+            que funciona con Elementor. Es un secreto distinto del API key de leads y lo puedes regenerar
+            cuando quieras.
+        </p>
+
+        @if (_formWebhook is null || !_formWebhook.HasToken)
+        {
+            <button class="btn btn-primary" disabled="@_formWebhookBusy" @onclick="RegenerateFormWebhookAsync">@(_formWebhookBusy ? "Generando..." : "Generar token del webhook")</button>
+        }
+        else
+        {
+            <div style="margin-bottom:14px;">
+                <label class="form-label" style="font-size:12px;font-weight:700;">URL del webhook (pegar en WordPress)</label>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <code style="background:var(--muted);padding:4px 10px;border-radius:7px;font-size:12.5px;word-break:break-all;">@FormWebhookUrl()</code>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => Copy(FormWebhookUrl())">Copiar</button>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+                <span class="badge bg-@(_formWebhook.IsEnabled ? "success" : "secondary")">@(_formWebhook.IsEnabled ? "Activo" : "Inactivo")</span>
+                <button class="btn btn-outline-secondary btn-sm" disabled="@_formWebhookBusy" @onclick="ToggleFormWebhookAsync">@(_formWebhook.IsEnabled ? "Desactivar" : "Activar")</button>
+                <button class="btn btn-outline-secondary btn-sm" disabled="@_formWebhookBusy" @onclick="RegenerateFormWebhookAsync">Regenerar token</button>
+                @if (_formWebhook.LastUsedAt is { } lu)
+                {
+                    <span class="text-muted" style="font-size:11px;">Ultimo uso: @lu.LocalDateTime.ToString("dd MMM yyyy HH:mm")</span>
+                }
+            </div>
+
+            <label class="form-label" style="font-size:12px;font-weight:700;">Campos que envia el formulario</label>
+            <ul class="text-muted" style="font-size:12px;margin:4px 0 0 0;padding-left:18px;">
+                <li><code>nombre</code> (obligatorio) &middot; <code>telefono</code> &middot; <code>email</code></li>
+                <li><code>asunto</code> &middot; <code>mensaje</code> &middot; <code>tipo</code> (pqrs | contacto) &middot; <code>pagina</code></li>
+            </ul>
+            <p class="text-muted" style="font-size:11px;margin-top:8px;">
+                Content-Type: <code>application/x-www-form-urlencoded</code> (Elementor) o <code>application/json</code>.
+                El token se muestra solo aqui dentro de la URL; si lo regeneras, la anterior deja de funcionar.
             </p>
         }
         </div>
@@ -499,6 +552,8 @@ else
     private TenantDetail? _tenant;
     private Visal.Application.Tenancy.TenantApiConfigDto? _api;
     private bool _apiBusy;
+    private Visal.Application.Tenancy.FormWebhookConfigDto? _formWebhook;
+    private bool _formWebhookBusy;
 
     private bool _profileOpen;
     private bool _profileBusy;
@@ -564,6 +619,7 @@ else
         _plan = _sub is null ? null : _plans.FirstOrDefault(p => p.Id == _sub.PlanId);
         _payments = (await PaymentsSvc.ListAsync(_tenantId)).ToList();
         _api = await TenantApiSvc.GetAsync(_tenantId);
+        _formWebhook = await FormWebhookSvc.GetAsync(_tenantId);
         _loading = false;
     }
 
@@ -580,6 +636,28 @@ else
         _apiBusy = true;
         try { _api = await TenantApiSvc.SetEnabledAsync(_tenantId, !_api.IsEnabled, await ActorAsync()) ?? _api; }
         finally { _apiBusy = false; }
+    }
+
+    private async Task RegenerateFormWebhookAsync()
+    {
+        _formWebhookBusy = true;
+        try { _formWebhook = await FormWebhookSvc.RegenerateAsync(_tenantId, await ActorAsync()); }
+        finally { _formWebhookBusy = false; }
+    }
+
+    private async Task ToggleFormWebhookAsync()
+    {
+        if (_formWebhook is null || !_formWebhook.HasToken) { return; }
+        _formWebhookBusy = true;
+        try { _formWebhook = await FormWebhookSvc.SetEnabledAsync(_tenantId, !_formWebhook.IsEnabled, await ActorAsync()) ?? _formWebhook; }
+        finally { _formWebhookBusy = false; }
+    }
+
+    private string FormWebhookUrl()
+    {
+        var baseUrl = Nav.BaseUri.TrimEnd('/');
+        var token = _formWebhook?.Token ?? "TU_TOKEN";
+        return $"{baseUrl}/webhooks/formularios/{token}";
     }
 
     private async Task Copy(string text)

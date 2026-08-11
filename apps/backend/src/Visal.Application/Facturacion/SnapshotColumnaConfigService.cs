@@ -37,7 +37,7 @@ public sealed class SnapshotColumnaConfigService(
                 var descr = string.IsNullOrWhiteSpace(ov.Descripcion)
                     ? (descrDefault.TryGetValue(col, out var d) ? d : null)
                     : ov.Descripcion;
-                conOverride.Add(new ColumnaConfigItemDto(col, ov.Orden, ov.Visible, ov.Alias, descr, ov.RutaOrigen));
+                conOverride.Add(new ColumnaConfigItemDto(col, ov.Orden, ov.Visible, ov.Alias, descr, ov.RutaOrigen, ov.FormatoTipo, ov.FormatoPatron, ov.EnError));
             }
             else
             {
@@ -78,6 +78,9 @@ public sealed class SnapshotColumnaConfigService(
                 e.Alias = string.IsNullOrWhiteSpace(item.Alias) ? null : item.Alias.Trim();
                 e.Descripcion = string.IsNullOrWhiteSpace(item.Descripcion) ? null : item.Descripcion.Trim();
                 e.RutaOrigen = string.IsNullOrWhiteSpace(item.RutaOrigen) ? null : item.RutaOrigen.Trim();
+                e.FormatoTipo = item.FormatoTipo;
+                e.FormatoPatron = string.IsNullOrWhiteSpace(item.FormatoPatron) ? null : item.FormatoPatron.Trim();
+                e.EnError = item.EnError;
                 mapExistentes.Remove(item.ColumnaOriginal);
             }
             else
@@ -91,7 +94,9 @@ public sealed class SnapshotColumnaConfigService(
                     Visible = item.Visible,
                     Alias = string.IsNullOrWhiteSpace(item.Alias) ? null : item.Alias.Trim(),
                     Descripcion = string.IsNullOrWhiteSpace(item.Descripcion) ? null : item.Descripcion.Trim(),
-                    RutaOrigen = string.IsNullOrWhiteSpace(item.RutaOrigen) ? null : item.RutaOrigen.Trim()
+                    RutaOrigen = string.IsNullOrWhiteSpace(item.RutaOrigen) ? null : item.RutaOrigen.Trim(),
+                    FormatoTipo = item.FormatoTipo,
+                    FormatoPatron = string.IsNullOrWhiteSpace(item.FormatoPatron) ? null : item.FormatoPatron.Trim()
                 });
             }
         }
@@ -125,7 +130,7 @@ public sealed class SnapshotColumnaConfigService(
             .ToDictionaryAsync(c => c.ColumnaOriginal, ct);
 
         // Mismo criterio que ListarAsync: overrides ordenan, no-overrides al final.
-        var conOverride = new List<(string Col, int Orden, string Header)>();
+        var conOverride = new List<(string Col, int Orden, ColumnaExportInfo Info)>();
         var sinOverride = new List<string>();
         foreach (var col in columnasCanonicas)
         {
@@ -133,7 +138,7 @@ public sealed class SnapshotColumnaConfigService(
             {
                 if (!ov.Visible) { continue; } // oculta -> fuera del export
                 var header = string.IsNullOrWhiteSpace(ov.Alias) ? col : ov.Alias!;
-                conOverride.Add((col, ov.Orden, header));
+                conOverride.Add((col, ov.Orden, new ColumnaExportInfo(col, header, ov.FormatoTipo, ov.FormatoPatron)));
             }
             else
             {
@@ -142,7 +147,7 @@ public sealed class SnapshotColumnaConfigService(
         }
 
         var salida = new List<ColumnaExportInfo>(columnasCanonicas.Count);
-        salida.AddRange(conOverride.OrderBy(x => x.Orden).Select(x => new ColumnaExportInfo(x.Col, x.Header)));
+        salida.AddRange(conOverride.OrderBy(x => x.Orden).Select(x => x.Info));
         salida.AddRange(sinOverride.Select(x => new ColumnaExportInfo(x, x)));
         return salida;
     }

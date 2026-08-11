@@ -574,7 +574,7 @@
 @if (_showColConfig)
 {
     <div class="sn-modal-back" @onclick="CerrarColConfig">
-    <div class="sn-modal sn-modal-lg" @onclick:stopPropagation="true">
+    <div class="sn-modal sn-modal-fcc" @onclick:stopPropagation="true">
         <div class="sn-modal-h">
             <b>Configurar columnas del archivo</b>
             <button class="sn-close" @onclick="CerrarColConfig">x</button>
@@ -601,48 +601,74 @@
 
             @if (_colConfigErr is not null) { <div class="ase-alert">@_colConfigErr</div> }
 
-            <div class="fcc-list">
-                <div class="fcc-item fcc-head">
-                    <div class="fcc-row-main">
-                        <div class="fcc-move"></div>
-                        <div class="fcc-vis">Visible</div>
-                        <div class="fcc-name">Columna original</div>
-                        <div class="fcc-alias">Alias (header en archivo)</div>
-                    </div>
-                </div>
-                @for (var i = 0; i < _colConfigItems.Count; i++)
-                {
-                    var idx = i;
-                    var it = _colConfigItems[idx];
-                    <div class="fcc-item @(it.Visible ? "" : "fcc-off")">
-                        <div class="fcc-row-main">
-                            <div class="fcc-move">
-                                <button class="fcc-arr" title="Subir" disabled="@(idx == 0)" @onclick="() => SubirColConfig(idx)">^</button>
-                                <button class="fcc-arr" title="Bajar" disabled="@(idx == _colConfigItems.Count - 1)" @onclick="() => BajarColConfig(idx)">v</button>
-                            </div>
-                            <div class="fcc-vis">
-                                <input type="checkbox" checked="@it.Visible" @onchange="e => ToggleColConfig(idx, (bool)e.Value!)" />
-                            </div>
-                            <div class="fcc-name" title="@it.ColumnaOriginal">@it.ColumnaOriginal</div>
-                            <div class="fcc-alias">
-                                <input class="form-control form-control-sm" placeholder="@it.ColumnaOriginal"
-                                       value="@(it.Alias ?? "")" @oninput="e => SetAliasColConfig(idx, e.Value?.ToString())" />
-                            </div>
-                        </div>
-                        <div class="fcc-row-extra">
-                            <div class="fcc-extra-field">
-                                <label>Descripcion</label>
-                                <textarea class="form-control form-control-sm" rows="2" placeholder="Que significa este campo..."
-                                          @oninput="e => SetDescripcionColConfig(idx, e.Value?.ToString())">@(it.Descripcion ?? "")</textarea>
-                            </div>
-                            <div class="fcc-extra-field">
-                                <label>Ruta origen</label>
-                                <input class="form-control form-control-sm" placeholder="Paciente.NumeroDocumento"
-                                       value="@(it.RutaOrigen ?? "")" @oninput="e => SetRutaOrigenColConfig(idx, e.Value?.ToString())" />
-                            </div>
-                        </div>
-                    </div>
-                }
+            <div class="fcc-tablewrap">
+                <table class="fcc-table">
+                    <thead>
+                        <tr>
+                            <th class="fcc-c-move">Orden</th>
+                            <th class="fcc-c-vis">Visible</th>
+                            <th class="fcc-c-err">Error</th>
+                            <th class="fcc-c-name">Columna original</th>
+                            <th class="fcc-c-alias">Alias (header en archivo)</th>
+                            <th class="fcc-c-desc">Descripcion</th>
+                            <th class="fcc-c-ruta">Ruta origen</th>
+                            <th class="fcc-c-fmt">Formato de salida</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var i = 0; i < _colConfigItems.Count; i++)
+                        {
+                            var idx = i;
+                            var it = _colConfigItems[idx];
+                            <tr class="@(it.Visible ? "" : "fcc-off") @(it.EnError ? "fcc-err" : "")">
+                                <td class="fcc-c-move">
+                                    <div class="fcc-move">
+                                        <button class="fcc-arr" title="Subir" disabled="@(idx == 0)" @onclick="() => SubirColConfig(idx)">^</button>
+                                        <button class="fcc-arr" title="Bajar" disabled="@(idx == _colConfigItems.Count - 1)" @onclick="() => BajarColConfig(idx)">v</button>
+                                    </div>
+                                </td>
+                                <td class="fcc-c-vis">
+                                    <input type="checkbox" checked="@it.Visible" @onchange="e => ToggleColConfig(idx, (bool)e.Value!)" />
+                                </td>
+                                <td class="fcc-c-err">
+                                    <input type="checkbox" title="Marcar esta columna como en error" checked="@it.EnError" @onchange="e => SetErrorColConfig(idx, (bool)e.Value!)" />
+                                </td>
+                                <td class="fcc-c-name" title="@it.ColumnaOriginal">@it.ColumnaOriginal</td>
+                                <td class="fcc-c-alias">
+                                    <input class="form-control form-control-sm" placeholder="@it.ColumnaOriginal"
+                                           value="@(it.Alias ?? "")" @oninput="e => SetAliasColConfig(idx, e.Value?.ToString())" />
+                                </td>
+                                <td class="fcc-c-desc">
+                                    <textarea class="form-control form-control-sm fcc-desc-ta" rows="2" placeholder="Que significa este campo..."
+                                              @oninput="e => SetDescripcionColConfig(idx, e.Value?.ToString())">@(it.Descripcion ?? "")</textarea>
+                                </td>
+                                <td class="fcc-c-ruta">
+                                    <input class="form-control form-control-sm" placeholder="Paciente.NumeroDocumento"
+                                           value="@(it.RutaOrigen ?? "")" @oninput="e => SetRutaOrigenColConfig(idx, e.Value?.ToString())" />
+                                </td>
+                                <td class="fcc-c-fmt">
+                                    <select class="form-control form-control-sm" value="@it.FormatoTipo.ToString()"
+                                            @onchange="e => SetFormatoColConfig(idx, e.Value?.ToString())">
+                                        <option value="General">General (sin formato)</option>
+                                        <option value="Texto">Texto</option>
+                                        <option value="NumeroEntero">Numero entero (1.234)</option>
+                                        <option value="NumeroDecimal">Numero con decimales (1.234,56)</option>
+                                        <option value="Moneda">Moneda ($ 1.234,56)</option>
+                                        <option value="Porcentaje">Porcentaje (12,00%)</option>
+                                        <option value="Fecha">Fecha (dd/mm/aaaa)</option>
+                                        <option value="FechaHora">Fecha y hora (dd/mm/aaaa hh:mm)</option>
+                                        <option value="Personalizado">Personalizado...</option>
+                                    </select>
+                                    @if (it.FormatoTipo == Visal.Domain.Enums.SnapshotColumnaFormato.Personalizado)
+                                    {
+                                        <input class="form-control form-control-sm" style="margin-top:4px;" placeholder="Patron Excel, ej. dd/mm/yyyy o #,##0.00"
+                                               value="@(it.FormatoPatron ?? "")" @oninput="e => SetFormatoPatronColConfig(idx, e.Value?.ToString())" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
                 @if (_colConfigItems.Count == 0)
                 {
                     <div class="ase-empty">Este tipo no expone columnas todavia.</div>
@@ -748,26 +774,35 @@
     .sn-modal-lg { max-width:960px; width:96%; }
 
     /* Editor columnas del snapshot: filas apiladas verticales con handle, toggle, alias. */
-    .fcc-list { border:1px solid var(--border); border-radius:6px; max-height:60vh; overflow-y:auto; background:white; }
-    .fcc-item { border-bottom:1px solid #f1f5f9; }
-    .fcc-item:last-child { border-bottom:none; }
-    .fcc-item.fcc-off { background:#f8fafc; opacity:0.7; }
-    .fcc-row-main { display:grid; grid-template-columns: 68px 68px minmax(180px, 1.2fr) minmax(180px, 1.4fr); gap:8px; padding:8px 10px; align-items:center; }
-    .fcc-row-extra { display:grid; grid-template-columns: 2fr 1fr; gap:8px; padding:0 10px 10px; }
-    .fcc-extra-field { display:flex; flex-direction:column; gap:2px; }
-    .fcc-extra-field label { font-size:11px; color:#64748b; margin:0; }
-    .fcc-extra-field input, .fcc-extra-field textarea { font-size:12px; }
-    .fcc-extra-field textarea { resize:vertical; min-height:44px; }
-    .fcc-head { background:#f1f5f9; font-weight:600; font-size:12px; color:#334155; position:sticky; top:0; z-index:1; }
-    .fcc-head .fcc-row-main { padding:10px; }
+    .sn-modal-fcc { max-width:1200px; width:97%; max-height:92vh; }
+    .fcc-tablewrap { border:1px solid var(--border); border-radius:6px; max-height:62vh; overflow:auto; background:white; }
+    .fcc-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .fcc-table thead th { position:sticky; top:0; z-index:1; background:#f1f5f9; color:#334155; font-weight:600; text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+    .fcc-table tbody td { padding:6px 8px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .fcc-table tbody tr:last-child td { border-bottom:none; }
+    .fcc-table tbody tr:hover { background:#f8fafc; }
+    .fcc-table tbody tr.fcc-off { background:#f8fafc; opacity:0.7; }
+    .fcc-table tbody tr.fcc-err { background:#fef2f2; }
+    .fcc-table tbody tr.fcc-err:hover { background:#fee2e2; }
+    .fcc-table tbody tr.fcc-err td.fcc-c-name { color:#b91c1c; }
+    .fcc-table .form-control-sm { font-size:12px; width:100%; }
+    .fcc-desc-ta { resize:vertical; min-height:44px; }
+    .fcc-c-move { width:60px; }
+    .fcc-c-vis { width:56px; text-align:center; }
+    td.fcc-c-vis { text-align:center; }
+    .fcc-c-err { width:52px; text-align:center; }
+    td.fcc-c-err { text-align:center; }
+    .fcc-c-err input { width:18px; height:18px; cursor:pointer; accent-color:#dc2626; }
+    .fcc-c-name { min-width:170px; max-width:240px; color:#1e293b; font-weight:500; word-break:break-word; }
+    .fcc-c-alias { min-width:150px; }
+    .fcc-c-desc { min-width:220px; }
+    .fcc-c-ruta { min-width:180px; }
+    .fcc-c-fmt { min-width:210px; }
     .fcc-move { display:flex; gap:4px; }
     .fcc-arr { width:26px; height:26px; border:1px solid var(--border); background:white; border-radius:4px; font-size:11px; line-height:1; cursor:pointer; padding:0; }
     .fcc-arr:hover:not(:disabled) { background:#eff6ff; border-color:#93c5fd; }
     .fcc-arr:disabled { color:#cbd5e1; cursor:not-allowed; }
-    .fcc-vis { display:flex; justify-content:center; }
-    .fcc-vis input { width:18px; height:18px; cursor:pointer; }
-    .fcc-name { font-size:13px; color:#1e293b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .fcc-alias input { font-size:12px; }
+    .fcc-c-vis input { width:18px; height:18px; cursor:pointer; }
 </style>
 
 @code {
@@ -1283,7 +1318,7 @@
             var items = await ColSvc.ListarAsync(_colConfigTipo);
             // Renumeramos orden secuencial para simplificar el drag & drop en memoria.
             _colConfigItems = items
-                .Select((it, i) => new ColumnaConfigItemDto(it.ColumnaOriginal, i, it.Visible, it.Alias, it.Descripcion, it.RutaOrigen))
+                .Select((it, i) => it with { Orden = i })
                 .ToList();
         }
         catch (Exception ex) { _colConfigErr = ex.Message; }
@@ -1310,6 +1345,12 @@
         _colConfigItems[idx] = it with { Visible = visible };
     }
 
+    private void SetErrorColConfig(int idx, bool enError)
+    {
+        var it = _colConfigItems[idx];
+        _colConfigItems[idx] = it with { EnError = enError };
+    }
+
     private void SetAliasColConfig(int idx, string? alias)
     {
         var it = _colConfigItems[idx];
@@ -1326,6 +1367,20 @@
     {
         var it = _colConfigItems[idx];
         _colConfigItems[idx] = it with { RutaOrigen = string.IsNullOrWhiteSpace(ruta) ? null : ruta };
+    }
+
+    private void SetFormatoColConfig(int idx, string? tipo)
+    {
+        var it = _colConfigItems[idx];
+        var parsed = Enum.TryParse<Visal.Domain.Enums.SnapshotColumnaFormato>(tipo, out var f)
+            ? f : Visal.Domain.Enums.SnapshotColumnaFormato.General;
+        _colConfigItems[idx] = it with { FormatoTipo = parsed };
+    }
+
+    private void SetFormatoPatronColConfig(int idx, string? patron)
+    {
+        var it = _colConfigItems[idx];
+        _colConfigItems[idx] = it with { FormatoPatron = string.IsNullOrWhiteSpace(patron) ? null : patron };
     }
 
     private void Renumerar()

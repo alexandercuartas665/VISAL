@@ -560,7 +560,9 @@ else
             new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
             new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
             new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
-            new List<SuministroMedicamentoItemDto>());
+            new List<SuministroMedicamentoItemDto>(),
+            // Diagnosticos viajan desde la HC padre (tabla del formulario), no de un servicio.
+            HcDiagnosticosReader.Leer(_hc?.SchemaJson, _hc?.ValoresJson));
         HistoriaMedicaPrefillHelper.Aplicar(valores, fuentes, rutas, _schema);
 
         // Firmante para el pie de la formula: nombre = especialista de la HC

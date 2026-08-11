@@ -1149,7 +1149,8 @@ else
             new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
             new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
             new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
-            new List<SuministroMedicamentoItemDto>());
+            new List<SuministroMedicamentoItemDto>(),
+            HcDiagnosticosReader.Leer(_hc?.SchemaJson, _hc?.ValoresJson));
         HistoriaMedicaPrefillHelper.Aplicar(valores, fuentes, rutas, _schMed);
         if (string.IsNullOrWhiteSpace(valores.TryGetValue("profesional_nombre", out var pn) ? pn : null))
         {

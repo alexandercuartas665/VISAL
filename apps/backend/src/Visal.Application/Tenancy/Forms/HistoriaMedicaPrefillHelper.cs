@@ -17,6 +17,8 @@ public static class HistoriaMedicaPrefillHelper
     public static readonly string[] CamposDisponibles = new[]
     {
         "todo.lista_completa",
+        "diagnosticos.lista_cie10",
+        "diagnosticos.lista_numerada",
         "medicamentos.lista_numerada",
         "remisiones.lista_numerada",
         "incapacidades.lista_numerada",
@@ -40,8 +42,14 @@ public static class HistoriaMedicaPrefillHelper
         IReadOnlyList<OrdenExternaItemDto> RxImagenologia,
         IReadOnlyList<OrdenExternaItemDto> Laboratorios,
         IReadOnlyList<OrdenExternaItemDto> InsumosExternos,
-        IReadOnlyList<SuministroMedicamentoItemDto> SuministrosMedicamentos)
+        IReadOnlyList<SuministroMedicamentoItemDto> SuministrosMedicamentos,
+        IReadOnlyList<DiagnosticoItemDto>? Diagnosticos = null)
     {
+        /// <summary>Diagnosticos de la HC (nunca null): default a lista vacia si el
+        /// caller no los provee, para no romper los llamadores existentes.</summary>
+        public IReadOnlyList<DiagnosticoItemDto> DiagnosticosSafe
+            => Diagnosticos ?? Array.Empty<DiagnosticoItemDto>();
+
         public static HmFuentes Empty => new(
             Array.Empty<OrdenMedicamentoItemDto>(),
             Array.Empty<RemisionItemDto>(),
@@ -52,7 +60,8 @@ public static class HistoriaMedicaPrefillHelper
             Array.Empty<OrdenExternaItemDto>(),
             Array.Empty<OrdenExternaItemDto>(),
             Array.Empty<OrdenExternaItemDto>(),
-            Array.Empty<SuministroMedicamentoItemDto>());
+            Array.Empty<SuministroMedicamentoItemDto>(),
+            Array.Empty<DiagnosticoItemDto>());
     }
 
     /// <summary>
@@ -64,6 +73,8 @@ public static class HistoriaMedicaPrefillHelper
     {
         return new(StringComparer.OrdinalIgnoreCase)
         {
+            ["diagnosticos.lista_cie10"] = LineaCie10Diagnosticos(fuentes.DiagnosticosSafe),
+            ["diagnosticos.lista_numerada"] = ListaNumeradaDiagnosticos(fuentes.DiagnosticosSafe),
             ["medicamentos.lista_numerada"] = ListaNumeradaMedicamentos(fuentes.Medicamentos),
             ["remisiones.lista_numerada"] = ListaNumeradaRemisiones(fuentes.Remisiones),
             ["incapacidades.lista_numerada"] = ListaNumeradaIncapacidades(fuentes.Incapacidades),
@@ -119,6 +130,44 @@ public static class HistoriaMedicaPrefillHelper
             sb.Append(titulo).Append('\n').Append(contenido);
         }
         return sb.ToString();
+    }
+
+    /// <summary>Linea inline estilo "CIE 10: [Z251] NECESIDAD DE..., [A09X] DIARREA...".
+    /// Si un item no tiene codigo parseado usa el texto crudo del diagnostico.</summary>
+    public static string LineaCie10Diagnosticos(IReadOnlyList<DiagnosticoItemDto> items)
+    {
+        if (items is null || items.Count == 0) { return ""; }
+        var partes = new List<string>();
+        foreach (var d in items)
+        {
+            if (!string.IsNullOrWhiteSpace(d.Codigo))
+            {
+                var nom = string.IsNullOrWhiteSpace(d.Nombre) ? "" : " " + d.Nombre;
+                partes.Add($"[{d.Codigo}]{nom}".Trim());
+            }
+            else if (!string.IsNullOrWhiteSpace(d.Diagnostico))
+            {
+                partes.Add(d.Diagnostico!.Trim());
+            }
+        }
+        return partes.Count == 0 ? "" : "CIE 10: " + string.Join(", ", partes);
+    }
+
+    /// <summary>Formato: "1. [Z251] NECESIDAD DE... - ENFERMEDAD GENERAL".</summary>
+    public static string ListaNumeradaDiagnosticos(IReadOnlyList<DiagnosticoItemDto> items)
+    {
+        if (items is null || items.Count == 0) { return ""; }
+        var sb = new System.Text.StringBuilder();
+        var i = 1;
+        foreach (var d in items)
+        {
+            sb.Append(i++).Append(". ");
+            if (!string.IsNullOrWhiteSpace(d.Codigo)) { sb.Append('[').Append(d.Codigo).Append("] "); }
+            sb.Append(string.IsNullOrWhiteSpace(d.Nombre) ? (d.Diagnostico ?? "") : d.Nombre);
+            if (!string.IsNullOrWhiteSpace(d.Origen)) { sb.Append(" - ").Append(d.Origen); }
+            sb.Append('\n');
+        }
+        return sb.ToString().TrimEnd();
     }
 
     public static string ListaNumeradaMedicamentos(IReadOnlyList<OrdenMedicamentoItemDto> items)
@@ -329,6 +378,8 @@ public static class HistoriaMedicaPrefillHelper
     {
         IList<Dictionary<string, string?>>? rows = source.Trim().ToLowerInvariant() switch
         {
+            "diagnosticos.lista_cie10" => fuentes.DiagnosticosSafe.Select(DiagnosticoToFields).ToList<Dictionary<string, string?>>(),
+            "diagnosticos.lista_numerada" => fuentes.DiagnosticosSafe.Select(DiagnosticoToFields).ToList<Dictionary<string, string?>>(),
             "medicamentos.lista_numerada" => fuentes.Medicamentos.OrderBy(m => m.Orden).Select(MedicamentoToFields).ToList<Dictionary<string, string?>>(),
             "remisiones.lista_numerada" => fuentes.Remisiones.OrderBy(m => m.Orden).Select(RemisionToFields).ToList<Dictionary<string, string?>>(),
             "incapacidades.lista_numerada" => fuentes.Incapacidades.OrderBy(m => m.Orden).Select(IncapacidadToFields).ToList<Dictionary<string, string?>>(),
@@ -415,6 +466,24 @@ public static class HistoriaMedicaPrefillHelper
             if (char.IsLetterOrDigit(c)) { arr[n++] = char.ToLowerInvariant(c); }
         }
         return new string(arr, 0, n);
+    }
+
+    private static Dictionary<string, string?> DiagnosticoToFields(DiagnosticoItemDto d)
+    {
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["codigo"] = d.Codigo,
+            ["cie"] = d.Codigo,
+            ["cie10"] = d.Codigo,
+            ["codigocie"] = d.Codigo,
+            ["diagnostico"] = d.Diagnostico,
+            ["descripcion"] = string.IsNullOrWhiteSpace(d.Nombre) ? d.Diagnostico : d.Nombre,
+            ["nombre"] = string.IsNullOrWhiteSpace(d.Nombre) ? d.Diagnostico : d.Nombre,
+            ["origen"] = d.Origen,
+            ["causa"] = d.Origen,
+            ["tipo"] = d.Tipo,
+            ["relacion"] = d.Relacion
+        };
     }
 
     private static Dictionary<string, string?> MedicamentoToFields(OrdenMedicamentoItemDto m)

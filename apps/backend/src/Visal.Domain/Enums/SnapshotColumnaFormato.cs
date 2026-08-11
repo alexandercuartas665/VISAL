@@ -17,5 +17,9 @@ public enum SnapshotColumnaFormato
     Fecha = 5,
     FechaHora = 6,
     Porcentaje = 7,
+    /// <summary>Fecha con el ano adelante: aaaa/mm/dd (ISO-like).</summary>
+    FechaIso = 8,
+    /// <summary>Fecha y hora con el ano adelante: aaaa/mm/dd hh:mm.</summary>
+    FechaHoraIso = 9,
     Personalizado = 99
 }

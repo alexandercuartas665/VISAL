@@ -395,7 +395,10 @@
                 }
                 else
                 {
-                    <div class="sn-vertabla-wrap">
+                    <div id="snVerTop" class="sn-vertabla-toptrack">
+                        <div class="sn-vertabla-topspacer"></div>
+                    </div>
+                    <div id="snVerWrap" class="sn-vertabla-wrap">
                         <table class="sn-vertabla">
                             <thead>
                                 <tr>
@@ -657,6 +660,8 @@
                                         <option value="Porcentaje">Porcentaje (12,00%)</option>
                                         <option value="Fecha">Fecha (dd/mm/aaaa)</option>
                                         <option value="FechaHora">Fecha y hora (dd/mm/aaaa hh:mm)</option>
+                                        <option value="FechaIso">Fecha ano adelante (aaaa/mm/dd)</option>
+                                        <option value="FechaHoraIso">Fecha y hora ano adelante (aaaa/mm/dd hh:mm)</option>
                                         <option value="Personalizado">Personalizado...</option>
                                     </select>
                                     @if (it.FormatoTipo == Visal.Domain.Enums.SnapshotColumnaFormato.Personalizado)
@@ -754,7 +759,9 @@
     .sn-page-info { font-size:12px; color:var(--muted); margin-right:8px; }
 
     /* Tabla del modal grande: sticky header + freeze cols */
-    .sn-vertabla-wrap { overflow:auto; max-height:calc(92vh - 220px); }
+    .sn-vertabla-toptrack { overflow-x:auto; overflow-y:hidden; border-bottom:1px solid #e2e8f0; }
+    .sn-vertabla-topspacer { height:1px; }
+    .sn-vertabla-wrap { overflow:auto; max-height:calc(92vh - 240px); }
     .sn-vertabla { border-collapse:separate; border-spacing:0; font-size:12px; width:auto; min-width:100%; }
     .sn-vertabla th, .sn-vertabla td { padding:6px 10px; border-right:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; min-width:140px; max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .sn-vertabla th { position:sticky; top:0; z-index:2; background:#eff6ff; font-weight:600; color:#1e3a8a; text-transform:none; letter-spacing:0; cursor:pointer; user-select:none; }
@@ -1162,6 +1169,18 @@
         _bulkFactura = "";
         _bulkAplicando = false;
         _ripsIgnorarValidacion = false;
+    }
+
+    // Cablea (idempotente) la barra de scroll superior sincronizada con la tabla
+    // del modal Ver. Corre en cada render mientras el modal muestra filas para
+    // refrescar el ancho tras paginacion / cambio de columnas.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_showVer && _verFilas.Count > 0)
+        {
+            try { await JS.InvokeVoidAsync("snDualScroll.wire", "snVerTop", "snVerWrap"); }
+            catch { /* JS aun no cargado o modal cerrandose: ignorar */ }
+        }
     }
 
     private async Task AplicarFacturaAlLote()

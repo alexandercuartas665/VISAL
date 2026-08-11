@@ -60,6 +60,8 @@ public static class SnapshotColumnaFormatter
         SnapshotColumnaFormato.Porcentaje => "0.00%",
         SnapshotColumnaFormato.Fecha => "dd/mm/yyyy",
         SnapshotColumnaFormato.FechaHora => "dd/mm/yyyy hh:mm",
+        SnapshotColumnaFormato.FechaIso => "yyyy/mm/dd",
+        SnapshotColumnaFormato.FechaHoraIso => "yyyy/mm/dd hh:mm",
         SnapshotColumnaFormato.Personalizado => string.IsNullOrWhiteSpace(patron) ? null : patron,
         _ => null
     };
@@ -82,6 +84,10 @@ public static class SnapshotColumnaFormatter
                 return TryFecha(val, out var f) ? f.ToString("dd/MM/yyyy", Co) : val.ToString() ?? string.Empty;
             case SnapshotColumnaFormato.FechaHora:
                 return TryFecha(val, out var fh) ? fh.ToString("dd/MM/yyyy HH:mm", Co) : val.ToString() ?? string.Empty;
+            case SnapshotColumnaFormato.FechaIso:
+                return TryFecha(val, out var fi) ? fi.ToString("yyyy/MM/dd", Co) : val.ToString() ?? string.Empty;
+            case SnapshotColumnaFormato.FechaHoraIso:
+                return TryFecha(val, out var fhi) ? fhi.ToString("yyyy/MM/dd HH:mm", Co) : val.ToString() ?? string.Empty;
             case SnapshotColumnaFormato.Texto:
             case SnapshotColumnaFormato.Personalizado:
             case SnapshotColumnaFormato.General:

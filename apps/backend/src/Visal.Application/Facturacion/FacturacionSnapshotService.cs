@@ -558,6 +558,8 @@ public sealed class FacturacionSnapshotService(
                 break;
             case SnapshotColumnaFormato.Fecha:
             case SnapshotColumnaFormato.FechaHora:
+            case SnapshotColumnaFormato.FechaIso:
+            case SnapshotColumnaFormato.FechaHoraIso:
                 if (SnapshotColumnaFormatter.TryFecha(val, out var fecha)) { cell.Value = fecha; }
                 else { cell.Value = val.ToString(); patronExcel = null; }
                 break;

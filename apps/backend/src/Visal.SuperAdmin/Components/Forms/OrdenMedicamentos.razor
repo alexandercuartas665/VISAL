@@ -16,6 +16,9 @@
         <span class="od-bar-count">@_items.Count item(s)</span>
     </div>
     <div class="od-bar-right">
+        <button class="btn btn-success btn-sm" title="Abre la formula medica: ahi se emite (firma + QR de verificacion)"
+                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
+                @onclick="ImprimirAsync">&#10003; Emitir formula (QR)</button>
         <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
                 disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
                 @onclick="ImprimirAsync">&#128424; Imprimir</button>

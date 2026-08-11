@@ -67,6 +67,9 @@ public sealed class OrdenMedicamentoService(
         }
         // Guard: HC debe estar Abierta. Una HC cerrada es un documento firmado.
         await db.EnsureAbiertaAsync(historiaId, ct);
+        // Guard: si la orden ya fue emitida (QR firmado), no se editan los items
+        // hasta revocarla — el snapshot publico debe seguir siendo fiel a lo firmado.
+        await EnsureNoEmisionActivaAsync(historiaId, ct);
 
         // Calcular siguiente orden en la historia.
         var siguiente = 1 + await db.HistoriaClinicaMedicamentos
@@ -108,6 +111,7 @@ public sealed class OrdenMedicamentoService(
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
+        await EnsureNoEmisionActivaAsync(entity.HistoriaClinicaId, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Frecuencia = Trim(req.Frecuencia);
         entity.Dias = Trim(req.Dias);
@@ -125,6 +129,7 @@ public sealed class OrdenMedicamentoService(
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
         await db.EnsureAbiertaAsync(hcId, ct);
+        await EnsureNoEmisionActivaAsync(hcId, ct);
         db.HistoriaClinicaMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
@@ -135,6 +140,22 @@ public sealed class OrdenMedicamentoService(
     {
         return await db.HistoriaClinicaMedicamentos
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
+    }
+
+    /// <summary>
+    /// Bloquea la edicion de items si la orden ya fue emitida (QR firmado) y sigue
+    /// vigente. El profesional debe revocar la emision para poder editar; asi el
+    /// snapshot publico nunca queda desalineado de lo que muestra el QR.
+    /// </summary>
+    private async Task EnsureNoEmisionActivaAsync(Guid historiaId, CancellationToken ct)
+    {
+        var emitida = await db.OrdenesMedicamentosPublicas
+            .AnyAsync(o => o.HistoriaClinicaId == historiaId && o.RevocadaAt == null, ct);
+        if (emitida)
+        {
+            throw new InvalidOperationException(
+                "La orden de medicamentos ya fue emitida. Revocala para editar los medicamentos.");
+        }
     }
 
     private static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

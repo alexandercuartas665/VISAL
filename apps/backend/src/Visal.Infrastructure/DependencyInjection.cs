@@ -76,6 +76,8 @@ public static class DependencyInjection
         services.AddScoped<Application.Common.IReceiptPdfRenderer, Pdf.QuestPdfReceiptRenderer>();
         // PDF de cotizaciones desde HTML libre (Chromium headless via PuppeteerSharp).
         services.AddScoped<Application.Common.IQuotePdfRenderer, Rendering.PuppeteerQuotePdfRenderer>();
+        // QR de verificacion de ordenes de medicamentos (QRCoder, PNG managed).
+        services.AddSingleton<Application.Common.IQrCodeGenerator, Rendering.QRCoderQrCodeGenerator>();
 
         // Ola 8 RC8e — cola in-process del orquestador REVISOR CLINICO IA. La cola
         // como singleton porque el Channel<T> sobrevive al request HTTP que encola

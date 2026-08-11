@@ -2,7 +2,9 @@
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
 @using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Forms
 @using Visal.SuperAdmin.Components.Forms
 @inject IHistoriaClinicaService HcSvc
 @inject IAsignacionService AsigSvc
@@ -12,6 +14,8 @@
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
 @inject ISuministroMedicamentoService SumMedSvc
+@inject IOrdenMedicamentoPublicaService PubSvc
+@inject IFirmaResolverService FirmaResolverSvc
 @inject IJSRuntime JS
 
 @*
@@ -90,13 +94,59 @@ else if (_form is null && !string.Equals(Tipo, "REGISTRO_MEDICAMENTOS", StringCo
 }
 else
 {
+    var esMed = string.Equals(Tipo, "ORDEN_MEDICAMENTOS", StringComparison.OrdinalIgnoreCase);
+    var esMedEmitida = esMed && _emision is not null;
+
     <div class="doc-actions">
         <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
-        <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir / Guardar PDF</button>
+        @if (esMed && _emision is null)
+        {
+            @* Orden de medicamentos sin emitir: el QR sale al EMITIR, no al imprimir.
+               Emitir es la accion primaria; imprimir el borrador queda secundario. *@
+            <button class="dbtn primary" style="background:#16a34a;border-color:#16a34a;" @onclick="EmitirOrdenAsync" disabled="@_emitBusy">
+                @(_emitBusy ? "Emitiendo..." : "Emitir formula (firmar + QR)")
+            </button>
+            <button class="dbtn" @onclick="PrintAsync" title="Imprime el borrador, sin codigo de verificacion">&#128424; Imprimir borrador (sin QR)</button>
+        }
+        else
+        {
+            <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir / Guardar PDF</button>
+            @if (esMedEmitida)
+            {
+                <button class="dbtn" style="border-color:#dc2626;color:#dc2626;" @onclick="RevocarOrdenAsync" disabled="@_emitBusy">Revocar</button>
+            }
+        }
         <span class="spacer"></span>
-        <span class="meta">Formato: <b>@(_form?.Codigo ?? "REGMED")</b> &middot; @_tipoLabel</span>
+        @if (esMedEmitida)
+        {
+            <span class="meta">Emitida @_emision!.EmitidoAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm") &middot; Codigo <b>@_emision!.Codigo</b></span>
+        }
+        else
+        {
+            <span class="meta">Formato: <b>@(_form?.Codigo ?? "REGMED")</b> &middot; @_tipoLabel</span>
+        }
     </div>
+    @if (!string.IsNullOrEmpty(_emitError))
+    {
+        <div class="doc-actions" style="color:#dc2626;">@_emitError</div>
+    }
 
+    @if (esMedEmitida)
+    {
+        @* Orden emitida: documento firmado, inmutable, schema-driven con el QR
+           (viene del snapshot congelado — no se recalcula desde la HC actual). *@
+        <div class="doc">
+            <DocumentoImprimible Schema="_schema" Values="_emisionBag"
+                PacienteNombre="@(_paciente?.NombreCompleto)"
+                PacienteTipoDoc="@(_paciente?.TipoDocumento)"
+                PacienteDoc="@(_paciente?.NumeroDocumento)"
+                EspecialistaNombre="@(_hc?.EspecialistaNombre)"
+                MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(_form?.Codigo, _form?.CodigoSecundario, Tipo)"
+                OrdenNum="@_ordenNumero" TipoCortoHeader="ORD" TituloFallback="@_tipoLabel" />
+        </div>
+    }
+    else
+    {
     <div class="doc">
         @* ============ ENCABEZADO (del FormDefinition) ============ *@
         <div class="doc-header">
@@ -316,6 +366,7 @@ else
             </div>
         </div>
     </div>
+    }
 }
 
 @code {
@@ -338,12 +389,20 @@ else
     private List<CertificacionItemDto> _cert = new();
     private List<SuministroMedicamentoItemDto> _sumMed = new();
 
+    // Emision publica (ORD-MEDI): snapshot congelado + QR.
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private OrdenPublicaResumenDto? _emision;
+    private Dictionary<string, string?> _emisionBag = new();
+    private bool _emitBusy;
+    private string? _emitError;
+
     private FormHeader Hdr => _schema.Header ?? FormHeader.Default();
 
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
         _meds = new(); _srv = new(); _inc = new(); _cert = new(); _sumMed = new();
+        _emision = null; _emisionBag = new(); _emitError = null;
 
         _tipoLabel = TipoLabel(Tipo);
         _titulo = $"{_tipoLabel}";
@@ -351,7 +410,11 @@ else
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { _loading = false; return; }
         _paciente = await AsigSvc.GetPacienteAsync(_hc.PacienteId);
-        _form = await FormsSvc.GetActivoByTipoAsync(Tipo);
+        // El mapeo real Tipo->formato vive en codigo_secundario (ORD-MEDI tiene
+        // codigo_secundario="ORDEN_MEDICAMENTOS", tipo="FORMATO"). Resolvemos por
+        // codigo_secundario y caemos a tipo por compatibilidad.
+        _form = await FormsSvc.GetActivoByCodigoSecundarioAsync(Tipo)
+                ?? await FormsSvc.GetActivoByTipoAsync(Tipo);
         if (_form is not null)
         {
             try { _schema = JsonSerializer.Deserialize<FormSchema>(_form.SchemaJson) ?? new(); }
@@ -365,6 +428,8 @@ else
         {
             case "ORDEN_MEDICAMENTOS":
                 _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                _emision = await PubSvc.ObtenerEmisionActivaAsync(HcId);
+                _emisionBag = _emision is null ? new() : DeserializarBag(_emision.BagJson);
                 break;
             case "ORDEN_SERVICIOS":
                 _srv = (await SrvSvc.ListarPorHistoriaAsync(HcId)).ToList();
@@ -387,6 +452,154 @@ else
     }
 
     private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
+
+    /// <summary>Emite (firma) la orden ORD-MEDI: arma el bag prellenado del formato,
+    /// captura la proyeccion publica, y persiste el snapshot inmutable con codigo.</summary>
+    private async Task EmitirOrdenAsync()
+    {
+        if (_hc is null || _paciente is null || _form is null) { return; }
+        if (_meds.Count == 0) { _emitError = "La orden no tiene medicamentos para emitir."; return; }
+        _emitBusy = true; _emitError = null;
+        try
+        {
+            var (bag, profNombre, profRegistro) = await ConstruirBagOrdenAsync();
+            var items = _meds.Select(m => new OrdenItemPublicoDto(
+                m.NombreMedicamento, m.CodigoMedicamento, m.Cantidad, m.Frecuencia, m.Dias, m.Posologia)).ToList();
+            var fecha = DateTimeOffset.Now;
+            var actor = await ActorIdAsync();
+            var req = new EmitirOrdenRequest(
+                _hc.Id, JsonSerializer.Serialize(bag), fecha,
+                Iniciales(_paciente.NombreCompleto), profNombre, profRegistro, items);
+            await PubSvc.EmitirAsync(req, actor);
+            await OnParametersSetAsync();
+        }
+        catch (Exception ex) { _emitError = ex.Message; }
+        finally { _emitBusy = false; }
+    }
+
+    private async Task RevocarOrdenAsync()
+    {
+        if (_emision is null) { return; }
+        _emitBusy = true; _emitError = null;
+        try
+        {
+            var actor = await ActorIdAsync();
+            await PubSvc.RevocarAsync(_emision.Id, actor, null);
+            await OnParametersSetAsync();
+        }
+        catch (Exception ex) { _emitError = ex.Message; }
+        finally { _emitBusy = false; }
+    }
+
+    /// <summary>Construye el bag del formato ORD-MEDI prellenando paciente, sistema
+    /// (fecha/usuario/registro/firma), firmas y la tabla de medicamentos — el mismo
+    /// pipeline de prefill que usan las escalas/consentimientos al iniciarse.</summary>
+    private async Task<(Dictionary<string, string?> Bag, string? ProfNombre, string? ProfRegistro)> ConstruirBagOrdenAsync()
+    {
+        var valores = new Dictionary<string, string?>();
+        string? profNombre = _hc?.EspecialistaNombre;
+        string? profRegistro = null;
+        if (_paciente is null || _form is null) { return (valores, profNombre, profRegistro); }
+
+        var rutas = PrefillRouteSet.FromJson(_form.PrefillRoutesJson);
+        PacientePrefillHelper.Aplicar(valores, _paciente, _schema, rutas);
+
+        // Datos del profesional/usuario logueado (identificacion, registro, firma).
+        Guid? profId = null, platformUid = null, tenantId = null;
+        string? uName = null, uEmail = null, uSede = null;
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            uName = st.User.Identity?.Name ?? st.User.FindFirst("display_name")?.Value;
+            uEmail = st.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+            uSede = st.User.FindFirst("sede_nombre")?.Value;
+            if (Guid.TryParse(st.User.FindFirst("profesional_id")?.Value, out var pid)) { profId = pid; }
+            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var puid)) { platformUid = puid; }
+            if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
+        }
+        try
+        {
+            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(profId, platformUid, tenantId);
+            profRegistro = datosProf?.RegistroMedico;
+            // El firmante de la formula es el profesional-usuario que la emite:
+            // nombre + registro + firma del mismo. Solo si el usuario no tiene
+            // profesional vinculado caemos al especialista de la HC o al nombre
+            // del usuario logueado.
+            if (!string.IsNullOrWhiteSpace(datosProf?.Nombre)) { profNombre = datosProf!.Nombre; }
+            else if (string.IsNullOrWhiteSpace(profNombre)) { profNombre = uName; }
+            SistemaPrefillHelper.Aplicar(valores, new SistemaPrefillHelper.SistemaCtx(
+                Ahora: DateTimeOffset.Now,
+                AgenciaNombre: null, AgenciaSlogan: null,
+                SedeNombre: uSede ?? _paciente.Sede, SedeCiudad: _paciente.Ciudad,
+                UsuarioNombre: uName, UsuarioEmail: uEmail,
+                UsuarioIdentificacion: datosProf?.Identificacion,
+                UsuarioRegistroMedico: datosProf?.RegistroMedico,
+                UsuarioFirmaUrl: datosProf?.FirmaUrl), rutas);
+        }
+        catch { }
+
+        try
+        {
+            var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(_paciente.Id);
+            string? firmaProf = null;
+            if (profId is Guid pid2 && pid2 != Guid.Empty)
+            {
+                firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid2);
+            }
+            else if (platformUid is Guid puid2 && tenantId is Guid tid2)
+            {
+                firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(puid2, tid2);
+            }
+            FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+        }
+        catch { }
+
+        // Tabla de medicamentos (solo se poblan las filas de la HC actual).
+        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(
+            _meds,
+            new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
+            new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
+            new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
+            new List<SuministroMedicamentoItemDto>());
+        HistoriaMedicaPrefillHelper.Aplicar(valores, fuentes, rutas, _schema);
+
+        // Firmante para el pie de la formula: nombre = especialista de la HC
+        // (o usuario logueado), registro medico resuelto. Se congelan en el
+        // snapshot para que el documento emitido nunca cambie.
+        valores["profesional_nombre"] = profNombre;
+        valores["profesional_registro"] = profRegistro;
+
+        return (valores, profNombre, profRegistro);
+    }
+
+    private async Task<Guid> ActorIdAsync()
+    {
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id))
+            {
+                return id;
+            }
+        }
+        return Guid.Empty;
+    }
+
+    /// <summary>Iniciales del paciente (privacidad): "MERCEDES PULIDO" -> "M.P.".</summary>
+    private static string Iniciales(string? nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) { return "N.N."; }
+        var partes = nombre.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var ini = partes.Where(p => p.Length > 0).Take(2).Select(p => char.ToUpperInvariant(p[0]));
+        return string.Join(".", ini) + ".";
+    }
+
+    private static Dictionary<string, string?> DeserializarBag(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return new(); }
+        try { return JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? new(); }
+        catch { return new(); }
+    }
 
     private static string TipoLabel(string tipo) => tipo.ToUpperInvariant() switch
     {

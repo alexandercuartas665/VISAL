@@ -140,6 +140,7 @@ else
                                      PacienteTipoDoc="_paciente.TipoDocumento"
                                      PacienteDoc="_paciente.NumeroDocumento"
                                      EspecialistaNombre="item.Detail.EspecialistaNombre"
+                                     MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(item.Detail.FormatoCodigo)"
                                      OrdenNum="@item.Detail.Id.ToString().Substring(0,8).ToUpperInvariant()"
                                      FechaLinea="@fechaLinea"
                                      TipoCortoHeader="HC"

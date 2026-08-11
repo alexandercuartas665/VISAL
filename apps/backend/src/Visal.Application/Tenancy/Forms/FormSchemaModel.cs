@@ -137,6 +137,29 @@ public sealed class FormNode
     [JsonPropertyName("allowCustom")]
     public bool AllowCustom { get; set; }
 
+    // ── Codigo QR (fieldType = "qr") ──
+    /// <summary>
+    /// Solo para fieldType = "qr". Name de OTRO campo del bag cuyo valor (un
+    /// codigo de verificacion) se codifica en el QR. Si esta vacio, se usa el
+    /// propio <see cref="Name"/> del nodo. El renderer construye la URL publica
+    /// <c>{PublicBaseUrl}/verificar-orden/{codigo}</c> y genera el PNG. Ejemplo:
+    /// "orden_codigo_verificacion".
+    /// </summary>
+    [JsonPropertyName("qrSource")]
+    public string? QrSource { get; set; }
+
+    /// <summary>Solo para fieldType = "qr". Tamano de visualizacion del QR en px. Default 200.</summary>
+    [JsonPropertyName("qrSize")]
+    public int? QrSize { get; set; }
+
+    /// <summary>
+    /// Solo para fieldType = "qr". Si true (default), muestra el codigo como texto
+    /// monoespaciado debajo del QR para que se pueda tipear manualmente en la
+    /// pagina publica de verificacion.
+    /// </summary>
+    [JsonPropertyName("showCode")]
+    public bool ShowCode { get; set; } = true;
+
     // ── Tabla con filas pre-semilladas (FieldType = "table") ──
     /// <summary>
     /// Filas iniciales que ya vienen rellenadas. Cada fila es una lista paralela
@@ -265,6 +288,7 @@ public sealed class FormNode
     public bool IsSection => Type == "section";
     public bool IsText => Type == "text";
     public bool IsTable => Type == "field" && FieldType == "table";
+    public bool IsQr => Type == "field" && FieldType == "qr";
 }
 
 /// <summary>
@@ -313,6 +337,18 @@ public sealed class FormHeader
     /// <summary>Campos de cabecera personalizables (ej. No Historia, Consecutivo, Ciudad y Fecha).</summary>
     [JsonPropertyName("campos")]
     public List<FormHeaderField> Campos { get; set; } = new();
+
+    /// <summary>
+    /// Si true (default), el bloque "N° interno + fecha" (HC N° / Apertura o
+    /// Cerrada, arriba a la derecha del documento) aparece en la IMPRESION. Si
+    /// false, solo se ve en pantalla como referencia rapida del operador y se
+    /// oculta en el PDF (d-print-none). Se configura por formato en el disenador:
+    /// asi las notas / HCs del paciente no llevan el id interno ni la fecha en el
+    /// papel, pero las ordenes / formula medica si. Historicamente estaba oculto
+    /// para todos los formatos; ahora es parametrizable (default = mostrar).
+    /// </summary>
+    [JsonPropertyName("imprimirCodigoFecha")]
+    public bool ImprimirCodigoFecha { get; set; } = true;
 
     public static FormHeader Default() => new()
     {

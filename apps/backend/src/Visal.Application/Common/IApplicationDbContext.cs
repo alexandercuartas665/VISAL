@@ -109,6 +109,8 @@ public interface IApplicationDbContext
     DbSet<RevisionPolicy> RevisionPolicies { get; }
     DbSet<PreRevisionIaPending> PreRevisionIaPendings { get; }
     DbSet<DocumentoNota> DocumentoNotas { get; }
+    DbSet<OrdenMedicamentoPublica> OrdenesMedicamentosPublicas { get; }
+    DbSet<VerificacionOrdenLog> VerificacionOrdenLogs { get; }
     DbSet<SeguimientoEncuesta> SeguimientoEncuestas { get; }
     DbSet<ReporteCatalogo> ReporteCatalogos { get; }
     DbSet<ReporteTenantActivacion> ReporteTenantActivaciones { get; }

@@ -11,7 +11,10 @@
 @inject IAsignacionService AsigSvc
 @inject IFormDefinitionService FormsSvc
 @inject IOrdenMedicamentoService MedSvc
+@inject IOrdenMedicamentoPublicaService PubSvc
 @inject IOrdenServicioService SrvSvc
+@inject Visal.Application.Common.IQrCodeGenerator Qr
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
 @inject IRemisionService RemSvc
@@ -130,36 +133,55 @@ else
         @* ============ ORDEN DE MEDICAMENTOS ============ *@
         @if (_incluirMed && _meds.Count > 0)
         {
-            <div class="pack-doc">
-                @RenderHeader(BestHdr(HdrMed, "Orden de Medicamentos"), "Orden de Medicamentos", "MED",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
-                <div class="pack-band">Detalle de la orden</div>
-                <table class="pack-table">
-                    <thead>
-                        <tr>
-                            <th style="width:40px">#</th>
-                            <th>Medicamento</th>
-                            <th style="width:140px">Posologia</th>
-                            <th style="width:80px">Cantidad</th>
-                            <th>Observacion</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var m in _meds)
-                        {
+            @if (_schMed is not null)
+            {
+                @* Formato ORD-MEDI schema-driven, con su propio encabezado y el pie
+                   de formula medica (firma + QR/codigo + recibido + barra). Emitida:
+                   snapshot congelado; borrador: prellenado. DocumentoImprimible ya
+                   aporta su .pack-doc, por eso no lo envolvemos aparte. *@
+                <DocumentoImprimible Schema="_schMed" Values="_bagMed"
+                                     PacienteNombre="@(_paciente?.NombreCompleto)"
+                                     PacienteTipoDoc="@(_paciente?.TipoDocumento)"
+                                     PacienteDoc="@(_paciente?.NumeroDocumento)"
+                                     EspecialistaNombre="@_hc.EspecialistaNombre"
+                                     MostrarPieFormula="true"
+                                     OrdenNum="@(_hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED")"
+                                     TipoCortoHeader="ORD"
+                                     TituloFallback="Orden de Medicamentos" />
+            }
+            else
+            {
+                @* Fallback: sin formato ORD-MEDI configurado, tabla simple. *@
+                <div class="pack-doc">
+                    @RenderHeader(BestHdr(HdrMed, "Orden de Medicamentos"), "Orden de Medicamentos", "MED",
+                        _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED",
+                        "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    <div class="pack-band">Detalle de la orden</div>
+                    <table class="pack-table">
+                        <thead>
                             <tr>
-                                <td class="num">@m.Orden</td>
-                                <td><b>@m.NombreMedicamento</b></td>
-                                <td>@(string.IsNullOrWhiteSpace(m.Posologia) ? "-" : m.Posologia)</td>
-                                <td class="num">@(string.IsNullOrWhiteSpace(m.Cantidad) ? "-" : m.Cantidad)</td>
-                                <td>@(m.Observacion ?? "")</td>
+                                <th style="width:40px">#</th>
+                                <th>Medicamento</th>
+                                <th style="width:140px">Posologia</th>
+                                <th style="width:80px">Cantidad</th>
+                                <th>Observacion</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
-                @RenderFirma(_hc.EspecialistaNombre, "Firma del profesional tratante")
-            </div>
+                        </thead>
+                        <tbody>
+                            @foreach (var m in _meds)
+                            {
+                                <tr>
+                                    <td class="num">@m.Orden</td>
+                                    <td><b>@m.NombreMedicamento</b></td>
+                                    <td>@(string.IsNullOrWhiteSpace(m.Posologia) ? "-" : m.Posologia)</td>
+                                    <td class="num">@(string.IsNullOrWhiteSpace(m.Cantidad) ? "-" : m.Cantidad)</td>
+                                    <td>@(m.Observacion ?? "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         }
 
         @* ============ ORDEN A SERVICIOS ============ *@
@@ -607,6 +629,8 @@ else
 
     // Items
     private List<OrdenMedicamentoItemDto> _meds = new();
+    private OrdenPublicaResumenDto? _emisionMed;   // emision publica activa (QR) de la orden de medicamentos
+    private Dictionary<string, string?> _bagMed = new();  // bag para renderizar ORD-MEDI schema-driven (con pie de formula)
     private List<OrdenServicioItemDto> _srv = new();
     private List<IncapacidadItemDto> _inc = new();
     private List<CertificacionItemDto> _cert = new();
@@ -677,6 +701,13 @@ else
             _fdMed = await FormsSvc.GetActivoByCodigoSecundarioAsync("ORDEN_MEDICAMENTOS");
             if (_fdMed is not null) { try { _schMed = JsonSerializer.Deserialize<FormSchema>(_fdMed.SchemaJson) ?? new(); } catch { } }
             _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
+            // Si la orden de medicamentos ya fue emitida, traemos su codigo para
+            // estampar el QR de verificacion en el paquete impreso.
+            try { _emisionMed = await PubSvc.ObtenerEmisionActivaAsync(HcId); } catch { _emisionMed = null; }
+            // Bag para renderizar el formato ORD-MEDI con su pie: si esta emitida
+            // usamos el snapshot congelado (paciente + meds + firma + QR + prof);
+            // si no, un borrador prellenado con paciente + tabla de medicamentos.
+            _bagMed = ConstruirBagMed();
         }
         if (_incluirSrv)
         {
@@ -870,9 +901,9 @@ else
                         <div class="pack-hdr-tag">@hd.Tagline</div>
                     </div>
                 </div>
-                @* Ver DocumentoImprimible.razor — HC N° / Apertura solo pantalla,
-                   se oculta al imprimir con d-print-none. *@
-                <div class="pack-hdr-nohist d-print-none">
+                @* Ver DocumentoImprimible.razor — HC N° / Apertura. El flag
+                   por-formato ImprimirCodigoFecha decide si sale en el PDF. *@
+                <div class="pack-hdr-nohist @(hd.ImprimirCodigoFecha ? "" : "d-print-none")">
                     @tipoCorto N°: <b>@ordenNum</b><br />
                     @fechaLinea<br />
                     HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
@@ -1037,6 +1068,30 @@ else
             </div>
             return;
         }
+        if (n.IsQr)
+        {
+            var qrKey = string.IsNullOrWhiteSpace(n.QrSource) ? (n.Name ?? "") : n.QrSource!;
+            var codigo = (vals.TryGetValue(qrKey, out var qcv) ? qcv : null)?.Trim() ?? "";
+            var qrSize = n.QrSize is int qs && qs > 0 ? Math.Clamp(qs, 80, 600) : 200;
+            <div class="pack-cell" style="grid-column: span @span; text-align:center;">
+                @if (n.Label is { Length: > 0 }) { <div class="pack-label">@n.Label</div> }
+                @if (string.IsNullOrEmpty(codigo))
+                {
+                    <div class="pack-value">(QR pendiente de emision)</div>
+                }
+                else
+                {
+                    var qurl = $"{QrBaseUrl()}/verificar-orden/{Uri.EscapeDataString(codigo)}";
+                    <img src="@Qr.GenerarPngDataUri(qurl, qrSize)" alt="QR de verificacion"
+                         width="@qrSize" height="@qrSize" style="width:@(qrSize)px;height:@(qrSize)px;display:inline-block;" />
+                    @if (n.ShowCode)
+                    {
+                        <div style="font-family:monospace;font-weight:600;letter-spacing:1px;margin-top:4px;">@codigo</div>
+                    }
+                }
+            </div>
+            return;
+        }
         var key = n.Name ?? $"fld:{n.Id}";
         var val = vals.TryGetValue(key, out var vv) ? vv : null;
         // Reusamos FormatCellForPrint para date/datetime y dejamos otros tipos
@@ -1059,6 +1114,50 @@ else
     /// Reglas: data URL de imagen, ruta relativa que empieza en /uploads/, o URL
     /// http(s) con extensión de imagen. Se mantiene en línea con la misma logica
     /// de FormViewer para que la impresión coincida con lo que ve el operador.</summary>
+    /// <summary>Base URL publica para el QR: config Branding:PublicBaseUrl o el host actual.</summary>
+    private string QrBaseUrl()
+    {
+        var cfg = Config["Branding:PublicBaseUrl"];
+        return (string.IsNullOrWhiteSpace(cfg) ? Nav.BaseUri : cfg).TrimEnd('/');
+    }
+
+    /// <summary>Arma el bag para renderizar la orden de medicamentos con el
+    /// formato ORD-MEDI (schema-driven, con pie de formula: firma + QR + recibido
+    /// + barra). Si la orden esta emitida usa el snapshot congelado (documento
+    /// firmado inmutable); si no, un borrador prellenado con paciente + tabla de
+    /// medicamentos desde las rutas del formato.</summary>
+    private Dictionary<string, string?> ConstruirBagMed()
+    {
+        // Orden emitida: snapshot inmutable (paciente + meds + firma + prof + codigo).
+        if (_emisionMed is not null && !string.IsNullOrWhiteSpace(_emisionMed.BagJson))
+        {
+            try
+            {
+                var frozen = JsonSerializer.Deserialize<Dictionary<string, string?>>(_emisionMed.BagJson);
+                if (frozen is not null) { return frozen; }
+            }
+            catch { }
+        }
+        // Borrador (sin emitir): prellenar paciente + tabla de medicamentos para
+        // que el documento use el diseno del formato aunque no haya firma/QR aun.
+        var valores = new Dictionary<string, string?>();
+        if (_schMed is null || _fdMed is null) { return valores; }
+        var rutas = PrefillRouteSet.FromJson(_fdMed.PrefillRoutesJson);
+        if (_paciente is not null) { PacientePrefillHelper.Aplicar(valores, _paciente, _schMed, rutas); }
+        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(
+            _meds,
+            new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
+            new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
+            new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
+            new List<SuministroMedicamentoItemDto>());
+        HistoriaMedicaPrefillHelper.Aplicar(valores, fuentes, rutas, _schMed);
+        if (string.IsNullOrWhiteSpace(valores.TryGetValue("profesional_nombre", out var pn) ? pn : null))
+        {
+            valores["profesional_nombre"] = _hc?.EspecialistaNombre;
+        }
+        return valores;
+    }
+
     private static bool IsImageUrl(string? v)
     {
         if (string.IsNullOrWhiteSpace(v)) { return false; }

@@ -239,6 +239,16 @@
                 <div class="fb-prop"><label>Lema</label><input class="fb-input" @bind="_schema.Header!.Tagline" @bind:event="oninput" placeholder="Atencion Humana, Agil y Oportuna" /></div>
                 <div class="fb-prop"><label>Titulo del documento</label><input class="fb-input" @bind="_schema.Header!.Titulo" @bind:event="oninput" placeholder="(usa el nombre del formulario)" /></div>
 
+                <label class="fb-check">
+                    <input type="checkbox" @bind="_schema.Header!.ImprimirCodigoFecha" />
+                    Mostrar N&deg; interno y fecha en la impresion
+                </label>
+                <div class="fb-hint">
+                    Si lo apagas, el N&deg; interno de la HC y la fecha (apertura/cierre) solo se ven
+                    en pantalla, no en el PDF. Util para notas / HCs del paciente; en ordenes y formula
+                    medica dejalo encendido.
+                </div>
+
                 <div class="fb-props-subtitle">Logo</div>
                 @if (!string.IsNullOrWhiteSpace(_schema.Header!.LogoUrl))
                 {
@@ -622,6 +632,23 @@
                             <input class="fb-input fb-mono" @bind="_selected.Formula" @bind:event="oninput" placeholder="edad(fecha_nacimiento)" />
                             <div class="fb-hint">Funciones: edad(fecha), sumar(a,b), restar(a,b), hoy(). Referencia campos por su nombre.</div>
                         </div>
+                    }
+                    else if (_selected.FieldType == "qr")
+                    {
+                        <div class="fb-prop">
+                            <label>Campo con el codigo (QrSource)</label>
+                            <input class="fb-input fb-mono" @bind="_selected.QrSource" @bind:event="oninput" placeholder="orden_codigo_verificacion" />
+                            <div class="fb-hint">Name del campo del que se lee el codigo a codificar. Si se deja vacio, usa el Name/id de este mismo campo.</div>
+                        </div>
+                        <div class="fb-prop">
+                            <label>Tamano (px)</label>
+                            <input type="number" class="fb-input" @bind="_selected.QrSize" @bind:event="oninput" placeholder="200" />
+                        </div>
+                        <label class="fb-check">
+                            <input type="checkbox" @bind="_selected.ShowCode" />
+                            Mostrar el codigo como texto debajo del QR
+                        </label>
+                        <div class="fb-hint">El QR apunta a la pagina publica /verificar-orden/{codigo}. Se genera al emitir la orden.</div>
                     }
                     else
                     {
@@ -1110,7 +1137,8 @@
         ["select"] = "Lista",
         ["autocomplete"] = "Autocompletar",
         ["calculated"] = "Calculado",
-        ["table"] = "Tabla"
+        ["table"] = "Tabla",
+        ["qr"] = "Codigo QR"
     };
 
     private static readonly Dictionary<string, string> Catalogs = new()

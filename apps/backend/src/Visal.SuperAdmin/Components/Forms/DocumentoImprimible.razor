@@ -1,5 +1,9 @@
+@using System.Text
 @using System.Text.Json
 @using Visal.Application.Tenancy.Forms
+@inject Visal.Application.Common.IQrCodeGenerator Qr
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
+@inject NavigationManager Nav
 
 @*
     DocumentoImprimible — renderer compartido tipo "documento imprimible"
@@ -49,11 +53,11 @@
                     <div class="pack-hdr-tag">@hd.Tagline</div>
                 </div>
             </div>
-            @* Bloque HC N° / Apertura: visible en pantalla como referencia rapida
-               para el operador, pero se oculta en la impresion — la fecha y el id
-               interno no van en el PDF que se entrega al paciente / la EPS.
-               d-print-none es utility de Bootstrap 5 (display:none @media print). *@
-            <div class="pack-hdr-nohist d-print-none">
+            @* Bloque HC N° / Apertura. Se ve siempre en pantalla como referencia
+               rapida; si aparece o no en el PDF lo decide el flag por-formato
+               ImprimirCodigoFecha (default true = imprime). d-print-none es
+               utility de Bootstrap 5 (display:none @media print). *@
+            <div class="pack-hdr-nohist @(hd.ImprimirCodigoFecha ? "" : "d-print-none")">
                 @if (!string.IsNullOrWhiteSpace(OrdenNum))
                 {
                     @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b>
@@ -90,6 +94,44 @@
             @RenderTopNode(node)
         }
     }
+
+    @* ===== Pie de formula medica: firma (izq) + QR/codigo (centro) +
+       recibido (der), y barra final con fecha de impresion y la URL del
+       programa. Solo cuando el llamador lo pide (orden emitida). ===== *@
+    @if (MostrarPieFormula)
+    {
+        var _firma = Values.TryGetValue("firma_profesional", out var _fp) ? _fp : null;
+        var _profNom = (Values.TryGetValue("profesional_nombre", out var _pn) ? _pn : null);
+        if (string.IsNullOrWhiteSpace(_profNom)) { _profNom = EspecialistaNombre ?? ""; }
+        var _profReg = (Values.TryGetValue("profesional_registro", out var _pr) ? _pr : null) ?? "";
+        var _cod = (Values.TryGetValue("orden_codigo_verificacion", out var _cc) ? _cc : null)?.Trim() ?? "";
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-top:26px;">
+            <div style="flex:1 1 38%;text-align:center;font-size:11px;">
+                @if (IsImageUrl(_firma)) { <img src="@_firma" alt="firma" style="max-height:54px;max-width:190px;object-fit:contain;display:block;margin:0 auto 2px;" /> }
+                <div style="border-top:1px solid #000;margin:2px auto 3px;width:82%;"></div>
+                <div style="font-weight:700;">@_profNom</div>
+                <div style="color:#333;">@(string.IsNullOrWhiteSpace(_profReg) ? "" : $"R.M. {_profReg} - ")Firmado Electronicamente.</div>
+            </div>
+            <div style="flex:0 0 auto;text-align:center;font-size:11px;">
+                @if (!string.IsNullOrEmpty(_cod))
+                {
+                    var _qurl = $"{QrBaseUrl()}/verificar-orden/{Uri.EscapeDataString(_cod)}";
+                    <img src="@Qr.GenerarPngDataUri(_qurl, 116)" alt="QR de verificacion" width="116" height="116" style="display:block;margin:0 auto;" />
+                    <div style="font-weight:600;margin-top:2px;">Codigo de Seguridad</div>
+                    <div style="font-family:monospace;font-weight:700;color:#c1121f;letter-spacing:1px;">@_cod</div>
+                }
+            </div>
+            <div style="flex:1 1 34%;font-size:11px;color:#555;">
+                <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:9px;"><span>Recibido:</span><span style="flex:1;border-bottom:1px solid #999;">&nbsp;</span></div>
+                <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:9px;"><span>Telefono:</span><span style="flex:1;border-bottom:1px solid #999;">&nbsp;</span></div>
+                <div style="display:flex;gap:6px;align-items:flex-end;"><span>Direccion:</span><span style="flex:1;border-bottom:1px solid #999;">&nbsp;</span></div>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#777;border-top:1px solid #ccc;margin-top:12px;padding-top:4px;">
+            <span>Impreso el @FechaImpresion()</span>
+            <span>@ProgramaUrl()</span>
+        </div>
+    }
 </div>
 
 @code {
@@ -104,6 +146,9 @@
     [Parameter] public string TipoCortoHeader { get; set; } = "HC";
     [Parameter] public string? TituloFallback { get; set; }
     [Parameter] public HashSet<string>? SeccionesOpcionalesIncluidas { get; set; }
+    /// <summary>Cuando true, agrega el pie de formula medica (firma + QR/codigo
+    /// + recibido + barra con fecha de impresion y URL del programa).</summary>
+    [Parameter] public bool MostrarPieFormula { get; set; }
 
     // ── Renderer (copia fiel del que vivia en ImprimirPaquete.razor) ─────
 
@@ -117,6 +162,11 @@
         {
             return;
         }
+        // Con el pie de formula medica activo, el QR y las secciones de
+        // firma/verificacion/pie que el schema traiga como fallback las pinta
+        // el pie hardcodeado. Se saltan aqui para no duplicarlas.
+        if (MostrarPieFormula && n.IsQr) { return; }
+        if (MostrarPieFormula && n.IsSection && EsSeccionPieFallback(n.Label)) { return; }
 
         if (n.IsText)
         {
@@ -147,6 +197,9 @@
 
     private RenderFragment RenderDocNode(FormNode n) => __builder =>
     {
+        // El pie hardcodeado ya pinta el QR + codigo. Evitar duplicado cuando
+        // el QR viene como hijo de una seccion del schema.
+        if (n.IsQr && MostrarPieFormula) { return; }
         var span = Math.Clamp(n.WidthColumns <= 0 ? 12 : n.WidthColumns, 1, 12);
         if (n.IsText)
         {
@@ -211,6 +264,30 @@
             </div>
             return;
         }
+        if (n.IsQr)
+        {
+            var qrKey = string.IsNullOrWhiteSpace(n.QrSource) ? (n.Name ?? "") : n.QrSource!;
+            var codigo = (Values.TryGetValue(qrKey, out var cv) ? cv : null)?.Trim() ?? "";
+            var qrSize = n.QrSize is int qs && qs > 0 ? Math.Clamp(qs, 80, 600) : 200;
+            <div class="pack-cell" style="grid-column: span @span; text-align:center;">
+                @if (n.Label is { Length: > 0 }) { <div class="pack-label">@n.Label</div> }
+                @if (string.IsNullOrEmpty(codigo))
+                {
+                    <div class="pack-value">(QR pendiente de emision)</div>
+                }
+                else
+                {
+                    var url = $"{QrBaseUrl()}/verificar-orden/{Uri.EscapeDataString(codigo)}";
+                    <img src="@Qr.GenerarPngDataUri(url, qrSize)" alt="QR de verificacion"
+                         width="@qrSize" height="@qrSize" style="width:@(qrSize)px;height:@(qrSize)px;display:inline-block;" />
+                    @if (n.ShowCode)
+                    {
+                        <div style="font-family:monospace;font-weight:600;letter-spacing:1px;margin-top:4px;">@codigo</div>
+                    }
+                }
+            </div>
+            return;
+        }
         var key = n.Name ?? $"fld:{n.Id}";
         var val = Values.TryGetValue(key, out var vv) ? vv : null;
         var fieldDisplay = FormatCellForPrint(val, n.FieldType);
@@ -226,6 +303,74 @@
             }
         </div>
     };
+
+    /// <summary>Base URL publica para el QR: config Branding:PublicBaseUrl o el host actual.</summary>
+    private string QrBaseUrl()
+    {
+        var cfg = Config["Branding:PublicBaseUrl"];
+        return (string.IsNullOrWhiteSpace(cfg) ? Nav.BaseUri : cfg).TrimEnd('/');
+    }
+
+    /// <summary>URL del programa que ejecuta el proceso, para la barra del pie.
+    /// Config Branding:ProgramUrl con fallback al dominio de produccion.</summary>
+    private string ProgramaUrl()
+    {
+        var cfg = Config["Branding:ProgramUrl"];
+        return string.IsNullOrWhiteSpace(cfg) ? "https://axon.ipsvisalrt.com/" : cfg;
+    }
+
+    /// <summary>Fecha/hora de impresion en formato "dd/MM/yyyy - h:mm:ss a.m./p.m.".</summary>
+    private static string FechaImpresion()
+    {
+        var n = DateTime.Now;
+        return n.ToString("dd/MM/yyyy - h:mm:ss") + " " + (n.Hour < 12 ? "a.m." : "p.m.");
+    }
+
+    /// <summary>True si la seccion es un fallback de firma/verificacion/pie que
+    /// el schema pudo traer antes de existir el pie hardcodeado. Comparacion
+    /// insensible a mayusculas y acentos (se normalizan a ASCII).</summary>
+    private static bool EsSeccionPieFallback(string? label)
+    {
+        var lbl = SinAcentos((label ?? string.Empty).Trim().ToLowerInvariant());
+        return lbl.Contains("firma y verificacion")
+            || lbl.Contains("pie de impresion")
+            || lbl == "verificacion";
+    }
+
+    /// <summary>Quita diacriticos (a/e/i/o/u/n con acento o tilde) para permitir
+    /// comparaciones ASCII-safe sin literales acentuados en el codigo.</summary>
+    private static string SinAcentos(string s)
+    {
+        var d = s.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(d.Length);
+        foreach (var c in d)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
+                != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    /// <summary>True cuando el formato es una orden de medicamentos: el codigo
+    /// empieza por "ORD-MEDI" o el codigo secundario/tipo es "ORDEN_MEDICAMENTOS".
+    /// Lo usan las paginas de impresion para activar MostrarPieFormula solo
+    /// cuando aplica.</summary>
+    public static bool EsFormatoOrdenMedicamentos(string? codigo, string? codigoSecundario = null, string? tipo = null)
+    {
+        if (!string.IsNullOrWhiteSpace(codigo)
+            && codigo.Trim().StartsWith("ORD-MEDI", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (string.Equals(codigoSecundario?.Trim(), "ORDEN_MEDICAMENTOS", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return string.Equals(tipo?.Trim(), "ORDEN_MEDICAMENTOS", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsImageUrl(string? v)
     {

@@ -147,6 +147,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<PreRevisionIaPending> PreRevisionIaPendings => Set<PreRevisionIaPending>();
     public DbSet<DocumentoNota> DocumentoNotas => Set<DocumentoNota>();
 
+    // Orden de Medicamentos publica (QR de verificacion + snapshot inmutable)
+    public DbSet<OrdenMedicamentoPublica> OrdenesMedicamentosPublicas => Set<OrdenMedicamentoPublica>();
+    public DbSet<VerificacionOrdenLog> VerificacionOrdenLogs => Set<VerificacionOrdenLog>();
+
     // Modulo Tableros (Kanban colaborativo)
     public DbSet<TaskBoard> TaskBoards => Set<TaskBoard>();
     public DbSet<TaskBoardMember> TaskBoardMembers => Set<TaskBoardMember>();
@@ -1583,6 +1587,33 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.UmbralConfianza).HasPrecision(4, 3);
             // Singleton por tenant — una fila max por TenantId.
             b.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        modelBuilder.Entity<OrdenMedicamentoPublica>(b =>
+        {
+            b.Property(x => x.CodigoVerificacion).HasMaxLength(16).IsRequired();
+            b.Property(x => x.RevocacionMotivo).HasMaxLength(1000);
+            // Snapshot inmutable de la orden emitida (bag del formulario ORD-MEDI).
+            b.Property(x => x.SnapshotJson).HasColumnType("jsonb");
+
+            b.HasOne(x => x.HistoriaClinica).WithMany()
+                .HasForeignKey(x => x.HistoriaClinicaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // El codigo es globalmente unico: la verificacion publica lo busca sin
+            // tenant scope (IgnoreQueryFilters) y resuelve el tenant desde la fila.
+            b.HasIndex(x => x.CodigoVerificacion).IsUnique();
+            // Listado interno "ordenes emitidas de esta HC" + deteccion de emision activa.
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
+        });
+
+        modelBuilder.Entity<VerificacionOrdenLog>(b =>
+        {
+            b.Property(x => x.CodigoConsultado).HasMaxLength(16).IsRequired();
+            b.Property(x => x.Ip).HasMaxLength(64);
+            b.Property(x => x.UserAgent).HasMaxLength(500);
+            // Trazabilidad por orden en orden cronologico.
+            b.HasIndex(x => new { x.OrdenMedicamentoPublicaId, x.ConsultadoEn });
         });
 
         // ---- Modulo Tableros (Kanban colaborativo) ----

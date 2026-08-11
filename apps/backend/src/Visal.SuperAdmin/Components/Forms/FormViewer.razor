@@ -1,5 +1,8 @@
 @using Visal.SuperAdmin.Components.Forms
 @inject IJSRuntime JS
+@inject Visal.Application.Common.IQrCodeGenerator Qr
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
+@inject NavigationManager Nav
 
 @* ============================================================
    FormViewer: renderiza un FormSchema como una vista
@@ -974,6 +977,49 @@ else
          v.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
          v.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>Base URL publica para el QR: config Branding:PublicBaseUrl o, si
+    /// no esta seteada, el host de la peticion actual (sirve en dev sin config).</summary>
+    private string ResolvePublicBaseUrl()
+    {
+        var cfg = Config["Branding:PublicBaseUrl"];
+        var baseUrl = string.IsNullOrWhiteSpace(cfg) ? Nav.BaseUri : cfg;
+        return baseUrl.TrimEnd('/');
+    }
+
+    /// <summary>Renderiza el nodo "qr": lee el codigo del bag (QrSource o Name),
+    /// genera el PNG del QR apuntando a la pagina publica de verificacion, y
+    /// opcionalmente muestra el codigo como texto. Si no hay codigo aun (orden no
+    /// emitida), muestra un placeholder gris.</summary>
+    private RenderFragment RenderQr(FormNode node) => __builder =>
+    {
+        var qrKey = string.IsNullOrWhiteSpace(node.QrSource) ? (node.Name ?? "") : node.QrSource!;
+        var codigo = (GetValue(qrKey) ?? "").Trim();
+        var size = node.QrSize is int s && s > 0 ? Math.Clamp(s, 80, 600) : 200;
+
+        if (string.IsNullOrEmpty(codigo))
+        {
+            <div class="fv-qr-placeholder"
+                 style="width:@(size)px;max-width:100%;height:@(size)px;border:1px dashed #cbd5e1;border-radius:6px;display:flex;align-items:center;justify-content:center;text-align:center;color:#94a3b8;font-size:.8rem;padding:8px;background:#f8fafc;">
+                El QR se generara al emitir la orden.
+            </div>
+            return;
+        }
+
+        var url = $"{ResolvePublicBaseUrl()}/verificar-orden/{Uri.EscapeDataString(codigo)}";
+        var dataUri = Qr.GenerarPngDataUri(url, size);
+        <div class="fv-qr-wrap" style="display:inline-block;text-align:center;">
+            <img src="@dataUri" alt="Codigo QR de verificacion" width="@size" height="@size"
+                 style="width:@(size)px;height:@(size)px;max-width:100%;display:block;" />
+            @if (node.ShowCode)
+            {
+                <div class="fv-qr-code"
+                     style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;letter-spacing:1px;margin-top:6px;font-size:1rem;">
+                    @codigo
+                </div>
+            }
+        </div>
+    };
+
     private RenderFragment RenderInput(FormNode node) => __builder =>
     {
         var key = node.Name ?? $"fld:{node.Id}";
@@ -1030,6 +1076,9 @@ else
 
         switch (node.FieldType)
         {
+            case "qr":
+                @RenderQr(node)
+                break;
             case "textarea":
                 // El disenador puede configurar cuantas filas mostrar; por
                 // defecto 3 (comportamiento historico). Se acota entre 1 y 30

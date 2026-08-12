@@ -144,6 +144,7 @@ else
                 PacienteDoc="@(_paciente?.NumeroDocumento)"
                 EspecialistaNombre="@(_hc?.EspecialistaNombre)"
                 MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(_form?.Codigo, _form?.CodigoSecundario, Tipo)"
+                FechaLinea="@FechaFormulaOrd()"
                 OrdenNum="@_ordenNumero" TipoCortoHeader="ORD" TituloFallback="@_tipoLabel" />
         </div>
     }
@@ -526,6 +527,14 @@ else
     /// <summary>Construye el bag del formato ORD-MEDI prellenando paciente, sistema
     /// (fecha/usuario/registro/firma), firmas y la tabla de medicamentos — el mismo
     /// pipeline de prefill que usan las escalas/consentimientos al iniciarse.</summary>
+    // Fecha de expedicion para el encabezado del documento: la de emision si esta
+    // emitido (documento firmado), o la de hoy si es borrador.
+    private string FechaFormulaOrd()
+    {
+        var f = _emision?.EmitidoAt ?? DateTimeOffset.Now;
+        return "Fecha: " + f.LocalDateTime.ToString("dd/MM/yyyy");
+    }
+
     private async Task<(Dictionary<string, string?> Bag, string? ProfNombre, string? ProfRegistro)> ConstruirBagOrdenAsync()
     {
         var valores = new Dictionary<string, string?>();
@@ -549,9 +558,15 @@ else
             if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var puid)) { platformUid = puid; }
             if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
         }
+        // La formula la FIRMA el medico tratante de la HC (especialista), no quien
+        // la emite. Resolvemos por el ProfesionalId de la HC; si no tiene profesional
+        // vinculado, caemos al usuario logueado (compatibilidad).
+        var firmanteProfId = _hc?.ProfesionalId ?? profId;
+
         try
         {
-            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(profId, platformUid, tenantId);
+            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(
+                firmanteProfId, firmanteProfId is null ? platformUid : null, tenantId);
             profRegistro = datosProf?.RegistroMedico;
             // El firmante de la formula es el profesional-usuario que la emite:
             // nombre + registro + firma del mismo. Solo si el usuario no tiene
@@ -574,7 +589,7 @@ else
         {
             var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(_paciente.Id);
             string? firmaProf = null;
-            if (profId is Guid pid2 && pid2 != Guid.Empty)
+            if (firmanteProfId is Guid pid2 && pid2 != Guid.Empty)
             {
                 firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid2);
             }

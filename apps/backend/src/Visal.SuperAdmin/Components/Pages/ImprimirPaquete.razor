@@ -146,6 +146,7 @@ else
                                      PacienteDoc="@(_paciente?.NumeroDocumento)"
                                      EspecialistaNombre="@_hc.EspecialistaNombre"
                                      MostrarPieFormula="true"
+                                     FechaLinea="@FechaFormulaMed()"
                                      OrdenNum="@(_hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED")"
                                      TipoCortoHeader="ORD"
                                      TituloFallback="Orden de Medicamentos" />
@@ -1174,11 +1175,17 @@ else
             if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
         }
 
+        // La formula la FIRMA el medico tratante de la HC (especialista), no quien
+        // da Imprimir. Resolvemos por el ProfesionalId de la HC; si la HC no tiene
+        // profesional vinculado, caemos al usuario logueado (compatibilidad).
+        var firmanteProfId = _hc.ProfesionalId ?? profId;
+
         string? profNombre = _hc.EspecialistaNombre;
         string? profRegistro = null;
         try
         {
-            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(profId, platformUid, tenantId);
+            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(
+                firmanteProfId, firmanteProfId is null ? platformUid : null, tenantId);
             profRegistro = datosProf?.RegistroMedico;
             if (!string.IsNullOrWhiteSpace(datosProf?.Nombre)) { profNombre = datosProf!.Nombre; }
             else if (string.IsNullOrWhiteSpace(profNombre)) { profNombre = uName; }
@@ -1197,7 +1204,7 @@ else
         {
             var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(_paciente.Id);
             string? firmaProf = null;
-            if (profId is Guid pid2 && pid2 != Guid.Empty)
+            if (firmanteProfId is Guid pid2 && pid2 != Guid.Empty)
             {
                 firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid2);
             }
@@ -1256,6 +1263,14 @@ else
     /// + barra). Si la orden esta emitida usa el snapshot congelado (documento
     /// firmado inmutable); si no, un borrador prellenado con paciente + tabla de
     /// medicamentos desde las rutas del formato.</summary>
+    // Fecha de expedicion de la formula medica para el encabezado: la fecha de
+    // emision de la orden (documento firmado). Si aun es borrador, la de hoy.
+    private string FechaFormulaMed()
+    {
+        var f = _emisionMed?.EmitidoAt ?? DateTimeOffset.Now;
+        return "Fecha: " + f.ToLocalTime().ToString("dd/MM/yyyy");
+    }
+
     private Dictionary<string, string?> ConstruirBagMed()
     {
         // Orden emitida: snapshot inmutable (paciente + meds + firma + prof + codigo).

@@ -74,6 +74,13 @@
                     }
                 </div>
             }
+            else if (!string.IsNullOrWhiteSpace(FechaLinea))
+            {
+                @* Formatos con el bloque HC N°/apertura oculto (p.ej. la formula
+                   medica, ver FAT-5) que aun asi deben mostrar la fecha de
+                   expedicion en el encabezado (arriba a la derecha). *@
+                <div class="pack-hdr-nohist">@FechaLinea</div>
+            }
         </div>
         <div class="pack-hdr-title">@tituloFinal</div>
         <div class="pack-hdr-meta">

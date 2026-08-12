@@ -7,6 +7,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Forms
 @using Visal.SuperAdmin.Components.Forms
+@using Microsoft.AspNetCore.Components.Authorization
 @inject IHistoriaClinicaService HcSvc
 @inject IAsignacionService AsigSvc
 @inject IFormDefinitionService FormsSvc
@@ -603,6 +604,9 @@ else
     private List<string> _docs = new();
     private bool _incluirHc, _incluirMed, _incluirSrv, _incluirInc, _incluirCert, _incluirRem, _incluirEsc, _incluirEvo, _incluirCon;
     private bool _incluirIns, _incluirRxExt, _incluirLabExt, _incluirInsExt, _incluirSrvExt, _incluirRegMed;
+    private bool _autoEmitir;  // ?emitir=1 -> emite la orden de medicamentos al imprimir
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     /// <summary>Ids de secciones opcionales que el usuario decidio INCLUIR en la
     /// impresion (?secs=id1,id2). Default vacio: no incluir ninguna opcional.
@@ -662,6 +666,10 @@ else
         _incluirInsExt = _docs.Contains("INSEXT");
         _incluirSrvExt = _docs.Contains("SRVEXT");
         _incluirRegMed = _docs.Contains("REGMED");
+        // ?emitir=1: la impresion viene del boton general de la HC -> emitir la
+        // orden de medicamentos (firma + QR) si aun no lo estaba. El "Consultar"
+        // de /ordenes NO pasa este flag, asi que queda solo-lectura.
+        _autoEmitir = query.TryGetValue("emitir", out var ve) && ve.ToString() == "1";
 
         // Secciones opcionales incluidas por el usuario (?secs=). Vacio o ausente
         // = no incluir ninguna. Case-insensitive por si el consumidor URL-encode
@@ -704,6 +712,19 @@ else
             // Si la orden de medicamentos ya fue emitida, traemos su codigo para
             // estampar el QR de verificacion en el paquete impreso.
             try { _emisionMed = await PubSvc.ObtenerEmisionActivaAsync(HcId); } catch { _emisionMed = null; }
+            // Auto-emision: si la impresion viene del boton general de la HC
+            // (emitir=1) y la orden aun no esta emitida, se emite ahora (firma +
+            // QR + snapshot inmutable) para que salga con su codigo. Idempotente.
+            if (_autoEmitir && _emisionMed is null && _meds.Count > 0
+                && _fdMed is not null && _paciente is not null && _hc is not null)
+            {
+                try
+                {
+                    await AutoEmitirMedAsync();
+                    _emisionMed = await PubSvc.ObtenerEmisionActivaAsync(HcId);
+                }
+                catch { /* si la emision falla, el paquete sigue como borrador (sin QR) */ }
+            }
             // Bag para renderizar el formato ORD-MEDI con su pie: si esta emitida
             // usamos el snapshot congelado (paciente + meds + firma + QR + prof);
             // si no, un borrador prellenado con paciente + tabla de medicamentos.
@@ -1124,6 +1145,110 @@ else
     {
         var cfg = Config["Branding:PublicBaseUrl"];
         return (string.IsNullOrWhiteSpace(cfg) ? Nav.BaseUri : cfg).TrimEnd('/');
+    }
+
+    /// <summary>Emite la orden de medicamentos de esta HC (firma + QR + snapshot
+    /// inmutable) reusando el mismo pipeline de prefill que /orden-doc: paciente +
+    /// sistema (usuario/registro/firma) + firmas + tabla de medicamentos +
+    /// diagnosticos. El firmante es el usuario logueado que imprime. El caller ya
+    /// verifico que no hay emision activa.</summary>
+    private async Task AutoEmitirMedAsync()
+    {
+        if (_hc is null || _paciente is null || _fdMed is null || _meds.Count == 0) { return; }
+
+        var valores = new Dictionary<string, string?>();
+        var rutas = PrefillRouteSet.FromJson(_fdMed.PrefillRoutesJson);
+        PacientePrefillHelper.Aplicar(valores, _paciente, _schMed, rutas);
+
+        // Datos del usuario/profesional logueado (identificacion, registro, firma).
+        Guid? profId = null, platformUid = null, tenantId = null;
+        string? uName = null, uEmail = null, uSede = null;
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            uName = st.User.Identity?.Name ?? st.User.FindFirst("display_name")?.Value;
+            uEmail = st.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+            uSede = st.User.FindFirst("sede_nombre")?.Value;
+            if (Guid.TryParse(st.User.FindFirst("profesional_id")?.Value, out var pid)) { profId = pid; }
+            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var puid)) { platformUid = puid; }
+            if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
+        }
+
+        string? profNombre = _hc.EspecialistaNombre;
+        string? profRegistro = null;
+        try
+        {
+            var datosProf = await FirmaResolverSvc.ResolverDatosProfesionalAsync(profId, platformUid, tenantId);
+            profRegistro = datosProf?.RegistroMedico;
+            if (!string.IsNullOrWhiteSpace(datosProf?.Nombre)) { profNombre = datosProf!.Nombre; }
+            else if (string.IsNullOrWhiteSpace(profNombre)) { profNombre = uName; }
+            SistemaPrefillHelper.Aplicar(valores, new SistemaPrefillHelper.SistemaCtx(
+                Ahora: DateTimeOffset.Now,
+                AgenciaNombre: null, AgenciaSlogan: null,
+                SedeNombre: uSede ?? _paciente.Sede, SedeCiudad: _paciente.Ciudad,
+                UsuarioNombre: uName, UsuarioEmail: uEmail,
+                UsuarioIdentificacion: datosProf?.Identificacion,
+                UsuarioRegistroMedico: datosProf?.RegistroMedico,
+                UsuarioFirmaUrl: datosProf?.FirmaUrl), rutas);
+        }
+        catch { }
+
+        try
+        {
+            var firmaPac = await FirmaResolverSvc.ResolverFirmaPacienteAsync(_paciente.Id);
+            string? firmaProf = null;
+            if (profId is Guid pid2 && pid2 != Guid.Empty)
+            {
+                firmaProf = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid2);
+            }
+            else if (platformUid is Guid puid2 && tenantId is Guid tid2)
+            {
+                firmaProf = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(puid2, tid2);
+            }
+            FirmasPrefillHelper.Aplicar(valores, firmaPac, firmaProf, rutas);
+        }
+        catch { }
+
+        var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(
+            _meds,
+            new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
+            new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
+            new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
+            new List<SuministroMedicamentoItemDto>(),
+            HcDiagnosticosReader.Leer(_hc.SchemaJson, _hc.ValoresJson));
+        HistoriaMedicaPrefillHelper.Aplicar(valores, fuentes, rutas, _schMed);
+
+        valores["profesional_nombre"] = profNombre;
+        valores["profesional_registro"] = profRegistro;
+
+        var items = _meds.Select(m => new OrdenItemPublicoDto(
+            m.NombreMedicamento, m.CodigoMedicamento, m.Cantidad, m.Frecuencia, m.Dias, m.Posologia)).ToList();
+        var req = new EmitirOrdenRequest(
+            _hc.Id, JsonSerializer.Serialize(valores), DateTimeOffset.Now,
+            Iniciales(_paciente.NombreCompleto), profNombre, profRegistro, items);
+        await PubSvc.EmitirAsync(req, await ActorIdAsync());
+    }
+
+    private async Task<Guid> ActorIdAsync()
+    {
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id))
+            {
+                return id;
+            }
+        }
+        return Guid.Empty;
+    }
+
+    /// <summary>Iniciales del paciente (privacidad): "MERCEDES PULIDO" -> "M.P.".</summary>
+    private static string Iniciales(string? nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) { return "N.N."; }
+        var partes = nombre.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var ini = partes.Where(p => p.Length > 0).Take(2).Select(p => char.ToUpperInvariant(p[0]));
+        return string.Join(".", ini) + ".";
     }
 
     /// <summary>Arma el bag para renderizar la orden de medicamentos con el

@@ -99,22 +99,24 @@ else
 
     <div class="doc-actions">
         <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
-        @if (esMed && _emision is null)
-        {
-            @* Orden de medicamentos sin emitir: el QR sale al EMITIR, no al imprimir.
-               Emitir es la accion primaria; imprimir el borrador queda secundario. *@
-            <button class="dbtn primary" style="background:#16a34a;border-color:#16a34a;" @onclick="EmitirOrdenAsync" disabled="@_emitBusy">
-                @(_emitBusy ? "Emitiendo..." : "Emitir formula (firmar + QR)")
-            </button>
-            <button class="dbtn" @onclick="PrintAsync" title="Imprime el borrador, sin codigo de verificacion">&#128424; Imprimir borrador (sin QR)</button>
-        }
-        else
-        {
-            <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir / Guardar PDF</button>
-            @if (esMedEmitida)
+        @* Un solo boton: al imprimir una orden de medicamentos se emite
+           automaticamente (firma + QR + snapshot inmutable) si aun no lo estaba,
+           para que el documento salga siempre con su codigo de verificacion. El
+           resto de tipos (y las ya emitidas) solo imprime. *@
+        <button class="dbtn primary" @onclick="ImprimirAsync" disabled="@_emitBusy">
+            @if (_emitBusy)
             {
-                <button class="dbtn" style="border-color:#dc2626;color:#dc2626;" @onclick="RevocarOrdenAsync" disabled="@_emitBusy">Revocar</button>
+                <text>Preparando...</text>
             }
+            else
+            {
+                <text>&#128424; Imprimir / Guardar PDF</text>
+            }
+        </button>
+        @if (esMedEmitida)
+        {
+            <button class="dbtn" style="border-color:#dc2626;color:#dc2626;" @onclick="RevocarOrdenAsync" disabled="@_emitBusy"
+                    title="Anula la emision para poder editar la orden; luego vuelves a imprimir">Revocar</button>
         }
         <span class="spacer"></span>
         @if (esMedEmitida)
@@ -452,6 +454,36 @@ else
     }
 
     private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
+
+    // Cuando la impresion dispara una emision, el print real se aplaza hasta que
+    // el documento emitido (con QR) termine de renderizarse — se hace en OnAfterRender.
+    private bool _pendingPrint;
+
+    /// <summary>Boton unico de impresion. Para ordenes de medicamentos que aun no
+    /// estan emitidas, emite primero (firma + QR + snapshot inmutable) y luego
+    /// imprime, para que el documento salga siempre con su codigo de verificacion.
+    /// El resto de tipos (y las ordenes ya emitidas) solo imprime.</summary>
+    private async Task ImprimirAsync()
+    {
+        var esMed = string.Equals(Tipo, "ORDEN_MEDICAMENTOS", StringComparison.OrdinalIgnoreCase);
+        if (esMed && _emision is null && _meds.Count > 0)
+        {
+            await EmitirOrdenAsync();          // emite + recarga: _emision pasa a != null
+            if (_emision is null) { return; }  // fallo la emision (hay _emitError): no imprimir
+            _pendingPrint = true;              // imprimir tras renderizar el doc emitido con QR
+            return;
+        }
+        await PrintAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingPrint && _emision is not null)
+        {
+            _pendingPrint = false;
+            await PrintAsync();
+        }
+    }
 
     /// <summary>Emite (firma) la orden ORD-MEDI: arma el bag prellenado del formato,
     /// captura la proyeccion publica, y persiste el snapshot inmutable con codigo.</summary>

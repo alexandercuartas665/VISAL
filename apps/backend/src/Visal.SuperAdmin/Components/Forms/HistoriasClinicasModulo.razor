@@ -253,6 +253,17 @@
                         }
                     </div>
                 }
+                @* Identificador corto de la HC (N interno). Ayuda al usuario a saber
+                   que historia esta viendo/creando; coincide con el "N" que sale en
+                   las impresiones (primeros 8 del GUID). El ID completo va en el
+                   tooltip por si se necesita para soporte. *@
+                @if (_historiaSel is not null)
+                {
+                    <span class="hc-id-chip" style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border:1px solid var(--border);border-radius:999px;background:var(--card);font-size:12px;color:var(--muted-foreground);white-space:nowrap;"
+                          title="@($"Historia clinica - N interno. ID completo: {_historiaSel.Id}")">
+                        HC N&deg;: <b style="color:var(--foreground);font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:.5px;">@_historiaSel.Id.ToString().Substring(0, 8).ToUpperInvariant()</b>
+                    </span>
+                }
             </div>
             @if (_imprimirMsg is not null) { <div class="hc-info-msg">@_imprimirMsg</div> }
 
@@ -2516,6 +2527,10 @@
         if (docs.Count == 0) { _imprimirMsg = "Selecciona al menos un documento."; return; }
         _showImprimirModal = false;
         var url = $"/imprimir-paquete/{h.Id}?docs={string.Join(",", docs)}";
+        // Al imprimir desde la HC, la orden de medicamentos se EMITE (firma + QR +
+        // snapshot) automaticamente si aun no lo estaba, para que salga con su
+        // codigo de verificacion. El "Consultar" de /ordenes no pasa este flag.
+        if (docs.Contains("MED")) { url += "&emitir=1"; }
         if (_imprSeccionesOpcionalesSel.Count > 0)
         {
             url += $"&secs={string.Join(",", _imprSeccionesOpcionalesSel)}";

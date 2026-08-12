@@ -16,12 +16,13 @@
         <span class="od-bar-count">@_items.Count item(s)</span>
     </div>
     <div class="od-bar-right">
-        <button class="btn btn-success btn-sm" title="Abre la formula medica: ahi se emite (firma + QR de verificacion)"
-                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
-                @onclick="ImprimirAsync">&#10003; Emitir formula (QR)</button>
-        <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
-                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
-                @onclick="ImprimirAsync">&#128424; Imprimir</button>
+        @* La impresion de la orden de medicamentos se hace desde el boton
+           "Imprimir" general de la historia (arriba). Ese boton emite la formula
+           (firma + QR) y la incluye en el paquete. Aqui ya no hay boton propio
+           para no confundir con dos puntos de impresion. *@
+        <span class="od-print-hint" style="font-size:12px;color:var(--muted-foreground);">
+            Para imprimir esta orden usa el bot&oacute;n <b>&#128424; Imprimir</b> de la historia (arriba).
+        </span>
     </div>
 </div>
 

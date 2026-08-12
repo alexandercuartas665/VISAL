@@ -15,8 +15,14 @@ public class FormWebhookEvent : BaseEntity
     /// <summary>SHA-256 (hex) del payload normalizado (tenant + campos mapeados).</summary>
     public string DedupHash { get; set; } = null!;
 
-    /// <summary>Tarjeta (Lead) creada por esta recepcion. Null si no llego a crearse.</summary>
+    /// <summary>
+    /// Tarjeta del embudo (Lead) creada por esta recepcion. Historico: hoy el webhook crea tarjetas
+    /// en el modulo de Tableros (ver <see cref="TaskCardId"/>). Se conserva para dedup de filas viejas.
+    /// </summary>
     public Guid? LeadId { get; set; }
+
+    /// <summary>Tarjeta del modulo Tableros (TaskCard) creada por esta recepcion. Null si no llego a crearse.</summary>
+    public Guid? TaskCardId { get; set; }
 
     public DateTimeOffset ReceivedAt { get; set; }
 }

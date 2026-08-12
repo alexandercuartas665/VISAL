@@ -26,45 +26,46 @@ public interface IFormWebhookService
 
     /// <summary>
     /// Procesa una recepcion del webhook publico de formularios: resuelve el tenant por el token de
-    /// la URL, deduplica, asegura la etapa "PQRS" y crea la tarjeta. Acepta el cuerpo como
-    /// application/x-www-form-urlencoded (Elementor) o application/json.
+    /// la URL, deduplica, resuelve el tablero destino segun el tipo (PQR / CONTACTOS) y crea una
+    /// tarjeta en su primera columna. Acepta el cuerpo como application/x-www-form-urlencoded
+    /// (Elementor) o application/json.
     /// </summary>
     Task<FormWebhookResult> ProcessAsync(string token, string? contentType, string rawBody, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// Intake publico de formularios web (WordPress -> tarjeta en el embudo). Cada tenant tiene un token
+/// Intake publico de formularios web (WordPress -> tarjeta en Tableros). Cada tenant tiene un token
 /// opaco (hash para buscar, cifrado para mostrar en Mi cuenta) que viaja EN LA URL del webhook. La
-/// tarjeta se enruta a la etapa "PQRS" del tenant (se crea idempotente en la primera recepcion). El
-/// webhook es la frontera de confianza: opera sin contexto de sesion y con datos por tenant explicito.
-/// Ver ADR docs/decisiones/0009.
+/// tarjeta se enruta por el campo "tipo" al tablero del modulo Tableros: "pqrs" -> tablero PQR,
+/// "contacto" -> tablero CONTACTOS (nombres sobreescribibles por tenant). Cae en la primera columna
+/// del tablero (menor SortOrder). El webhook es la frontera de confianza: opera sin contexto de sesion
+/// y con datos por tenant explicito. Ver ADR docs/decisiones/0009.
 /// </summary>
 public sealed class FormWebhookService : IFormWebhookService
 {
-    // Etapa destino de todas las tarjetas de formularios web (Contactanos y PQRS).
-    public const string PqrsStageName = "PQRS";
+    // Tableros destino (modulo Tableros Kanban), enrutados por el campo "tipo" del formulario.
+    public const string PqrBoardName = "PQR";
+    public const string ContactosBoardName = "CONTACTOS";
+
+    // Override opcional por tenant (Configuracion de Empresa). Si no estan, se usan los nombres default.
+    public const string KeyTableroPqrs = "formularios.tablero_pqrs";
+    public const string KeyTableroContacto = "formularios.tablero_contacto";
 
     // Ventana de dedup: un reenvio del mismo payload dentro de este lapso no crea tarjeta doble.
     private static readonly TimeSpan DedupWindow = TimeSpan.FromMinutes(10);
 
-    // Prefijo de campos reservados que NO se aceptan como FieldKey (van en campos nativos del Lead).
-    // Aqui solo mapeamos claves conocidas, asi que ninguna reservada puede colarse desde el payload.
-
     private readonly IApplicationDbContext _db;
-    private readonly ITenantApiService _api;
     private readonly ISecretProtector _secretProtector;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditWriter _audit;
 
     public FormWebhookService(
         IApplicationDbContext db,
-        ITenantApiService api,
         ISecretProtector secretProtector,
         TimeProvider timeProvider,
         IAuditWriter audit)
     {
         _db = db;
-        _api = api;
         _secretProtector = secretProtector;
         _timeProvider = timeProvider;
         _audit = audit;
@@ -122,7 +123,7 @@ public sealed class FormWebhookService : IFormWebhookService
         try { raw = ParsePayload(contentType, rawBody); }
         catch { return new FormWebhookResult(400, false, Error: "Cuerpo no valido: se espera x-www-form-urlencoded o JSON."); }
 
-        // 3) Mapear a campos nativos + configurables.
+        // 3) Mapear a los campos que nos interesan.
         var nombre = Cap(Get(raw, "nombre"), 200);
         if (string.IsNullOrWhiteSpace(nombre))
         {
@@ -147,121 +148,169 @@ public sealed class FormWebhookService : IFormWebhookService
         {
             cfg.LastUsedAt = now;
             await _db.SaveChangesAsync(cancellationToken);
-            return new FormWebhookResult(200, true, prior.LeadId, Duplicate: true);
+            return new FormWebhookResult(200, true, prior.TaskCardId ?? prior.LeadId, Duplicate: true);
         }
 
-        // 5) Resolver la etapa destino segun el tipo (configurable en Configuracion de Empresa).
-        //    Si no esta configurada, cae a "PQRS" (comportamiento por defecto).
-        var stageName = await ResolverEtapaAsync(cfg.TenantId, tipo, cancellationToken);
+        // 5) Resolver el tablero destino segun el tipo (PQR / CONTACTOS; override por config del tenant).
+        var boardName = await ResolverTableroAsync(cfg.TenantId, tipo, cancellationToken);
 
-        // 6) Asegurar la etapa + sus campos (idempotente, por entorno).
-        await EnsureStageAndFieldsAsync(cfg.TenantId, stageName, cancellationToken);
+        // 6) Asegurar el tablero + sus columnas (idempotente). Devuelve la primera columna (destino).
+        var (boardId, columnId) = await EnsureBoardAndColumnsAsync(cfg.TenantId, boardName, cancellationToken);
 
-        // 7) Crear la tarjeta enrutada a esa etapa.
-        var fields = new Dictionary<string, JsonElement>();
-        Put(fields, "email", email);
-        Put(fields, "asunto", asunto);
-        Put(fields, "mensaje", mensaje);
-        Put(fields, "tipo", tipo);
-        Put(fields, "pagina_origen", pagina);
+        // 7) Crear la tarjeta en la primera columna del tablero.
+        var cardId = await CrearTarjetaAsync(cfg.TenantId, boardId, columnId, nombre!, telefono, email, asunto, mensaje, tipo, pagina, cancellationToken);
 
-        var req = new ApiCreateLeadRequest(nombre, telefono, null, null, null, fields, stageName);
-        var result = await _api.CreateLeadAsync(cfg.TenantId, req, cancellationToken);
-        if (!result.Ok || result.LeadId is null)
-        {
-            return new FormWebhookResult(400, false, Error: result.Error ?? "No se pudo crear la tarjeta.");
-        }
-
-        // 8) Registrar el evento (dedup) + actividad con origen web:{tipo}.
+        // 8) Registrar el evento (dedup).
         _db.FormWebhookEvents.Add(new FormWebhookEvent
         {
             TenantId = cfg.TenantId,
             DedupHash = dedupHash,
-            LeadId = result.LeadId,
+            TaskCardId = cardId,
             ReceivedAt = now
-        });
-        _db.LeadActivities.Add(new LeadActivity
-        {
-            TenantId = cfg.TenantId,
-            LeadId = result.LeadId.Value,
-            ActivityType = $"web:{tipo}",
-            Description = $"Formulario web ({tipo}) recibido desde el sitio."
         });
         cfg.LastUsedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
 
-        return new FormWebhookResult(201, true, result.LeadId);
+        return new FormWebhookResult(201, true, cardId);
     }
 
     /// <summary>
-    /// Etapa destino segun el tipo de formulario. Lee la config del tenant (Configuracion de Empresa);
-    /// si no esta configurada, cae a "PQRS". Contexto-less: por eso lee por TenantId con IgnoreQueryFilters.
+    /// Nombre del tablero destino segun el tipo de formulario. Default: "PQR" para pqrs, "CONTACTOS"
+    /// para contacto. Sobreescribible por tenant (Configuracion de Empresa). Contexto-less: por eso lee
+    /// por TenantId con IgnoreQueryFilters.
     /// </summary>
-    private async Task<string> ResolverEtapaAsync(Guid tenantId, string tipo, CancellationToken cancellationToken)
+    private async Task<string> ResolverTableroAsync(Guid tenantId, string tipo, CancellationToken cancellationToken)
     {
-        var key = string.Equals(tipo, "contacto", StringComparison.OrdinalIgnoreCase)
-            ? ConfiguracionClinicaService.KeyEtapaFormContacto
-            : ConfiguracionClinicaService.KeyEtapaFormPqrs;
+        var esContacto = string.Equals(tipo, "contacto", StringComparison.OrdinalIgnoreCase);
+        var key = esContacto ? KeyTableroContacto : KeyTableroPqrs;
+        var def = esContacto ? ContactosBoardName : PqrBoardName;
         var cfg = await _db.TenantConfigurations.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.ConfigKey == key, cancellationToken);
         var v = cfg?.ConfigValue?.Trim();
-        return string.IsNullOrWhiteSpace(v) ? PqrsStageName : v!;
+        return string.IsNullOrWhiteSpace(v) ? def : v!;
     }
 
     /// <summary>
-    /// Crea (si no existe) la etapa indicada del tenant y sus campos configurables. Idempotente: solo
-    /// agrega lo que falte. Se ejecuta en la recepcion, sin depender de GUIDs por entorno.
+    /// Resuelve el tablero por nombre (case-insensitive) dentro del tenant. Si no existe, lo crea con
+    /// sus 4 columnas por defecto (Por hacer / En progreso / En revision / Completado) para no perder la
+    /// recepcion. Retorna (boardId, primeraColumnaId). Contexto-less: usa IgnoreQueryFilters.
     /// </summary>
-    private async Task EnsureStageAndFieldsAsync(Guid tenantId, string stageName, CancellationToken cancellationToken)
+    private async Task<(Guid BoardId, Guid ColumnId)> EnsureBoardAndColumnsAsync(Guid tenantId, string boardName, CancellationToken cancellationToken)
     {
-        var target = stageName.Trim().ToLowerInvariant();
-        var stage = await _db.PipelineStages.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Name.ToLower() == target, cancellationToken);
-        if (stage is null)
-        {
-            // SortOrder alto: no se vuelve la etapa "por defecto" (la primera) del embudo.
-            var maxOrder = await _db.PipelineStages.IgnoreQueryFilters()
-                .Where(s => s.TenantId == tenantId)
-                .Select(s => (int?)s.SortOrder)
-                .MaxAsync(cancellationToken) ?? 0;
-            stage = new PipelineStage { TenantId = tenantId, Name = stageName.Trim(), SortOrder = maxOrder + 1 };
-            _db.PipelineStages.Add(stage);
-            await _db.SaveChangesAsync(cancellationToken); // necesitamos stage.Id para los campos
-        }
+        var target = boardName.Trim().ToLowerInvariant();
+        var board = await _db.TaskBoards.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(b => b.TenantId == tenantId && !b.IsArchived && b.Name.ToLower() == target, cancellationToken);
 
-        var existingKeys = await _db.PipelineFieldDefinitions.IgnoreQueryFilters()
-            .Where(f => f.TenantId == tenantId)
-            .Select(f => f.FieldKey)
-            .ToListAsync(cancellationToken);
-        var existing = new HashSet<string>(existingKeys, StringComparer.OrdinalIgnoreCase);
-
-        var defs = new (string Key, string Label, PipelineFieldType Type, int Column, int SortOrder, string Description)[]
+        if (board is null)
         {
-            ("email",         "Correo",           PipelineFieldType.Text,     1, 1, "Correo del contacto (formulario web)."),
-            ("asunto",        "Asunto",           PipelineFieldType.Text,     2, 2, "Asunto del mensaje (formulario web)."),
-            ("mensaje",       "Mensaje",          PipelineFieldType.TextArea, 2, 3, "Mensaje / PQRS del ciudadano."),
-            ("tipo",          "Tipo",             PipelineFieldType.Text,     1, 4, "Origen del formulario: pqrs o contacto."),
-            ("pagina_origen", "Pagina de origen", PipelineFieldType.Text,     2, 5, "URL de la pagina que envio el formulario."),
-        };
+            // Dueno del tablero auto-creado: reutiliza el de un tablero existente del tenant; si no hay,
+            // el primer usuario activo del tenant. Asi el tablero queda visible para alguien.
+            var ownerId = await _db.TaskBoards.IgnoreQueryFilters()
+                    .Where(b => b.TenantId == tenantId)
+                    .OrderBy(b => b.CreatedAt)
+                    .Select(b => (Guid?)b.OwnerPlatformUserId)
+                    .FirstOrDefaultAsync(cancellationToken)
+                ?? await _db.TenantUsers.IgnoreQueryFilters()
+                    .Where(u => u.TenantId == tenantId && u.Status == PlatformUserStatus.Active)
+                    .OrderBy(u => u.CreatedAt)
+                    .Select(u => (Guid?)u.PlatformUserId)
+                    .FirstOrDefaultAsync(cancellationToken)
+                ?? Guid.Empty;
 
-        var added = false;
-        foreach (var d in defs)
-        {
-            if (existing.Contains(d.Key)) { continue; }
-            _db.PipelineFieldDefinitions.Add(new PipelineFieldDefinition
+            var maxOrder = await _db.TaskBoards.IgnoreQueryFilters()
+                .Where(b => b.TenantId == tenantId)
+                .Select(b => (int?)b.SortOrder)
+                .MaxAsync(cancellationToken) ?? -1;
+
+            board = new TaskBoard
             {
                 TenantId = tenantId,
-                StageId = stage.Id,
-                FieldKey = d.Key,
-                Label = d.Label,
-                FieldType = d.Type,
-                Column = d.Column,
-                SortOrder = d.SortOrder,
-                Description = d.Description
-            });
-            added = true;
+                Name = boardName.Trim(),
+                SortOrder = maxOrder + 1,
+                OwnerPlatformUserId = ownerId,
+                CreatedBy = ownerId,
+            };
+            _db.TaskBoards.Add(board);
+
+            var cols = new (string Name, int Order, bool Done)[]
+            {
+                ("Por hacer", 0, false),
+                ("En progreso", 1, false),
+                ("En revision", 2, false),
+                ("Completado", 3, true),
+            };
+            foreach (var c in cols)
+            {
+                _db.TaskBoardColumns.Add(new TaskBoardColumn
+                {
+                    TenantId = tenantId,
+                    BoardId = board.Id,
+                    Name = c.Name,
+                    SortOrder = c.Order,
+                    IsDone = c.Done,
+                    CreatedBy = ownerId,
+                });
+            }
+            await _db.SaveChangesAsync(cancellationToken);
         }
-        if (added) { await _db.SaveChangesAsync(cancellationToken); }
+
+        // Primera columna del tablero (menor SortOrder). Fallback defensivo: si no tuviera columnas,
+        // crea "Por hacer" para no perder la tarjeta.
+        var firstColumnId = await _db.TaskBoardColumns.IgnoreQueryFilters()
+            .Where(c => c.BoardId == board.Id)
+            .OrderBy(c => c.SortOrder)
+            .Select(c => (Guid?)c.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (firstColumnId is null)
+        {
+            var col = new TaskBoardColumn { TenantId = tenantId, BoardId = board.Id, Name = "Por hacer", SortOrder = 0 };
+            _db.TaskBoardColumns.Add(col);
+            await _db.SaveChangesAsync(cancellationToken);
+            firstColumnId = col.Id;
+        }
+
+        return (board.Id, firstColumnId.Value);
+    }
+
+    /// <summary>
+    /// Crea la tarjeta del formulario web en la columna indicada. Titulo = nombre del contacto;
+    /// descripcion = resumen legible con los datos recibidos. Se agrega al final de la columna.
+    /// </summary>
+    private async Task<Guid> CrearTarjetaAsync(
+        Guid tenantId, Guid boardId, Guid columnId,
+        string nombre, string? telefono, string? email, string? asunto, string? mensaje, string tipo, string? pagina,
+        CancellationToken cancellationToken)
+    {
+        var nextOrder = (await _db.TaskCards.IgnoreQueryFilters()
+            .Where(c => c.ColumnId == columnId)
+            .Select(c => (int?)c.SortOrder)
+            .MaxAsync(cancellationToken) ?? -1) + 1;
+
+        var card = new TaskCard
+        {
+            TenantId = tenantId,
+            BoardId = boardId,
+            ColumnId = columnId,
+            Title = nombre,
+            Description = ConstruirDescripcion(email, telefono, asunto, mensaje, tipo, pagina),
+            SortOrder = nextOrder,
+        };
+        _db.TaskCards.Add(card);
+        return card.Id;
+    }
+
+    // Descripcion legible (markdown simple) de la tarjeta con los datos del formulario web.
+    private static string ConstruirDescripcion(string? email, string? telefono, string? asunto, string? mensaje, string tipo, string? pagina)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Recibido desde el formulario web (").Append(tipo).Append(").\n\n");
+        if (!string.IsNullOrWhiteSpace(asunto)) { sb.Append("**Asunto:** ").Append(asunto).Append('\n'); }
+        if (!string.IsNullOrWhiteSpace(mensaje)) { sb.Append("**Mensaje:** ").Append(mensaje).Append('\n'); }
+        if (!string.IsNullOrWhiteSpace(email)) { sb.Append("**Correo:** ").Append(email).Append('\n'); }
+        if (!string.IsNullOrWhiteSpace(telefono)) { sb.Append("**Telefono:** ").Append(telefono).Append('\n'); }
+        if (!string.IsNullOrWhiteSpace(pagina)) { sb.Append("**Pagina:** ").Append(pagina).Append('\n'); }
+        return sb.ToString().TrimEnd();
     }
 
     // ---- Parsing -----------------------------------------------------------
@@ -487,15 +536,7 @@ public sealed class FormWebhookService : IFormWebhookService
     private static string? Cap(string? value, int max)
         => value is null ? null : (value.Length <= max ? value : value[..max]);
 
-    private static void Put(Dictionary<string, JsonElement> fields, string key, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            fields[key] = JsonSerializer.SerializeToElement(value);
-        }
-    }
-
-    // Normaliza el tipo de formulario. Vacio -> "pqrs" (default seguro). Se acota para el ActivityType.
+    // Normaliza el tipo de formulario. Vacio -> "pqrs" (default seguro). Se acota para el ruteo.
     private static string NormalizeTipo(string? raw)
     {
         var t = (raw ?? string.Empty).Trim().ToLowerInvariant();

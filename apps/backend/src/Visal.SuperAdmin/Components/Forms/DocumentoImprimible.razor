@@ -53,22 +53,27 @@
                     <div class="pack-hdr-tag">@hd.Tagline</div>
                 </div>
             </div>
-            @* Bloque HC N° / Apertura. Se ve siempre en pantalla como referencia
-               rapida; si aparece o no en el PDF lo decide el flag por-formato
-               ImprimirCodigoFecha (default true = imprime). d-print-none es
-               utility de Bootstrap 5 (display:none @media print). *@
-            <div class="pack-hdr-nohist @(hd.ImprimirCodigoFecha ? "" : "d-print-none")">
-                @if (!string.IsNullOrWhiteSpace(OrdenNum))
-                {
-                    @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b>
+            @* Bloque HC N° / Apertura. El flag por-formato ImprimirCodigoFecha
+               decide si el bloque se muestra. WYSIWYG: si esta apagado no se
+               renderiza ni en pantalla ni en el PDF (antes se ocultaba solo en
+               el PDF via d-print-none, lo que confundia porque en pantalla se
+               seguia viendo). Util para notas donde el usuario escribe la fecha
+               dentro del cuerpo del formato. *@
+            @if (hd.ImprimirCodigoFecha)
+            {
+                <div class="pack-hdr-nohist">
+                    @if (!string.IsNullOrWhiteSpace(OrdenNum))
+                    {
+                        @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b>
 
-                    <br />
-                }
-                @if (!string.IsNullOrWhiteSpace(FechaLinea))
-                {
-                    @FechaLinea<br />
-                }
-            </div>
+                        <br />
+                    }
+                    @if (!string.IsNullOrWhiteSpace(FechaLinea))
+                    {
+                        @FechaLinea<br />
+                    }
+                </div>
+            }
         </div>
         <div class="pack-hdr-title">@tituloFinal</div>
         <div class="pack-hdr-meta">

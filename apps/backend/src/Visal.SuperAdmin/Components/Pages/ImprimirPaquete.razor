@@ -901,13 +901,18 @@ else
                         <div class="pack-hdr-tag">@hd.Tagline</div>
                     </div>
                 </div>
-                @* Ver DocumentoImprimible.razor — HC N° / Apertura. El flag
-                   por-formato ImprimirCodigoFecha decide si sale en el PDF. *@
-                <div class="pack-hdr-nohist @(hd.ImprimirCodigoFecha ? "" : "d-print-none")">
-                    @tipoCorto N°: <b>@ordenNum</b><br />
-                    @fechaLinea<br />
-                    HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
-                </div>
+                @* Ver DocumentoImprimible.razor — HC N° / Apertura. WYSIWYG:
+                   el flag por-formato ImprimirCodigoFecha decide si el bloque
+                   se renderiza (pantalla + PDF). Apagado = no aparece en ningun
+                   lado (antes se ocultaba solo en el PDF via d-print-none). *@
+                @if (hd.ImprimirCodigoFecha)
+                {
+                    <div class="pack-hdr-nohist">
+                        @tipoCorto N°: <b>@ordenNum</b><br />
+                        @fechaLinea<br />
+                        HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
+                    </div>
+                }
             </div>
             <div class="pack-hdr-title">@tituloFinal</div>
             <div class="pack-hdr-meta">

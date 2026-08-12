@@ -265,6 +265,14 @@ public sealed class FormWebhookService : IFormWebhookService
     }
 
     // ---- Parsing -----------------------------------------------------------
+    //
+    // Formato OFICIAL soportado: Elementor Pro "Webhook" con "Advanced Data" = ON, que envia los
+    // campos ANIDADOS como fields[<id>][value] (mas [id][type][title][raw_value][required]) y los
+    // metadatos como meta[<clave>][value]. Leemos SIEMPRE fields[<id>][value].
+    //
+    // Tolerancia: si llega Advanced Data OFF (claves planas por id/etiqueta, p.ej. form_fields[nombre]
+    // o "nombre") o un JSON, no revienta: esas claves caen al bucket "plano". El formato anidado gana
+    // sobre el plano cuando ambos vienen.
 
     private static Dictionary<string, string> ParsePayload(string? contentType, string body)
     {
@@ -275,64 +283,200 @@ public sealed class FormWebhookService : IFormWebhookService
 
     private static Dictionary<string, string> ParseFormUrlEncoded(string body)
     {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Descomponemos SIN colapsar la clave, para distinguir el formato anidado (fields[<id>][value])
+        // del plano (form_fields[<id>] o "nombre").
+        var nested = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);    // fields[<id>][value]
+        var nestedRaw = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // fields[<id>][raw_value]
+        var flat = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);      // plano / form_fields[<id>]
+        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);      // meta[<clave>][value]
+
         foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var eq = pair.IndexOf('=');
             var rawKey = eq >= 0 ? pair[..eq] : pair;
             var rawVal = eq >= 0 ? pair[(eq + 1)..] : string.Empty;
-            var key = NormalizeKey(WebUtility.UrlDecode(rawKey) ?? string.Empty);
+            var key = (WebUtility.UrlDecode(rawKey) ?? string.Empty).Trim();
             if (key.Length == 0) { continue; }
-            dict[key] = WebUtility.UrlDecode(rawVal) ?? string.Empty; // ultima gana
+            var val = WebUtility.UrlDecode(rawVal) ?? string.Empty;
+
+            var (baseName, parts) = SplitKey(key);
+            AbsorbPair(baseName, parts, val, nested, nestedRaw, flat, meta);
         }
-        return dict;
+
+        return MergeParsed(nested, nestedRaw, flat, meta);
+    }
+
+    // Parte "fields[nombre][value]" en base="fields" y partes=["nombre","value"]. Soporta corchetes
+    // literales (como los manda Elementor). Una clave sin corchetes ("nombre") -> base="nombre", partes=[].
+    private static (string Base, List<string> Parts) SplitKey(string key)
+    {
+        var parts = new List<string>();
+        var open = key.IndexOf('[');
+        if (open < 0) { return (key, parts); }
+        var baseName = key[..open];
+        var i = open;
+        while (i < key.Length && key[i] == '[')
+        {
+            var close = key.IndexOf(']', i + 1);
+            if (close < 0) { break; }
+            parts.Add(key.Substring(i + 1, close - i - 1));
+            i = close + 1;
+        }
+        return (baseName, parts);
+    }
+
+    private static void AbsorbPair(
+        string baseName, List<string> parts, string val,
+        Dictionary<string, string> nested, Dictionary<string, string> nestedRaw,
+        Dictionary<string, string> flat, Dictionary<string, string> meta)
+    {
+        var b = baseName.Trim().ToLowerInvariant();
+
+        // Metadatos del form en si (form[id], form[name]): no son campos.
+        if (b == "form") { return; }
+
+        // Formato oficial anidado: fields[<id>][value] / fields[<id>][raw_value].
+        if (b == "fields" && parts.Count == 2)
+        {
+            var id = parts[0].Trim().ToLowerInvariant();
+            if (id.Length == 0) { return; }
+            var sub = parts[1].Trim().ToLowerInvariant();
+            if (sub == "value") { nested[id] = val; }
+            else if (sub == "raw_value") { nestedRaw[id] = val; }
+            // [id][type][title][required] se ignoran a proposito.
+            return;
+        }
+
+        // Metadatos de Elementor: meta[<clave>][value] (nos interesa page_url).
+        if (b == "meta" && parts.Count == 2 && string.Equals(parts[1].Trim(), "value", StringComparison.OrdinalIgnoreCase))
+        {
+            var k = parts[0].Trim().ToLowerInvariant();
+            if (k.Length > 0) { meta[k] = val; }
+            return;
+        }
+
+        // Plano tolerante: form_fields[<id>] o fields[<id>] (un solo nivel) -> id.
+        if ((b == "form_fields" || b == "fields") && parts.Count == 1)
+        {
+            var id = parts[0].Trim().ToLowerInvariant();
+            if (id.Length > 0) { flat[id] = val; }
+            return;
+        }
+
+        // Clave plana sin corchetes: "nombre", "email", ...
+        if (parts.Count == 0 && b.Length > 0)
+        {
+            flat[b] = val;
+        }
+        // Cualquier otra forma con corchetes desconocidos se ignora (no rompe).
     }
 
     private static Dictionary<string, string> ParseJson(string body)
     {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nested = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nestedRaw = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var flat = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         using var doc = JsonDocument.Parse(body);
         if (doc.RootElement.ValueKind == JsonValueKind.Object)
         {
-            FlattenJson(doc.RootElement, dict);
+            CollectJson(doc.RootElement, nested, nestedRaw, flat, meta);
         }
-        return dict;
+        return MergeParsed(nested, nestedRaw, flat, meta);
     }
 
-    // Aplana un objeto JSON un nivel: soporta payload plano y anidado (p.ej. { "form_fields": {..} }).
-    private static void FlattenJson(JsonElement obj, Dictionary<string, string> dict)
+    // Recorre el JSON soportando tanto el plano ({ "nombre": "..." }) como el anidado de Elementor
+    // ({ "fields": { "nombre": { "value": "..." } }, "meta": { "page_url": { "value": "..." } } }).
+    private static void CollectJson(
+        JsonElement obj,
+        Dictionary<string, string> nested, Dictionary<string, string> nestedRaw,
+        Dictionary<string, string> flat, Dictionary<string, string> meta)
     {
         foreach (var prop in obj.EnumerateObject())
         {
-            switch (prop.Value.ValueKind)
+            var name = prop.Name.Trim().ToLowerInvariant();
+            if (name == "form") { continue; }
+
+            if (name == "fields" && prop.Value.ValueKind == JsonValueKind.Object)
             {
-                case JsonValueKind.Object:
-                    FlattenJson(prop.Value, dict);
-                    break;
-                case JsonValueKind.String:
-                    dict[NormalizeKey(prop.Name)] = prop.Value.GetString() ?? string.Empty;
-                    break;
-                case JsonValueKind.Number:
-                case JsonValueKind.True:
-                case JsonValueKind.False:
-                    dict[NormalizeKey(prop.Name)] = prop.Value.ToString();
-                    break;
-                // arrays / null se ignoran
+                foreach (var f in prop.Value.EnumerateObject())
+                {
+                    var id = f.Name.Trim().ToLowerInvariant();
+                    if (id.Length == 0) { continue; }
+                    if (f.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        if (TryScalarProp(f.Value, "value", out var v)) { nested[id] = v; }
+                        if (TryScalarProp(f.Value, "raw_value", out var rv)) { nestedRaw[id] = rv; }
+                    }
+                    else if (TryScalar(f.Value, out var sv)) { flat[id] = sv; }
+                }
+                continue;
+            }
+
+            if (name == "meta" && prop.Value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var m in prop.Value.EnumerateObject())
+                {
+                    var k = m.Name.Trim().ToLowerInvariant();
+                    if (k.Length == 0) { continue; }
+                    if (m.Value.ValueKind == JsonValueKind.Object && TryScalarProp(m.Value, "value", out var mv)) { meta[k] = mv; }
+                    else if (TryScalar(m.Value, out var msv)) { meta[k] = msv; }
+                }
+                continue;
+            }
+
+            if (prop.Value.ValueKind == JsonValueKind.Object)
+            {
+                CollectJson(prop.Value, nested, nestedRaw, flat, meta); // objetos anidados desconocidos: aplanar
+            }
+            else if (TryScalar(prop.Value, out var s))
+            {
+                flat[name] = s;
             }
         }
     }
 
-    // Normaliza claves tipo "form_fields[nombre]" o "fields[email]" a "nombre" / "email".
-    private static string NormalizeKey(string key)
+    private static bool TryScalar(JsonElement e, out string val)
     {
-        key = key.Trim();
-        var open = key.LastIndexOf('[');
-        var close = key.LastIndexOf(']');
-        if (open >= 0 && close > open)
+        switch (e.ValueKind)
         {
-            key = key.Substring(open + 1, close - open - 1);
+            case JsonValueKind.String: val = e.GetString() ?? string.Empty; return true;
+            case JsonValueKind.Number:
+            case JsonValueKind.True:
+            case JsonValueKind.False: val = e.ToString(); return true;
+            default: val = string.Empty; return false;
         }
-        return key.Trim().ToLowerInvariant();
+    }
+
+    private static bool TryScalarProp(JsonElement obj, string prop, out string val)
+    {
+        if (obj.TryGetProperty(prop, out var e) && TryScalar(e, out val)) { return true; }
+        val = string.Empty;
+        return false;
+    }
+
+    // Combina los buckets en un diccionario final. El formato anidado (Advanced Data ON) gana sobre
+    // el plano; raw_value solo cubre huecos de value; meta[page_url] alimenta "pagina".
+    private static Dictionary<string, string> MergeParsed(
+        Dictionary<string, string> nested, Dictionary<string, string> nestedRaw,
+        Dictionary<string, string> flat, Dictionary<string, string> meta)
+    {
+        var dict = new Dictionary<string, string>(flat, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kv in nested) { dict[kv.Key] = kv.Value; }
+        foreach (var kv in nestedRaw)
+        {
+            if (!dict.TryGetValue(kv.Key, out var v) || string.IsNullOrWhiteSpace(v)) { dict[kv.Key] = kv.Value; }
+        }
+
+        if (meta.TryGetValue("page_url", out var pageUrl) && !string.IsNullOrWhiteSpace(pageUrl)
+            && (!dict.TryGetValue("pagina", out var pg) || string.IsNullOrWhiteSpace(pg)))
+        {
+            dict["pagina"] = pageUrl;
+        }
+
+        return dict;
     }
 
     // ---- Helpers -----------------------------------------------------------

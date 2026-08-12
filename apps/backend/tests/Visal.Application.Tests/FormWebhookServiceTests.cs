@@ -233,4 +233,95 @@ public sealed class FormWebhookServiceTests
         var leadP = await ctx.Leads.IgnoreQueryFilters().Include(l => l.Stage).FirstAsync(l => l.Id == p.CardId);
         Assert.Equal(FormWebhookService.PqrsStageName, leadP.Stage!.Name);
     }
+
+    // ---- Elementor Pro "Advanced Data" = ON (formato oficial real) ----------
+    // Los campos vienen anidados: fields[<id>][value] (+ [id][type][title][raw_value][required]) y los
+    // metadatos como meta[<clave>][value]. Corchetes literales, application/x-www-form-urlencoded.
+
+    private static string OnField(string id, string type, string title, string value)
+        => $"fields[{id}][id]={id}"
+         + $"&fields[{id}][type]={type}"
+         + $"&fields[{id}][title]={Uri.EscapeDataString(title)}"
+         + $"&fields[{id}][value]={Uri.EscapeDataString(value)}"
+         + $"&fields[{id}][raw_value]={Uri.EscapeDataString(value)}"
+         + $"&fields[{id}][required]=false";
+
+    private static string AdvancedDataOnBody(string nombre, string email, string asunto, string mensaje, string tipo, string? pageUrl)
+    {
+        var parts = new List<string>
+        {
+            "form[id]=7ae7988",
+            "form[name]=New+Form",
+            OnField("nombre", "text", "", nombre),
+            OnField("email", "email", "", email),
+            OnField("asunto", "select", "Que deseas agendar", asunto),
+            OnField("mensaje", "textarea", "", mensaje),
+            OnField("tipo", "hidden", "", tipo),
+        };
+        if (pageUrl is not null)
+        {
+            parts.Add($"meta[page_url][title]=Page+URL&meta[page_url][value]={Uri.EscapeDataString(pageUrl)}");
+        }
+        return string.Join("&", parts);
+    }
+
+    [Fact]
+    public async Task Process_ElementorAdvancedDataOn_CreatesCard_MapsAllFields()
+    {
+        var (svc, ctx, _) = Build(nameof(Process_ElementorAdvancedDataOn_CreatesCard_MapsAllFields));
+        var token = await NewTokenAsync(svc);
+        var body = AdvancedDataOnBody("Juan Perez", "juan@correo.com", "Medicina general", "Texto del mensaje",
+            "pqrs", "https://www.ipsvisalrt.com/contactanos/");
+
+        var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", body);
+
+        Assert.Equal(201, res.StatusCode);
+        var lead = await ctx.Leads.IgnoreQueryFilters().Include(l => l.Stage).FirstAsync(l => l.Id == res.CardId);
+        Assert.Equal("Juan Perez", lead.ContactName);                        // fields[nombre][value]
+        Assert.Equal(FormWebhookService.PqrsStageName, lead.Stage!.Name);    // tipo=pqrs
+        Assert.Contains("juan@correo.com", lead.FieldValuesJson);            // fields[email][value]
+        Assert.Contains("Medicina general", lead.FieldValuesJson);           // fields[asunto][value] (texto de la opcion)
+        Assert.Contains("Texto del mensaje", lead.FieldValuesJson);          // fields[mensaje][value]
+        Assert.Contains("ipsvisalrt.com/contactanos", lead.FieldValuesJson); // meta[page_url] -> pagina_origen
+        Assert.Contains(await ctx.LeadActivities.IgnoreQueryFilters().Where(a => a.LeadId == lead.Id).ToListAsync(),
+            a => a.ActivityType == "web:pqrs");
+    }
+
+    [Fact]
+    public async Task Process_ElementorAdvancedDataOn_TipoRoutesCard()
+    {
+        var (svc, ctx, _) = Build(nameof(Process_ElementorAdvancedDataOn_TipoRoutesCard));
+        // contacto -> etapa "Contacto"; pqrs -> "PQRS" (sin config).
+        ctx.TenantConfigurations.Add(new TenantConfiguration
+        {
+            TenantId = Tenant,
+            ConfigKey = ConfiguracionClinicaService.KeyEtapaFormContacto,
+            ConfigValue = "Contacto"
+        });
+        await ctx.SaveChangesAsync();
+        var token = await NewTokenAsync(svc);
+
+        var contacto = AdvancedDataOnBody("Ana", "a@x.com", "General", "Hola", "contacto", null);
+        var c = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", contacto);
+        var leadC = await ctx.Leads.IgnoreQueryFilters().Include(l => l.Stage).FirstAsync(l => l.Id == c.CardId);
+        Assert.Equal("Contacto", leadC.Stage!.Name);
+        Assert.Contains(await ctx.LeadActivities.IgnoreQueryFilters().Where(a => a.LeadId == leadC.Id).ToListAsync(),
+            a => a.ActivityType == "web:contacto");
+
+        var pqrs = AdvancedDataOnBody("Beto", "b@x.com", "General", "Queja", "pqrs", null);
+        var p = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", pqrs);
+        var leadP = await ctx.Leads.IgnoreQueryFilters().Include(l => l.Stage).FirstAsync(l => l.Id == p.CardId);
+        Assert.Equal(FormWebhookService.PqrsStageName, leadP.Stage!.Name);
+    }
+
+    [Fact]
+    public async Task Process_ElementorAdvancedDataOn_MissingNombre_Returns400()
+    {
+        var (svc, _, _) = Build(nameof(Process_ElementorAdvancedDataOn_MissingNombre_Returns400));
+        var token = await NewTokenAsync(svc);
+        // fields[nombre][value] vacio -> obligatorio faltante.
+        var body = AdvancedDataOnBody("", "x@y.com", "General", "hola", "pqrs", null);
+        var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", body);
+        Assert.Equal(400, res.StatusCode);
+    }
 }

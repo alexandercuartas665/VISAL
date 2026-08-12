@@ -10,6 +10,13 @@ public class Sucursal : TenantEntity
     public string? Direccion { get; set; }
     public string? Ciudad { get; set; }
     public string? Telefono { get; set; }
+
+    /// <summary>
+    /// Correo de contacto de la sede. Lo alimenta el snapshot Relacion de Facturas
+    /// (columna "Correo electronico") junto con Direccion y Telefono de la sede.
+    /// </summary>
+    public string? Email { get; set; }
+
     public bool Activo { get; set; } = true;
 
     /// <summary>

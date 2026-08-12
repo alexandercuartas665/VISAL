@@ -20,7 +20,7 @@ public sealed class SucursalService : ISucursalService
         var q = _db.Sucursales.AsNoTracking();
         if (soloActivas) { q = q.Where(s => s.Activo); }
         return await q.OrderBy(s => s.Nombre)
-            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio, s.CodigoHabilitacion, s.ExigirHcRevisadaParaFacturar)).ToListAsync(ct);
+            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio, s.CodigoHabilitacion, s.ExigirHcRevisadaParaFacturar, s.Email)).ToListAsync(ct);
     }
 
     public async Task<SucursalDto?> SaveAsync(SaveSucursalRequest req, Guid actor, CancellationToken ct = default)

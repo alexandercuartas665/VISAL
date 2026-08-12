@@ -102,7 +102,9 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Grupo Servicios"]                         = "Aseguradoras → Contratos → Servicios → columna GRUPO SERV. FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
         ["Servicios"]                               = "Aseguradoras → Contratos → Servicios → columna SERVICIO FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
         ["Nacionalidad"]                            = "sale del modulo de admision Datos del paciente",
-        ["Correo electrónico"]                      = "Correo del paciente registrado en /admision (Paciente.Email)",
+        ["Dirección"]                               = "Direccion de la sede que atendio (Configuracion de Empresa -> sede -> Direccion)",
+        ["Telefono"]                                = "Telefono de la sede que atendio (Configuracion de Empresa -> sede -> Telefono)",
+        ["Correo electrónico"]                      = "Correo de la sede que atendio (Configuracion de Empresa -> sede -> Correo)",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -169,9 +171,9 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 37
             ["Departamento"] = h.DepartamentoNombre,                           // 38
             ["Municipio"] = h.MunicipioNombre,                                 // 39
-            ["Dirección"] = h.Paciente.Direccion,                              // 40
-            ["Telefono"] = h.Paciente.Telefono,                                // 41
-            ["Correo electrónico"] = h.Paciente.Email,                         // 42 — correo del paciente (Paciente.Email)
+            ["Dirección"] = h.Sucursal?.Direccion,                             // 40 — direccion de la sede que atendio (Sucursal.Direccion)
+            ["Telefono"] = h.Sucursal?.Telefono,                               // 41 — telefono de la sede que atendio (Sucursal.Telefono)
+            ["Correo electrónico"] = h.Sucursal?.Email,                        // 42 — correo de la sede que atendio (Sucursal.Email)
         };
     }
 

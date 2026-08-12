@@ -96,7 +96,8 @@ public sealed class SnapshotColumnaConfigService(
                     Descripcion = string.IsNullOrWhiteSpace(item.Descripcion) ? null : item.Descripcion.Trim(),
                     RutaOrigen = string.IsNullOrWhiteSpace(item.RutaOrigen) ? null : item.RutaOrigen.Trim(),
                     FormatoTipo = item.FormatoTipo,
-                    FormatoPatron = string.IsNullOrWhiteSpace(item.FormatoPatron) ? null : item.FormatoPatron.Trim()
+                    FormatoPatron = string.IsNullOrWhiteSpace(item.FormatoPatron) ? null : item.FormatoPatron.Trim(),
+                    EnError = item.EnError
                 });
             }
         }

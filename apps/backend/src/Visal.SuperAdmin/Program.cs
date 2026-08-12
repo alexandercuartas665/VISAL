@@ -705,7 +705,12 @@ app.MapPost("/webhooks/formularios/{token}", async (
     var result = await svc.ProcessAsync(token, request.ContentType, bodyText, ct);
     return result.StatusCode switch
     {
-        201 => Results.Json(new { ok = true, cardId = result.CardId }, statusCode: 201),
+        // Elementor Pro 3.0.6 valida estrictamente HTTP == 200: con cualquier otro
+        // 2xx (incluido 201) muestra "Webhook Error" al usuario aunque la tarjeta se
+        // haya creado. Por eso la creacion exitosa (el servicio devuelve 201) se
+        // responde como 200. Body sin cambios. El duplicado ya era 200; los errores
+        // (400 sin nombre, 401 token invalido, 429 rate limit) se mantienen.
+        201 => Results.Json(new { ok = true, cardId = result.CardId }, statusCode: 200),
         200 => Results.Json(new { ok = true, cardId = result.CardId, duplicate = true }, statusCode: 200),
         401 => Results.Json(new { error = result.Error }, statusCode: 401),
         429 => Results.StatusCode(429),

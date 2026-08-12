@@ -1,4 +1,6 @@
+using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +8,7 @@ using Visal.Application.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Visal.Application.Tenancy;
 
@@ -54,21 +57,39 @@ public sealed class FormWebhookService : IFormWebhookService
     // Ventana de dedup: un reenvio del mismo payload dentro de este lapso no crea tarjeta doble.
     private static readonly TimeSpan DedupWindow = TimeSpan.FromMinutes(10);
 
+    // Adjuntos: limites de la descarga desde WordPress. El campo de archivo de Elementor NO manda el
+    // binario; manda la(s) URL(s) del archivo ya subido, que descargamos por HTTP y re-hospedamos.
+    private const long MaxAdjuntoBytes = 10L * 1024 * 1024; // 10 MB por archivo
+    private const int MaxAdjuntos = 10;                     // tope de archivos por recepcion
+    private static readonly HashSet<string> ExtensionesPermitidas = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pdf", "jpg", "jpeg", "png", "doc", "docx", "xls", "xlsx",
+    };
+
     private readonly IApplicationDbContext _db;
     private readonly ISecretProtector _secretProtector;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditWriter _audit;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IUploadStorage _uploads;
+    private readonly ILogger<FormWebhookService> _logger;
 
     public FormWebhookService(
         IApplicationDbContext db,
         ISecretProtector secretProtector,
         TimeProvider timeProvider,
-        IAuditWriter audit)
+        IAuditWriter audit,
+        IHttpClientFactory httpClientFactory,
+        IUploadStorage uploads,
+        ILogger<FormWebhookService> logger)
     {
         _db = db;
         _secretProtector = secretProtector;
         _timeProvider = timeProvider;
         _audit = audit;
+        _httpClientFactory = httpClientFactory;
+        _uploads = uploads;
+        _logger = logger;
     }
 
     public async Task<FormWebhookConfigDto?> GetAsync(Guid tenantId, CancellationToken cancellationToken = default)
@@ -123,6 +144,20 @@ public sealed class FormWebhookService : IFormWebhookService
         try { raw = ParsePayload(contentType, rawBody); }
         catch { return new FormWebhookResult(400, false, Error: "Cuerpo no valido: se espera x-www-form-urlencoded o JSON."); }
 
+        // 2b) Adjuntos: Elementor manda la(s) URL(s) del archivo YA subido a WordPress en el campo
+        // "archivo" (fields[archivo][value]; varias separadas por coma). El binario NO viaja en el
+        // POST: lo descargamos aparte mas abajo. Campo OPCIONAL: si viene vacio, flujo normal.
+        var archivoUrls = ExtraerUrlsArchivo(Get(raw, "archivo"));
+        if (archivoUrls.Count > 0)
+        {
+            // Diagnostico temporal (Info): confirma la llave exacta y el formato de la URL que manda
+            // Elementor Pro 3.0.6. Se puede quitar una vez validado en produccion. El token va en la
+            // URL (no en el body), asi que no se filtra aqui.
+            _logger.LogInformation(
+                "FormWebhook: recepcion CON archivo ({Count} url[s]). Body crudo: {Body}",
+                archivoUrls.Count, Cap(rawBody, 4000));
+        }
+
         // 3) Mapear a los campos que nos interesan.
         var nombre = Cap(Get(raw, "nombre"), 200);
         if (string.IsNullOrWhiteSpace(nombre))
@@ -170,6 +205,15 @@ public sealed class FormWebhookService : IFormWebhookService
         });
         cfg.LastUsedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+
+        // 9) Adjuntos: descargar cada URL desde WordPress, validar y registrarlos en la tarjeta recien
+        // creada. Si la descarga de un archivo falla, se loguea y se sigue: la tarjeta ya existe y la
+        // respuesta al webhook no cambia (sigue siendo 200).
+        if (archivoUrls.Count > 0)
+        {
+            try { await ProcesarAdjuntosAsync(cfg.TenantId, cardId, archivoUrls, cancellationToken); }
+            catch (Exception ex) { _logger.LogError(ex, "FormWebhook: fallo general procesando adjuntos de la tarjeta {CardId}", cardId); }
+        }
 
         return new FormWebhookResult(201, true, cardId);
     }
@@ -312,6 +356,189 @@ public sealed class FormWebhookService : IFormWebhookService
         if (!string.IsNullOrWhiteSpace(pagina)) { sb.Append("**Pagina:** ").Append(pagina).Append('\n'); }
         return sb.ToString().TrimEnd();
     }
+
+    // ---- Adjuntos ----------------------------------------------------------
+    //
+    // El campo de archivo de Elementor NO manda el binario: manda la(s) URL(s) del archivo ya subido
+    // a WordPress (https://www.ipsvisalrt.com/wp-content/uploads/...). Por cada URL descargamos el
+    // binario, validamos (extension + tamano + host publico), lo re-hospedamos donde VISAL guarda los
+    // adjuntos y registramos un TaskCardAttachment en la tarjeta. Nada de esto rompe el flujo: la
+    // tarjeta ya quedo creada y cualquier fallo se loguea.
+
+    /// <summary>Parte el valor del campo "archivo" en URLs individuales (coma-separadas). Acota a
+    /// MaxAdjuntos. No valida el esquema aqui (eso lo hace EsUrlDescargableAsync).</summary>
+    private static List<string> ExtraerUrlsArchivo(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return new List<string>(); }
+        return raw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(u => u.Length > 0)
+            .Take(MaxAdjuntos)
+            .ToList();
+    }
+
+    private async Task ProcesarAdjuntosAsync(Guid tenantId, Guid cardId, List<string> urls, CancellationToken ct)
+    {
+        var client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
+        // Algunos WordPress con plugins de seguridad rechazan descargas sin User-Agent (403).
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("VisalFormWebhook/1.0");
+
+        var guardados = 0;
+        foreach (var url in urls)
+        {
+            try
+            {
+                var fileName = NombreArchivoDesdeUrl(url);
+                var ext = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+                if (!ExtensionesPermitidas.Contains(ext))
+                {
+                    _logger.LogWarning("FormWebhook: extension '{Ext}' no permitida. Se omite el adjunto.", ext);
+                    continue;
+                }
+
+                // SSRF-guard: solo http/https a un host que NO resuelva a IP privada/loopback.
+                if (!await EsUrlDescargableAsync(url, ct))
+                {
+                    _logger.LogWarning("FormWebhook: URL de adjunto rechazada (esquema/host no permitido). Se omite.");
+                    continue;
+                }
+
+                using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("FormWebhook: descarga de adjunto fallo HTTP {Code}. Se omite.", (int)resp.StatusCode);
+                    continue;
+                }
+
+                // Rechazo temprano por Content-Length si el servidor lo declara.
+                if (resp.Content.Headers.ContentLength is long declarado && declarado > MaxAdjuntoBytes)
+                {
+                    _logger.LogWarning("FormWebhook: adjunto excede el maximo ({Max} bytes, declara {Len}). Se omite.", MaxAdjuntoBytes, declarado);
+                    continue;
+                }
+
+                var bytes = await LeerAcotadoAsync(resp, MaxAdjuntoBytes, ct);
+                if (bytes is null)
+                {
+                    _logger.LogWarning("FormWebhook: adjunto excede el maximo ({Max} bytes). Se omite.", MaxAdjuntoBytes);
+                    continue;
+                }
+                if (bytes.Length == 0) { continue; }
+
+                var contentType = resp.Content.Headers.ContentType?.MediaType;
+                if (string.IsNullOrWhiteSpace(contentType)) { contentType = MimePorExtension(ext); }
+
+                // Re-hospedar el binario donde VISAL guarda adjuntos de tablero.
+                var storedName = $"card-{Guid.NewGuid():N}.{ext}";
+                var storedUrl = await _uploads.GuardarAsync("tableros", storedName, bytes, ct);
+
+                _db.TaskCardAttachments.Add(new TaskCardAttachment
+                {
+                    TenantId = tenantId,
+                    TaskCardId = cardId,
+                    FileName = fileName,
+                    Url = storedUrl,
+                    MimeType = contentType,
+                    SizeBytes = bytes.LongLength,
+                    UploadedBy = null,
+                    UploadedByName = "Formulario web",
+                });
+                guardados++;
+            }
+            catch (Exception ex)
+            {
+                // No rompe el flujo: la tarjeta ya existe. Solo se loguea (sin volcar la URL, que puede
+                // llevar tokens en la query de WordPress).
+                _logger.LogError(ex, "FormWebhook: error descargando/guardando un adjunto de la tarjeta {CardId}.", cardId);
+            }
+        }
+
+        if (guardados > 0) { await _db.SaveChangesAsync(ct); }
+    }
+
+    /// <summary>Nombre de archivo desde el ultimo segmento de la URL (sin query ni fragment), decodificado.</summary>
+    private static string NombreArchivoDesdeUrl(string url)
+    {
+        var s = url.Trim();
+        var cut = s.IndexOfAny(new[] { '?', '#' });
+        if (cut >= 0) { s = s[..cut]; }
+        s = s.TrimEnd('/');
+        var slash = s.LastIndexOf('/');
+        var name = slash >= 0 ? s[(slash + 1)..] : s;
+        name = WebUtility.UrlDecode(name) ?? name;
+        name = Path.GetFileName(name);
+        if (string.IsNullOrWhiteSpace(name)) { name = "archivo.bin"; }
+        return Cap(name, 200)!;
+    }
+
+    /// <summary>Lee el cuerpo de la respuesta acotado a maxBytes. Devuelve null si lo excede (para no
+    /// materializar en memoria un archivo mas grande que el limite).</summary>
+    private static async Task<byte[]?> LeerAcotadoAsync(HttpResponseMessage resp, long maxBytes, CancellationToken ct)
+    {
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var ms = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+        {
+            ms.Write(buffer, 0, read);
+            if (ms.Length > maxBytes) { return null; }
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>true si la URL es http/https y su host NO resuelve a una IP privada/loopback/link-local
+    /// (defensa basica anti-SSRF: el webhook esta tras token, pero el valor del campo es controlable).</summary>
+    private static async Task<bool> EsUrlDescargableAsync(string url, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) { return false; }
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) { return false; }
+        try
+        {
+            var addrs = await Dns.GetHostAddressesAsync(uri.DnsSafeHost, ct);
+            if (addrs.Length == 0) { return false; }
+            foreach (var ip in addrs)
+            {
+                if (EsIpPrivada(ip)) { return false; }
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static bool EsIpPrivada(IPAddress ip)
+    {
+        if (IPAddress.IsLoopback(ip)) { return true; }
+        var b = ip.GetAddressBytes();
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && b.Length == 4)
+        {
+            if (b[0] == 0 || b[0] == 10 || b[0] == 127) { return true; }
+            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) { return true; }
+            if (b[0] == 192 && b[1] == 168) { return true; }
+            if (b[0] == 169 && b[1] == 254) { return true; } // link-local / metadata cloud
+            return false;
+        }
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal) { return true; }
+            if (ip.IsIPv4MappedToIPv6) { return EsIpPrivada(ip.MapToIPv4()); }
+            if (b.Length == 16 && (b[0] & 0xFE) == 0xFC) { return true; } // ULA fc00::/7
+        }
+        return false;
+    }
+
+    private static string MimePorExtension(string ext) => ext switch
+    {
+        "pdf" => "application/pdf",
+        "jpg" or "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        _ => "application/octet-stream",
+    };
 
     // ---- Parsing -----------------------------------------------------------
     //

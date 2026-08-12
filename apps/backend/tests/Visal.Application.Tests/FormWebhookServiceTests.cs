@@ -1,4 +1,8 @@
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Visal.Application.Common;
 using Visal.Application.Tenancy;
 using Visal.Domain.Entities;
@@ -46,6 +50,38 @@ public sealed class FormWebhookServiceTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    // Almacenamiento de adjuntos fake: registra lo guardado y devuelve una ruta servible predecible.
+    private sealed class FakeUploadStorage : IUploadStorage
+    {
+        public readonly List<(string Sub, string Name, byte[] Bytes)> Saved = new();
+        public Task<string> GuardarAsync(string subcarpeta, string nombre, byte[] contenido, CancellationToken cancellationToken = default)
+        {
+            Saved.Add((subcarpeta, nombre, contenido));
+            return Task.FromResult($"/uploads/{subcarpeta}/{nombre}");
+        }
+    }
+
+    // Handler HTTP fake: responde 200 con los mismos bytes/content-type para cualquier GET.
+    private sealed class StubHttpHandler : HttpMessageHandler
+    {
+        private readonly byte[] _bytes;
+        private readonly string _contentType;
+        public StubHttpHandler(byte[] bytes, string contentType) { _bytes = bytes; _contentType = contentType; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var content = new ByteArrayContent(_bytes);
+            content.Headers.ContentType = new MediaTypeHeaderValue(_contentType);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
+    }
+
+    private sealed class FakeHttpClientFactory : IHttpClientFactory
+    {
+        private readonly HttpMessageHandler _handler;
+        public FakeHttpClientFactory(HttpMessageHandler handler) { _handler = handler; }
+        public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
+    }
+
     private static VisalDbContext NewCtx(string dbName)
     {
         var opts = new DbContextOptionsBuilder<VisalDbContext>()
@@ -57,12 +93,18 @@ public sealed class FormWebhookServiceTests
 
     private static (FormWebhookService svc, VisalDbContext ctx, FakeTime time) Build(string dbName)
     {
+        var (svc, ctx, time, _) = BuildEx(dbName, null);
+        return (svc, ctx, time);
+    }
+
+    private static (FormWebhookService svc, VisalDbContext ctx, FakeTime time, FakeUploadStorage uploads) BuildEx(string dbName, HttpMessageHandler? handler)
+    {
         var ctx = NewCtx(dbName);
         var time = new FakeTime();
-        var secret = new FakeSecretProtector();
-        var audit = new FakeAudit();
-        var svc = new FormWebhookService(ctx, secret, time, audit);
-        return (svc, ctx, time);
+        var uploads = new FakeUploadStorage();
+        var factory = new FakeHttpClientFactory(handler ?? new StubHttpHandler(Array.Empty<byte>(), "application/octet-stream"));
+        var svc = new FormWebhookService(ctx, new FakeSecretProtector(), time, new FakeAudit(), factory, uploads, NullLogger<FormWebhookService>.Instance);
+        return (svc, ctx, time, uploads);
     }
 
     private static async Task<string> NewTokenAsync(FormWebhookService svc)
@@ -353,5 +395,90 @@ public sealed class FormWebhookServiceTests
         var body = AdvancedDataOnBody("", "x@y.com", "General", "hola", "pqrs", null);
         var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", body);
         Assert.Equal(400, res.StatusCode);
+    }
+
+    // ---- Adjuntos (campo "archivo": URL[s] en fields[archivo][value]) --------
+    // El host es una IP publica literal para que EsUrlDescargableAsync no dispare una consulta DNS
+    // real en el test (para literales, Dns.GetHostAddresses devuelve la IP sin red); el handler fake
+    // intercepta la GET y sirve los bytes.
+
+    [Fact]
+    public async Task Process_WithArchivo_DownloadsAndRegistersAttachment()
+    {
+        var pdf = new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37 }; // "%PDF-1.7"
+        var handler = new StubHttpHandler(pdf, "application/pdf");
+        var (svc, ctx, _, uploads) = BuildEx(nameof(Process_WithArchivo_DownloadsAndRegistersAttachment), handler);
+        await SeedBoardAsync(ctx, FormWebhookService.PqrBoardName);
+        var token = await NewTokenAsync(svc);
+
+        var url = "http://93.184.216.34/wp-content/uploads/2026/08/documento.pdf";
+        var body = "nombre=Juan&tipo=pqrs&fields%5Barchivo%5D%5Bvalue%5D=" + Uri.EscapeDataString(url);
+
+        var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", body);
+
+        Assert.Equal(201, res.StatusCode);
+        var att = await ctx.TaskCardAttachments.IgnoreQueryFilters().ToListAsync();
+        Assert.Single(att);
+        Assert.Equal(res.CardId, att[0].TaskCardId);
+        Assert.Equal("documento.pdf", att[0].FileName);       // ultimo segmento de la URL
+        Assert.Equal("application/pdf", att[0].MimeType);      // del header de respuesta
+        Assert.Equal(pdf.Length, att[0].SizeBytes);
+        Assert.StartsWith("/uploads/tableros/", att[0].Url);   // re-hospedado en VISAL
+        Assert.Single(uploads.Saved);                          // el binario se guardo una vez
+    }
+
+    [Fact]
+    public async Task Process_WithArchivo_SeparatedByComma_RegistersEach()
+    {
+        var bytes = new byte[] { 1, 2, 3, 4 };
+        var handler = new StubHttpHandler(bytes, "image/png");
+        var (svc, ctx, _, _) = BuildEx(nameof(Process_WithArchivo_SeparatedByComma_RegistersEach), handler);
+        await SeedBoardAsync(ctx, FormWebhookService.ContactosBoardName);
+        var token = await NewTokenAsync(svc);
+
+        var u1 = "http://93.184.216.34/wp-content/uploads/a.png";
+        var u2 = "http://93.184.216.34/wp-content/uploads/b.jpg";
+        var body = "nombre=Ana&tipo=contacto&fields%5Barchivo%5D%5Bvalue%5D=" + Uri.EscapeDataString($"{u1},{u2}");
+
+        var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", body);
+
+        Assert.Equal(201, res.StatusCode);
+        var att = await ctx.TaskCardAttachments.IgnoreQueryFilters().OrderBy(a => a.FileName).ToListAsync();
+        Assert.Equal(2, att.Count);
+        Assert.Equal("a.png", att[0].FileName);
+        Assert.Equal("b.jpg", att[1].FileName);
+    }
+
+    [Fact]
+    public async Task Process_WithArchivo_DisallowedExtension_IsSkipped_CardStillCreated()
+    {
+        var handler = new StubHttpHandler(new byte[] { 9, 9, 9 }, "application/octet-stream");
+        var (svc, ctx, _, uploads) = BuildEx(nameof(Process_WithArchivo_DisallowedExtension_IsSkipped_CardStillCreated), handler);
+        await SeedBoardAsync(ctx, FormWebhookService.PqrBoardName);
+        var token = await NewTokenAsync(svc);
+
+        var url = "http://93.184.216.34/wp-content/uploads/malicioso.exe";
+        var body = "nombre=Juan&tipo=pqrs&fields%5Barchivo%5D%5Bvalue%5D=" + Uri.EscapeDataString(url);
+
+        var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", body);
+
+        Assert.Equal(201, res.StatusCode);                         // la tarjeta se crea igual
+        Assert.NotNull(res.CardId);
+        Assert.Empty(await ctx.TaskCardAttachments.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(uploads.Saved);                               // no se descargo ni guardo nada
+    }
+
+    [Fact]
+    public async Task Process_WithoutArchivo_NoAttachments()
+    {
+        var (svc, ctx, _, uploads) = BuildEx(nameof(Process_WithoutArchivo_NoAttachments), null);
+        await SeedBoardAsync(ctx, FormWebhookService.PqrBoardName);
+        var token = await NewTokenAsync(svc);
+
+        var res = await svc.ProcessAsync(token, "application/x-www-form-urlencoded", "nombre=Juan&tipo=pqrs");
+
+        Assert.Equal(201, res.StatusCode);
+        Assert.Empty(await ctx.TaskCardAttachments.IgnoreQueryFilters().ToListAsync());
+        Assert.Empty(uploads.Saved);
     }
 }

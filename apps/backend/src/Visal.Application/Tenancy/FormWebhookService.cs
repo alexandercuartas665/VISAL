@@ -150,12 +150,10 @@ public sealed class FormWebhookService : IFormWebhookService
         var archivoUrls = ExtraerUrlsArchivo(Get(raw, "archivo"));
         if (archivoUrls.Count > 0)
         {
-            // Diagnostico temporal (Info): confirma la llave exacta y el formato de la URL que manda
-            // Elementor Pro 3.0.6. Se puede quitar una vez validado en produccion. El token va en la
-            // URL (no en el body), asi que no se filtra aqui.
-            _logger.LogInformation(
-                "FormWebhook: recepcion CON archivo ({Count} url[s]). Body crudo: {Body}",
-                archivoUrls.Count, Cap(rawBody, 4000));
+            // Senal operativa (Info) SIN PII: solo el conteo de archivos. El formato de Elementor
+            // (fields[archivo][value] = URL[s] coma-separadas) quedo confirmado en laboratorio, asi
+            // que ya no volcamos el body crudo (llevaba nombre/email/telefono/mensaje del remitente).
+            _logger.LogInformation("FormWebhook: recepcion con {Count} archivo(s) adjunto(s).", archivoUrls.Count);
         }
 
         // 3) Mapear a los campos que nos interesan.

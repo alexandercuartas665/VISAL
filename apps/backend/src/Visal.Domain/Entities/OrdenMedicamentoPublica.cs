@@ -19,6 +19,15 @@ public class OrdenMedicamentoPublica : TenantEntity
     public HistoriaClinica? HistoriaClinica { get; set; }
 
     /// <summary>
+    /// Tipo de orden que emitio esta fila: "MED" (medicamentos), "SRV" (servicios),
+    /// "REM" (remisiones), "INS" (insumos), "INC" (incapacidades), "CERT"
+    /// (certificaciones), "RXEXT"/"LABEXT"/"SRVEXT"/"INSEXT" (catalogo externo).
+    /// Permite varias emisiones vigentes (una por tipo) en la misma HC. Las filas
+    /// anteriores a esta columna quedan como "MED" (default de la migracion).
+    /// </summary>
+    public string TipoOrden { get; set; } = "MED";
+
+    /// <summary>
     /// Token corto legible (12 caracteres alfanumericos, base32 sin caracteres
     /// ambiguos 0/O/1/I/L). Globalmente unico (indice unico). Es lo que va dentro
     /// del QR y lo que el receptor puede tipear en la pagina publica.

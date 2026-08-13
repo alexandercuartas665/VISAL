@@ -150,7 +150,7 @@ public sealed class OrdenMedicamentoService(
     private async Task EnsureNoEmisionActivaAsync(Guid historiaId, CancellationToken ct)
     {
         var emitida = await db.OrdenesMedicamentosPublicas
-            .AnyAsync(o => o.HistoriaClinicaId == historiaId && o.RevocadaAt == null, ct);
+            .AnyAsync(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "MED" && o.RevocadaAt == null, ct);
         if (emitida)
         {
             throw new InvalidOperationException(

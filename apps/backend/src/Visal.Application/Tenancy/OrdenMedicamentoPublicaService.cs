@@ -44,8 +44,9 @@ public sealed class OrdenMedicamentoPublicaService(
 
         if (req.Items.Count == 0)
         {
-            throw new InvalidOperationException("La orden no tiene medicamentos para emitir.");
+            throw new InvalidOperationException("La orden no tiene items para emitir.");
         }
+        var tipoOrden = string.IsNullOrWhiteSpace(req.TipoOrden) ? "MED" : req.TipoOrden.Trim().ToUpperInvariant();
 
         var now = clock.GetUtcNow();
         var codigo = await GenerarCodigoUnicoAsync(ct);
@@ -67,6 +68,7 @@ public sealed class OrdenMedicamentoPublicaService(
         {
             TenantId = tid,
             HistoriaClinicaId = hc.Id,
+            TipoOrden = tipoOrden,
             CodigoVerificacion = codigo,
             EmitidoAt = now,
             EmitidoPor = actorUserId,
@@ -74,7 +76,7 @@ public sealed class OrdenMedicamentoPublicaService(
         };
         db.OrdenesMedicamentosPublicas.Add(orden);
 
-        audit.Write(actorUserId, "orden-medicamentos.emitir", nameof(OrdenMedicamentoPublica),
+        audit.Write(actorUserId, "orden-publica.emitir", nameof(OrdenMedicamentoPublica),
             orden.Id, previousValue: null,
             newValue: new { orden.CodigoVerificacion, orden.HistoriaClinicaId },
             tenantId: tid);
@@ -106,11 +108,16 @@ public sealed class OrdenMedicamentoPublicaService(
         return true;
     }
 
-    public async Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(
+    public Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(
         Guid historiaClinicaId, CancellationToken ct = default)
+        => ObtenerEmisionActivaAsync(historiaClinicaId, "MED", ct);
+
+    public async Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(
+        Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default)
     {
+        var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
         var orden = await db.OrdenesMedicamentosPublicas.AsNoTracking()
-            .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.RevocadaAt == null)
+            .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.TipoOrden == tipo && o.RevocadaAt == null)
             .OrderByDescending(o => o.EmitidoAt)
             .FirstOrDefaultAsync(ct);
         if (orden is null) { return null; }
@@ -120,10 +127,14 @@ public sealed class OrdenMedicamentoPublicaService(
         return new OrdenPublicaResumenDto(orden.Id, orden.CodigoVerificacion, orden.EmitidoAt, false, bagJson);
     }
 
-    public async Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, CancellationToken ct = default)
+    public Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, CancellationToken ct = default)
+        => TieneEmisionActivaAsync(historiaClinicaId, "MED", ct);
+
+    public async Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default)
     {
+        var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
         return await db.OrdenesMedicamentosPublicas
-            .AnyAsync(o => o.HistoriaClinicaId == historiaClinicaId && o.RevocadaAt == null, ct);
+            .AnyAsync(o => o.HistoriaClinicaId == historiaClinicaId && o.TipoOrden == tipo && o.RevocadaAt == null, ct);
     }
 
     public async Task<OrdenVerificacionPublicaDto?> VerificarPorCodigoAsync(
@@ -166,7 +177,9 @@ public sealed class OrdenMedicamentoPublicaService(
             p.Items ?? new List<OrdenItemPublicoDto>(),
             orden.RevocadaAt is not null,
             tenantData?.Name,
-            tenantData?.LogoUrl);
+            tenantData?.LogoUrl,
+            orden.TipoOrden,
+            IOrdenMedicamentoPublicaService.TituloPorTipo(orden.TipoOrden));
     }
 
     // ── Helpers ──

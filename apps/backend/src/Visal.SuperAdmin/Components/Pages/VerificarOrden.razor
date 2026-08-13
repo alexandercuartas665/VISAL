@@ -29,6 +29,7 @@
     .vo-bad { background: #fee2e2; color: #991b1b; }
     .vo-warn { background: #fef9c3; color: #854d0e; }
     .vo-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; letter-spacing: 2px; font-size: 18px; margin-top: 10px; }
+    .vo-tipo { font-weight: 700; color: #1565c0; font-size: 15px; margin-top: 4px; }
     .vo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 16px 0; }
     .vo-grid .k { font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: .04em; }
     .vo-grid .v { font-size: 14px; font-weight: 600; }
@@ -79,6 +80,7 @@
                     <span class="vo-badge vo-ok">&#10003; Orden verificada</span>
                 }
                 <div class="vo-code">@_dto.Codigo</div>
+                <div class="vo-tipo">@_dto.TituloOrden</div>
 
                 <div class="vo-grid">
                     <div><div class="k">Fecha de emision</div><div class="v">@_dto.FechaEmision.LocalDateTime.ToString("dd/MM/yyyy")</div></div>
@@ -87,15 +89,23 @@
                     <div><div class="k">Registro medico</div><div class="v">@(_dto.ProfesionalRegistro ?? "-")</div></div>
                 </div>
 
-                <div class="vo-h">Medicamentos prescritos</div>
+                @{ var esMed = string.Equals(_dto.TipoOrden, "MED", StringComparison.OrdinalIgnoreCase); }
+                <div class="vo-h">@(esMed ? "Medicamentos prescritos" : "Detalle de la orden")</div>
                 <table class="vo-items">
                     <thead>
-                        <tr><th style="width:26px">#</th><th>Medicamento</th><th>Posologia</th></tr>
+                        @if (esMed)
+                        {
+                            <tr><th style="width:26px">#</th><th>Medicamento</th><th>Posologia</th></tr>
+                        }
+                        else
+                        {
+                            <tr><th style="width:26px">#</th><th>Descripcion</th><th style="width:110px">Codigo</th><th style="width:70px">Cantidad</th></tr>
+                        }
                     </thead>
                     <tbody>
                         @if (_dto.Items.Count == 0)
                         {
-                            <tr><td colspan="3" style="text-align:center;color:#94a3b8;padding:12px;">Sin items.</td></tr>
+                            <tr><td colspan="@(esMed ? 3 : 4)" style="text-align:center;color:#94a3b8;padding:12px;">Sin items.</td></tr>
                         }
                         else
                         {
@@ -103,11 +113,23 @@
                             @foreach (var it in _dto.Items)
                             {
                                 n++;
-                                <tr>
-                                    <td>@n</td>
-                                    <td><b>@it.Nombre</b>@(string.IsNullOrWhiteSpace(it.Codigo) ? "" : $" ({it.Codigo})")</td>
-                                    <td>@(string.IsNullOrWhiteSpace(it.Posologia) ? "-" : it.Posologia)</td>
-                                </tr>
+                                if (esMed)
+                                {
+                                    <tr>
+                                        <td>@n</td>
+                                        <td><b>@it.Nombre</b>@(string.IsNullOrWhiteSpace(it.Codigo) ? "" : $" ({it.Codigo})")</td>
+                                        <td>@(string.IsNullOrWhiteSpace(it.Posologia) ? "-" : it.Posologia)</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td>@n</td>
+                                        <td><b>@it.Nombre</b></td>
+                                        <td>@(string.IsNullOrWhiteSpace(it.Codigo) ? "-" : it.Codigo)</td>
+                                        <td>@(string.IsNullOrWhiteSpace(it.Cantidad) ? "-" : it.Cantidad)</td>
+                                    </tr>
+                                }
                             }
                         }
                     </tbody>

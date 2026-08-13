@@ -193,6 +193,7 @@ else
                 @RenderHeader(BestHdr(HdrSrv, "Orden a Servicios"), "Orden a Servicios", "SRV",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRV",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "SRV"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -217,7 +218,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -228,6 +229,7 @@ else
                 @RenderHeader(BestHdr(HdrRem, "Ordenes de Remision"), "Ordenes de Remision", "REM",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-REM",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "REM"; }
                 <div class="pack-band">Detalle de las remisiones</div>
                 <table class="pack-table">
                     <thead>
@@ -252,7 +254,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -263,6 +265,7 @@ else
                 @RenderHeader(HdrTenant("Orden de Insumos"), "Orden de Insumos", "INS",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INS",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "INS"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -287,7 +290,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -334,6 +337,7 @@ else
                 @RenderHeader(HdrTenant("Orden RX Imagenologia"), "Orden RX Imagenologia", "RXEXT",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-RX",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "RXEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -358,7 +362,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -369,6 +373,7 @@ else
                 @RenderHeader(HdrTenant("Orden de Laboratorios"), "Orden de Laboratorios", "LABEXT",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-LAB",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "LABEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -393,7 +398,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -404,6 +409,7 @@ else
                 @RenderHeader(HdrTenant("Orden de Servicios Externos"), "Orden de Servicios Externos", "SRVEXT",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRVX",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "SRVEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -428,7 +434,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -439,6 +445,7 @@ else
                 @RenderHeader(HdrTenant("Orden de Insumos Externos"), "Orden de Insumos Externos", "INSEXT",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INSX",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "INSEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -463,7 +470,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -474,6 +481,7 @@ else
                 @RenderHeader(BestHdr(HdrInc, "Orden de Incapacidad"), "Orden de Incapacidad", "INC",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INC",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "INC"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
@@ -500,7 +508,7 @@ else
                         }
                     </tbody>
                 </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -511,6 +519,7 @@ else
                 @RenderHeader(BestHdr(HdrCert, "Certificacion Medica"), "Certificacion Medica", "CERT",
                     _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-CERT",
                     "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                @{ _pieTipo = "CERT"; }
                 <div class="pack-band">Detalle</div>
                 @foreach (var c in _cert)
                 {
@@ -519,7 +528,7 @@ else
                         @c.Contenido
                     </div>
                 }
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" />
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
             </div>
         }
 
@@ -646,6 +655,14 @@ else
     private string? _pieProfRegistro;
     private string _pieFecha = "";
     private string _pieUrl = "";
+    // Emisiones publicas (QR) por tipo de orden no-medicamento: tipo -> (codigo, PNG data URI).
+    // Se llenan al imprimir para estampar el QR de verificacion en el pie de cada orden.
+    private readonly Dictionary<string, (string Codigo, string QrImg)> _emisionesOrden = new(StringComparer.OrdinalIgnoreCase);
+    private string? PieCod(string tipo) => _emisionesOrden.TryGetValue(tipo, out var e) ? e.Codigo : null;
+    private string? PieQr(string tipo) => _emisionesOrden.TryGetValue(tipo, out var e) ? e.QrImg : null;
+    // Tipo de la orden que se esta renderizando; se fija antes de cada bloque de orden
+    // (render secuencial) para que su PieOrdenImprimible resuelva el QR correcto.
+    private string _pieTipo = "";
     private List<OrdenServicioItemDto> _srv = new();
     private List<IncapacidadItemDto> _inc = new();
     private List<CertificacionItemDto> _cert = new();
@@ -867,6 +884,8 @@ else
             || _incluirRxExt || _incluirLabExt || _incluirSrvExt || _incluirInsExt)
         {
             await CargarPieOrdenesAsync();
+            // Emite/reusa la verificacion publica por tipo y arma el QR del pie.
+            await PrepararQrOrdenesAsync();
         }
 
         _loading = false;
@@ -943,6 +962,95 @@ else
     {
         var n = DateTime.Now;
         return n.ToString("dd/MM/yyyy - h:mm") + " " + (n.Hour < 12 ? "a.m." : "p.m.");
+    }
+
+    // Estampa el QR de verificacion en las ordenes no-medicamento incluidas. Para cada
+    // tipo con items, reusa la emision publica activa (si ya existe) o la emite ahora
+    // cuando la impresion viene del boton general de la HC (emitir=1). Congela un
+    // snapshot con iniciales del paciente + profesional tratante + items, minteando el
+    // codigo del QR. Igual contrato que la orden de medicamentos, generalizado por tipo.
+    // Se llama DESPUES de CargarPieOrdenesAsync (usa _pieProfNombre / _pieProfRegistro).
+    private async Task PrepararQrOrdenesAsync()
+    {
+        if (_hc is null || _paciente is null) { return; }
+
+        var tipos = new List<(string Tipo, List<OrdenItemPublicoDto> Items)>();
+        if (_incluirSrv && _srv.Count > 0)
+        {
+            tipos.Add(("SRV", _srv.Select(s => new OrdenItemPublicoDto(
+                s.Descripcion ?? "", s.CodigoServicio, s.Cantidad, null, null, s.Observaciones)).ToList()));
+        }
+        if (_incluirRem && _rem.Count > 0)
+        {
+            tipos.Add(("REM", _rem.Select(r => new OrdenItemPublicoDto(
+                r.EspecialidadNombre ?? "", r.EspecialidadCodigo, r.Cantidad, null, null, r.Motivo)).ToList()));
+        }
+        if (_incluirIns && _insumos.Count > 0)
+        {
+            tipos.Add(("INS", _insumos.Select(i => new OrdenItemPublicoDto(
+                i.Descripcion ?? "", i.Codigo, i.Cantidad, null, null, i.Observaciones)).ToList()));
+        }
+        if (_incluirRxExt && _rxExt.Count > 0)
+        {
+            tipos.Add(("RXEXT", _rxExt.Select(r => new OrdenItemPublicoDto(
+                r.Descripcion ?? "", r.Codigo, r.Cantidad, null, null, r.Observaciones)).ToList()));
+        }
+        if (_incluirLabExt && _labExt.Count > 0)
+        {
+            tipos.Add(("LABEXT", _labExt.Select(l => new OrdenItemPublicoDto(
+                l.Descripcion ?? "", l.Codigo, l.Cantidad, null, null, l.Observaciones)).ToList()));
+        }
+        if (_incluirSrvExt && _srvExt.Count > 0)
+        {
+            tipos.Add(("SRVEXT", _srvExt.Select(s => new OrdenItemPublicoDto(
+                s.Descripcion ?? "", s.Codigo, s.Cantidad, null, null, s.Observaciones)).ToList()));
+        }
+        if (_incluirInsExt && _insExt.Count > 0)
+        {
+            tipos.Add(("INSEXT", _insExt.Select(x => new OrdenItemPublicoDto(
+                x.Descripcion ?? "", x.Codigo, x.Cantidad, null, null, x.Observaciones)).ToList()));
+        }
+        if (_incluirInc && _inc.Count > 0)
+        {
+            tipos.Add(("INC", _inc.Select(i => new OrdenItemPublicoDto(
+                i.Motivo ?? "", i.Tipo, i.Dias?.ToString(), null, i.Dias?.ToString(), null)).ToList()));
+        }
+        if (_incluirCert && _cert.Count > 0)
+        {
+            tipos.Add(("CERT", _cert.Select(c => new OrdenItemPublicoDto(
+                c.Titulo ?? "", null, null, null, null, null)).ToList()));
+        }
+
+        foreach (var (tipo, items) in tipos)
+        {
+            try
+            {
+                var em = await PubSvc.ObtenerEmisionActivaAsync(HcId, tipo);
+                if (em is null && _autoEmitir && items.Count > 0)
+                {
+                    await EmitirOrdenTipoAsync(tipo, items);
+                    em = await PubSvc.ObtenerEmisionActivaAsync(HcId, tipo);
+                }
+                if (em is not null)
+                {
+                    var qurl = $"{QrBaseUrl()}/verificar-orden/{Uri.EscapeDataString(em.Codigo)}";
+                    _emisionesOrden[tipo] = (em.Codigo, Qr.GenerarPngDataUri(qurl, 150));
+                }
+            }
+            catch { /* si un tipo falla, el resto del paquete se imprime igual (sin su QR) */ }
+        }
+    }
+
+    // Emite una orden publica de un tipo dado (SRV/REM/INS/...): congela iniciales del
+    // paciente + profesional tratante + items y mintea el codigo del QR. El BagJson va
+    // vacio porque estas ordenes no se renderizan schema-driven (usan tabla + pie).
+    private async Task EmitirOrdenTipoAsync(string tipo, List<OrdenItemPublicoDto> items)
+    {
+        if (_hc is null || _paciente is null || items.Count == 0) { return; }
+        var req = new EmitirOrdenRequest(
+            _hc.Id, "{}", DateTimeOffset.Now,
+            Iniciales(_paciente.NombreCompleto), _pieProfNombre, _pieProfRegistro, items, tipo);
+        await PubSvc.EmitirAsync(req, await ActorIdAsync());
     }
 
     // ---- helpers de render ----

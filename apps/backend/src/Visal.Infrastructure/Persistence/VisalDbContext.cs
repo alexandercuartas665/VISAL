@@ -1594,6 +1594,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.CodigoVerificacion).HasMaxLength(16).IsRequired();
             b.Property(x => x.RevocacionMotivo).HasMaxLength(1000);
+            // Tipo de orden emitida (MED/SRV/REM/...). Default "MED" para las filas previas.
+            b.Property(x => x.TipoOrden).HasMaxLength(16).IsRequired().HasDefaultValue("MED");
             // Snapshot inmutable de la orden emitida (bag del formulario ORD-MEDI).
             b.Property(x => x.SnapshotJson).HasColumnType("jsonb");
 
@@ -1604,8 +1606,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // El codigo es globalmente unico: la verificacion publica lo busca sin
             // tenant scope (IgnoreQueryFilters) y resuelve el tenant desde la fila.
             b.HasIndex(x => x.CodigoVerificacion).IsUnique();
-            // Listado interno "ordenes emitidas de esta HC" + deteccion de emision activa.
-            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
+            // Deteccion de emision activa por HC + tipo (una emision vigente por tipo).
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.TipoOrden });
         });
 
         modelBuilder.Entity<VerificacionOrdenLog>(b =>

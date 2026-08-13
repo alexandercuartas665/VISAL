@@ -4,9 +4,10 @@
     medico tratante + bloque "Recibido/Telefono/Direccion" + barra final con fecha de
     impresion y URL del sistema.
 
-    Es el espejo del pie de la formula medica (DocumentoImprimible con MostrarPieFormula)
-    SIN el QR: el QR/codigo de verificacion es exclusivo de la orden de medicamentos
-    emitida. La firma es la del medico tratante de la HC, no la de quien imprime.
+    Es el espejo del pie de la formula medica (DocumentoImprimible con MostrarPieFormula).
+    Si se le pasa QrImg + Codigo (la orden fue emitida con verificacion publica), pinta el
+    QR de verificacion; si no, solo firma + recibido + barra. La firma es la del medico
+    tratante de la HC, no la de quien imprime.
 *@
 
 @if (!string.IsNullOrWhiteSpace(Diagnostico))
@@ -24,11 +25,22 @@
         <div style="font-weight:700;">@ProfNombre</div>
         <div style="color:#333;">@(string.IsNullOrWhiteSpace(ProfRegistro) ? "" : $"R.M. {ProfRegistro} - ")Firmado Electronicamente.</div>
     </div>
-    <div style="flex:1 1 42%;font-size:11px;color:#555;">
+    <div style="flex:1 1 34%;font-size:11px;color:#555;">
         <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:9px;"><span>Recibido:</span><span style="flex:1;border-bottom:1px solid #999;">&nbsp;</span></div>
         <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:9px;"><span>Telefono:</span><span style="flex:1;border-bottom:1px solid #999;">&nbsp;</span></div>
         <div style="display:flex;gap:6px;align-items:flex-end;"><span>Direccion:</span><span style="flex:1;border-bottom:1px solid #999;">&nbsp;</span></div>
     </div>
+    @if (!string.IsNullOrWhiteSpace(QrImg))
+    {
+        <div style="flex:0 0 auto;text-align:center;font-size:9px;color:#555;">
+            <img src="@QrImg" alt="QR de verificacion" style="width:92px;height:92px;display:block;margin:0 auto 2px;" />
+            <div>Verifique esta orden</div>
+            @if (!string.IsNullOrWhiteSpace(Codigo))
+            {
+                <div style="font-family:monospace;font-weight:700;letter-spacing:1px;">@Codigo</div>
+            }
+        </div>
+    }
 </div>
 
 <div style="display:flex;justify-content:space-between;font-size:9px;color:#777;border-top:1px solid #ccc;margin-top:12px;padding-top:4px;">
@@ -43,6 +55,10 @@
     [Parameter] public string? ProfRegistro { get; set; }
     [Parameter] public string? FechaImpresion { get; set; }
     [Parameter] public string? ProgramaUrl { get; set; }
+    /// <summary>Data URI del PNG del QR de verificacion (opcional). Si viene vacio, no se pinta QR.</summary>
+    [Parameter] public string? QrImg { get; set; }
+    /// <summary>Codigo corto de verificacion a mostrar bajo el QR (opcional).</summary>
+    [Parameter] public string? Codigo { get; set; }
 
     private static bool EsImagen(string? v)
     {

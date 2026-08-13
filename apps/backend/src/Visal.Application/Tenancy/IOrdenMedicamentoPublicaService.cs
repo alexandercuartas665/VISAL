@@ -23,7 +23,9 @@ public sealed record EmitirOrdenRequest(
     string PacienteIniciales,
     string? ProfesionalNombre,
     string? ProfesionalRegistro,
-    IReadOnlyList<OrdenItemPublicoDto> Items);
+    IReadOnlyList<OrdenItemPublicoDto> Items,
+    // Tipo de orden emitida ("MED" por defecto para no romper la fórmula médica).
+    string TipoOrden = "MED");
 
 /// <summary>Resultado de emitir: el codigo minteado y el id de la fila.</summary>
 public sealed record EmitirOrdenResultDto(Guid Id, string Codigo, DateTimeOffset EmitidoAt);
@@ -53,7 +55,10 @@ public sealed record OrdenVerificacionPublicaDto(
     IReadOnlyList<OrdenItemPublicoDto> Items,
     bool Revocada,
     string? TenantNombre,
-    string? TenantLogoUrl);
+    string? TenantLogoUrl,
+    // Tipo ("MED","SRV",...) + titulo legible para el encabezado publico.
+    string TipoOrden = "MED",
+    string TituloOrden = "Orden de Medicamentos");
 
 /// <summary>
 /// Emision, revocacion y verificacion publica de ordenes de medicamentos con QR.
@@ -68,11 +73,32 @@ public interface IOrdenMedicamentoPublicaService
     /// <summary>Revoca una orden emitida (baja logica; el snapshot se conserva). Audita.</summary>
     Task<bool> RevocarAsync(Guid ordenPublicaId, Guid actorUserId, string? motivo, CancellationToken ct = default);
 
-    /// <summary>Emision vigente (no revocada) mas reciente de la HC, o null. Incluye el bag congelado.</summary>
+    /// <summary>Emision de MEDICAMENTOS vigente (no revocada) mas reciente de la HC, o null. Incluye el bag congelado.</summary>
     Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(Guid historiaClinicaId, CancellationToken ct = default);
 
-    /// <summary>True si la HC tiene una emision vigente (usado para bloquear edicion de items).</summary>
+    /// <summary>Emision vigente mas reciente de la HC PARA UN TIPO de orden (MED/SRV/REM/...), o null.</summary>
+    Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default);
+
+    /// <summary>True si la HC tiene una emision de MEDICAMENTOS vigente (usado para bloquear edicion de items).</summary>
     Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, CancellationToken ct = default);
+
+    /// <summary>True si la HC tiene una emision vigente para el tipo de orden dado.</summary>
+    Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default);
+
+    /// <summary>Titulo legible del documento por tipo de orden (para el encabezado publico y la impresion).</summary>
+    static string TituloPorTipo(string? tipoOrden) => (tipoOrden ?? "MED").ToUpperInvariant() switch
+    {
+        "SRV" => "Orden a Servicios",
+        "REM" => "Ordenes de Remision",
+        "INS" => "Orden de Insumos",
+        "INC" => "Orden de Incapacidad",
+        "CERT" => "Certificacion Medica",
+        "RXEXT" => "Orden RX Imagenologia",
+        "LABEXT" => "Orden de Laboratorios",
+        "SRVEXT" => "Orden de Servicios Externos",
+        "INSEXT" => "Orden de Insumos Externos",
+        _ => "Orden de Medicamentos",
+    };
 
     /// <summary>
     /// Verificacion PUBLICA por codigo (sin autenticacion, sin tenant scope). Registra

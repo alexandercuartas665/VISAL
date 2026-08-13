@@ -83,9 +83,9 @@
                 @if (sel.FiltraSede)
                 {
                     <div>
-                        <label>Sede</label>
+                        <label>Sede / Agencia</label>
                         <select @bind="_sedeId">
-                            <option value="">Todas las mias</option>
+                            <option value="">Todas las sedes</option>
                             @foreach (var s in _misSedes)
                             {
                                 <option value="@s.Id">@s.Nombre</option>
@@ -217,19 +217,17 @@
     protected override async Task OnInitializedAsync()
     {
         _reportes = (await ReportSvc.ListarMisReportesAsync()).ToList();
-        var userId = Tenant.UserId;
-        if (userId is Guid uid)
+        // Sedes/agencias para el filtro de reportes: TODAS las sucursales activas
+        // de la agencia (tenant), no solo las asignadas al usuario. Un reporte es
+        // una vista gerencial, asi que el filtro debe poder acotar a cualquier sede.
+        // Sucursal es tenant-scoped, el query filter aisla por agencia.
+        if (Tenant.TenantId is Guid)
         {
-            _misSedes = await (
-                from tus in ((DbContext)Db).Set<Visal.Domain.Entities.TenantUserSucursal>().AsNoTracking()
-                join tu in ((DbContext)Db).Set<Visal.Domain.Entities.TenantUser>().AsNoTracking()
-                    on tus.TenantUserId equals tu.Id
-                join suc in ((DbContext)Db).Set<Visal.Domain.Entities.Sucursal>().AsNoTracking()
-                    on tus.SucursalId equals suc.Id
-                where tu.PlatformUserId == uid
-                orderby suc.Nombre
-                select new SedeItem(suc.Id, suc.Nombre)
-            ).ToListAsync();
+            _misSedes = await ((DbContext)Db).Set<Visal.Domain.Entities.Sucursal>().AsNoTracking()
+                .Where(s => s.Activo)
+                .OrderBy(s => s.Nombre)
+                .Select(s => new SedeItem(s.Id, s.Nombre))
+                .ToListAsync();
         }
     }
 
@@ -299,23 +297,29 @@
     private async Task DescargarCsv()
     {
         if (_resultado is null || _reporte is null) { return; }
-        var sb = new StringBuilder();
-        sb.AppendLine(string.Join(",", _resultado.Columnas.Select(EscapeCsv)));
-        foreach (var row in _resultado.Filas)
+        try
         {
-            sb.AppendLine(string.Join(",", row.Select(x => EscapeCsv(FormatoCelda(x)))));
+            var sb = new StringBuilder();
+            sb.AppendLine(string.Join(",", _resultado.Columnas.Select(EscapeCsv)));
+            foreach (var row in _resultado.Filas)
+            {
+                sb.AppendLine(string.Join(",", row.Select(x => EscapeCsv(FormatoCelda(x)))));
+            }
+            var bytes = Encoding.UTF8.GetPreamble()
+                .Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+            await Descargar($"reporte-{NombreArchivo()}-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+                            "text/csv", bytes);
         }
-        var bytes = Encoding.UTF8.GetPreamble()
-            .Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
-        await Descargar($"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
-                        "text/csv", bytes);
+        catch (Exception ex) { _error = "No se pudo generar el CSV: " + ex.Message; }
     }
 
     private async Task DescargarExcel()
     {
         if (_resultado is null || _reporte is null) { return; }
+        try
+        {
         using var wb = new XLWorkbook();
-        var ws = wb.Worksheets.Add(Sanitize(_reporte.Nombre).PadRight(1).Substring(0, Math.Min(31, Math.Max(1, _reporte.Nombre.Length))));
+        var ws = wb.Worksheets.Add(NombreHojaExcel());
         for (var c = 0; c < _resultado.Columnas.Count; c++)
         {
             ws.Cell(1, c + 1).Value = _resultado.Columnas[c];
@@ -346,37 +350,54 @@
         ws.Columns().AdjustToContents();
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
-        await Descargar($"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+        await Descargar($"reporte-{NombreArchivo()}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ms.ToArray());
+        }
+        catch (Exception ex) { _error = "No se pudo generar el Excel: " + ex.Message; }
     }
 
     private async Task DescargarJson()
     {
         if (_resultado is null || _reporte is null) { return; }
-        var rows = _resultado.Filas.Select(row =>
+        try
         {
-            var obj = new Dictionary<string, object?>();
-            for (var c = 0; c < _resultado.Columnas.Count; c++)
+            var rows = _resultado.Filas.Select(row =>
             {
-                obj[_resultado.Columnas[c]] = c < row.Count ? row[c] : null;
-            }
-            return obj;
-        }).ToList();
-        var opts = new JsonSerializerOptions { WriteIndented = true };
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(rows, opts));
-        await Descargar($"reporte-{Sanitize(_reporte.Nombre)}-{DateTime.Now:yyyyMMdd-HHmmss}.json",
-                        "application/json", bytes);
+                var obj = new Dictionary<string, object?>();
+                for (var c = 0; c < _resultado.Columnas.Count; c++)
+                {
+                    obj[_resultado.Columnas[c]] = c < row.Count ? row[c] : null;
+                }
+                return obj;
+            }).ToList();
+            var opts = new JsonSerializerOptions { WriteIndented = true };
+            var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(rows, opts));
+            await Descargar($"reporte-{NombreArchivo()}-{DateTime.Now:yyyyMMdd-HHmmss}.json",
+                            "application/json", bytes);
+        }
+        catch (Exception ex) { _error = "No se pudo generar el JSON: " + ex.Message; }
     }
 
+    // Descarga por Blob (createObjectURL): robusta para archivos grandes, a
+    // diferencia de un data: URI que tiene tope de tamano en varios navegadores.
+    // El base64 se decodifica a bytes en el cliente y se arma un Blob descargable.
     private async Task Descargar(string fileName, string mime, byte[] bytes)
     {
         var base64 = Convert.ToBase64String(bytes);
         await JS.InvokeVoidAsync("eval", $@"
             (function(){{
-                var a = document.createElement('a');
-                a.href = 'data:{mime};base64,{base64}';
-                a.download = '{fileName}';
-                document.body.appendChild(a); a.click(); a.remove();
+                try {{
+                    var bin = atob('{base64}');
+                    var len = bin.length;
+                    var arr = new Uint8Array(len);
+                    for (var i = 0; i < len; i++) {{ arr[i] = bin.charCodeAt(i); }}
+                    var blob = new Blob([arr], {{ type: '{mime}' }});
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url; a.download = '{fileName}';
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(function(){{ URL.revokeObjectURL(url); }}, 1500);
+                }} catch (e) {{ console.error('descarga reporte', e); }}
             }})();");
     }
 
@@ -387,6 +408,21 @@
             return "\"" + s.Replace("\"", "\"\"") + "\"";
         }
         return s;
+    }
+
+    // Nombre de archivo seguro (solo alfanumerico/-/_). Nunca vacio.
+    private string NombreArchivo()
+    {
+        var s = Sanitize(_reporte?.Nombre ?? "");
+        return string.IsNullOrWhiteSpace(s) ? "reporte" : s;
+    }
+
+    // Nombre de hoja Excel valido: max 31 chars, no vacio, sin caracteres
+    // prohibidos por ClosedXML (Sanitize ya deja solo alfanumerico/-/_).
+    private string NombreHojaExcel()
+    {
+        var s = NombreArchivo();
+        return s.Length > 31 ? s.Substring(0, 31) : s;
     }
 
     private static string Sanitize(string s) =>

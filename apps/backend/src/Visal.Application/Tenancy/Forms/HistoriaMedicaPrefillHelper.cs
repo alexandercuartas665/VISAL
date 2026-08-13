@@ -504,11 +504,18 @@ public static class HistoriaMedicaPrefillHelper
             ["codigo"] = m.CodigoMedicamento,
             ["codigomedicamento"] = m.CodigoMedicamento,
             ["registrosanitario"] = m.CodigoMedicamento,
-            // Cantidad por toma (texto literal del doctor).
-            ["cantidad"] = m.Cantidad,
-            // Cantidad total despachable = c * f * d cuando se puede calcular,
-            // si no, cae al texto literal de cantidad por toma.
+            // En una formula/orden, la columna "Cantidad" es la cantidad TOTAL a
+            // despachar (c * 24/frecuencia * dias) — lo que autoriza el despacho en
+            // farmacia. La cantidad por toma vive en la posologia; por eso la clave
+            // generica "cantidad" resuelve al total (con fallback al texto literal
+            // cuando no se puede calcular, ej. cremas sin frecuencia).
+            ["cantidad"] = total ?? m.Cantidad,
             ["cantidadtotal"] = total ?? m.Cantidad,
+            ["cantidaddespacho"] = total ?? m.Cantidad,
+            // Cantidad por toma explicita, para el formato que la quiera por separado.
+            ["cantidadtoma"] = m.Cantidad,
+            ["cantidadportoma"] = m.Cantidad,
+            ["cantidadxtoma"] = m.Cantidad,
             ["frecuencia"] = m.Frecuencia,
             ["dias"] = m.Dias,
             ["posologia"] = posologia,

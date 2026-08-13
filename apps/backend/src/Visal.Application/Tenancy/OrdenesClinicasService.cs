@@ -36,6 +36,17 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             var esp = filtro.Especialista.Trim().ToLower();
             q = q.Where(h => h.EspecialistaNombre != null && h.EspecialistaNombre.ToLower().Contains(esp));
         }
+        if (!string.IsNullOrWhiteSpace(filtro.CodigoHc)
+            && TryBuildCodigoHcRango(filtro.CodigoHc, out var hcLo, out var hcHi))
+        {
+            // Filtramos por RANGO de GUID en vez de ILIKE sobre el texto del id.
+            // El "HC N°" son los primeros 8 hex del GUID (= los primeros 4 bytes).
+            // Un prefijo de N hex acota el id a [prefijo+ceros, prefijo+efes], y la
+            // comparacion de uuid en Postgres es lexicografica sobre esos bytes, asi
+            // que el rango captura exactamente las HC cuyo codigo empieza por el
+            // prefijo. Es index-friendly y no depende de traducir Guid.ToString().
+            q = q.Where(h => h.Id >= hcLo && h.Id <= hcHi);
+        }
 
         // LEFT JOIN a `revisiones_clinica` para traer el estado agregado + veredicto
         // agente sin romper filas de HCs que aun no entraron al ciclo (Capa 08 Ola 2).
@@ -504,5 +515,31 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             ms.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             nombre);
+    }
+
+    /// <summary>
+    /// Traduce el "HC N°" que teclea el usuario (los primeros hasta 8 hex del GUID,
+    /// ej. "019F973B" o un prefijo parcial) al rango de GUID [lo, hi] que engloba a
+    /// todas las HC cuyo id empieza por ese prefijo. Devuelve false si tras limpiar
+    /// a solo hex no queda nada. Se toman como maximo 8 hex (los que forman el codigo
+    /// visible); el prefijo se rellena con '0' para el limite inferior y con 'f' para
+    /// el superior, y el resto del GUID va de ceros a efes. Como la comparacion de
+    /// uuid en Postgres es lexicografica byte a byte, el rango captura justo el prefijo.
+    /// </summary>
+    internal static bool TryBuildCodigoHcRango(string? codigoHc, out Guid lo, out Guid hi)
+    {
+        lo = Guid.Empty;
+        hi = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(codigoHc)) { return false; }
+
+        var hex = new string(codigoHc.Where(Uri.IsHexDigit).ToArray());
+        if (hex.Length == 0) { return false; }
+        if (hex.Length > 8) { hex = hex[..8]; }
+
+        var loHex = hex.PadRight(8, '0');
+        var hiHex = hex.PadRight(8, 'f');
+        lo = Guid.Parse($"{loHex}-0000-0000-0000-000000000000");
+        hi = Guid.Parse($"{hiHex}-ffff-ffff-ffff-ffffffffffff");
+        return true;
     }
 }

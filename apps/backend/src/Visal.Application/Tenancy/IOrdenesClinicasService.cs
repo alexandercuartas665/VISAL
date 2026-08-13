@@ -81,7 +81,11 @@ public sealed record OrdenesClinicasFiltro(
     Guid? SucursalId = null,
     /// <summary>Filtra HCs por Codigo (o CodigoSecundario) del FormDefinition.
     /// Ejemplo: "HC-FO-08". Vacio = todos los formatos.</summary>
-    string? FormatoCodigo = null);
+    string? FormatoCodigo = null,
+    /// <summary>Filtra por el "HC N°" que ve el usuario: los primeros 8 hex del
+    /// GUID de la HC (ej. "019F973B"). Case-insensitive y por prefijo, asi que
+    /// sirve el codigo completo o una parte. Vacio = sin filtro.</summary>
+    string? CodigoHc = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);

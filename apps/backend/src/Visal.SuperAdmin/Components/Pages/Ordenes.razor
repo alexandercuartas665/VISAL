@@ -436,6 +436,12 @@ else
                    @bind="_filtroPaciente" @onkeyup="OnKeyup" />
         </div>
         <div class="oc-f">
+            <label>HC N°</label>
+            <input class="form-control form-control-sm mono"
+                   placeholder="Ej. 019F973B"
+                   @bind="_codigoHcFiltro" @onkeyup="OnKeyup" />
+        </div>
+        <div class="oc-f">
             <label>Fecha desde</label>
             <input type="date" class="form-control form-control-sm" @bind="_desde" />
         </div>
@@ -677,6 +683,7 @@ else
                         <th class="text-center" style="width:60px">Acc.</th>
                         <th style="min-width:220px">Paciente</th>
                         <th style="width:160px">Documento</th>
+                        <th style="width:96px" title="Numero corto de la HC (primeros 8 del identificador). Se puede buscar por este codigo en el filtro HC N°.">HC N°</th>
                         <th>Formato HC</th>
                         <th class="text-center" style="width:70px" title="Numero global de sesion dentro de la asignacion que origino la HC">Sesion</th>
                         <th style="width:180px">Especialista</th>
@@ -813,6 +820,7 @@ else
                                 </div>
                             </td>
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
+                            <td class="mono" title="HC N°">@r.HistoriaClinicaId.ToString()[..8].ToUpperInvariant()</td>
                             <td>@r.FormatoNombre</td>
                             <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
                             <td>@(r.EspecialistaNombre ?? "-")</td>
@@ -1505,6 +1513,7 @@ else
     private DateTime? _archHasta;
 
     private string _filtroPaciente = "";
+    private string _codigoHcFiltro = "";
     private DateTime? _desde;
     private DateTime? _hasta;
     private string _especialista = "";
@@ -1647,7 +1656,8 @@ else
                 SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase),
                 AseguradoraId: Guid.TryParse(_aseguradoraFiltro, out var aseId) ? aseId : (Guid?)null,
                 SucursalId: Guid.TryParse(_sucursalFiltro, out var sedeId) ? sedeId : (Guid?)null,
-                FormatoCodigo: string.IsNullOrWhiteSpace(_formatoFiltro) ? null : _formatoFiltro);
+                FormatoCodigo: string.IsNullOrWhiteSpace(_formatoFiltro) ? null : _formatoFiltro,
+                CodigoHc: string.IsNullOrWhiteSpace(_codigoHcFiltro) ? null : _codigoHcFiltro.Trim());
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -1665,7 +1675,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = "";
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = "";
         await Buscar();
     }
 

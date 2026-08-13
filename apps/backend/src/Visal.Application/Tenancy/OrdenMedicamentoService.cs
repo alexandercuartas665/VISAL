@@ -67,9 +67,10 @@ public sealed class OrdenMedicamentoService(
         }
         // Guard: HC debe estar Abierta. Una HC cerrada es un documento firmado.
         await db.EnsureAbiertaAsync(historiaId, ct);
-        // Guard: si la orden ya fue emitida (QR firmado), no se editan los items
-        // hasta revocarla — el snapshot publico debe seguir siendo fiel a lo firmado.
-        await EnsureNoEmisionActivaAsync(historiaId, ct);
+        // Si la orden ya fue emitida (QR firmado), editar la anula: revocamos la
+        // emision vigente para que la impresion anterior no quede desalineada. Al
+        // reimprimir se re-emite un QR nuevo con los medicamentos actualizados.
+        await RevocarEmisionMedActivaAsync(historiaId, actor, ct);
 
         // Calcular siguiente orden en la historia.
         var siguiente = 1 + await db.HistoriaClinicaMedicamentos
@@ -111,7 +112,7 @@ public sealed class OrdenMedicamentoService(
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
-        await EnsureNoEmisionActivaAsync(entity.HistoriaClinicaId, ct);
+        await RevocarEmisionMedActivaAsync(entity.HistoriaClinicaId, actor, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Frecuencia = Trim(req.Frecuencia);
         entity.Dias = Trim(req.Dias);
@@ -129,7 +130,7 @@ public sealed class OrdenMedicamentoService(
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
         await db.EnsureAbiertaAsync(hcId, ct);
-        await EnsureNoEmisionActivaAsync(hcId, ct);
+        await RevocarEmisionMedActivaAsync(hcId, actor, ct);
         db.HistoriaClinicaMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
@@ -143,18 +144,28 @@ public sealed class OrdenMedicamentoService(
     }
 
     /// <summary>
-    /// Bloquea la edicion de items si la orden ya fue emitida (QR firmado) y sigue
-    /// vigente. El profesional debe revocar la emision para poder editar; asi el
-    /// snapshot publico nunca queda desalineado de lo que muestra el QR.
+    /// Al editar los medicamentos de una HC ABIERTA, la orden emitida (QR firmado)
+    /// deja de ser fiel a lo que se prescribe. En vez de bloquear, revocamos la
+    /// emision vigente (baja logica) y dejamos editar: la orden impresa anterior
+    /// queda anulada (su QR marca "revocada") y la proxima impresion re-emite un
+    /// QR nuevo con los medicamentos actualizados. El guard de HC abierta corre
+    /// antes que esto, asi que aqui la HC siempre esta abierta (una HC cerrada es
+    /// documento firmado y no se editan sus items). No hace SaveChanges: el metodo
+    /// llamador persiste la revocacion junto con la edicion en el mismo scope.
     /// </summary>
-    private async Task EnsureNoEmisionActivaAsync(Guid historiaId, CancellationToken ct)
+    private async Task RevocarEmisionMedActivaAsync(Guid historiaId, Guid actor, CancellationToken ct)
     {
-        var emitida = await db.OrdenesMedicamentosPublicas
-            .AnyAsync(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "MED" && o.RevocadaAt == null, ct);
-        if (emitida)
+        var emisiones = await db.OrdenesMedicamentosPublicas
+            .Where(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "MED" && o.RevocadaAt == null)
+            .ToListAsync(ct);
+        if (emisiones.Count == 0) { return; }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var e in emisiones)
         {
-            throw new InvalidOperationException(
-                "La orden de medicamentos ya fue emitida. Revocala para editar los medicamentos.");
+            e.RevocadaAt = now;
+            e.RevocadaPor = actor == Guid.Empty ? (Guid?)null : actor;
+            e.RevocacionMotivo = "Revocada automaticamente al editar los medicamentos de la HC abierta.";
         }
     }
 

@@ -127,6 +127,7 @@ public interface IApplicationDbContext
     DbSet<TaskCardChecklistItem> TaskCardChecklistItems { get; }
     DbSet<TaskCardActivity> TaskCardActivities { get; }
     DbSet<TaskCardAttachment> TaskCardAttachments { get; }
+    DbSet<TaskFieldDefinition> TaskFieldDefinitions { get; }
     DbSet<SaasPlan> SaasPlans { get; }
     DbSet<SaasPlanLimit> SaasPlanLimits { get; }
     DbSet<TenantSubscription> TenantSubscriptions { get; }

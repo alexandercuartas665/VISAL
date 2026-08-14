@@ -2,8 +2,10 @@
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Visal.Application.Tenancy
+@using Visal.SuperAdmin.Components.Forms
 @inject ITaskBoardService BoardsSvc
 @inject ITaskBoardMemberService MembersSvc
+@inject ITaskFieldService FieldSvc
 @inject NavigationManager Nav
 
 <PageTitle>@(_board?.Name ?? "Tablero") - Visal</PageTitle>
@@ -35,6 +37,7 @@ else
                 }
             </div>
             <div class="td-head-right">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _fieldsConfigOpen = true">🧩 Campos (@_boardFields.Count)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="OpenMembers">👥 Miembros (@_board.MemberCount)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="OpenEditBoard">✎ Editar</button>
             </div>
@@ -242,6 +245,20 @@ else
                             }
                         </div>
                     </div>
+
+                    @* --- Campos dinamicos del tablero --- *@
+                    @if (_boardFields.Count > 0)
+                    {
+                        <div class="td-modal-section">
+                            <span class="td-modal-section-icon">🧩</span>
+                            <div class="td-modal-section-body">
+                                <div class="td-modal-section-head">
+                                    <h3 class="td-modal-section-title">Campos</h3>
+                                </div>
+                                <TaskDynamicFields Fields="_boardFields" Values="_cardValues" OnChanged="PersistCardValuesAsync" />
+                            </div>
+                        </div>
+                    }
 
                     @* --- Checklist --- *@
                     @if (detail.Checklist.Count > 0 || _showChecklistAdd)
@@ -544,6 +561,14 @@ else
     </div>
 }
 
+@* ===== Modal: Configurar campos dinamicos del tablero ===== *@
+@if (_fieldsConfigOpen && _board is not null)
+{
+    <TaskFieldsConfig BoardId="BoardId" Actor="_actorId"
+                      OnClose="() => _fieldsConfigOpen = false"
+                      OnChanged="ReloadFieldsAsync" />
+}
+
 @* ===== Modal: Editar tablero ===== *@
 @if (_editBoardOpen && _board is not null)
 {
@@ -832,6 +857,11 @@ else
     private Guid _actorId;
     private string _actorDisplayName = "";
 
+    // Campos dinamicos del tablero (definiciones) + valores de la tarjeta abierta.
+    private List<TaskFieldDto> _boardFields = new();
+    private Dictionary<string, string?> _cardValues = new();
+    private bool _fieldsConfigOpen;
+
     private TaskBoardDto? _board;
     private List<TaskBoardColumnDto> _columns = new();
     private List<TaskCardSummaryDto> _cards = new();
@@ -919,6 +949,12 @@ else
         _cards = (await BoardsSvc.ListCardsAsync(BoardId, _actorId)).ToList();
         _boardMembers = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
         _boardTags = (await BoardsSvc.ListBoardTagsAsync(BoardId, _actorId)).ToList();
+        _boardFields = (await FieldSvc.ListFieldsAsync(BoardId, _actorId)).ToList();
+    }
+
+    private async Task ReloadFieldsAsync()
+    {
+        _boardFields = (await FieldSvc.ListFieldsAsync(BoardId, _actorId)).ToList();
     }
 
     // ---- Drag&drop ----
@@ -992,6 +1028,7 @@ else
     {
         _cardDetail = await BoardsSvc.GetCardAsync(cardId, _actorId);
         if (_cardDetail is null) { return; }
+        _cardValues = await FieldSvc.GetCardValuesAsync(cardId, _actorId);
         _editCardTitle = _cardDetail.Card.Title;
         _editCardDescription = _cardDetail.Card.Description;
         _editCardColor = _cardDetail.Card.Color ?? "#3b82f6";
@@ -1003,7 +1040,14 @@ else
         _dragOver = false;
     }
 
-    private void CloseCardModal() { _cardModalOpen = false; _cardDetail = null; }
+    private void CloseCardModal() { _cardModalOpen = false; _cardDetail = null; _cardValues = new(); }
+
+    // Persiste los valores de campos dinamicos de la tarjeta (autoguardado por campo).
+    private async Task PersistCardValuesAsync()
+    {
+        if (_cardDetail is null) { return; }
+        await FieldSvc.SaveCardValuesAsync(_cardDetail.Card.Id, _cardValues, _actorId);
+    }
 
     private async Task SaveCardAsync()
     {

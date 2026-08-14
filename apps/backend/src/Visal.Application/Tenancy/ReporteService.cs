@@ -222,18 +222,32 @@ public sealed class ReporteService(
             sql = Regex.Replace(sql, Regex.Escape(token), param, RegexOptions.IgnoreCase);
         }
 
+        // Conexion DEDICADA (no la del DbContext scoped): el lector crudo mantiene la
+        // conexion ocupada mientras transmite las filas; si reusaramos la conexion del
+        // DbContext, cualquier otra operacion EF en el mismo circuito Blazor (o un doble
+        // clic en Ejecutar) chocaria con "A second operation was started on this context".
         var ctx = (DbContext)db;
-        var conn = ctx.Database.GetDbConnection();
-        if (conn.State != ConnectionState.Open) { await conn.OpenAsync(ct); }
+        var connString = ctx.Database.GetConnectionString()
+            ?? throw new InvalidOperationException("No hay cadena de conexion configurada para ejecutar el reporte.");
+        var factory = DbProviderFactories.GetFactory(ctx.Database.GetDbConnection());
+        await using var conn = factory.CreateConnection()
+            ?? throw new InvalidOperationException("No se pudo crear la conexion para ejecutar el reporte.");
+        conn.ConnectionString = connString;
+        await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandType = CommandType.Text;
         cmd.CommandTimeout = 30;
 
-        AddParam(cmd, "_tenantId", tid);
-        AddParam(cmd, "_sedeId",   req.SedeId as object ?? DBNull.Value);
-        AddParam(cmd, "_desde",    req.Desde.HasValue ? req.Desde.Value.ToDateTime(TimeOnly.MinValue) : (object)DBNull.Value);
-        AddParam(cmd, "_hasta",    req.Hasta.HasValue ? req.Hasta.Value.ToDateTime(TimeOnly.MaxValue) : (object)DBNull.Value);
+        // DbType explicito en cada parametro: cuando el valor es NULL (sin sede/fechas),
+        // Postgres no puede inferir el tipo de un parametro sin tipo declarado y lanza
+        // "42P08: could not determine data type of parameter". Declararlo lo resuelve.
+        AddParam(cmd, "_tenantId", tid, DbType.Guid);
+        AddParam(cmd, "_sedeId",   req.SedeId as object ?? DBNull.Value, DbType.Guid);
+        // Fechas como DATE (no timestamp): los reportes filtran sobre fechas puras y el SQL
+        // castea a ::date. Enviar timestamptz exigiria Kind=Utc y rompe con DateTime Unspecified.
+        AddParam(cmd, "_desde",    req.Desde.HasValue ? req.Desde.Value : (object)DBNull.Value, DbType.Date);
+        AddParam(cmd, "_hasta",    req.Hasta.HasValue ? req.Hasta.Value : (object)DBNull.Value, DbType.Date);
 
         var columnas = new List<string>();
         var filas = new List<IReadOnlyList<object?>>();
@@ -253,10 +267,11 @@ public sealed class ReporteService(
         return new ReporteResultado(columnas, filas, filas.Count);
     }
 
-    private static void AddParam(DbCommand cmd, string name, object value)
+    private static void AddParam(DbCommand cmd, string name, object value, DbType dbType)
     {
         var p = cmd.CreateParameter();
         p.ParameterName = name;
+        p.DbType = dbType;
         p.Value = value;
         cmd.Parameters.Add(p);
     }

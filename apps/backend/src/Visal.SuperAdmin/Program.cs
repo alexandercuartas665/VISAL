@@ -197,6 +197,10 @@ app.MapPost("/auth/login", async (
     var claims = new List<Claim>
     {
         new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+        // Alias explicito del id de plataforma. Varias paginas (Tableros, Ordenes, revision
+        // clinica) resuelven el actor con FindFirst("user_id"); sin este claim ese id quedaba
+        // en Guid.Empty y rompia el gate owner/miembro de los tableros.
+        new("user_id", user.Id.ToString()),
         new(ClaimTypes.Name, user.DisplayName ?? user.Email),
         new(ClaimTypes.Email, user.Email)
     };

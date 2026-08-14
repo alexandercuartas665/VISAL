@@ -162,6 +162,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TaskCardChecklistItem> TaskCardChecklistItems => Set<TaskCardChecklistItem>();
     public DbSet<TaskCardActivity> TaskCardActivities => Set<TaskCardActivity>();
     public DbSet<TaskCardAttachment> TaskCardAttachments => Set<TaskCardAttachment>();
+    public DbSet<TaskFieldDefinition> TaskFieldDefinitions => Set<TaskFieldDefinition>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -1655,10 +1656,28 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Title).HasMaxLength(200).IsRequired();
             b.Property(x => x.Description).HasColumnType("text");
             b.Property(x => x.Color).HasMaxLength(20);
+            // Valores de campos dinamicos del tablero, indexados por FieldKey.
+            b.Property(x => x.FieldValuesJson).HasColumnType("jsonb");
             b.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.Column).WithMany().HasForeignKey(x => x.ColumnId).OnDelete(DeleteBehavior.Restrict);
             b.HasIndex(x => new { x.TenantId, x.BoardId, x.ColumnId, x.SortOrder });
             b.HasIndex(x => new { x.TenantId, x.IsArchived });
+        });
+
+        // Definiciones de campos dinamicos por tablero (portado del pipeline de CUBOT).
+        modelBuilder.Entity<TaskFieldDefinition>(b =>
+        {
+            b.Property(x => x.FieldKey).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Label).HasMaxLength(150).IsRequired();
+            b.Property(x => x.FieldType).HasConversion<string>().HasMaxLength(40);
+            b.Property(x => x.Options).HasColumnType("text");
+            b.Property(x => x.Description).HasColumnType("text");
+            b.Property(x => x.TotalSourceKeys).HasMaxLength(2000);
+            b.Property(x => x.RepeatWithFieldKey).HasMaxLength(80);
+            b.HasOne(x => x.Board).WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            // FieldKey unico por tablero.
+            b.HasIndex(x => new { x.BoardId, x.FieldKey }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.BoardId, x.SortOrder });
         });
 
         modelBuilder.Entity<TaskCardAssignment>(b =>

@@ -1,0 +1,274 @@
+@using Visal.Application.Tenancy
+@using Visal.Domain.Entities
+@inject ITaskFieldService FieldSvc
+
+@* Disenador de campos dinamicos de un tablero (portado del modal "Configurar embudo" de
+   CUBOT.travels). Lista/crea/edita/ordena/borra definiciones de campo del tablero. *@
+
+<div class="tfc-back" @onclick="OnClose"></div>
+<div class="tfc-modal" @onclick:stopPropagation>
+    <div class="tfc-head">
+        <div>
+            <div class="tfc-eyebrow">Configurar campos</div>
+            <h3 class="tfc-title">Campos del tablero</h3>
+        </div>
+        <button class="tfc-close" @onclick="OnClose">&times;</button>
+    </div>
+
+    <div class="tfc-body">
+        @if (!string.IsNullOrEmpty(_msg))
+        {
+            <div class="tfc-msg">@_msg</div>
+        }
+
+        <div class="tfc-list">
+            @if (_fields.Count == 0)
+            {
+                <div class="tfc-empty">Aun no hay campos. Agrega el primero abajo.</div>
+            }
+            @for (var i = 0; i < _fields.Count; i++)
+            {
+                var f = _fields[i];
+                var idx = i;
+                <div class="tfc-row @(_editId == f.Id ? "is-editing" : "")">
+                    <div class="tfc-ord">
+                        <button class="tfc-ordbtn" title="Subir" disabled="@(idx == 0)" @onclick="() => MoveAsync(idx, -1)">&uarr;</button>
+                        <button class="tfc-ordbtn" title="Bajar" disabled="@(idx == _fields.Count - 1)" @onclick="() => MoveAsync(idx, 1)">&darr;</button>
+                    </div>
+                    <div class="tfc-rowmain">
+                        <div class="tfc-rowlabel">
+                            @(f.FieldType == TaskFieldType.Separator ? "— " + f.Label + " —" : f.Label)
+                            @if (f.ShowInFilter) { <span class="tfc-badge tfc-badge-filter" title="Aparece como filtro">filtro</span> }
+                            @if (f.AllowMultiple) { <span class="tfc-badge">multiple</span> }
+                        </div>
+                        <div class="tfc-rowmeta">@f.FieldType &middot; ancho @f.Column &middot; <code>@f.FieldKey</code></div>
+                    </div>
+                    <div class="tfc-rowacts">
+                        <button class="tfc-mini" @onclick="() => Editar(f)">Editar</button>
+                        <button class="tfc-mini tfc-danger" @onclick="() => EliminarAsync(f)">Eliminar</button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="tfc-form">
+            <div class="tfc-form-title">@(_editId is null ? "Nuevo campo" : "Editar campo")</div>
+            <div class="tfc-grid">
+                <div class="tfc-c2">
+                    <label>Etiqueta</label>
+                    <input class="tfc-input" @bind="_form.Label" placeholder="Ej. Tipo PQRS" />
+                </div>
+                <div>
+                    <label>Tipo</label>
+                    <select class="tfc-input" @bind="_form.FieldType">
+                        @foreach (var t in Enum.GetValues<TaskFieldType>())
+                        {
+                            <option value="@t">@TipoLabel(t)</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label>Ancho</label>
+                    <select class="tfc-input" @bind="_form.Column">
+                        <option value="1">Angosto</option>
+                        <option value="2">Medio</option>
+                        <option value="3">Ancho</option>
+                    </select>
+                </div>
+                @if (_form.FieldType == TaskFieldType.Select)
+                {
+                    <div class="tfc-c2">
+                        <label>Opciones (una por linea)</label>
+                        <textarea class="tfc-input" rows="3" @bind="_form.Options" placeholder="Opcion 1&#10;Opcion 2"></textarea>
+                    </div>
+                }
+                @if (_form.FieldType == TaskFieldType.Total)
+                {
+                    <div class="tfc-c2">
+                        <label>Campos a sumar (FieldKeys separados por coma)</label>
+                        <input class="tfc-input" @bind="_form.TotalSourceKeys" placeholder="valor_a, valor_b" />
+                    </div>
+                }
+                <div class="tfc-c2">
+                    <label>Descripcion / ayuda (opcional)</label>
+                    <input class="tfc-input" @bind="_form.Description" placeholder="Para que sirve el campo" />
+                </div>
+                <div class="tfc-c2 tfc-checks">
+                    <label class="tfc-check"><input type="checkbox" @bind="_form.ShowInFilter" /> Usar como filtro del tablero</label>
+                    <label class="tfc-check"><input type="checkbox" @bind="_form.AllowMultiple" /> Permitir varios valores</label>
+                    @if (_form.AllowMultiple)
+                    {
+                        <label class="tfc-check"><input type="checkbox" @bind="_form.MultiWithDetail" /> Cada valor con detalle</label>
+                    }
+                </div>
+                <div class="tfc-c2">
+                    <label>Repetir segun campo numerico (FieldKey, opcional)</label>
+                    <input class="tfc-input" @bind="_form.RepeatWithFieldKey" placeholder="Ej. cantidad_ninos" />
+                </div>
+            </div>
+            <div class="tfc-form-foot">
+                @if (_editId is not null)
+                {
+                    <button class="tfc-btn-ghost" @onclick="ResetForm">Cancelar edicion</button>
+                }
+                <button class="tfc-btn" disabled="@_busy" @onclick="GuardarAsync">@(_editId is null ? "Agregar campo" : "Guardar cambios")</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid BoardId { get; set; }
+    [Parameter] public Guid Actor { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Se dispara cuando cambian las definiciones (para que el tablero recargue campos).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private sealed class FieldForm
+    {
+        public string Label { get; set; } = "";
+        public TaskFieldType FieldType { get; set; } = TaskFieldType.Text;
+        public int Column { get; set; } = 1;
+        public string? Options { get; set; }
+        public string? Description { get; set; }
+        public bool ShowInFilter { get; set; }
+        public bool AllowMultiple { get; set; }
+        public bool MultiWithDetail { get; set; }
+        public string? TotalSourceKeys { get; set; }
+        public string? RepeatWithFieldKey { get; set; }
+    }
+
+    private List<TaskFieldDto> _fields = new();
+    private FieldForm _form = new();
+    private Guid? _editId;
+    private string _msg = "";
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await RecargarAsync();
+
+    private async Task RecargarAsync()
+    {
+        _fields = (await FieldSvc.ListFieldsAsync(BoardId, Actor)).ToList();
+    }
+
+    private void Editar(TaskFieldDto f)
+    {
+        _editId = f.Id;
+        _form = new FieldForm
+        {
+            Label = f.Label,
+            FieldType = f.FieldType,
+            Column = f.Column,
+            Options = f.Options,
+            Description = f.Description,
+            ShowInFilter = f.ShowInFilter,
+            AllowMultiple = f.AllowMultiple,
+            MultiWithDetail = f.MultiWithDetail,
+            TotalSourceKeys = f.TotalSourceKeys,
+            RepeatWithFieldKey = f.RepeatWithFieldKey
+        };
+        _msg = "";
+    }
+
+    private void ResetForm() { _editId = null; _form = new FieldForm(); _msg = ""; }
+
+    private async Task GuardarAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Label)) { _msg = "La etiqueta es obligatoria."; return; }
+        _busy = true;
+        try
+        {
+            if (_editId is Guid id)
+            {
+                await FieldSvc.UpdateFieldAsync(id, new UpdateTaskFieldRequest(
+                    _form.Label, _form.FieldType, _form.Column, _form.Options, _form.Description,
+                    _form.ShowInFilter, _form.AllowMultiple, _form.MultiWithDetail, _form.TotalSourceKeys, _form.RepeatWithFieldKey), Actor);
+            }
+            else
+            {
+                await FieldSvc.CreateFieldAsync(new CreateTaskFieldRequest(
+                    BoardId, _form.Label, _form.FieldType, _form.Column, _form.Options, _form.Description,
+                    _form.ShowInFilter, _form.AllowMultiple, _form.MultiWithDetail, _form.TotalSourceKeys, _form.RepeatWithFieldKey), Actor);
+            }
+            ResetForm();
+            await RecargarAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _msg = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(TaskFieldDto f)
+    {
+        await FieldSvc.DeleteFieldAsync(f.Id, Actor);
+        if (_editId == f.Id) { ResetForm(); }
+        await RecargarAsync();
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task MoveAsync(int index, int dir)
+    {
+        var target = index + dir;
+        if (target < 0 || target >= _fields.Count) { return; }
+        (_fields[index], _fields[target]) = (_fields[target], _fields[index]);
+        await FieldSvc.ReorderFieldsAsync(BoardId, _fields.Select(f => f.Id).ToList(), Actor);
+        await OnChanged.InvokeAsync();
+    }
+
+    private static string TipoLabel(TaskFieldType t) => t switch
+    {
+        TaskFieldType.Text => "Texto",
+        TaskFieldType.Number => "Numero",
+        TaskFieldType.Currency => "Moneda",
+        TaskFieldType.TextArea => "Texto largo",
+        TaskFieldType.Select => "Lista (select)",
+        TaskFieldType.Date => "Fecha",
+        TaskFieldType.Email => "Email",
+        TaskFieldType.Phone => "Telefono",
+        TaskFieldType.Total => "Total (suma)",
+        TaskFieldType.Time => "Hora",
+        TaskFieldType.TimeRange => "Rango de horas",
+        TaskFieldType.Separator => "Separador / grupo",
+        _ => t.ToString()
+    };
+}
+
+<style>
+    .tfc-back { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:1500; }
+    .tfc-modal { position:fixed; top:3%; left:50%; transform:translateX(-50%); width:min(720px,96vw); max-height:94vh;
+                 background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1501; display:flex; flex-direction:column; overflow:hidden; }
+    .tfc-head { display:flex; justify-content:space-between; align-items:flex-start; padding:.85rem 1.1rem; border-bottom:1px solid #e5e7eb; }
+    .tfc-eyebrow { color:#64748b; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; }
+    .tfc-title { margin:.1rem 0 0; font-size:1.15rem; color:#0f172a; }
+    .tfc-close { background:transparent; border:none; font-size:1.6rem; line-height:1; color:#64748b; cursor:pointer; }
+    .tfc-body { padding:.9rem 1.1rem; overflow:auto; }
+    .tfc-msg { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:.45rem .7rem; border-radius:6px; margin-bottom:.6rem; font-size:.82rem; }
+    .tfc-empty { color:#94a3b8; text-align:center; padding:.8rem; font-size:.85rem; }
+    .tfc-list { display:flex; flex-direction:column; gap:.35rem; margin-bottom:1rem; }
+    .tfc-row { display:flex; align-items:center; gap:.5rem; border:1px solid #e5e7eb; border-radius:8px; padding:.4rem .55rem; }
+    .tfc-row.is-editing { border-color:#93c5fd; background:#eff6ff; }
+    .tfc-ord { display:flex; flex-direction:column; gap:2px; }
+    .tfc-ordbtn { border:1px solid #cbd5e1; background:#fff; border-radius:4px; width:1.4rem; height:1.05rem; line-height:1; cursor:pointer; font-size:.7rem; color:#475569; }
+    .tfc-ordbtn:disabled { opacity:.35; cursor:default; }
+    .tfc-rowmain { flex:1; min-width:0; }
+    .tfc-rowlabel { font-weight:600; color:#0f172a; font-size:.86rem; display:flex; align-items:center; gap:.35rem; }
+    .tfc-rowmeta { color:#94a3b8; font-size:.72rem; }
+    .tfc-rowmeta code { background:#f1f5f9; padding:0 .25rem; border-radius:3px; }
+    .tfc-badge { background:#eef2ff; color:#4338ca; font-size:.62rem; padding:.05rem .3rem; border-radius:99px; text-transform:uppercase; letter-spacing:.03em; }
+    .tfc-badge-filter { background:#ecfeff; color:#0e7490; }
+    .tfc-rowacts { display:flex; gap:.3rem; }
+    .tfc-mini { border:1px solid #cbd5e1; background:#fff; color:#334155; border-radius:6px; padding:.2rem .5rem; font-size:.76rem; cursor:pointer; }
+    .tfc-danger { color:#b91c1c; border-color:#fecaca; }
+    .tfc-form { border-top:1px dashed #e5e7eb; padding-top:.8rem; }
+    .tfc-form-title { font-weight:600; color:#0f172a; margin-bottom:.5rem; font-size:.9rem; }
+    .tfc-grid { display:grid; grid-template-columns:1fr 1fr; gap:.5rem .6rem; }
+    .tfc-c2 { grid-column:span 2; }
+    .tfc-grid label { display:block; font-size:.74rem; color:#334155; margin-bottom:.15rem; }
+    .tfc-input { width:100%; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:6px; font:inherit; font-size:.85rem; }
+    .tfc-checks { display:flex; flex-wrap:wrap; gap:.75rem; }
+    .tfc-check { display:flex; align-items:center; gap:.3rem; font-size:.8rem; color:#334155; }
+    .tfc-form-foot { display:flex; justify-content:flex-end; gap:.5rem; margin-top:.7rem; }
+    .tfc-btn { background:#2563eb; color:#fff; border:none; padding:.45rem .9rem; border-radius:6px; cursor:pointer; }
+    .tfc-btn:disabled { opacity:.6; }
+    .tfc-btn-ghost { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.45rem .8rem; border-radius:6px; cursor:pointer; }
+</style>

@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IServicioBulkUpdateService, Tenancy.ServicioBulkUpdateService>();
         services.AddScoped<Tenancy.ITaskBoardService, Tenancy.TaskBoardService>();
         services.AddScoped<Tenancy.ITaskBoardMemberService, Tenancy.TaskBoardMemberService>();
+        services.AddScoped<Tenancy.ITaskFieldService, Tenancy.TaskFieldService>();
         services.AddScoped<Tenancy.IPaqueteService, Tenancy.PaqueteService>();
         services.AddScoped<Tenancy.ICuotaCopagoService, Tenancy.CuotaCopagoService>();
         services.AddScoped<Tenancy.IProfesionalConfigService, Tenancy.ProfesionalConfigService>();

@@ -1,0 +1,448 @@
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@using Visal.Domain.Entities
+
+@* Captura de los campos dinamicos de una tarjeta de tablero. Portado del render del
+   pipeline de CUBOT.travels (switch por tipo + multi/repeat/total). Los valores viven en
+   el diccionario Values (FieldKey -> valor); los campos multiples/repetidos guardan un
+   arreglo JSON serializado. Autoguarda por campo via OnChanged (evento onchange/blur). *@
+
+<div class="tdf">
+    @foreach (var f in Ordered())
+    {
+        if (f.FieldType == TaskFieldType.Separator)
+        {
+            <div class="tdf-sep"><span>@f.Label</span></div>
+            continue;
+        }
+
+        <div class="tdf-field @(f.Column >= 3 ? "col-full" : f.Column == 2 ? "col-med" : "")">
+            <label class="tdf-label">@f.Label</label>
+            @if (!string.IsNullOrWhiteSpace(f.Description))
+            {
+                <div class="tdf-help">@f.Description</div>
+            }
+
+            @if (!string.IsNullOrEmpty(f.RepeatWithFieldKey))
+            {
+                var rc = RepeatCount(f.RepeatWithFieldKey!);
+                if (rc <= 0)
+                {
+                    <div class="tdf-muted">Indica "@FieldLabel(f.RepeatWithFieldKey!)" para capturar @f.Label.</div>
+                }
+                else
+                {
+                    var rlist = MultiList(f.FieldKey, rc);
+                    for (int ri = 0; ri < rc; ri++)
+                    {
+                        var ci = ri;
+                        <div class="tdf-multi-row">
+                            <span class="tdf-multi-idx">@(ci + 1)</span>
+                            @RenderMultiInput(f, rlist, ci)
+                        </div>
+                    }
+                }
+            }
+            else if (f.AllowMultiple)
+            {
+                var mlist = MultiList(f.FieldKey, -1);
+                var dlist = f.MultiWithDetail ? DetailList(f.FieldKey, mlist.Count) : null;
+                for (int mi = 0; mi < mlist.Count; mi++)
+                {
+                    var ci = mi;
+                    <div class="tdf-multi-row">
+                        @if (f.MultiWithDetail && dlist is not null)
+                        {
+                            <input class="tdf-input tdf-detail" placeholder="Detalle" disabled="@ReadOnly"
+                                   value="@dlist[ci]" @onchange="e => { dlist[ci] = e.Value?.ToString(); Commit(f.FieldKey); }" />
+                        }
+                        @RenderMultiInput(f, mlist, ci)
+                        @if (!ReadOnly)
+                        {
+                            <button type="button" class="tdf-multi-del" title="Quitar" @onclick="() => RemoveMulti(f.FieldKey, ci)">&times;</button>
+                        }
+                    </div>
+                }
+                @if (!ReadOnly)
+                {
+                    <button type="button" class="tdf-multi-add" @onclick="() => AddMulti(f.FieldKey)">+ Agregar</button>
+                }
+            }
+            else
+            {
+                @switch (f.FieldType)
+                {
+                    case TaskFieldType.TextArea:
+                        <textarea class="tdf-input" rows="2" disabled="@ReadOnly"
+                                  value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())"></textarea>
+                        break;
+                    case TaskFieldType.Number:
+                        <input class="tdf-input" type="number" step="any" disabled="@ReadOnly"
+                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        break;
+                    case TaskFieldType.Currency:
+                        <div class="tdf-money">
+                            <span class="tdf-money-sign">$</span>
+                            <input class="tdf-input" type="text" inputmode="numeric" disabled="@ReadOnly"
+                                   value="@FormatThousands(Get(f.FieldKey))" @onchange="e => Set(f.FieldKey, DigitsToRaw(e.Value?.ToString()))" />
+                        </div>
+                        break;
+                    case TaskFieldType.Date:
+                        <input class="tdf-input" type="date" disabled="@ReadOnly"
+                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        break;
+                    case TaskFieldType.Email:
+                        <input class="tdf-input" type="email" disabled="@ReadOnly"
+                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        break;
+                    case TaskFieldType.Phone:
+                        <input class="tdf-input" type="tel" disabled="@ReadOnly" placeholder="+57 300 000 0000"
+                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        break;
+                    case TaskFieldType.Time:
+                        <input class="tdf-input" type="time" disabled="@ReadOnly"
+                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        break;
+                    case TaskFieldType.TimeRange:
+                        <div class="tdf-timerange">
+                            <input class="tdf-input" type="time" title="Salida" disabled="@ReadOnly"
+                                   value="@TimeRangePart(Get(f.FieldKey), 0)" @onchange="e => Set(f.FieldKey, SetTimeRange(Get(f.FieldKey), 0, e.Value?.ToString()))" />
+                            <span class="tdf-muted">a</span>
+                            <input class="tdf-input" type="time" title="Llegada" disabled="@ReadOnly"
+                                   value="@TimeRangePart(Get(f.FieldKey), 1)" @onchange="e => Set(f.FieldKey, SetTimeRange(Get(f.FieldKey), 1, e.Value?.ToString()))" />
+                        </div>
+                        break;
+                    case TaskFieldType.Select:
+                        <select class="tdf-input" disabled="@ReadOnly"
+                                value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())">
+                            <option value="">&mdash;</option>
+                            @foreach (var opt in SelectOptions(f))
+                            {
+                                <option value="@opt">@opt</option>
+                            }
+                        </select>
+                        break;
+                    case TaskFieldType.Total:
+                        <input class="tdf-input tdf-total" type="text" readonly value="@ComputeTotal(f).ToString("0.##")" />
+                        break;
+                    default:
+                        <input class="tdf-input" disabled="@ReadOnly"
+                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        break;
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<TaskFieldDto> Fields { get; set; } = Array.Empty<TaskFieldDto>();
+    [Parameter] public Dictionary<string, string?> Values { get; set; } = new();
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>Se dispara cuando cambia cualquier valor (para persistir Values en el padre).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    // Estado interno para campos multiples/repetidos, reconstruido desde Values.
+    private readonly Dictionary<string, List<string?>> _multiValues = new();
+    private readonly Dictionary<string, List<string?>> _multiDetails = new();
+    private string _hydratedFor = "";
+
+    protected override void OnParametersSet()
+    {
+        // Rehidrata el estado multi cuando cambia el conjunto de valores (nueva tarjeta).
+        var sig = string.Join("|", Values.Keys.OrderBy(k => k)) + "#" + Values.Count + "#" + Fields.Count;
+        if (sig == _hydratedFor) { return; }
+        _hydratedFor = sig;
+        _multiValues.Clear();
+        _multiDetails.Clear();
+        foreach (var f in Fields)
+        {
+            if (!Values.ContainsKey(f.FieldKey)) { Values[f.FieldKey] = null; }
+            if (f.AllowMultiple || !string.IsNullOrEmpty(f.RepeatWithFieldKey))
+            {
+                if (f.MultiWithDetail)
+                {
+                    var (d, v) = ParseMultiDetail(Values.GetValueOrDefault(f.FieldKey));
+                    _multiDetails[f.FieldKey] = d;
+                    _multiValues[f.FieldKey] = v;
+                }
+                else
+                {
+                    _multiValues[f.FieldKey] = ParseMulti(Values.GetValueOrDefault(f.FieldKey));
+                }
+            }
+        }
+    }
+
+    private IEnumerable<TaskFieldDto> Ordered() => Fields.OrderBy(f => f.SortOrder);
+
+    private string? Get(string key) => Values.TryGetValue(key, out var v) ? v : null;
+
+    private async void Set(string key, string? value)
+    {
+        Values[key] = string.IsNullOrWhiteSpace(value) ? null : value;
+        await OnChanged.InvokeAsync();
+    }
+
+    // Reserializa el campo multiple/repetido de vuelta a Values y notifica.
+    private async void Commit(string key)
+    {
+        var f = Fields.FirstOrDefault(x => x.FieldKey == key);
+        if (f is null) { return; }
+        if (f.MultiWithDetail)
+        {
+            var d = _multiDetails.GetValueOrDefault(key) ?? new();
+            var v = _multiValues.GetValueOrDefault(key) ?? new();
+            Values[key] = SerializeMultiDetail(d, v);
+        }
+        else
+        {
+            Values[key] = SerializeMulti(_multiValues.GetValueOrDefault(key) ?? new());
+        }
+        await OnChanged.InvokeAsync();
+    }
+
+    private RenderFragment RenderMultiInput(TaskFieldDto f, List<string?> list, int ci) => builder =>
+    {
+        var key = f.FieldKey;
+        // Reutilizamos inputs simples segun el tipo; onchange -> Commit(key).
+        switch (f.FieldType)
+        {
+            case TaskFieldType.Currency:
+                builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "tdf-money"); builder.AddAttribute(2, "style", "flex:1;");
+                builder.OpenElement(3, "span"); builder.AddAttribute(4, "class", "tdf-money-sign"); builder.AddContent(5, "$"); builder.CloseElement();
+                builder.OpenElement(6, "input");
+                builder.AddAttribute(7, "class", "tdf-input");
+                builder.AddAttribute(8, "type", "text");
+                builder.AddAttribute(9, "inputmode", "numeric");
+                builder.AddAttribute(10, "disabled", ReadOnly);
+                builder.AddAttribute(11, "value", FormatThousands(list[ci]));
+                builder.AddAttribute(12, "onchange", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, (Microsoft.AspNetCore.Components.ChangeEventArgs e) => { list[ci] = DigitsToRaw(e.Value?.ToString()); Commit(key); }));
+                builder.CloseElement();
+                builder.CloseElement();
+                break;
+            case TaskFieldType.Number:
+                MultiPlain(builder, list, ci, key, "number");
+                break;
+            case TaskFieldType.Date:
+                MultiPlain(builder, list, ci, key, "date");
+                break;
+            case TaskFieldType.Email:
+                MultiPlain(builder, list, ci, key, "email");
+                break;
+            case TaskFieldType.Phone:
+                MultiPlain(builder, list, ci, key, "tel");
+                break;
+            default:
+                MultiPlain(builder, list, ci, key, "text");
+                break;
+        }
+    };
+
+    private void MultiPlain(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, List<string?> list, int ci, string key, string type)
+    {
+        builder.OpenElement(0, "input");
+        builder.AddAttribute(1, "class", "tdf-input");
+        builder.AddAttribute(2, "type", type);
+        builder.AddAttribute(3, "disabled", ReadOnly);
+        builder.AddAttribute(4, "value", list[ci]);
+        builder.AddAttribute(5, "onchange", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, (Microsoft.AspNetCore.Components.ChangeEventArgs e) => { list[ci] = e.Value?.ToString(); Commit(key); }));
+        builder.CloseElement();
+    }
+
+    // ===== Helpers portados de CUBOT =====
+    private static IEnumerable<string> SelectOptions(TaskFieldDto f) =>
+        string.IsNullOrWhiteSpace(f.Options)
+            ? Enumerable.Empty<string>()
+            : f.Options.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private string FieldLabel(string key) => Fields.FirstOrDefault(x => x.FieldKey == key)?.Label ?? key;
+
+    private decimal ComputeTotal(TaskFieldDto totalField)
+    {
+        if (string.IsNullOrWhiteSpace(totalField.TotalSourceKeys)) { return 0m; }
+        var keys = totalField.TotalSourceKeys.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        decimal sum = 0m;
+        foreach (var key in keys)
+        {
+            if (_multiValues.TryGetValue(key, out var list))
+            {
+                foreach (var item in list) { if (TryNum(item, out var n)) { sum += n; } }
+            }
+            else if (Values.TryGetValue(key, out var sv) && TryNum(sv, out var nv))
+            {
+                sum += nv;
+            }
+        }
+        return sum;
+    }
+
+    private static bool TryNum(string? s, out decimal value)
+    {
+        value = 0m;
+        if (string.IsNullOrWhiteSpace(s)) { return false; }
+        var clean = s.Replace(".", "").Replace(",", ".").Replace("$", "").Trim();
+        return decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out value)
+            || decimal.TryParse(clean, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out value);
+    }
+
+    private int RepeatCount(string repeatFieldKey)
+    {
+        var raw = Values.TryGetValue(repeatFieldKey, out var v) ? v : null;
+        if (int.TryParse(raw, out var n)) { return Math.Clamp(n, 0, 20); }
+        return 0;
+    }
+
+    private List<string?> MultiList(string key, int fixedCount)
+    {
+        if (!_multiValues.TryGetValue(key, out var list)) { list = new(); _multiValues[key] = list; }
+        if (fixedCount >= 0)
+        {
+            while (list.Count < fixedCount) { list.Add(null); }
+            while (list.Count > fixedCount) { list.RemoveAt(list.Count - 1); }
+        }
+        else if (list.Count == 0) { list.Add(null); }
+        return list;
+    }
+
+    private void AddMulti(string key)
+    {
+        if (!_multiValues.TryGetValue(key, out var list)) { list = new(); _multiValues[key] = list; }
+        list.Add(null);
+        if (_multiDetails.TryGetValue(key, out var dets)) { dets.Add(null); }
+    }
+
+    private void RemoveMulti(string key, int index)
+    {
+        if (_multiValues.TryGetValue(key, out var list) && index >= 0 && index < list.Count)
+        {
+            list.RemoveAt(index);
+            if (_multiDetails.TryGetValue(key, out var dets) && index < dets.Count) { dets.RemoveAt(index); }
+        }
+        Commit(key);
+    }
+
+    private List<string?> DetailList(string key, int count)
+    {
+        if (!_multiDetails.TryGetValue(key, out var list)) { list = new(); _multiDetails[key] = list; }
+        while (list.Count < count) { list.Add(null); }
+        while (list.Count > count) { list.RemoveAt(list.Count - 1); }
+        return list;
+    }
+
+    private static List<string?> ParseMulti(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return new(); }
+        if (raw.TrimStart().StartsWith("["))
+        {
+            try { var arr = JsonSerializer.Deserialize<List<string?>>(raw); if (arr is not null) { return arr; } }
+            catch { }
+        }
+        return new() { raw };
+    }
+
+    private static string? SerializeMulti(List<string?> list)
+    {
+        var clean = list.Select(x => x?.Trim()).Where(x => !string.IsNullOrEmpty(x)).ToList();
+        return clean.Count == 0 ? null : JsonSerializer.Serialize(clean);
+    }
+
+    private sealed class MultiDetailItem { public string? d { get; set; } public string? v { get; set; } }
+
+    private static (List<string?> details, List<string?> values) ParseMultiDetail(string? raw)
+    {
+        var details = new List<string?>();
+        var values = new List<string?>();
+        if (string.IsNullOrWhiteSpace(raw)) { return (details, values); }
+        if (raw.TrimStart().StartsWith("["))
+        {
+            try
+            {
+                var arr = JsonSerializer.Deserialize<List<MultiDetailItem>>(raw);
+                if (arr is not null) { foreach (var it in arr) { details.Add(it.d); values.Add(it.v); } return (details, values); }
+            }
+            catch { foreach (var s in ParseMulti(raw)) { details.Add(null); values.Add(s); } return (details, values); }
+        }
+        details.Add(null); values.Add(raw);
+        return (details, values);
+    }
+
+    private static string? SerializeMultiDetail(List<string?> details, List<string?> values)
+    {
+        var items = new List<MultiDetailItem>();
+        var n = Math.Max(details.Count, values.Count);
+        for (var i = 0; i < n; i++)
+        {
+            var d = i < details.Count ? details[i]?.Trim() : null;
+            var v = i < values.Count ? values[i]?.Trim() : null;
+            if (string.IsNullOrEmpty(d) && string.IsNullOrEmpty(v)) { continue; }
+            items.Add(new MultiDetailItem { d = d, v = v });
+        }
+        return items.Count == 0 ? null : JsonSerializer.Serialize(items);
+    }
+
+    private static string TimeRangePart(string? raw, int idx)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return ""; }
+        var parts = raw.Split(" - ", 2, StringSplitOptions.None);
+        return idx < parts.Length ? parts[idx].Trim() : "";
+    }
+
+    private static string? SetTimeRange(string? raw, int idx, string? val)
+    {
+        var a = TimeRangePart(raw, 0);
+        var b = TimeRangePart(raw, 1);
+        if (idx == 0) { a = val ?? ""; } else { b = val ?? ""; }
+        if (string.IsNullOrEmpty(a) && string.IsNullOrEmpty(b)) { return null; }
+        return $"{a} - {b}";
+    }
+
+    // Formatea con separador de miles para mostrar (mantiene la parte decimal si la hay).
+    private static string FormatThousands(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return ""; }
+        var s = raw.Trim();
+        var neg = s.StartsWith("-");
+        s = s.TrimStart('-');
+        var dot = s.IndexOf('.');
+        var intPart = dot >= 0 ? s[..dot] : s;
+        var dec = dot >= 0 ? s[dot..] : "";
+        intPart = new string(intPart.Where(char.IsDigit).ToArray());
+        if (intPart.Length == 0) { intPart = "0"; }
+        if (long.TryParse(intPart, out var n)) { intPart = n.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture); }
+        return (neg ? "-" : "") + intPart + dec;
+    }
+
+    // Quita separadores de miles; conserva digitos y punto decimal.
+    private static string? DigitsToRaw(string? display)
+    {
+        if (string.IsNullOrWhiteSpace(display)) { return null; }
+        var neg = display.TrimStart().StartsWith("-");
+        var kept = new string(display.Where(c => char.IsDigit(c) || c == '.').ToArray());
+        if (string.IsNullOrEmpty(kept)) { return null; }
+        return (neg ? "-" : "") + kept;
+    }
+}
+
+<style>
+    .tdf { display:grid; grid-template-columns:1fr 1fr; gap:.6rem .75rem; }
+    .tdf-field.col-med { grid-column:span 2; }
+    .tdf-field.col-full { grid-column:span 2; }
+    .tdf-sep { grid-column:span 2; display:flex; align-items:center; gap:.6rem; margin:.35rem 0 .1rem; color:#1e3a8a; font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.03em; }
+    .tdf-sep::after { content:""; flex:1; height:1px; background:#dbeafe; }
+    .tdf-label { display:block; font-size:.75rem; color:#334155; margin-bottom:.15rem; font-weight:500; }
+    .tdf-help { font-size:.7rem; color:#94a3b8; margin-bottom:.15rem; }
+    .tdf-muted { font-size:.72rem; color:#94a3b8; }
+    .tdf-input { width:100%; padding:.38rem .5rem; border:1px solid #cbd5e1; border-radius:6px; font:inherit; font-size:.85rem; background:#fff; }
+    .tdf-input:disabled { background:#f8fafc; color:#64748b; }
+    .tdf-total { background:#f1f5f9; font-weight:600; }
+    .tdf-money { display:flex; align-items:center; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; }
+    .tdf-money .tdf-input { border:none; border-radius:0; }
+    .tdf-money-sign { padding:0 .45rem; color:#64748b; background:#f1f5f9; align-self:stretch; display:flex; align-items:center; }
+    .tdf-timerange { display:flex; gap:.4rem; align-items:center; }
+    .tdf-multi-row { display:flex; gap:.35rem; align-items:center; margin-bottom:.3rem; }
+    .tdf-multi-idx { font-size:.72rem; color:#94a3b8; min-width:1.1rem; text-align:center; }
+    .tdf-detail { max-width:40%; }
+    .tdf-multi-del { border:none; background:#fee2e2; color:#b91c1c; width:1.6rem; height:1.6rem; border-radius:6px; cursor:pointer; line-height:1; }
+    .tdf-multi-add { border:1px dashed #93c5fd; background:#eff6ff; color:#1d4ed8; padding:.2rem .6rem; border-radius:6px; cursor:pointer; font-size:.78rem; }
+</style>

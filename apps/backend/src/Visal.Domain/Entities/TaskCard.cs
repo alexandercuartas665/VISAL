@@ -31,4 +31,12 @@ public class TaskCard : TenantEntity
 
     /// <summary>Color HEX para acentuar el titulo de la tarjeta. Null = sin color especifico.</summary>
     public string? Color { get; set; }
+
+    /// <summary>
+    /// Valores de los campos dinamicos del tablero (jsonb), indexados por FieldKey de
+    /// <see cref="TaskFieldDefinition"/>. Diccionario plano { "field_key": "valor" }.
+    /// Los campos multiples/repetidos guardan su valor como un arreglo JSON serializado.
+    /// Portado del patron Lead.FieldValuesJson de CUBOT.travels.
+    /// </summary>
+    public string? FieldValuesJson { get; set; }
 }

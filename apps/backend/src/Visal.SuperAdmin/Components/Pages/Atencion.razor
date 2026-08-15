@@ -109,14 +109,47 @@ else
                             </div>
                         </div>
 
+                        @* Servicio y Profesional son catalogos grandes: en vez de pintar
+                           todas las opciones como pildoras usamos un autocompletado tipo
+                           tag-input (escribir -> elegir). Se conserva la multi-seleccion:
+                           lo elegido queda como chip removible arriba del buscador. *@
                         @if (ServiciosDisponibles.Count > 0)
                         {
                             <div class="at-fbar-filt-group">
                                 <div class="at-fbar-filt-lbl">Servicio</div>
-                                <div class="at-fbar-chips">
-                                    @foreach (var s in ServiciosDisponibles)
+                                @if (_filServicios.Count > 0)
+                                {
+                                    <div class="at-fbar-chips" style="margin-bottom:7px;">
+                                        @foreach (var s in _filServicios.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                                        {
+                                            <button class="at-fbar-fchip on" @onclick="() => ToggleServicio(s)" title="Quitar">@s <span class="at-ac-x">&times;</span></button>
+                                        }
+                                    </div>
+                                }
+                                <div class="at-ac">
+                                    <input class="form-control form-control-sm at-ac-input" placeholder="Escribe para buscar servicio..."
+                                           @bind="_servicioQuery" @bind:event="oninput" />
+                                    @if (!string.IsNullOrWhiteSpace(_servicioQuery))
                                     {
-                                        <button class="at-fbar-fchip @(_filServicios.Contains(s) ? "on" : "")" @onclick="() => ToggleServicio(s)">@s</button>
+                                        var scAll = ServiciosFiltrados();
+                                        var scShow = scAll.Take(AcMax).ToList();
+                                        <div class="at-ac-menu">
+                                            @if (scShow.Count == 0)
+                                            {
+                                                <div class="at-ac-empty">Sin coincidencias para "@_servicioQuery"</div>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var s in scShow)
+                                                {
+                                                    <button type="button" class="at-ac-opt" @onclick="() => AddServicio(s)">@s</button>
+                                                }
+                                                @if (scAll.Count > AcMax)
+                                                {
+                                                    <div class="at-ac-more">Escribe mas para afinar la busqueda...</div>
+                                                }
+                                            }
+                                        </div>
                                     }
                                 </div>
                             </div>
@@ -126,10 +159,39 @@ else
                         {
                             <div class="at-fbar-filt-group">
                                 <div class="at-fbar-filt-lbl">Profesional</div>
-                                <div class="at-fbar-chips">
-                                    @foreach (var p in ProfesionalesDisponibles)
+                                @if (_filProfesionales.Count > 0)
+                                {
+                                    <div class="at-fbar-chips" style="margin-bottom:7px;">
+                                        @foreach (var p in _filProfesionales.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                                        {
+                                            <button class="at-fbar-fchip on" @onclick="() => ToggleProfesional(p)" title="Quitar">@p <span class="at-ac-x">&times;</span></button>
+                                        }
+                                    </div>
+                                }
+                                <div class="at-ac">
+                                    <input class="form-control form-control-sm at-ac-input" placeholder="Escribe para buscar profesional..."
+                                           @bind="_profesionalQuery" @bind:event="oninput" />
+                                    @if (!string.IsNullOrWhiteSpace(_profesionalQuery))
                                     {
-                                        <button class="at-fbar-fchip @(_filProfesionales.Contains(p) ? "on" : "")" @onclick="() => ToggleProfesional(p)">@p</button>
+                                        var prAll = ProfesionalesFiltrados();
+                                        var prShow = prAll.Take(AcMax).ToList();
+                                        <div class="at-ac-menu">
+                                            @if (prShow.Count == 0)
+                                            {
+                                                <div class="at-ac-empty">Sin coincidencias para "@_profesionalQuery"</div>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var p in prShow)
+                                                {
+                                                    <button type="button" class="at-ac-opt" @onclick="() => AddProfesional(p)">@p</button>
+                                                }
+                                                @if (prAll.Count > AcMax)
+                                                {
+                                                    <div class="at-ac-more">Escribe mas para afinar la busqueda...</div>
+                                                }
+                                            }
+                                        </div>
                                     }
                                 </div>
                             </div>
@@ -200,7 +262,7 @@ else
                             <tr class="@(s.Completado ? "at-row-done" : "")">
                                 @foreach (var col in _columnasVisibles)
                                 {
-                                    @RenderCelda(col.Key, s)
+                                    @RenderCelda(col.Key, col.Label, s)
                                 }
                             </tr>
                         }
@@ -402,6 +464,14 @@ else
     .at-fbar-fchip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; border: 1px solid #cbd5e1; background: #fff; font-size: 12px; cursor: pointer; color: #334155; }
     .at-fbar-fchip:hover { border-color: #1565c0; }
     .at-fbar-fchip.on { background: #dbeafe; border-color: #1565c0; color: #1565c0; font-weight: 600; }
+    /* Autocompletado de los filtros Servicio / Profesional */
+    .at-ac { position: relative; }
+    .at-ac-input { max-width: 100%; font-size: 12.5px; }
+    .at-ac-x { font-weight: 700; margin-left: 1px; }
+    .at-ac-menu { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 3px); background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 28px rgba(15,23,42,.15); max-height: 240px; overflow-y: auto; padding: 4px; }
+    .at-ac-opt { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 9px; border-radius: 6px; font-size: 12px; color: #334155; cursor: pointer; white-space: normal; line-height: 1.3; }
+    .at-ac-opt:hover { background: #eff6ff; color: #1565c0; }
+    .at-ac-empty, .at-ac-more { padding: 6px 9px; font-size: 11px; color: #94a3b8; }
     .at-fbar-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; color: #334155; }
     .at-grid-h { padding: 10px 14px; font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid #e2e8f0; background: #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
     .at-cfg-btn { text-transform: none; font-weight: 600; letter-spacing: 0; }
@@ -456,6 +526,57 @@ else
            el WhatsApp por defecto. El usuario puede colapsarlo/expandirlo con el chip. */
         .at-fs-body-with-chat { grid-template-columns: minmax(0, 1fr) 44px 360px; }
         .at-fs-body-with-chat.wa-colapsado { grid-template-columns: minmax(0, 1fr) 44px 360px; }
+    }
+
+    /* ===== Telefono (hasta 768px): lista como tarjetas apiladas, sin scroll horizontal ===== */
+    @@media (max-width: 768px) {
+        /* Filtros basicos (Profesional/Especialidad) a 1 columna */
+        .at-filtros { grid-template-columns: 1fr; }
+
+        /* Header de la lista: permitir que el boton Columnas baje si no cabe */
+        .at-grid-h { flex-wrap: wrap; gap: 8px; }
+
+        /* Parrilla -> tarjetas: cada fila es una tarjeta y cada celda es
+           "ETIQUETA .......... valor" usando el data-label de la celda. */
+        .at-grid-wrap { overflow-x: hidden; max-height: none; }
+        .at-tbl { min-width: 0; }
+        .at-tbl thead { display: none; }
+        .at-tbl tbody, .at-tbl tr, .at-tbl td { display: block; width: 100%; }
+        .at-tbl tr {
+            border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 10px;
+            padding: 4px 12px; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.06);
+        }
+        .at-tbl tr.at-row-done { background: #f8fafc; opacity: .8; }
+        .at-tbl td {
+            border: 0 !important; border-bottom: 1px solid #f1f5f9 !important;
+            padding: 7px 0 !important; text-align: left !important;
+            display: flex; justify-content: space-between; align-items: center; gap: 12px;
+            white-space: normal;
+        }
+        .at-tbl tr td:last-child { border-bottom: 0 !important; }
+        .at-tbl td::before {
+            content: attr(data-label); flex: 0 0 42%;
+            font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #64748b;
+        }
+        /* Columna checkbox (etiqueta vacia): accion masiva de escritorio, se oculta en movil */
+        .at-tbl td[data-label=""] { display: none; }
+
+        /* ----- Modal fullscreen (HC / Notas) a pantalla completa ----- */
+        .at-fs-modal { top: 0; left: 0; right: 0; bottom: 0; border-radius: 0; }
+        .at-fs-h { padding: 10px 12px; gap: 8px; }
+        .at-fs-h h3 { font-size: 14px; }
+        .at-fs-body { padding: 10px 12px; }
+
+        /* Modal Notas: apilar Notas / WhatsApp / Monitor IA en 1 columna */
+        .at-fs-body-with-chat,
+        .at-fs-body-with-chat.wa-colapsado,
+        .at-fs-body-with-chat.mon-colapsado,
+        .at-fs-body-with-chat.wa-colapsado.mon-colapsado { display: block; overflow: auto; }
+        .at-fs-notas { padding: 12px; }
+        .at-fs-whatsapp, .at-fs-aichat { border-left: none; border-top: 1px solid #e2e8f0; }
+        /* Franja colapsada horizontal (no texto vertical) en movil */
+        .at-side-strip { flex-direction: row; width: 100%; min-width: 0; justify-content: center; padding: 10px; }
+        .at-side-strip-text { writing-mode: horizontal-tb; transform: none; }
     }
     .usu-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 950; }
     .usu-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 720px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 951; display: flex; flex-direction: column; }
@@ -662,6 +783,33 @@ else
     private void ToggleServicio(string s) { if (!_filServicios.Add(s)) { _filServicios.Remove(s); } }
     private void ToggleProfesional(string p) { if (!_filProfesionales.Add(p)) { _filProfesionales.Remove(p); } }
     private void TogglePaqueteCodigo(string c) { if (!_filPaquetesCodigos.Add(c)) { _filPaquetesCodigos.Remove(c); } }
+
+    // ===== Autocompletado de los filtros Servicio / Profesional =====
+    // Los catalogos son grandes; se busca escribiendo en vez de pintar pildoras.
+    private string _servicioQuery = "";
+    private string _profesionalQuery = "";
+    private const int AcMax = 10;
+
+    private List<string> ServiciosFiltrados()
+    {
+        var qy = _servicioQuery.Trim();
+        if (qy.Length == 0) { return new(); }
+        return ServiciosDisponibles
+            .Where(s => !_filServicios.Contains(s) && s.Contains(qy, StringComparison.OrdinalIgnoreCase))
+            .Take(AcMax + 1)   // +1 para detectar "hay mas"
+            .ToList();
+    }
+    private List<string> ProfesionalesFiltrados()
+    {
+        var qy = _profesionalQuery.Trim();
+        if (qy.Length == 0) { return new(); }
+        return ProfesionalesDisponibles
+            .Where(p => !_filProfesionales.Contains(p) && p.Contains(qy, StringComparison.OrdinalIgnoreCase))
+            .Take(AcMax + 1)
+            .ToList();
+    }
+    private void AddServicio(string s) { _filServicios.Add(s); _servicioQuery = ""; }
+    private void AddProfesional(string p) { _filProfesionales.Add(p); _profesionalQuery = ""; }
     private void SetPaquete(string v) => _filPaquete = _filPaquete == v ? "" : v;
     private void SetFecha(string v) => _filFecha = _filFecha == v ? "" : v;
 
@@ -679,6 +827,8 @@ else
         _filServicios.Clear();
         _filProfesionales.Clear();
         _filPaquetesCodigos.Clear();
+        _servicioQuery = "";
+        _profesionalQuery = "";
         _filPaquete = "";
         _filFecha = "";
         _filFechaDesde = _filFechaHasta = null;
@@ -834,7 +984,7 @@ else
     private List<AtencionColumnaConfigDto> _configColumnas = new();
 
     /// <summary>Columnas visibles ya mezcladas con overrides y ordenadas.</summary>
-    private IReadOnlyList<(string Key, string Titulo)> _columnasVisibles
+    private IReadOnlyList<(string Key, string Titulo, string Label)> _columnasVisibles
     {
         get
         {
@@ -844,21 +994,28 @@ else
                 cfgDict.TryGetValue(d.Key, out var ov);
                 var visible = ov?.Visible ?? true;
                 var titulo = string.IsNullOrWhiteSpace(ov?.Alias) ? d.TituloHtml : System.Net.WebUtility.HtmlEncode(ov!.Alias!);
+                // Etiqueta en texto plano para el data-label de las tarjetas en movil.
+                // Usamos el titulo del encabezado (mas legible que el nombre interno),
+                // reemplazando el salto de linea por espacio: "Paquete<br/>Nombre" -> "Paquete Nombre".
+                var label = string.IsNullOrWhiteSpace(ov?.Alias)
+                    ? d.TituloHtml.Replace("<br/>", " ").Replace("<br>", " ")
+                    : ov!.Alias!;
                 var orden = ov?.Orden ?? d.OrdenDefault;
-                return new { d.Key, Titulo = titulo, Visible = visible, Orden = orden };
+                return new { d.Key, Titulo = titulo, Label = label, Visible = visible, Orden = orden };
             });
-            return items.Where(x => x.Visible).OrderBy(x => x.Orden).Select(x => (x.Key, x.Titulo)).ToList();
+            return items.Where(x => x.Visible).OrderBy(x => x.Orden).Select(x => (x.Key, x.Titulo, x.Label)).ToList();
         }
     }
 
     /// <summary>Render de la celda de la fila segun el key de la columna.</summary>
-    private RenderFragment RenderCelda(string key, MiServicioAsignadoDto s) => __b =>
+    private RenderFragment RenderCelda(string key, string label, MiServicioAsignadoDto s) => __b =>
     {
         var seq = 0;
         switch (key)
         {
             case "chk":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.OpenElement(seq++, "input");
                 __b.AddAttribute(seq++, "type", "checkbox");
                 __b.AddAttribute(seq++, "disabled", s.Completado);
@@ -869,6 +1026,7 @@ else
             {
                 var bloqueoHc = _puedeSaltarOrden ? null : MotivoBloqueoOrden(s);
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.OpenElement(seq++, "button");
                 __b.AddAttribute(seq++, "class", "btn btn-outline-secondary btn-sm");
                 __b.AddAttribute(seq++, "title", bloqueoHc ?? "Abrir Historias Clinicas del paciente");
@@ -889,6 +1047,7 @@ else
                     ? "Esta sesion ya tiene HC Cerrada vinculada."
                     : (_puedeSaltarOrden ? null : MotivoBloqueoOrden(s));
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.OpenElement(seq++, "button");
                 __b.AddAttribute(seq++, "class", "btn btn-outline-primary btn-sm");
                 __b.AddAttribute(seq++, "title", bloqueoNotas ?? "Abrir Notas Medicas (registrar atencion)");
@@ -901,56 +1060,66 @@ else
             }
             case "cod_int":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, s.CodigoAsignacionInterna);
                 __b.CloseElement();
                 break;
             case "cod_asig":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, s.CodigoAutorizacion);
                 __b.CloseElement();
                 break;
             case "fec_asig":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.FechaAsignacion.ToString("dd/MM/yyyy"));
                 __b.CloseElement();
                 break;
             case "orden":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "text-center");
                 __b.AddContent(seq++, s.Orden);
                 __b.CloseElement();
                 break;
             case "tipo":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.TipoServicio);
                 __b.CloseElement();
                 break;
             case "servicio":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.NombreServicio);
                 __b.CloseElement();
                 break;
             case "pkg_cod":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, s.PaqueteCodigo);
                 __b.CloseElement();
                 break;
             case "pkg_nom":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.PaqueteNombre);
                 __b.CloseElement();
                 break;
             case "session_no":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "text-center");
                 __b.AddContent(seq++, s.NumeroSesionMostrar);
                 __b.CloseElement();
                 break;
             case "completado":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.OpenElement(seq++, "span");
                 __b.AddAttribute(seq++, "class", s.Completado ? "at-pill-done" : "at-pill-no");
                 __b.AddContent(seq++, s.Completado ? "COMPLETO" : "NO");
@@ -959,33 +1128,39 @@ else
                 break;
             case "tipo_doc_pac":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, s.TipoDocPaciente);
                 __b.CloseElement();
                 break;
             case "no_doc_pac":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, s.NumeroDocPaciente);
                 __b.CloseElement();
                 break;
             case "nom_paciente":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.NombrePaciente);
                 __b.CloseElement();
                 break;
             case "profesional":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.NombreProfesional);
                 __b.CloseElement();
                 break;
             case "fec_nota":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "");
                 __b.CloseElement();
                 break;
             case "hora_cierre":
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono text-center");
                 __b.AddContent(seq++, s.HoraCierre is DateTimeOffset hc ? hc.ToLocalTime().ToString("HH:mm") : "-");
                 __b.CloseElement();
@@ -996,6 +1171,7 @@ else
                     // el motivo del ultimo rechazo (viene resuelto en el service).
                     var (txt, cls, tip) = ChipRevisionAt(s);
                     __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                     __b.AddAttribute(seq++, "class", "text-center");
                     __b.OpenElement(seq++, "span");
                     __b.AddAttribute(seq++, "class", "at-rv-chip " + cls);
@@ -1007,6 +1183,7 @@ else
                 break;
             default:
                 __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
                 __b.CloseElement();
                 break;
         }

@@ -272,3 +272,19 @@
     margin: 6px;
     font-size: 11px;
 }
+
+/* ====== Telefono (hasta 768px): formulario en 1 columna ====== */
+@media (max-width: 768px) {
+    /* Todos los campos ocupan el ancho completo, sin importar su span original. */
+    .fv-grid { grid-template-columns: 1fr; }
+    .fv-col { grid-column: 1 / -1 !important; border-right: none; }
+
+    /* Cabecera del documento apilada (logo / titulo / meta) */
+    .fv-head { grid-template-columns: 1fr; }
+    .fv-head-logo,
+    .fv-head-title { border-right: none; border-bottom: 1px solid #cbd5e1; }
+    .fv-head-meta-row { grid-template-columns: 88px 1fr; }
+
+    /* Tablas repetibles: permitir scroll horizontal propio en vez de desbordar */
+    .fv-tbl-wrap { overflow-x: auto; }
+}

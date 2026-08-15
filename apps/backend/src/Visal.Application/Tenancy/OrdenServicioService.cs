@@ -11,7 +11,7 @@ public sealed class OrdenServicioService(
     IHistoriaPrefillService prefill) : IOrdenServicioService
 {
     public async Task<IReadOnlyList<ServicioSugerenciaDto>> BuscarSugerenciasAsync(
-        string termino, int take = 12, CancellationToken ct = default)
+        string termino, int take = 12, Guid? pacienteId = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(termino) || termino.Trim().Length < 2)
         {
@@ -21,6 +21,17 @@ public sealed class OrdenServicioService(
         var t = termino.Trim().ToLowerInvariant();
         if (take <= 0) { take = 12; }
         if (take > 50) { take = 50; }
+
+        // Si viene pacienteId, acotamos el catalogo a los contratos del paciente
+        // (las aseguradoras a las que esta vinculado). En ese modo NO mezclamos
+        // paquete-hints globales ni el catalogo EXTERNO de CUPS: solo servicios de
+        // sus contratos. Sin pacienteId se mantiene el comportamiento previo.
+        List<Guid>? contratoIds = null;
+        if (pacienteId is Guid pid)
+        {
+            contratoIds = await ContratoIdsDelPacienteAsync(pid, ct);
+            if (contratoIds.Count == 0) { return Array.Empty<ServicioSugerenciaDto>(); }
+        }
 
         // PQ7: si el termino coincide con el codigo de un Paquete activo, anteponer
         // los servicios del paquete como sugerencias. El profesional puede tomar
@@ -33,7 +44,7 @@ public sealed class OrdenServicioService(
             .Select(p => new { p.Id, p.Codigo, p.Nombre })
             .ToListAsync(ct);
         var paqueteHints = new List<ServicioSugerenciaDto>();
-        if (paquetes.Count > 0)
+        if (paquetes.Count > 0 && contratoIds is null)
         {
             var pkg = paquetes[0];
             var codigos = await db.PaqueteServicios.AsNoTracking()
@@ -90,7 +101,9 @@ public sealed class OrdenServicioService(
         // de EF (ServicioContrato hereda de TenantEntity).
         // Hacemos un join opcional con Contrato/Aseguradora para mostrar de donde
         // viene el servicio en el dropdown (ej: "EPS SURA - CTR-001").
-        var q = from s in db.ServiciosContrato.AsNoTracking()
+        var baseServicios = db.ServiciosContrato.AsNoTracking();
+        if (contratoIds is not null) { baseServicios = baseServicios.Where(s => contratoIds.Contains(s.ContratoId)); }
+        var q = from s in baseServicios
                 where (s.Descripcion != null && s.Descripcion.ToLower().Contains(t)) ||
                       (s.CodigoServicio != null && s.CodigoServicio.ToLower().Contains(t)) ||
                       (s.CodigoInterno != null && s.CodigoInterno.ToLower().Contains(t))
@@ -113,16 +126,22 @@ public sealed class OrdenServicioService(
         // Sugerencias del catalogo EXTERNO (CUPS 890xxx cargados desde el Excel).
         // Aparecen tras los propios y se distinguen con Aseguradora="Externo (CUPS)".
         // Al agregarlos, ServicioContratoId queda null y CodigoServicio guarda el CUPS.
-        var externos = await db.CatalogosServicioReferencia.AsNoTracking()
-            .Where(c => c.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral
-                        && (c.Codigo.ToLower().Contains(t) || c.Nombre.ToLower().Contains(t))
-                        && c.Activo)
-            .OrderBy(c => c.Codigo)
-            .Take(Math.Max(1, take - propios.Count))
-            .Select(c => new ServicioSugerenciaDto(
-                Guid.Empty, c.Codigo, c.Nombre,
-                "EXTERNO", null, null, "Externo (CUPS)", null))
-            .ToListAsync(ct);
+        // Catalogo EXTERNO (CUPS) solo en modo global (sin paciente). En modo
+        // paciente nos cenimos estrictamente a sus contratos.
+        var externos = new List<ServicioSugerenciaDto>();
+        if (contratoIds is null)
+        {
+            externos = await db.CatalogosServicioReferencia.AsNoTracking()
+                .Where(c => c.Tipo == Visal.Domain.Enums.TipoCatalogoServicio.ServicioGeneral
+                            && (c.Codigo.ToLower().Contains(t) || c.Nombre.ToLower().Contains(t))
+                            && c.Activo)
+                .OrderBy(c => c.Codigo)
+                .Take(Math.Max(1, take - propios.Count))
+                .Select(c => new ServicioSugerenciaDto(
+                    Guid.Empty, c.Codigo, c.Nombre,
+                    "EXTERNO", null, null, "Externo (CUPS)", null))
+                .ToListAsync(ct);
+        }
         // PaqueteHints van AL PRINCIPIO para que salten a la vista cuando el
         // profesional escribe exactamente el codigo del paquete.
         return paqueteHints.Concat(propios).Concat(externos).ToList();
@@ -209,6 +228,88 @@ public sealed class OrdenServicioService(
     {
         return await db.HistoriaClinicaOrdenesServicio
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
+    }
+
+    private async Task<List<Guid>> ContratoIdsDelPacienteAsync(Guid pacienteId, CancellationToken ct) =>
+        await db.PacienteContratos.AsNoTracking()
+            .Where(pc => pc.PacienteId == pacienteId)
+            .Select(pc => pc.ContratoAseguradoraId)
+            .Distinct()
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<PaquetePacienteDto>> ListarPaquetesDelPacienteAsync(
+        Guid pacienteId, CancellationToken ct = default)
+    {
+        var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
+        if (contratoIds.Count == 0) { return Array.Empty<PaquetePacienteDto>(); }
+
+        // Paquetes presentes en los contratos del paciente (via ServicioContrato.PaqueteId).
+        var rows = await (
+            from s in db.ServiciosContrato.AsNoTracking()
+            where contratoIds.Contains(s.ContratoId) && s.PaqueteId != null
+            join p in db.Paquetes.AsNoTracking() on s.PaqueteId equals p.Id
+            select new { p.Id, p.Codigo, p.Nombre })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(x => new { x.Id, x.Codigo, x.Nombre })
+            .Select(g => new PaquetePacienteDto(g.Key.Id, g.Key.Codigo, g.Key.Nombre, g.Count()))
+            .OrderBy(x => x.Codigo)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<OrdenServicioItemDto>> AgregarPaqueteAsync(
+        Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        await db.EnsureAbiertaAsync(historiaId, ct);
+
+        var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
+        if (contratoIds.Count == 0) { return Array.Empty<OrdenServicioItemDto>(); }
+
+        // Servicios del paquete que existen en los contratos del paciente.
+        var servicios = await db.ServiciosContrato.AsNoTracking()
+            .Where(s => contratoIds.Contains(s.ContratoId) && s.PaqueteId == paqueteId)
+            .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
+            .ToListAsync(ct);
+        if (servicios.Count == 0) { return Array.Empty<OrdenServicioItemDto>(); }
+
+        // ServicioContratoId ya presentes en la orden -> no duplicar.
+        var yaEnOrden = (await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
+            .Where(x => x.HistoriaClinicaId == historiaId && x.ServicioContratoId != null)
+            .Select(x => x.ServicioContratoId)
+            .ToListAsync(ct)).Where(v => v.HasValue).Select(v => v!.Value);
+        var yaSet = new HashSet<Guid>(yaEnOrden);
+
+        var siguiente = 1 + (await db.HistoriaClinicaOrdenesServicio
+            .Where(x => x.HistoriaClinicaId == historiaId)
+            .Select(x => (int?)x.Orden).MaxAsync(ct) ?? 0);
+
+        var nuevos = new List<HistoriaClinicaOrdenServicio>();
+        foreach (var s in servicios)
+        {
+            if (yaSet.Contains(s.Id)) { continue; }
+            nuevos.Add(new HistoriaClinicaOrdenServicio
+            {
+                TenantId = tid,
+                HistoriaClinicaId = historiaId,
+                ServicioContratoId = s.Id,
+                CodigoServicio = Trim(s.CodigoServicio),
+                Descripcion = string.IsNullOrWhiteSpace(s.Descripcion) ? "(sin descripcion)" : s.Descripcion!.Trim(),
+                Cantidad = "1",
+                Observaciones = null,
+                Orden = siguiente++,
+            });
+        }
+        if (nuevos.Count == 0) { return Array.Empty<OrdenServicioItemDto>(); }
+
+        db.HistoriaClinicaOrdenesServicio.AddRange(nuevos);
+        await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
+
+        return nuevos.Select(e => new OrdenServicioItemDto(
+            e.Id, e.HistoriaClinicaId, e.ServicioContratoId,
+            e.CodigoServicio, e.Descripcion, e.Cantidad, e.Observaciones, e.Orden)).ToList();
     }
 
     private static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

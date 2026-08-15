@@ -41,6 +41,15 @@ public sealed record ActualizarServicioRequest(
     string? Cantidad,
     string? Observaciones);
 
+/// <summary>Paquete disponible para un paciente: existe dentro de alguno de los
+/// contratos del paciente (via ServicioContrato.PaqueteId). CantidadServicios es
+/// cuantos servicios del paquete estan en esos contratos.</summary>
+public sealed record PaquetePacienteDto(
+    Guid PaqueteId,
+    string Codigo,
+    string Nombre,
+    int CantidadServicios);
+
 public interface IOrdenServicioService
 {
     /// <summary>
@@ -49,7 +58,18 @@ public interface IOrdenServicioService
     /// input "Nombre del Servicio".
     /// </summary>
     Task<IReadOnlyList<ServicioSugerenciaDto>> BuscarSugerenciasAsync(
-        string termino, int take = 12, CancellationToken ct = default);
+        string termino, int take = 12, Guid? pacienteId = null, CancellationToken ct = default);
+
+    /// <summary>Paquetes disponibles para el paciente: los que existen dentro de
+    /// sus contratos de aseguradora. Alimenta el selector de paquetes.</summary>
+    Task<IReadOnlyList<PaquetePacienteDto>> ListarPaquetesDelPacienteAsync(
+        Guid pacienteId, CancellationToken ct = default);
+
+    /// <summary>Agrega a la orden TODOS los servicios de un paquete que existan en
+    /// los contratos del paciente. Omite los que ya estan en la orden. Devuelve las
+    /// filas nuevas creadas.</summary>
+    Task<IReadOnlyList<OrdenServicioItemDto>> AgregarPaqueteAsync(
+        Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, CancellationToken ct = default);
 
     /// <summary>Items actuales de la orden a servicios de la historia (ordenados por Orden).</summary>
     Task<IReadOnlyList<OrdenServicioItemDto>> ListarPorHistoriaAsync(

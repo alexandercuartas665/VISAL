@@ -148,6 +148,8 @@ public interface IApplicationDbContext
     // Ingesta de correos -> PQR: buzones IMAP por tenant + bitacora/dedup de correos procesados.
     DbSet<TenantEmailIngestConfig> TenantEmailIngestConfigs { get; }
     DbSet<EmailIngestLog> EmailIngestLogs { get; }
+    // Menu lateral personalizable por tenant (grupos + orden + ocultas + enlaces externos).
+    DbSet<TenantNavMenuConfig> TenantNavMenuConfigs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

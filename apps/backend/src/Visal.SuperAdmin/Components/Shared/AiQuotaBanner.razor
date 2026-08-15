@@ -38,17 +38,26 @@
     private bool _show;
     private string _toneClass = string.Empty;
 
-    protected override async Task OnInitializedAsync()
+    private bool _cargado;
+
+    // Cargamos DESPUES del primer render (no en OnInitializedAsync) a proposito:
+    // este banner vive en el layout y comparte el DbContext scoped del circuito
+    // con la pagina. Si consultara durante OnInitializedAsync correria en paralelo
+    // con el OnInitializedAsync de la pagina y reventaria el DbContext con
+    // "A second operation was started on this context instance". Al diferir a
+    // OnAfterRender, la pagina ya termino su carga inicial y no hay concurrencia.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender || _cargado) { return; }
+        _cargado = true;
         try
         {
             _quota = await UsageSvc.GetQuotaAsync();
         }
         catch
         {
-            // No es catastrofico: sin tenant (edge de layout renderizado antes de scope),
-            // sin plan configurado, o error de red en Postgres — el banner simplemente
-            // no aparece.
+            // No es catastrofico: sin tenant, sin plan configurado, o error de red
+            // en Postgres — el banner simplemente no aparece.
             _quota = null;
             return;
         }
@@ -63,6 +72,9 @@
             _show = true;
             _toneClass = "visal-ai-quota-banner--warning";
         }
+        // Cargamos despues del render inicial: hay que pedir un re-render para
+        // que el banner (si aplica) aparezca.
+        if (_show) { StateHasChanged(); }
     }
 
     private static string Format(long n)

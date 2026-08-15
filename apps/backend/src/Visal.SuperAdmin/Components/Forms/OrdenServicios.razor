@@ -33,15 +33,76 @@
 else
 {
     <div class="os-card">
+        @* ---- Selector de paquetes del paciente: al elegir uno se agregan de una
+             vez todos sus servicios (solo paquetes presentes en los contratos del
+             paciente). ---- *@
+        @if (_paquetes.Count > 0)
+        {
+            <div class="os-pkg-bar">
+                <div class="os-pkg-f">
+                    <label>Paquete del contrato</label>
+                    <select class="form-control form-control-sm" @bind="_paqueteSel">
+                        <option value="">Selecciona un paquete...</option>
+                        @foreach (var p in _paquetes)
+                        {
+                            <option value="@p.PaqueteId">@p.Codigo &mdash; @p.Nombre (@p.CantidadServicios serv.)</option>
+                        }
+                    </select>
+                </div>
+                <button class="btn btn-outline-primary btn-sm os-pkg-btn" title="Agregar a la orden todos los servicios del paquete"
+                        @onclick="CargarPaqueteAsync"
+                        disabled="@(string.IsNullOrEmpty(_paqueteSel) || _cargandoPkg)">
+                    @(_cargandoPkg ? "Cargando..." : "Cargar servicios del paquete")
+                </button>
+            </div>
+        }
+
         @* ---- Fila de captura: autocompletado + cantidad ---- *@
         <div class="os-row">
             <div class="os-f os-c-10 os-search-wrap">
-                <label>Nombre del Servicio</label>
+                <div class="os-search-head">
+                    <label>@(_soloPaquetes ? "Nombre del Paquete" : "Nombre del Servicio")</label>
+                    <label class="os-solo-pkg" title="Buscar solo paquetes de los contratos del paciente">
+                        <input type="checkbox" checked="@_soloPaquetes"
+                               @onchange="e => OnSoloPaquetesChanged((bool)e.Value!)" />
+                        Solo paquetes
+                    </label>
+                </div>
                 <input class="form-control form-control-sm"
-                       placeholder="Buscar servicio por descripcion o codigo (min 2 caracteres)..."
+                       placeholder="@(_soloPaquetes ? "Buscar paquete por codigo o nombre..." : "Buscar servicio por descripcion o codigo (min 2 caracteres)...")"
                        value="@_terminoBusqueda"
                        @oninput="OnTerminoChanged" />
-                @if (_sugerencias.Count > 0)
+                @if (_soloPaquetes)
+                {
+                    @if (_sugerenciasPkg.Count > 0)
+                    {
+                        <div class="os-suggest">
+                            @foreach (var p in _sugerenciasPkg)
+                            {
+                                <button class="os-suggest-item os-suggest-pkg"
+                                        @onclick="() => SeleccionarPaqueteAsync(p)">
+                                    <div class="os-suggest-nm">
+                                        @p.Nombre
+                                        <span class="os-suggest-pkg-tag">Paquete</span>
+                                    </div>
+                                    <div class="os-suggest-meta">
+                                        @if (!string.IsNullOrWhiteSpace(p.Codigo)) { <span class="os-suggest-cod">@p.Codigo</span> }
+                                        <span>&middot; @p.CantidadServicios servicio(s)</span>
+                                    </div>
+                                </button>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="os-suggest os-suggest-empty">
+                            @(_paquetes.Count == 0
+                                ? "Este paciente no tiene paquetes en sus contratos."
+                                : $"Sin paquetes para \"{_terminoBusqueda}\"")
+                        </div>
+                    }
+                }
+                else if (_sugerencias.Count > 0)
                 {
                     <div class="os-suggest">
                         @foreach (var s in _sugerencias)
@@ -206,6 +267,28 @@ else
     .os-cod-cell { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#0f172a; font-weight:700; }
     .os-empty-row { padding:30px !important; font-style:italic; }
     .os-inline-input { font-size:12px; }
+
+    /* Selector de paquetes del paciente */
+    .os-pkg-bar { display:flex; gap:10px; align-items:flex-end; margin-bottom:14px; padding:10px 12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; flex-wrap:wrap; }
+    .os-pkg-f { flex:1; min-width:220px; }
+    .os-pkg-f label { font-size:11px; font-weight:700; color:#0369a1; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
+    .os-pkg-btn { white-space:nowrap; }
+
+    /* Checkbox "Solo paquetes" en la cabecera del buscador */
+    .os-search-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .os-search-head > label { margin-bottom:4px; }
+    .os-search-head .os-solo-pkg { display:inline-flex; align-items:center; gap:5px; font-size:11px;
+        font-weight:700; color:#0369a1; text-transform:none; letter-spacing:normal; margin-bottom:4px; cursor:pointer; }
+    .os-search-head .os-solo-pkg input { margin:0; cursor:pointer; }
+
+    /* Telefono (hasta 768px): filas de captura y toolbar en 1 columna */
+    @@media (max-width: 768px) {
+        .os-row { grid-template-columns: 1fr; }
+        .os-c-1, .os-c-2, .os-c-10, .os-c-11 { grid-column: 1 / -1; }
+        .os-action-add { min-height: 44px; }
+        .os-pkg-bar { flex-direction: column; align-items: stretch; }
+        .os-grid-wrap { overflow-x: auto; }
+    }
 </style>
 
 @code {
@@ -223,9 +306,22 @@ else
         if (OnItemsChanged.HasDelegate) { await OnItemsChanged.InvokeAsync(); }
     }
 
+    /// <summary>Paciente de la HC. Necesario para acotar servicios y paquetes a
+    /// los contratos del paciente. Lo pasa HistoriasClinicasModulo.</summary>
+    [Parameter] public Guid? PacienteId { get; set; }
+
     private Guid? _ultimoIdCargado;
+    private Guid? _ultimoPacienteCargado;
+    private List<PaquetePacienteDto> _paquetes = new();
+    private string _paqueteSel = "";
+    private bool _cargandoPkg;
     private string _terminoBusqueda = "";
     private List<ServicioSugerenciaDto> _sugerencias = new();
+    /// <summary>Modo del buscador: false = busca servicios; true = busca solo paquetes
+    /// de los contratos del paciente (checkbox "Solo paquetes"). Al elegir un paquete
+    /// en modo paquetes se cargan de una vez todos sus servicios.</summary>
+    private bool _soloPaquetes;
+    private List<PaquetePacienteDto> _sugerenciasPkg = new();
     private List<OrdenServicioItemDto> _items = new();
     private bool _buscando;
     private bool _agregando;
@@ -243,6 +339,69 @@ else
             _sugerencias.Clear();
             await CargarItemsAsync();
         }
+        if (PacienteId != _ultimoPacienteCargado)
+        {
+            _ultimoPacienteCargado = PacienteId;
+            _paqueteSel = "";
+            _sugerenciasPkg.Clear();
+            _paquetes = PacienteId is Guid pid
+                ? (await OrdSvc.ListarPaquetesDelPacienteAsync(pid)).ToList()
+                : new();
+        }
+    }
+
+    /// <summary>Toggle del checkbox "Solo paquetes": cambia el modo del buscador.
+    /// Al activarlo precarga los paquetes del paciente para que el dropdown ya
+    /// muestre opciones sin teclear; al desactivarlo vuelve al buscador de servicios.</summary>
+    private void OnSoloPaquetesChanged(bool valor)
+    {
+        _soloPaquetes = valor;
+        _terminoBusqueda = "";
+        _sugerencias.Clear();
+        _sugerenciasPkg = valor ? _paquetes.Take(20).ToList() : new();
+        StateHasChanged();
+    }
+
+    /// <summary>Elegir un paquete en el buscador (modo "Solo paquetes"): carga de
+    /// una vez todos sus servicios, igual que el boton del selector.</summary>
+    private async Task SeleccionarPaqueteAsync(PaquetePacienteDto p)
+    {
+        _sugerenciasPkg.Clear();
+        _terminoBusqueda = "";
+        await AgregarPaquetePorIdAsync(p.PaqueteId);
+    }
+
+    /// <summary>Agrega a la orden TODOS los servicios del paquete seleccionado en el
+    /// selector desplegable. Reusa el helper compartido.</summary>
+    private async Task CargarPaqueteAsync()
+    {
+        if (!Guid.TryParse(_paqueteSel, out var paqId)) { return; }
+        await AgregarPaquetePorIdAsync(paqId);
+        _paqueteSel = "";
+    }
+
+    /// <summary>Agrega a la orden TODOS los servicios del paquete indicado que existan
+    /// en los contratos del paciente. Omite duplicados (backend). Compartido por el
+    /// selector desplegable y el buscador en modo "Solo paquetes".</summary>
+    private async Task AgregarPaquetePorIdAsync(Guid paqId)
+    {
+        if (HistoriaClinicaId is not Guid hid || PacienteId is not Guid pid) { return; }
+        _cargandoPkg = true;
+        try
+        {
+            var nuevos = await OrdSvc.AgregarPaqueteAsync(hid, pid, paqId, Guid.Empty);
+            if (nuevos.Count > 0)
+            {
+                _items.AddRange(nuevos);
+                await NotifyCount();
+                await NotifyItemsChanged();
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("alert", "Ese paquete no agrego servicios: ya estan en la orden o el contrato del paciente no los tiene.");
+            }
+        }
+        finally { _cargandoPkg = false; }
     }
 
     private async Task CargarItemsAsync()
@@ -261,6 +420,23 @@ else
     private async Task OnTerminoChanged(ChangeEventArgs e)
     {
         _terminoBusqueda = e.Value?.ToString() ?? "";
+
+        // Modo "Solo paquetes": filtro local sobre los paquetes ya cargados del
+        // paciente (por codigo o nombre). No pega al backend ni usa debounce.
+        if (_soloPaquetes)
+        {
+            var t = _terminoBusqueda.Trim();
+            _sugerenciasPkg = (string.IsNullOrEmpty(t)
+                ? _paquetes
+                : _paquetes.Where(p =>
+                    (p.Codigo?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (p.Nombre?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false)))
+                .Take(20).ToList();
+            _sugerencias.Clear();
+            StateHasChanged();
+            return;
+        }
+
         _debounceCts?.Cancel();
         _debounceCts = new();
         var token = _debounceCts.Token;
@@ -269,7 +445,7 @@ else
             await Task.Delay(200, token);
             _buscando = true;
             var t = _terminoBusqueda;
-            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, 12, token)).ToList();
+            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, 12, PacienteId, token)).ToList();
             _buscando = false;
             StateHasChanged();
         }

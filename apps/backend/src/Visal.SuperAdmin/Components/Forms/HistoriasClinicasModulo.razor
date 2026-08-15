@@ -472,6 +472,7 @@
                             else if (_tabSel == "Ordenes servicios")
                             {
                                 <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
+                                                PacienteId="@PacienteActivo?.Id"
                                                 OnCountChanged="@(c => _servCount = c)"
                                                 OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                             }
@@ -921,6 +922,31 @@
     .hc-side-lbl { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .hc-side-badge { background: #1565c0; color: #fff; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; flex-shrink: 0; }
     .menu-colapsado .hc-side-lbl, .menu-colapsado .hc-side-badge { display: none; }
+
+    /* ===== Telefono (hasta 768px): pestañas como barra horizontal + contenido full ===== */
+    @@media (max-width: 768px) {
+        /* El grid menu|contenido pasa a una sola columna (barra arriba, contenido abajo) */
+        .hc-col-full.hc-with-menu,
+        .hc-col-full.hc-with-menu.menu-colapsado { grid-template-columns: 1fr !important; grid-template-rows: auto 1fr; }
+        .hc-side-menu { border-right: none; border-bottom: 1px solid #e2e8f0; }
+        .hc-side-toggle { display: none; }
+        .hc-side-nav { display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 4px; gap: 4px; -webkit-overflow-scrolling: touch; }
+        .hc-side-item { flex-direction: column; align-items: center; gap: 3px; min-width: 72px; padding: 8px 6px; border-left: none; border-bottom: 3px solid transparent; text-align: center; }
+        .hc-side-item.sel { border-left: none; border-bottom-color: #1565c0; }
+        .hc-side-lbl { white-space: normal; font-size: 10px; line-height: 1.1; overflow: visible; text-overflow: clip; }
+        .hc-side-badge { position: absolute; top: 3px; right: 6px; }
+        /* En movil no ocultamos labels aunque el estado sea "colapsado" */
+        .menu-colapsado .hc-side-lbl { display: block; }
+        .menu-colapsado .hc-side-badge { display: block; }
+
+        /* Formularios internos y grids de 2-3 columnas a 1 columna */
+        .hc-form { grid-template-columns: 1fr; }
+        .hc-grid,
+        .hc-grid.paciente-colapsado,
+        .hc-grid.chat-colapsado,
+        .hc-grid.paciente-colapsado.chat-colapsado { grid-template-columns: 1fr; }
+        .ase-form { grid-template-columns: 1fr !important; }
+    }
     .menu-colapsado .hc-side-item { justify-content: center; padding: 10px 6px; }
     .menu-colapsado .hc-side-toggle { justify-content: center; padding: 10px 6px; }
     /* Conservamos las clases tab por compat — escondidas (no se renderizan) */

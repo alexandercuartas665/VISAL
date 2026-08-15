@@ -48,6 +48,9 @@ public static class ModuloCatalogo
         new("cfg-interoperabilidad", "Interoperabilidad", "Configuracion de la Entidad"),
         new("cfg-roles", "Roles y Permisos", "Configuracion de la Entidad"),
         new("cfg-usuarios", "Administracion de Usuarios", "Configuracion de la Entidad"),
+        // Menu lateral configurable por tenant: crear grupos, mover/ocultar opciones,
+        // enlaces externos e iconos. Owner/Admin del tenant lo tienen implicito.
+        new("cfg-menu-lateral", "Menu lateral (personalizar)", "Configuracion de la Entidad"),
         // Facturacion (Capa 07): snapshots transaccionales para radicacion EPS.
         // Permite generar, ver y descargar. Owner/Admin y SuperAdmin lo tienen implicito.
         new("facturacion.snapshots", "Facturacion - Snapshots Transaccionales", "Facturacion"),

@@ -1,6 +1,9 @@
 @implements IDisposable
+@using Microsoft.Extensions.DependencyInjection
+@using Visal.Application.Tenancy.Menu
+@using Visal.SuperAdmin.Menu
 @inject NavigationManager Navigation
-@inject ITenantAdminService TenantsSvc
+@inject IServiceScopeFactory ScopeFactory
 
 <div class="visal-brand visal-brand-stack">
     <div class="visal-logo @( !_showAdmin && !string.IsNullOrWhiteSpace(_tenantLogoUrl) ? "visal-logo-wide" : "" )">
@@ -51,6 +54,36 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
             <span>Atencion</span>
         </NavLink>
+    }
+    else if (_showTenant && _menu.Groups.Count > 0)
+    {
+        @* Menu dinamico por tenant: se arma desde la config guardada (o el default
+           del catalogo). Cada opcion respeta su gate (permiso / atencion / admin /
+           plataforma). Si por algo _menu no cargo (Groups vacio), cae al menu
+           hardcodeado de mas abajo como fallback — asi nunca queda sin menu. *@
+        @foreach (var g in _menu.Groups)
+        {
+            var visibles = g.Items.Where(EsVisible).ToList();
+            if (visibles.Count == 0) { continue; }
+            <div class="visal-nav-label">@g.Label</div>
+            @foreach (var it in visibles)
+            {
+                @if (it.External)
+                {
+                    <a class="visal-nav-link" href="@it.Href" target="_blank" rel="noopener noreferrer">
+                        @((MarkupString)MenuIcons.Svg(it.IconKey))
+                        <span>@it.Label</span>
+                    </a>
+                }
+                else
+                {
+                    <NavLink class="visal-nav-link" href="@it.Href" Match="@(it.ExactMatch ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                        @((MarkupString)MenuIcons.Svg(it.IconKey))
+                        <span>@it.Label</span>
+                    </NavLink>
+                }
+            }
+        }
     }
     else if (_showTenant)
     {
@@ -613,6 +646,21 @@
         return _perms.Contains(modulo);
     }
 
+    /// <summary>Arbol del menu lateral del tenant (config personalizada o default).
+    /// Se carga en OnInitializedAsync desde un scope propio.</summary>
+    private NavMenuTreeDto _menu = new();
+
+    /// <summary>Gate de visibilidad de una opcion del menu dinamico. Replica las
+    /// reglas del menu hardcodeado: permiso (o sin permiso = todos), Atencion
+    /// (profesional/admin), solo admin de agencia, o solo plataforma.</summary>
+    private bool EsVisible(NavMenuItemDto it) => it.Gate switch
+    {
+        NavGate.Atencion => _esProfesional || _esAdminAgencia || _esAdminOperativo,
+        NavGate.AdminAgency => _esAdminAgencia,
+        NavGate.Platform => _showAdmin,
+        _ => it.Permission is null || Puede(it.Permission),
+    };
+
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
@@ -659,12 +707,38 @@
         else if (isTenantUser)
         {
             _roleLabel = state.User.FindFirst("tenant_role")?.Value ?? "Agencia";
-            if (Guid.TryParse(tenantClaim, out var tenantId))
+        }
+
+        // Cargamos el branding del tenant Y el arbol del menu lateral en UN scope
+        // propio (DbContext dedicado). Asi este widget del layout NO comparte el
+        // DbContext scoped del circuito con la pagina ni con otros widgets cuando
+        // todos inicializan en paralelo — lo que dispara "A second operation was
+        // started on this context instance". GetAsync / GetEffectiveAsync reciben
+        // el tenantId explicito: no dependen del TenantAmbient, por eso es seguro
+        // resolverlos en un scope aparte. Para operador de plataforma (sin tenant)
+        // el menu cae al default del catalogo.
+        if (_showTenant)
+        {
+            Guid? tenantIdOpt = isTenantUser && Guid.TryParse(tenantClaim, out var tid) ? tid : null;
+            try
             {
-                var tenant = await TenantsSvc.GetAsync(tenantId);
-                _tenantName = tenant?.Name;
-                _tenantLogoUrl = tenant?.LogoUrl;
-                _tenantSlogan = tenant?.Slogan;
+                using var scope = ScopeFactory.CreateScope();
+                if (tenantIdOpt is Guid tenantId)
+                {
+                    var tenantsSvc = scope.ServiceProvider.GetRequiredService<ITenantAdminService>();
+                    var tenant = await tenantsSvc.GetAsync(tenantId);
+                    _tenantName = tenant?.Name;
+                    _tenantLogoUrl = tenant?.LogoUrl;
+                    _tenantSlogan = tenant?.Slogan;
+                }
+                var menuSvc = scope.ServiceProvider.GetRequiredService<INavMenuConfigService>();
+                _menu = await menuSvc.GetEffectiveAsync(tenantIdOpt);
+            }
+            catch
+            {
+                // Si el menu dinamico no cargo, dejamos _menu vacio -> el NavMenu
+                // cae al menu hardcodeado de fallback. Nunca queda sin menu.
+                _menu = new();
             }
         }
     }

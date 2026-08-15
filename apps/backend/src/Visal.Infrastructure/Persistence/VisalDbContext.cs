@@ -80,6 +80,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<SqlConsoleLog> SqlConsoleLogs => Set<SqlConsoleLog>();
     public DbSet<TenantEmailIngestConfig> TenantEmailIngestConfigs => Set<TenantEmailIngestConfig>();
     public DbSet<EmailIngestLog> EmailIngestLogs => Set<EmailIngestLog>();
+    public DbSet<TenantNavMenuConfig> TenantNavMenuConfigs => Set<TenantNavMenuConfig>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();

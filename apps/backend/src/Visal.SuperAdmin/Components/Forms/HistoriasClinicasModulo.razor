@@ -1661,7 +1661,10 @@
                             && h.ProfesionalId is Guid duenio
                             && mi != duenio;
         // Cargar la historia completa desde BD para mostrar sus valores en el FormViewer.
-        var detail = await HcSvc.GetAsync(h.Id);
+        // Envuelto en RetryAsync: es la primera lectura grande contra el DbContext
+        // compartido del circuito y puede chocar con un subcomponente hijo o el panel
+        // WhatsApp/chat IA que lo esten usando en ese instante.
+        var detail = await RetryAsync(() => HcSvc.GetAsync(h.Id));
         if (detail is null) { return; }
         // Propagar datos RIPS a la fila seleccionada para el resumen de tags.
         h.RipsViaNombre = detail.RipsViaIngresoNombre;
@@ -1709,25 +1712,30 @@
         _saveStatus = "limpio";
         _ultimoGuardado = null;
         _saveTitle = "Los cambios se guardan automaticamente cada 2 segundos.";
-        // Refrescar el badge de la pestana de medicamentos para la nueva HC.
-        _medCount = await OrdMedSvc.ContarPorHistoriaAsync(h.Id);
-        _servCount = await OrdSrvSvc.ContarPorHistoriaAsync(h.Id);
-        _insCount = await InsumoSvc.ContarPorHistoriaAsync(h.Id);
-        _sumMedCount = await SumMedSvc.ContarPorHistoriaAsync(h.Id);
-        _remCount = await RemSvc.ContarPorHistoriaAsync(h.Id);
-        _incCount = await IncSvc.ContarPorHistoriaAsync(h.Id);
-        _certCount = await CertSvc.ContarPorHistoriaAsync(h.Id);
-        _escCount = await EscSvc.ContarPorHistoriaAsync(h.Id);
-        _evoCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION");
-        _conCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO");
-        _atCount = await DocSvc.ContarPorHistoriaAsync(h.Id, "ATENCION");
-        _docExtCount = (await NotaSvc.ListarDocumentosPorHistoriaAsync(h.Id)).Count;
+        // Refrescar los badges de todas las pestanas para la nueva HC. Cada conteo
+        // toca el DbContext compartido del circuito; si otro flujo (panel WhatsApp,
+        // chat IA, o un subcomponente hijo re-inicializandose) lo esta usando en ese
+        // instante, EF lanza "A second operation was started on this context...".
+        // RetryAsync reintenta hasta 3 veces con backoff, igual que
+        // RefrescarPrefillHistoriaMedicaAsync, en vez de tumbar el circuito Blazor.
+        _medCount = await RetryAsync(() => OrdMedSvc.ContarPorHistoriaAsync(h.Id));
+        _servCount = await RetryAsync(() => OrdSrvSvc.ContarPorHistoriaAsync(h.Id));
+        _insCount = await RetryAsync(() => InsumoSvc.ContarPorHistoriaAsync(h.Id));
+        _sumMedCount = await RetryAsync(() => SumMedSvc.ContarPorHistoriaAsync(h.Id));
+        _remCount = await RetryAsync(() => RemSvc.ContarPorHistoriaAsync(h.Id));
+        _incCount = await RetryAsync(() => IncSvc.ContarPorHistoriaAsync(h.Id));
+        _certCount = await RetryAsync(() => CertSvc.ContarPorHistoriaAsync(h.Id));
+        _escCount = await RetryAsync(() => EscSvc.ContarPorHistoriaAsync(h.Id));
+        _evoCount = await RetryAsync(() => DocSvc.ContarPorHistoriaAsync(h.Id, "EVOLUCION"));
+        _conCount = await RetryAsync(() => DocSvc.ContarPorHistoriaAsync(h.Id, "CONSENTIMIENTO"));
+        _atCount = await RetryAsync(() => DocSvc.ContarPorHistoriaAsync(h.Id, "ATENCION"));
+        _docExtCount = (await RetryAsync(() => NotaSvc.ListarDocumentosPorHistoriaAsync(h.Id))).Count;
         // Ordenes externas (RX / Lab / Insumos externos): el servicio no tiene
         // ContarPorHistoria por tipo, listamos y contamos — es una sola query
         // COUNT por cada tipo, mismo costo.
-        _rxExtCount  = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia)).Count;
-        _labExtCount = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio)).Count;
-        _insExtCount = (await OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Insumo)).Count;
+        _rxExtCount  = (await RetryAsync(() => OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.RxImagenologia))).Count;
+        _labExtCount = (await RetryAsync(() => OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Laboratorio))).Count;
+        _insExtCount = (await RetryAsync(() => OrdExtSvc.ListarPorHistoriaAsync(h.Id, Visal.Domain.Enums.TipoCatalogoServicio.Insumo))).Count;
         // Aplicar fuente derivada "historiaMedica" (medicamentos.lista_numerada, etc.)
         // ANTES de pintar. Asi al abrir una HC vieja el contenido refleja la orden
         // actual aunque haya cambiado entre sesiones, no el ValoresJson historico.

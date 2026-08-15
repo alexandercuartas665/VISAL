@@ -79,6 +79,10 @@ public static class DependencyInjection
         // QR de verificacion de ordenes de medicamentos (QRCoder, PNG managed).
         services.AddSingleton<Application.Common.IQrCodeGenerator, Rendering.QRCoderQrCodeGenerator>();
 
+        // Ingesta de correos -> PQR: lector IMAP (MailKit) + poller en background (patron PreRevisionIaWorker).
+        services.AddSingleton<Visal.Application.Tenancy.Email.IImapEmailReader, Email.MailKitImapReader>();
+        services.AddHostedService<Email.EmailIngestWorker>();
+
         // Ola 8 RC8e — cola in-process del orquestador REVISOR CLINICO IA. La cola
         // como singleton porque el Channel<T> sobrevive al request HTTP que encola
         // y al worker que consume. El BackgroundService se registra aparte para

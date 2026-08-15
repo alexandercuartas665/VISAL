@@ -145,6 +145,9 @@ public interface IApplicationDbContext
     DbSet<PasswordResetToken> PasswordResetTokens { get; }
     DbSet<SuperAdminAuditLog> SuperAdminAuditLogs { get; }
     DbSet<SqlConsoleLog> SqlConsoleLogs { get; }
+    // Ingesta de correos -> PQR: buzones IMAP por tenant + bitacora/dedup de correos procesados.
+    DbSet<TenantEmailIngestConfig> TenantEmailIngestConfigs { get; }
+    DbSet<EmailIngestLog> EmailIngestLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -1,0 +1,429 @@
+@page "/config/correos-pqr"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.EntityFrameworkCore
+@using Visal.Application.Common
+@using Visal.Application.Tenancy.Email
+@using Visal.Domain.Enums
+@inject IEmailIngestConfigService Svc
+@inject IApplicationDbContext Db
+
+<PageTitle>Correos PQR - Visal</PageTitle>
+
+<div class="ep-page">
+    <div class="ep-head">
+        <div>
+            <div class="ep-eyebrow">Configuracion de entidad</div>
+            <h1 class="ep-title">Correos &rarr; PQR</h1>
+            <div class="ep-sub">Conecta buzones de Gmail (IMAP + App Password). Un agente de IA lee cada correo, decide
+                si es una PQRS-F y, si lo es, crea una tarjeta en el tablero PQR con los datos del caso.</div>
+        </div>
+        <button class="ep-btn ep-btn-primary" @onclick="() => AbrirEditor(null)">+ Nuevo buzon</button>
+    </div>
+
+    @if (_cargando)
+    {
+        <div class="ep-empty"><em>Cargando...</em></div>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="ep-empty">No hay buzones configurados. Crea el primero con "+ Nuevo buzon".</div>
+    }
+    else
+    {
+        <div class="ep-cards">
+            @foreach (var b in _items)
+            {
+                <div class="ep-card @(b.IsEnabled ? "ep-on" : "")">
+                    <div class="ep-card-top">
+                        <div>
+                            <div class="ep-card-name">@b.Nombre</div>
+                            <div class="ep-card-email">@b.EmailAddress</div>
+                        </div>
+                        <span class="ep-badge @(b.IsEnabled ? "ep-badge-on" : "ep-badge-off")">@(b.IsEnabled ? "Activo" : "Apagado")</span>
+                    </div>
+                    <div class="ep-rows">
+                        <div><span>Agente</span><strong>@(b.ClassifierAgentName ?? "— sin agente —")</strong></div>
+                        <div><span>Tablero</span><strong>@(b.TargetBoardName ?? "— sin tablero —")</strong></div>
+                        <div><span>Cadencia</span><strong>cada @b.PollIntervalMinutes min</strong></div>
+                        <div><span>App Password</span><strong>@(b.HasAppPassword ? "guardada" : "— falta —")</strong></div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(b.LastResultSummary))
+                    {
+                        <div class="ep-last">Ultima corrida: @b.LastResultSummary</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(b.LastError))
+                    {
+                        <div class="ep-last ep-err">⚠ @b.LastError</div>
+                    }
+                    <div class="ep-card-foot">
+                        <button class="ep-btn ep-btn-sm" @onclick="() => AbrirEditor(b)">Editar</button>
+                        <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProbarAsync(b)">Probar conexion</button>
+                        <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProcesarAsync(b)">Procesar ahora</button>
+                        <button class="ep-btn ep-btn-sm" @onclick="() => AbrirLogsAsync(b)">Ver correos</button>
+                        <button class="ep-btn ep-btn-sm ep-btn-danger" @onclick="() => EliminarAsync(b)">Eliminar</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_msg))
+    {
+        <div class="ep-toast @(_error ? "ep-toast-err" : "ep-toast-ok")">@_msg</div>
+    }
+</div>
+
+@if (_form is not null)
+{
+    <div class="ep-modal-back" @onclick="() => _form = null"></div>
+    <div class="ep-modal">
+        <div class="ep-modal-head">
+            <h3>@(_form.Id is null ? "Nuevo buzon" : "Editar buzon")</h3>
+            <button class="ep-close" @onclick="() => _form = null">×</button>
+        </div>
+        <div class="ep-modal-body">
+            <div class="ep-grid">
+                <div class="ep-field ep-col2">
+                    <label>Nombre del buzon</label>
+                    <input class="ep-inp" @bind="_form.Nombre" placeholder="ej. PQR FOMAG" />
+                </div>
+                <div class="ep-field ep-col2">
+                    <label>Correo (Gmail)</label>
+                    <input class="ep-inp" @bind="_form.EmailAddress" placeholder="buzon@gmail.com" autocomplete="off" />
+                </div>
+                <div class="ep-field ep-col2">
+                    <label>App Password (16 caracteres)</label>
+                    <input class="ep-inp" type="password" @bind="_form.AppPassword" autocomplete="new-password"
+                           placeholder="@(_form.HasAppPassword ? "Dejar vacio para conservar la actual" : "Pega la App Password de Gmail")" />
+                    <div class="ep-hint">Se guarda cifrada. Requiere 2FA + IMAP activo. La clave normal de la cuenta no sirve.</div>
+                </div>
+
+                <div class="ep-field">
+                    <label>Agente clasificador</label>
+                    <select class="ep-inp" @bind="_form.ClassifierAgentId">
+                        <option value="">— elige un agente —</option>
+                        @foreach (var a in _agentes)
+                        {
+                            <option value="@a.Id">@a.Name @(a.Provider.ToString())</option>
+                        }
+                    </select>
+                    <div class="ep-hint">Reutiliza un agente existente. Aporta el motor de IA; las instrucciones las pone el sistema.</div>
+                </div>
+                <div class="ep-field">
+                    <label>Tablero destino</label>
+                    <select class="ep-inp" @bind="_form.TargetBoardId">
+                        <option value="">— elige un tablero —</option>
+                        @foreach (var t in _tableros)
+                        {
+                            <option value="@t.Id">@t.Name</option>
+                        }
+                    </select>
+                    <div class="ep-hint">Normalmente el tablero "PQR". La tarjeta cae en su primera columna.</div>
+                </div>
+
+                <div class="ep-field">
+                    <label>Host IMAP</label>
+                    <input class="ep-inp" @bind="_form.ImapHost" />
+                </div>
+                <div class="ep-field ep-field-row">
+                    <div>
+                        <label>Puerto</label>
+                        <input class="ep-inp" type="number" @bind="_form.ImapPort" />
+                    </div>
+                    <label class="ep-check"><input type="checkbox" @bind="_form.ImapUseSsl" /> SSL</label>
+                </div>
+
+                <div class="ep-field">
+                    <label>Carpeta</label>
+                    <input class="ep-inp" @bind="_form.Folder" />
+                </div>
+                <div class="ep-field">
+                    <label>Revisar cada (min)</label>
+                    <input class="ep-inp" type="number" @bind="_form.PollIntervalMinutes" />
+                </div>
+
+                <div class="ep-field">
+                    <label>Ventana inicial (dias)</label>
+                    <input class="ep-inp" type="number" @bind="_form.LookbackDays" />
+                </div>
+                <div class="ep-field">
+                    <label>Max por corrida</label>
+                    <input class="ep-inp" type="number" @bind="_form.MaxPorCorrida" />
+                </div>
+
+                <div class="ep-field ep-col2 ep-checks">
+                    <label class="ep-check"><input type="checkbox" @bind="_form.OnlyUnread" /> Solo correos no leidos</label>
+                    <label class="ep-check"><input type="checkbox" @bind="_form.MarkAsRead" /> Marcar como leidos al procesar</label>
+                    <label class="ep-check ep-check-strong"><input type="checkbox" @bind="_form.IsEnabled" /> Encendido (poller automatico)</label>
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_formError))
+            {
+                <div class="ep-form-err">@_formError</div>
+            }
+        </div>
+        <div class="ep-modal-foot">
+            <button class="ep-btn" @onclick="() => _form = null">Cancelar</button>
+            <button class="ep-btn ep-btn-primary" disabled="@_saving" @onclick="GuardarAsync">Guardar</button>
+        </div>
+    </div>
+}
+
+@if (_logsDe is not null)
+{
+    <div class="ep-modal-back" @onclick="() => _logsDe = null"></div>
+    <div class="ep-modal ep-modal-wide">
+        <div class="ep-modal-head">
+            <h3>Correos procesados — @_logsDe.Nombre</h3>
+            <button class="ep-close" @onclick="() => _logsDe = null">×</button>
+        </div>
+        <div class="ep-modal-body">
+            @if (_logs.Count == 0)
+            {
+                <div class="ep-empty">Todavia no se ha procesado ningun correo.</div>
+            }
+            else
+            {
+                <div class="ep-tablewrap">
+                    <table class="ep-table">
+                        <thead><tr><th>Fecha</th><th>De</th><th>Asunto</th><th>Resultado</th><th>Tipo</th><th>Detalle</th></tr></thead>
+                        <tbody>
+                            @foreach (var l in _logs)
+                            {
+                                <tr>
+                                    <td>@l.ProcessedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                    <td>@l.FromAddress</td>
+                                    <td class="ep-td-clip">@l.Subject</td>
+                                    <td><span class="ep-res ep-res-@l.Resultado">@ResTexto(l.Resultado)</span></td>
+                                    <td>@l.TipoPqrs</td>
+                                    <td class="ep-td-clip">@(l.ErrorMessage ?? (l.TaskCardId is null ? "" : "tarjeta creada"))</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+        <div class="ep-modal-foot">
+            <button class="ep-btn" @onclick="() => _logsDe = null">Cerrar</button>
+        </div>
+    </div>
+}
+
+<style>
+.ep-page { padding: 1rem 1.25rem; }
+.ep-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem; gap:1rem; }
+.ep-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.ep-title { margin:.15rem 0 0 0; font-size:1.55rem; color:#0f172a; }
+.ep-sub { color:#64748b; font-size:.85rem; margin-top:.35rem; max-width:760px; }
+.ep-empty { padding:2rem; text-align:center; color:#94a3b8; }
+.ep-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap:.85rem; }
+.ep-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:.9rem 1rem; display:flex; flex-direction:column; gap:.5rem; }
+.ep-card.ep-on { border-color:#93c5fd; box-shadow: 0 2px 10px rgba(37,99,235,.08); }
+.ep-card-top { display:flex; justify-content:space-between; align-items:flex-start; }
+.ep-card-name { font-weight:600; color:#0f172a; }
+.ep-card-email { color:#64748b; font-size:.8rem; }
+.ep-badge { font-size:.7rem; padding:.12rem .5rem; border-radius:99px; }
+.ep-badge-on { background:#dcfce7; color:#15803d; }
+.ep-badge-off { background:#f1f5f9; color:#64748b; }
+.ep-rows { display:grid; grid-template-columns:1fr 1fr; gap:.25rem .75rem; font-size:.8rem; }
+.ep-rows > div { display:flex; justify-content:space-between; gap:.4rem; }
+.ep-rows span { color:#94a3b8; }
+.ep-rows strong { color:#334155; font-weight:500; text-align:right; }
+.ep-last { font-size:.76rem; color:#64748b; background:#f8fafc; padding:.35rem .5rem; border-radius:6px; }
+.ep-last.ep-err { background:#fef2f2; color:#b91c1c; }
+.ep-card-foot { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.25rem; padding-top:.55rem; border-top:1px solid #f1f5f9; }
+.ep-btn { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.4rem .75rem; border-radius:6px; cursor:pointer; font:inherit; }
+.ep-btn:disabled { opacity:.5; cursor:not-allowed; }
+.ep-btn-sm { padding:.25rem .55rem; font-size:.78rem; }
+.ep-btn-primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+.ep-btn-danger { color:#b91c1c; border-color:#fecaca; }
+.ep-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
+.ep-modal { position:fixed; top:4%; left:50%; transform:translateX(-50%); width:min(720px, 96vw); max-height:92vh;
+            background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401; display:flex; flex-direction:column; overflow:hidden; }
+.ep-modal-wide { width:min(920px, 97vw); }
+.ep-modal-head { display:flex; justify-content:space-between; align-items:center; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; }
+.ep-modal-head h3 { margin:0; font-size:1.15rem; color:#0f172a; }
+.ep-close { background:transparent; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:#64748b; }
+.ep-modal-body { padding:1rem 1.15rem; overflow:auto; }
+.ep-modal-foot { padding:.75rem 1.15rem; border-top:1px solid #e5e7eb; display:flex; justify-content:flex-end; gap:.5rem; }
+.ep-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem 1rem; }
+.ep-field { display:flex; flex-direction:column; gap:.25rem; }
+.ep-col2 { grid-column:1 / -1; }
+.ep-field label { font-size:.8rem; color:#334155; }
+.ep-inp { padding:.5rem .6rem; border:1px solid #cbd5e1; border-radius:8px; font:inherit; width:100%; }
+.ep-hint { font-size:.72rem; color:#94a3b8; }
+.ep-field-row { flex-direction:row; align-items:flex-end; gap:.75rem; }
+.ep-field-row > div { flex:1; }
+.ep-check { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color:#334155; }
+.ep-checks { flex-direction:row; flex-wrap:wrap; gap:.75rem 1.25rem; padding-top:.25rem; }
+.ep-check-strong { font-weight:600; }
+.ep-form-err { margin-top:.6rem; color:#b91c1c; font-size:.85rem; }
+.ep-tablewrap { overflow:auto; }
+.ep-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.ep-table th, .ep-table td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid #f1f5f9; }
+.ep-table th { color:#64748b; font-weight:600; }
+.ep-td-clip { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ep-res { font-size:.72rem; padding:.1rem .45rem; border-radius:99px; }
+.ep-res-CreadaPqr { background:#dcfce7; color:#15803d; }
+.ep-res-NoEsPqr { background:#f1f5f9; color:#64748b; }
+.ep-res-Error { background:#fef2f2; color:#b91c1c; }
+.ep-res-Duplicado { background:#fef9c3; color:#854d0e; }
+.ep-res-SinConfig { background:#fef2f2; color:#b91c1c; }
+.ep-toast { position:fixed; bottom:1.25rem; left:50%; transform:translateX(-50%); padding:.55rem 1rem; border-radius:8px; font-size:.85rem; z-index:1500; box-shadow:0 6px 20px rgba(0,0,0,.15); max-width:90vw; }
+.ep-toast-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
+.ep-toast-err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+</style>
+
+@code {
+    private sealed class AgenteOpt { public Guid Id; public string Name = ""; public AiProvider Provider; }
+    private sealed class TableroOpt { public Guid Id; public string Name = ""; }
+
+    private sealed class FormModel
+    {
+        public Guid? Id { get; set; }
+        public bool HasAppPassword { get; set; }
+        public string Nombre { get; set; } = "";
+        public string EmailAddress { get; set; } = "";
+        public string? AppPassword { get; set; }
+        public string ImapHost { get; set; } = "imap.gmail.com";
+        public int ImapPort { get; set; } = 993;
+        public bool ImapUseSsl { get; set; } = true;
+        public string Folder { get; set; } = "INBOX";
+        public Guid? ClassifierAgentId { get; set; }
+        public Guid? TargetBoardId { get; set; }
+        public int PollIntervalMinutes { get; set; } = 5;
+        public int LookbackDays { get; set; } = 7;
+        public int MaxPorCorrida { get; set; } = 25;
+        public bool OnlyUnread { get; set; } = true;
+        public bool MarkAsRead { get; set; } = true;
+        public bool IsEnabled { get; set; }
+    }
+
+    private bool _cargando = true;
+    private List<EmailIngestConfigDto> _items = new();
+    private List<AgenteOpt> _agentes = new();
+    private List<TableroOpt> _tableros = new();
+    private FormModel? _form;
+    private string? _formError;
+    private bool _saving;
+    private Guid? _busyId;
+    private EmailIngestConfigDto? _logsDe;
+    private List<EmailIngestLogDto> _logs = new();
+    private string _msg = "";
+    private bool _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var db = (DbContext)Db;
+        _agentes = await db.Set<Visal.Domain.Entities.AiAgent>().AsNoTracking()
+            .OrderByDescending(a => a.IsActive).ThenBy(a => a.SortOrder).ThenBy(a => a.Name)
+            .Select(a => new AgenteOpt { Id = a.Id, Name = a.Name, Provider = a.Provider }).ToListAsync();
+        _tableros = await db.Set<Visal.Domain.Entities.TaskBoard>().AsNoTracking()
+            .OrderBy(t => t.Name).Select(t => new TableroOpt { Id = t.Id, Name = t.Name }).ToListAsync();
+        await RecargarAsync();
+        _cargando = false;
+    }
+
+    private async Task RecargarAsync() => _items = (await Svc.ListAsync()).ToList();
+
+    private void AbrirEditor(EmailIngestConfigDto? b)
+    {
+        _formError = null;
+        if (b is null)
+        {
+            _form = new FormModel
+            {
+                // Preselecciona el tablero "PQR" si existe.
+                TargetBoardId = _tableros.FirstOrDefault(t => t.Name.Equals("PQR", StringComparison.OrdinalIgnoreCase))?.Id
+            };
+        }
+        else
+        {
+            _form = new FormModel
+            {
+                Id = b.Id, HasAppPassword = b.HasAppPassword, Nombre = b.Nombre, EmailAddress = b.EmailAddress,
+                ImapHost = b.ImapHost, ImapPort = b.ImapPort, ImapUseSsl = b.ImapUseSsl, Folder = b.Folder,
+                ClassifierAgentId = b.ClassifierAgentId, TargetBoardId = b.TargetBoardId,
+                PollIntervalMinutes = b.PollIntervalMinutes, LookbackDays = b.LookbackDays, MaxPorCorrida = b.MaxPorCorrida,
+                OnlyUnread = b.OnlyUnread, MarkAsRead = b.MarkAsRead, IsEnabled = b.IsEnabled
+            };
+        }
+    }
+
+    private async Task GuardarAsync()
+    {
+        if (_form is null) { return; }
+        _formError = null;
+        _saving = true;
+        try
+        {
+            var req = new SaveEmailIngestConfigRequest(
+                _form.Id, _form.Nombre, _form.EmailAddress, _form.AppPassword, _form.ImapHost, _form.ImapPort,
+                _form.ImapUseSsl, _form.Folder, _form.ClassifierAgentId, _form.TargetBoardId, null,
+                _form.PollIntervalMinutes, _form.LookbackDays, _form.MaxPorCorrida, _form.OnlyUnread, _form.MarkAsRead, _form.IsEnabled);
+            await Svc.SaveAsync(req);
+            await RecargarAsync();
+            _form = null;
+            Toast("Buzon guardado.", false);
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task ProbarAsync(EmailIngestConfigDto b)
+    {
+        _busyId = b.Id;
+        try
+        {
+            var (ok, err, total) = await Svc.TestConnectionAsync(b.Id);
+            Toast(ok ? $"Conexion OK. {total} correo(s) en la carpeta." : (err ?? "No se pudo conectar."), !ok);
+        }
+        catch (Exception ex) { Toast(ex.Message, true); }
+        finally { _busyId = null; }
+    }
+
+    private async Task ProcesarAsync(EmailIngestConfigDto b)
+    {
+        _busyId = b.Id;
+        try
+        {
+            var r = await Svc.ProcessNowAsync(b.Id);
+            if (r.Ok) { Toast($"{r.Leidos} leidos · {r.Creados} PQR · {r.Descartados} descartados · {r.Errores} errores.", r.Errores > 0); }
+            else { Toast(r.Error ?? "No se pudo procesar.", true); }
+            await RecargarAsync();
+        }
+        catch (Exception ex) { Toast(ex.Message, true); }
+        finally { _busyId = null; }
+    }
+
+    private async Task AbrirLogsAsync(EmailIngestConfigDto b)
+    {
+        _logsDe = b;
+        _logs = (await Svc.ListLogsAsync(b.Id, 150)).ToList();
+    }
+
+    private async Task EliminarAsync(EmailIngestConfigDto b)
+    {
+        try
+        {
+            await Svc.DeleteAsync(b.Id);
+            await RecargarAsync();
+            Toast("Buzon eliminado.", false);
+        }
+        catch (Exception ex) { Toast(ex.Message, true); }
+    }
+
+    private static string ResTexto(EmailIngestResultTipo r) => r switch
+    {
+        EmailIngestResultTipo.CreadaPqr => "PQR creada",
+        EmailIngestResultTipo.NoEsPqr => "No es PQR",
+        EmailIngestResultTipo.Duplicado => "Duplicado",
+        EmailIngestResultTipo.Error => "Error",
+        EmailIngestResultTipo.SinConfig => "Sin config",
+        _ => r.ToString()
+    };
+
+    private void Toast(string m, bool err) { _msg = m; _error = err; }
+}

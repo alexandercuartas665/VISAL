@@ -23,7 +23,10 @@ public sealed class AiInferenceService : IAiInferenceService
         _usage = usage;
     }
 
-    public async Task<AiChatResult> TestChatAsync(Guid agentId, IReadOnlyList<AiChatTurn> turns, string? systemPromptOverride = null, CancellationToken cancellationToken = default)
+    public Task<AiChatResult> TestChatAsync(Guid agentId, IReadOnlyList<AiChatTurn> turns, string? systemPromptOverride = null, CancellationToken cancellationToken = default)
+        => RunAgentAsync(agentId, turns, systemPromptOverride, "test", cancellationToken);
+
+    public async Task<AiChatResult> RunAgentAsync(Guid agentId, IReadOnlyList<AiChatTurn> turns, string? systemPromptOverride, string source, CancellationToken cancellationToken = default)
     {
         var agent = await _db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId, cancellationToken);
         if (agent is null) { return new AiChatResult(false, null, "El agente no existe."); }
@@ -68,7 +71,7 @@ public sealed class AiInferenceService : IAiInferenceService
         // Todo consumo de IA del tenant pasa por el modulo de tokens (incluido el chat de prueba).
         if (result.Ok)
         {
-            await _usage.RecordAsync(agent.Id, agent.Provider, model, result.InputTokens, result.OutputTokens, "test", true, cancellationToken);
+            await _usage.RecordAsync(agent.Id, agent.Provider, model, result.InputTokens, result.OutputTokens, source, true, cancellationToken);
         }
 
         // Entrega de recursos: el modelo marca [[enviar: Nombre]] y aqui adjuntamos el recurso (archivo o texto).

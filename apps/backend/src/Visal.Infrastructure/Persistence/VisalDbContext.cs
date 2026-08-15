@@ -78,6 +78,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<ReporteTenantActivacion> ReporteTenantActivaciones => Set<ReporteTenantActivacion>();
     public DbSet<ReporteUsuario> ReporteUsuarios => Set<ReporteUsuario>();
     public DbSet<SqlConsoleLog> SqlConsoleLogs => Set<SqlConsoleLog>();
+    public DbSet<TenantEmailIngestConfig> TenantEmailIngestConfigs => Set<TenantEmailIngestConfig>();
+    public DbSet<EmailIngestLog> EmailIngestLogs => Set<EmailIngestLog>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
@@ -215,6 +217,28 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
     private static void ConfigureEntities(ModelBuilder modelBuilder)
     {
+        // Ingesta de correos -> PQR (buzones IMAP por tenant + bitacora/dedup).
+        modelBuilder.Entity<TenantEmailIngestConfig>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(150).IsRequired();
+            b.Property(x => x.EmailAddress).HasMaxLength(256).IsRequired();
+            b.Property(x => x.ImapHost).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Folder).HasMaxLength(200).IsRequired();
+            b.Property(x => x.LastResultSummary).HasMaxLength(500);
+            b.HasIndex(x => x.TenantId);
+        });
+
+        modelBuilder.Entity<EmailIngestLog>(b =>
+        {
+            b.Property(x => x.MessageId).HasMaxLength(998).IsRequired();
+            b.Property(x => x.FromAddress).HasMaxLength(320);
+            b.Property(x => x.FromName).HasMaxLength(320);
+            b.Property(x => x.Subject).HasMaxLength(500);
+            b.Property(x => x.TipoPqrs).HasMaxLength(80);
+            // Dedup: un correo (Message-ID) se procesa una sola vez por buzon.
+            b.HasIndex(x => new { x.ConfigId, x.MessageId }).IsUnique();
+        });
+
         modelBuilder.Entity<Tenant>(b =>
         {
             b.Property(x => x.Name).HasMaxLength(200).IsRequired();

@@ -36,4 +36,11 @@ public interface IAiInferenceService
     /// configurados por la plataforma. systemPromptOverride permite probar un prompt aun sin guardar.
     /// </summary>
     Task<AiChatResult> TestChatAsync(Guid agentId, IReadOnlyList<AiChatTurn> turns, string? systemPromptOverride = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ejecuta el agente indicado igual que <see cref="TestChatAsync"/> pero permite etiquetar el
+    /// origen del consumo de tokens (ej. "email-pqr" para la ingesta de correos). Todo consumo se
+    /// registra en el modulo de tokens con ese <paramref name="source"/>.
+    /// </summary>
+    Task<AiChatResult> RunAgentAsync(Guid agentId, IReadOnlyList<AiChatTurn> turns, string? systemPromptOverride, string source, CancellationToken cancellationToken = default);
 }

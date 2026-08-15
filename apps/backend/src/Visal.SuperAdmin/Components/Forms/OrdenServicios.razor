@@ -33,30 +33,6 @@
 else
 {
     <div class="os-card">
-        @* ---- Selector de paquetes del paciente: al elegir uno se agregan de una
-             vez todos sus servicios (solo paquetes presentes en los contratos del
-             paciente). ---- *@
-        @if (_paquetes.Count > 0)
-        {
-            <div class="os-pkg-bar">
-                <div class="os-pkg-f">
-                    <label>Paquete del contrato</label>
-                    <select class="form-control form-control-sm" @bind="_paqueteSel">
-                        <option value="">Selecciona un paquete...</option>
-                        @foreach (var p in _paquetes)
-                        {
-                            <option value="@p.PaqueteId">@p.Codigo &mdash; @p.Nombre (@p.CantidadServicios serv.)</option>
-                        }
-                    </select>
-                </div>
-                <button class="btn btn-outline-primary btn-sm os-pkg-btn" title="Agregar a la orden todos los servicios del paquete"
-                        @onclick="CargarPaqueteAsync"
-                        disabled="@(string.IsNullOrEmpty(_paqueteSel) || _cargandoPkg)">
-                    @(_cargandoPkg ? "Cargando..." : "Cargar servicios del paquete")
-                </button>
-            </div>
-        }
-
         @* ---- Fila de captura: autocompletado + cantidad ---- *@
         <div class="os-row">
             <div class="os-f os-c-10 os-search-wrap">
@@ -268,12 +244,6 @@ else
     .os-empty-row { padding:30px !important; font-style:italic; }
     .os-inline-input { font-size:12px; }
 
-    /* Selector de paquetes del paciente */
-    .os-pkg-bar { display:flex; gap:10px; align-items:flex-end; margin-bottom:14px; padding:10px 12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; flex-wrap:wrap; }
-    .os-pkg-f { flex:1; min-width:220px; }
-    .os-pkg-f label { font-size:11px; font-weight:700; color:#0369a1; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
-    .os-pkg-btn { white-space:nowrap; }
-
     /* Checkbox "Solo paquetes" en la cabecera del buscador */
     .os-search-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
     .os-search-head > label { margin-bottom:4px; }
@@ -286,7 +256,6 @@ else
         .os-row { grid-template-columns: 1fr; }
         .os-c-1, .os-c-2, .os-c-10, .os-c-11 { grid-column: 1 / -1; }
         .os-action-add { min-height: 44px; }
-        .os-pkg-bar { flex-direction: column; align-items: stretch; }
         .os-grid-wrap { overflow-x: auto; }
     }
 </style>
@@ -313,8 +282,6 @@ else
     private Guid? _ultimoIdCargado;
     private Guid? _ultimoPacienteCargado;
     private List<PaquetePacienteDto> _paquetes = new();
-    private string _paqueteSel = "";
-    private bool _cargandoPkg;
     private string _terminoBusqueda = "";
     private List<ServicioSugerenciaDto> _sugerencias = new();
     /// <summary>Modo del buscador: false = busca servicios; true = busca solo paquetes
@@ -342,7 +309,6 @@ else
         if (PacienteId != _ultimoPacienteCargado)
         {
             _ultimoPacienteCargado = PacienteId;
-            _paqueteSel = "";
             _sugerenciasPkg.Clear();
             _paquetes = PacienteId is Guid pid
                 ? (await OrdSvc.ListarPaquetesDelPacienteAsync(pid)).ToList()
@@ -371,37 +337,23 @@ else
         await AgregarPaquetePorIdAsync(p.PaqueteId);
     }
 
-    /// <summary>Agrega a la orden TODOS los servicios del paquete seleccionado en el
-    /// selector desplegable. Reusa el helper compartido.</summary>
-    private async Task CargarPaqueteAsync()
-    {
-        if (!Guid.TryParse(_paqueteSel, out var paqId)) { return; }
-        await AgregarPaquetePorIdAsync(paqId);
-        _paqueteSel = "";
-    }
-
     /// <summary>Agrega a la orden TODOS los servicios del paquete indicado que existan
-    /// en los contratos del paciente. Omite duplicados (backend). Compartido por el
-    /// selector desplegable y el buscador en modo "Solo paquetes".</summary>
+    /// en los contratos del paciente. Omite duplicados (backend). Lo usa el buscador
+    /// en modo "Solo paquetes".</summary>
     private async Task AgregarPaquetePorIdAsync(Guid paqId)
     {
         if (HistoriaClinicaId is not Guid hid || PacienteId is not Guid pid) { return; }
-        _cargandoPkg = true;
-        try
+        var nuevos = await OrdSvc.AgregarPaqueteAsync(hid, pid, paqId, Guid.Empty);
+        if (nuevos.Count > 0)
         {
-            var nuevos = await OrdSvc.AgregarPaqueteAsync(hid, pid, paqId, Guid.Empty);
-            if (nuevos.Count > 0)
-            {
-                _items.AddRange(nuevos);
-                await NotifyCount();
-                await NotifyItemsChanged();
-            }
-            else
-            {
-                await JS.InvokeVoidAsync("alert", "Ese paquete no agrego servicios: ya estan en la orden o el contrato del paciente no los tiene.");
-            }
+            _items.AddRange(nuevos);
+            await NotifyCount();
+            await NotifyItemsChanged();
         }
-        finally { _cargandoPkg = false; }
+        else
+        {
+            await JS.InvokeVoidAsync("alert", "Ese paquete no agrego servicios: ya estan en la orden o el contrato del paciente no los tiene.");
+        }
     }
 
     private async Task CargarItemsAsync()

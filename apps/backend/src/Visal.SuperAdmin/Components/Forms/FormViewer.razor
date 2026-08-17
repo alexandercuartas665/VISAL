@@ -81,6 +81,21 @@ else
                                 <input class="form-control form-control-sm fv-auto"
                                        value="@GetValue(hdrKey)" readonly tabindex="-1" />
                             }
+                            else if (EsCampoFecha(cabF.Label))
+                            {
+                                @* Campo fecha/hora del encabezado: control nativo datetime-local.
+                                   El valor se guarda como texto "dd/MM/yyyy HH:mm" (para imprimir),
+                                   pero el input trabaja en ISO (yyyy-MM-ddTHH:mm). *@
+                                <input type="datetime-local" class="form-control form-control-sm"
+                                       value="@HdrFechaAIso(GetValue(hdrKey))"
+                                       @onchange="e => SetValue(hdrKey, HdrFechaDesdeIso(e.Value?.ToString()))" />
+                            }
+                            else if (EsCampoHora(cabF.Label))
+                            {
+                                <input type="time" class="form-control form-control-sm"
+                                       value="@GetValue(hdrKey)"
+                                       @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                            }
                             else
                             {
                                 <input class="form-control form-control-sm"
@@ -334,6 +349,45 @@ else
     /// entero esta en modo lectura, o porque su Name esta en ReadOnlyKeys.</summary>
     private bool IsNodeReadOnly(FormNode n) =>
         ReadOnly || (!string.IsNullOrEmpty(n.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(n.Name));
+
+    /// <summary>El campo del encabezado es de fecha: se le da control datetime-local.</summary>
+    private static bool EsCampoFecha(string? label)
+        => (label ?? "").ToLowerInvariant().Contains("fecha");
+
+    /// <summary>El campo del encabezado es de solo hora: se le da control time.</summary>
+    private static bool EsCampoHora(string? label)
+    {
+        var l = (label ?? "").ToLowerInvariant();
+        return l.Contains("hora") && !l.Contains("fecha");
+    }
+
+    /// <summary>Convierte el valor guardado ("dd/MM/yyyy HH:mm" o "dd/MM/yyyy") al
+    /// formato ISO (yyyy-MM-ddTHH:mm) que espera el input datetime-local. Devuelve
+    /// vacio si el valor no es una fecha parseable (p.ej. tiene texto de ciudad).</summary>
+    private static string HdrFechaAIso(string? val)
+    {
+        if (string.IsNullOrWhiteSpace(val)) { return ""; }
+        var formatos = new[] { "dd/MM/yyyy HH:mm", "dd/MM/yyyy" };
+        if (DateTime.TryParseExact(val.Trim(), formatos, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var dt))
+        {
+            return dt.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return "";
+    }
+
+    /// <summary>Convierte el valor ISO del input datetime-local de vuelta a
+    /// "dd/MM/yyyy HH:mm" para guardarlo/imprimirlo.</summary>
+    private static string HdrFechaDesdeIso(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso)) { return ""; }
+        if (DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var dt))
+        {
+            return dt.ToString("dd/MM/yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return iso ?? "";
+    }
 
     private string? GetValue(string key) => Valores.TryGetValue(key, out var v) ? v : null;
 

@@ -109,6 +109,20 @@ else
                             </div>
                         </div>
 
+                        <div class="at-fbar-filt-group">
+                            <div class="at-fbar-filt-lbl">Formato de historia</div>
+                            <div class="at-fbar-chips">
+                                @foreach (var f in FormatosHcDisponibles)
+                                {
+                                    <button class="at-fbar-fchip @(_filFormatosHc.Contains(f) ? "on" : "")" @onclick="() => ToggleFormatoHc(f)">@f</button>
+                                }
+                                @if (FormatosHcDisponibles.Count == 0)
+                                {
+                                    <span style="font-size:11px;color:#94a3b8;">Sin formatos en los servicios listados</span>
+                                }
+                            </div>
+                        </div>
+
                         @* Servicio y Profesional son catalogos grandes: en vez de pintar
                            todas las opciones como pildoras usamos un autocompletado tipo
                            tag-input (escribir -> elegir). Se conserva la multi-seleccion:
@@ -614,6 +628,8 @@ else
     private bool _filtrosOpen;
     private string _sortBy = "recent";
     private HashSet<string> _filTipos = new(StringComparer.OrdinalIgnoreCase);
+    // Filtro por codigo de formato de HC (FormatoHistoria del servicio asignado).
+    private HashSet<string> _filFormatosHc = new(StringComparer.OrdinalIgnoreCase);
     // True cuando el usuario tiene rol Owner/Admin del tenant o el permiso
     // "atencion.saltar-orden" marcado en /cfg-roles. Cuando es true, la UI
     // no bloquea los botones HC/Notas por orden secuencial (el backend gate
@@ -633,6 +649,8 @@ else
     private List<string> ServiciosDisponibles => _todos.Select(x => x.NombreServicio).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
     private List<string> ProfesionalesDisponibles => _todos.Select(x => x.NombreProfesional).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
     private List<string> PaquetesCodigosDisponibles => _todos.Where(x => !string.IsNullOrWhiteSpace(x.PaqueteCodigo)).Select(x => x.PaqueteCodigo!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
+    // Formatos de HC presentes en los servicios asignados listados (codigo FormDefinition).
+    private List<string> FormatosHcDisponibles => _todos.Where(x => !string.IsNullOrWhiteSpace(x.FormatoHistoria)).Select(x => x.FormatoHistoria!).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
 
     private string _nombreProf = "";
     private string _especialidad = "";
@@ -694,6 +712,7 @@ else
                               || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase));
             }
             if (_filTipos.Count > 0) { q = q.Where(s => _filTipos.Contains(s.TipoServicio)); }
+            if (_filFormatosHc.Count > 0) { q = q.Where(s => s.FormatoHistoria != null && _filFormatosHc.Contains(s.FormatoHistoria)); }
             // Dropdown principal Pendiente / Terminado / Todos. Cuando esta en
             // "Pendiente" el backend ya solo devuelve pendientes (ver Cargar);
             // igual reforzamos aqui en cliente para consistencia si _todos vino
@@ -760,7 +779,7 @@ else
         return MotivoBloqueoOrden(s) is null;
     }
 
-    private bool FiltrosActivos => _filTipos.Count > 0
+    private bool FiltrosActivos => _filTipos.Count > 0 || _filFormatosHc.Count > 0
                                    || _filServicios.Count > 0 || _filProfesionales.Count > 0
                                    || !string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0
                                    || !string.IsNullOrEmpty(_filFecha);
@@ -771,6 +790,7 @@ else
         {
             var n = 0;
             if (_filTipos.Count > 0) { n++; }
+            if (_filFormatosHc.Count > 0) { n++; }
             if (_filServicios.Count > 0) { n++; }
             if (_filProfesionales.Count > 0) { n++; }
             if (!string.IsNullOrEmpty(_filPaquete) || _filPaquetesCodigos.Count > 0) { n++; }
@@ -780,6 +800,7 @@ else
     }
 
     private void ToggleTipo(string t) { if (!_filTipos.Add(t)) { _filTipos.Remove(t); } }
+    private void ToggleFormatoHc(string f) { if (!_filFormatosHc.Add(f)) { _filFormatosHc.Remove(f); } }
     private void ToggleServicio(string s) { if (!_filServicios.Add(s)) { _filServicios.Remove(s); } }
     private void ToggleProfesional(string p) { if (!_filProfesionales.Add(p)) { _filProfesionales.Remove(p); } }
     private void TogglePaqueteCodigo(string c) { if (!_filPaquetesCodigos.Add(c)) { _filPaquetesCodigos.Remove(c); } }
@@ -824,6 +845,7 @@ else
     private void LimpiarFiltros()
     {
         _filTipos.Clear();
+        _filFormatosHc.Clear();
         _filServicios.Clear();
         _filProfesionales.Clear();
         _filPaquetesCodigos.Clear();

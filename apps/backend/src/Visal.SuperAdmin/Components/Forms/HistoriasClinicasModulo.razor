@@ -131,7 +131,7 @@
                     <label>Formato de historia <small class="text-muted">(opcional - filtro)</small></label>
                     <select class="form-select form-select-sm" @bind="_filFormato">
                         <option value="">Todos los formatos</option>
-                        @foreach (var f in _formatos)
+                        @foreach (var f in _formatosDelPaciente)
                         {
                             <option value="@f.Id">[@f.Codigo] @f.Nombre</option>
                         }
@@ -1296,6 +1296,11 @@
     private const int AutoSaveDebounceMs = 2000;
 
     private List<FormDefinitionDto> _formatos = new();
+    // Formatos en los que el paciente REALMENTE tiene historias. Puebla el filtro
+    // "Formato de historia" solo con lo que tiene actividad (no todo el catalogo de
+    // formatos activos). Se carga una vez al abrir el modulo con la lista completa
+    // del paciente y no depende del filtro actual.
+    private List<(Guid Id, string Codigo, string Nombre)> _formatosDelPaciente = new();
     private FormSchema? _schemaActual;
     private PrefillRouteSet _prefillRoutesActual = new();
     private Dictionary<string, string?> _valores = new();
@@ -1395,6 +1400,9 @@
             }
             await CargarNombreTenantAsync();
             await ResolverPuedeReabrirAsync();
+            // Poblar el filtro "Formato de historia" solo con los formatos donde el
+            // paciente tiene actividad (no todo el catalogo de formatos activos).
+            await CargarFormatosDelPacienteAsync();
             await AutoCargarHcEnCursoSiCorrespondeAsync();
         });
     }
@@ -1612,6 +1620,22 @@
         }).ToList();
     }
 
+    /// <summary>Carga los formatos DISTINTOS en los que el paciente tiene historias,
+    /// para poblar el filtro "Formato de historia" solo con lo que tiene actividad
+    /// (en vez de todo el catalogo de formatos activos). Consulta la lista completa
+    /// del paciente (sin filtros) una vez al abrir el modulo, asi el dropdown refleja
+    /// todo el historial y no colapsa al aplicar un filtro.</summary>
+    private async Task CargarFormatosDelPacienteAsync()
+    {
+        if (PacienteActivo is not PacienteAsignacionDto p) { _formatosDelPaciente = new(); return; }
+        var rows = await RetryAsync(() => HcSvc.ListarPorPacienteAsync(p.Id, null, null, null));
+        _formatosDelPaciente = rows
+            .GroupBy(r => r.FormDefinitionId)
+            .Select(g => (Id: g.Key, Codigo: g.First().FormatoCodigo, Nombre: g.First().FormatoNombre))
+            .OrderBy(f => f.Codigo, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>Lee el claim "profesional_id" del usuario logueado, una sola
     /// vez por sesion del componente. Null para admins (no son profesionales).</summary>
     private async Task<Guid?> ResolverMiProfesionalIdAsync()
@@ -1699,7 +1723,7 @@
         }
         // Re-aplicar header autofill (No Historia / Fecha / Hora) por si la HC se
         // creo antes de esta feature o el schema cambio. Mantiene el header sincronizado.
-        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura);
+        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura, string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase));
         _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
         _formatoActualNombre = detail.FormatoNombre;
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.FormatoVersion)
@@ -1880,7 +1904,7 @@
                 if (detail is not null)
                 {
                     _valores = DeserializeValores(detail.ValoresJson);
-                    _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura);
+                    _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura, string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase));
                 }
                 await RefrescarPrefillHistoriaMedicaAsync(h.Id);
                 // Persistir las filas auto-cargadas (no esperar al autosave debounced)
@@ -2129,7 +2153,7 @@
                 actorUid);
 
             stage = "HeaderAutoFillHelper.Aplicar";
-            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura);
+            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura, hcAbierta: true);
             _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
             stage = "HcSvc.GuardarValoresAsync";
             await HcSvc.GuardarValoresAsync(creada.Id, SerializeValores(_valores), Guid.Empty);
@@ -2366,7 +2390,7 @@
             // (fecha/hora/medico/firmas del usuario actual). Los campos clinicos libres
             // del origen se preservan porque el prefill solo escribe las keys mapeadas.
             await PrefillFromPaciente();
-            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, copia.Id, copia.FechaApertura);
+            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, copia.Id, copia.FechaApertura, hcAbierta: true);
             _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
 
             // Persistir los valores actualizados (source + prefill fresco) en la copia.

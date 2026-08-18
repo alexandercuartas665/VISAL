@@ -157,6 +157,27 @@
                     <label class="ep-check"><input type="checkbox" @bind="_form.MarkAsRead" /> Marcar como leidos al procesar</label>
                     <label class="ep-check ep-check-strong"><input type="checkbox" @bind="_form.IsEnabled" /> Encendido (poller automatico)</label>
                 </div>
+
+                <div class="ep-field ep-col2">
+                    <label>Etiqueta de "procesado" (opcional)</label>
+                    <div class="ep-field-row">
+                        <input class="ep-inp" list="ep-labels" @bind="_form.ProcessedLabel"
+                               placeholder="ej. Procesado / PQR-Procesado (etiqueta EXISTENTE de la cuenta)" />
+                        <button type="button" class="ep-btn ep-btn-sm" disabled="@(_loadingLabels || _form.Id is null)"
+                                @onclick="CargarEtiquetasAsync">@(_loadingLabels ? "Cargando..." : "Cargar etiquetas")</button>
+                    </div>
+                    <datalist id="ep-labels">
+                        @foreach (var l in _labels)
+                        {
+                            <option value="@l"></option>
+                        }
+                    </datalist>
+                    <div class="ep-hint">
+                        Marca VISIBLE de "ya procesado" para el operador: a cada correo procesado se le aplica esta etiqueta
+                        de Gmail. Debe ser una etiqueta que YA EXISTA en la cuenta. Deja vacio para no etiquetar.
+                        @if (_form.Id is null) { <span>Guarda el buzon primero para poder cargar sus etiquetas.</span> }
+                    </div>
+                </div>
             </div>
             @if (!string.IsNullOrEmpty(_formError))
             {
@@ -298,6 +319,7 @@
         public int MaxPorCorrida { get; set; } = 25;
         public bool OnlyUnread { get; set; } = true;
         public bool MarkAsRead { get; set; } = true;
+        public string? ProcessedLabel { get; set; }
         public bool IsEnabled { get; set; }
     }
 
@@ -311,6 +333,8 @@
     private Guid? _busyId;
     private EmailIngestConfigDto? _logsDe;
     private List<EmailIngestLogDto> _logs = new();
+    private List<string> _labels = new();
+    private bool _loadingLabels;
     private string _msg = "";
     private bool _error;
 
@@ -331,6 +355,8 @@
     private void AbrirEditor(EmailIngestConfigDto? b)
     {
         _formError = null;
+        _labels = new();
+        _loadingLabels = false;
         if (b is null)
         {
             _form = new FormModel
@@ -347,8 +373,10 @@
                 ImapHost = b.ImapHost, ImapPort = b.ImapPort, ImapUseSsl = b.ImapUseSsl, Folder = b.Folder,
                 ClassifierAgentId = b.ClassifierAgentId, TargetBoardId = b.TargetBoardId,
                 PollIntervalMinutes = b.PollIntervalMinutes, LookbackDays = b.LookbackDays, MaxPorCorrida = b.MaxPorCorrida,
-                OnlyUnread = b.OnlyUnread, MarkAsRead = b.MarkAsRead, IsEnabled = b.IsEnabled
+                OnlyUnread = b.OnlyUnread, MarkAsRead = b.MarkAsRead, ProcessedLabel = b.ProcessedLabel, IsEnabled = b.IsEnabled
             };
+            // Pre-siembra el datalist con la etiqueta ya guardada para que se vea sin recargar.
+            if (!string.IsNullOrWhiteSpace(b.ProcessedLabel)) { _labels = new() { b.ProcessedLabel! }; }
         }
     }
 
@@ -362,7 +390,8 @@
             var req = new SaveEmailIngestConfigRequest(
                 _form.Id, _form.Nombre, _form.EmailAddress, _form.AppPassword, _form.ImapHost, _form.ImapPort,
                 _form.ImapUseSsl, _form.Folder, _form.ClassifierAgentId, _form.TargetBoardId, null,
-                _form.PollIntervalMinutes, _form.LookbackDays, _form.MaxPorCorrida, _form.OnlyUnread, _form.MarkAsRead, _form.IsEnabled);
+                _form.PollIntervalMinutes, _form.LookbackDays, _form.MaxPorCorrida, _form.OnlyUnread, _form.MarkAsRead,
+                _form.ProcessedLabel, _form.IsEnabled);
             await Svc.SaveAsync(req);
             await RecargarAsync();
             _form = null;
@@ -402,6 +431,32 @@
     {
         _logsDe = b;
         _logs = (await Svc.ListLogsAsync(b.Id, 150)).ToList();
+    }
+
+    private async Task CargarEtiquetasAsync()
+    {
+        if (_form?.Id is not { } id) { return; }
+        _loadingLabels = true;
+        _formError = null;
+        try
+        {
+            var (ok, err, labels) = await Svc.ListarEtiquetasAsync(id);
+            if (ok)
+            {
+                // Conserva la etiqueta ya elegida aunque no venga en la lista (evita perder la seleccion).
+                var set = new List<string>(labels);
+                if (!string.IsNullOrWhiteSpace(_form.ProcessedLabel) &&
+                    !set.Contains(_form.ProcessedLabel!, StringComparer.OrdinalIgnoreCase))
+                {
+                    set.Insert(0, _form.ProcessedLabel!);
+                }
+                _labels = set;
+                Toast(labels.Count == 0 ? "La cuenta no tiene etiquetas propias (solo carpetas de sistema)." : $"{labels.Count} etiqueta(s) cargada(s).", false);
+            }
+            else { _formError = err ?? "No se pudieron cargar las etiquetas."; }
+        }
+        catch (Exception ex) { _formError = ex.Message; }
+        finally { _loadingLabels = false; }
     }
 
     private async Task EliminarAsync(EmailIngestConfigDto b)

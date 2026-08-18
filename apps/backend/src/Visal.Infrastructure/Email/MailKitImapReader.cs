@@ -89,6 +89,50 @@ public sealed class MailKitImapReader : IImapEmailReader
         }
     }
 
+    public async Task<IReadOnlyList<string>> ListLabelsAsync(ImapConnectionParams p, CancellationToken ct = default)
+    {
+        using var client = new ImapClient();
+        await client.ConnectAsync(p.Host, p.Port, p.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls, ct);
+        await client.AuthenticateAsync(p.Username, p.Password, ct);
+
+        // Excluir carpetas de sistema (Gmail las expone como carpetas especiales) para que el
+        // usuario solo vea sus etiquetas reales.
+        const FolderAttributes especiales = FolderAttributes.All | FolderAttributes.Trash | FolderAttributes.Junk
+            | FolderAttributes.Sent | FolderAttributes.Drafts | FolderAttributes.Important
+            | FolderAttributes.Flagged | FolderAttributes.Inbox | FolderAttributes.NoSelect
+            | FolderAttributes.NonExistent;
+
+        var labels = new List<string>();
+        foreach (var ns in client.PersonalNamespaces)
+        {
+            foreach (var f in await client.GetFoldersAsync(ns, false, ct))
+            {
+                if ((f.Attributes & especiales) != 0) { continue; }
+                if (string.IsNullOrWhiteSpace(f.FullName)) { continue; }
+                labels.Add(f.FullName);
+            }
+        }
+        await client.DisconnectAsync(true, ct);
+        return labels.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public async Task AddLabelAsync(ImapConnectionParams p, IReadOnlyList<long> uids, string label, CancellationToken ct = default)
+    {
+        if (uids.Count == 0 || string.IsNullOrWhiteSpace(label)) { return; }
+        using var client = new ImapClient();
+        await client.ConnectAsync(p.Host, p.Port, p.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls, ct);
+        await client.AuthenticateAsync(p.Username, p.Password, ct);
+        if (!client.Capabilities.HasFlag(ImapCapabilities.GMailExt1))
+        {
+            await client.DisconnectAsync(true, ct);
+            throw new NotSupportedException("El servidor no soporta etiquetas de Gmail (X-GM-LABELS). El etiquetado solo aplica a cuentas Gmail/Workspace.");
+        }
+        var folder = await OpenFolderAsync(client, p.Folder, FolderAccess.ReadWrite, ct);
+        var ids = uids.Select(u => new UniqueId((uint)u)).ToList();
+        await folder.AddLabelsAsync(ids, new[] { label }, true, ct);
+        await client.DisconnectAsync(true, ct);
+    }
+
     private static async Task<IMailFolder> OpenFolderAsync(ImapClient client, string folderName, FolderAccess access, CancellationToken ct)
     {
         IMailFolder folder = string.IsNullOrWhiteSpace(folderName) || folderName.Equals("INBOX", StringComparison.OrdinalIgnoreCase)

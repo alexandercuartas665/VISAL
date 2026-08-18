@@ -58,6 +58,13 @@ public class TenantEmailIngestConfig : TenantEntity
     /// <summary>Marcar como leidos los correos procesados (evita reprocesar el mismo universo).</summary>
     public bool MarkAsRead { get; set; } = true;
 
+    /// <summary>
+    /// Etiqueta (Gmail label / carpeta IMAP) que se aplica a cada correo procesado, como marca
+    /// VISIBLE de "ya procesado" para el operador humano (mas claro que solo marcarlo leido).
+    /// Debe ser una etiqueta EXISTENTE de la cuenta. Null/vacio = no se aplica etiqueta.
+    /// </summary>
+    public string? ProcessedLabel { get; set; }
+
     /// <summary>Si esta encendido para el poller automatico.</summary>
     public bool IsEnabled { get; set; }
 

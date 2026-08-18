@@ -20,6 +20,7 @@ public sealed record EmailIngestConfigDto(
     int MaxPorCorrida,
     bool OnlyUnread,
     bool MarkAsRead,
+    string? ProcessedLabel,
     bool IsEnabled,
     bool HasAppPassword,
     DateTimeOffset? LastPolledAt,
@@ -44,6 +45,7 @@ public sealed record SaveEmailIngestConfigRequest(
     int MaxPorCorrida,
     bool OnlyUnread,
     bool MarkAsRead,
+    string? ProcessedLabel,
     bool IsEnabled);
 
 /// <summary>Renglon de la bitacora de correos procesados.</summary>
@@ -78,4 +80,8 @@ public interface IEmailIngestConfigService
     Task<(bool Ok, string? Error, int Total)> TestConnectionAsync(Guid id, CancellationToken ct = default);
     Task<EmailIngestRunResult> ProcessNowAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<EmailIngestLogDto>> ListLogsAsync(Guid configId, int take = 100, CancellationToken ct = default);
+
+    /// <summary>Lista las etiquetas EXISTENTES de la cuenta (para elegir cual marca "procesado").
+    /// Usa la clave guardada del buzon; requiere que ya se haya guardado la App Password.</summary>
+    Task<(bool Ok, string? Error, IReadOnlyList<string> Labels)> ListarEtiquetasAsync(Guid id, CancellationToken ct = default);
 }

@@ -192,8 +192,17 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
             catch { /* no critico: el dedup por Message-ID ya evita reprocesar */ }
         }
 
+        // Etiquetar como "procesado" (marca VISIBLE para el operador humano). No critico: si el
+        // servidor no soporta etiquetas o falla, el dedup por Message-ID igual evita reprocesar.
+        string? etiquetaError = null;
+        if (!string.IsNullOrWhiteSpace(cfg.ProcessedLabel) && uidsProcesados.Count > 0)
+        {
+            try { await _reader.AddLabelAsync(pars, uidsProcesados, cfg.ProcessedLabel!.Trim(), ct); }
+            catch (Exception ex) { etiquetaError = $"No se pudo aplicar la etiqueta '{cfg.ProcessedLabel}': {ex.Message}"; }
+        }
+
         cfg.LastPolledAt = now;
-        cfg.LastError = errores > 0 ? $"{errores} correo(s) con error en la ultima corrida." : null;
+        cfg.LastError = errores > 0 ? $"{errores} correo(s) con error en la ultima corrida." : etiquetaError;
         cfg.LastResultSummary = $"{emails.Count} leidos · {creados} PQR · {descartados} descartados · {duplicados} ya vistos · {errores} errores";
         await _db.SaveChangesAsync(ct);
 

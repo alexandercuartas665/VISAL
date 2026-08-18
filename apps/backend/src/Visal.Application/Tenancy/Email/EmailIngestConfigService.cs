@@ -87,6 +87,7 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
         cfg.MaxPorCorrida = Math.Clamp(req.MaxPorCorrida, 1, 200);
         cfg.OnlyUnread = req.OnlyUnread;
         cfg.MarkAsRead = req.MarkAsRead;
+        cfg.ProcessedLabel = string.IsNullOrWhiteSpace(req.ProcessedLabel) ? null : req.ProcessedLabel.Trim();
         cfg.IsEnabled = req.IsEnabled;
 
         // App Password: solo se reescribe si viene una nueva (cifrada). Vacio = conservar.
@@ -131,6 +132,29 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
         return await _reader.TestConnectionAsync(pars, ct);
     }
 
+    public async Task<(bool Ok, string? Error, IReadOnlyList<string> Labels)> ListarEtiquetasAsync(Guid id, CancellationToken ct = default)
+    {
+        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (cfg is null) { return (false, "El buzon no existe.", Array.Empty<string>()); }
+        if (string.IsNullOrEmpty(cfg.AppPasswordEncrypted)) { return (false, "Primero guarda la App Password del buzon.", Array.Empty<string>()); }
+
+        string password;
+        try { password = _secret.Unprotect(cfg.AppPasswordEncrypted); }
+        catch { return (false, "La App Password esta cifrada con una version anterior. Vuelve a guardarla.", Array.Empty<string>()); }
+
+        var pars = new ImapConnectionParams(cfg.ImapHost, cfg.ImapPort, cfg.ImapUseSsl, cfg.EmailAddress, password,
+            string.IsNullOrWhiteSpace(cfg.Folder) ? "INBOX" : cfg.Folder, cfg.OnlyUnread, 1, null);
+        try
+        {
+            var labels = await _reader.ListLabelsAsync(pars, ct);
+            return (true, null, labels);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"No se pudieron leer las etiquetas: {ex.Message}", Array.Empty<string>());
+        }
+    }
+
     public Task<EmailIngestRunResult> ProcessNowAsync(Guid id, CancellationToken ct = default)
         => _processor.ProcessConfigAsync(id, ct);
 
@@ -153,7 +177,7 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
             c.ClassifierAgentId is { } aid && agentes.TryGetValue(aid, out var an) ? an : null,
             c.TargetBoardId,
             c.TargetBoardId is { } bid && tableros.TryGetValue(bid, out var bn) ? bn : null,
-            c.PollIntervalMinutes, c.LookbackDays, c.MaxPorCorrida, c.OnlyUnread, c.MarkAsRead, c.IsEnabled,
+            c.PollIntervalMinutes, c.LookbackDays, c.MaxPorCorrida, c.OnlyUnread, c.MarkAsRead, c.ProcessedLabel, c.IsEnabled,
             !string.IsNullOrEmpty(c.AppPasswordEncrypted),
             c.LastPolledAt, c.LastError, c.LastResultSummary);
 }

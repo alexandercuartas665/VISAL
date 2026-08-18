@@ -112,6 +112,21 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
             return new EmailIngestRunResult(false, 0, 0, 0, 0, 0, msg);
         }
 
+        // El prompt fuerte de clasificacion (contrato JSON) lo pone el sistema y NO se toca. Si el
+        // agente tiene un system_prompt propio, se ANEXA como refuerzo/afinacion del tenant (Opcion B):
+        // agrega contexto (servicios de la agencia, matices de clasificacion) sin anular las reglas
+        // base, y se recuerda al final que la salida debe seguir siendo el JSON descrito.
+        var extraPrompt = await _db.AiAgents.AsNoTracking()
+            .Where(a => a.Id == cfg.ClassifierAgentId!.Value)
+            .Select(a => a.SystemPrompt)
+            .FirstOrDefaultAsync(ct);
+        var promptClasificador = string.IsNullOrWhiteSpace(extraPrompt)
+            ? PromptClasificador
+            : PromptClasificador
+              + "\n\n--- Instrucciones adicionales de la agencia (contexto y afinacion) ---\n"
+              + extraPrompt.Trim()
+              + "\n\nImportante: independientemente de lo anterior, responde UNICAMENTE con el objeto JSON descrito arriba, sin texto adicional.";
+
         int creados = 0, descartados = 0, errores = 0, duplicados = 0;
         var uidsProcesados = new List<long>();
 
@@ -139,7 +154,7 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
             {
                 var promptUsuario = BuildEmailPrompt(email);
                 var turns = new List<AiChatTurn> { new("user", promptUsuario) };
-                var ia = await _ai.RunAgentAsync(cfg.ClassifierAgentId!.Value, turns, PromptClasificador, "email-pqr", ct);
+                var ia = await _ai.RunAgentAsync(cfg.ClassifierAgentId!.Value, turns, promptClasificador, "email-pqr", ct);
 
                 if (!ia.Ok || string.IsNullOrWhiteSpace(ia.Text))
                 {

@@ -70,11 +70,23 @@ else
                     <label class="form-label">Modelo por defecto</label>
                     <input class="form-control" list="ai-models-@_editing.Provider" @bind="_form.Model" placeholder="@_editing.DefaultModel" autocomplete="off" />
                     <datalist id="ai-models-@_editing.Provider">
-                        @foreach (var m in _editing.SuggestedModels)
+                        @foreach (var m in (_remoteModels ?? _editing.SuggestedModels))
                         {
                             <option value="@m">@m</option>
                         }
                     </datalist>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="LoadModelsAsync" disabled="@_loadingModels">
+                            @(_loadingModels ? "Consultando..." : "Cargar modelos disponibles")
+                        </button>
+                        @if (_modelsMsg is not null)
+                        {
+                            <span class="@(_modelsError ? "text-danger" : "text-muted")" style="font-size:11px;">@_modelsMsg</span>
+                        }
+                    </div>
+                    <div class="text-muted" style="font-size:11px;margin-top:4px;">
+                        Consulta los modelos del proveedor. Usa la API key que escribas arriba; si la dejas vacia, usa la guardada.
+                    </div>
                 </div>
                 <div class="field">
                     <label class="form-label">URL base (opcional)</label>
@@ -108,6 +120,12 @@ else
     private AiProviderDto? _editing;
     private readonly Form _form = new();
 
+    // Modelos consultados en vivo al proveedor (endpoint /models); si es null se usan los sugeridos.
+    private List<string>? _remoteModels;
+    private bool _loadingModels;
+    private bool _modelsError;
+    private string? _modelsMsg;
+
     protected override async Task OnInitializedAsync()
     {
         _providers = (await AiSvc.ListAsync()).ToList();
@@ -122,6 +140,34 @@ else
         _form.Model = p.Model;
         _form.BaseUrl = p.BaseUrl;
         _form.IsEnabled = p.IsEnabled;
+        _remoteModels = null;
+        _modelsMsg = null;
+        _modelsError = false;
+        _loadingModels = false;
+    }
+
+    private async Task LoadModelsAsync()
+    {
+        if (_editing is null) { return; }
+        _loadingModels = true;
+        _modelsMsg = null;
+        _modelsError = false;
+        try
+        {
+            var res = await AiSvc.ListRemoteModelsAsync(_editing.Provider, _form.ApiKey, _form.BaseUrl);
+            if (res.Ok && res.Models.Count > 0)
+            {
+                _remoteModels = res.Models.ToList();
+                _modelsMsg = $"{res.Models.Count} modelos disponibles (abre la lista).";
+            }
+            else
+            {
+                _modelsError = true;
+                _modelsMsg = res.Error ?? "El proveedor no devolvio modelos.";
+            }
+        }
+        catch (Exception ex) { _modelsError = true; _modelsMsg = ex.Message; }
+        finally { _loadingModels = false; }
     }
 
     private async Task SaveAsync()

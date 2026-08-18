@@ -119,8 +119,8 @@ else
         @if (_incluirHc && _hcSchema is not null)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrHc, _hc.FormatoNombre, "HC", _hc.Id.ToString().Substring(0, 8).ToUpperInvariant(),
-                    $"Apertura: {_hc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+                @RenderHeader(HdrHc, _hc.FormatoNombre, "HC", ConsecutivoHc(),
+                    FechaLineaHc())
 
                 @foreach (var node in _hcSchema.Children)
                 {
@@ -146,8 +146,9 @@ else
                                      PacienteDoc="@(_paciente?.NumeroDocumento)"
                                      EspecialistaNombre="@_hc.EspecialistaNombre"
                                      MostrarPieFormula="true"
-                                     FechaLinea="@FechaFormulaMed()"
-                                     OrdenNum="@(_hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED")"
+                                     FechaLinea="@FechaLineaHc()"
+                                     HcConsecutivo="@ConsecutivoHc()"
+                                     OrdenNum="@(ConsecutivoHc() + "-MED")"
                                      TipoCortoHeader="ORD"
                                      TituloFallback="Orden de Medicamentos" />
             }
@@ -156,8 +157,8 @@ else
                 @* Fallback: sin formato ORD-MEDI configurado, tabla simple. *@
                 <div class="pack-doc">
                     @RenderHeader(BestHdr(HdrMed, "Orden de Medicamentos"), "Orden de Medicamentos", "MED",
-                        _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-MED",
-                        "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                        ConsecutivoHc() + "-MED",
+                        FechaLineaHc())
                     <div class="pack-band">Detalle de la orden</div>
                     <table class="pack-table">
                         <thead>
@@ -191,8 +192,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(BestHdr(HdrSrv, "Orden a Servicios"), "Orden a Servicios", "SRV",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRV",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-SRV",
+                    FechaLineaHc())
                 @{ _pieTipo = "SRV"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -227,8 +228,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(BestHdr(HdrRem, "Ordenes de Remision"), "Ordenes de Remision", "REM",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-REM",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-REM",
+                    FechaLineaHc())
                 @{ _pieTipo = "REM"; }
                 <div class="pack-band">Detalle de las remisiones</div>
                 <table class="pack-table">
@@ -263,8 +264,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(HdrTenant("Orden de Insumos"), "Orden de Insumos", "INS",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INS",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-INS",
+                    FechaLineaHc())
                 @{ _pieTipo = "INS"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -301,8 +302,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(HdrTenant("Medicamentos"), "Medicamentos", "REGMED",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-REGMED",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-REGMED",
+                    FechaLineaHc())
                 <div class="pack-band">Registro de medicamentos suministrados</div>
                 <table class="pack-table">
                     <thead>
@@ -335,8 +336,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(HdrTenant("Orden RX Imagenologia"), "Orden RX Imagenologia", "RXEXT",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-RX",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-RX",
+                    FechaLineaHc())
                 @{ _pieTipo = "RXEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -371,8 +372,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(HdrTenant("Orden de Laboratorios"), "Orden de Laboratorios", "LABEXT",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-LAB",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-LAB",
+                    FechaLineaHc())
                 @{ _pieTipo = "LABEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -407,8 +408,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(HdrTenant("Orden de Servicios Externos"), "Orden de Servicios Externos", "SRVEXT",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-SRVX",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-SRVX",
+                    FechaLineaHc())
                 @{ _pieTipo = "SRVEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -443,8 +444,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(HdrTenant("Orden de Insumos Externos"), "Orden de Insumos Externos", "INSEXT",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INSX",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-INSX",
+                    FechaLineaHc())
                 @{ _pieTipo = "INSEXT"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -479,8 +480,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(BestHdr(HdrInc, "Orden de Incapacidad"), "Orden de Incapacidad", "INC",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-INC",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-INC",
+                    FechaLineaHc())
                 @{ _pieTipo = "INC"; }
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
@@ -517,8 +518,8 @@ else
         {
             <div class="pack-doc">
                 @RenderHeader(BestHdr(HdrCert, "Certificacion Medica"), "Certificacion Medica", "CERT",
-                    _hc.Id.ToString().Substring(0,8).ToUpperInvariant() + "-CERT",
-                    "Fecha: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm"))
+                    ConsecutivoHc() + "-CERT",
+                    FechaLineaHc())
                 @{ _pieTipo = "CERT"; }
                 <div class="pack-band">Detalle</div>
                 @foreach (var c in _cert)
@@ -1087,6 +1088,39 @@ else
         };
     }
 
+    /// <summary>
+    /// Consecutivo legible de la HC = ultimos 8 del ID (mismo criterio que el
+    /// encabezado editable de la HC via HeaderAutoFillHelper). Se usa como "HC N°"
+    /// en la HC y en todas las ordenes derivadas para que coincida con lo que el
+    /// usuario ve en pantalla.
+    /// </summary>
+    private string ConsecutivoHc() => _hc is null ? "" : _hc.Id.ToString("N")[^8..].ToUpperInvariant();
+
+    /// <summary>
+    /// Fecha/hora canonica de la HC para impresion: la que el medico dejo en el
+    /// campo de FECHA del encabezado (editable, "dd/MM/yyyy HH:mm"). Si no hay, cae
+    /// a la fecha de apertura. Todas las ordenes derivadas imprimen esta misma fecha.
+    /// </summary>
+    private string FechaCanonicaHc()
+    {
+        var campos = _schHc?.Header?.Campos;
+        if (campos is not null && _hc is not null)
+        {
+            foreach (var f in campos)
+            {
+                var label = (f.Label ?? "").ToLowerInvariant();
+                if (label.Contains("fecha")
+                    && _valores.TryGetValue("hdr:" + f.Id, out var v) && !string.IsNullOrWhiteSpace(v))
+                {
+                    return v!.Trim();
+                }
+            }
+        }
+        return _hc is null ? "" : _hc.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+    }
+
+    private string FechaLineaHc() => "Fecha: " + FechaCanonicaHc();
+
     private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea) => __builder =>
     {
         // El titulo del documento es el del HEADER del schema (lo que el
@@ -1120,7 +1154,7 @@ else
                     <div class="pack-hdr-nohist">
                         @tipoCorto N°: <b>@ordenNum</b><br />
                         @fechaLinea<br />
-                        HC: <b>@_hc!.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
+                        HC: <b>@ConsecutivoHc()</b>
                     </div>
                 }
             </div>

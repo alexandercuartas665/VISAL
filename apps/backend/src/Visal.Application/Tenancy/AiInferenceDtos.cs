@@ -12,6 +12,9 @@ public sealed record AiChatAttachment(string Name, AgentResourceType ResourceTyp
 public sealed record AiChatResult(bool Ok, string? Text, string? Error, int InputTokens = 0, int OutputTokens = 0,
     IReadOnlyList<AiChatAttachment>? Attachments = null);
 
+/// <summary>Modelos disponibles reportados por el proveedor (consulta a su endpoint /models).</summary>
+public sealed record AiModelsResult(bool Ok, IReadOnlyList<string> Models, string? Error);
+
 /// <summary>
 /// Cliente HTTP que habla con cada proveedor de IA (Gemini, OpenAI/ChatGPT, DeepSeek, Claude).
 /// Recibe la API key ya descifrada; no persiste ni loggea secretos.
@@ -25,6 +28,16 @@ public interface IAiProviderClient
         string model,
         string systemPrompt,
         IReadOnlyList<AiChatTurn> turns,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consulta al proveedor los modelos disponibles para esta cuenta (endpoint /models). La key
+    /// llega descifrada; no se persiste ni se loggea. Devuelve la lista ordenada o el error del proveedor.
+    /// </summary>
+    Task<AiModelsResult> ListModelsAsync(
+        AiProvider provider,
+        string apiKey,
+        string? baseUrl,
         CancellationToken cancellationToken = default);
 }
 

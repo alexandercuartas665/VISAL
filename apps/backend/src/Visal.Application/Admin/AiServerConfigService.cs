@@ -1,4 +1,5 @@
 using Visal.Application.Common;
+using Visal.Application.Tenancy;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -17,12 +18,15 @@ public sealed class AiServerConfigService : IAiServerConfigService
     private readonly IApplicationDbContext _db;
     private readonly ISecretProtector _secretProtector;
     private readonly IAuditWriter _audit;
+    private readonly IAiProviderClient _client;
 
-    public AiServerConfigService(IApplicationDbContext db, ISecretProtector secretProtector, IAuditWriter audit)
+    public AiServerConfigService(IApplicationDbContext db, ISecretProtector secretProtector, IAuditWriter audit,
+        IAiProviderClient client)
     {
         _db = db;
         _secretProtector = secretProtector;
         _audit = audit;
+        _client = client;
     }
 
     public async Task<IReadOnlyList<AiProviderDto>> ListAsync(CancellationToken cancellationToken = default)
@@ -73,6 +77,28 @@ public sealed class AiServerConfigService : IAiServerConfigService
             var model = string.IsNullOrWhiteSpace(c.Model) ? meta.DefaultModel : c.Model!;
             return new AiProviderOptionDto(c.Provider, meta.DisplayName, model);
         }).ToList();
+    }
+
+    public async Task<AiModelsResult> ListRemoteModelsAsync(AiProvider provider, string? apiKeyOverride, string? baseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var apiKey = apiKeyOverride?.Trim();
+        var effectiveBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.Trim();
+
+        // Si no llega key tecleada, usar la guardada (descifrada) del proveedor.
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            var cfg = await _db.AiProviderConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Provider == provider, cancellationToken);
+            if (cfg?.ApiKeyEncrypted is null)
+            {
+                return new AiModelsResult(false, Array.Empty<string>(), "No hay API key guardada. Pega la key y vuelve a intentar.");
+            }
+            try { apiKey = _secretProtector.Unprotect(cfg.ApiKeyEncrypted); }
+            catch { return new AiModelsResult(false, Array.Empty<string>(), "La API key guardada no se pudo descifrar. Re-ingresala."); }
+            effectiveBaseUrl ??= cfg.BaseUrl;
+        }
+
+        return await _client.ListModelsAsync(provider, apiKey!, effectiveBaseUrl, cancellationToken);
     }
 
     private AiProviderDto Map(AiProvider provider, AiProviderConfig? c)

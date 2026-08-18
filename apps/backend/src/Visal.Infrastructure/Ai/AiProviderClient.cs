@@ -34,6 +34,104 @@ public sealed class AiProviderClient : IAiProviderClient
         }
     }
 
+    public async Task<AiModelsResult> ListModelsAsync(AiProvider provider, string apiKey, string? baseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return provider switch
+            {
+                AiProvider.Gemini => await GeminiModels(apiKey, baseUrl, cancellationToken),
+                AiProvider.Claude => await ClaudeModels(apiKey, baseUrl, cancellationToken),
+                _ => await OpenAiCompatibleModels(provider, apiKey, baseUrl, cancellationToken)
+            };
+        }
+        catch (Exception ex)
+        {
+            return new AiModelsResult(false, Array.Empty<string>(), $"No se pudo consultar los modelos: {ex.Message}");
+        }
+    }
+
+    // ===== Listado de modelos (GET /models) =====
+    private async Task<AiModelsResult> OpenAiCompatibleModels(AiProvider provider, string apiKey, string? baseUrl, CancellationToken ct)
+    {
+        var fallback = provider == AiProvider.DeepSeek ? "https://api.deepseek.com" : "https://api.openai.com/v1";
+        var url = $"{Base(baseUrl, fallback)}/models";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using var resp = await _http.SendAsync(req, ct);
+        var raw = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode) { return ModelsFail((int)resp.StatusCode, raw); }
+        return ParseIdArray(raw, "data", "id");
+    }
+
+    private async Task<AiModelsResult> ClaudeModels(string apiKey, string? baseUrl, CancellationToken ct)
+    {
+        var url = $"{Base(baseUrl, "https://api.anthropic.com")}/v1/models?limit=100";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("x-api-key", apiKey);
+        req.Headers.Add("anthropic-version", "2023-06-01");
+        using var resp = await _http.SendAsync(req, ct);
+        var raw = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode) { return ModelsFail((int)resp.StatusCode, raw); }
+        return ParseIdArray(raw, "data", "id");
+    }
+
+    private async Task<AiModelsResult> GeminiModels(string apiKey, string? baseUrl, CancellationToken ct)
+    {
+        var url = $"{Base(baseUrl, "https://generativelanguage.googleapis.com")}/v1beta/models?key={apiKey}&pageSize=200";
+        using var resp = await _http.GetAsync(url, ct);
+        var raw = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode) { return ModelsFail((int)resp.StatusCode, raw); }
+        using var doc = JsonDocument.Parse(raw);
+        var list = new List<string>();
+        if (doc.RootElement.TryGetProperty("models", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in arr.EnumerateArray())
+            {
+                // Solo modelos que generan contenido (chat), descartando embeddings/otros.
+                var supportsGen = true;
+                if (el.TryGetProperty("supportedGenerationMethods", out var methods) && methods.ValueKind == JsonValueKind.Array)
+                {
+                    supportsGen = methods.EnumerateArray().Any(m => m.GetString() == "generateContent");
+                }
+                if (!supportsGen) { continue; }
+                var name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
+                if (string.IsNullOrWhiteSpace(name)) { continue; }
+                if (name!.StartsWith("models/", StringComparison.Ordinal)) { name = name["models/".Length..]; }
+                list.Add(name);
+            }
+        }
+        return new AiModelsResult(true, Ordered(list), null);
+    }
+
+    private static AiModelsResult ParseIdArray(string raw, string arrayProp, string idProp)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        var list = new List<string>();
+        if (doc.RootElement.TryGetProperty(arrayProp, out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in arr.EnumerateArray())
+            {
+                if (el.TryGetProperty(idProp, out var id) && id.ValueKind == JsonValueKind.String)
+                {
+                    var v = id.GetString();
+                    if (!string.IsNullOrWhiteSpace(v)) { list.Add(v!); }
+                }
+            }
+        }
+        return new AiModelsResult(true, Ordered(list), null);
+    }
+
+    private static IReadOnlyList<string> Ordered(IEnumerable<string> items) =>
+        items.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static AiModelsResult ModelsFail(int status, string raw)
+    {
+        var snippet = raw.Length > 300 ? raw[..300] : raw;
+        return new AiModelsResult(false, Array.Empty<string>(), $"El proveedor respondio HTTP {status}. {snippet}");
+    }
+
     private static string Base(string? baseUrl, string fallback) =>
         (string.IsNullOrWhiteSpace(baseUrl) ? fallback : baseUrl).TrimEnd('/');
 

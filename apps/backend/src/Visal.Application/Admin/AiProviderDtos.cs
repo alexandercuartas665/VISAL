@@ -1,3 +1,4 @@
+using Visal.Application.Tenancy;
 using Visal.Domain.Enums;
 
 namespace Visal.Application.Admin;
@@ -34,6 +35,14 @@ public interface IAiServerConfigService
 
     /// <summary>Proveedores habilitados (con API key) que las agencias pueden elegir en sus agentes.</summary>
     Task<IReadOnlyList<AiProviderOptionDto>> ListEnabledAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consulta al proveedor los modelos disponibles para poblar el selector. Si <paramref name="apiKeyOverride"/>
+    /// llega (key recien tecleada pero aun sin guardar) se usa esa; si no, la API key guardada del proveedor.
+    /// La key nunca se devuelve ni se loggea.
+    /// </summary>
+    Task<AiModelsResult> ListRemoteModelsAsync(AiProvider provider, string? apiKeyOverride, string? baseUrl,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Metadata estatica de cada proveedor (nombre visible, modelo por defecto, modelos sugeridos).</summary>

@@ -64,22 +64,33 @@
                 <div class="pack-hdr-nohist">
                     @if (!string.IsNullOrWhiteSpace(OrdenNum))
                     {
-                        @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b>
-
-                        <br />
+                        @($"{TipoCortoHeader} N°: ")<b>@OrdenNum</b><br />
                     }
                     @if (!string.IsNullOrWhiteSpace(FechaLinea))
                     {
                         @FechaLinea<br />
                     }
+                    @if (!string.IsNullOrWhiteSpace(HcConsecutivo))
+                    {
+                        <text>HC: </text><b>@HcConsecutivo</b>
+                    }
                 </div>
             }
-            else if (!string.IsNullOrWhiteSpace(FechaLinea))
+            else if (!string.IsNullOrWhiteSpace(FechaLinea) || !string.IsNullOrWhiteSpace(HcConsecutivo))
             {
                 @* Formatos con el bloque HC N°/apertura oculto (p.ej. la formula
                    medica, ver FAT-5) que aun asi deben mostrar la fecha de
-                   expedicion en el encabezado (arriba a la derecha). *@
-                <div class="pack-hdr-nohist">@FechaLinea</div>
+                   expedicion y la trazabilidad de la HC (N° de historia). *@
+                <div class="pack-hdr-nohist">
+                    @if (!string.IsNullOrWhiteSpace(FechaLinea))
+                    {
+                        @FechaLinea<br />
+                    }
+                    @if (!string.IsNullOrWhiteSpace(HcConsecutivo))
+                    {
+                        <text>HC: </text><b>@HcConsecutivo</b>
+                    }
+                </div>
             }
         </div>
         <div class="pack-hdr-title">@tituloFinal</div>
@@ -155,6 +166,9 @@
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public string? OrdenNum { get; set; }
     [Parameter] public string? FechaLinea { get; set; }
+    /// <summary>Consecutivo/N. de la HC de origen. Se imprime como "HC: {valor}" para
+    /// trazabilidad, incluso cuando ImprimirCodigoFecha esta apagado (p.ej. formula medica).</summary>
+    [Parameter] public string? HcConsecutivo { get; set; }
     [Parameter] public string TipoCortoHeader { get; set; } = "HC";
     [Parameter] public string? TituloFallback { get; set; }
     [Parameter] public HashSet<string>? SeccionesOpcionalesIncluidas { get; set; }

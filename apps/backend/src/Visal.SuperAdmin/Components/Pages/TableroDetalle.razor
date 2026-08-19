@@ -8,6 +8,8 @@
 @inject ITaskFieldService FieldSvc
 @inject ITaskBoardColumnPrefService PrefsSvc
 @inject Visal.Application.Tenancy.Email.IPqrEmailReplyService ReplySvc
+@inject IHistoriaClinicaService HcSvc
+@inject IPacienteService PacientesSvc
 @inject Microsoft.JSInterop.IJSRuntime Js
 @inject NavigationManager Nav
 
@@ -38,6 +40,15 @@ else
                 {
                     <span class="tb-badge-owner">Owner</span>
                 }
+                <div class="td-search">
+                    <span class="td-search-ico">🔎</span>
+                    <input class="td-search-input" placeholder="Buscar por título, nombre o cédula..."
+                           @bind="_search" @bind:event="oninput" />
+                    @if (!string.IsNullOrWhiteSpace(_search))
+                    {
+                        <button class="td-search-x" @onclick="@(() => _search = "")" title="Limpiar">×</button>
+                    }
+                </div>
             </div>
             <div class="td-head-right">
                 <div class="td-vista-toggle">
@@ -48,6 +59,7 @@ else
                 {
                     <button class="btn btn-outline-secondary btn-sm" @onclick="OpenColsConfig">🧱 Columnas</button>
                 }
+                <button class="btn btn-outline-secondary btn-sm" @onclick="OpenStages">🗂 Etapas (@_columns.Count)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="() => _fieldsConfigOpen = true">🧩 Campos (@_boardFields.Count)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="OpenMembers">👥 Miembros (@_board.MemberCount)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="OpenEditBoard">✎ Editar</button>
@@ -70,7 +82,7 @@ else
                         <div class="td-col-count">@col.CardCount</div>
                     </div>
                     <div class="td-col-body">
-                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).OrderBy(c => c.SortOrder))
+                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).Where(CardMatchesSearch).OrderBy(c => c.SortOrder))
                         {
                             <div class="td-card @(card.Color is null ? "" : "td-card-colored")"
                                  style="@(card.Color is null ? "" : $"border-left:3px solid {card.Color};")"
@@ -225,7 +237,7 @@ else
     var detail = _cardDetail;
     var col = _columns.FirstOrDefault(c => c.Id == detail.Card.ColumnId);
     <div class="td-modal-overlay" @onclick="CloseCardModal">
-        <div class="td-modal @(_dragOver ? "td-drag-over" : "")" @onclick:stopPropagation="true"
+        <div class="td-modal @(_dragOver ? "td-drag-over" : "") @(_hmOpen ? "td-modal-wide" : "")" @onclick:stopPropagation="true"
              @ondragenter:preventDefault="true" @ondragover:preventDefault="true"
              @ondragenter="OnCardDragEnter" @ondragleave="OnCardDragLeave">
             @* Drop mask: cubre TODO el modal cuando el usuario arrastra un archivo.
@@ -506,6 +518,7 @@ else
                         <h4>Acciones</h4>
                         <div class="td-modal-side-btns">
                             <button class="td-modal-side-btn" @onclick="OpenReplyAsync">✉ Responder correo</button>
+                            <button class="td-modal-side-btn @(_hmOpen ? "td-side-active" : "")" @onclick="ToggleHistoriaMedicaAsync">🩺 Historia médica</button>
                             <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("move"))">➡ Mover</button>
                             <button class="td-modal-side-btn" @onclick="ArchiveCardAsync">
                                 📦 @(detail.Card.IsArchived ? "Desarchivar" : "Archivar")
@@ -515,6 +528,150 @@ else
                         </div>
                     </div>
                 </div>
+
+                @* ===== Tercera columna: Historia medica del paciente del PQR ===== *@
+                @if (_hmOpen)
+                {
+                    <div class="td-modal-hm">
+                        <div class="td-hm-head">
+                            <h4>🩺 Historia médica</h4>
+                            <button class="td-modal-x" style="width:24px; height:24px; font-size:17px;" @onclick="@(() => _hmOpen = false)">×</button>
+                        </div>
+
+                        @if (_hmBuscando)
+                        {
+                            <p class="td-hm-hint">Buscando paciente...</p>
+                        }
+                        else if (_hmPacienteId is null)
+                        {
+                            @* Sin match por cedula: mensaje + buscador manual *@
+                            <div class="td-hm-nopac">
+                                @if (!string.IsNullOrWhiteSpace(_hmCedula))
+                                {
+                                    <p>La cédula <strong>@_hmCedula</strong> del PQR <strong>no corresponde</strong> a un paciente registrado en la IPS.</p>
+                                }
+                                else
+                                {
+                                    <p>Este PQR no trae cédula. Busca el paciente manualmente:</p>
+                                }
+                            </div>
+                            <div class="td-hm-manual">
+                                <input class="form-control form-control-sm" placeholder="Buscar por cédula o nombre..."
+                                       @bind="_hmManualQuery" @bind:event="oninput" @onkeyup="@(async e => { if (e.Key == "Enter") await BuscarManualAsync(); })" />
+                                <button class="btn btn-primary btn-sm" @onclick="BuscarManualAsync">Buscar</button>
+                            </div>
+                            @if (_hmManualResultados.Count > 0)
+                            {
+                                <div class="td-hm-manual-list">
+                                    @foreach (var p in _hmManualResultados)
+                                    {
+                                        <button class="td-hm-manual-item" @onclick="@(() => SeleccionarPacienteManualAsync(p))">
+                                            <span class="td-hm-manual-doc">@p.NumeroDocumento</span>
+                                            <span class="td-hm-manual-nom">@p.NombreCompleto</span>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                            else if (_hmManualBuscado)
+                            {
+                                <p class="td-hm-hint">Sin coincidencias.</p>
+                            }
+                        }
+                        else
+                        {
+                            @* Paciente resuelto: cabecera + filtros + lista de historias *@
+                            <div class="td-hm-pac">
+                                <div class="td-hm-pac-nom">@_hmPacienteNombre</div>
+                                <div class="td-hm-pac-doc">CC @_hmPacienteDoc</div>
+                            </div>
+
+                            <div class="td-hm-tabs">
+                                <button class="td-hm-tab @(_hmTab == HmTab.Historias ? "active" : "")" @onclick="@(() => _hmTab = HmTab.Historias)">Historias</button>
+                                <button class="td-hm-tab @(_hmTab == HmTab.Datos ? "active" : "")" @onclick="@(() => _hmTab = HmTab.Datos)">Datos del paciente</button>
+                            </div>
+
+                            @if (_hmTab == HmTab.Historias)
+                            {
+                                <div class="td-hm-filtros">
+                                    <label>Desde <input type="date" class="form-control form-control-sm" @bind="_hmFechaIni" /></label>
+                                    <label>Hasta <input type="date" class="form-control form-control-sm" @bind="_hmFechaFin" /></label>
+                                    <label>Tipo de servicio
+                                        <select class="form-select form-select-sm" @bind="_hmFormato">
+                                            <option value="">(Todos)</option>
+                                            @foreach (var f in _hmFormatos)
+                                            {
+                                                <option value="@f.Id">@f.Label</option>
+                                            }
+                                        </select>
+                                    </label>
+                                    <button class="btn btn-primary btn-sm" @onclick="CargarHistoriasAsync">Mostrar</button>
+                                </div>
+
+                                <div class="td-hm-list">
+                                    @if (_hmHistorias.Count == 0)
+                                    {
+                                        <p class="td-hm-hint">Sin historias para el filtro actual.</p>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var h in _hmHistorias)
+                                        {
+                                            <div class="td-hm-item">
+                                                <div class="td-hm-item-top">
+                                                    <span class="td-hm-item-fecha">@h.FechaApertura.ToString("yyyy-MM-dd")</span>
+                                                    <span class="td-hm-item-est td-hm-est-@(h.Estado.ToString().ToLowerInvariant())">@h.Estado</span>
+                                                </div>
+                                                <div class="td-hm-item-fmt">@(string.IsNullOrWhiteSpace(h.FormatoCodigo) ? "" : $"[{h.FormatoCodigo}] ")@h.FormatoNombre</div>
+                                                @if (!string.IsNullOrWhiteSpace(h.EspecialistaNombre))
+                                                {
+                                                    <div class="td-hm-item-esp">👤 @h.EspecialistaNombre</div>
+                                                }
+                                                <button class="td-hm-ver" @onclick="@(() => VerHistoriaAsync(h.Id))">👁 Ver historia</button>
+                                            </div>
+                                        }
+                                    }
+                                </div>
+
+                                <button class="td-hm-notas" @onclick="VerNotasAsync">📝 Ver todas las notas médicas</button>
+                            }
+                            else if (_hmPacDetalle is not null)
+                            {
+                                var d = _hmPacDetalle;
+                                <div class="td-hm-datos">
+                                    <div class="td-hm-dato"><span>Tipo / N° documento</span><strong>@d.TipoDocumento @d.NumeroDocumento</strong></div>
+                                    <div class="td-hm-dato"><span>Nombre completo</span><strong>@d.NombreCompleto</strong></div>
+                                    <div class="td-hm-dato"><span>Fecha nacimiento</span><strong>@(d.FechaNacimiento?.ToString("yyyy-MM-dd") ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Edad</span><strong>@(d.Edad?.ToString() ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Sexo</span><strong>@(d.Sexo ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Estado civil</span><strong>@(d.EstadoCivil ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Grupo RH</span><strong>@(d.GrupoRh ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Régimen</span><strong>@(d.Regimen ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Zona / Estrato</span><strong>@(d.Zona ?? "—") / @(d.EstratoSocial ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Ocupación</span><strong>@(d.Ocupacion ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Dirección</span><strong>@(string.IsNullOrWhiteSpace(d.Direccion) ? "—" : d.Direccion)</strong></div>
+                                    <div class="td-hm-dato"><span>Barrio / Ciudad</span><strong>@(d.Barrio ?? "—") / @(d.Ciudad ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Teléfono</span><strong>@(string.IsNullOrWhiteSpace(d.Telefono) ? "—" : $"{d.CodigoPaisTelefono} {d.Telefono}")</strong></div>
+                                    <div class="td-hm-dato"><span>Email</span><strong>@(string.IsNullOrWhiteSpace(d.Email) ? "—" : d.Email)</strong></div>
+                                    <div class="td-hm-dato"><span>Diagnóstico principal</span><strong>@(string.IsNullOrWhiteSpace(d.DiagnosticoPrincipal) ? (d.Cie10Codigo ?? "—") : $"{d.Cie10Codigo} {d.DiagnosticoPrincipal}")</strong></div>
+                                    <div class="td-hm-dato"><span>Tutela</span><strong>@(d.Tutela ?? "—")</strong></div>
+                                    <div class="td-hm-dato"><span>Estado admisión</span><strong>@d.EstadoAdmision</strong></div>
+                                    @if (d.ContactosEmergencia.Count > 0)
+                                    {
+                                        <div class="td-hm-dato-h">Contactos de emergencia</div>
+                                        @foreach (var c in d.ContactosEmergencia)
+                                        {
+                                            <div class="td-hm-dato"><span>@(string.IsNullOrWhiteSpace(c.Parentesco) ? "Contacto" : c.Parentesco)</span><strong>@c.Nombre @(string.IsNullOrWhiteSpace(c.Telefono) ? "" : $"· {c.CodigoPais} {c.Telefono}")</strong></div>
+                                        }
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="td-hm-hint">Cargando datos del paciente...</p>
+                            }
+                        }
+                    </div>
+                }
 
                 @* ===== Popovers ===== *@
                 @if (_showMembersPop)
@@ -856,6 +1013,66 @@ else
     </div>
 }
 
+@* ===== Modal: Configurar etapas (columnas del kanban) ===== *@
+@if (_stagesOpen)
+{
+    <div class="tb-modal-backdrop" @onclick="@(() => { if (!_stagesBusy) _stagesOpen = false; })"></div>
+    <div class="tb-modal" style="width:640px; max-width:95vw;">
+        <div class="tb-modal-h">
+            <h3>Etapas del tablero</h3>
+            <button class="tb-modal-close" @onclick="@(() => { if (!_stagesBusy) _stagesOpen = false; })">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            <p class="td-cfg-hint">Arrastra para reordenar. Edita nombre y color, marca la etapa final, o elimina una etapa vacia. Aplica a <strong>todo el tablero</strong>.</p>
+            <div class="td-stage-list">
+                @foreach (var st in _stagesDraft.OrderBy(s => s.Orden))
+                {
+                    <div class="td-stage-row @(_stageDragId == st.Id ? "dragging" : "")"
+                         draggable="true"
+                         @ondragstart="@(() => _stageDragId = st.Id)"
+                         @ondragend="@(() => _stageDragId = null)"
+                         @ondragover:preventDefault="true"
+                         @ondrop="@(() => StageDropOn(st.Id))">
+                        <span class="td-cfg-grip" title="Arrastrar">⋮⋮</span>
+                        <input type="color" class="td-stage-color" value="@(st.Color ?? "#94a3b8")" @onchange="@(e => st.Color = e.Value?.ToString())" title="Color de la etapa" />
+                        <input class="td-stage-name" placeholder="Nombre de la etapa" value="@st.Name" @onchange="@(e => st.Name = e.Value?.ToString() ?? "")" />
+                        <label class="td-stage-done" title="Marca esta etapa como estado final (completado)">
+                            <input type="checkbox" checked="@st.IsDone" @onchange="@(e => st.IsDone = (bool)(e.Value ?? false))" /> Final
+                        </label>
+                        <span class="td-stage-count" title="Tarjetas en esta etapa">@st.CardCount</span>
+                        <button class="td-stage-del" title="@(st.CardCount > 0 ? "No se puede eliminar: tiene tarjetas" : "Eliminar etapa")"
+                                disabled="@(st.CardCount > 0 || _stagesBusy)"
+                                @onclick="@(() => DeleteStageAsync(st.Id))">🗑</button>
+                    </div>
+                }
+            </div>
+
+            @if (_stageAddOpen)
+            {
+                <div class="td-stage-addrow">
+                    <input type="color" class="td-stage-color" @bind="_newStageColor" title="Color" />
+                    <input class="td-stage-name" placeholder="Nombre de la nueva etapa" @bind="_newStageName" />
+                    <button class="btn btn-primary btn-sm" @onclick="AddStageAsync" disabled="@(string.IsNullOrWhiteSpace(_newStageName) || _stagesBusy)">Añadir</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="@(() => _stageAddOpen = false)">Cancelar</button>
+                </div>
+            }
+            else
+            {
+                <button class="btn btn-outline-secondary btn-sm td-stage-add" @onclick="@(() => { _newStageName = ""; _newStageColor = "#94a3b8"; _stageAddOpen = true; })">+ Añadir etapa</button>
+            }
+
+            @if (_stagesError is not null)
+            {
+                <p class="td-att-error">@_stagesError</p>
+            }
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="@(() => { if (!_stagesBusy) _stagesOpen = false; })" disabled="@_stagesBusy">Cancelar</button>
+            <button class="btn btn-primary" @onclick="SaveStagesAsync" disabled="@_stagesBusy">@(_stagesBusy ? "Guardando..." : "Guardar")</button>
+        </div>
+    </div>
+}
+
 @* ===== Modal: Miembros ===== *@
 @if (_membersOpen && _board is not null)
 {
@@ -915,6 +1132,11 @@ else
     .td-page { padding:8px 4px; }
     .td-head { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:6px; }
     .td-head-left { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+    .td-search { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #cbd5e1; border-radius:8px; padding:5px 10px; min-width:280px; max-width:360px; }
+    .td-search-ico { font-size:13px; color:#94a3b8; }
+    .td-search-input { flex:1; min-width:0; border:0; outline:none; font-size:13px; color:#0f172a; background:transparent; }
+    .td-search-x { border:0; background:transparent; color:#94a3b8; font-size:17px; line-height:1; cursor:pointer; padding:0 2px; }
+    .td-search-x:hover { color:#0f172a; }
     .td-back { text-decoration:none; color:#64748b; font-size:20px; padding:4px 8px; }
     .td-back:hover { color:#0f172a; }
     .td-color-dot { width:14px; height:14px; border-radius:50%; flex:none; }
@@ -1025,6 +1247,51 @@ else
     .td-modal-side-btn.td-danger { color:#dc2626; }
     .td-modal-side-btn.td-danger:hover { background:#fee2e2; color:#991b1b; }
     .td-modal-side-divider { border:0; border-top:1px solid #e2e8f0; margin:4px 0; }
+    .td-modal-side-btn.td-side-active { background:#2563eb; color:#fff; }
+    .td-modal-side-btn.td-side-active:hover { background:#1d4ed8; }
+
+    /* Tercera columna: Historia medica del paciente del PQR */
+    .td-modal.td-modal-wide { max-width:1240px; }
+    .td-modal-hm { width:360px; flex:none; display:flex; flex-direction:column; gap:12px; border-left:1px solid #e2e8f0; padding-left:20px; }
+    .td-hm-head { display:flex; align-items:center; justify-content:space-between; }
+    .td-hm-head h4 { margin:0; font-size:14px; font-weight:700; color:#0f172a; }
+    .td-hm-hint { color:#64748b; font-size:13px; margin:4px 0; }
+    .td-hm-nopac { background:#fef3c7; color:#92400e; border-radius:8px; padding:10px 12px; font-size:13px; }
+    .td-hm-nopac p { margin:0; }
+    .td-hm-manual { display:flex; gap:6px; }
+    .td-hm-manual-list { display:flex; flex-direction:column; gap:4px; max-height:240px; overflow-y:auto; }
+    .td-hm-manual-item { display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left; padding:6px 10px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; cursor:pointer; }
+    .td-hm-manual-item:hover { background:#eff6ff; border-color:#93c5fd; }
+    .td-hm-manual-doc { font-size:11px; color:#64748b; font-weight:600; }
+    .td-hm-manual-nom { font-size:13px; color:#0f172a; }
+    .td-hm-pac { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; }
+    .td-hm-pac-nom { font-size:14px; font-weight:700; color:#0f172a; }
+    .td-hm-pac-doc { font-size:12px; color:#475569; }
+    .td-hm-filtros { display:flex; flex-direction:column; gap:8px; }
+    .td-hm-filtros label { display:flex; flex-direction:column; gap:3px; font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.03em; }
+    .td-hm-list { display:flex; flex-direction:column; gap:8px; max-height:46vh; overflow-y:auto; }
+    .td-hm-item { border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; background:#fff; }
+    .td-hm-item-top { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+    .td-hm-item-fecha { font-size:12.5px; font-weight:700; color:#0f172a; }
+    .td-hm-item-est { font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:10px; text-transform:uppercase; letter-spacing:0.03em; }
+    .td-hm-est-abierta { background:#dcfce7; color:#166534; }
+    .td-hm-est-cerrada { background:#e2e8f0; color:#334155; }
+    .td-hm-est-inactiva { background:#fee2e2; color:#991b1b; }
+    .td-hm-item-fmt { font-size:12.5px; color:#0f172a; margin-top:3px; }
+    .td-hm-item-esp { font-size:11.5px; color:#64748b; margin-top:2px; }
+    .td-hm-ver { margin-top:6px; width:100%; padding:5px 8px; background:#2563eb; color:#fff; border:0; border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer; }
+    .td-hm-ver:hover { background:#1d4ed8; }
+    .td-hm-notas { margin-top:auto; padding:8px 10px; background:#f1f5f9; color:#0f172a; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; }
+    .td-hm-notas:hover { background:#e2e8f0; }
+    .td-hm-tabs { display:flex; gap:4px; border-bottom:1px solid #e2e8f0; }
+    .td-hm-tab { flex:1; padding:7px 8px; background:transparent; border:0; border-bottom:2px solid transparent; font-size:12.5px; font-weight:600; color:#64748b; cursor:pointer; }
+    .td-hm-tab:hover { color:#0f172a; }
+    .td-hm-tab.active { color:#2563eb; border-bottom-color:#2563eb; }
+    .td-hm-datos { display:flex; flex-direction:column; gap:2px; max-height:52vh; overflow-y:auto; }
+    .td-hm-dato { display:flex; flex-direction:column; gap:1px; padding:6px 8px; border-bottom:1px solid #f1f5f9; }
+    .td-hm-dato span { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:#94a3b8; }
+    .td-hm-dato strong { font-size:13px; font-weight:600; color:#0f172a; }
+    .td-hm-dato-h { margin-top:8px; padding:4px 8px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:#64748b; background:#f8fafc; }
     .td-modal-inline { display:flex; flex-wrap:wrap; gap:22px; padding-left:34px; margin-bottom:4px; }
     .td-modal-mini { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#64748b; margin:0 0 6px; }
     .td-avatar-row { display:flex; gap:0; align-items:center; }
@@ -1048,7 +1315,7 @@ else
     /* Descripcion */
     .td-desc-empty { padding:12px 14px; background:#e2e8f0; border-radius:6px; color:#64748b; font-size:13px; cursor:pointer; min-height:60px; }
     .td-desc-empty:hover { background:#cbd5e1; }
-    .td-desc-text { font-size:13.5px; color:#0f172a; white-space:pre-wrap; line-height:1.55; cursor:pointer; padding:8px 12px; border-radius:6px; }
+    .td-desc-text { font-size:13.5px; color:#0f172a; white-space:pre-wrap; line-height:1.55; cursor:pointer; padding:8px 12px; border-radius:6px; max-height:260px; overflow-y:auto; border:1px solid #e2e8f0; background:#fff; }
     .td-desc-text:hover { background:#f1f5f9; }
     .td-desc-edit { display:flex; flex-direction:column; gap:8px; }
     .td-desc-edit textarea { width:100%; min-height:100px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13.5px; font-family:inherit; resize:vertical; outline:none; }
@@ -1152,6 +1419,22 @@ else
     .td-cfg-ancho { width:70px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:5px; font-size:12.5px; outline:none; }
     .td-cfg-ancho:focus { border-color:#3b82f6; }
 
+    /* Modal etapas (columnas del kanban) */
+    .td-stage-list { display:flex; flex-direction:column; gap:4px; max-height:52vh; overflow-y:auto; }
+    .td-stage-row { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; }
+    .td-stage-row.dragging { opacity:0.5; }
+    .td-stage-color { width:34px; height:30px; padding:2px; border:1px solid #cbd5e1; border-radius:5px; cursor:pointer; flex:0 0 auto; }
+    .td-stage-name { flex:1; min-width:0; padding:5px 8px; border:1px solid #cbd5e1; border-radius:5px; font-size:13px; outline:none; }
+    .td-stage-name:focus { border-color:#3b82f6; }
+    .td-stage-done { display:flex; align-items:center; gap:4px; font-size:12px; color:#475569; white-space:nowrap; user-select:none; cursor:pointer; }
+    .td-stage-done input[type=checkbox] { width:15px; height:15px; cursor:pointer; }
+    .td-stage-count { min-width:24px; text-align:center; font-size:12px; color:#64748b; background:#f1f5f9; border-radius:10px; padding:1px 7px; }
+    .td-stage-del { border:none; background:transparent; cursor:pointer; font-size:15px; padding:2px 4px; border-radius:5px; }
+    .td-stage-del:hover:not(:disabled) { background:#fee2e2; }
+    .td-stage-del:disabled { opacity:0.35; cursor:not-allowed; }
+    .td-stage-addrow { display:flex; align-items:center; gap:8px; margin-top:10px; padding-top:10px; border-top:1px dashed #e2e8f0; }
+    .td-stage-add { margin-top:10px; }
+
     /* Modal responder correo */
     .tb-reply-hint { color:#64748b; font-size:13px; }
     .tb-reply-nope { background:#fef3c7; color:#92400e; border-radius:6px; padding:12px 14px; font-size:13px; }
@@ -1188,9 +1471,33 @@ else
     private Dictionary<string, string?> _cardValues = new();
     private bool _fieldsConfigOpen;
 
+    // ---- Panel Historia medica del paciente del PQR (3a columna del modal de tarjeta) ----
+    private bool _hmOpen;
+    private bool _hmBuscando;
+    private string? _hmCedula;
+    private Guid? _hmPacienteId;
+    private string? _hmPacienteNombre;
+    private string? _hmPacienteDoc;
+    private DateOnly? _hmFechaIni;
+    private DateOnly? _hmFechaFin;
+    private Guid? _hmFormato;
+    private List<(Guid Id, string Label)> _hmFormatos = new();
+    private List<HistoriaClinicaResumenDto> _hmHistorias = new();
+    private enum HmTab { Historias, Datos }
+    private HmTab _hmTab = HmTab.Historias;
+    private PacienteDetailDto? _hmPacDetalle;
+    private string _hmManualQuery = "";
+    private bool _hmManualBuscado;
+    private List<PacienteDto> _hmManualResultados = new();
+    // Todos los tipos de documento del paquete imprimible (los vacios no se renderizan).
+    private const string HmDocsPaquete = "HC,MED,SRV,INS,REM,RXEXT,LABEXT,INSEXT,SRVEXT,INC,CERT,ESC,EVO,CON";
+
     // ---- Vista tabla + columnas por usuario ----
     private enum Vista { Kanban, Tabla }
     private Vista _vista = Vista.Kanban;
+
+    // Buscador del tablero (filtra tarjetas en Kanban y Tabla).
+    private string _search = "";
 
     /// <summary>Una columna de la vista tabla (fija o campo dinamico) con la preferencia del usuario aplicada.</summary>
     private sealed class TableCol
@@ -1285,6 +1592,26 @@ else
     private string? _editBoardDescription;
     private string? _editBoardColor;
 
+    // Modal etapas (columnas del kanban)
+    private bool _stagesOpen;
+    private bool _stagesBusy;
+    private string? _stagesError;
+    private List<StageDraft> _stagesDraft = new();
+    private Guid? _stageDragId;
+    private bool _stageAddOpen;
+    private string _newStageName = "";
+    private string _newStageColor = "#94a3b8";
+
+    private sealed class StageDraft
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Color { get; set; }
+        public bool IsDone { get; set; }
+        public int Orden { get; set; }
+        public int CardCount { get; set; }
+    }
+
     // Modal miembros
     private bool _membersOpen;
     private List<TaskBoardMemberDto> _members = new();
@@ -1367,8 +1694,35 @@ else
     {
         var colOrder = _columns.Select((c, i) => (c.Id, i)).ToDictionary(x => x.Id, x => x.i);
         return _cards
+            .Where(CardMatchesSearch)
             .OrderBy(c => colOrder.TryGetValue(c.ColumnId, out var i) ? i : int.MaxValue)
             .ThenBy(c => c.SortOrder);
+    }
+
+    /// <summary>Filtro del buscador del tablero: por titulo + cualquier valor de campo dinamico
+    /// (incluye nombre y cedula). Tolerante a mayusculas; la cedula matchea ignorando separadores.</summary>
+    private bool CardMatchesSearch(TaskCardSummaryDto c)
+    {
+        if (string.IsNullOrWhiteSpace(_search)) { return true; }
+        var q = _search.Trim().ToLowerInvariant();
+        if ((c.Title ?? "").ToLowerInvariant().Contains(q)) { return true; }
+        if (c.FieldValues is not null)
+        {
+            foreach (var v in c.FieldValues.Values)
+            {
+                if (string.IsNullOrEmpty(v)) { continue; }
+                if (v.ToLowerInvariant().Contains(q)) { return true; }
+            }
+        }
+        // Busqueda por cedula ignorando puntos/comas del termino (25.053.801 -> 25053801).
+        var qDigits = new string(q.Where(char.IsDigit).ToArray());
+        if (qDigits.Length >= 3 && c.FieldValues is not null
+            && c.FieldValues.TryGetValue("identificacion", out var ced) && !string.IsNullOrEmpty(ced)
+            && ced.Contains(qDigits))
+        {
+            return true;
+        }
+        return false;
     }
 
     /// <summary>Tarjetas de la MISMA columna/etapa que la tarjeta abierta, en el mismo orden del kanban.</summary>
@@ -1565,6 +1919,124 @@ else
         await ReloadAllAsync();
     }
 
+    // ---- Etapas (columnas del kanban): crear/renombrar/reordenar/eliminar ----
+
+    private void OpenStages()
+    {
+        _stagesError = null;
+        _stageAddOpen = false;
+        _stageDragId = null;
+        BuildStagesDraft();
+        _stagesOpen = true;
+    }
+
+    private void BuildStagesDraft()
+    {
+        var ordered = _columns.OrderBy(c => c.SortOrder).ToList();
+        _stagesDraft = ordered.Select((c, i) => new StageDraft
+        {
+            Id = c.Id,
+            Name = c.Name,
+            Color = c.Color,
+            IsDone = c.IsDone,
+            Orden = i,
+            CardCount = c.CardCount,
+        }).ToList();
+    }
+
+    private void StageDropOn(Guid targetId)
+    {
+        if (_stageDragId is null || _stageDragId == targetId) { _stageDragId = null; return; }
+        var ordered = _stagesDraft.OrderBy(s => s.Orden).ToList();
+        var drag = ordered.FirstOrDefault(s => s.Id == _stageDragId);
+        if (drag is null) { _stageDragId = null; return; }
+        ordered.Remove(drag);
+        var idx = ordered.FindIndex(s => s.Id == targetId);
+        if (idx < 0) { idx = ordered.Count; }
+        ordered.Insert(idx, drag);
+        for (var i = 0; i < ordered.Count; i++) { ordered[i].Orden = i; }
+        _stagesDraft = ordered;
+        _stageDragId = null;
+    }
+
+    private async Task AddStageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newStageName)) { return; }
+        _stagesBusy = true;
+        _stagesError = null;
+        try
+        {
+            var color = string.IsNullOrWhiteSpace(_newStageColor) ? null : _newStageColor;
+            await BoardsSvc.CreateColumnAsync(new CreateTaskColumnRequest(BoardId, _newStageName.Trim(), color, false), _actorId);
+            _columns = (await BoardsSvc.ListColumnsAsync(BoardId, _actorId)).ToList();
+            BuildStagesDraft();
+            _stageAddOpen = false;
+            _newStageName = "";
+        }
+        finally { _stagesBusy = false; }
+    }
+
+    private async Task DeleteStageAsync(Guid columnId)
+    {
+        var st = _stagesDraft.FirstOrDefault(s => s.Id == columnId);
+        if (st is null) { return; }
+        if (st.CardCount > 0)
+        {
+            _stagesError = $"No se puede eliminar \"{st.Name}\": tiene {st.CardCount} tarjeta(s). Muevelas primero.";
+            return;
+        }
+        var ok = await Js.InvokeAsync<bool>("confirm", $"¿Eliminar la etapa \"{st.Name}\"? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        _stagesBusy = true;
+        _stagesError = null;
+        try
+        {
+            var deleted = await BoardsSvc.DeleteColumnAsync(columnId, _actorId);
+            if (!deleted)
+            {
+                _stagesError = "No se pudo eliminar la etapa (puede tener tarjetas o no tienes acceso).";
+            }
+            _columns = (await BoardsSvc.ListColumnsAsync(BoardId, _actorId)).ToList();
+            BuildStagesDraft();
+        }
+        finally { _stagesBusy = false; }
+    }
+
+    private async Task SaveStagesAsync()
+    {
+        if (_stagesDraft.Any(s => string.IsNullOrWhiteSpace(s.Name)))
+        {
+            _stagesError = "Toda etapa debe tener nombre.";
+            return;
+        }
+        _stagesBusy = true;
+        _stagesError = null;
+        try
+        {
+            // 1) Actualizar nombre/color/final de cada etapa que cambio.
+            foreach (var st in _stagesDraft)
+            {
+                var orig = _columns.FirstOrDefault(c => c.Id == st.Id);
+                var newColor = string.IsNullOrWhiteSpace(st.Color) ? null : st.Color;
+                if (orig is null
+                    || orig.Name != st.Name.Trim()
+                    || (orig.Color ?? "") != (newColor ?? "")
+                    || orig.IsDone != st.IsDone)
+                {
+                    await BoardsSvc.UpdateColumnAsync(st.Id,
+                        new UpdateTaskColumnRequest(st.Name.Trim(), newColor, st.IsDone), _actorId);
+                }
+            }
+            // 2) Reordenar segun el orden del draft.
+            var orderedIds = _stagesDraft.OrderBy(s => s.Orden).Select(s => s.Id).ToList();
+            await BoardsSvc.ReorderColumnsAsync(BoardId, orderedIds, _actorId);
+
+            _stagesOpen = false;
+            await ReloadAllAsync();
+        }
+        finally { _stagesBusy = false; }
+    }
+
     // ---- Editar tablero ----
 
     private void OpenEditBoard()
@@ -1624,7 +2096,90 @@ else
         _dragOver = false;
     }
 
-    private void CloseCardModal() { _cardModalOpen = false; _cardDetail = null; _cardValues = new(); }
+    private void CloseCardModal() { _cardModalOpen = false; _cardDetail = null; _cardValues = new(); _hmOpen = false; }
+
+    // ---- Panel Historia medica del paciente del PQR ----
+
+    /// <summary>Abre/cierra la columna de historia medica. Al abrir, resuelve el paciente por la cedula del PQR.</summary>
+    private async Task ToggleHistoriaMedicaAsync()
+    {
+        if (_hmOpen) { _hmOpen = false; return; }
+        _hmOpen = true;
+        CloseAllPopovers();
+        await ResolverPacienteDesdeTarjetaAsync();
+    }
+
+    private async Task ResolverPacienteDesdeTarjetaAsync()
+    {
+        // Reset del estado del panel.
+        _hmPacienteId = null; _hmPacienteNombre = null; _hmPacienteDoc = null; _hmPacDetalle = null; _hmTab = HmTab.Historias;
+        _hmHistorias = new(); _hmFormatos = new(); _hmFormato = null;
+        _hmFechaIni = null; _hmFechaFin = null;
+        _hmManualQuery = ""; _hmManualResultados = new(); _hmManualBuscado = false;
+
+        // Cedula de la tarjeta (campo dinamico "identificacion"), limpiada a solo digitos.
+        _cardValues.TryGetValue("identificacion", out var raw);
+        var ced = new string((raw ?? "").Where(char.IsDigit).ToArray());
+        _hmCedula = string.IsNullOrEmpty(ced) ? null : ced;
+        if (_hmCedula is null) { return; } // sin cedula -> buscador manual
+
+        _hmBuscando = true;
+        StateHasChanged();
+        try
+        {
+            var pac = (await PacientesSvc.ListAsync(_hmCedula, default))
+                .FirstOrDefault(p => new string(p.NumeroDocumento.Where(char.IsDigit).ToArray()) == _hmCedula);
+            if (pac is not null) { await FijarPacienteAsync(pac.Id, pac.NombreCompleto, pac.NumeroDocumento); }
+        }
+        finally { _hmBuscando = false; }
+    }
+
+    private async Task FijarPacienteAsync(Guid pacienteId, string nombre, string doc)
+    {
+        _hmPacienteId = pacienteId;
+        _hmPacienteNombre = nombre;
+        _hmPacienteDoc = doc;
+        _hmTab = HmTab.Historias;
+        _hmPacDetalle = await PacientesSvc.GetAsync(pacienteId, default);
+        // Formatos disponibles del paciente (dropdown "tipo de servicio").
+        var todas = await HcSvc.ListarPorPacienteAsync(pacienteId, null, null, null, default);
+        _hmFormatos = todas
+            .Where(h => h.FormDefinitionId != Guid.Empty)
+            .GroupBy(h => h.FormDefinitionId)
+            .Select(g => (Id: g.Key, Label: (string.IsNullOrWhiteSpace(g.First().FormatoCodigo) ? "" : $"[{g.First().FormatoCodigo}] ") + g.First().FormatoNombre))
+            .OrderBy(x => x.Label)
+            .ToList();
+        _hmHistorias = todas.OrderByDescending(h => h.FechaApertura).ToList();
+    }
+
+    private async Task CargarHistoriasAsync()
+    {
+        if (_hmPacienteId is null) { return; }
+        var lista = await HcSvc.ListarPorPacienteAsync(_hmPacienteId.Value, _hmFechaIni, _hmFechaFin, _hmFormato, default);
+        _hmHistorias = lista.OrderByDescending(h => h.FechaApertura).ToList();
+    }
+
+    private async Task BuscarManualAsync()
+    {
+        _hmManualBuscado = true;
+        if (string.IsNullOrWhiteSpace(_hmManualQuery)) { _hmManualResultados = new(); return; }
+        _hmManualResultados = (await PacientesSvc.ListAsync(_hmManualQuery.Trim(), default)).Take(20).ToList();
+    }
+
+    private async Task SeleccionarPacienteManualAsync(PacienteDto p)
+    {
+        _hmManualResultados = new();
+        await FijarPacienteAsync(p.Id, p.NombreCompleto, p.NumeroDocumento);
+    }
+
+    private async Task VerHistoriaAsync(Guid hcId) =>
+        await Js.InvokeVoidAsync("open", $"/imprimir-paquete/{hcId}?docs={HmDocsPaquete}", "_blank");
+
+    private async Task VerNotasAsync()
+    {
+        if (_hmPacienteId is null) { return; }
+        await Js.InvokeVoidAsync("open", $"/imprimir-notas-paciente/{_hmPacienteId}", "_blank");
+    }
 
     // Persiste los valores de campos dinamicos de la tarjeta (autoguardado por campo).
     private async Task PersistCardValuesAsync()

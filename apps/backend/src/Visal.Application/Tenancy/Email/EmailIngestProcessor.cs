@@ -290,7 +290,10 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
             ["fecha_radicacion"] = recibido.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["fecha_diligenciamiento"] = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["nombres_usuario"] = clasif.NombresUsuario,
-            ["identificacion"] = clasif.Identificacion,
+            // La cedula se guarda limpia (solo digitos): la IA suele extraerla con separadores de
+            // miles ("25.053.801") y aguas abajo (cruce de paciente, RIPS, busquedas) se necesita
+            // el numero puro.
+            ["identificacion"] = SoloDigitos(clasif.Identificacion),
             ["celular"] = clasif.Celular,
             ["email"] = string.IsNullOrWhiteSpace(clasif.Email) ? email.FromAddress : clasif.Email,
             ["servicio_pqrs"] = clasif.ServicioPqrs,
@@ -358,7 +361,101 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
         }
         if (adjuntos > 0) { await _db.SaveChangesAsync(ct); }
 
+        // Verificacion determinista: cruzar el paciente que la IA extrajo del correo contra la base
+        // (documento primero, nombre de respaldo) y etiquetar la tarjeta con el resultado para que
+        // quien atiende PQR distinga de una los casos de personas que NO son pacientes de la IPS.
+        try { await VerificarYEtiquetarPacienteAsync(boardId, card, clasif.Identificacion, clasif.NombresUsuario, ct); }
+        catch { /* la verificacion es un apoyo: nunca debe tumbar la creacion de la tarjeta */ }
+
         return (card.Id, adjuntos);
+    }
+
+    /// <summary>Deja solo los digitos de un texto (quita puntos, comas, espacios, guiones). Cadena vacia si no hay ninguno.</summary>
+    private static string SoloDigitos(string? s) =>
+        string.IsNullOrEmpty(s) ? "" : new string(s.Where(char.IsDigit).ToArray());
+
+    private enum VerifPaciente { EncontradoPorDocumento, CoincidenciaPorNombre, NoEncontrado, SinDatos }
+
+    /// <summary>
+    /// Cruza el documento/nombre extraidos del correo contra <c>pacientes</c> (tenant-scoped via filtro
+    /// global, igual patron que el resto del processor) y asigna a la tarjeta una etiqueta de color con
+    /// el veredicto. Solo lectura sobre pacientes; nunca los modifica.
+    /// </summary>
+    private async Task VerificarYEtiquetarPacienteAsync(Guid boardId, TaskCard card, string? documento, string? nombre, CancellationToken ct)
+    {
+        var (estado, coincidencias) = await VerificarPacienteAsync(documento, nombre, ct);
+
+        var (etiqueta, color) = estado switch
+        {
+            VerifPaciente.EncontradoPorDocumento => ("Paciente verificado", "#22c55e"),
+            VerifPaciente.CoincidenciaPorNombre => ("Verificar paciente", "#f59e0b"),
+            VerifPaciente.NoEncontrado => ("Paciente no encontrado", "#ef4444"),
+            _ => ("Sin datos de paciente", "#94a3b8"),
+        };
+
+        var tagId = await ObtenerOCrearEtiquetaAsync(boardId, card.TenantId, etiqueta, color, ct);
+
+        var yaAsignada = await _db.TaskCardTagAssignments.AnyAsync(a => a.TaskCardId == card.Id && a.TagId == tagId, ct);
+        if (!yaAsignada)
+        {
+            _db.TaskCardTagAssignments.Add(new TaskCardTagAssignment
+            {
+                TenantId = card.TenantId,
+                TaskCardId = card.Id,
+                TagId = tagId,
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
+    /// <summary>Documento primero (match exacto), nombre solo como respaldo cuando NO hay documento.</summary>
+    private async Task<(VerifPaciente Estado, int Coincidencias)> VerificarPacienteAsync(string? documento, string? nombre, CancellationToken ct)
+    {
+        var doc = SoloDigitos(documento);
+        if (doc.Length >= 4)
+        {
+            var count = await _db.Pacientes.Where(p => p.Activo && p.NumeroDocumento == doc).CountAsync(ct);
+            return (count > 0 ? VerifPaciente.EncontradoPorDocumento : VerifPaciente.NoEncontrado, count);
+        }
+
+        // Sin documento util: caer a busqueda por nombre (match debil -> "Verificar paciente").
+        var tokens = (nombre ?? "")
+            .Split(new[] { ' ', ',', '.', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => t.Length >= 3)
+            .Select(t => t.ToLowerInvariant())
+            .Take(4)
+            .ToList();
+        if (tokens.Count == 0) { return (VerifPaciente.SinDatos, 0); }
+
+        // Todos los tokens deben aparecer en NombreCompleto (AND) -> tolera orden y espacios distintos.
+        var q = _db.Pacientes.Where(p => p.Activo);
+        foreach (var t in tokens) { q = q.Where(p => p.NombreCompleto != null && p.NombreCompleto.ToLower().Contains(t)); }
+        var nombreCount = await q.CountAsync(ct);
+        return (nombreCount > 0 ? VerifPaciente.CoincidenciaPorNombre : VerifPaciente.NoEncontrado, nombreCount);
+    }
+
+    /// <summary>Busca la etiqueta del tablero por nombre; si no existe la crea (con su color). Idempotente.</summary>
+    private async Task<Guid> ObtenerOCrearEtiquetaAsync(Guid boardId, Guid tenantId, string nombre, string color, CancellationToken ct)
+    {
+        var existente = await _db.TaskCardTags
+            .Where(t => t.BoardId == boardId && t.Name == nombre)
+            .Select(t => (Guid?)t.Id)
+            .FirstOrDefaultAsync(ct);
+        if (existente is Guid id) { return id; }
+
+        var maxOrden = await _db.TaskCardTags.Where(t => t.BoardId == boardId)
+            .Select(t => (int?)t.SortOrder).MaxAsync(ct) ?? -1;
+        var tag = new TaskCardTag
+        {
+            TenantId = tenantId,
+            BoardId = boardId,
+            Name = nombre,
+            Color = color,
+            SortOrder = maxOrden + 1,
+        };
+        _db.TaskCardTags.Add(tag);
+        await _db.SaveChangesAsync(ct);
+        return tag.Id;
     }
 
     private async Task<int> SiguienteConsecutivoAsync(Guid boardId, CancellationToken ct)

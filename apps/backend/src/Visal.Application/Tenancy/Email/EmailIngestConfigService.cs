@@ -155,8 +155,8 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
         }
     }
 
-    public Task<EmailIngestRunResult> ProcessNowAsync(Guid id, CancellationToken ct = default)
-        => _processor.ProcessConfigAsync(id, ct);
+    public Task<EmailIngestRunResult> ProcessNowAsync(Guid id, IProgress<EmailIngestProgress>? progress = null, CancellationToken ct = default)
+        => _processor.ProcessConfigAsync(id, progress, ct);
 
     public async Task<IReadOnlyList<EmailIngestLogDto>> ListLogsAsync(Guid configId, int take = 100, CancellationToken ct = default)
     {

@@ -70,7 +70,7 @@ public sealed class EmailIngestWorker : BackgroundService
             try
             {
                 var proc = scope.ServiceProvider.GetRequiredService<IEmailIngestProcessor>();
-                await proc.ProcessConfigAsync(id, ct);
+                await proc.ProcessConfigAsync(id, progress: null, ct: ct);
             }
             catch (Exception ex)
             {

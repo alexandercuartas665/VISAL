@@ -8,5 +8,7 @@ namespace Visal.Application.Tenancy.Email;
 /// </summary>
 public interface IEmailIngestProcessor
 {
-    Task<EmailIngestRunResult> ProcessConfigAsync(Guid configId, CancellationToken ct = default);
+    /// <param name="progress">Opcional: recibe el avance en vivo (correo N de M + asunto actual) para la
+    /// UI de "Procesar ahora". El poller automatico lo deja en null.</param>
+    Task<EmailIngestRunResult> ProcessConfigAsync(Guid configId, IProgress<EmailIngestProgress>? progress = null, CancellationToken ct = default);
 }

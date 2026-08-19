@@ -281,6 +281,11 @@ public sealed class PreRevisionIaServiceTests
             LastSystemPrompt = systemPrompt;
             return Task.FromResult(_respuesta);
         }
+
+        public Task<AiModelsResult> ListModelsAsync(
+            AiProvider provider, string apiKey, string? baseUrl,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new AiModelsResult(true, Array.Empty<string>(), null));
     }
 
     private sealed class FakeSecretProtector : ISecretProtector

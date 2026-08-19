@@ -62,7 +62,7 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
         _clock = clock;
     }
 
-    public async Task<EmailIngestRunResult> ProcessConfigAsync(Guid configId, CancellationToken ct = default)
+    public async Task<EmailIngestRunResult> ProcessConfigAsync(Guid configId, IProgress<EmailIngestProgress>? progress = null, CancellationToken ct = default)
     {
         var cfg = await _db.TenantEmailIngestConfigs.FirstOrDefaultAsync(c => c.Id == configId, ct);
         if (cfg is null) { return new EmailIngestRunResult(false, 0, 0, 0, 0, 0, "El buzon no existe."); }
@@ -129,13 +129,17 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
               + extraPrompt.Trim()
               + "\n\nImportante: independientemente de lo anterior, responde UNICAMENTE con el objeto JSON descrito arriba, sin texto adicional.";
 
-        int creados = 0, descartados = 0, errores = 0, duplicados = 0, adjuntosTotal = 0;
+        int creados = 0, descartados = 0, errores = 0, duplicados = 0, adjuntosTotal = 0, idx = 0;
         long tokensTotal = 0;
         var uidsProcesados = new List<long>();
+        progress?.Report(new EmailIngestProgress(0, emails.Count, null));
 
         foreach (var email in emails)
         {
             ct.ThrowIfCancellationRequested();
+            idx++;
+            // Avance en vivo para la UI: "correo idx de N" + el asunto que se esta procesando ahora.
+            progress?.Report(new EmailIngestProgress(idx, emails.Count, email.Subject));
             var messageId = string.IsNullOrWhiteSpace(email.MessageId) ? $"uid:{email.Uid}" : email.MessageId;
 
             var yaProcesado = await _db.EmailIngestLogs.AnyAsync(l => l.ConfigId == cfg.Id && l.MessageId == messageId, ct);

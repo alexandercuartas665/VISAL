@@ -60,12 +60,35 @@
                         <button class="ep-btn ep-btn-sm" @onclick="() => AbrirEditor(b)">Editar</button>
                         <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProbarAsync(b)">Probar conexion</button>
                         <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProcesarAsync(b)">
-                            @if (_procesandoId == b.Id) { <span class="ep-spin"></span><text> Procesando...</text> }
+                            @if (_procesandoId == b.Id)
+                            {
+                                <span class="ep-spin"></span>
+                                <text> @(_progTotal > 0 ? $"Procesando {_progProcesados}/{_progTotal}" : "Procesando...")</text>
+                            }
                             else { <text>Procesar ahora</text> }
                         </button>
                         <button class="ep-btn ep-btn-sm" @onclick="() => AbrirLogsAsync(b)">Ver correos</button>
                         <button class="ep-btn ep-btn-sm ep-btn-danger" @onclick="() => EliminarAsync(b)">Eliminar</button>
                     </div>
+                    @if (_procesandoId == b.Id)
+                    {
+                        <div class="ep-prog">
+                            <div class="ep-prog-bar">
+                                <div class="ep-prog-fill" style="width:@(_progTotal > 0 ? (int)(100.0 * _progProcesados / _progTotal) : 0)%"></div>
+                            </div>
+                            <div class="ep-prog-txt">
+                                @if (_progTotal > 0)
+                                {
+                                    <text>Correo @_progProcesados de @_progTotal</text>
+                                    @if (!string.IsNullOrWhiteSpace(_progAsunto))
+                                    {
+                                        <span class="ep-prog-sub"> · @_progAsunto</span>
+                                    }
+                                }
+                                else { <text>Conectando al buzon...</text> }
+                            </div>
+                        </div>
+                    }
                 </div>
             }
         </div>
@@ -324,6 +347,11 @@
 .ep-chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.4rem; }
 .ep-chip { background:#f1f5f9; border:1px solid #cbd5e1; color:#334155; padding:.2rem .55rem; border-radius:99px; font-size:.76rem; cursor:pointer; }
 .ep-chip:hover { background:#e2e8f0; }
+.ep-prog { margin-top:.55rem; }
+.ep-prog-bar { height:6px; background:#e2e8f0; border-radius:99px; overflow:hidden; }
+.ep-prog-fill { height:100%; background:#2563eb; border-radius:99px; transition:width .25s ease; }
+.ep-prog-txt { margin-top:.3rem; font-size:.78rem; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ep-prog-sub { color:#64748b; }
 .ep-chip-on { background:#2563eb; color:#fff; border-color:#2563eb; }
 .ep-spin { display:inline-block; width:.85rem; height:.85rem; border:2px solid #cbd5e1; border-top-color:#2563eb; border-radius:50%; animation:ep-spin 0.7s linear infinite; vertical-align:-2px; }
 @@keyframes ep-spin { to { transform:rotate(360deg); } }
@@ -364,6 +392,9 @@
     private bool _saving;
     private Guid? _busyId;
     private Guid? _procesandoId;
+    private int _progProcesados;
+    private int _progTotal;
+    private string? _progAsunto;
     private EmailIngestConfigDto? _logsDe;
     private List<EmailIngestLogDto> _logs = new();
     private List<string> _labels = new();
@@ -450,10 +481,22 @@
     {
         _busyId = b.Id;
         _procesandoId = b.Id;
-        StateHasChanged(); // pinta el spinner "Procesando..." antes de bloquear en la corrida
+        _progProcesados = 0;
+        _progTotal = 0;
+        _progAsunto = null;
+        StateHasChanged(); // pinta el estado "Procesando..." antes de bloquear en la corrida
+        // Progress<T> marshala cada Report al dispatcher del render de Blazor Server, asi que la barra
+        // "correo N de M + asunto" se repinta entre cada await del procesador (fetch -> IA -> tarjeta).
+        var progreso = new Progress<EmailIngestProgress>(p =>
+        {
+            _progProcesados = p.Procesados;
+            _progTotal = p.Total;
+            _progAsunto = p.AsuntoActual;
+            InvokeAsync(StateHasChanged);
+        });
         try
         {
-            var r = await Svc.ProcessNowAsync(b.Id);
+            var r = await Svc.ProcessNowAsync(b.Id, progreso);
             if (r.Ok)
             {
                 Toast($"{r.Leidos} leidos · {r.Creados} PQR · {r.Descartados} descartados · {r.Adjuntos} adjuntos · {r.Tokens:N0} tokens · {r.Errores} errores.", r.Errores > 0);
@@ -462,7 +505,7 @@
             await RecargarAsync();
         }
         catch (Exception ex) { Toast(ex.Message, true); }
-        finally { _busyId = null; _procesandoId = null; }
+        finally { _busyId = null; _procesandoId = null; _progProcesados = 0; _progTotal = 0; _progAsunto = null; }
     }
 
     private async Task AbrirLogsAsync(EmailIngestConfigDto b)

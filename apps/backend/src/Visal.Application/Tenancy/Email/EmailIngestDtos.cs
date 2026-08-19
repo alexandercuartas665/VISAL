@@ -63,6 +63,10 @@ public sealed record EmailIngestLogDto(
     int AttachmentCount,
     DateTimeOffset ProcessedAt);
 
+/// <summary>Progreso en vivo de una corrida (para el boton "Procesar ahora"): cuantos correos van,
+/// de cuantos, y el asunto del que se esta procesando ahora.</summary>
+public sealed record EmailIngestProgress(int Procesados, int Total, string? AsuntoActual);
+
 /// <summary>Resumen de una corrida de procesamiento (para el boton "Procesar ahora").</summary>
 public sealed record EmailIngestRunResult(
     bool Ok,
@@ -83,7 +87,7 @@ public interface IEmailIngestConfigService
     Task<Guid> SaveAsync(SaveEmailIngestConfigRequest req, CancellationToken ct = default);
     Task DeleteAsync(Guid id, CancellationToken ct = default);
     Task<(bool Ok, string? Error, int Total)> TestConnectionAsync(Guid id, CancellationToken ct = default);
-    Task<EmailIngestRunResult> ProcessNowAsync(Guid id, CancellationToken ct = default);
+    Task<EmailIngestRunResult> ProcessNowAsync(Guid id, IProgress<EmailIngestProgress>? progress = null, CancellationToken ct = default);
     Task<IReadOnlyList<EmailIngestLogDto>> ListLogsAsync(Guid configId, int take = 100, CancellationToken ct = default);
 
     /// <summary>Lista las etiquetas EXISTENTES de la cuenta (para elegir cual marca "procesado").

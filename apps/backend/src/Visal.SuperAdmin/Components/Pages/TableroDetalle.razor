@@ -7,6 +7,8 @@
 @inject ITaskBoardMemberService MembersSvc
 @inject ITaskFieldService FieldSvc
 @inject ITaskBoardColumnPrefService PrefsSvc
+@inject Visal.Application.Tenancy.Email.IPqrEmailReplyService ReplySvc
+@inject Microsoft.JSInterop.IJSRuntime Js
 @inject NavigationManager Nav
 
 <PageTitle>@(_board?.Name ?? "Tablero") - Visal</PageTitle>
@@ -462,6 +464,7 @@ else
                     <div>
                         <h4>Acciones</h4>
                         <div class="td-modal-side-btns">
+                            <button class="td-modal-side-btn" @onclick="OpenReplyAsync">✉ Responder correo</button>
                             <button class="td-modal-side-btn" @onclick="@(() => TogglePopover("move"))">➡ Mover</button>
                             <button class="td-modal-side-btn" @onclick="ArchiveCardAsync">
                                 📦 @(detail.Card.IsArchived ? "Desarchivar" : "Archivar")
@@ -665,6 +668,119 @@ else
             <span style="flex:1;"></span>
             <button class="btn btn-outline-secondary" @onclick="@(() => _colsConfigOpen = false)">Cancelar</button>
             <button class="btn btn-primary" @onclick="SaveColsConfigAsync">Guardar</button>
+        </div>
+    </div>
+}
+
+@* ===== Modal: Responder correo del PQR ===== *@
+@if (_replyOpen)
+{
+    <div class="tb-modal-backdrop" @onclick="@(() => { if (!_replySending) _replyOpen = false; })"></div>
+    <div class="tb-modal" style="width:640px; max-width:95vw;">
+        <div class="tb-modal-h">
+            <h3>✉ Responder correo</h3>
+            <button class="tb-modal-close" @onclick="@(() => { if (!_replySending) _replyOpen = false; })">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            @if (_replyLoading)
+            {
+                <p class="tb-reply-hint">Resolviendo el correo original...</p>
+            }
+            else if (_replyCtx is null || !_replyCtx.Puede)
+            {
+                <div class="tb-reply-nope">@(_replyCtx?.Motivo ?? "No se puede responder esta tarjeta.")</div>
+            }
+            else
+            {
+                <div class="tb-reply-meta">
+                    <div><span class="tb-reply-lbl">Para:</span> <strong>@(_replyCtx.ToName ?? _replyCtx.ToAddress)</strong> &lt;@_replyCtx.ToAddress&gt;</div>
+                    <div><span class="tb-reply-lbl">Desde:</span> @_replyCtx.MailboxEmail</div>
+                </div>
+                <div class="tb-field">
+                    <label>Asunto</label>
+                    <input class="form-control" @bind="_replySubject" />
+                </div>
+
+                @if (_replyPlantillas.Count > 0)
+                {
+                    <div class="tb-reply-tpls">
+                        <span class="tb-reply-lbl">Plantillas:</span>
+                        @foreach (var p in _replyPlantillas)
+                        {
+                            <button class="tb-reply-chip" @onclick="@(() => AplicarPlantilla(p))" title="@p.Cuerpo">@p.Nombre</button>
+                        }
+                        <button class="tb-reply-chip tb-reply-chip-mgr" @onclick="@(() => _plantMgrOpen = !_plantMgrOpen)">⚙ Gestionar</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="tb-reply-tpls">
+                        <span class="tb-reply-lbl">Plantillas:</span>
+                        <span class="tb-reply-empty">ninguna aun</span>
+                        <button class="tb-reply-chip tb-reply-chip-mgr" @onclick="@(() => _plantMgrOpen = !_plantMgrOpen)">⚙ Gestionar</button>
+                    </div>
+                }
+
+                @if (_plantMgrOpen)
+                {
+                    <div class="tb-reply-mgr">
+                        @foreach (var p in _replyPlantillas)
+                        {
+                            <div class="tb-reply-mgr-row">
+                                <span class="tb-reply-mgr-name" title="@p.Cuerpo">@p.Nombre</span>
+                                <button class="tb-reply-mgr-del" @onclick="@(() => EliminarPlantillaAsync(p.Id))">Eliminar</button>
+                            </div>
+                        }
+                        <div class="tb-reply-mgr-add">
+                            <input class="form-control form-control-sm" placeholder="Nombre" @bind="_plantNombre" />
+                            <textarea class="form-control form-control-sm" rows="2" placeholder="Cuerpo (usa {{nombre}}, {{fecha}})" @bind="_plantCuerpo"></textarea>
+                            <button class="btn btn-primary btn-sm" @onclick="GuardarPlantillaAsync" disabled="@(string.IsNullOrWhiteSpace(_plantNombre) || string.IsNullOrWhiteSpace(_plantCuerpo))">Agregar plantilla</button>
+                        </div>
+                    </div>
+                }
+
+                <div class="tb-field">
+                    <label>Mensaje</label>
+                    <textarea class="form-control" rows="8" @bind="_replyBody" placeholder="Escribe la respuesta..."></textarea>
+                </div>
+
+                <div class="tb-field">
+                    <label>Adjuntos</label>
+                    <InputFile OnChange="OnReplyAttachAsync" accept="*/*" multiple />
+                    @if (_replyAdjuntos.Count > 0)
+                    {
+                        <div class="tb-reply-att-list">
+                            @for (var i = 0; i < _replyAdjuntos.Count; i++)
+                            {
+                                var idx = i;
+                                var a = _replyAdjuntos[idx];
+                                <div class="tb-reply-att">
+                                    <span>📎 @a.FileName (@FormatSize(a.Bytes.Length))</span>
+                                    <button class="tb-reply-att-x" @onclick="@(() => _replyAdjuntos.RemoveAt(idx))">×</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (_replyAttachError is not null)
+                    {
+                        <p class="td-att-error">@_replyAttachError</p>
+                    }
+                </div>
+
+                @if (_replyError is not null)
+                {
+                    <div class="tb-reply-err">@_replyError</div>
+                }
+            }
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="@(() => { if (!_replySending) _replyOpen = false; })" disabled="@_replySending">Cancelar</button>
+            @if (_replyCtx is not null && _replyCtx.Puede)
+            {
+                <button class="btn btn-primary" @onclick="EnviarRespuestaAsync" disabled="@(_replySending || string.IsNullOrWhiteSpace(_replyBody))">
+                    @(_replySending ? "Enviando..." : "Enviar respuesta")
+                </button>
+            }
         </div>
     </div>
 }
@@ -979,6 +1095,27 @@ else
     .td-cfg-alias:focus { border-color:#3b82f6; }
     .td-cfg-ancho { width:70px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:5px; font-size:12.5px; outline:none; }
     .td-cfg-ancho:focus { border-color:#3b82f6; }
+
+    /* Modal responder correo */
+    .tb-reply-hint { color:#64748b; font-size:13px; }
+    .tb-reply-nope { background:#fef3c7; color:#92400e; border-radius:6px; padding:12px 14px; font-size:13px; }
+    .tb-reply-meta { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; font-size:12.5px; color:#334155; margin-bottom:12px; display:flex; flex-direction:column; gap:2px; }
+    .tb-reply-lbl { color:#64748b; font-weight:600; margin-right:4px; }
+    .tb-reply-tpls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+    .tb-reply-empty { font-size:12px; color:#94a3b8; font-style:italic; }
+    .tb-reply-chip { border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:12px; padding:3px 10px; border-radius:14px; cursor:pointer; }
+    .tb-reply-chip:hover { background:#eff6ff; border-color:#3b82f6; color:#1e40af; }
+    .tb-reply-chip-mgr { border-style:dashed; color:#64748b; }
+    .tb-reply-mgr { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-bottom:12px; }
+    .tb-reply-mgr-row { display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid #eef2f7; }
+    .tb-reply-mgr-name { font-size:12.5px; color:#0f172a; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tb-reply-mgr-del { background:transparent; border:0; color:#dc2626; font-size:12px; cursor:pointer; }
+    .tb-reply-mgr-add { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+    .tb-reply-att-list { display:flex; flex-direction:column; gap:4px; margin-top:8px; }
+    .tb-reply-att { display:flex; align-items:center; justify-content:space-between; background:#fff; border:1px solid #e2e8f0; border-radius:5px; padding:5px 10px; font-size:12.5px; color:#334155; }
+    .tb-reply-att-x { background:transparent; border:0; color:#64748b; cursor:pointer; font-size:16px; line-height:1; }
+    .tb-reply-att-x:hover { color:#dc2626; }
+    .tb-reply-err { background:#fee2e2; color:#991b1b; border-radius:6px; padding:10px 12px; font-size:12.5px; margin-top:4px; }
 </style>
 
 @code {
@@ -1017,6 +1154,21 @@ else
     private bool _colsConfigOpen;
     private List<TableCol> _cfgDraft = new();
     private string? _cfgDragKey;
+
+    // ---- Responder correo del PQR ----
+    private bool _replyOpen;
+    private bool _replyLoading;
+    private bool _replySending;
+    private Visal.Application.Tenancy.Email.PqrReplyContextDto? _replyCtx;
+    private string _replySubject = "";
+    private string _replyBody = "";
+    private string? _replyError;
+    private string? _replyAttachError;
+    private List<Visal.Application.Tenancy.Email.PqrReplyAttachment> _replyAdjuntos = new();
+    private List<Visal.Application.Tenancy.Email.PqrPlantillaDto> _replyPlantillas = new();
+    private bool _plantMgrOpen;
+    private string _plantNombre = "";
+    private string _plantCuerpo = "";
 
     private TaskBoardDto? _board;
     private List<TaskBoardColumnDto> _columns = new();
@@ -1206,6 +1358,106 @@ else
         await PrefsSvc.GuardarLoteAsync(BoardId, _actorId, items);
         _colsConfigOpen = false;
         await BuildTableColsAsync();
+    }
+
+    // ---- Responder correo del PQR ----
+
+    private async Task OpenReplyAsync()
+    {
+        if (_cardDetail is null) { return; }
+        _replyOpen = true;
+        _replyLoading = true;
+        _replyCtx = null;
+        _replyError = _replyAttachError = null;
+        _replyBody = "";
+        _replyAdjuntos = new();
+        _plantMgrOpen = false;
+        _plantNombre = _plantCuerpo = "";
+        StateHasChanged();
+
+        _replyCtx = await ReplySvc.GetReplyContextAsync(_cardDetail.Card.Id);
+        _replySubject = _replyCtx?.Subject ?? "";
+        if (_replyCtx is { Puede: true })
+        {
+            _replyPlantillas = (await ReplySvc.ListPlantillasAsync()).ToList();
+        }
+        _replyLoading = false;
+    }
+
+    private void AplicarPlantilla(Visal.Application.Tenancy.Email.PqrPlantillaDto p)
+    {
+        _replyBody = SustituirTokens(p.Cuerpo);
+        if (!string.IsNullOrWhiteSpace(p.Asunto)) { _replySubject = SustituirTokens(p.Asunto!); }
+    }
+
+    private string SustituirTokens(string s)
+    {
+        var nombre = _replyCtx?.ToName ?? _replyCtx?.ToAddress ?? "";
+        return (s ?? "")
+            .Replace("{{nombre}}", nombre, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{fecha}}", DateTime.Now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task OnReplyAttachAsync(InputFileChangeEventArgs e)
+    {
+        _replyAttachError = null;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(10))
+            {
+                if (file.Size <= 0) { continue; }
+                if (file.Size > MaxAttachmentBytes)
+                {
+                    _replyAttachError = $"'{file.Name}' supera el limite de 20 MB.";
+                    continue;
+                }
+                using var ms = new MemoryStream();
+                await file.OpenReadStream(MaxAttachmentBytes).CopyToAsync(ms);
+                _replyAdjuntos.Add(new Visal.Application.Tenancy.Email.PqrReplyAttachment(file.Name, file.ContentType, ms.ToArray()));
+            }
+        }
+        catch (Exception ex) { _replyAttachError = ex.Message; }
+    }
+
+    private async Task EnviarRespuestaAsync()
+    {
+        if (_cardDetail is null || _replyCtx is not { Puede: true }) { return; }
+        if (string.IsNullOrWhiteSpace(_replyBody)) { return; }
+
+        var confirmar = await Js.InvokeAsync<bool>("confirm",
+            $"Enviar la respuesta a {_replyCtx.ToAddress}?");
+        if (!confirmar) { return; }
+
+        _replySending = true;
+        _replyError = null;
+        StateHasChanged();
+        try
+        {
+            var (ok, error) = await ReplySvc.ResponderAsync(
+                _cardDetail.Card.Id, _replySubject, _replyBody, _replyAdjuntos, _actorId, _actorDisplayName);
+            if (!ok)
+            {
+                _replyError = error ?? "No se pudo enviar el correo.";
+                return;
+            }
+            _replyOpen = false;
+            await RefreshCardAndListAsync();
+        }
+        finally { _replySending = false; }
+    }
+
+    private async Task GuardarPlantillaAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_plantNombre) || string.IsNullOrWhiteSpace(_plantCuerpo)) { return; }
+        await ReplySvc.GuardarPlantillaAsync(new Visal.Application.Tenancy.Email.SavePqrPlantillaRequest(null, _plantNombre, null, _plantCuerpo));
+        _plantNombre = _plantCuerpo = "";
+        _replyPlantillas = (await ReplySvc.ListPlantillasAsync()).ToList();
+    }
+
+    private async Task EliminarPlantillaAsync(Guid id)
+    {
+        await ReplySvc.EliminarPlantillaAsync(id);
+        _replyPlantillas = (await ReplySvc.ListPlantillasAsync()).ToList();
     }
 
     // ---- Drag&drop ----

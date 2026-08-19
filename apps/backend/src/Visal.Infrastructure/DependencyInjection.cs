@@ -81,6 +81,7 @@ public static class DependencyInjection
 
         // Ingesta de correos -> PQR: lector IMAP (MailKit) + poller en background (patron PreRevisionIaWorker).
         services.AddSingleton<Visal.Application.Tenancy.Email.IImapEmailReader, Email.MailKitImapReader>();
+        services.AddSingleton<Visal.Application.Tenancy.Email.IPqrEmailReplySender, Email.MailKitPqrReplySender>();
         services.AddHostedService<Email.EmailIngestWorker>();
 
         // Ola 8 RC8e — cola in-process del orquestador REVISOR CLINICO IA. La cola

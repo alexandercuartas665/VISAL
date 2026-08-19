@@ -167,6 +167,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TaskCardAttachment> TaskCardAttachments => Set<TaskCardAttachment>();
     public DbSet<TaskFieldDefinition> TaskFieldDefinitions => Set<TaskFieldDefinition>();
     public DbSet<TaskBoardColumnPref> TaskBoardColumnPrefs => Set<TaskBoardColumnPref>();
+    public DbSet<PqrRespuestaPlantilla> PqrRespuestaPlantillas => Set<PqrRespuestaPlantilla>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -1713,6 +1714,15 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Alias).HasMaxLength(80);
             // Una fila por (usuario, tablero, columna).
             b.HasIndex(x => new { x.TenantId, x.PlatformUserId, x.BoardId, x.ColumnKey }).IsUnique();
+        });
+
+        // Plantillas pregrabadas de respuesta a correos de PQR (por tenant).
+        modelBuilder.Entity<PqrRespuestaPlantilla>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Asunto).HasMaxLength(300);
+            b.Property(x => x.Cuerpo).HasColumnType("text").IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.SortOrder });
         });
 
         modelBuilder.Entity<TaskCardAssignment>(b =>

@@ -1,5 +1,8 @@
 namespace Visal.Application.Tenancy.Email;
 
+/// <summary>Adjunto de un correo entrante (contenido en memoria para copiarlo a la tarjeta PQR).</summary>
+public sealed record IncomingEmailAttachment(string FileName, string? MimeType, byte[] Content);
+
 /// <summary>Correo entrante leido de un buzon IMAP.</summary>
 public sealed record IncomingEmail(
     string MessageId,
@@ -8,7 +11,8 @@ public sealed record IncomingEmail(
     string? FromName,
     string Subject,
     DateTimeOffset ReceivedAt,
-    string BodyText);
+    string BodyText,
+    IReadOnlyList<IncomingEmailAttachment> Attachments);
 
 /// <summary>Parametros de conexion IMAP para una corrida de lectura. La clave llega descifrada.</summary>
 public sealed record ImapConnectionParams(

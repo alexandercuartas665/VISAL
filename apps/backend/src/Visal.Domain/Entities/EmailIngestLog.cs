@@ -37,5 +37,14 @@ public class EmailIngestLog : TenantEntity
 
     public string? ErrorMessage { get; set; }
 
+    /// <summary>Tokens de entrada que consumio el agente clasificador con este correo (0 si no aplico IA).</summary>
+    public int InputTokens { get; set; }
+
+    /// <summary>Tokens de salida que produjo el agente clasificador con este correo.</summary>
+    public int OutputTokens { get; set; }
+
+    /// <summary>Cantidad de adjuntos del correo que se copiaron a la tarjeta PQR.</summary>
+    public int AttachmentCount { get; set; }
+
     public DateTimeOffset ProcessedAt { get; set; }
 }

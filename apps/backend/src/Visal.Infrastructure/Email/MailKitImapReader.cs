@@ -3,6 +3,7 @@ using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
 using MailKit.Security;
+using MimeKit;
 using Visal.Application.Tenancy.Email;
 
 namespace Visal.Infrastructure.Email;
@@ -48,7 +49,8 @@ public sealed class MailKitImapReader : IImapEmailReader
                 FromName: from?.Name,
                 Subject: msg.Subject ?? "(sin asunto)",
                 ReceivedAt: msg.Date,
-                BodyText: body ?? ""));
+                BodyText: body ?? "",
+                Attachments: ExtraerAdjuntos(msg)));
         }
 
         await client.DisconnectAsync(true, ct);
@@ -107,9 +109,7 @@ public sealed class MailKitImapReader : IImapEmailReader
         {
             foreach (var f in await client.GetFoldersAsync(ns, false, ct))
             {
-                if ((f.Attributes & especiales) != 0) { continue; }
-                if (string.IsNullOrWhiteSpace(f.FullName)) { continue; }
-                labels.Add(f.FullName);
+                await RecolectarEtiquetasAsync(f, especiales, labels, ct);
             }
         }
         await client.DisconnectAsync(true, ct);
@@ -131,6 +131,51 @@ public sealed class MailKitImapReader : IImapEmailReader
         var ids = uids.Select(u => new UniqueId((uint)u)).ToList();
         await folder.AddLabelsAsync(ids, new[] { label }, true, ct);
         await client.DisconnectAsync(true, ct);
+    }
+
+    private const int MaxAttachmentBytes = 15 * 1024 * 1024; // 15 MB por adjunto
+    private const int MaxAttachmentsPerEmail = 10;
+
+    /// <summary>Decodifica los adjuntos reales del correo a bytes en memoria (omite los ilegibles o gigantes).</summary>
+    private static IReadOnlyList<IncomingEmailAttachment> ExtraerAdjuntos(MimeMessage msg)
+    {
+        var list = new List<IncomingEmailAttachment>();
+        foreach (var att in msg.Attachments)
+        {
+            if (list.Count >= MaxAttachmentsPerEmail) { break; }
+            if (att is not MimePart part) { continue; }
+            try
+            {
+                using var ms = new MemoryStream();
+                part.Content.DecodeTo(ms);
+                var bytes = ms.ToArray();
+                if (bytes.Length == 0 || bytes.Length > MaxAttachmentBytes) { continue; }
+                var name = part.FileName;
+                if (string.IsNullOrWhiteSpace(name)) { name = $"adjunto-{list.Count + 1}"; }
+                list.Add(new IncomingEmailAttachment(name!, part.ContentType?.MimeType, bytes));
+            }
+            catch { /* adjunto ilegible: se omite sin romper la corrida */ }
+        }
+        return list;
+    }
+
+    /// <summary>Agrega la carpeta como etiqueta (si no es de sistema) y desciende recursivamente a sus
+    /// subcarpetas, de modo que las etiquetas anidadas de Gmail ("Padre/Hijo") tambien aparezcan.</summary>
+    private static async Task RecolectarEtiquetasAsync(IMailFolder folder, FolderAttributes especiales, List<string> acc, CancellationToken ct)
+    {
+        var esSistema = (folder.Attributes & especiales) != 0;
+        if (!esSistema && !string.IsNullOrWhiteSpace(folder.FullName)) { acc.Add(folder.FullName); }
+        if (folder.Attributes.HasFlag(FolderAttributes.HasChildren) && !folder.Attributes.HasFlag(FolderAttributes.NonExistent))
+        {
+            try
+            {
+                foreach (var sub in await folder.GetSubfoldersAsync(false, ct))
+                {
+                    await RecolectarEtiquetasAsync(sub, especiales, acc, ct);
+                }
+            }
+            catch { /* algunas carpetas no permiten listar hijos: se ignora */ }
+        }
     }
 
     private static async Task<IMailFolder> OpenFolderAsync(ImapClient client, string folderName, FolderAccess access, CancellationToken ct)

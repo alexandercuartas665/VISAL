@@ -59,7 +59,10 @@
                     <div class="ep-card-foot">
                         <button class="ep-btn ep-btn-sm" @onclick="() => AbrirEditor(b)">Editar</button>
                         <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProbarAsync(b)">Probar conexion</button>
-                        <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProcesarAsync(b)">Procesar ahora</button>
+                        <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProcesarAsync(b)">
+                            @if (_procesandoId == b.Id) { <span class="ep-spin"></span><text> Procesando...</text> }
+                            else { <text>Procesar ahora</text> }
+                        </button>
                         <button class="ep-btn ep-btn-sm" @onclick="() => AbrirLogsAsync(b)">Ver correos</button>
                         <button class="ep-btn ep-btn-sm ep-btn-danger" @onclick="() => EliminarAsync(b)">Eliminar</button>
                     </div>
@@ -172,10 +175,22 @@
                             <option value="@l"></option>
                         }
                     </datalist>
+                    @if (_labels.Count > 0)
+                    {
+                        <div class="ep-chips">
+                            @foreach (var l in _labels)
+                            {
+                                <button type="button"
+                                        class="ep-chip @(string.Equals(l, _form!.ProcessedLabel, StringComparison.OrdinalIgnoreCase) ? "ep-chip-on" : "")"
+                                        @onclick="() => _form!.ProcessedLabel = l">@l</button>
+                            }
+                        </div>
+                    }
                     <div class="ep-hint">
                         Marca VISIBLE de "ya procesado" para el operador: a cada correo procesado se le aplica esta etiqueta
                         de Gmail. Debe ser una etiqueta que YA EXISTA en la cuenta. Deja vacio para no etiquetar.
-                        @if (_form.Id is null) { <span>Guarda el buzon primero para poder cargar sus etiquetas.</span> }
+                        @if (_form!.Id is null) { <span>Guarda el buzon primero para poder cargar sus etiquetas.</span> }
+                        else if (_labels.Count == 0) { <span>Pulsa "Cargar etiquetas" para ver las etiquetas disponibles del buzon.</span> }
                     </div>
                 </div>
             </div>
@@ -200,6 +215,14 @@
             <button class="ep-close" @onclick="() => _logsDe = null">×</button>
         </div>
         <div class="ep-modal-body">
+            @if (!string.IsNullOrWhiteSpace(_logsDe.LastError))
+            {
+                <div class="ep-last ep-err" style="margin-bottom:.6rem;">⚠ Ultima corrida con problema al leer/procesar: @_logsDe.LastError</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_logsDe.LastResultSummary))
+            {
+                <div class="ep-last" style="margin-bottom:.6rem;">Ultima corrida: @_logsDe.LastResultSummary</div>
+            }
             @if (_logs.Count == 0)
             {
                 <div class="ep-empty">Todavia no se ha procesado ningun correo.</div>
@@ -208,7 +231,7 @@
             {
                 <div class="ep-tablewrap">
                     <table class="ep-table">
-                        <thead><tr><th>Fecha</th><th>De</th><th>Asunto</th><th>Resultado</th><th>Tipo</th><th>Detalle</th></tr></thead>
+                        <thead><tr><th>Fecha</th><th>De</th><th>Asunto</th><th>Resultado</th><th>Tipo</th><th title="Tokens de entrada + salida">Tokens</th><th title="Adjuntos copiados a la tarjeta">Adj.</th><th>Detalle</th></tr></thead>
                         <tbody>
                             @foreach (var l in _logs)
                             {
@@ -218,7 +241,9 @@
                                     <td class="ep-td-clip">@l.Subject</td>
                                     <td><span class="ep-res ep-res-@l.Resultado">@ResTexto(l.Resultado)</span></td>
                                     <td>@l.TipoPqrs</td>
-                                    <td class="ep-td-clip">@(l.ErrorMessage ?? (l.TaskCardId is null ? "" : "tarjeta creada"))</td>
+                                    <td class="ep-num">@(l.InputTokens + l.OutputTokens > 0 ? (l.InputTokens + l.OutputTokens).ToString("N0") : "—")</td>
+                                    <td class="ep-num">@(l.AttachmentCount > 0 ? l.AttachmentCount.ToString() : "—")</td>
+                                    <td class="ep-td-clip">@(l.ErrorMessage ?? (l.TaskCardId is null ? "" : $"tarjeta creada{(l.AttachmentCount > 0 ? $" (+{l.AttachmentCount} adj.)" : "")}"))</td>
                                 </tr>
                             }
                         </tbody>
@@ -295,6 +320,13 @@
 .ep-toast { position:fixed; bottom:1.25rem; left:50%; transform:translateX(-50%); padding:.55rem 1rem; border-radius:8px; font-size:.85rem; z-index:1500; box-shadow:0 6px 20px rgba(0,0,0,.15); max-width:90vw; }
 .ep-toast-ok { background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; }
 .ep-toast-err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+.ep-num { text-align:right; font-variant-numeric:tabular-nums; color:#334155; }
+.ep-chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.4rem; }
+.ep-chip { background:#f1f5f9; border:1px solid #cbd5e1; color:#334155; padding:.2rem .55rem; border-radius:99px; font-size:.76rem; cursor:pointer; }
+.ep-chip:hover { background:#e2e8f0; }
+.ep-chip-on { background:#2563eb; color:#fff; border-color:#2563eb; }
+.ep-spin { display:inline-block; width:.85rem; height:.85rem; border:2px solid #cbd5e1; border-top-color:#2563eb; border-radius:50%; animation:ep-spin 0.7s linear infinite; vertical-align:-2px; }
+@@keyframes ep-spin { to { transform:rotate(360deg); } }
 </style>
 
 @code {
@@ -331,6 +363,7 @@
     private string? _formError;
     private bool _saving;
     private Guid? _busyId;
+    private Guid? _procesandoId;
     private EmailIngestConfigDto? _logsDe;
     private List<EmailIngestLogDto> _logs = new();
     private List<string> _labels = new();
@@ -416,15 +449,20 @@
     private async Task ProcesarAsync(EmailIngestConfigDto b)
     {
         _busyId = b.Id;
+        _procesandoId = b.Id;
+        StateHasChanged(); // pinta el spinner "Procesando..." antes de bloquear en la corrida
         try
         {
             var r = await Svc.ProcessNowAsync(b.Id);
-            if (r.Ok) { Toast($"{r.Leidos} leidos · {r.Creados} PQR · {r.Descartados} descartados · {r.Errores} errores.", r.Errores > 0); }
+            if (r.Ok)
+            {
+                Toast($"{r.Leidos} leidos · {r.Creados} PQR · {r.Descartados} descartados · {r.Adjuntos} adjuntos · {r.Tokens:N0} tokens · {r.Errores} errores.", r.Errores > 0);
+            }
             else { Toast(r.Error ?? "No se pudo procesar.", true); }
             await RecargarAsync();
         }
         catch (Exception ex) { Toast(ex.Message, true); }
-        finally { _busyId = null; }
+        finally { _busyId = null; _procesandoId = null; }
     }
 
     private async Task AbrirLogsAsync(EmailIngestConfigDto b)

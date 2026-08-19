@@ -14,6 +14,7 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
     private readonly ISecretProtector _secret;
     private readonly IImapEmailReader _reader;
     private readonly IAiInferenceService _ai;
+    private readonly IUploadStorage _uploads;
     private readonly TimeProvider _clock;
 
     private const int MaxBodyParaIa = 8000;
@@ -51,12 +52,13 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
     };
 
     public EmailIngestProcessor(IApplicationDbContext db, ISecretProtector secret, IImapEmailReader reader,
-        IAiInferenceService ai, TimeProvider clock)
+        IAiInferenceService ai, IUploadStorage uploads, TimeProvider clock)
     {
         _db = db;
         _secret = secret;
         _reader = reader;
         _ai = ai;
+        _uploads = uploads;
         _clock = clock;
     }
 
@@ -127,7 +129,8 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
               + extraPrompt.Trim()
               + "\n\nImportante: independientemente de lo anterior, responde UNICAMENTE con el objeto JSON descrito arriba, sin texto adicional.";
 
-        int creados = 0, descartados = 0, errores = 0, duplicados = 0;
+        int creados = 0, descartados = 0, errores = 0, duplicados = 0, adjuntosTotal = 0;
+        long tokensTotal = 0;
         var uidsProcesados = new List<long>();
 
         foreach (var email in emails)
@@ -146,7 +149,8 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
                 FromAddress = email.FromAddress,
                 FromName = email.FromName,
                 Subject = email.Subject,
-                ReceivedAt = email.ReceivedAt,
+                // Npgsql exige offset UTC para 'timestamp with time zone'; el correo trae su propio offset.
+                ReceivedAt = email.ReceivedAt == default ? (DateTimeOffset?)null : email.ReceivedAt.ToUniversalTime(),
                 ProcessedAt = now
             };
 
@@ -155,6 +159,10 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
                 var promptUsuario = BuildEmailPrompt(email);
                 var turns = new List<AiChatTurn> { new("user", promptUsuario) };
                 var ia = await _ai.RunAgentAsync(cfg.ClassifierAgentId!.Value, turns, promptClasificador, "email-pqr", ct);
+                // Contador de tokens por correo (auditoria de costo por mensaje).
+                log.InputTokens = ia.InputTokens;
+                log.OutputTokens = ia.OutputTokens;
+                tokensTotal += ia.InputTokens + ia.OutputTokens;
 
                 if (!ia.Ok || string.IsNullOrWhiteSpace(ia.Text))
                 {
@@ -180,10 +188,12 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
                     }
                     else
                     {
-                        var cardId = await CrearTarjetaPqrAsync(cfg, email, clasif, now, ct);
+                        var (cardId, adjuntos) = await CrearTarjetaPqrAsync(cfg, email, clasif, now, ct);
                         log.Resultado = EmailIngestResultTipo.CreadaPqr;
                         log.TipoPqrs = clasif.TipoPqrs;
                         log.TaskCardId = cardId;
+                        log.AttachmentCount = adjuntos;
+                        adjuntosTotal += adjuntos;
                         creados++;
                     }
                 }
@@ -218,10 +228,11 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
 
         cfg.LastPolledAt = now;
         cfg.LastError = errores > 0 ? $"{errores} correo(s) con error en la ultima corrida." : etiquetaError;
-        cfg.LastResultSummary = $"{emails.Count} leidos · {creados} PQR · {descartados} descartados · {duplicados} ya vistos · {errores} errores";
+        cfg.LastResultSummary = $"{emails.Count} leidos · {creados} PQR · {descartados} descartados · {duplicados} ya vistos · {errores} errores · {adjuntosTotal} adjuntos · {tokensTotal} tokens";
         await _db.SaveChangesAsync(ct);
 
-        return new EmailIngestRunResult(true, emails.Count, creados, descartados, errores, duplicados, null);
+        return new EmailIngestRunResult(true, emails.Count, creados, descartados, errores, duplicados,
+            etiquetaError, adjuntosTotal, tokensTotal);
     }
 
     private static string BuildEmailPrompt(IncomingEmail email)
@@ -238,7 +249,7 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
         return sb.ToString();
     }
 
-    private async Task<Guid> CrearTarjetaPqrAsync(TenantEmailIngestConfig cfg, IncomingEmail email,
+    private async Task<(Guid CardId, int Adjuntos)> CrearTarjetaPqrAsync(TenantEmailIngestConfig cfg, IncomingEmail email,
         EmailPqrClassification clasif, DateTimeOffset now, CancellationToken ct)
     {
         var boardId = cfg.TargetBoardId!.Value;
@@ -301,7 +312,36 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
         };
         _db.TaskCards.Add(card);
         await _db.SaveChangesAsync(ct);
-        return card.Id;
+
+        // Arrastrar los adjuntos del correo a la tarjeta del tablero (se guardan en el mismo
+        // almacenamiento que los adjuntos manuales del tablero y se enlazan como TaskCardAttachment).
+        var adjuntos = 0;
+        foreach (var att in email.Attachments)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var ext = Path.GetExtension(att.FileName);
+                var storedName = $"pqr-{Guid.NewGuid():N}{ext}";
+                var storedUrl = await _uploads.GuardarAsync("tableros", storedName, att.Content, ct);
+                _db.TaskCardAttachments.Add(new TaskCardAttachment
+                {
+                    TenantId = card.TenantId,
+                    TaskCardId = card.Id,
+                    FileName = att.FileName,
+                    Url = storedUrl,
+                    MimeType = att.MimeType,
+                    SizeBytes = att.Content.LongLength,
+                    UploadedBy = null,
+                    UploadedByName = "Correo PQR",
+                });
+                adjuntos++;
+            }
+            catch { /* un adjunto ilegible no debe tumbar la creacion de la tarjeta */ }
+        }
+        if (adjuntos > 0) { await _db.SaveChangesAsync(ct); }
+
+        return (card.Id, adjuntos);
     }
 
     private async Task<int> SiguienteConsecutivoAsync(Guid boardId, CancellationToken ct)

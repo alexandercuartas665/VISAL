@@ -58,6 +58,9 @@ public sealed record EmailIngestLogDto(
     string? TipoPqrs,
     Guid? TaskCardId,
     string? ErrorMessage,
+    int InputTokens,
+    int OutputTokens,
+    int AttachmentCount,
     DateTimeOffset ProcessedAt);
 
 /// <summary>Resumen de una corrida de procesamiento (para el boton "Procesar ahora").</summary>
@@ -68,7 +71,9 @@ public sealed record EmailIngestRunResult(
     int Descartados,
     int Errores,
     int Duplicados,
-    string? Error);
+    string? Error,
+    int Adjuntos = 0,
+    long Tokens = 0);
 
 /// <summary>ABM de buzones de ingesta de PQR + bitacora + acciones (probar conexion, procesar ahora).</summary>
 public interface IEmailIngestConfigService

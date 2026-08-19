@@ -165,7 +165,7 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
             .OrderByDescending(l => l.ProcessedAt)
             .Take(Math.Clamp(take, 1, 500))
             .Select(l => new EmailIngestLogDto(l.Id, l.FromAddress, l.Subject, l.ReceivedAt, l.Resultado,
-                l.TipoPqrs, l.TaskCardId, l.ErrorMessage, l.ProcessedAt))
+                l.TipoPqrs, l.TaskCardId, l.ErrorMessage, l.InputTokens, l.OutputTokens, l.AttachmentCount, l.ProcessedAt))
             .ToListAsync(ct);
     }
 

@@ -95,9 +95,15 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
             return new EmailIngestRunResult(false, 0, 0, 0, 0, 0, msg);
         }
 
-        var since = cfg.LastPolledAt ?? now.AddDays(-Math.Max(1, cfg.LookbackDays));
+        // En modo prueba se lee siempre desde la ventana de LookbackDays (no desde LastPolledAt) para
+        // que la carpeta de prueba se pueda re-leer completa, y se ignora OnlyUnread (los correos de la
+        // etiqueta suelen estar leidos). En operacion normal se respeta el watermark y OnlyUnread.
+        var since = cfg.ModoPrueba
+            ? now.AddDays(-Math.Max(1, cfg.LookbackDays))
+            : cfg.LastPolledAt ?? now.AddDays(-Math.Max(1, cfg.LookbackDays));
+        var soloNoLeidos = !cfg.ModoPrueba && cfg.OnlyUnread;
         var pars = new ImapConnectionParams(cfg.ImapHost, cfg.ImapPort, cfg.ImapUseSsl, cfg.EmailAddress, password,
-            string.IsNullOrWhiteSpace(cfg.Folder) ? "INBOX" : cfg.Folder, cfg.OnlyUnread, Math.Clamp(cfg.MaxPorCorrida, 1, 200), since);
+            string.IsNullOrWhiteSpace(cfg.Folder) ? "INBOX" : cfg.Folder, soloNoLeidos, Math.Clamp(cfg.MaxPorCorrida, 1, 200), since);
 
         IReadOnlyList<IncomingEmail> emails;
         try
@@ -155,6 +161,7 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
                 Subject = email.Subject,
                 // Npgsql exige offset UTC para 'timestamp with time zone'; el correo trae su propio offset.
                 ReceivedAt = email.ReceivedAt == default ? (DateTimeOffset?)null : email.ReceivedAt.ToUniversalTime(),
+                EsPrueba = cfg.ModoPrueba,
                 ProcessedAt = now
             };
 
@@ -214,8 +221,11 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
             uidsProcesados.Add(email.Uid);
         }
 
+        // Modo prueba: el buzon de Gmail NO se toca (ni marcar leido ni etiquetar), para poder
+        // re-ensayar con los mismos correos. En operacion normal si aplica ambas marcas.
+
         // Marcar leidos (para que la proxima corrida con OnlyUnread no los vuelva a traer).
-        if (cfg.MarkAsRead && uidsProcesados.Count > 0)
+        if (!cfg.ModoPrueba && cfg.MarkAsRead && uidsProcesados.Count > 0)
         {
             try { await _reader.MarkSeenAsync(pars, uidsProcesados, ct); }
             catch { /* no critico: el dedup por Message-ID ya evita reprocesar */ }
@@ -224,15 +234,18 @@ public sealed class EmailIngestProcessor : IEmailIngestProcessor
         // Etiquetar como "procesado" (marca VISIBLE para el operador humano). No critico: si el
         // servidor no soporta etiquetas o falla, el dedup por Message-ID igual evita reprocesar.
         string? etiquetaError = null;
-        if (!string.IsNullOrWhiteSpace(cfg.ProcessedLabel) && uidsProcesados.Count > 0)
+        if (!cfg.ModoPrueba && !string.IsNullOrWhiteSpace(cfg.ProcessedLabel) && uidsProcesados.Count > 0)
         {
             try { await _reader.AddLabelAsync(pars, uidsProcesados, cfg.ProcessedLabel!.Trim(), ct); }
             catch (Exception ex) { etiquetaError = $"No se pudo aplicar la etiqueta '{cfg.ProcessedLabel}': {ex.Message}"; }
         }
 
-        cfg.LastPolledAt = now;
+        // En modo prueba no se avanza el watermark (LastPolledAt) para no contaminar la operacion
+        // real: al apagar el modo, produccion arranca desde su ventana normal.
+        if (!cfg.ModoPrueba) { cfg.LastPolledAt = now; }
         cfg.LastError = errores > 0 ? $"{errores} correo(s) con error en la ultima corrida." : etiquetaError;
-        cfg.LastResultSummary = $"{emails.Count} leidos · {creados} PQR · {descartados} descartados · {duplicados} ya vistos · {errores} errores · {adjuntosTotal} adjuntos · {tokensTotal} tokens";
+        var prefijo = cfg.ModoPrueba ? "[PRUEBA] " : "";
+        cfg.LastResultSummary = $"{prefijo}{emails.Count} leidos · {creados} PQR · {descartados} descartados · {duplicados} ya vistos · {errores} errores · {adjuntosTotal} adjuntos · {tokensTotal} tokens";
         await _db.SaveChangesAsync(ct);
 
         return new EmailIngestRunResult(true, emails.Count, creados, descartados, errores, duplicados,

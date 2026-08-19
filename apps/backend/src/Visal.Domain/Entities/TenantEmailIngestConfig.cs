@@ -68,6 +68,16 @@ public class TenantEmailIngestConfig : TenantEntity
     /// <summary>Si esta encendido para el poller automatico.</summary>
     public bool IsEnabled { get; set; }
 
+    /// <summary>
+    /// Modo prueba: para ensayar la clasificacion sin tocar el buzon real ni la operacion.
+    /// Cuando esta encendido, "Procesar ahora" lee TODOS los correos de la Carpeta (ignora
+    /// OnlyUnread), NO marca leidos ni aplica la etiqueta de procesado (Gmail queda intacto),
+    /// SI crea tarjetas (marcadas como prueba) y el poller automatico lo omite. El dedup por
+    /// Message-ID sigue activo; el boton "Limpiar corrida de prueba" borra tarjetas + logs de
+    /// prueba para poder repetir con los mismos correos.
+    /// </summary>
+    public bool ModoPrueba { get; set; }
+
     /// <summary>Ultima vez que el poller reviso este buzon.</summary>
     public DateTimeOffset? LastPolledAt { get; set; }
 

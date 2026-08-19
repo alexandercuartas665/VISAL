@@ -22,6 +22,7 @@ public sealed record EmailIngestConfigDto(
     bool MarkAsRead,
     string? ProcessedLabel,
     bool IsEnabled,
+    bool ModoPrueba,
     bool HasAppPassword,
     DateTimeOffset? LastPolledAt,
     string? LastError,
@@ -46,7 +47,8 @@ public sealed record SaveEmailIngestConfigRequest(
     bool OnlyUnread,
     bool MarkAsRead,
     string? ProcessedLabel,
-    bool IsEnabled);
+    bool IsEnabled,
+    bool ModoPrueba);
 
 /// <summary>Renglon de la bitacora de correos procesados.</summary>
 public sealed record EmailIngestLogDto(
@@ -89,6 +91,13 @@ public interface IEmailIngestConfigService
     Task<(bool Ok, string? Error, int Total)> TestConnectionAsync(Guid id, CancellationToken ct = default);
     Task<EmailIngestRunResult> ProcessNowAsync(Guid id, IProgress<EmailIngestProgress>? progress = null, CancellationToken ct = default);
     Task<IReadOnlyList<EmailIngestLogDto>> ListLogsAsync(Guid configId, int take = 100, CancellationToken ct = default);
+
+    /// <summary>Cuenta cuantos registros de PRUEBA hay para el buzon (para mostrar/ocultar el boton de limpieza).</summary>
+    Task<int> ContarPruebasAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Borra las tarjetas y los registros generados en MODO PRUEBA para este buzon, dejando
+    /// todo limpio para volver a ensayar los mismos correos. Devuelve cuantas tarjetas y logs se borraron.</summary>
+    Task<(bool Ok, string? Error, int Tarjetas, int Logs)> LimpiarCorridaPruebaAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Lista las etiquetas EXISTENTES de la cuenta (para elegir cual marca "procesado").
     /// Usa la clave guardada del buzon; requiere que ya se haya guardado la App Password.</summary>

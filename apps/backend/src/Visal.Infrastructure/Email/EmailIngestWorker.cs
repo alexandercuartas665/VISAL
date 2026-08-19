@@ -53,7 +53,8 @@ public sealed class EmailIngestWorker : BackgroundService
             var db = scope.ServiceProvider.GetRequiredService<VisalDbContext>();
             var now = DateTimeOffset.UtcNow;
             var rows = await db.TenantEmailIngestConfigs.IgnoreQueryFilters()
-                .Where(c => c.IsEnabled && c.AppPasswordEncrypted != null && c.ClassifierAgentId != null && c.TargetBoardId != null)
+                // Los buzones en MODO PRUEBA no los toca el poller automatico: solo corren con "Procesar ahora".
+                .Where(c => c.IsEnabled && !c.ModoPrueba && c.AppPasswordEncrypted != null && c.ClassifierAgentId != null && c.TargetBoardId != null)
                 .Select(c => new { c.Id, c.TenantId, c.PollIntervalMinutes, c.LastPolledAt })
                 .ToListAsync(ct);
             due = rows

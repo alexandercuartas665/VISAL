@@ -89,6 +89,7 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
         cfg.MarkAsRead = req.MarkAsRead;
         cfg.ProcessedLabel = string.IsNullOrWhiteSpace(req.ProcessedLabel) ? null : req.ProcessedLabel.Trim();
         cfg.IsEnabled = req.IsEnabled;
+        cfg.ModoPrueba = req.ModoPrueba;
 
         // App Password: solo se reescribe si viene una nueva (cifrada). Vacio = conservar.
         if (!string.IsNullOrWhiteSpace(req.AppPassword))
@@ -169,6 +170,33 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
             .ToListAsync(ct);
     }
 
+    public Task<int> ContarPruebasAsync(Guid id, CancellationToken ct = default)
+        => _db.EmailIngestLogs.CountAsync(l => l.ConfigId == id && l.EsPrueba, ct);
+
+    public async Task<(bool Ok, string? Error, int Tarjetas, int Logs)> LimpiarCorridaPruebaAsync(Guid id, CancellationToken ct = default)
+    {
+        // Registros generados en modo prueba para este buzon. Cada uno puede tener una tarjeta asociada.
+        var logs = await _db.EmailIngestLogs.Where(l => l.ConfigId == id && l.EsPrueba).ToListAsync(ct);
+        if (logs.Count == 0) { return (true, null, 0, 0); }
+
+        var cardIds = logs.Where(l => l.TaskCardId != null).Select(l => l.TaskCardId!.Value).Distinct().ToList();
+
+        var tarjetas = 0;
+        if (cardIds.Count > 0)
+        {
+            // Primero los adjuntos (FK), luego las tarjetas.
+            var adjuntos = await _db.TaskCardAttachments.Where(a => cardIds.Contains(a.TaskCardId)).ToListAsync(ct);
+            if (adjuntos.Count > 0) { _db.TaskCardAttachments.RemoveRange(adjuntos); }
+            var cards = await _db.TaskCards.Where(c => cardIds.Contains(c.Id)).ToListAsync(ct);
+            tarjetas = cards.Count;
+            if (cards.Count > 0) { _db.TaskCards.RemoveRange(cards); }
+        }
+
+        _db.EmailIngestLogs.RemoveRange(logs);
+        await _db.SaveChangesAsync(ct);
+        return (true, null, tarjetas, logs.Count);
+    }
+
     private static EmailIngestConfigDto Map(TenantEmailIngestConfig c,
         IReadOnlyDictionary<Guid, string> agentes, IReadOnlyDictionary<Guid, string> tableros)
         => new(
@@ -178,6 +206,7 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
             c.TargetBoardId,
             c.TargetBoardId is { } bid && tableros.TryGetValue(bid, out var bn) ? bn : null,
             c.PollIntervalMinutes, c.LookbackDays, c.MaxPorCorrida, c.OnlyUnread, c.MarkAsRead, c.ProcessedLabel, c.IsEnabled,
+            c.ModoPrueba,
             !string.IsNullOrEmpty(c.AppPasswordEncrypted),
             c.LastPolledAt, c.LastError, c.LastResultSummary);
 }

@@ -7,6 +7,7 @@
 @using Visal.Domain.Enums
 @inject IEmailIngestConfigService Svc
 @inject IApplicationDbContext Db
+@inject Microsoft.JSInterop.IJSRuntime Js
 
 <PageTitle>Correos PQR - Visal</PageTitle>
 
@@ -40,7 +41,13 @@
                             <div class="ep-card-name">@b.Nombre</div>
                             <div class="ep-card-email">@b.EmailAddress</div>
                         </div>
-                        <span class="ep-badge @(b.IsEnabled ? "ep-badge-on" : "ep-badge-off")">@(b.IsEnabled ? "Activo" : "Apagado")</span>
+                        <div class="ep-badges">
+                            @if (b.ModoPrueba)
+                            {
+                                <span class="ep-badge ep-badge-test">MODO PRUEBA</span>
+                            }
+                            <span class="ep-badge @(b.IsEnabled ? "ep-badge-on" : "ep-badge-off")">@(b.IsEnabled ? "Activo" : "Apagado")</span>
+                        </div>
                     </div>
                     <div class="ep-rows">
                         <div><span>Agente</span><strong>@(b.ClassifierAgentName ?? "— sin agente —")</strong></div>
@@ -68,6 +75,10 @@
                             else { <text>Procesar ahora</text> }
                         </button>
                         <button class="ep-btn ep-btn-sm" @onclick="() => AbrirLogsAsync(b)">Ver correos</button>
+                        @if (b.ModoPrueba)
+                        {
+                            <button class="ep-btn ep-btn-sm ep-btn-test" disabled="@(_busyId == b.Id)" @onclick="() => LimpiarPruebaAsync(b)">Limpiar corrida de prueba</button>
+                        }
                         <button class="ep-btn ep-btn-sm ep-btn-danger" @onclick="() => EliminarAsync(b)">Eliminar</button>
                     </div>
                     @if (_procesandoId == b.Id)
@@ -182,6 +193,15 @@
                     <label class="ep-check"><input type="checkbox" @bind="_form.OnlyUnread" /> Solo correos no leidos</label>
                     <label class="ep-check"><input type="checkbox" @bind="_form.MarkAsRead" /> Marcar como leidos al procesar</label>
                     <label class="ep-check ep-check-strong"><input type="checkbox" @bind="_form.IsEnabled" /> Encendido (poller automatico)</label>
+                </div>
+
+                <div class="ep-field ep-col2">
+                    <label class="ep-check ep-check-test"><input type="checkbox" @bind="_form.ModoPrueba" /> <b>Modo prueba</b></label>
+                    <div class="ep-hint">
+                        Para ensayar la clasificacion sin tocar el buzon: lee TODOS los correos de la carpeta (ignora "solo no leidos"),
+                        NO marca leidos ni etiqueta (Gmail queda intacto), SI crea tarjetas y el poller automatico lo omite.
+                        Usa "Limpiar corrida de prueba" para borrar las tarjetas de prueba y repetir.
+                    </div>
                 </div>
 
                 <div class="ep-field ep-col2">
@@ -308,6 +328,10 @@
 .ep-btn-sm { padding:.25rem .55rem; font-size:.78rem; }
 .ep-btn-primary { background:#2563eb; color:#fff; border-color:#2563eb; }
 .ep-btn-danger { color:#b91c1c; border-color:#fecaca; }
+.ep-btn-test { color:#92400e; border-color:#fde68a; background:#fffbeb; }
+.ep-badges { display:flex; align-items:center; gap:.35rem; }
+.ep-badge-test { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; font-weight:700; letter-spacing:.02em; }
+.ep-check-test { color:#92400e; }
 .ep-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
 .ep-modal { position:fixed; top:4%; left:50%; transform:translateX(-50%); width:min(720px, 96vw); max-height:92vh;
             background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.25); z-index:1401; display:flex; flex-direction:column; overflow:hidden; }
@@ -381,6 +405,7 @@
         public bool MarkAsRead { get; set; } = true;
         public string? ProcessedLabel { get; set; }
         public bool IsEnabled { get; set; }
+        public bool ModoPrueba { get; set; }
     }
 
     private bool _cargando = true;
@@ -437,7 +462,8 @@
                 ImapHost = b.ImapHost, ImapPort = b.ImapPort, ImapUseSsl = b.ImapUseSsl, Folder = b.Folder,
                 ClassifierAgentId = b.ClassifierAgentId, TargetBoardId = b.TargetBoardId,
                 PollIntervalMinutes = b.PollIntervalMinutes, LookbackDays = b.LookbackDays, MaxPorCorrida = b.MaxPorCorrida,
-                OnlyUnread = b.OnlyUnread, MarkAsRead = b.MarkAsRead, ProcessedLabel = b.ProcessedLabel, IsEnabled = b.IsEnabled
+                OnlyUnread = b.OnlyUnread, MarkAsRead = b.MarkAsRead, ProcessedLabel = b.ProcessedLabel, IsEnabled = b.IsEnabled,
+                ModoPrueba = b.ModoPrueba
             };
             // Pre-siembra el datalist con la etiqueta ya guardada para que se vea sin recargar.
             if (!string.IsNullOrWhiteSpace(b.ProcessedLabel)) { _labels = new() { b.ProcessedLabel! }; }
@@ -455,7 +481,7 @@
                 _form.Id, _form.Nombre, _form.EmailAddress, _form.AppPassword, _form.ImapHost, _form.ImapPort,
                 _form.ImapUseSsl, _form.Folder, _form.ClassifierAgentId, _form.TargetBoardId, null,
                 _form.PollIntervalMinutes, _form.LookbackDays, _form.MaxPorCorrida, _form.OnlyUnread, _form.MarkAsRead,
-                _form.ProcessedLabel, _form.IsEnabled);
+                _form.ProcessedLabel, _form.IsEnabled, _form.ModoPrueba);
             await Svc.SaveAsync(req);
             await RecargarAsync();
             _form = null;
@@ -506,6 +532,22 @@
         }
         catch (Exception ex) { Toast(ex.Message, true); }
         finally { _busyId = null; _procesandoId = null; _progProcesados = 0; _progTotal = 0; _progAsunto = null; }
+    }
+
+    private async Task LimpiarPruebaAsync(EmailIngestConfigDto b)
+    {
+        var cuantas = await Svc.ContarPruebasAsync(b.Id);
+        if (cuantas == 0) { Toast("No hay corrida de prueba que limpiar.", false); return; }
+        if (!await Js.InvokeAsync<bool>("confirm", $"Se borraran las tarjetas y registros de la corrida de prueba ({cuantas} correo(s)). Esto deja el buzon limpio para repetir la prueba. Continuar?")) { return; }
+        _busyId = b.Id;
+        StateHasChanged();
+        try
+        {
+            var (ok, err, tarjetas, logs) = await Svc.LimpiarCorridaPruebaAsync(b.Id);
+            Toast(ok ? $"Corrida de prueba limpiada: {tarjetas} tarjeta(s) y {logs} registro(s) borrados." : (err ?? "No se pudo limpiar."), !ok);
+        }
+        catch (Exception ex) { Toast(ex.Message, true); }
+        finally { _busyId = null; }
     }
 
     private async Task AbrirLogsAsync(EmailIngestConfigDto b)

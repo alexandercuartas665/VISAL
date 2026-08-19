@@ -46,5 +46,12 @@ public class EmailIngestLog : TenantEntity
     /// <summary>Cantidad de adjuntos del correo que se copiaron a la tarjeta PQR.</summary>
     public int AttachmentCount { get; set; }
 
+    /// <summary>
+    /// True si este registro (y su tarjeta) se generaron en MODO PRUEBA del buzon. Permite
+    /// identificarlos para el boton "Limpiar corrida de prueba" (borra tarjetas + estos logs) y
+    /// distinguirlos de la operacion real.
+    /// </summary>
+    public bool EsPrueba { get; set; }
+
     public DateTimeOffset ProcessedAt { get; set; }
 }

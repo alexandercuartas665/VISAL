@@ -37,7 +37,7 @@
             {
                 <div class="ep-card @(b.IsEnabled ? "ep-on" : "")">
                     <div class="ep-card-top">
-                        <div>
+                        <div class="ep-card-idwrap">
                             <div class="ep-card-name">@b.Nombre</div>
                             <div class="ep-card-email">@b.EmailAddress</div>
                         </div>
@@ -310,10 +310,12 @@
 .ep-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap:.85rem; }
 .ep-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:.9rem 1rem; display:flex; flex-direction:column; gap:.5rem; }
 .ep-card.ep-on { border-color:#93c5fd; box-shadow: 0 2px 10px rgba(37,99,235,.08); }
-.ep-card-top { display:flex; justify-content:space-between; align-items:flex-start; }
-.ep-card-name { font-weight:600; color:#0f172a; }
-.ep-card-email { color:#64748b; font-size:.8rem; }
-.ep-badge { font-size:.7rem; padding:.12rem .5rem; border-radius:99px; }
+.ep-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:.5rem; }
+.ep-card-idwrap { min-width:0; flex:1 1 auto; }
+.ep-card-name { font-weight:600; color:#0f172a; word-break:break-word; }
+.ep-card-email { color:#64748b; font-size:.8rem; word-break:break-all; }
+.ep-badges { flex:0 0 auto; display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:.35rem; }
+.ep-badge { font-size:.7rem; padding:.12rem .5rem; border-radius:99px; white-space:nowrap; }
 .ep-badge-on { background:#dcfce7; color:#15803d; }
 .ep-badge-off { background:#f1f5f9; color:#64748b; }
 .ep-rows { display:grid; grid-template-columns:1fr 1fr; gap:.25rem .75rem; font-size:.8rem; }
@@ -329,7 +331,6 @@
 .ep-btn-primary { background:#2563eb; color:#fff; border-color:#2563eb; }
 .ep-btn-danger { color:#b91c1c; border-color:#fecaca; }
 .ep-btn-test { color:#92400e; border-color:#fde68a; background:#fffbeb; }
-.ep-badges { display:flex; align-items:center; gap:.35rem; }
 .ep-badge-test { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; font-weight:700; letter-spacing:.02em; }
 .ep-check-test { color:#92400e; }
 .ep-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }

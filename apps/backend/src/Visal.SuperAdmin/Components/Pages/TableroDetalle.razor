@@ -6,6 +6,7 @@
 @inject ITaskBoardService BoardsSvc
 @inject ITaskBoardMemberService MembersSvc
 @inject ITaskFieldService FieldSvc
+@inject ITaskBoardColumnPrefService PrefsSvc
 @inject NavigationManager Nav
 
 <PageTitle>@(_board?.Name ?? "Tablero") - Visal</PageTitle>
@@ -37,6 +38,14 @@ else
                 }
             </div>
             <div class="td-head-right">
+                <div class="td-vista-toggle">
+                    <button class="td-vista-btn @(_vista == Vista.Kanban ? "active" : "")" @onclick="@(() => _vista = Vista.Kanban)" title="Vista Kanban">▤ Kanban</button>
+                    <button class="td-vista-btn @(_vista == Vista.Tabla ? "active" : "")" @onclick="@(() => _vista = Vista.Tabla)" title="Vista Tabla">☰ Tabla</button>
+                </div>
+                @if (_vista == Vista.Tabla)
+                {
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="OpenColsConfig">🧱 Columnas</button>
+                }
                 <button class="btn btn-outline-secondary btn-sm" @onclick="() => _fieldsConfigOpen = true">🧩 Campos (@_boardFields.Count)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="OpenMembers">👥 Miembros (@_board.MemberCount)</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="OpenEditBoard">✎ Editar</button>
@@ -48,6 +57,8 @@ else
         }
 
         @* ===== Kanban ===== *@
+        @if (_vista == Vista.Kanban)
+        {
         <div class="td-kanban">
             @foreach (var col in _columns)
             {
@@ -125,6 +136,57 @@ else
                 <button class="td-add-column" @onclick="@(() => { _newColName = ""; _newColOpen = true; })">+ Añadir columna</button>
             }
         </div>
+        }
+        else
+        {
+            @* ===== Vista Tabla ===== *@
+            var visibles = _tableCols.Where(c => c.Visible).OrderBy(c => c.Orden).ToList();
+            <div class="td-tabla-wrap">
+                @if (_cards.Count == 0)
+                {
+                    <p class="td-tabla-empty">Este tablero no tiene tarjetas todavia.</p>
+                }
+                else
+                {
+                    <table class="td-tabla">
+                        <thead>
+                            <tr>
+                                @foreach (var tc in visibles)
+                                {
+                                    <th style="@(tc.Width is int w ? $"width:{w}px; min-width:{w}px; max-width:{w}px;" : "")">@tc.Label</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var card in TableCards())
+                            {
+                                <tr @onclick="@(() => OpenCardAsync(card.Id))">
+                                    @foreach (var tc in visibles)
+                                    {
+                                        if (tc.Key == "__titulo__")
+                                        {
+                                            <td class="td-tabla-titulo" style="@(tc.Width is int w2 ? $"max-width:{w2}px;" : "")">
+                                                <span class="td-tabla-dot" style="background:@(card.Color ?? "#cbd5e1");"></span>@card.Title
+                                            </td>
+                                        }
+                                        else if (tc.Key == "__estado__")
+                                        {
+                                            var ecol = _columns.FirstOrDefault(c => c.Id == card.ColumnId);
+                                            <td><span class="td-tabla-chip" style="border-color:@(ecol?.Color ?? "#cbd5e1");">@(ecol?.Name ?? "-")</span></td>
+                                        }
+                                        else
+                                        {
+                                            var val = card.FieldValues is not null && card.FieldValues.TryGetValue(tc.Key, out var v) ? v : null;
+                                            <td class="td-tabla-cell" style="@(tc.Width is int w3 ? $"max-width:{w3}px;" : "")" title="@val">@(string.IsNullOrWhiteSpace(val) ? "" : val)</td>
+                                        }
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
     </div>
 }
 
@@ -569,6 +631,44 @@ else
                       OnChanged="ReloadFieldsAsync" />
 }
 
+@* ===== Modal: Configurar columnas de la vista tabla (por usuario) ===== *@
+@if (_colsConfigOpen)
+{
+    <div class="tb-modal-backdrop" @onclick="@(() => _colsConfigOpen = false)"></div>
+    <div class="tb-modal" style="width:560px;">
+        <div class="tb-modal-h">
+            <h3>Columnas de la tabla</h3>
+            <button class="tb-modal-close" @onclick="@(() => _colsConfigOpen = false)">&times;</button>
+        </div>
+        <div class="tb-modal-body">
+            <p class="td-cfg-hint">Arrastra para reordenar. Esta configuracion es <strong>solo tuya</strong>.</p>
+            <div class="td-cfg-list">
+                @foreach (var tc in _cfgDraft.OrderBy(c => c.Orden))
+                {
+                    <div class="td-cfg-row @(_cfgDragKey == tc.Key ? "dragging" : "")"
+                         draggable="true"
+                         @ondragstart="@(() => _cfgDragKey = tc.Key)"
+                         @ondragend="@(() => _cfgDragKey = null)"
+                         @ondragover:preventDefault="true"
+                         @ondrop="@(() => CfgDropOn(tc.Key))">
+                        <span class="td-cfg-grip" title="Arrastrar">⋮⋮</span>
+                        <input type="checkbox" checked="@tc.Visible" @onchange="@(e => tc.Visible = (bool)(e.Value ?? false))" title="Mostrar columna" />
+                        <span class="td-cfg-name" title="@tc.DefaultLabel">@tc.DefaultLabel</span>
+                        <input class="td-cfg-alias" placeholder="Alias..." value="@tc.Alias" @onchange="@(e => tc.Alias = e.Value?.ToString())" />
+                        <input class="td-cfg-ancho" type="number" min="60" max="600" step="10" placeholder="Auto" value="@tc.Width" @onchange="@(e => tc.Width = int.TryParse(e.Value?.ToString(), out var n) ? n : (int?)null)" title="Ancho en px" />
+                    </div>
+                }
+            </div>
+        </div>
+        <div class="tb-modal-foot">
+            <button class="btn btn-outline-secondary" @onclick="ResetColsAsync">Restablecer</button>
+            <span style="flex:1;"></span>
+            <button class="btn btn-outline-secondary" @onclick="@(() => _colsConfigOpen = false)">Cancelar</button>
+            <button class="btn btn-primary" @onclick="SaveColsConfigAsync">Guardar</button>
+        </div>
+    </div>
+}
+
 @* ===== Modal: Editar tablero ===== *@
 @if (_editBoardOpen && _board is not null)
 {
@@ -662,8 +762,28 @@ else
     .td-back:hover { color:#0f172a; }
     .td-color-dot { width:14px; height:14px; border-radius:50%; flex:none; }
     .td-title { margin:0; font-size:20px; font-weight:700; color:#0f172a; }
-    .td-head-right { display:flex; gap:6px; }
+    .td-head-right { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .td-desc { color:#64748b; font-size:13px; margin:4px 0 16px 40px; }
+
+    /* Toggle Kanban/Tabla */
+    .td-vista-toggle { display:inline-flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; margin-right:2px; }
+    .td-vista-btn { border:0; background:#fff; color:#475569; font-size:12.5px; font-weight:600; padding:5px 10px; cursor:pointer; }
+    .td-vista-btn + .td-vista-btn { border-left:1px solid #e2e8f0; }
+    .td-vista-btn:hover { background:#f1f5f9; }
+    .td-vista-btn.active { background:#3b82f6; color:#fff; }
+
+    /* Vista Tabla */
+    .td-tabla-wrap { overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+    .td-tabla-empty { color:#94a3b8; font-style:italic; padding:20px; margin:0; }
+    .td-tabla { width:100%; border-collapse:collapse; font-size:13px; }
+    .td-tabla thead th { position:sticky; top:0; background:#f8fafc; color:#334155; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; text-align:left; padding:9px 12px; border-bottom:2px solid #e2e8f0; white-space:nowrap; z-index:1; }
+    .td-tabla tbody tr { cursor:pointer; border-bottom:1px solid #f1f5f9; }
+    .td-tabla tbody tr:hover { background:#f8fafc; }
+    .td-tabla td { padding:8px 12px; color:#334155; vertical-align:top; }
+    .td-tabla-titulo { font-weight:600; color:#0f172a; }
+    .td-tabla-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+    .td-tabla-chip { display:inline-block; font-size:11px; font-weight:600; color:#475569; border:1.5px solid #cbd5e1; border-radius:10px; padding:1px 9px; white-space:nowrap; }
+    .td-tabla-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
     /* Kanban */
     .td-kanban { display:flex; gap:12px; overflow-x:auto; padding-bottom:12px; align-items:flex-start; }
@@ -846,6 +966,19 @@ else
     .tb-badge-owner { background:#eef2ff; color:#4338ca; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; }
     .tb-member-name { font-weight:600; color:#0f172a; font-size:13px; }
     .tb-member-role { color:#64748b; font-size:11px; }
+
+    /* Config de columnas por usuario */
+    .td-cfg-hint { font-size:12.5px; color:#64748b; margin:0 0 12px; }
+    .td-cfg-list { display:flex; flex-direction:column; gap:4px; max-height:52vh; overflow-y:auto; }
+    .td-cfg-row { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; }
+    .td-cfg-row.dragging { opacity:0.5; }
+    .td-cfg-grip { cursor:grab; color:#94a3b8; font-size:13px; letter-spacing:-2px; user-select:none; }
+    .td-cfg-row input[type=checkbox] { width:16px; height:16px; cursor:pointer; }
+    .td-cfg-name { flex:1; font-size:13px; color:#0f172a; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .td-cfg-alias { width:120px; padding:4px 8px; border:1px solid #cbd5e1; border-radius:5px; font-size:12.5px; outline:none; }
+    .td-cfg-alias:focus { border-color:#3b82f6; }
+    .td-cfg-ancho { width:70px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:5px; font-size:12.5px; outline:none; }
+    .td-cfg-ancho:focus { border-color:#3b82f6; }
 </style>
 
 @code {
@@ -861,6 +994,29 @@ else
     private List<TaskFieldDto> _boardFields = new();
     private Dictionary<string, string?> _cardValues = new();
     private bool _fieldsConfigOpen;
+
+    // ---- Vista tabla + columnas por usuario ----
+    private enum Vista { Kanban, Tabla }
+    private Vista _vista = Vista.Kanban;
+
+    /// <summary>Una columna de la vista tabla (fija o campo dinamico) con la preferencia del usuario aplicada.</summary>
+    private sealed class TableCol
+    {
+        public string Key = "";
+        public string DefaultLabel = "";
+        public string? Alias;
+        public bool Visible = true;
+        public int? Width;
+        public int Orden;
+        public bool IsField;
+        public string Label => string.IsNullOrWhiteSpace(Alias) ? DefaultLabel : Alias!;
+    }
+    private List<TableCol> _tableCols = new();
+
+    // Modal configurar columnas (draft editable + drag)
+    private bool _colsConfigOpen;
+    private List<TableCol> _cfgDraft = new();
+    private string? _cfgDragKey;
 
     private TaskBoardDto? _board;
     private List<TaskBoardColumnDto> _columns = new();
@@ -950,11 +1106,106 @@ else
         _boardMembers = (await MembersSvc.ListMembersAsync(BoardId, _actorId)).ToList();
         _boardTags = (await BoardsSvc.ListBoardTagsAsync(BoardId, _actorId)).ToList();
         _boardFields = (await FieldSvc.ListFieldsAsync(BoardId, _actorId)).ToList();
+        await BuildTableColsAsync();
     }
 
     private async Task ReloadFieldsAsync()
     {
         _boardFields = (await FieldSvc.ListFieldsAsync(BoardId, _actorId)).ToList();
+        await BuildTableColsAsync();
+    }
+
+    // ---- Vista tabla: columnas + orden de filas ----
+
+    /// <summary>Arma las columnas de la tabla (Titulo/Estado + campos dinamicos) y les aplica la
+    /// preferencia del usuario (visible/alias/orden/ancho). Las columnas sin preferencia usan default.</summary>
+    private async Task BuildTableColsAsync()
+    {
+        var cols = new List<TableCol>
+        {
+            new() { Key = "__titulo__", DefaultLabel = "Titulo" },
+            new() { Key = "__estado__", DefaultLabel = "Estado" },
+        };
+        foreach (var f in _boardFields.OrderBy(f => f.SortOrder).ThenBy(f => f.Label))
+        {
+            cols.Add(new TableCol { Key = f.FieldKey, DefaultLabel = f.Label, IsField = true });
+        }
+        for (var i = 0; i < cols.Count; i++) { cols[i].Orden = i; }
+
+        var prefs = await PrefsSvc.ListAsync(BoardId, _actorId);
+        if (prefs.Count > 0)
+        {
+            var byKey = prefs.ToDictionary(p => p.ColumnKey);
+            foreach (var c in cols)
+            {
+                if (byKey.TryGetValue(c.Key, out var p))
+                {
+                    c.Visible = p.Visible;
+                    c.Alias = p.Alias;
+                    if (p.Orden is int o) { c.Orden = o; }
+                    c.Width = p.Ancho;
+                }
+            }
+        }
+        _tableCols = cols;
+    }
+
+    /// <summary>Orden de filas en la tabla: por posicion de la columna (estado) y luego SortOrder.</summary>
+    private IEnumerable<TaskCardSummaryDto> TableCards()
+    {
+        var colOrder = _columns.Select((c, i) => (c.Id, i)).ToDictionary(x => x.Id, x => x.i);
+        return _cards
+            .OrderBy(c => colOrder.TryGetValue(c.ColumnId, out var i) ? i : int.MaxValue)
+            .ThenBy(c => c.SortOrder);
+    }
+
+    // ---- Modal configurar columnas (por usuario) ----
+
+    private void OpenColsConfig()
+    {
+        _cfgDraft = _tableCols
+            .OrderBy(c => c.Orden)
+            .Select(c => new TableCol { Key = c.Key, DefaultLabel = c.DefaultLabel, Alias = c.Alias, Visible = c.Visible, Width = c.Width, Orden = c.Orden, IsField = c.IsField })
+            .ToList();
+        _cfgDragKey = null;
+        _colsConfigOpen = true;
+    }
+
+    private void CfgDropOn(string targetKey)
+    {
+        if (_cfgDragKey is null || _cfgDragKey == targetKey) { return; }
+        var ordered = _cfgDraft.OrderBy(c => c.Orden).ToList();
+        var drag = ordered.FirstOrDefault(c => c.Key == _cfgDragKey);
+        if (drag is null) { return; }
+        ordered.Remove(drag);
+        var idx = ordered.FindIndex(c => c.Key == targetKey);
+        if (idx < 0) { idx = ordered.Count; }
+        ordered.Insert(idx, drag);
+        for (var i = 0; i < ordered.Count; i++) { ordered[i].Orden = i; }
+        _cfgDraft = ordered;
+        _cfgDragKey = null;
+    }
+
+    private async Task SaveColsConfigAsync()
+    {
+        var items = _cfgDraft
+            .Select(c => new SaveTaskColumnPrefRequest(
+                c.Key, c.Visible,
+                string.IsNullOrWhiteSpace(c.Alias) ? null : c.Alias!.Trim(),
+                c.Orden, c.Width))
+            .ToList();
+        await PrefsSvc.GuardarLoteAsync(BoardId, _actorId, items);
+        _colsConfigOpen = false;
+        await BuildTableColsAsync();
+    }
+
+    private async Task ResetColsAsync()
+    {
+        // Manda todo en default puro -> el servicio borra las filas y la tabla vuelve al default.
+        var items = _tableCols.Select(c => new SaveTaskColumnPrefRequest(c.Key, true, null, null, null)).ToList();
+        await PrefsSvc.GuardarLoteAsync(BoardId, _actorId, items);
+        _colsConfigOpen = false;
+        await BuildTableColsAsync();
     }
 
     // ---- Drag&drop ----

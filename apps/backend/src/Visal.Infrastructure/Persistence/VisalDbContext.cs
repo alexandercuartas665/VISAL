@@ -166,6 +166,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TaskCardActivity> TaskCardActivities => Set<TaskCardActivity>();
     public DbSet<TaskCardAttachment> TaskCardAttachments => Set<TaskCardAttachment>();
     public DbSet<TaskFieldDefinition> TaskFieldDefinitions => Set<TaskFieldDefinition>();
+    public DbSet<TaskBoardColumnPref> TaskBoardColumnPrefs => Set<TaskBoardColumnPref>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -1703,6 +1704,15 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // FieldKey unico por tablero.
             b.HasIndex(x => new { x.BoardId, x.FieldKey }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.BoardId, x.SortOrder });
+        });
+
+        // Preferencias de columnas de la vista tabla, POR USUARIO (individual, no por tenant).
+        modelBuilder.Entity<TaskBoardColumnPref>(b =>
+        {
+            b.Property(x => x.ColumnKey).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Alias).HasMaxLength(80);
+            // Una fila por (usuario, tablero, columna).
+            b.HasIndex(x => new { x.TenantId, x.PlatformUserId, x.BoardId, x.ColumnKey }).IsUnique();
         });
 
         modelBuilder.Entity<TaskCardAssignment>(b =>

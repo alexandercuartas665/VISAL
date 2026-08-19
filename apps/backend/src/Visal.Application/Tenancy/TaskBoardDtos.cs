@@ -68,7 +68,10 @@ public sealed record TaskCardSummaryDto(
     IReadOnlyList<TaskCardMemberDto> Members,
     IReadOnlyList<TaskCardTagDto> Tags,
     int ChecklistTotal, int ChecklistDone,
-    int CommentsCount, int AttachmentsCount);
+    int CommentsCount, int AttachmentsCount,
+    /// <summary>Valores de los campos dinamicos del tablero (FieldKey -> valor), para la vista tabla.
+    /// null/vacio si la tarjeta no tiene valores. Solo lo llena <c>ListCardsAsync</c>.</summary>
+    IReadOnlyDictionary<string, string?>? FieldValues = null);
 
 public sealed record TaskCardDetailDto(
     TaskCardSummaryDto Card,

@@ -381,7 +381,8 @@ public sealed class TaskBoardService : ITaskBoardService
                 tagsByCard.TryGetValue(c.Id, out var t) ? t : (IReadOnlyList<TaskCardTagDto>)Array.Empty<TaskCardTagDto>(),
                 chk.Total, chk.Done,
                 comments.TryGetValue(c.Id, out var cm) ? cm : 0,
-                attachments.TryGetValue(c.Id, out var at) ? at : 0);
+                attachments.TryGetValue(c.Id, out var at) ? at : 0,
+                DeserializeFieldValues(c.FieldValuesJson));
         }).ToList();
     }
 
@@ -772,5 +773,18 @@ public sealed class TaskBoardService : ITaskBoardService
         if (parts.Length == 1) { return first.ToString(); }
         var second = char.ToUpperInvariant(parts[1][0]);
         return $"{first}{second}";
+    }
+
+    /// <summary>Deserializa el jsonb de valores dinamicos (FieldKey -> valor) para la vista tabla.
+    /// Devuelve null si esta vacio para no inflar el DTO.</summary>
+    private static IReadOnlyDictionary<string, string?>? DeserializeFieldValues(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return null; }
+        try
+        {
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string?>>(json);
+            return dict is { Count: > 0 } ? dict : null;
+        }
+        catch { return null; }
     }
 }

@@ -143,8 +143,12 @@ else
         {
             @* ===== Vista Tabla ===== *@
             var visibles = _tableCols.Where(c => c.Visible).OrderBy(c => c.Orden).ToList();
+            var todasFilas = TableCards().ToList();
+            var totalPaginas = Math.Max(1, (int)Math.Ceiling(todasFilas.Count / (double)_tablaPageSize));
+            if (_tablaPage > totalPaginas) { _tablaPage = totalPaginas; }
+            var pagina = todasFilas.Skip((_tablaPage - 1) * _tablaPageSize).Take(_tablaPageSize).ToList();
             <div class="td-tabla-wrap">
-                @if (_cards.Count == 0)
+                @if (todasFilas.Count == 0)
                 {
                     <p class="td-tabla-empty">Este tablero no tiene tarjetas todavia.</p>
                 }
@@ -160,7 +164,7 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var card in TableCards())
+                            @foreach (var card in pagina)
                             {
                                 <tr @onclick="@(() => OpenCardAsync(card.Id))">
                                     @foreach (var tc in visibles)
@@ -188,6 +192,29 @@ else
                     </table>
                 }
             </div>
+            @if (todasFilas.Count > 0)
+            {
+                var desde = (_tablaPage - 1) * _tablaPageSize + 1;
+                var hasta = Math.Min(_tablaPage * _tablaPageSize, todasFilas.Count);
+                <div class="td-tabla-pager">
+                    <span class="td-pager-info">@desde–@hasta de @todasFilas.Count</span>
+                    <div class="td-pager-size">
+                        <span>Filas:</span>
+                        <select @bind="_tablaPageSize" @bind:after="@(() => _tablaPage = 1)">
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                    <div class="td-pager-btns">
+                        <button class="td-pager-btn" disabled="@(_tablaPage <= 1)" @onclick="@(() => _tablaPage = 1)" title="Primera">«</button>
+                        <button class="td-pager-btn" disabled="@(_tablaPage <= 1)" @onclick="@(() => _tablaPage--)" title="Anterior">‹</button>
+                        <span class="td-pager-cur">@_tablaPage / @totalPaginas</span>
+                        <button class="td-pager-btn" disabled="@(_tablaPage >= totalPaginas)" @onclick="@(() => _tablaPage++)" title="Siguiente">›</button>
+                        <button class="td-pager-btn" disabled="@(_tablaPage >= totalPaginas)" @onclick="@(() => _tablaPage = totalPaginas)" title="Ultima">»</button>
+                    </div>
+                </div>
+            }
         }
     </div>
 }
@@ -228,6 +255,20 @@ else
                         <p class="td-modal-sub">en la lista <strong>@(col?.Name ?? "(sin columna)")</strong></p>
                     }
                 </div>
+                @{
+                    var hermanas = SiblingCards();
+                    var idxActual = hermanas.FindIndex(c => c.Id == detail.Card.Id);
+                }
+                @if (hermanas.Count > 1)
+                {
+                    <div class="td-modal-nav" @onclick:stopPropagation="true">
+                        <button class="td-modal-nav-btn" title="Anterior en @(col?.Name ?? "esta columna")"
+                                disabled="@(idxActual <= 0)" @onclick="@(() => OpenSiblingAsync(-1))">‹</button>
+                        <span class="td-modal-nav-pos">@(idxActual + 1) / @hermanas.Count</span>
+                        <button class="td-modal-nav-btn" title="Siguiente en @(col?.Name ?? "esta columna")"
+                                disabled="@(idxActual < 0 || idxActual >= hermanas.Count - 1)" @onclick="@(() => OpenSiblingAsync(1))">›</button>
+                    </div>
+                }
                 <button class="td-modal-x" @onclick="CloseCardModal" aria-label="Cerrar">×</button>
             </div>
 
@@ -889,10 +930,10 @@ else
     .td-vista-btn.active { background:#3b82f6; color:#fff; }
 
     /* Vista Tabla */
-    .td-tabla-wrap { overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+    .td-tabla-wrap { overflow:auto; max-height:calc(100vh - 200px); border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
     .td-tabla-empty { color:#94a3b8; font-style:italic; padding:20px; margin:0; }
-    .td-tabla { width:100%; border-collapse:collapse; font-size:13px; }
-    .td-tabla thead th { position:sticky; top:0; background:#f8fafc; color:#334155; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; text-align:left; padding:9px 12px; border-bottom:2px solid #e2e8f0; white-space:nowrap; z-index:1; }
+    .td-tabla { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
+    .td-tabla thead th { position:sticky; top:0; background:#f1f5f9; color:#334155; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; text-align:left; padding:9px 12px; border-bottom:2px solid #cbd5e1; white-space:nowrap; z-index:2; box-shadow:0 1px 0 #cbd5e1; }
     .td-tabla tbody tr { cursor:pointer; border-bottom:1px solid #f1f5f9; }
     .td-tabla tbody tr:hover { background:#f8fafc; }
     .td-tabla td { padding:8px 12px; color:#334155; vertical-align:top; }
@@ -900,6 +941,16 @@ else
     .td-tabla-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:7px; vertical-align:middle; }
     .td-tabla-chip { display:inline-block; font-size:11px; font-weight:600; color:#475569; border:1.5px solid #cbd5e1; border-radius:10px; padding:1px 9px; white-space:nowrap; }
     .td-tabla-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* Pager de la vista tabla */
+    .td-tabla-pager { display:flex; align-items:center; gap:16px; padding:8px 4px; margin-top:8px; font-size:12.5px; color:#475569; flex-wrap:wrap; }
+    .td-pager-info { color:#64748b; }
+    .td-pager-size { display:flex; align-items:center; gap:6px; }
+    .td-pager-size select { padding:3px 6px; border:1px solid #cbd5e1; border-radius:5px; font-size:12.5px; }
+    .td-pager-btns { display:flex; align-items:center; gap:4px; margin-left:auto; }
+    .td-pager-btn { min-width:28px; height:28px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; color:#334155; cursor:pointer; font-size:14px; }
+    .td-pager-btn:hover:not(:disabled) { background:#f1f5f9; border-color:#94a3b8; }
+    .td-pager-btn:disabled { opacity:0.4; cursor:default; }
+    .td-pager-cur { padding:0 8px; font-weight:600; color:#0f172a; }
 
     /* Kanban */
     .td-kanban { display:flex; gap:12px; overflow-x:auto; padding-bottom:12px; align-items:flex-start; }
@@ -923,6 +974,11 @@ else
     .td-add-column:hover { background:#f1f5f9; border-color:#94a3b8; }
 
     /* Card modal */
+    .td-modal-nav { display:flex; align-items:center; gap:2px; flex:none; margin-right:4px; }
+    .td-modal-nav-btn { width:30px; height:30px; border:1px solid #e2e8f0; background:#fff; border-radius:6px; color:#475569; cursor:pointer; font-size:18px; line-height:1; display:grid; place-items:center; }
+    .td-modal-nav-btn:hover:not(:disabled) { background:#f1f5f9; border-color:#94a3b8; color:#0f172a; }
+    .td-modal-nav-btn:disabled { opacity:0.4; cursor:default; }
+    .td-modal-nav-pos { font-size:12px; color:#64748b; font-weight:600; padding:0 4px; white-space:nowrap; }
     .td-title-input { flex:1; font-size:16px; font-weight:700; border:none; padding:4px 8px; background:transparent; color:#0f172a; }
     .td-title-input:focus { outline:1px solid #3b82f6; border-radius:4px; }
     .td-modal-grid { display:grid; grid-template-columns: 1fr 220px; gap:20px; }
@@ -1150,6 +1206,10 @@ else
     }
     private List<TableCol> _tableCols = new();
 
+    // Paginacion de la vista tabla
+    private int _tablaPage = 1;
+    private int _tablaPageSize = 25;
+
     // Modal configurar columnas (draft editable + drag)
     private bool _colsConfigOpen;
     private List<TableCol> _cfgDraft = new();
@@ -1309,6 +1369,27 @@ else
         return _cards
             .OrderBy(c => colOrder.TryGetValue(c.ColumnId, out var i) ? i : int.MaxValue)
             .ThenBy(c => c.SortOrder);
+    }
+
+    /// <summary>Tarjetas de la MISMA columna/etapa que la tarjeta abierta, en el mismo orden del kanban.</summary>
+    private List<TaskCardSummaryDto> SiblingCards()
+    {
+        if (_cardDetail is null) { return new(); }
+        return _cards
+            .Where(c => c.ColumnId == _cardDetail.Card.ColumnId)
+            .OrderBy(c => c.SortOrder).ThenByDescending(c => c.Id)
+            .ToList();
+    }
+
+    /// <summary>Salta a la tarjeta anterior/siguiente (dir -1 / +1) dentro de la misma columna.</summary>
+    private async Task OpenSiblingAsync(int dir)
+    {
+        if (_cardDetail is null) { return; }
+        var hermanas = SiblingCards();
+        var idx = hermanas.FindIndex(c => c.Id == _cardDetail.Card.Id);
+        var destino = idx + dir;
+        if (idx < 0 || destino < 0 || destino >= hermanas.Count) { return; }
+        await OpenCardAsync(hermanas[destino].Id);
     }
 
     // ---- Modal configurar columnas (por usuario) ----

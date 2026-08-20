@@ -155,6 +155,7 @@ else
                                          HcConsecutivo="@ConsecutivoHc()"
                                          OrdenNum="@($"{ConsecutivoHc()}-MED{(_ordenesMed.Count > 1 ? "-" + om.NumeroOrden : "")}")"
                                          TipoCortoHeader="ORD"
+                                         Subtitulo="@(_ordenesMed.Count > 1 ? $"Orden {om.NumeroOrden} de {_ordenesMed.Count}" : null)"
                                          TituloFallback="@($"Orden de Medicamentos{_suf}")" />
                 }
                 else

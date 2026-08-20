@@ -94,6 +94,10 @@
             }
         </div>
         <div class="pack-hdr-title">@tituloFinal</div>
+        @if (!string.IsNullOrWhiteSpace(Subtitulo))
+        {
+            <div style="text-align:center;font-weight:700;font-size:12px;letter-spacing:.5px;margin-top:1px;">@Subtitulo</div>
+        }
         <div class="pack-hdr-meta">
             @if (!string.IsNullOrWhiteSpace(PacienteNombre))
             {
@@ -165,6 +169,9 @@
     [Parameter] public string? PacienteDoc { get; set; }
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public string? OrdenNum { get; set; }
+    /// <summary>Subtitulo opcional bajo el titulo del formato (p.ej. "Orden 1 de 2"
+    /// cuando una HC tiene varias ordenes del mismo tipo). Vacio = no se renderiza.</summary>
+    [Parameter] public string? Subtitulo { get; set; }
     [Parameter] public string? FechaLinea { get; set; }
     /// <summary>Consecutivo/N. de la HC de origen. Se imprime como "HC: {valor}" para
     /// trazabilidad, incluso cuando ImprimirCodigoFecha esta apagado (p.ej. formula medica).</summary>

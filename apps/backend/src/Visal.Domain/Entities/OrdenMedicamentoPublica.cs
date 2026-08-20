@@ -28,6 +28,14 @@ public class OrdenMedicamentoPublica : TenantEntity
     public string TipoOrden { get; set; } = "MED";
 
     /// <summary>
+    /// Numero de la orden (grupo) dentro de la HC de la que se emitio. Permite
+    /// varias emisiones vigentes por (HC, tipo, numero de orden): una HC puede
+    /// tener 2+ "Ordenes de Medicamentos" (o de insumos), cada una con su propio
+    /// QR de verificacion. Las filas previas a esta columna quedan en 1.
+    /// </summary>
+    public int NumeroOrden { get; set; } = 1;
+
+    /// <summary>
     /// Token corto legible (12 caracteres alfanumericos, base32 sin caracteres
     /// ambiguos 0/O/1/I/L). Globalmente unico (indice unico). Es lo que va dentro
     /// del QR y lo que el receptor puede tipear en la pagina publica.

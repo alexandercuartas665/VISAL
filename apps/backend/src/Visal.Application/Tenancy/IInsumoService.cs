@@ -8,14 +8,16 @@ public sealed record InsumoItemDto(
     string? Cantidad,
     string? Observaciones,
     string? MipresUrl,
-    int Orden);
+    int Orden,
+    int NumeroOrden = 1);
 
 public sealed record AgregarInsumoRequest(
     string? Codigo,
     string Descripcion,
     string? Cantidad,
     string? Observaciones,
-    string? MipresUrl = null);
+    string? MipresUrl = null,
+    int NumeroOrden = 1);
 
 public sealed record ActualizarInsumoRequest(
     string? Cantidad,
@@ -34,6 +36,9 @@ public interface IInsumoService
         Guid itemId, ActualizarInsumoRequest req, Guid actor, CancellationToken ct = default);
 
     Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Elimina TODA una orden (grupo NumeroOrden) de insumos de la HC con sus items.</summary>
+    Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default);
 
     Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default);
 }

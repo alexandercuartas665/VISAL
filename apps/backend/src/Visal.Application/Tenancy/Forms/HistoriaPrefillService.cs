@@ -41,7 +41,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .OrderBy(m => m.Orden)
             .Select(m => new OrdenMedicamentoItemDto(
                 m.Id, m.HistoriaClinicaId, m.MedicamentoId, m.CodigoMedicamento, m.NombreMedicamento,
-                m.Cantidad, m.Frecuencia, m.Dias, m.Posologia, m.Observacion, m.Orden, m.MipresUrl))
+                m.Cantidad, m.Frecuencia, m.Dias, m.Posologia, m.Observacion, m.Orden, m.MipresUrl, m.NumeroOrden))
             .ToListAsync(ct);
 
         var rem = await db.HistoriaClinicaRemisiones
@@ -80,7 +80,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .OrderBy(o => o.Orden)
             .Select(o => new InsumoItemDto(
                 o.Id, o.HistoriaClinicaId, o.Codigo, o.Descripcion,
-                o.Cantidad, o.Observaciones, o.MipresUrl, o.Orden))
+                o.Cantidad, o.Observaciones, o.MipresUrl, o.Orden, o.NumeroOrden))
             .ToListAsync(ct);
 
         // Registro de medicamentos suministrados (bitacora tipo PP-FO-84 NOTAS

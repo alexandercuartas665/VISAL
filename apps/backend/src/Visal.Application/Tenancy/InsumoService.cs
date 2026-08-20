@@ -15,11 +15,12 @@ public sealed class InsumoService(
     {
         return await db.HistoriaClinicaInsumos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
-            .OrderBy(x => x.Orden)
+            .OrderBy(x => x.NumeroOrden)
+            .ThenBy(x => x.Orden)
             .ThenBy(x => x.CreatedAt)
             .Select(x => new InsumoItemDto(
                 x.Id, x.HistoriaClinicaId, x.Codigo, x.Descripcion,
-                x.Cantidad, x.Observaciones, x.MipresUrl, x.Orden))
+                x.Cantidad, x.Observaciones, x.MipresUrl, x.Orden, x.NumeroOrden))
             .ToListAsync(ct);
     }
 
@@ -32,15 +33,17 @@ public sealed class InsumoService(
             throw new InvalidOperationException("La descripcion del insumo es obligatoria.");
         }
         await db.EnsureAbiertaAsync(historiaId, ct);
+        var numeroOrden = req.NumeroOrden <= 0 ? 1 : req.NumeroOrden;
 
         var siguiente = 1 + await db.HistoriaClinicaInsumos
-            .Where(x => x.HistoriaClinicaId == historiaId)
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
             .Select(x => (int?)x.Orden).MaxAsync(ct) ?? 1;
 
         var entity = new HistoriaClinicaInsumo
         {
             TenantId = tid,
             HistoriaClinicaId = historiaId,
+            NumeroOrden = numeroOrden,
             Codigo = Trim(req.Codigo),
             Descripcion = req.Descripcion.Trim(),
             Cantidad = Trim(req.Cantidad),
@@ -54,7 +57,20 @@ public sealed class InsumoService(
 
         return new InsumoItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.Codigo, entity.Descripcion,
-            entity.Cantidad, entity.Observaciones, entity.MipresUrl, entity.Orden);
+            entity.Cantidad, entity.Observaciones, entity.MipresUrl, entity.Orden, entity.NumeroOrden);
+    }
+
+    public async Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default)
+    {
+        await db.EnsureAbiertaAsync(historiaId, ct);
+        var items = await db.HistoriaClinicaInsumos
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
+            .ToListAsync(ct);
+        if (items.Count == 0) { return false; }
+        db.HistoriaClinicaInsumos.RemoveRange(items);
+        await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
+        return true;
     }
 
     public async Task<bool> ActualizarAsync(

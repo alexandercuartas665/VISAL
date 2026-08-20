@@ -23,7 +23,8 @@ public sealed record OrdenMedicamentoItemDto(
     string? Posologia,
     string? Observacion,
     int Orden,
-    string? MipresUrl);
+    string? MipresUrl,
+    int NumeroOrden = 1);
 
 public sealed record AgregarMedicamentoRequest(
     Guid? MedicamentoId,
@@ -34,7 +35,8 @@ public sealed record AgregarMedicamentoRequest(
     string? Dias,
     string? Posologia,
     string? Observacion,
-    string? MipresUrl = null);
+    string? MipresUrl = null,
+    int NumeroOrden = 1);
 
 public sealed record ActualizarMedicamentoRequest(
     string? Cantidad,
@@ -64,6 +66,9 @@ public interface IOrdenMedicamentoService
         Guid itemId, ActualizarMedicamentoRequest req, Guid actor, CancellationToken ct = default);
 
     Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Elimina TODA una orden (grupo NumeroOrden) de la HC con sus items.</summary>
+    Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default);
 
     /// <summary>Conteo rapido para el badge en la pestana del modulo.</summary>
     Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default);

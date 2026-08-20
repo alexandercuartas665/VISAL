@@ -19,6 +19,16 @@ public class HistoriaClinicaMedicamento : TenantEntity
     public Guid? MedicamentoId { get; set; }
     public Medicamento? Medicamento { get; set; }
 
+    /// <summary>
+    /// Numero de la orden (grupo) dentro de la misma HC. Permite tener 1..N
+    /// "Ordenes de Medicamentos" en una misma historia: todos los items con el
+    /// mismo (HistoriaClinicaId, NumeroOrden) forman una orden imprimible. Los
+    /// items previos a esta columna quedan en la orden 1 (default de la migracion).
+    /// El prefill hacia la HC sigue agregando TODOS los items de la HC sin importar
+    /// la orden — la separacion es solo para captura/impresion/QR.
+    /// </summary>
+    public int NumeroOrden { get; set; } = 1;
+
     /// <summary>Snapshot del nombre del medicamento al momento de agregarlo.
     /// Sobrevive a cambios del catalogo posteriores.</summary>
     public string NombreMedicamento { get; set; } = null!;

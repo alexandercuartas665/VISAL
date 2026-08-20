@@ -25,7 +25,10 @@ public sealed record EmitirOrdenRequest(
     string? ProfesionalRegistro,
     IReadOnlyList<OrdenItemPublicoDto> Items,
     // Tipo de orden emitida ("MED" por defecto para no romper la fórmula médica).
-    string TipoOrden = "MED");
+    string TipoOrden = "MED",
+    // Numero de la orden (grupo) dentro de la HC: cada orden de medicamentos/insumos
+    // emite su propio QR. Default 1 (compatibilidad con la orden unica anterior).
+    int NumeroOrden = 1);
 
 /// <summary>Resultado de emitir: el codigo minteado y el id de la fila.</summary>
 public sealed record EmitirOrdenResultDto(Guid Id, string Codigo, DateTimeOffset EmitidoAt);
@@ -78,6 +81,9 @@ public interface IOrdenMedicamentoPublicaService
 
     /// <summary>Emision vigente mas reciente de la HC PARA UN TIPO de orden (MED/SRV/REM/...), o null.</summary>
     Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default);
+
+    /// <summary>Emision vigente mas reciente de la HC para un tipo Y numero de orden (grupo), o null.</summary>
+    Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(Guid historiaClinicaId, string tipoOrden, int numeroOrden, CancellationToken ct = default);
 
     /// <summary>True si la HC tiene una emision de MEDICAMENTOS vigente (usado para bloquear edicion de items).</summary>
     Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, CancellationToken ct = default);

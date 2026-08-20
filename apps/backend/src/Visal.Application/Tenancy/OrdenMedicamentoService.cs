@@ -48,12 +48,13 @@ public sealed class OrdenMedicamentoService(
     {
         return await db.HistoriaClinicaMedicamentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
-            .OrderBy(x => x.Orden)
+            .OrderBy(x => x.NumeroOrden)
+            .ThenBy(x => x.Orden)
             .ThenBy(x => x.CreatedAt)
             .Select(x => new OrdenMedicamentoItemDto(
                 x.Id, x.HistoriaClinicaId, x.MedicamentoId, x.CodigoMedicamento,
                 x.NombreMedicamento, x.Cantidad, x.Frecuencia, x.Dias,
-                x.Posologia, x.Observacion, x.Orden, x.MipresUrl))
+                x.Posologia, x.Observacion, x.Orden, x.MipresUrl, x.NumeroOrden))
             .ToListAsync(ct);
     }
 
@@ -67,20 +68,22 @@ public sealed class OrdenMedicamentoService(
         }
         // Guard: HC debe estar Abierta. Una HC cerrada es un documento firmado.
         await db.EnsureAbiertaAsync(historiaId, ct);
-        // Si la orden ya fue emitida (QR firmado), editar la anula: revocamos la
+        var numeroOrden = req.NumeroOrden <= 0 ? 1 : req.NumeroOrden;
+        // Si esa orden ya fue emitida (QR firmado), editar la anula: revocamos su
         // emision vigente para que la impresion anterior no quede desalineada. Al
         // reimprimir se re-emite un QR nuevo con los medicamentos actualizados.
-        await RevocarEmisionMedActivaAsync(historiaId, actor, ct);
+        await RevocarEmisionMedActivaAsync(historiaId, numeroOrden, actor, ct);
 
-        // Calcular siguiente orden en la historia.
+        // Calcular siguiente posicion DENTRO de esa orden (grupo).
         var siguiente = 1 + await db.HistoriaClinicaMedicamentos
-            .Where(x => x.HistoriaClinicaId == historiaId)
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
             .Select(x => (int?)x.Orden).MaxAsync(ct) ?? 1;
 
         var entity = new HistoriaClinicaMedicamento
         {
             TenantId = tid,
             HistoriaClinicaId = historiaId,
+            NumeroOrden = numeroOrden,
             MedicamentoId = req.MedicamentoId,
             CodigoMedicamento = Trim(req.CodigoMedicamento),
             NombreMedicamento = req.NombreMedicamento.Trim(),
@@ -103,7 +106,7 @@ public sealed class OrdenMedicamentoService(
         return new OrdenMedicamentoItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.MedicamentoId, entity.CodigoMedicamento,
             entity.NombreMedicamento, entity.Cantidad, entity.Frecuencia, entity.Dias,
-            entity.Posologia, entity.Observacion, entity.Orden, entity.MipresUrl);
+            entity.Posologia, entity.Observacion, entity.Orden, entity.MipresUrl, entity.NumeroOrden);
     }
 
     public async Task<bool> ActualizarAsync(
@@ -112,7 +115,7 @@ public sealed class OrdenMedicamentoService(
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
-        await RevocarEmisionMedActivaAsync(entity.HistoriaClinicaId, actor, ct);
+        await RevocarEmisionMedActivaAsync(entity.HistoriaClinicaId, entity.NumeroOrden, actor, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Frecuencia = Trim(req.Frecuencia);
         entity.Dias = Trim(req.Dias);
@@ -130,10 +133,24 @@ public sealed class OrdenMedicamentoService(
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
         await db.EnsureAbiertaAsync(hcId, ct);
-        await RevocarEmisionMedActivaAsync(hcId, actor, ct);
+        await RevocarEmisionMedActivaAsync(hcId, entity.NumeroOrden, actor, ct);
         db.HistoriaClinicaMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
+        return true;
+    }
+
+    public async Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default)
+    {
+        await db.EnsureAbiertaAsync(historiaId, ct);
+        var items = await db.HistoriaClinicaMedicamentos
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
+            .ToListAsync(ct);
+        if (items.Count == 0) { return false; }
+        await RevocarEmisionMedActivaAsync(historiaId, numeroOrden, actor, ct);
+        db.HistoriaClinicaMedicamentos.RemoveRange(items);
+        await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
         return true;
     }
 
@@ -153,10 +170,11 @@ public sealed class OrdenMedicamentoService(
     /// documento firmado y no se editan sus items). No hace SaveChanges: el metodo
     /// llamador persiste la revocacion junto con la edicion en el mismo scope.
     /// </summary>
-    private async Task RevocarEmisionMedActivaAsync(Guid historiaId, Guid actor, CancellationToken ct)
+    private async Task RevocarEmisionMedActivaAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct)
     {
         var emisiones = await db.OrdenesMedicamentosPublicas
-            .Where(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "MED" && o.RevocadaAt == null)
+            .Where(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "MED"
+                        && o.NumeroOrden == numeroOrden && o.RevocadaAt == null)
             .ToListAsync(ct);
         if (emisiones.Count == 0) { return; }
 

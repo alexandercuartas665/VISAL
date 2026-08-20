@@ -69,6 +69,7 @@ public sealed class OrdenMedicamentoPublicaService(
             TenantId = tid,
             HistoriaClinicaId = hc.Id,
             TipoOrden = tipoOrden,
+            NumeroOrden = req.NumeroOrden <= 0 ? 1 : req.NumeroOrden,
             CodigoVerificacion = codigo,
             EmitidoAt = now,
             EmitidoPor = actorUserId,
@@ -118,6 +119,23 @@ public sealed class OrdenMedicamentoPublicaService(
         var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
         var orden = await db.OrdenesMedicamentosPublicas.AsNoTracking()
             .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.TipoOrden == tipo && o.RevocadaAt == null)
+            .OrderByDescending(o => o.EmitidoAt)
+            .FirstOrDefaultAsync(ct);
+        if (orden is null) { return null; }
+
+        var snap = DeserializarSnapshot(orden.SnapshotJson);
+        var bagJson = JsonSerializer.Serialize(snap.Bag);
+        return new OrdenPublicaResumenDto(orden.Id, orden.CodigoVerificacion, orden.EmitidoAt, false, bagJson);
+    }
+
+    public async Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(
+        Guid historiaClinicaId, string tipoOrden, int numeroOrden, CancellationToken ct = default)
+    {
+        var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
+        var num = numeroOrden <= 0 ? 1 : numeroOrden;
+        var orden = await db.OrdenesMedicamentosPublicas.AsNoTracking()
+            .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.TipoOrden == tipo
+                        && o.NumeroOrden == num && o.RevocadaAt == null)
             .OrderByDescending(o => o.EmitidoAt)
             .FirstOrDefaultAsync(ct);
         if (orden is null) { return null; }

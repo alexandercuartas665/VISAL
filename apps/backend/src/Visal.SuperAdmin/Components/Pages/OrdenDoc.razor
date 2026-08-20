@@ -1,4 +1,5 @@
 @page "/orden-doc/{HcId:guid}/{Tipo}"
+@page "/orden-doc/{HcId:guid}/{Tipo}/{NumeroOrden:int}"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
@@ -10,6 +11,7 @@
 @inject IAsignacionService AsigSvc
 @inject IFormDefinitionService FormsSvc
 @inject IOrdenMedicamentoService MedSvc
+@inject IInsumoService InsumoSvc
 @inject IOrdenServicioService SrvSvc
 @inject IIncapacidadService IncSvc
 @inject ICertificacionService CertSvc
@@ -223,6 +225,39 @@ else
                 </table>
                 break;
 
+            case "INSUMOS":
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th style="width:120px">Codigo</th>
+                            <th>Descripcion</th>
+                            <th style="width:90px">Cantidad</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_insumos.Count == 0)
+                        {
+                            <tr><td colspan="5" class="doc-empty-row">No hay insumos en esta orden.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var it in _insumos)
+                            {
+                                <tr>
+                                    <td class="num">@it.Orden</td>
+                                    <td class="mono">@(string.IsNullOrWhiteSpace(it.Codigo) ? "-" : it.Codigo)</td>
+                                    <td><b>@it.Descripcion</b></td>
+                                    <td class="num">@(string.IsNullOrWhiteSpace(it.Cantidad) ? "-" : it.Cantidad)</td>
+                                    <td>@(it.Observaciones ?? "")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                break;
+
             case "ORDEN_SERVICIOS":
                 <table class="doc-table">
                     <thead>
@@ -375,6 +410,9 @@ else
 @code {
     [Parameter] public Guid HcId { get; set; }
     [Parameter] public string Tipo { get; set; } = "";
+    /// <summary>Numero de orden (grupo) cuando la HC tiene 1..N ordenes del mismo tipo.
+    /// Null = imprimir todos los items del tipo (compatibilidad con la orden unica).</summary>
+    [Parameter] public int? NumeroOrden { get; set; }
 
     private HistoriaClinicaDetailDto? _hc;
     private PacienteAsignacionDto? _paciente;
@@ -387,6 +425,7 @@ else
 
     // Listas por tipo (solo se llena la que aplica).
     private List<OrdenMedicamentoItemDto> _meds = new();
+    private List<InsumoItemDto> _insumos = new();
     private List<OrdenServicioItemDto> _srv = new();
     private List<IncapacidadItemDto> _inc = new();
     private List<CertificacionItemDto> _cert = new();
@@ -404,7 +443,7 @@ else
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
-        _meds = new(); _srv = new(); _inc = new(); _cert = new(); _sumMed = new();
+        _meds = new(); _insumos = new(); _srv = new(); _inc = new(); _cert = new(); _sumMed = new();
         _emision = null; _emisionBag = new(); _emitError = null;
 
         _tipoLabel = TipoLabel(Tipo);
@@ -424,15 +463,22 @@ else
             catch { _schema = new(); }
         }
 
-        // Numero corto de orden basado en HC + tipo (visible en el encabezado).
-        _ordenNumero = $"{_hc.Id.ToString().Substring(0,8).ToUpperInvariant()}-{Tipo.Substring(0, Math.Min(4, Tipo.Length))}";
+        // Numero corto de orden basado en HC + tipo (+ numero de orden si aplica).
+        var sufOrden = NumeroOrden is int nOrd ? $"-{nOrd}" : "";
+        _ordenNumero = $"{_hc.Id.ToString().Substring(0,8).ToUpperInvariant()}-{Tipo.Substring(0, Math.Min(4, Tipo.Length))}{sufOrden}";
 
         switch (Tipo.ToUpperInvariant())
         {
             case "ORDEN_MEDICAMENTOS":
-                _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
-                _emision = await PubSvc.ObtenerEmisionActivaAsync(HcId);
+                _meds = (await MedSvc.ListarPorHistoriaAsync(HcId))
+                    .Where(m => NumeroOrden is null || m.NumeroOrden == NumeroOrden).ToList();
+                // QR por orden: la emision activa se busca para (HC, MED, numero de orden).
+                _emision = await PubSvc.ObtenerEmisionActivaAsync(HcId, "MED", NumeroOrden ?? 1);
                 _emisionBag = _emision is null ? new() : DeserializarBag(_emision.BagJson);
+                break;
+            case "INSUMOS":
+                _insumos = (await InsumoSvc.ListarPorHistoriaAsync(HcId))
+                    .Where(i => NumeroOrden is null || i.NumeroOrden == NumeroOrden).ToList();
                 break;
             case "ORDEN_SERVICIOS":
                 _srv = (await SrvSvc.ListarPorHistoriaAsync(HcId)).ToList();
@@ -502,7 +548,8 @@ else
             var actor = await ActorIdAsync();
             var req = new EmitirOrdenRequest(
                 _hc.Id, JsonSerializer.Serialize(bag), fecha,
-                Iniciales(_paciente.NombreCompleto), profNombre, profRegistro, items);
+                Iniciales(_paciente.NombreCompleto), profNombre, profRegistro, items,
+                "MED", NumeroOrden ?? 1);
             await PubSvc.EmitirAsync(req, actor);
             await OnParametersSetAsync();
         }
@@ -653,6 +700,7 @@ else
     private static string TipoLabel(string tipo) => tipo.ToUpperInvariant() switch
     {
         "ORDEN_MEDICAMENTOS" => "Orden de Medicamentos",
+        "INSUMOS"            => "Orden de Insumos",
         "ORDEN_SERVICIOS"    => "Orden a Servicios",
         "REMISIONES"         => "Orden de Remision",
         "INCAPACIDADES"      => "Orden de Incapacidad",

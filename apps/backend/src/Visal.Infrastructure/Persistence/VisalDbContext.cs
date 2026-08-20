@@ -762,7 +762,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.Medicamento).WithMany().HasForeignKey(x => x.MedicamentoId)
                 .OnDelete(DeleteBehavior.SetNull);
-            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+            b.Property(x => x.NumeroOrden).HasDefaultValue(1);
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.NumeroOrden, x.Orden });
         });
 
         modelBuilder.Entity<HistoriaClinicaOrdenServicio>(b =>
@@ -795,7 +796,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Observaciones).HasColumnType("text");
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
-            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+            b.Property(x => x.NumeroOrden).HasDefaultValue(1);
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.NumeroOrden, x.Orden });
         });
 
         modelBuilder.Entity<HistoriaClinicaSuministroMedicamento>(b =>
@@ -1624,6 +1626,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.RevocacionMotivo).HasMaxLength(1000);
             // Tipo de orden emitida (MED/SRV/REM/...). Default "MED" para las filas previas.
             b.Property(x => x.TipoOrden).HasMaxLength(16).IsRequired().HasDefaultValue("MED");
+            // Numero de la orden (grupo) dentro de la HC. Default 1 para filas previas.
+            b.Property(x => x.NumeroOrden).HasDefaultValue(1);
             // Snapshot inmutable de la orden emitida (bag del formulario ORD-MEDI).
             b.Property(x => x.SnapshotJson).HasColumnType("jsonb");
 
@@ -1634,8 +1638,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // El codigo es globalmente unico: la verificacion publica lo busca sin
             // tenant scope (IgnoreQueryFilters) y resuelve el tenant desde la fila.
             b.HasIndex(x => x.CodigoVerificacion).IsUnique();
-            // Deteccion de emision activa por HC + tipo (una emision vigente por tipo).
-            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.TipoOrden });
+            // Deteccion de emision activa por HC + tipo + numero de orden (una emision
+            // vigente por cada orden imprimible: N ordenes de medicamentos/insumos por HC).
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.TipoOrden, x.NumeroOrden });
         });
 
         modelBuilder.Entity<VerificacionOrdenLog>(b =>

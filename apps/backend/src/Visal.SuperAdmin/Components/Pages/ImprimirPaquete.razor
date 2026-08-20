@@ -272,12 +272,12 @@ else
         {
             @foreach (var oi in _ordenesIns)
             {
-                var _sufIns = OrdSufijo(oi.NumeroOrden, _ordenesIns.Count);
+                var _subIns = _ordenesIns.Count > 1 ? $"Orden {oi.NumeroOrden} de {_ordenesIns.Count}" : null;
                 var _tipoIns = _ordenesIns.Count > 1 ? $"INS#{oi.NumeroOrden}" : "INS";
                 <div class="pack-doc">
-                    @RenderHeader(HdrTenant("Orden de Insumos" + _sufIns), "Orden de Insumos" + _sufIns, "INS",
+                    @RenderHeader(HdrTenant("Orden de Insumos"), "Orden de Insumos", "INS",
                         ConsecutivoHc() + "-INS" + (_ordenesIns.Count > 1 ? "-" + oi.NumeroOrden : ""),
-                        FechaLineaHc())
+                        FechaLineaHc(), _subIns)
                     <div class="pack-band">Detalle de la orden</div>
                     <table class="pack-table">
                         <thead>
@@ -1190,7 +1190,7 @@ else
 
     private string FechaLineaHc() => "Fecha: " + FechaCanonicaHc();
 
-    private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea) => __builder =>
+    private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea, string? subtitulo = null) => __builder =>
     {
         // El titulo del documento es el del HEADER del schema (lo que el
         // disenador escribio en "Titulo" del editor de formularios, ej.
@@ -1228,6 +1228,10 @@ else
                 }
             </div>
             <div class="pack-hdr-title">@tituloFinal</div>
+            @if (!string.IsNullOrWhiteSpace(subtitulo))
+            {
+                <div style="text-align:center;font-weight:700;font-size:12px;letter-spacing:.5px;margin-top:1px;">@subtitulo</div>
+            }
             <div class="pack-hdr-meta">
                 <span><b>Paciente:</b> @(_paciente?.NombreCompleto ?? "-")</span>
                 <span><b>Doc:</b> @(_paciente?.TipoDocumento) @(_paciente?.NumeroDocumento)</span>

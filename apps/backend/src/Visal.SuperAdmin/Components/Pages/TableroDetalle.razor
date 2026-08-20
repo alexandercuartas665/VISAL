@@ -70,6 +70,28 @@ else
             <p class="td-desc">@_board.Description</p>
         }
 
+        @if (_boardTags.Count > 0)
+        {
+            <div class="td-tagfilter">
+                <span class="td-tagfilter-label">🏷 Etiquetas:</span>
+                @foreach (var t in _boardTags)
+                {
+                    var active = _tagFilter.Contains(t.Id);
+                    var col = string.IsNullOrWhiteSpace(t.Color) ? "#94a3b8" : t.Color;
+                    <button type="button"
+                            class="td-tagfilter-chip @(active ? "active" : "")"
+                            style="@(active ? $"background:{col};border-color:{col};color:#fff;" : $"border-color:{col};color:#475569;")"
+                            @onclick="@(() => ToggleTagFilter(t.Id))">
+                        @t.Name
+                    </button>
+                }
+                @if (_tagFilter.Count > 0)
+                {
+                    <button type="button" class="td-tagfilter-clear" @onclick="@(() => _tagFilter.Clear())" title="Quitar filtro de etiquetas">Limpiar</button>
+                }
+            </div>
+        }
+
         @* ===== Kanban ===== *@
         @if (_vista == Vista.Kanban)
         {
@@ -82,7 +104,7 @@ else
                         <div class="td-col-count">@col.CardCount</div>
                     </div>
                     <div class="td-col-body">
-                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).Where(CardMatchesSearch).OrderBy(c => c.SortOrder))
+                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).Where(CardVisible).OrderBy(c => c.SortOrder))
                         {
                             <div class="td-card @(card.Color is null ? "" : "td-card-colored")"
                                  style="@(card.Color is null ? "" : $"border-left:3px solid {card.Color};")"
@@ -1137,6 +1159,13 @@ else
     .td-search-input { flex:1; min-width:0; border:0; outline:none; font-size:13px; color:#0f172a; background:transparent; }
     .td-search-x { border:0; background:transparent; color:#94a3b8; font-size:17px; line-height:1; cursor:pointer; padding:0 2px; }
     .td-search-x:hover { color:#0f172a; }
+    .td-tagfilter { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:8px 0 2px; }
+    .td-tagfilter-label { font-size:12px; color:#64748b; font-weight:600; margin-right:2px; }
+    .td-tagfilter-chip { font-size:12px; font-weight:600; padding:3px 10px; border-radius:12px; background:#fff; border:1.5px solid #cbd5e1; cursor:pointer; line-height:1.4; }
+    .td-tagfilter-chip:hover { filter:brightness(0.97); }
+    .td-tagfilter-chip.active { box-shadow:0 0 0 2px rgba(59,130,246,0.25); }
+    .td-tagfilter-clear { font-size:12px; color:#64748b; background:transparent; border:0; cursor:pointer; text-decoration:underline; padding:2px 4px; }
+    .td-tagfilter-clear:hover { color:#0f172a; }
     .td-back { text-decoration:none; color:#64748b; font-size:20px; padding:4px 8px; }
     .td-back:hover { color:#0f172a; }
     .td-color-dot { width:14px; height:14px; border-radius:50%; flex:none; }
@@ -1499,6 +1528,13 @@ else
     // Buscador del tablero (filtra tarjetas en Kanban y Tabla).
     private string _search = "";
 
+    // Filtro por etiquetas del tablero (chips en el header). Vacio = todas.
+    private HashSet<Guid> _tagFilter = new();
+    private void ToggleTagFilter(Guid id)
+    {
+        if (!_tagFilter.Add(id)) { _tagFilter.Remove(id); }
+    }
+
     /// <summary>Una columna de la vista tabla (fija o campo dinamico) con la preferencia del usuario aplicada.</summary>
     private sealed class TableCol
     {
@@ -1694,9 +1730,20 @@ else
     {
         var colOrder = _columns.Select((c, i) => (c.Id, i)).ToDictionary(x => x.Id, x => x.i);
         return _cards
-            .Where(CardMatchesSearch)
+            .Where(CardVisible)
             .OrderBy(c => colOrder.TryGetValue(c.ColumnId, out var i) ? i : int.MaxValue)
             .ThenBy(c => c.SortOrder);
+    }
+
+    /// <summary>Tarjeta visible = pasa el buscador de texto Y el filtro de etiquetas (ambos combinables).</summary>
+    private bool CardVisible(TaskCardSummaryDto c) => CardMatchesSearch(c) && CardMatchesTags(c);
+
+    /// <summary>Filtro por etiqueta: vacio = todas; si hay etiquetas activas, la tarjeta debe tener
+    /// al menos una de ellas (OR entre etiquetas seleccionadas).</summary>
+    private bool CardMatchesTags(TaskCardSummaryDto c)
+    {
+        if (_tagFilter.Count == 0) { return true; }
+        return c.Tags is not null && c.Tags.Any(t => _tagFilter.Contains(t.Id));
     }
 
     /// <summary>Filtro del buscador del tablero: por titulo + cualquier valor de campo dinamico

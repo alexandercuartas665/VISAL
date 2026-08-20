@@ -24,9 +24,11 @@
         <span class="oi-bar-count">@OrdenesPresentes().Count orden(es) &middot; @_items.Count item(s)</span>
     </div>
     <div class="oi-bar-right">
-        <button class="btn btn-outline-primary btn-sm" title="Imprimir la orden actual de insumos"
-                disabled="@(HistoriaClinicaId is null || !_items.Any(x => x.NumeroOrden == _ordenActual))"
-                @onclick="ImprimirAsync">&#128424; Imprimir orden @_ordenActual</button>
+        @* La impresion se hace SIEMPRE desde el boton "Imprimir" general de la historia
+           (arriba): cada orden de insumos sale como su propio documento. *@
+        <span style="font-size:12px;color:var(--muted-foreground);">
+            Para imprimir usa el bot&oacute;n <b>&#128424; Imprimir</b> de la historia (arriba). Cada orden sale por separado.
+        </span>
     </div>
 </div>
 

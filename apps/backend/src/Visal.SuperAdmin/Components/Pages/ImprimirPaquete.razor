@@ -131,59 +131,65 @@ else
             </div>
         }
 
-        @* ============ ORDEN DE MEDICAMENTOS ============ *@
-        @if (_incluirMed && _meds.Count > 0)
+        @* ============ ORDENES DE MEDICAMENTOS ============ *@
+        @* Cada orden (grupo NumeroOrden) se imprime como un DOCUMENTO SEPARADO con su
+           propia firma/QR. No se agregan varias ordenes en un solo formulario. *@
+        @if (_incluirMed && _ordenesMed.Count > 0)
         {
-            @if (_schMed is not null)
+            @foreach (var om in _ordenesMed)
             {
-                @* Formato ORD-MEDI schema-driven, con su propio encabezado y el pie
-                   de formula medica (firma + QR/codigo + recibido + barra). Emitida:
-                   snapshot congelado; borrador: prellenado. DocumentoImprimible ya
-                   aporta su .pack-doc, por eso no lo envolvemos aparte. *@
-                <DocumentoImprimible Schema="_schMed" Values="_bagMed"
-                                     PacienteNombre="@(_paciente?.NombreCompleto)"
-                                     PacienteTipoDoc="@(_paciente?.TipoDocumento)"
-                                     PacienteDoc="@(_paciente?.NumeroDocumento)"
-                                     EspecialistaNombre="@_hc.EspecialistaNombre"
-                                     MostrarPieFormula="true"
-                                     FechaLinea="@FechaLineaHc()"
-                                     HcConsecutivo="@ConsecutivoHc()"
-                                     OrdenNum="@(ConsecutivoHc() + "-MED")"
-                                     TipoCortoHeader="ORD"
-                                     TituloFallback="Orden de Medicamentos" />
-            }
-            else
-            {
-                @* Fallback: sin formato ORD-MEDI configurado, tabla simple. *@
-                <div class="pack-doc">
-                    @RenderHeader(BestHdr(HdrMed, "Orden de Medicamentos"), "Orden de Medicamentos", "MED",
-                        ConsecutivoHc() + "-MED",
-                        FechaLineaHc())
-                    <div class="pack-band">Detalle de la orden</div>
-                    <table class="pack-table">
-                        <thead>
-                            <tr>
-                                <th style="width:40px">#</th>
-                                <th>Medicamento</th>
-                                <th style="width:140px">Posologia</th>
-                                <th style="width:80px">Cantidad</th>
-                                <th>Observacion</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var m in _meds)
-                            {
+                var _suf = OrdSufijo(om.NumeroOrden, _ordenesMed.Count);
+                @if (_schMed is not null)
+                {
+                    @* Formato ORD-MEDI schema-driven, con su propio encabezado y el pie
+                       de formula medica (firma + QR/codigo + recibido + barra). Emitida:
+                       snapshot congelado; borrador: prellenado. DocumentoImprimible ya
+                       aporta su .pack-doc, por eso no lo envolvemos aparte. *@
+                    <DocumentoImprimible Schema="_schMed" Values="om.Bag"
+                                         PacienteNombre="@(_paciente?.NombreCompleto)"
+                                         PacienteTipoDoc="@(_paciente?.TipoDocumento)"
+                                         PacienteDoc="@(_paciente?.NumeroDocumento)"
+                                         EspecialistaNombre="@_hc.EspecialistaNombre"
+                                         MostrarPieFormula="true"
+                                         FechaLinea="@FechaLineaHc()"
+                                         HcConsecutivo="@ConsecutivoHc()"
+                                         OrdenNum="@($"{ConsecutivoHc()}-MED{(_ordenesMed.Count > 1 ? "-" + om.NumeroOrden : "")}")"
+                                         TipoCortoHeader="ORD"
+                                         TituloFallback="@($"Orden de Medicamentos{_suf}")" />
+                }
+                else
+                {
+                    @* Fallback: sin formato ORD-MEDI configurado, tabla simple. *@
+                    <div class="pack-doc">
+                        @RenderHeader(BestHdr(HdrMed, "Orden de Medicamentos" + _suf), "Orden de Medicamentos" + _suf, "MED",
+                            ConsecutivoHc() + "-MED" + (_ordenesMed.Count > 1 ? "-" + om.NumeroOrden : ""),
+                            FechaLineaHc())
+                        <div class="pack-band">Detalle de la orden</div>
+                        <table class="pack-table">
+                            <thead>
                                 <tr>
-                                    <td class="num">@m.Orden</td>
-                                    <td><b>@m.NombreMedicamento</b></td>
-                                    <td>@(string.IsNullOrWhiteSpace(m.Posologia) ? "-" : m.Posologia)</td>
-                                    <td class="num">@(string.IsNullOrWhiteSpace(m.Cantidad) ? "-" : m.Cantidad)</td>
-                                    <td>@(m.Observacion ?? "")</td>
+                                    <th style="width:40px">#</th>
+                                    <th>Medicamento</th>
+                                    <th style="width:140px">Posologia</th>
+                                    <th style="width:80px">Cantidad</th>
+                                    <th>Observacion</th>
                                 </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody>
+                                @foreach (var m in om.Meds)
+                                {
+                                    <tr>
+                                        <td class="num">@m.Orden</td>
+                                        <td><b>@m.NombreMedicamento</b></td>
+                                        <td>@(string.IsNullOrWhiteSpace(m.Posologia) ? "-" : m.Posologia)</td>
+                                        <td class="num">@(string.IsNullOrWhiteSpace(m.Cantidad) ? "-" : m.Cantidad)</td>
+                                        <td>@(m.Observacion ?? "")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
             }
         }
 
@@ -259,40 +265,45 @@ else
             </div>
         }
 
-        @* ============ INSUMOS (internos, texto libre) ============ *@
-        @if (_incluirIns && _insumos.Count > 0)
+        @* ============ ORDENES DE INSUMOS (internos, texto libre) ============ *@
+        @* Cada orden (grupo NumeroOrden) es un documento separado con su propio QR. *@
+        @if (_incluirIns && _ordenesIns.Count > 0)
         {
-            <div class="pack-doc">
-                @RenderHeader(HdrTenant("Orden de Insumos"), "Orden de Insumos", "INS",
-                    ConsecutivoHc() + "-INS",
-                    FechaLineaHc())
-                @{ _pieTipo = "INS"; }
-                <div class="pack-band">Detalle de la orden</div>
-                <table class="pack-table">
-                    <thead>
-                        <tr>
-                            <th style="width:40px">#</th>
-                            <th style="width:120px">Codigo</th>
-                            <th>Descripcion</th>
-                            <th style="width:80px">Cantidad</th>
-                            <th>Observaciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var i in _insumos)
-                        {
+            @foreach (var oi in _ordenesIns)
+            {
+                var _sufIns = OrdSufijo(oi.NumeroOrden, _ordenesIns.Count);
+                var _tipoIns = _ordenesIns.Count > 1 ? $"INS#{oi.NumeroOrden}" : "INS";
+                <div class="pack-doc">
+                    @RenderHeader(HdrTenant("Orden de Insumos" + _sufIns), "Orden de Insumos" + _sufIns, "INS",
+                        ConsecutivoHc() + "-INS" + (_ordenesIns.Count > 1 ? "-" + oi.NumeroOrden : ""),
+                        FechaLineaHc())
+                    <div class="pack-band">Detalle de la orden</div>
+                    <table class="pack-table">
+                        <thead>
                             <tr>
-                                <td class="num">@i.Orden</td>
-                                <td class="mono">@(i.Codigo ?? "-")</td>
-                                <td><b>@i.Descripcion</b></td>
-                                <td class="num">@(string.IsNullOrWhiteSpace(i.Cantidad) ? "-" : i.Cantidad)</td>
-                                <td>@(i.Observaciones ?? "")</td>
+                                <th style="width:40px">#</th>
+                                <th style="width:120px">Codigo</th>
+                                <th>Descripcion</th>
+                                <th style="width:80px">Cantidad</th>
+                                <th>Observaciones</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
-            </div>
+                        </thead>
+                        <tbody>
+                            @foreach (var i in oi.Items)
+                            {
+                                <tr>
+                                    <td class="num">@i.Orden</td>
+                                    <td class="mono">@(i.Codigo ?? "-")</td>
+                                    <td><b>@i.Descripcion</b></td>
+                                    <td class="num">@(string.IsNullOrWhiteSpace(i.Cantidad) ? "-" : i.Cantidad)</td>
+                                    <td>@(i.Observaciones ?? "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_tipoIns)" Codigo="@PieCod(_tipoIns)" />
+                </div>
+            }
         }
 
         @* ============ REGISTRO DE MEDICAMENTOS SUMINISTRADOS ============ *@
@@ -644,8 +655,25 @@ else
 
     // Items
     private List<OrdenMedicamentoItemDto> _meds = new();
-    private OrdenPublicaResumenDto? _emisionMed;   // emision publica activa (QR) de la orden de medicamentos
-    private Dictionary<string, string?> _bagMed = new();  // bag para renderizar ORD-MEDI schema-driven (con pie de formula)
+    private OrdenPublicaResumenDto? _emisionMed;   // emision publica activa (QR) de la primera orden (compat FechaFormulaMed)
+    private Dictionary<string, string?> _bagMed = new();  // bag de la primera orden (compat)
+
+    // Una entrada por cada orden (grupo) de medicamentos de la HC. Cada orden se
+    // imprime como un DOCUMENTO SEPARADO con su propio bag y su propia emision/QR:
+    // NO se suman los items de varias ordenes en un solo formulario.
+    private sealed class OrdenMedRender
+    {
+        public int NumeroOrden { get; set; } = 1;
+        public List<OrdenMedicamentoItemDto> Meds { get; set; } = new();
+        public OrdenPublicaResumenDto? Emision { get; set; }
+        public Dictionary<string, string?> Bag { get; set; } = new();
+    }
+    private List<OrdenMedRender> _ordenesMed = new();
+    // Una entrada por cada orden (grupo) de insumos, para imprimirlas por separado.
+    private List<(int NumeroOrden, List<InsumoItemDto> Items)> _ordenesIns = new();
+    // Sufijo " — Orden N" solo cuando hay mas de una orden del tipo (evita ruido cuando hay una sola).
+    private static string OrdSufijo(int numeroOrden, int totalOrdenes)
+        => totalOrdenes > 1 ? $" - Orden {numeroOrden}" : "";
 
     // Datos del pie clinico que comparten las ordenes impresas (servicios, remisiones,
     // insumos, incapacidades, certificaciones y externas): diagnostico(s) + firma del
@@ -738,26 +766,35 @@ else
             _fdMed = await FormsSvc.GetActivoByCodigoSecundarioAsync("ORDEN_MEDICAMENTOS");
             if (_fdMed is not null) { try { _schMed = JsonSerializer.Deserialize<FormSchema>(_fdMed.SchemaJson) ?? new(); } catch { } }
             _meds = (await MedSvc.ListarPorHistoriaAsync(HcId)).ToList();
-            // Si la orden de medicamentos ya fue emitida, traemos su codigo para
-            // estampar el QR de verificacion en el paquete impreso.
-            try { _emisionMed = await PubSvc.ObtenerEmisionActivaAsync(HcId); } catch { _emisionMed = null; }
-            // Auto-emision: si la impresion viene del boton general de la HC
-            // (emitir=1) y la orden aun no esta emitida, se emite ahora (firma +
-            // QR + snapshot inmutable) para que salga con su codigo. Idempotente.
-            if (_autoEmitir && _emisionMed is null && _meds.Count > 0
-                && _fdMed is not null && _paciente is not null && _hc is not null)
+            // Una entrada por CADA orden (grupo NumeroOrden): cada una emite/lee su
+            // propio QR y arma su propio bag, para imprimirse como documento aparte.
+            _ordenesMed = new();
+            foreach (var grp in _meds.GroupBy(m => m.NumeroOrden).OrderBy(g => g.Key))
             {
-                try
+                var om = new OrdenMedRender { NumeroOrden = grp.Key, Meds = grp.OrderBy(m => m.Orden).ToList() };
+                // Emision activa (QR) de ESTA orden en concreto.
+                try { om.Emision = await PubSvc.ObtenerEmisionActivaAsync(HcId, "MED", grp.Key); } catch { om.Emision = null; }
+                // Auto-emision por orden: si viene del boton general (emitir=1) y esta
+                // orden aun no esta emitida, se emite ahora (firma + QR + snapshot
+                // inmutable de SUS medicamentos). Idempotente por (HC, MED, orden).
+                if (_autoEmitir && om.Emision is null && om.Meds.Count > 0
+                    && _fdMed is not null && _paciente is not null && _hc is not null)
                 {
-                    await AutoEmitirMedAsync();
-                    _emisionMed = await PubSvc.ObtenerEmisionActivaAsync(HcId);
+                    try
+                    {
+                        await AutoEmitirMedAsync(grp.Key, om.Meds);
+                        om.Emision = await PubSvc.ObtenerEmisionActivaAsync(HcId, "MED", grp.Key);
+                    }
+                    catch { /* si la emision falla, esa orden sigue como borrador (sin QR) */ }
                 }
-                catch { /* si la emision falla, el paquete sigue como borrador (sin QR) */ }
+                // Bag para renderizar el formato ORD-MEDI: emitida -> snapshot congelado
+                // (con su codigo/QR ya inyectado); borrador -> prellenado con SUS meds.
+                om.Bag = ConstruirBagMed(om.Meds, om.Emision);
+                _ordenesMed.Add(om);
             }
-            // Bag para renderizar el formato ORD-MEDI con su pie: si esta emitida
-            // usamos el snapshot congelado (paciente + meds + firma + QR + prof);
-            // si no, un borrador prellenado con paciente + tabla de medicamentos.
-            _bagMed = ConstruirBagMed();
+            // Compat: FechaFormulaMed/_bagMed apuntan a la primera orden.
+            _emisionMed = _ordenesMed.FirstOrDefault()?.Emision;
+            _bagMed = _ordenesMed.FirstOrDefault()?.Bag ?? new();
         }
         if (_incluirSrv)
         {
@@ -786,6 +823,12 @@ else
         if (_incluirIns)
         {
             _insumos = (await InsumoSvc.ListarPorHistoriaAsync(HcId)).ToList();
+            // Una entrada por CADA orden (grupo NumeroOrden) de insumos.
+            _ordenesIns = _insumos
+                .GroupBy(i => i.NumeroOrden)
+                .OrderBy(g => g.Key)
+                .Select(g => (g.Key, g.OrderBy(i => i.Orden).ToList()))
+                .ToList();
         }
         if (_incluirRegMed)
         {
@@ -986,11 +1029,7 @@ else
             tipos.Add(("REM", _rem.Select(r => new OrdenItemPublicoDto(
                 r.EspecialidadNombre ?? "", r.EspecialidadCodigo, r.Cantidad, null, null, r.Motivo)).ToList()));
         }
-        if (_incluirIns && _insumos.Count > 0)
-        {
-            tipos.Add(("INS", _insumos.Select(i => new OrdenItemPublicoDto(
-                i.Descripcion ?? "", i.Codigo, i.Cantidad, null, null, i.Observaciones)).ToList()));
-        }
+        // INS se maneja aparte (abajo) porque cada orden emite/lee su propio QR.
         if (_incluirRxExt && _rxExt.Count > 0)
         {
             tipos.Add(("RXEXT", _rxExt.Select(r => new OrdenItemPublicoDto(
@@ -1040,17 +1079,46 @@ else
             }
             catch { /* si un tipo falla, el resto del paquete se imprime igual (sin su QR) */ }
         }
+
+        // Insumos: una emision/QR por CADA orden (grupo NumeroOrden). La clave del
+        // diccionario coincide con la que usa el render: "INS" si hay una sola orden,
+        // "INS#{n}" si hay varias.
+        if (_incluirIns)
+        {
+            foreach (var (numeroOrden, insItems) in _ordenesIns)
+            {
+                if (insItems.Count == 0) { continue; }
+                var key = _ordenesIns.Count > 1 ? $"INS#{numeroOrden}" : "INS";
+                var items = insItems.Select(i => new OrdenItemPublicoDto(
+                    i.Descripcion ?? "", i.Codigo, i.Cantidad, null, null, i.Observaciones)).ToList();
+                try
+                {
+                    var em = await PubSvc.ObtenerEmisionActivaAsync(HcId, "INS", numeroOrden);
+                    if (em is null && _autoEmitir && items.Count > 0)
+                    {
+                        await EmitirOrdenTipoAsync("INS", items, numeroOrden);
+                        em = await PubSvc.ObtenerEmisionActivaAsync(HcId, "INS", numeroOrden);
+                    }
+                    if (em is not null)
+                    {
+                        var qurl = $"{QrBaseUrl()}/verificar-orden/{Uri.EscapeDataString(em.Codigo)}";
+                        _emisionesOrden[key] = (em.Codigo, Qr.GenerarPngDataUri(qurl, 150));
+                    }
+                }
+                catch { /* si una orden de insumos falla, las demas se imprimen igual */ }
+            }
+        }
     }
 
     // Emite una orden publica de un tipo dado (SRV/REM/INS/...): congela iniciales del
     // paciente + profesional tratante + items y mintea el codigo del QR. El BagJson va
     // vacio porque estas ordenes no se renderizan schema-driven (usan tabla + pie).
-    private async Task EmitirOrdenTipoAsync(string tipo, List<OrdenItemPublicoDto> items)
+    private async Task EmitirOrdenTipoAsync(string tipo, List<OrdenItemPublicoDto> items, int numeroOrden = 1)
     {
         if (_hc is null || _paciente is null || items.Count == 0) { return; }
         var req = new EmitirOrdenRequest(
             _hc.Id, "{}", DateTimeOffset.Now,
-            Iniciales(_paciente.NombreCompleto), _pieProfNombre, _pieProfRegistro, items, tipo);
+            Iniciales(_paciente.NombreCompleto), _pieProfNombre, _pieProfRegistro, items, tipo, numeroOrden);
         await PubSvc.EmitirAsync(req, await ActorIdAsync());
     }
 
@@ -1375,9 +1443,9 @@ else
     /// sistema (usuario/registro/firma) + firmas + tabla de medicamentos +
     /// diagnosticos. El firmante es el usuario logueado que imprime. El caller ya
     /// verifico que no hay emision activa.</summary>
-    private async Task AutoEmitirMedAsync()
+    private async Task AutoEmitirMedAsync(int numeroOrden, List<OrdenMedicamentoItemDto> meds)
     {
-        if (_hc is null || _paciente is null || _fdMed is null || _meds.Count == 0) { return; }
+        if (_hc is null || _paciente is null || _fdMed is null || meds.Count == 0) { return; }
 
         var valores = new Dictionary<string, string?>();
         var rutas = PrefillRouteSet.FromJson(_fdMed.PrefillRoutesJson);
@@ -1439,7 +1507,7 @@ else
         catch { }
 
         var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(
-            _meds,
+            meds,
             new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
             new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
             new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
@@ -1450,11 +1518,11 @@ else
         valores["profesional_nombre"] = profNombre;
         valores["profesional_registro"] = profRegistro;
 
-        var items = _meds.Select(m => new OrdenItemPublicoDto(
+        var items = meds.Select(m => new OrdenItemPublicoDto(
             m.NombreMedicamento, m.CodigoMedicamento, m.Cantidad, m.Frecuencia, m.Dias, m.Posologia)).ToList();
         var req = new EmitirOrdenRequest(
             _hc.Id, JsonSerializer.Serialize(valores), DateTimeOffset.Now,
-            Iniciales(_paciente.NombreCompleto), profNombre, profRegistro, items);
+            Iniciales(_paciente.NombreCompleto), profNombre, profRegistro, items, "MED", numeroOrden);
         await PubSvc.EmitirAsync(req, await ActorIdAsync());
     }
 
@@ -1493,14 +1561,14 @@ else
         return "Fecha: " + f.ToLocalTime().ToString("dd/MM/yyyy");
     }
 
-    private Dictionary<string, string?> ConstruirBagMed()
+    private Dictionary<string, string?> ConstruirBagMed(List<OrdenMedicamentoItemDto> meds, OrdenPublicaResumenDto? emision)
     {
         // Orden emitida: snapshot inmutable (paciente + meds + firma + prof + codigo).
-        if (_emisionMed is not null && !string.IsNullOrWhiteSpace(_emisionMed.BagJson))
+        if (emision is not null && !string.IsNullOrWhiteSpace(emision.BagJson))
         {
             try
             {
-                var frozen = JsonSerializer.Deserialize<Dictionary<string, string?>>(_emisionMed.BagJson);
+                var frozen = JsonSerializer.Deserialize<Dictionary<string, string?>>(emision.BagJson);
                 if (frozen is not null) { return frozen; }
             }
             catch { }
@@ -1512,7 +1580,7 @@ else
         var rutas = PrefillRouteSet.FromJson(_fdMed.PrefillRoutesJson);
         if (_paciente is not null) { PacientePrefillHelper.Aplicar(valores, _paciente, _schMed, rutas); }
         var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(
-            _meds,
+            meds,
             new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
             new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
             new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),

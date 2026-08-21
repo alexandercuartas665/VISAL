@@ -118,6 +118,7 @@
                                         <th style="width:30px"></th>
                                         <th style="width:90px">Asignar</th>
                                         <th style="width:50px">Doc.</th>
+                                        <th style="width:60px">Reasig.</th>
                                         <th>Orden</th>
                                         <th>Paciente</th>
                                         <th>Servicio</th>
@@ -144,6 +145,16 @@
                                                 else
                                                 {
                                                     <span class="cd-doc-none" title="Esta asignacion no tiene documento adjunto">&mdash;</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (p.TurnosCoordinados > 0)
+                                                {
+                                                    <button class="btn btn-outline-primary btn-sm cd-reasig-btn" title="Reasignar el doctor de los turnos pendientes" @onclick="() => AbrirReasignar(p)">&#128100;&#8646;</button>
+                                                }
+                                                else
+                                                {
+                                                    <span class="cd-doc-none" title="Aun no hay turnos coordinados en este servicio">&mdash;</span>
                                                 }
                                             </td>
                                             <td class="mono">@p.Orden</td>
@@ -602,6 +613,81 @@ else if (_tabSel == "Calendario")
     </div>
 }
 
+@* ===== Modal: Reasignar doctor de los turnos de un servicio coordinado ===== *@
+@if (_reasignAsig is AsignacionPendienteDto ra)
+{
+    <div class="cd-doc-bk" @onclick="CerrarReasignar"></div>
+    <div class="cd-reasig-modal" @onclick:stopPropagation>
+        <div class="cd-doc-h">
+            <div class="cd-doc-title">
+                <strong>Reasignar doctor</strong>
+                <span class="cd-doc-sub">@ra.PacienteNombre &mdash; @ra.NombreServicio</span>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="CerrarReasignar">&#10006; Cerrar</button>
+        </div>
+        <div class="cd-reasig-body">
+            <div class="cd-reasig-help">
+                Marca los turnos a reasignar y elige el doctor destino. Los turnos con
+                <strong>historia clinica cerrada</strong> (atendidos) no se pueden mover. Si un
+                turno tiene una HC <strong>abierta</strong>, se reasigna el turno pero esa HC queda con el doctor original.
+            </div>
+
+            @if (_reasignTurnos.Count == 0)
+            {
+                <div class="ase-empty">Este servicio no tiene turnos coordinados.</div>
+            }
+            else
+            {
+                <table class="table table-sm cd-reasig-tbl">
+                    <thead><tr><th style="width:34px"></th><th>#</th><th>Doctor actual</th><th>Fecha</th><th>Estado</th></tr></thead>
+                    <tbody>
+                        @foreach (var t in _reasignTurnos)
+                        {
+                            var reasignable = !t.TieneHcCerrada;
+                            <tr class="@(reasignable ? "" : "cd-reasig-lock")">
+                                <td><input type="checkbox" disabled="@(!reasignable)" checked="@_reasignSel.Contains(t.Id)" @onchange="() => ToggleReasignSel(t.Id)" /></td>
+                                <td class="mono">@t.Orden</td>
+                                <td>@t.ProfesionalNombre</td>
+                                <td>@(t.FechaInicio?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                <td>
+                                    @if (t.TieneHcCerrada) { <span class="cd-estado-pill cd-est-cerr">Atendido (no reasignable)</span> }
+                                    else if (t.TieneHcAbierta) { <span class="cd-estado-pill cd-est-abie">HC abierta</span> }
+                                    else { <span class="cd-estado-pill cd-est-pend">Pendiente</span> }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                <div class="cd-reasig-foot">
+                    <div class="ase-f ase-f-wide-3">
+                        <label>Doctor destino</label>
+                        <select class="form-select form-select-sm" @bind="_reasignDestino">
+                            <option value="">Seleccione doctor destino</option>
+                            @foreach (var e in _reasignEspecialistas)
+                            {
+                                <option value="@e.Id">@e.NombreCompleto @(e.TipoProfesional is not null ? $"({e.TipoProfesional})" : "")</option>
+                            }
+                        </select>
+                        @if (_reasignEspecialistas.Count == 0)
+                        {
+                            <small class="cd-help">No hay profesionales del tipo "@ra.TipoServicio" en el catalogo.</small>
+                        }
+                    </div>
+                    @if (!string.IsNullOrEmpty(_reasignMsg))
+                    {
+                        <div class="cd-reasig-result">@_reasignMsg</div>
+                    }
+                    <button class="btn btn-primary" @onclick="ConfirmarReasignar"
+                            disabled="@(_reasignBusy || _reasignSel.Count == 0 || string.IsNullOrEmpty(_reasignDestino))">
+                        @(_reasignBusy ? "Reasignando..." : $"Reasignar {_reasignSel.Count} turno(s)")
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
 <style>
     /* Tab Coordinaciones */
     .cd-coord-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
@@ -759,6 +845,23 @@ else if (_tabSel == "Calendario")
     .cd-doc-body { flex: 1; min-height: 0; background: #334155; display: flex; align-items: center; justify-content: center; }
     .cd-doc-body iframe { width: 100%; height: 100%; border: 0; background: #fff; }
     .cd-doc-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+    /* Modal Reasignar doctor */
+    .cd-reasig-modal { position: fixed; inset: 8vh 50% auto auto; transform: translateX(50%); right: 50%; z-index: 1201;
+                       width: min(640px, 92vw); max-height: 84vh; background: #fff; border-radius: 10px;
+                       box-shadow: 0 20px 60px rgba(0,0,0,.3); display: flex; flex-direction: column; overflow: hidden; }
+    .cd-reasig-body { padding: 12px 14px; overflow: auto; }
+    .cd-reasig-help { font-size: 12px; color: #475569; background: #eff6ff; border-left: 3px solid #1565c0; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
+    .cd-reasig-tbl th { font-size: 11px; text-transform: uppercase; color: #64748b; }
+    .cd-reasig-tbl td { vertical-align: middle; font-size: 12.5px; }
+    .cd-reasig-lock { opacity: .6; }
+    .cd-est-cerr { background: #dcfce7; color: #166534; }
+    .cd-est-abie { background: #fef3c7; color: #92400e; }
+    .cd-est-pend { background: #dbeafe; color: #1e40af; }
+    .cd-reasig-foot { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+    .cd-reasig-foot > button { align-self: flex-end; }
+    .cd-reasig-result { font-size: 12.5px; color: #0f172a; background: #f1f5f9; border-radius: 6px; padding: 8px 10px; }
+    .cd-reasig-btn { line-height: 1; padding: 2px 7px; font-size: 13px; }
 </style>
 
 @* ============ Modal Aplicar programacion ============ *@
@@ -871,6 +974,60 @@ else if (_tabSel == "Calendario")
         var u = url.Split('?', '#')[0].ToLowerInvariant();
         return u.EndsWith(".png") || u.EndsWith(".jpg") || u.EndsWith(".jpeg")
             || u.EndsWith(".webp") || u.EndsWith(".gif") || u.EndsWith(".bmp");
+    }
+
+    // ============ Reasignar doctor de los turnos de un servicio ============
+    private AsignacionPendienteDto? _reasignAsig;
+    private List<TurnoReasignableDto> _reasignTurnos = new();
+    private HashSet<Guid> _reasignSel = new();
+    private List<EspecialistaDto> _reasignEspecialistas = new();
+    private string _reasignDestino = "";
+    private bool _reasignBusy;
+    private string? _reasignMsg;
+
+    private async Task AbrirReasignar(AsignacionPendienteDto p)
+    {
+        _reasignAsig = p;
+        _reasignDestino = "";
+        _reasignMsg = null;
+        _reasignSel = new();
+        _reasignTurnos = (await Svc.ListarTurnosReasignablesAsync(p.Id)).ToList();
+        // Pre-selecciona los reasignables (los que NO tienen HC cerrada).
+        foreach (var t in _reasignTurnos.Where(x => !x.TieneHcCerrada)) { _reasignSel.Add(t.Id); }
+        _reasignEspecialistas = (await Svc.ListarEspecialistasPorModuloAsync(p.TipoServicio)).ToList();
+    }
+
+    private void CerrarReasignar()
+    {
+        _reasignAsig = null; _reasignTurnos = new(); _reasignSel = new();
+        _reasignEspecialistas = new(); _reasignMsg = null; _reasignDestino = "";
+    }
+
+    private void ToggleReasignSel(Guid id)
+    {
+        if (!_reasignSel.Remove(id)) { _reasignSel.Add(id); }
+    }
+
+    private async Task ConfirmarReasignar()
+    {
+        if (_reasignAsig is not AsignacionPendienteDto asig) { return; }
+        if (_reasignSel.Count == 0 || !Guid.TryParse(_reasignDestino, out var destino)) { return; }
+        _reasignBusy = true; _reasignMsg = null;
+        try
+        {
+            var res = await Svc.ReasignarTurnosAsync(
+                new ReasignarTurnosRequest(_reasignSel.ToList(), destino), Guid.Empty);
+            var msg = $"Reasignados: {res.Reasignados} turno(s).";
+            if (res.Omitidos.Count > 0) { msg += " Omitidos: " + string.Join("; ", res.Omitidos.Distinct()); }
+            _reasignMsg = msg;
+            // Recarga los turnos para reflejar el nuevo doctor y limpia la seleccion.
+            _reasignTurnos = (await Svc.ListarTurnosReasignablesAsync(asig.Id)).ToList();
+            _reasignSel = new();
+            // Refresca el grid principal (por si cambio el estado del servicio).
+            await Cargar();
+        }
+        catch (Exception ex) { _reasignMsg = "No se pudo reasignar: " + ex.Message; }
+        finally { _reasignBusy = false; }
     }
 
     // ============ Tablero Kanban ============

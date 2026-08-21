@@ -1640,4 +1640,96 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         await db.SaveChangesAsync(ct);
         return true;
     }
+
+    public async Task<IReadOnlyList<TurnoReasignableDto>> ListarTurnosReasignablesAsync(
+        Guid asignacionId, CancellationToken ct = default)
+    {
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.AsignacionId == asignacionId)
+            .OrderBy(t => t.CreatedAt).ThenBy(t => t.Id)
+            .ToListAsync(ct);
+        if (turnos.Count == 0) { return Array.Empty<TurnoReasignableDto>(); }
+
+        var turnoIds = turnos.Select(t => t.Id).ToList();
+
+        // Estados de las HC vinculadas por turno (turno -> sesion -> pivote HC -> HC).
+        var hcLinks = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId))
+            .Select(pv => new { pv.Sesion!.AsignacionTurnoId, pv.HistoriaClinica!.Estado })
+            .ToListAsync(ct);
+        var cerrada = hcLinks.Where(x => x.Estado == HistoriaClinicaEstado.Cerrada)
+            .Select(x => x.AsignacionTurnoId).ToHashSet();
+        var abierta = hcLinks.Where(x => x.Estado == HistoriaClinicaEstado.Abierta)
+            .Select(x => x.AsignacionTurnoId).ToHashSet();
+
+        var profIds = turnos.Select(t => t.ProfesionalId).Distinct().ToList();
+        var profDict = await db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+
+        return turnos.Select((t, idx) => new TurnoReasignableDto(
+            t.Id, idx + 1, t.ProfesionalId,
+            profDict.TryGetValue(t.ProfesionalId, out var n) ? n : "(desconocido)",
+            t.FechaInicio, t.MesAsignar,
+            cerrada.Contains(t.Id), abierta.Contains(t.Id))).ToList();
+    }
+
+    public async Task<ReasignarTurnosResult> ReasignarTurnosAsync(
+        ReasignarTurnosRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (req?.TurnoIds is null || req.TurnoIds.Count == 0)
+        { throw new InvalidOperationException("No se indicaron turnos para reasignar."); }
+        if (req.NuevoProfesionalId == Guid.Empty)
+        { throw new InvalidOperationException("Selecciona el doctor destino."); }
+
+        var ids = req.TurnoIds.Distinct().ToList();
+        var turnos = await db.AsignacionTurnos.Where(t => ids.Contains(t.Id)).ToListAsync(ct);
+        if (turnos.Count == 0)
+        { return new ReasignarTurnosResult(0, new[] { "Los turnos indicados ya no existen." }); }
+
+        // El flujo es "por servicio": todos los turnos deben ser de la misma asignacion.
+        var asignacionIds = turnos.Select(t => t.AsignacionId).Distinct().ToList();
+        if (asignacionIds.Count != 1)
+        { throw new InvalidOperationException("Los turnos deben pertenecer al mismo servicio."); }
+
+        var asig = await db.Asignaciones.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == asignacionIds[0], ct)
+            ?? throw new InvalidOperationException("Asignacion no encontrada.");
+
+        // Doctor destino: existe y es del tipo de profesional compatible con el servicio.
+        _ = await db.Profesionales.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == req.NuevoProfesionalId, ct)
+            ?? throw new InvalidOperationException("El doctor destino no existe.");
+        var elegibles = await ListarEspecialistasPorModuloAsync(asig.Modulo ?? asig.TipoServicio, ct);
+        if (!elegibles.Any(e => e.Id == req.NuevoProfesionalId))
+        {
+            throw new InvalidOperationException(
+                $"El doctor destino no es del tipo de profesional requerido para '{asig.TipoServicio}'.");
+        }
+
+        // Re-check dentro de la operacion: bloquea los turnos que ya tengan HC cerrada
+        // (por si alguno se cerro entre listar y confirmar).
+        var cerrados = (await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(pv => ids.Contains(pv.Sesion!.AsignacionTurnoId)
+                         && pv.HistoriaClinica!.Estado == HistoriaClinicaEstado.Cerrada)
+            .Select(pv => pv.Sesion!.AsignacionTurnoId)
+            .ToListAsync(ct)).ToHashSet();
+
+        var omitidos = new List<string>();
+        var movidos = 0;
+        foreach (var t in turnos)
+        {
+            if (t.ProfesionalId == req.NuevoProfesionalId)
+            { omitidos.Add("Un turno ya estaba asignado a ese doctor."); continue; }
+            if (cerrados.Contains(t.Id))
+            { omitidos.Add("Un turno ya tiene historia clinica cerrada (atendido) y no se reasigna."); continue; }
+            t.ProfesionalId = req.NuevoProfesionalId;
+            t.UpdatedAt = DateTimeOffset.UtcNow;
+            t.UpdatedBy = actor;
+            movidos++;
+        }
+
+        if (movidos > 0) { await db.SaveChangesAsync(ct); }
+        return new ReasignarTurnosResult(movidos, omitidos);
+    }
 }

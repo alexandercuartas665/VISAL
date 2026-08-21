@@ -119,6 +119,22 @@ public sealed record TurnoCoordinadoDto(
     DateOnly? FechaInicio, short? MesAsignar,
     decimal? Tarifa = null);
 
+/// <summary>Turno de una asignacion visto desde el flujo "Reasignar doctor".
+/// <paramref name="Orden"/> es el indice cronologico dentro de la asignacion (1..N).
+/// Un turno es reasignable si NO tiene una HC cerrada (<paramref name="TieneHcCerrada"/> = false).
+/// Si tiene una HC abierta (<paramref name="TieneHcAbierta"/>), se puede reasignar el turno
+/// pero esa HC abierta queda con el doctor original.</summary>
+public sealed record TurnoReasignableDto(
+    Guid Id, int Orden, Guid ProfesionalId, string ProfesionalNombre,
+    DateOnly? FechaInicio, short? MesAsignar,
+    bool TieneHcCerrada, bool TieneHcAbierta);
+
+/// <summary>Payload del boton "Reasignar": mueve los turnos indicados al nuevo doctor.</summary>
+public sealed record ReasignarTurnosRequest(IReadOnlyList<Guid> TurnoIds, Guid NuevoProfesionalId);
+
+/// <summary>Resultado de la reasignacion: cuantos se movieron y por que se omitieron los demas.</summary>
+public sealed record ReasignarTurnosResult(int Reasignados, IReadOnlyList<string> Omitidos);
+
 /// <summary>Payload del boton "Asignar el servicio": graba todos los turnos de un servicio en una transaccion.</summary>
 public sealed record AsignarServicioRequest(
     Guid AsignacionId, IReadOnlyList<TurnoCoordinadoRequest> Turnos);
@@ -484,4 +500,20 @@ public interface IAsignacionService
     /// (o eliminar del lote desde /asignacion).
     /// </summary>
     Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lista los turnos de una asignacion coordinada para el flujo "Reasignar doctor",
+    /// con banderas de HC cerrada/abierta por turno. Ordenados cronologicamente.
+    /// </summary>
+    Task<IReadOnlyList<TurnoReasignableDto>> ListarTurnosReasignablesAsync(
+        Guid asignacionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reasigna los turnos indicados a <c>NuevoProfesionalId</c>. Solo mueve los turnos
+    /// que NO tengan una HC cerrada (re-valida dentro de la operacion para evitar carreras).
+    /// Valida que el nuevo doctor sea del tipo de profesional compatible con el servicio.
+    /// Devuelve cuantos se reasignaron y la lista de omitidos con su motivo.
+    /// </summary>
+    Task<ReasignarTurnosResult> ReasignarTurnosAsync(
+        ReasignarTurnosRequest req, Guid actor, CancellationToken ct = default);
 }

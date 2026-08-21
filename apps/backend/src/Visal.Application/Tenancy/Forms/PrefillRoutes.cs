@@ -213,6 +213,15 @@ public static class PrefillSourceCatalog
             // fecha_hora, presentacion, dosis, cantidad, via, usuario.
             "suministros_medicamentos.lista_numerada"
         },
+        // Resumen de ESCALAS clinicas de la HC. A diferencia del resto de origenes,
+        // NO se aplica en el prefill de carga del formulario: no hay helper cliente
+        // que lo resuelva, asi que en la apertura de la HC este origen se ignora y el
+        // campo destino queda intacto. Su unico consumidor es EscalaService.CerrarAsync:
+        // al CERRAR una escala, arma un resumen automatico (nombre + fecha + campos de
+        // la seccion RESULTADO) y lo ACUMULA (append) en el campo destino de la HC que
+        // el admin haya mapeado aqui (tipicamente "analisis"). Se configura por formato
+        // de HC en el modal Rutas de prefill: escalas.resumen -> [campo analisis].
+        ["escalas"] = new[] { "resumen" },
         // Firma del paciente: PNG/URL del archivo mas reciente en NotaMedicaDocumento
         // con categoria "Firma del Paciente" para el paciente activo. Se resuelve en
         // runtime via FirmasPrefillHelper.
@@ -309,6 +318,7 @@ public static class PrefillSourceCatalog
         "contrato" => "Contrato",
         "usuario" => "Usuario",
         "historiaMedica" => "Historia Medica",
+        "escalas" => "Escalas (resumen al cerrar)",
         "firmaPaciente" => "Firma del Paciente",
         "firmaProfesional" => "Firma del Profesional",
         "firmaAcompanante1" => "Firma Acompanante 1",

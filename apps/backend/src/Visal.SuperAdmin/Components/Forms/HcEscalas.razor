@@ -190,6 +190,11 @@ else
     [Parameter] public PacienteAsignacionDto? Paciente { get; set; }
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+    /// <summary>Se dispara al CERRAR una escala. El host (HistoriasClinicasModulo)
+    /// lo usa para recargar los valores de la HC, porque al cerrar la escala el
+    /// backend puede volcar un resumen automatico al campo analisis de la HC
+    /// (ver origen de prefill "escalas.resumen").</summary>
+    [Parameter] public EventCallback OnEscalaCerrada { get; set; }
 
     /// <summary>Estado de autenticacion del usuario logueado. Se usa para
     /// resolver la firma del profesional logueado al iniciar una escala que
@@ -531,6 +536,10 @@ else
             await CargarEscalasAsync();
             CerrarVisor();
             _msg = "Escala marcada como definitiva.";
+            // Notifica al host para que recargue los valores de la HC: si el
+            // formato mapeo "escalas.resumen" a un campo (analisis), el backend
+            // acaba de acumular ahi el resumen de esta escala.
+            if (OnEscalaCerrada.HasDelegate) { await OnEscalaCerrada.InvokeAsync(); }
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }

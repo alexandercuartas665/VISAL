@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -146,8 +148,67 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
         e.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
+
+        // Al cerrar, vuelca un resumen automatico de la escala al campo de la HC
+        // que el admin haya mapeado en Rutas de prefill (origen "escalas.resumen").
+        // Modifica la entidad HC (tracked); el SaveChanges de abajo persiste ambas.
+        await VolcarResumenAAnalisisAsync(e, ct);
+
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    /// <summary>
+    /// Si el formato de la HC padre tiene una ruta de prefill con origen "escalas"
+    /// (campo "resumen") mapeada a un campo destino, construye el resumen automatico
+    /// de esta escala (nombre + fecha + campos de la seccion RESULTADO) y lo ACUMULA
+    /// (append) en ese campo de <c>HistoriaClinica.ValoresJson</c>. Sin ruta
+    /// configurada, no hace nada (comportamiento historico intacto).
+    /// </summary>
+    private async Task VolcarResumenAAnalisisAsync(HistoriaClinicaEscala e, CancellationToken ct)
+    {
+        var hc = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == e.HistoriaClinicaId, ct);
+        if (hc is null) { return; }
+
+        // Campo destino: target del mapeo con origen "escalas" / source "resumen".
+        var hcForm = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Id == hc.FormDefinitionId)
+            .Select(f => new { f.PrefillRoutesJson })
+            .FirstOrDefaultAsync(ct);
+        if (hcForm is null) { return; }
+
+        var target = PrefillRouteSet.FromJson(hcForm.PrefillRoutesJson).Routes
+            .Where(r => string.Equals(r.SourceModule, "escalas", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(r => r.Mappings)
+            .Where(m => string.Equals(m.Source, "resumen", StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(m.Target))
+            .Select(m => m.Target)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(target)) { return; }
+
+        var escForm = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Id == e.FormDefinitionId)
+            .Select(f => new { f.Nombre, f.SchemaJson })
+            .FirstOrDefaultAsync(ct);
+        if (escForm is null) { return; }
+
+        var bloque = EscalaResumenBuilder.Construir(
+            escForm.SchemaJson, e.ValoresJson, escForm.Nombre, e.FechaCierre ?? DateTimeOffset.UtcNow);
+        if (string.IsNullOrWhiteSpace(bloque)) { return; }
+
+        var valores = ParseValores(hc.ValoresJson);
+        valores.TryGetValue(target, out var actual);
+        valores[target] = string.IsNullOrWhiteSpace(actual)
+            ? bloque
+            : actual!.TrimEnd() + "\n\n" + bloque;
+        hc.ValoresJson = JsonSerializer.Serialize(valores);
+    }
+
+    private static Dictionary<string, string?> ParseValores(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return new(); }
+        try { return JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? new(); }
+        catch { return new(); }
     }
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)

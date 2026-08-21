@@ -117,6 +117,7 @@
                                     <tr>
                                         <th style="width:30px"></th>
                                         <th style="width:90px">Asignar</th>
+                                        <th style="width:50px">Doc.</th>
                                         <th>Orden</th>
                                         <th>Paciente</th>
                                         <th>Servicio</th>
@@ -135,6 +136,16 @@
                                         <tr class="@(_solicitudSel?.Id == p.Id ? "cd-row-sel" : "")">
                                             <td><input type="checkbox" /></td>
                                             <td><button class="btn btn-outline-primary btn-sm" title="Cargar a la derecha" @onclick="() => CargarSolicitud(p)">&#9998;</button></td>
+                                            <td>
+                                                @if (!string.IsNullOrWhiteSpace(p.PdfAutorizacionUrl))
+                                                {
+                                                    <button class="btn btn-outline-secondary btn-sm cd-doc-btn" title="Ver documento adjunto (contrato / autorizacion)" @onclick="() => AbrirDoc(p)">&#128196;</button>
+                                                }
+                                                else
+                                                {
+                                                    <span class="cd-doc-none" title="Esta asignacion no tiene documento adjunto">&mdash;</span>
+                                                }
+                                            </td>
                                             <td class="mono">@p.Orden</td>
                                             <td>@p.PacienteNombre</td>
                                             <td>@p.NombreServicio</td>
@@ -562,6 +573,35 @@ else if (_tabSel == "Calendario")
     }
 }
 
+@* ============== Modal visor del documento adjunto de la asignacion ============== *@
+@if (_docView is AsignacionPendienteDto dv && !string.IsNullOrWhiteSpace(dv.PdfAutorizacionUrl))
+{
+    <div class="cd-doc-bk" @onclick="CerrarDoc"></div>
+    <div class="cd-doc-modal" @onclick:stopPropagation>
+        <div class="cd-doc-h">
+            <div class="cd-doc-title">
+                <strong>Documento de la asignacion</strong>
+                <span class="cd-doc-sub">@dv.PacienteNombre &mdash; @dv.NombreServicio</span>
+            </div>
+            <div class="cd-doc-actions">
+                <a class="btn btn-sm btn-outline-primary" href="@dv.PdfAutorizacionUrl" target="_blank" title="Abrir en pestaña nueva">&#128279; Abrir aparte</a>
+                <a class="btn btn-sm btn-outline-primary" href="@dv.PdfAutorizacionUrl" download title="Descargar">&#11015; Descargar</a>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CerrarDoc">&#10006; Cerrar</button>
+            </div>
+        </div>
+        <div class="cd-doc-body">
+            @if (EsImagenDoc(dv.PdfAutorizacionUrl))
+            {
+                <img src="@dv.PdfAutorizacionUrl" alt="Documento adjunto" />
+            }
+            else
+            {
+                <iframe src="@dv.PdfAutorizacionUrl" title="Documento adjunto"></iframe>
+            }
+        </div>
+    </div>
+}
+
 <style>
     /* Tab Coordinaciones */
     .cd-coord-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
@@ -703,6 +743,22 @@ else if (_tabSel == "Calendario")
     .cd-cal-legend { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
     .cd-cal-lg { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #475569; }
     .cd-cal-lg-sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+    /* Boton + visor del documento adjunto de la asignacion */
+    .cd-doc-btn { line-height: 1; padding: 2px 7px; font-size: 15px; }
+    .cd-doc-none { color: #cbd5e1; }
+    .cd-doc-bk { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1200; }
+    .cd-doc-modal { position: fixed; inset: 4vh 5vw; z-index: 1201; background: #fff; border-radius: 10px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,.3); display: flex; flex-direction: column; overflow: hidden; }
+    .cd-doc-h { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+                padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+    .cd-doc-title { display: flex; flex-direction: column; min-width: 0; }
+    .cd-doc-title strong { font-size: 14px; color: #0f172a; }
+    .cd-doc-sub { font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cd-doc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .cd-doc-body { flex: 1; min-height: 0; background: #334155; display: flex; align-items: center; justify-content: center; }
+    .cd-doc-body iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+    .cd-doc-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
 </style>
 
 @* ============ Modal Aplicar programacion ============ *@
@@ -804,6 +860,18 @@ else if (_tabSel == "Calendario")
 
     private List<AsignacionPendienteDto> _pendientes = new();
     private AsignacionPendienteDto? _solicitudSel;
+
+    // Documento adjunto (PDF/imagen) de la asignacion que se ve en modal, sin salir de la pagina.
+    private AsignacionPendienteDto? _docView;
+    private void AbrirDoc(AsignacionPendienteDto p) => _docView = p;
+    private void CerrarDoc() => _docView = null;
+    private static bool EsImagenDoc(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) { return false; }
+        var u = url.Split('?', '#')[0].ToLowerInvariant();
+        return u.EndsWith(".png") || u.EndsWith(".jpg") || u.EndsWith(".jpeg")
+            || u.EndsWith(".webp") || u.EndsWith(".gif") || u.EndsWith(".bmp");
+    }
 
     // ============ Tablero Kanban ============
     private List<KanbanCardVm> _kbCards = new();

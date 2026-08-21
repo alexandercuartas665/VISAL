@@ -622,7 +622,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 a.CreatedAt,
                 a.Estado.ToString(),
                 coordinados,
-                Guid.TryParse(a.ServicioId, out var sgid) && espDict.TryGetValue(sgid, out var esp) ? esp : null);
+                Guid.TryParse(a.ServicioId, out var sgid) && espDict.TryGetValue(sgid, out var esp) ? esp : null,
+                a.PdfAutorizacionUrl);
         }).ToList();
     }
 

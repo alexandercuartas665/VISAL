@@ -149,8 +149,11 @@
 
     protected override void OnParametersSet()
     {
-        // Rehidrata el estado multi cuando cambia el conjunto de valores (nueva tarjeta).
-        var sig = string.Join("|", Values.Keys.OrderBy(k => k)) + "#" + Values.Count + "#" + Fields.Count;
+        // Rehidrata el estado multi cuando cambian los VALORES (nueva tarjeta). La firma
+        // debe incluir los valores, no solo las llaves: todas las tarjetas de un tablero
+        // comparten las mismas llaves, asi que firmar por llaves dejaba el estado multi de
+        // la tarjeta anterior al abrir otra (bug: "veo lo mismo que la tarjeta anterior").
+        var sig = string.Join("|", Values.OrderBy(kv => kv.Key).Select(kv => kv.Key + "=" + kv.Value)) + "#" + Fields.Count;
         if (sig == _hydratedFor) { return; }
         _hydratedFor = sig;
         _multiValues.Clear();

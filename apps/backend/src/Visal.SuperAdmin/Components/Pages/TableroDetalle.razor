@@ -259,7 +259,7 @@ else
     var detail = _cardDetail;
     var col = _columns.FirstOrDefault(c => c.Id == detail.Card.ColumnId);
     <div class="td-modal-overlay" @onclick="CloseCardModal">
-        <div class="td-modal @(_dragOver ? "td-drag-over" : "") @(_hmOpen ? "td-modal-wide" : "")" @onclick:stopPropagation="true"
+        <div class="td-modal @(_dragOver ? "td-drag-over" : "") @(_hmOpen ? "td-modal-wide" : "")" @key="detail.Card.Id" @onclick:stopPropagation="true"
              @ondragenter:preventDefault="true" @ondragover:preventDefault="true"
              @ondragenter="OnCardDragEnter" @ondragleave="OnCardDragLeave">
             @* Drop mask: cubre TODO el modal cuando el usuario arrastra un archivo.

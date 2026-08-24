@@ -152,10 +152,16 @@
                 }
                 @foreach (var h in _historias)
                 {
-                    <div class="hc-item @(h.Id == _historiaSel?.Id ? "sel" : "") @(_menuAbierto == h.Id ? "menu-open" : "")">
+                    <div class="hc-item @(h.Id == _historiaSel?.Id ? "sel" : "") @(_menuAbierto == h.Id ? "menu-open" : "") @(h.EsEvolucion ? "hc-item-evolucion" : "")">
                         <div class="hc-item-h">
                             <div>
-                                <div class="hc-item-prof">Especialista: <strong>@h.Especialista</strong></div>
+                                <div class="hc-item-prof">
+                                    @if (h.EsEvolucion)
+                                    {
+                                        <span class="hc-item-evol-badge">Evolucion</span>
+                                    }
+                                    Especialista: <strong>@h.Especialista</strong>
+                                </div>
                                 <div class="hc-item-fecha">Fecha inicial: @h.Fecha.ToString("dd/MM/yyyy")</div>
                                 @if (h.SesionNumero.HasValue)
                                 {
@@ -881,6 +887,9 @@
     .hc-item-prof { font-size: 12.5px; color: #0f172a; }
     .hc-item-fecha { font-size: 11px; color: #64748b; margin-top: 2px; }
     .hc-item-sesion { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 1px 8px; border-radius: 999px; }
+    /* Modo terapia: HC-evolucion (sesiones 2..N) se distingue con acento y badge morado. */
+    .hc-item-evolucion { border-left: 3px solid #7c3aed; }
+    .hc-item-evol-badge { display: inline-block; margin-right: 6px; font-size: 10px; font-weight: 700; color: #6d28d9; background: #ede9fe; padding: 1px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
     .hc-item-obs { font-size: 11px; color: #475569; font-style: italic; margin-top: 6px; }
     .hc-item-pill { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-top: 6px; text-transform: uppercase; }
     .hc-est-abierta { background: #dbeafe; color: #1e40af; }
@@ -1623,7 +1632,8 @@
             Estado = r.Estado,
             Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : ""),
             ProfesionalId = r.ProfesionalId,
-            SesionNumero = r.SesionNumero
+            SesionNumero = r.SesionNumero,
+            EsEvolucion = r.EsEvolucion
         }).ToList();
     }
 
@@ -2709,5 +2719,8 @@
         /// <summary>SessionNo del turno vinculado via el pivote — null cuando la
         /// HC no nacio desde una sesion (por ejemplo, admision libre).</summary>
         public int? SesionNumero { get; set; }
+        /// <summary>True si el formato de esta HC es de EVOLUCION (sesiones 2..N de
+        /// terapias en "modo terapia"). Se muestra con un badge distinto en la lista.</summary>
+        public bool EsEvolucion { get; set; }
     }
 }

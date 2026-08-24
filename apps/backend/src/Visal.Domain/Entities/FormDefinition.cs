@@ -43,4 +43,15 @@ public class FormDefinition : TenantEntity
     /// Null o vacio = no hay rutas configuradas (el consumidor cae al match por nombre).
     /// </summary>
     public string? PrefillRoutesJson { get; set; }
+
+    /// <summary>
+    /// Modo terapia: codigo del FormDefinition de EVOLUCION que se usa para la
+    /// 2da sesion en adelante de un servicio cuyo formato de HC es ESTE. La primera
+    /// sesion (cronologica) usa este formato completo; las siguientes usan el formato
+    /// corto apuntado aqui. Sigue siendo una HistoriaClinica por debajo (factura,
+    /// candado de orden, Completado y revision quedan intactos), solo cambia el schema
+    /// que llena el profesional. Null = comportamiento normal (todas las sesiones usan
+    /// este mismo formato).
+    /// </summary>
+    public string? FormatoEvolucionCodigo { get; set; }
 }

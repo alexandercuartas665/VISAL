@@ -101,6 +101,10 @@
             <label>Version</label>
             <input class="fb-input" @bind="_version" @bind:event="oninput" placeholder="1.0" />
         </div>
+        <div class="fb-meta-field" style="max-width:210px;" title="Modo terapia: si aqui pones el codigo de un formato de EVOLUCION, en un servicio con ESTE formato la 2da sesion en adelante usara ese formato corto en vez del completo. Sigue siendo Historia Clinica por debajo (factura y ordena igual). Vacio = todas las sesiones usan este mismo formato.">
+            <label>Formato evolucion (ses. 2+)</label>
+            <input class="fb-input fb-mono" @bind="_formatoEvolucionCodigo" @bind:event="oninput" placeholder="(opcional)" />
+        </div>
         <label class="fb-check">
             <input type="checkbox" @bind="_activo" /> Activo
         </label>
@@ -1158,6 +1162,7 @@
     private Guid? _currentId;
     private string _codigo = "";
     private string? _codigoSecundario = null;
+    private string? _formatoEvolucionCodigo = null;
 
     // Filtro por tipo en el toolbar (solo afecta el desplegable, no el form abierto).
     private string _filterTipo = "";
@@ -1430,7 +1435,7 @@
     private void NewForm()
     {
         _currentId = null;
-        _codigo = ""; _codigoSecundario = null; _nombre = ""; _tipo = null; _version = null; _activo = true;
+        _codigo = ""; _codigoSecundario = null; _nombre = ""; _tipo = null; _version = null; _activo = true; _formatoEvolucionCodigo = null;
         _schema = new FormSchema();
         _selected = null; _headerSel = false;
         _error = null; _ok = null;
@@ -1671,7 +1676,7 @@
             // Abrir el formulario recien importado.
             _currentId = det.Id;
             _codigo = det.Codigo; _codigoSecundario = det.CodigoSecundario; _nombre = det.Nombre;
-            _tipo = det.Tipo; _version = det.Version; _activo = det.Activo;
+            _tipo = det.Tipo; _version = det.Version; _activo = det.Activo; _formatoEvolucionCodigo = det.FormatoEvolucionCodigo;
             _schema = FormSchema.FromJson(det.SchemaJson);
             _prefillRoutes = PrefillRouteSet.FromJson(det.PrefillRoutesJson);
             _selected = null; _headerSel = false;
@@ -1748,7 +1753,7 @@
         var d = await FormsSvc.GetAsync(id);
         if (d is null) { return; }
         _currentId = d.Id;
-        _codigo = d.Codigo; _codigoSecundario = d.CodigoSecundario; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo;
+        _codigo = d.Codigo; _codigoSecundario = d.CodigoSecundario; _nombre = d.Nombre; _tipo = d.Tipo; _version = d.Version; _activo = d.Activo; _formatoEvolucionCodigo = d.FormatoEvolucionCodigo;
         _schema = FormSchema.FromJson(d.SchemaJson);
         _prefillRoutes = PrefillRouteSet.FromJson(d.PrefillRoutesJson);
         _selected = null; _headerSel = false;
@@ -2273,7 +2278,7 @@
         try
         {
             var actor = await ActorAsync();
-            var req = new SaveFormDefinitionRequest(_currentId, _codigo, _nombre, _version, _tipo, _schema.ToJson(), _activo, CodigoSecundario: _codigoSecundario);
+            var req = new SaveFormDefinitionRequest(_currentId, _codigo, _nombre, _version, _tipo, _schema.ToJson(), _activo, CodigoSecundario: _codigoSecundario, FormatoEvolucionCodigo: _formatoEvolucionCodigo);
             var saved = await FormsSvc.SaveAsync(req, actor);
             if (saved is null)
             {

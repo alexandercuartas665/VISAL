@@ -15,7 +15,11 @@ public sealed record HistoriaClinicaResumenDto(
     // Numero de sesion (SessionNo) del AsignacionTurnoSesion vinculado via el
     // pivote AsignacionTurnoSesionHc. Null cuando la HC no nacio desde una
     // sesion de /atencion (por ejemplo, HC creada libremente desde admision).
-    int? SesionNumero = null);
+    int? SesionNumero = null,
+    // True si el formato de esta HC es un formato de EVOLUCION (su Codigo esta
+    // apuntado por el FormatoEvolucionCodigo de algun formato de HC del tenant).
+    // Se usa para etiquetar/distinguir las sesiones 2..N de terapias en la lista.
+    bool EsEvolucion = false);
 
 /// <summary>Detalle completo de una historia (incluye valores diligenciados).</summary>
 public sealed record HistoriaClinicaDetailDto(

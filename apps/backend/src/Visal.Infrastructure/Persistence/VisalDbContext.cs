@@ -651,6 +651,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Tipo).HasMaxLength(40);
             b.Property(x => x.SchemaJson).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.PrefillRoutesJson).HasColumnType("jsonb");
+            b.Property(x => x.FormatoEvolucionCodigo).HasMaxLength(40);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             // CodigoSecundario NO es unico - es un id alternativo libre.
             b.HasIndex(x => new { x.TenantId, x.CodigoSecundario });

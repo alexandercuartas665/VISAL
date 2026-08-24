@@ -42,6 +42,15 @@ public sealed class HistoriaClinicaService(
             q = q.Where(h => h.FormDefinitionId == fid);
         }
 
+        // Formatos que son "evolucion": su Codigo esta apuntado por el
+        // FormatoEvolucionCodigo de algun formato de HC (modo terapia). Sirve para
+        // etiquetar las sesiones 2..N en la lista de historias.
+        var evolucionCodes = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.FormatoEvolucionCodigo != null)
+            .Select(f => f.FormatoEvolucionCodigo!)
+            .Distinct()
+            .ToListAsync(ct);
+
         var rows = await q
             .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
             .OrderByDescending(x => x.h.FechaApertura)
@@ -54,7 +63,7 @@ public sealed class HistoriaClinicaService(
                 x.h.Id, x.f.Id, x.f.Codigo, x.f.Nombre,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
                 x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
-                (int?)null))
+                (int?)null, evolucionCodes.Contains(x.f.Codigo)))
             .ToListAsync(ct);
 
         // Enriquecer con SesionNumero (nGlobal cronologico) via el pivote

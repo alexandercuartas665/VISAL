@@ -169,6 +169,32 @@ public sealed class AtencionProfesionalService(
             .GroupBy(t => t.AsignacionId)
             .ToDictionary(g => g.Key, g => g.Sum(t => t.Cantidad));
 
+        // Modo terapia: si el formato de HC del servicio define FormatoEvolucionCodigo,
+        // la 2da sesion en adelante (nGlobal >= 2) usa ese formato de evolucion (corto)
+        // en vez del HC completo. Sigue siendo una HistoriaClinica por debajo, asi que
+        // facturacion / candado de orden / Completado / revision quedan intactos.
+        var formatosHc = asigs
+            .Select(a => a.FormatoHistoria)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var evolucionPorFormato = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (formatosHc.Count > 0)
+        {
+            var defs = await db.FormDefinitions.AsNoTracking()
+                .Where(f => f.FormatoEvolucionCodigo != null
+                            && (formatosHc.Contains(f.Codigo)
+                                || (f.CodigoSecundario != null && formatosHc.Contains(f.CodigoSecundario))))
+                .Select(f => new { f.Codigo, f.CodigoSecundario, f.FormatoEvolucionCodigo })
+                .ToListAsync(ct);
+            foreach (var d in defs)
+            {
+                if (!string.IsNullOrWhiteSpace(d.Codigo)) { evolucionPorFormato[d.Codigo] = d.FormatoEvolucionCodigo!; }
+                if (!string.IsNullOrWhiteSpace(d.CodigoSecundario)) { evolucionPorFormato[d.CodigoSecundario!] = d.FormatoEvolucionCodigo!; }
+            }
+        }
+
         // Contador GLOBAL de sesion por asignacion — incrementa a medida que
         // recorremos los turnos ordenados por CreatedAt asc. Cada fila expandida
         // (n=1..Cantidad) toma el siguiente numero. Esto corrige el bug de que 2
@@ -223,6 +249,15 @@ public sealed class AtencionProfesionalService(
                     horaCierre = hcCierre;
                 }
 
+                // Sesion 1 (cronologica) usa el formato HC completo; de la 2da en adelante
+                // usa el formato de evolucion si el formato de HC lo tiene configurado.
+                var formatoEfectivo = a.FormatoHistoria;
+                if (nGlobal >= 2 && !string.IsNullOrWhiteSpace(a.FormatoHistoria)
+                    && evolucionPorFormato.TryGetValue(a.FormatoHistoria.Trim(), out var evoCod))
+                {
+                    formatoEfectivo = evoCod;
+                }
+
                 result.Add(new MiServicioAsignadoDto(
                     t.Id, a.Id,
                     n, t.Cantidad,
@@ -238,7 +273,7 @@ public sealed class AtencionProfesionalService(
                     a.PacienteId,
                     completado,
                     sesion?.FechaAtencion,
-                    a.FormatoHistoria,
+                    formatoEfectivo,
                     nGlobal,
                     totalAsig,
                     profs.TryGetValue(t.ProfesionalId, out var np) ? np : "",

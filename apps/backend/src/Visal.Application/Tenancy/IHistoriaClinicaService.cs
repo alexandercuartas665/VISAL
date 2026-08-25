@@ -45,6 +45,13 @@ public sealed record HistoriaClinicaDetailDto(
     string? RipsCausaExternaCodigo = null,
     string? RipsCausaExternaNombre = null);
 
+/// <summary>
+/// Una HC de EVOLUCION (sesion 2..N de una terapia) vinculada a la HC de la
+/// primera sesion, junto con su numero de sesion global. Se usa para imprimir,
+/// tras el documento de la primera sesion, todas las evoluciones consecuentes.
+/// </summary>
+public sealed record HistoriaEvolucionLigadaDto(int SesionNumero, HistoriaClinicaDetailDto Historia);
+
 public sealed record CrearHistoriaRequest(
     Guid PacienteId,
     Guid FormDefinitionId,
@@ -82,6 +89,17 @@ public interface IHistoriaClinicaService
 
     /// <summary>Trae la historia completa con su schema y valores.</summary>
     Task<HistoriaClinicaDetailDto?> GetAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Dada la HC de la PRIMERA sesion de una terapia (modo terapia: su formato de
+    /// HC tiene FormatoEvolucionCodigo), devuelve las HC de EVOLUCION de las sesiones
+    /// consecuentes (2..N) de la misma Asignacion, en estado Cerrada, ordenadas por
+    /// numero de sesion. Se usa para imprimir, junto con el documento de la primera
+    /// sesion, todas las evoluciones ligadas. Devuelve vacio si la HC no es de una
+    /// terapia, no es la primera sesion, o no tiene evoluciones cerradas.
+    /// </summary>
+    Task<IReadOnlyList<HistoriaEvolucionLigadaDto>> GetEvolucionesLigadasAsync(
+        Guid primeraSesionHcId, CancellationToken ct = default);
 
     /// <summary>Crea una historia con estado Abierta y los valores iniciales (prefill).</summary>
     Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default);

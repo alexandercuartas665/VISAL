@@ -131,6 +131,32 @@ else
             </div>
         }
 
+        @* ==== EVOLUCIONES DE TERAPIA (sesiones 2..N ligadas a la 1ra sesion) ====
+           Modo terapia: al imprimir el documento de la PRIMERA sesion, se anexan
+           tambien las evoluciones (HC cortas) de las sesiones consecuentes de la
+           misma Asignacion. Cada una en su propia pagina. Solo aparece cuando la
+           HC impresa es la primera sesion de una terapia (ver GetEvolucionesLigadasAsync). *@
+        @if (_incluirHc && _evolucionesTerapia.Count > 0)
+        {
+            @foreach (var evo in _evolucionesTerapia)
+            {
+                var schEvo = TryParseSchema(evo.Historia.SchemaJson);
+                var valEvo = TryParseValores(evo.Historia.ValoresJson);
+                var hdrEvo = schEvo?.Header ?? FormHeader.Default();
+                <div class="pack-doc">
+                    @RenderHeader(hdrEvo, evo.Historia.FormatoNombre, "EVO",
+                        evo.Historia.Id.ToString().Substring(0, 8).ToUpperInvariant(),
+                        $"Fecha: {evo.Historia.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}",
+                        $"Evolucion - Sesion {evo.SesionNumero}")
+                    @if (schEvo is not null)
+                    {
+                        @foreach (var node in schEvo.Children) { @RenderTopNode(node, valEvo) }
+                    }
+                    @RenderFirma(evo.Historia.EspecialistaNombre ?? _hc.EspecialistaNombre, "Firma del profesional tratante")
+                </div>
+            }
+        }
+
         @* ============ ORDENES DE MEDICAMENTOS ============ *@
         @* Cada orden (grupo NumeroOrden) se imprime como un DOCUMENTO SEPARADO con su
            propia firma/QR. No se agregan varias ordenes en un solo formulario. *@
@@ -639,6 +665,9 @@ else
     private List<EscalaDetailDto> _escalasDetails = new();
     private List<DocumentoHcDetailDto> _evoDetails = new();
     private List<DocumentoHcDetailDto> _conDetails = new();
+    // Modo terapia: evoluciones (sesiones 2..N) ligadas a la HC de la 1ra sesion.
+    // Se cargan solo cuando la HC impresa es la primera sesion de una terapia.
+    private List<HistoriaEvolucionLigadaDto> _evolucionesTerapia = new();
 
     // HC: schema + valores
     private FormSchema? _hcSchema;
@@ -756,6 +785,12 @@ else
                 try { _valores = JsonSerializer.Deserialize<Dictionary<string, string?>>(_hc.ValoresJson) ?? new(); }
                 catch { _valores = new(); }
             }
+
+            // Modo terapia: si la HC impresa es la primera sesion de una terapia,
+            // anexamos las evoluciones (sesiones consecuentes) cerradas. Devuelve
+            // vacio en cualquier otro caso (HC normal, no-primera-sesion, sin evos).
+            try { _evolucionesTerapia = (await HcSvc.GetEvolucionesLigadasAsync(HcId)).ToList(); }
+            catch { _evolucionesTerapia = new(); }
         }
 
         // Cada orden clasica se ubica en form_definitions por su "Codigo formulario"
@@ -1374,7 +1409,15 @@ else
                                 {
                                     var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
                                     string? cellVal;
-                                    if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
+                                    // Columna calculada (ej. IMC en antropometria): se calcula a
+                                    // partir de las celdas hermanas de la MISMA fila (no se persiste),
+                                    // igual que en el FormViewer. Si algun operando falta, sale "".
+                                    if (string.Equals(col.FieldType, "calculated", StringComparison.OrdinalIgnoreCase)
+                                        && !string.IsNullOrWhiteSpace(col.Formula))
+                                    {
+                                        cellVal = ComputeRowFormula(n, col, idx, seedRow, vals);
+                                    }
+                                    else if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
                                     else { vals.TryGetValue($"{tblKey}:{idx}:{col.Id}", out cellVal); }
                                     // Columnas date guardan ISO (yyyy-MM-dd) para que el datepicker
                                     // del FormViewer las pueda leer. En impresion las mostramos en
@@ -1654,5 +1697,31 @@ else
     {
         if (string.IsNullOrWhiteSpace(json)) { return new(); }
         try { return JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? new(); } catch { return new(); }
+    }
+
+    /// <summary>Calcula el valor de una celda calculada (FieldType="calculated")
+    /// para impresion, leyendo las celdas hermanas de la MISMA fila con la misma
+    /// precedencia que el render (seedVal si tiene, sino el valor del store). Reusa
+    /// el motor de formulas compartido (FormFormulaEvaluator), igual que el
+    /// FormViewer. Devuelve "" si falta la formula o algun operando no es numerico.</summary>
+    private static string ComputeRowFormula(FormNode table, FormColumn col, int rowIdx,
+        List<string?>? seedRow, Dictionary<string, string?> vals)
+    {
+        if (table.Columns is null || string.IsNullOrWhiteSpace(col.Formula)) { return ""; }
+        var rowVals = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var ci = 0;
+        foreach (var sib in table.Columns)
+        {
+            if (!string.IsNullOrWhiteSpace(sib.Name))
+            {
+                var sVal = (seedRow is not null && ci < seedRow.Count) ? seedRow[ci] : null;
+                string? v;
+                if (!string.IsNullOrEmpty(sVal)) { v = sVal; }
+                else { vals.TryGetValue($"tbl:{table.Id}:{rowIdx}:{sib.Id}", out v); }
+                rowVals[sib.Name!] = v;
+            }
+            ci++;
+        }
+        return FormFormulaEvaluator.EvaluateRow(col.Formula!, rowVals);
     }
 }

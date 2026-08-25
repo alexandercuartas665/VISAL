@@ -140,6 +140,84 @@ public sealed class HistoriaClinicaService(
         return row;
     }
 
+    public async Task<IReadOnlyList<HistoriaEvolucionLigadaDto>> GetEvolucionesLigadasAsync(
+        Guid primeraSesionHcId, CancellationToken ct = default)
+    {
+        var vacio = (IReadOnlyList<HistoriaEvolucionLigadaDto>)Array.Empty<HistoriaEvolucionLigadaDto>();
+
+        // 1) Turno + asignacion de la HC dada, via el pivote sesion-HC.
+        var turnoDeLaHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.HistoriaClinicaId == primeraSesionHcId)
+            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                  p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
+            .FirstOrDefaultAsync(ct);
+        if (turnoDeLaHc == Guid.Empty) { return vacio; }
+
+        var asigId = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.Id == turnoDeLaHc)
+            .Select(t => t.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        if (asigId == Guid.Empty) { return vacio; }
+
+        // 2) Modo terapia: el formato de HC de la sesion dada debe declarar
+        //    FormatoEvolucionCodigo. Si no, no hay evoluciones que imprimir.
+        var formatoEvo = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == primeraSesionHcId)
+            .Join(db.FormDefinitions.AsNoTracking(),
+                  h => h.FormDefinitionId, f => f.Id, (h, f) => f.FormatoEvolucionCodigo)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(formatoEvo)) { return vacio; }
+
+        // 3) nGlobal por turno de la asignacion (misma regla que la parrilla
+        //    /atencion y ListarPorPacienteAsync: CreatedAt asc, tiebreak por Id).
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.AsignacionId == asigId)
+            .Select(t => new { t.Id, t.CreatedAt })
+            .ToListAsync(ct);
+        var ordenTurno = turnos
+            .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Select((x, i) => new { x.Id, N = i + 1 })
+            .ToDictionary(x => x.Id, x => x.N);
+
+        // Solo imprimimos las evoluciones cuando la HC dada es la PRIMERA sesion.
+        if (!ordenTurno.TryGetValue(turnoDeLaHc, out var nHc) || nHc != 1) { return vacio; }
+
+        // 4) HC vinculadas a las sesiones de esta asignacion, con su turno.
+        //    Nos quedamos con las de nGlobal >= 2 (las evoluciones).
+        var turnoIds = ordenTurno.Keys.ToList();
+        var links = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                  p => p.SesionId, s => s.Id,
+                  (p, s) => new { p.HistoriaClinicaId, s.AsignacionTurnoId })
+            .Where(x => turnoIds.Contains(x.AsignacionTurnoId))
+            .ToListAsync(ct);
+        var hcNGlobal = links
+            .Where(x => ordenTurno.TryGetValue(x.AsignacionTurnoId, out var n) && n >= 2)
+            .GroupBy(x => x.HistoriaClinicaId)
+            .ToDictionary(g => g.Key, g => ordenTurno[g.First().AsignacionTurnoId]);
+        if (hcNGlobal.Count == 0) { return vacio; }
+
+        // 5) Detalle de esas HC — solo Cerradas (las abiertas/descartadas no se imprimen).
+        var ids = hcNGlobal.Keys.ToList();
+        var detalles = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => ids.Contains(h.Id) && h.Estado == HistoriaClinicaEstado.Cerrada)
+            .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
+            .Select(x => new HistoriaClinicaDetailDto(
+                x.h.Id, x.h.PacienteId, x.f.Id, x.f.Codigo, x.f.Nombre, x.f.Version,
+                x.f.SchemaJson, x.f.PrefillRoutesJson, x.h.ValoresJson,
+                x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
+                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
+                x.h.RipsViaIngresoCodigo, x.h.RipsViaIngresoNombre,
+                x.h.RipsFinalidadCodigo, x.h.RipsFinalidadNombre,
+                x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre))
+            .ToListAsync(ct);
+
+        return detalles
+            .Select(d => new HistoriaEvolucionLigadaDto(hcNGlobal[d.Id], d))
+            .OrderBy(e => e.SesionNumero)
+            .ToList();
+    }
+
     public async Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }

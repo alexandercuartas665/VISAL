@@ -284,7 +284,16 @@
                                 {
                                     var seedVal = (seedRow is not null && colIdx < seedRow.Count) ? seedRow[colIdx] : null;
                                     string? cellVal;
-                                    if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
+                                    // Columna calculada: mismo criterio que el FormViewer. El valor
+                                    // se calcula a partir de las celdas hermanas de la MISMA fila
+                                    // en vez de leerlo del store (no se persiste). Si algun operando
+                                    // falta o no es numerico, sale "" (se pinta &nbsp;).
+                                    if (string.Equals(col.FieldType, "calculated", StringComparison.OrdinalIgnoreCase)
+                                        && !string.IsNullOrWhiteSpace(col.Formula))
+                                    {
+                                        cellVal = ComputeRowFormulaForPrint(n, col, idx, seedRow);
+                                    }
+                                    else if (!string.IsNullOrEmpty(seedVal)) { cellVal = seedVal; }
                                     else { Values.TryGetValue($"{tblKey}:{idx}:{col.Id}", out cellVal); }
                                     var displayVal = FormatCellForPrint(cellVal, col.FieldType);
                                     <td>@(string.IsNullOrWhiteSpace(displayVal) ? new MarkupString("&nbsp;") : (MarkupString)System.Net.WebUtility.HtmlEncode(displayVal))</td>
@@ -441,5 +450,30 @@
             return raw;
         }
         return raw;
+    }
+
+    /// <summary>Calcula el valor de una celda calculada para impresion, leyendo
+    /// las celdas hermanas de la MISMA fila con la misma precedencia que el
+    /// render (seedVal si tiene, sino el valor del store). Reusa el motor de
+    /// formulas compartido (FormFormulaEvaluator), igual que el FormViewer.
+    /// Devuelve "" si falta la formula o algun operando no es numerico.</summary>
+    private string ComputeRowFormulaForPrint(FormNode table, FormColumn col, int rowIdx, List<string?>? seedRow)
+    {
+        if (table.Columns is null || string.IsNullOrWhiteSpace(col.Formula)) { return ""; }
+        var rowVals = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var ci = 0;
+        foreach (var sib in table.Columns)
+        {
+            if (!string.IsNullOrWhiteSpace(sib.Name))
+            {
+                var sVal = (seedRow is not null && ci < seedRow.Count) ? seedRow[ci] : null;
+                string? v;
+                if (!string.IsNullOrEmpty(sVal)) { v = sVal; }
+                else { Values.TryGetValue($"tbl:{table.Id}:{rowIdx}:{sib.Id}", out v); }
+                rowVals[sib.Name!] = v;
+            }
+            ci++;
+        }
+        return Visal.Application.Tenancy.Forms.FormFormulaEvaluator.EvaluateRow(col.Formula!, rowVals);
     }
 }

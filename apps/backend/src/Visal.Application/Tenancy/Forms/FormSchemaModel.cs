@@ -428,6 +428,15 @@ public sealed class FormColumn
     [JsonPropertyName("defaultValue")]
     public string? DefaultValue { get; set; }
 
+    /// <summary>Formula que se evalua por fila cuando FieldType = "calculated".
+    /// Sintaxis identica a FormNode.Formula: funciones como imc(...),
+    /// sum(...), cases(...), etc. Los identificadores se resuelven contra
+    /// las celdas de la MISMA fila (Name de otras columnas). Ejemplo en
+    /// tabla antropometria: imc(peso, talla). Solo tiene efecto cuando
+    /// FieldType = "calculated"; en cualquier otro fieldType se ignora.</summary>
+    [JsonPropertyName("formula")]
+    public string? Formula { get; set; }
+
     /// <summary>Nombre (Name) de OTRA columna de la misma tabla que actua como
     /// disparador. Si esta seteado, las celdas de esta columna solo se habilitan
     /// cuando la celda hermana (mismo rowIdx) tenga el valor <see cref="EnabledByValue"/>.

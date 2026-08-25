@@ -425,7 +425,13 @@
                                                 || (o.Options is { Count: > 0 })))
                                         .ToList();
                                 }
-                                @if (triggerCandidates.Count > 0)
+                                @* Mostramos el control si hay columnas candidatas O si la
+                                   columna ya tiene una condicion configurada — asi una
+                                   condicion "colgada" (que apunta a una columna que dejo de
+                                   ser candidata: paso a texto sin opciones) sigue siendo
+                                   visible y se puede quitar. Antes se ocultaba y quedaba
+                                   atrapada, deshabilitando la celda para siempre. *@
+                                @if (triggerCandidates.Count > 0 || !string.IsNullOrEmpty(col.EnabledByColumn))
                                 {
                                     <div class="fb-col-cond">
                                         <small>Habilitar solo si...</small>
@@ -435,6 +441,11 @@
                                                 @foreach (var t in triggerCandidates)
                                                 {
                                                     <option value="@t.Name">@t.Label</option>
+                                                }
+                                                @if (!string.IsNullOrEmpty(col.EnabledByColumn)
+                                                     && !triggerCandidates.Any(t => string.Equals(t.Name, col.EnabledByColumn, StringComparison.OrdinalIgnoreCase)))
+                                                {
+                                                    <option value="@col.EnabledByColumn">@col.EnabledByColumn (columna sin opciones)</option>
                                                 }
                                             </select>
                                             <input class="fb-input" placeholder="= valor"

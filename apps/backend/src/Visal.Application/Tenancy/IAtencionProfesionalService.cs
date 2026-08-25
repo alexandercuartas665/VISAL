@@ -55,7 +55,16 @@ public sealed record MiServicioAsignadoDto(
     /// la HC esta Cerrada. Null cuando no hay HC vinculada o la HC aun no
     /// se cierra — la UI la muestra como HH:mm en la columna "Hora Cierre".
     /// </summary>
-    DateTimeOffset? HoraCierre = null);
+    DateTimeOffset? HoraCierre = null,
+    /// <summary>
+    /// Ids (GUID) de las HistoriaClinica vinculadas a esta sesion via el pivote
+    /// AsignacionTurnoSesionHc, unidos por espacio. Solo se usa para BUSCAR en la
+    /// parrilla de Atencion por "id de historia medica" (el mismo GUID que el
+    /// modulo de Historias muestra como "HC N&deg;" con sus primeros 8 caracteres).
+    /// El match es Contains case-insensitive, asi que sirve tanto el id completo
+    /// como el corto de 8. Null cuando la sesion aun no tiene HC vinculada.
+    /// </summary>
+    string? HistoriaClinicaIds = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

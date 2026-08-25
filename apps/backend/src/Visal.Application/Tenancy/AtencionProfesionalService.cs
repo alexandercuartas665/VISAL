@@ -110,6 +110,21 @@ public sealed class AtencionProfesionalService(
                 .GroupBy(x => x.SesionId)
                 .ToDictionary(g => g.Key, g => g.Max(x => x.FechaCierre!.Value));
 
+        // Ids de las HC vinculadas a cada sesion (via el mismo pivote, pero sin
+        // filtrar por FechaCierre: sirve tambien para HCs Abiertas). Solo se usa
+        // para permitir BUSCAR por "id de historia medica" en la parrilla de
+        // Atencion. Se une por espacio; el filtro del front hace Contains.
+        var hcIdsPorSesion = sesionIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .Where(p => sesionIds.Contains(p.SesionId))
+                .Select(p => new { p.SesionId, p.HistoriaClinicaId })
+                .ToListAsync(ct))
+                .GroupBy(x => x.SesionId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => string.Join(" ", g.Select(x => x.HistoriaClinicaId.ToString())));
+
         // Capa 08 Ola 3 — Chip de revision por fila del grid.
         // Para cada paciente traemos la HC MAS RECIENTE (Abierta o Cerrada) y su
         // revision viva (si existe). El chip resume el estado del ciclo — util
@@ -249,6 +264,14 @@ public sealed class AtencionProfesionalService(
                     horaCierre = hcCierre;
                 }
 
+                // Ids de HC vinculadas a esta sesion — solo para el buscador por
+                // id de historia medica en la parrilla. Null si no hay HC aun.
+                string? historiaClinicaIds = null;
+                if (sesion is not null && hcIdsPorSesion.TryGetValue(sesion.Id, out var hcIdsSesion))
+                {
+                    historiaClinicaIds = hcIdsSesion;
+                }
+
                 // Sesion 1 (cronologica) usa el formato HC completo; de la 2da en adelante
                 // usa el formato de evolucion si el formato de HC lo tiene configurado.
                 var formatoEfectivo = a.FormatoHistoria;
@@ -282,7 +305,8 @@ public sealed class AtencionProfesionalService(
                     revEstado,
                     revUltima,
                     revMotivo,
-                    horaCierre));
+                    horaCierre,
+                    historiaClinicaIds));
             }
         }
         return result;

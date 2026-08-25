@@ -63,7 +63,7 @@ else
         <div class="at-fbar">
             <div class="at-fbar-search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input placeholder="Buscar paciente por documento o nombre..." @bind="_filtroPac" @bind:event="oninput" />
+                <input placeholder="Buscar por documento, nombre o id de historia medica..." @bind="_filtroPac" @bind:event="oninput" />
                 @if (!string.IsNullOrEmpty(_filtroPac))
                 {
                     <button class="at-fbar-search-clear" @onclick="() => _filtroPac = string.Empty" title="Limpiar">&times;</button>
@@ -771,7 +771,11 @@ else
             {
                 var t = _filtroPac.Trim();
                 q = q.Where(s => s.NumeroDocPaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
-                              || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase));
+                              || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
+                              // Tambien por id de historia medica (GUID completo o el
+                              // corto de 8 que muestra el modulo de Historias como "HC N").
+                              || (s.HistoriaClinicaIds != null
+                                  && s.HistoriaClinicaIds.Contains(t, StringComparison.OrdinalIgnoreCase)));
             }
             if (_filTipos.Count > 0) { q = q.Where(s => _filTipos.Contains(s.TipoServicio)); }
             if (_filFormatosHc.Count > 0) { q = q.Where(s => s.FormatoHistoria != null && _filFormatosHc.Contains(s.FormatoHistoria)); }

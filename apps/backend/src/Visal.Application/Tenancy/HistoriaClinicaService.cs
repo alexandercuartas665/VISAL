@@ -145,77 +145,66 @@ public sealed class HistoriaClinicaService(
     {
         var vacio = (IReadOnlyList<HistoriaEvolucionLigadaDto>)Array.Empty<HistoriaEvolucionLigadaDto>();
 
-        // 1) Turno + asignacion de la HC dada, via el pivote sesion-HC.
-        var turnoDeLaHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
-            .Where(p => p.HistoriaClinicaId == primeraSesionHcId)
-            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
-                  p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
-            .FirstOrDefaultAsync(ct);
-        if (turnoDeLaHc == Guid.Empty) { return vacio; }
-
-        var asigId = await db.AsignacionTurnos.AsNoTracking()
-            .Where(t => t.Id == turnoDeLaHc)
-            .Select(t => t.AsignacionId)
-            .FirstOrDefaultAsync(ct);
-        if (asigId == Guid.Empty) { return vacio; }
-
-        // 2) Modo terapia: el formato de HC de la sesion dada debe declarar
-        //    FormatoEvolucionCodigo. Si no, no hay evoluciones que imprimir.
-        var formatoEvo = await db.HistoriasClinicas.AsNoTracking()
+        // 1) La HC impresa debe ser de un formato de terapia: su FormDefinition
+        //    declara FormatoEvolucionCodigo. Ese codigo (ej. PP-FO-85_R) es el
+        //    formato de las HC cortas de las sesiones consecuentes; solo el formato
+        //    completo (1ra sesion) lo trae, las evoluciones no. Asi, imprimir una
+        //    evolucion no anexa nada (evoCod nulo) — correcto.
+        var evoCod = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == primeraSesionHcId)
             .Join(db.FormDefinitions.AsNoTracking(),
                   h => h.FormDefinitionId, f => f.Id, (h, f) => f.FormatoEvolucionCodigo)
             .FirstOrDefaultAsync(ct);
-        if (string.IsNullOrWhiteSpace(formatoEvo)) { return vacio; }
+        if (string.IsNullOrWhiteSpace(evoCod)) { return vacio; }
 
-        // 3) nGlobal por turno de la asignacion (misma regla que la parrilla
-        //    /atencion y ListarPorPacienteAsync: CreatedAt asc, tiebreak por Id).
-        var turnos = await db.AsignacionTurnos.AsNoTracking()
-            .Where(t => t.AsignacionId == asigId)
-            .Select(t => new { t.Id, t.CreatedAt })
-            .ToListAsync(ct);
-        var ordenTurno = turnos
-            .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
-            .Select((x, i) => new { x.Id, N = i + 1 })
-            .ToDictionary(x => x.Id, x => x.N);
-
-        // Solo imprimimos las evoluciones cuando la HC dada es la PRIMERA sesion.
-        if (!ordenTurno.TryGetValue(turnoDeLaHc, out var nHc) || nHc != 1) { return vacio; }
-
-        // 4) HC vinculadas a las sesiones de esta asignacion, con su turno.
-        //    Nos quedamos con las de nGlobal >= 2 (las evoluciones).
-        var turnoIds = ordenTurno.Keys.ToList();
-        var links = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+        // 2) Asignacion de la HC via el pivote sesion -> turno -> asignacion.
+        var asigId = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.HistoriaClinicaId == primeraSesionHcId)
             .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
-                  p => p.SesionId, s => s.Id,
-                  (p, s) => new { p.HistoriaClinicaId, s.AsignacionTurnoId })
-            .Where(x => turnoIds.Contains(x.AsignacionTurnoId))
-            .ToListAsync(ct);
-        var hcNGlobal = links
-            .Where(x => ordenTurno.TryGetValue(x.AsignacionTurnoId, out var n) && n >= 2)
-            .GroupBy(x => x.HistoriaClinicaId)
-            .ToDictionary(g => g.Key, g => ordenTurno[g.First().AsignacionTurnoId]);
-        if (hcNGlobal.Count == 0) { return vacio; }
+                  p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
+            .Join(db.AsignacionTurnos.AsNoTracking(),
+                  turnoId => turnoId, t => t.Id, (turnoId, t) => t.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        if (asigId == Guid.Empty) { return vacio; }
 
-        // 5) Detalle de esas HC — solo Cerradas (las abiertas/descartadas no se imprimen).
-        var ids = hcNGlobal.Keys.ToList();
-        var detalles = await db.HistoriasClinicas.AsNoTracking()
-            .Where(h => ids.Contains(h.Id) && h.Estado == HistoriaClinicaEstado.Cerrada)
-            .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
-            .Select(x => new HistoriaClinicaDetailDto(
-                x.h.Id, x.h.PacienteId, x.f.Id, x.f.Codigo, x.f.Nombre, x.f.Version,
-                x.f.SchemaJson, x.f.PrefillRoutesJson, x.h.ValoresJson,
-                x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
-                x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
-                x.h.RipsViaIngresoCodigo, x.h.RipsViaIngresoNombre,
-                x.h.RipsFinalidadCodigo, x.h.RipsFinalidadNombre,
-                x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre))
+        // 3) HC de EVOLUCION (formato == evoCod) ligadas a CUALQUIER sesion de la
+        //    misma asignacion, en estado Cerrada. Identificar por FORMATO (no por
+        //    posicion de turno) es robusto a como se estructuren turnos/sesiones:
+        //    una terapia real puede tener 1 turno con N sesiones (todas SessionNo=1)
+        //    o N turnos. El scope por asignacion evita mezclar evoluciones de otra
+        //    terapia del mismo paciente.
+        var evoluciones = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            join f in db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals f.Id
+            where t.AsignacionId == asigId
+                  && f.Codigo == evoCod
+                  && h.Estado == HistoriaClinicaEstado.Cerrada
+            select new HistoriaClinicaDetailDto(
+                h.Id, h.PacienteId, f.Id, f.Codigo, f.Nombre, f.Version,
+                f.SchemaJson, f.PrefillRoutesJson, h.ValoresJson,
+                h.Estado.ToString(), h.FechaApertura, h.FechaCierre,
+                h.EspecialistaNombre, h.MotivoInactivacion, h.ProfesionalId,
+                h.RipsViaIngresoCodigo, h.RipsViaIngresoNombre,
+                h.RipsFinalidadCodigo, h.RipsFinalidadNombre,
+                h.RipsCausaExternaCodigo, h.RipsCausaExternaNombre))
             .ToListAsync(ct);
 
-        return detalles
-            .Select(d => new HistoriaEvolucionLigadaDto(hcNGlobal[d.Id], d))
-            .OrderBy(e => e.SesionNumero)
+        // Distinct por Id (una HC podria estar ligada a mas de una sesion) y orden
+        // cronologico por apertura. Numeramos como sesiones 2..N (la 1ra es la HC
+        // completa que se esta imprimiendo).
+        var ordenadas = evoluciones
+            .GroupBy(d => d.Id).Select(g => g.First())
+            .OrderBy(d => d.FechaApertura)
             .ToList();
+        var result = new List<HistoriaEvolucionLigadaDto>(ordenadas.Count);
+        for (int i = 0; i < ordenadas.Count; i++)
+        {
+            result.Add(new HistoriaEvolucionLigadaDto(i + 2, ordenadas[i]));
+        }
+        return result;
     }
 
     public async Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default)

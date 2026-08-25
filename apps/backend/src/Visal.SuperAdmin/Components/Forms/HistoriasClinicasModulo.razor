@@ -158,7 +158,7 @@
 
         <div class="ase-card hc-list-card">
             <div class="ase-card-h">Historias del paciente (@_historias.Count)</div>
-            <div class="hc-list @(_menuAbierto != null ? "hc-list-menu-open" : "")">
+            <div class="hc-list">
                 @if (_historias.Count == 0)
                 {
                     <div class="ase-empty">Aplica un filtro y presiona "Mostrar historias".</div>
@@ -182,10 +182,10 @@
                                 }
                             </div>
                             <div class="dropdown">
-                                <button class="btn btn-link btn-sm hc-item-menu" @onclick="() => ToggleMenu(h.Id)">&#8942;</button>
+                                <button class="btn btn-link btn-sm hc-item-menu" @onclick="(e) => ToggleMenu(h.Id, e)">&#8942;</button>
                                 @if (_menuAbierto == h.Id)
                                 {
-                                    <div class="hc-menu">
+                                    <div class="hc-menu" style="left:@(((int)_menuX))px; top:@(((int)_menuY))px;">
                                         <div class="hc-menu-h">Acciones</div>
                                         <button class="hc-menu-item" @onclick="() => Seleccionar(h)">Ver esta historia</button>
                                         <button class="hc-menu-item" @onclick="() => CrearCopiaAsync(h)">Crear una copia</button>
@@ -888,11 +888,6 @@
 
     .hc-list-card { min-height: 0; }
     .hc-list { overflow: auto; flex: 1; padding: 4px; max-height: 440px; }
-    /* Mientras un menu kebab esta abierto dejamos de recortar la lista: con una
-       sola historia (lista corta) o en la ultima tarjeta, el overflow:auto cortaba
-       el menu por abajo. La tarjeta activa sube de nivel de apilamiento para no
-       quedar tapada por la siguiente. */
-    .hc-list.hc-list-menu-open { overflow: visible; }
     .hc-item { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 8px; background: #fff; cursor: pointer; position: relative; }
     .hc-item.menu-open { z-index: 50; }
     .hc-item.sel { border-color: #1565c0; background: #eff6ff; }
@@ -911,7 +906,11 @@
     .hc-item-menu { font-size: 20px; color: #64748b; padding: 0 6px; }
 
     .dropdown { position: relative; }
-    .hc-menu { position: absolute; right: 0; top: 24px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 12px rgba(15,23,42,.1); min-width: 200px; z-index: 100; padding: 6px 0; }
+    /* Menu kebab: position:fixed anclado a las coordenadas del clic (left/top van
+       inline), abriendo hacia la izquierda (translateX) para no salirse por la
+       derecha. Fixed evita que el overflow:auto de la lista lo recorte y que al
+       abrirlo salte el scroll (antes se cambiaba el overflow de la lista). */
+    .hc-menu { position: fixed; transform: translateX(-100%); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 6px 18px rgba(15,23,42,.16); min-width: 200px; max-height: 60vh; overflow: auto; z-index: 1000; padding: 6px 0; }
     .hc-menu-h { font-size: 11px; font-weight: 700; color: #94a3b8; padding: 6px 12px; text-transform: uppercase; }
     .hc-menu-item { display: block; width: 100%; padding: 8px 12px; background: none; border: none; text-align: left; font-size: 12.5px; color: #0f172a; cursor: pointer; }
     .hc-menu-item:hover { background: #f1f5f9; }
@@ -1275,6 +1274,11 @@
     private List<HistoriaRow> _historias = new();
     private HistoriaRow? _historiaSel;
     private Guid? _menuAbierto;
+    // Coordenadas (viewport) del clic que abrio el menu kebab. El menu se
+    // posiciona con position:fixed en estas coords para no depender del scroll
+    // de la lista (antes cambiaba el overflow de la lista y saltaba el scroll).
+    private double _menuX;
+    private double _menuY;
     /// <summary>ProfesionalId del usuario logueado (claim "profesional_id"). Null
     /// si el usuario es admin (no esta vinculado a un profesional). Sirve para:
     /// (1) reanudar la HC abierta del MISMO doctor al pulsar Iniciar; (2) decidir
@@ -2033,7 +2037,15 @@
             StateHasChanged();
         }
     }
-    private void ToggleMenu(Guid id) => _menuAbierto = _menuAbierto == id ? null : id;
+    private void ToggleMenu(Guid id, Microsoft.AspNetCore.Components.Web.MouseEventArgs e)
+    {
+        if (_menuAbierto == id) { _menuAbierto = null; return; }
+        _menuAbierto = id;
+        // Anclamos el menu al punto del clic (el kebab esta a la derecha de la
+        // tarjeta). translateX(-100%) en el CSS lo abre hacia la izquierda.
+        _menuX = e.ClientX;
+        _menuY = e.ClientY;
+    }
 
     private static Dictionary<string, string?> DeserializeValores(string? json)
     {

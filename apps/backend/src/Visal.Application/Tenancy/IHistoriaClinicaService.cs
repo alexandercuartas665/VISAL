@@ -46,6 +46,13 @@ public sealed record HistoriaClinicaDetailDto(
     string? RipsCausaExternaNombre = null);
 
 /// <summary>
+/// Opcion del filtro "Asignacion" en el modulo de Historias: una atencion del
+/// paciente que tiene HC ligadas. La etiqueta combina servicio + fecha + id corto
+/// para que el usuario distinga cada atencion.
+/// </summary>
+public sealed record AsignacionHistoriaOpcionDto(Guid AsignacionId, string Etiqueta, DateOnly Fecha);
+
+/// <summary>
 /// Una HC de EVOLUCION (sesion 2..N de una terapia) vinculada a la HC de la
 /// primera sesion, junto con su numero de sesion global. Se usa para imprimir,
 /// tras el documento de la primera sesion, todas las evoluciones consecuentes.
@@ -80,12 +87,21 @@ public sealed record CrearHistoriaRequest(
 
 public interface IHistoriaClinicaService
 {
-    /// <summary>Historias del paciente filtradas opcionalmente por rango de fechas y formato.</summary>
+    /// <summary>Historias del paciente filtradas opcionalmente por rango de fechas,
+    /// formato y/o asignacion (atencion). Cuando <paramref name="asignacionId"/> llega,
+    /// solo devuelve las HC ligadas (via el pivote sesion-HC) a esa asignacion.</summary>
     Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
         DateOnly? desde = null, DateOnly? hasta = null,
         Guid? formDefinitionId = null,
+        Guid? asignacionId = null,
         CancellationToken ct = default);
+
+    /// <summary>Asignaciones (atenciones) del paciente que tienen al menos una HC
+    /// ligada, para poblar el filtro "Asignacion" del modulo de Historias. Cada
+    /// opcion trae una etiqueta legible (servicio + fecha + id corto).</summary>
+    Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
+        Guid pacienteId, CancellationToken ct = default);
 
     /// <summary>Trae la historia completa con su schema y valores.</summary>
     Task<HistoriaClinicaDetailDto?> GetAsync(Guid id, CancellationToken ct = default);

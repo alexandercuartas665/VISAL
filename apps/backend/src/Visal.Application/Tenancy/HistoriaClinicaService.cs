@@ -22,10 +22,25 @@ public sealed class HistoriaClinicaService(
         Guid pacienteId,
         DateOnly? desde = null, DateOnly? hasta = null,
         Guid? formDefinitionId = null,
+        Guid? asignacionId = null,
         CancellationToken ct = default)
     {
         var q = db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId);
+
+        // Filtro por asignacion (atencion): solo HC ligadas a alguna sesion de esa
+        // asignacion, via el pivote sesion-HC -> turno -> asignacion. Se aplica como
+        // subconsulta para no traer todo y filtrar en memoria.
+        if (asignacionId is Guid aid)
+        {
+            var hcIdsDeAsig =
+                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                where t.AsignacionId == aid
+                select p.HistoriaClinicaId;
+            q = q.Where(h => hcIdsDeAsig.Contains(h.Id));
+        }
 
         if (desde is DateOnly d)
         {
@@ -205,6 +220,39 @@ public sealed class HistoriaClinicaService(
             result.Add(new HistoriaEvolucionLigadaDto(i + 2, ordenadas[i]));
         }
         return result;
+    }
+
+    public async Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
+        Guid pacienteId, CancellationToken ct = default)
+    {
+        // Asignaciones (atenciones) que tienen al menos una HC del paciente,
+        // via el pivote sesion-HC -> turno -> asignacion.
+        var asigIds = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            where h.PacienteId == pacienteId
+            select t.AsignacionId)
+            .Distinct()
+            .ToListAsync(ct);
+        if (asigIds.Count == 0)
+        {
+            return Array.Empty<AsignacionHistoriaOpcionDto>();
+        }
+
+        var asigs = await db.Asignaciones.AsNoTracking()
+            .Where(a => asigIds.Contains(a.Id))
+            .Select(a => new { a.Id, a.NombreServicio, a.FechaInicio })
+            .ToListAsync(ct);
+
+        return asigs
+            .OrderByDescending(a => a.FechaInicio)
+            .Select(a => new AsignacionHistoriaOpcionDto(
+                a.Id,
+                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({a.Id.ToString()[..8].ToUpperInvariant()})",
+                a.FechaInicio))
+            .ToList();
     }
 
     public async Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default)

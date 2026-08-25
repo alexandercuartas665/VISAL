@@ -137,6 +137,19 @@
                         }
                     </select>
                 </div>
+                @if (_asignacionesDelPaciente.Count > 0)
+                {
+                    <div class="ase-f ase-f-wide">
+                        <label>Asignacion / atencion <small class="text-muted">(opcional - filtro)</small></label>
+                        <select class="form-select form-select-sm" @bind="_filAsignacion">
+                            <option value="">Todas las atenciones</option>
+                            @foreach (var a in _asignacionesDelPaciente)
+                            {
+                                <option value="@a.AsignacionId">@a.Etiqueta</option>
+                            }
+                        </select>
+                    </div>
+                }
                 <div class="ase-f ase-f-wide">
                     <button class="btn btn-outline-primary btn-sm" @onclick="MostrarHistorias">Mostrar historias</button>
                 </div>
@@ -1115,6 +1128,11 @@
     private DateOnly? _filFechaIni;
     private DateOnly? _filFechaFin;
     private string _filFormato = "";
+    // Filtro por asignacion (atencion): guid seleccionado en el dropdown. Vacio =
+    // todas las atenciones. Sirve para ver solo las historias de UNA atencion
+    // (util en terapias: 1ra sesion + sus evoluciones).
+    private string _filAsignacion = "";
+    private List<AsignacionHistoriaOpcionDto> _asignacionesDelPaciente = new();
     // Formato forzado por el servicio asignado (viene de Asignacion.FormatoHistoria
     // resuelto a su FormDefinition). Cuando esta seteado, IniciarHistoria usa este
     // formato y el dropdown queda solo como filtro de busqueda.
@@ -1623,7 +1641,8 @@
     {
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
         Guid? formId = Guid.TryParse(_filFormato, out var fid) ? fid : null;
-        var rows = await HcSvc.ListarPorPacienteAsync(p.Id, _filFechaIni, _filFechaFin, formId);
+        Guid? asigId = Guid.TryParse(_filAsignacion, out var aid) ? aid : null;
+        var rows = await HcSvc.ListarPorPacienteAsync(p.Id, _filFechaIni, _filFechaFin, formId, asigId);
         _historias = rows.Select(r => new HistoriaRow
         {
             Id = r.Id,
@@ -1644,13 +1663,16 @@
     /// todo el historial y no colapsa al aplicar un filtro.</summary>
     private async Task CargarFormatosDelPacienteAsync()
     {
-        if (PacienteActivo is not PacienteAsignacionDto p) { _formatosDelPaciente = new(); return; }
+        if (PacienteActivo is not PacienteAsignacionDto p) { _formatosDelPaciente = new(); _asignacionesDelPaciente = new(); return; }
         var rows = await RetryAsync(() => HcSvc.ListarPorPacienteAsync(p.Id, null, null, null));
         _formatosDelPaciente = rows
             .GroupBy(r => r.FormDefinitionId)
             .Select(g => (Id: g.Key, Codigo: g.First().FormatoCodigo, Nombre: g.First().FormatoNombre))
             .OrderBy(f => f.Codigo, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        // Opciones del filtro por asignacion (atencion). Solo atenciones con HC.
+        try { _asignacionesDelPaciente = (await HcSvc.ListarAsignacionesConHistoriaAsync(p.Id)).ToList(); }
+        catch { _asignacionesDelPaciente = new(); }
     }
 
     /// <summary>Lee el claim "profesional_id" del usuario logueado, una sola

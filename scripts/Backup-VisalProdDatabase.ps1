@@ -5,7 +5,7 @@
     D:\Backups\Produccion\Visal, con retencion por dias.
 
 .DESCRIPTION
-    - SSH al server prod (root@10.0.0.3 con la llave id_ed25519_visal).
+    - SSH al server prod (root@10.0.0.4 con la llave id_ed25519_visal_test).
     - Ejecuta `docker exec visal-postgres-prod pg_dumpall -U <USER>` dentro
       del servidor y comprime el stream con gzip antes de bajarlo.
     - Guarda el .sql.gz en D:\Backups\Produccion\Visal\{yyyy-MM-dd_HHmmss}\.
@@ -15,17 +15,19 @@
 
 .NOTES
     Se ejecuta como el usuario que corre la tarea programada; ese usuario
-    necesita tener la llave privada en %USERPROFILE%\.ssh\id_ed25519_visal
-    y el host key de 10.0.0.3 aceptado en known_hosts (basta con haber
-    hecho un `ssh root@10.0.0.3` interactivo una vez).
+    necesita tener la llave privada en %USERPROFILE%\.ssh\id_ed25519_visal_test
+    y el host key de 10.0.0.4 aceptado en known_hosts (basta con haber
+    hecho un `ssh root@10.0.0.4` interactivo una vez).
 #>
 
 [CmdletBinding()]
 param(
     [string]$BackupRoot     = "D:\Backups\Produccion\Visal",
-    [string]$RemoteHost     = "10.0.0.3",
+    # PRODUCCION real = 10.0.0.4 con la llave id_ed25519_visal_test. (Antes apuntaba
+    # a 10.0.0.3, que es PRUEBAS: el respaldo "de prod" traia la BD de test.)
+    [string]$RemoteHost     = "10.0.0.4",
     [string]$RemoteUser     = "root",
-    [string]$SshKey         = "$env:USERPROFILE\.ssh\id_ed25519_visal",
+    [string]$SshKey         = "$env:USERPROFILE\.ssh\id_ed25519_visal_test",
     [string]$ContainerName  = "visal-postgres-prod",
     [string]$PgUser         = "visal",
     [int]$RetentionDays     = 30

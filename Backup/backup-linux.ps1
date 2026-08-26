@@ -22,7 +22,7 @@
       - Cero cambios en BD, volumenes, contenedores o config
 
 .PARAMETER RemoteHost
-    IP o nombre del server prod. Default: 10.0.0.3 (mismo del deploy).
+    IP o nombre del server prod. Default: 10.0.0.4 (PRODUCCION real).
 
 .PARAMETER RemoteUser
     Usuario SSH del server. Default: root.
@@ -31,14 +31,14 @@
     Carpeta remota del deploy. Default: /opt/visal.
 
 .PARAMETER KeyName
-    Nombre de la llave SSH en ~/.ssh/. Default: id_ed25519_visal.
+    Nombre de la llave SSH en ~/.ssh/. Default: id_ed25519_visal_test.
 
 .PARAMETER DestinationRoot
     Carpeta local para el ZIP. Default: $env:TEMP\visal-backups.
     Cuando conectes el disco D, pasar "D:\Backups\Visal".
 
 .PARAMETER EnvFile
-    .env local a cifrar dentro del ZIP. Default: <repo>\deploy\docker-prod\.env.
+    .env local a cifrar dentro del ZIP. Default: <repo>\deploy\docker-prod2\.env.
 
 .PARAMETER EncryptionPassword
     SecureString con la clave para cifrar el .env. Si se omite, se pide por prompt.
@@ -48,7 +48,7 @@
 
 .EXAMPLE
     .\backup-linux.ps1
-    # Usa defaults del deploy: root@10.0.0.3, /opt/visal, id_ed25519_visal
+    # Usa defaults de prod: root@10.0.0.4, /opt/visal, id_ed25519_visal_test
     # ZIP a %TEMP%\visal-backups\
 
 .EXAMPLE
@@ -56,10 +56,12 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$RemoteHost = '10.0.0.3',
+    # PRODUCCION real = 10.0.0.4 con la llave id_ed25519_visal_test. (Antes apuntaba
+    # a 10.0.0.3, que es PRUEBAS: el backup "de prod" bajaba la BD de test.)
+    [string]$RemoteHost = '10.0.0.4',
     [string]$RemoteUser = 'root',
     [string]$RemoteDir = '/opt/visal',
-    [string]$KeyName = 'id_ed25519_visal',
+    [string]$KeyName = 'id_ed25519_visal_test',
     [string]$DestinationRoot = "$env:TEMP\visal-backups",
     [string]$EnvFile,
     [securestring]$EncryptionPassword,
@@ -70,7 +72,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-if (-not $EnvFile) { $EnvFile = Join-Path $RepoRoot 'deploy\docker-prod\.env' }
+if (-not $EnvFile) { $EnvFile = Join-Path $RepoRoot 'deploy\docker-prod2\.env' }
 
 . (Join-Path $PSScriptRoot 'lib\Crypto.ps1')
 

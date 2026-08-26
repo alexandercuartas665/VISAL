@@ -346,9 +346,12 @@ else
     [Parameter] public EventCallback<KeyValuePair<string, string?>> OnValueChanged { get; set; }
 
     /// <summary>True si el nodo concreto debe renderizarse readonly: porque el visor
-    /// entero esta en modo lectura, o porque su Name esta en ReadOnlyKeys.</summary>
+    /// entero esta en modo lectura, o porque su Name esta en ReadOnlyKeys (prefill).
+    /// Excepcion: un campo marcado EditableConPrefill NO se bloquea por prefill (se
+    /// prellena pero se puede editar); el bloqueo por HC cerrada/lectura (ReadOnly)
+    /// sigue mandando igual.</summary>
     private bool IsNodeReadOnly(FormNode n) =>
-        ReadOnly || (!string.IsNullOrEmpty(n.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(n.Name));
+        ReadOnly || (!n.EditableConPrefill && !string.IsNullOrEmpty(n.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(n.Name));
 
     /// <summary>El campo del encabezado es de fecha: se le da control datetime-local.</summary>
     private static bool EsCampoFecha(string? label)
@@ -757,10 +760,12 @@ else
             }
             else
             {
-                var auto = !string.IsNullOrEmpty(node.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(node.Name);
+                var esPrefill = !string.IsNullOrEmpty(node.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(node.Name);
+                var auto = esPrefill && !node.EditableConPrefill;
                 <label class="fv-lbl">
                     @node.Label @(node.Required ? "*" : "")
                     @if (auto) { <span class="fv-auto-badge" title="Este campo se llena automaticamente desde la HC. No se edita manualmente.">auto</span> }
+                    else if (esPrefill && node.EditableConPrefill) { <span class="fv-auto-badge" style="background:#e0f2fe;color:#075985;" title="Se prellena automaticamente pero puedes editarlo.">prellenado - editable</span> }
                 </label>
                 @RenderInput(node)
             }

@@ -673,6 +673,17 @@
 
                 @RenderVisibleWhenPanel(_selected)
 
+                @* Editable aunque se prellene: por defecto todo campo destino de un
+                   prefill (paciente/sistema/firma/historia medica) queda bloqueado
+                   ("auto"). Con este flag se prellena pero el profesional lo edita. *@
+                @if (!_selected.IsSection && !_selected.IsText && !_selected.IsTable && _selected.FieldType != "calculated")
+                {
+                    <label class="fb-check" title="Si el campo es destino de un prefill (paciente, sistema, firma o historia medica), normalmente queda bloqueado. Marca esto para que se prellene pero se pueda editar a mano.">
+                        <input type="checkbox" @bind="_selected.EditableConPrefill" />
+                        Editable aunque se prellene (prefill)
+                    </label>
+                }
+
                 @* Formula reactiva de plantilla: pega valores de OTROS campos del
                    mismo formulario dentro de este. Solo aplica a fields (no a
                    secciones ni tablas). El editor lo activa poniendo un template

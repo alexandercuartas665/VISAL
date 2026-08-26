@@ -115,6 +115,16 @@ public sealed class FormNode
     [JsonPropertyName("defaultValue")]
     public string? DefaultValue { get; set; }
 
+    /// <summary>
+    /// Si true, el campo se puede EDITAR a mano aunque sea destino de un prefill
+    /// (prellenado desde paciente, sistema, firma o historia medica). Por defecto
+    /// (false) todo campo prellenado queda bloqueado ("auto"). Con este flag el
+    /// prefill sigue rellenando el valor inicial, pero el profesional lo puede
+    /// sobrescribir. No afecta el bloqueo por HC cerrada/lectura (ese manda igual).
+    /// </summary>
+    [JsonPropertyName("editableConPrefill")]
+    public bool EditableConPrefill { get; set; }
+
     // ── Calculado ──
     [JsonPropertyName("formula")]
     public string? Formula { get; set; }

@@ -70,6 +70,12 @@ deploy/docker-prod/dumps/*.dump
 deploy/docker-prod/dumps/*.sql
 deploy/docker-prod/dumps/*.sql.gz
 deploy/docker-prod/backups/
+deploy/docker-prod2/.env
+deploy/docker-prod2/dumps/
+deploy/docker-prod2/backups/
+# Dumps de BD descargados a la PC (prod/pruebas) - datos clinicos sensibles, nunca al repo
+prod-dump/
+*.dump
 
 # Archivos subidos en tiempo de ejecucion (logos, avatares, media de chat/agentes)
 apps/backend/src/Visal.SuperAdmin/wwwroot/uploads/

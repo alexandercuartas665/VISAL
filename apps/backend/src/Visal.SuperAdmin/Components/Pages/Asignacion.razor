@@ -33,9 +33,23 @@
             @onclick='() => SwitchTab("listado")'>Listado</button>
 </div>
 
-@if (_error is not null) { <div class="ase-alert">@_error</div> }
-@* _ok se renderiza dentro de la columna 3, antes de "Datos del servicio a agregar",
-   para dar feedback contextual al lado de la accion. *@
+@* Errores en un MODAL centrado en vez de un banner arriba: la pagina es larga y
+   el boton Guardar queda muy abajo, asi que el aviso del tope no se veia. El
+   modal aparece sobre todo y se cierra con el boton o el fondo. (El _ok exitoso
+   sigue contextual en la columna 3, al lado de la accion.) *@
+@if (_error is not null)
+{
+    <div style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2000;" @onclick="CerrarMensaje"></div>
+    <div style="position:fixed;top:18%;left:50%;transform:translateX(-50%);z-index:2001;max-width:560px;width:92%;background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(15,23,42,.35);border-top:5px solid #dc2626;padding:20px 22px;" role="alertdialog">
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+            <div style="font-size:26px;line-height:1;color:#dc2626;">@(new MarkupString("&#9888;"))</div>
+            <div style="flex:1;font-size:14px;color:#0f172a;white-space:pre-wrap;">@_error</div>
+        </div>
+        <div style="text-align:right;margin-top:16px;">
+            <button class="btn btn-sm btn-danger" @onclick="CerrarMensaje">Cerrar</button>
+        </div>
+    </div>
+}
 
 @if (_tab == "wizard")
 {
@@ -159,7 +173,6 @@
                                 <th>Codigos</th>
                                 <th>Descripcion</th>
                                 <th>Clase</th>
-                                <th class="text-end">Tarifa</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -201,7 +214,6 @@
                                             }
                                         </div>
                                     </td>
-                                    <td class="text-end">@(s.Tarifa is decimal t ? $"$ {t:N0}" : "")</td>
                                 </tr>
                             }
                         </tbody>
@@ -1091,6 +1103,9 @@ else
     private string _ripsViaCod = "";
 
     private bool _busy;
+
+    /// <summary>Cierra el modal de error (boton Cerrar o click en el fondo).</summary>
+    private void CerrarMensaje() => _error = null;
     private string? _error, _ok;
 
     // Modal BUSCAR PACIENTES.
@@ -1642,28 +1657,11 @@ else
                 return;
             }
 
-            // Paquete: exigimos que TODOS los servicios del paquete esten
-            // representados en el carrito (con Cantidad >= 0). El coordinador
-            // debe agregar cada servicio del paquete y marcar con Cantidad=0
-            // los que no aplican. Si faltan servicios, bloqueamos.
-            foreach (var g in _carrito.Where(c => c.PaqueteCodigo is not null)
-                                       .GroupBy(c => c.PaqueteCodigo!))
-            {
-                if (!_paqueteServiciosCache.TryGetValue(g.Key, out var esperados)) { continue; }
-                var enCarrito = g.Select(c => c.Servicio.Codigo)
-                                 .Where(c => !string.IsNullOrWhiteSpace(c))
-                                 .Select(c => c!)
-                                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var faltantes = esperados.Where(c => !enCarrito.Contains(c)).ToList();
-                if (faltantes.Count > 0)
-                {
-                    var muestra = string.Join(", ", faltantes.Take(5));
-                    var extra = faltantes.Count > 5 ? $" y {faltantes.Count - 5} mas" : "";
-                    _error = $"Paquete {g.Key}: agrega TODOS los servicios del paquete antes de guardar. " +
-                             $"Marca con Cantidad=0 los que no apliquen. Faltantes: {muestra}{extra}.";
-                    return;
-                }
-            }
+            // Paquete: NO se exige agregar TODOS los servicios del paquete. El
+            // coordinador puede guardar solo los servicios que apliquen (incluso
+            // uno solo). Antes habia un control que bloqueaba si faltaba algun
+            // servicio del paquete; se quito a pedido para permitir asignaciones
+            // parciales de paquete.
 
             // Re-anclar el paquete_valor_pactado al PRIMER chip con Cantidad>0
             // de cada instancia (si el chip que originalmente lo llevaba quedo

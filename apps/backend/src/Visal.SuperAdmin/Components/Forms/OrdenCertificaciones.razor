@@ -14,9 +14,10 @@
         <span class="oc-bar-count">@_items.Count item(s)</span>
     </div>
     <div class="oc-bar-right">
-        <button class="btn btn-outline-primary btn-sm" title="Imprimir certificacion"
-                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
-                @onclick="ImprimirAsync">&#128424; Imprimir</button>
+        @* La impresion se hace desde el boton "Imprimir" general de la historia (arriba). *@
+        <span style="font-size:12px;color:var(--muted-foreground);">
+            Para imprimir usa el bot&oacute;n <b>&#128424; Imprimir</b> de la historia (arriba).
+        </span>
     </div>
 </div>
 

@@ -777,7 +777,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.ServicioContrato).WithMany().HasForeignKey(x => x.ServicioContratoId)
                 .OnDelete(DeleteBehavior.SetNull);
-            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.NumeroOrden, x.Orden });
         });
 
         modelBuilder.Entity<HistoriaClinicaIncapacidad>(b =>

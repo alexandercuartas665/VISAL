@@ -221,39 +221,44 @@ else
         }
 
         @* ============ ORDEN A SERVICIOS ============ *@
-        @if (_incluirSrv && _srv.Count > 0)
+        @* Cada orden (grupo NumeroOrden) es un documento separado con su propio QR. *@
+        @if (_incluirSrv && _ordenesSrv.Count > 0)
         {
-            <div class="pack-doc">
-                @RenderHeader(BestHdr(HdrSrv, "Orden a Servicios"), "Orden a Servicios", "SRV",
-                    ConsecutivoHc() + "-SRV",
-                    FechaLineaHc())
-                @{ _pieTipo = "SRV"; }
-                <div class="pack-band">Detalle de la orden</div>
-                <table class="pack-table">
-                    <thead>
-                        <tr>
-                            <th style="width:40px">#</th>
-                            <th style="width:110px">Cod. Servicio</th>
-                            <th>Descripcion</th>
-                            <th style="width:80px">Cantidad</th>
-                            <th>Observaciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var s in _srv)
-                        {
+            @foreach (var os in _ordenesSrv)
+            {
+                var _subSrv = _ordenesSrv.Count > 1 ? $"Orden {os.NumeroOrden} de {_ordenesSrv.Count}" : null;
+                var _tipoSrv = _ordenesSrv.Count > 1 ? $"SRV#{os.NumeroOrden}" : "SRV";
+                <div class="pack-doc">
+                    @RenderHeader(BestHdr(HdrSrv, "Orden a Servicios"), "Orden a Servicios", "SRV",
+                        ConsecutivoHc() + "-SRV" + (_ordenesSrv.Count > 1 ? "-" + os.NumeroOrden : ""),
+                        FechaLineaHc(), _subSrv)
+                    <div class="pack-band">Detalle de la orden</div>
+                    <table class="pack-table">
+                        <thead>
                             <tr>
-                                <td class="num">@s.Orden</td>
-                                <td class="mono">@(s.CodigoServicio ?? "-")</td>
-                                <td><b>@s.Descripcion</b></td>
-                                <td class="num">@(string.IsNullOrWhiteSpace(s.Cantidad) ? "-" : s.Cantidad)</td>
-                                <td>@(s.Observaciones ?? "")</td>
+                                <th style="width:40px">#</th>
+                                <th style="width:110px">Cod. Servicio</th>
+                                <th>Descripcion</th>
+                                <th style="width:80px">Cantidad</th>
+                                <th>Observaciones</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
-                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_pieTipo)" Codigo="@PieCod(_pieTipo)" />
-            </div>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in os.Items)
+                            {
+                                <tr>
+                                    <td class="num">@s.Orden</td>
+                                    <td class="mono">@(s.CodigoServicio ?? "-")</td>
+                                    <td><b>@s.Descripcion</b></td>
+                                    <td class="num">@(string.IsNullOrWhiteSpace(s.Cantidad) ? "-" : s.Cantidad)</td>
+                                    <td>@(s.Observaciones ?? "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr(_tipoSrv)" Codigo="@PieCod(_tipoSrv)" />
+                </div>
+            }
         }
 
         @* ============ REMISIONES ============ *@
@@ -701,6 +706,8 @@ else
     private List<OrdenMedRender> _ordenesMed = new();
     // Una entrada por cada orden (grupo) de insumos, para imprimirlas por separado.
     private List<(int NumeroOrden, List<InsumoItemDto> Items)> _ordenesIns = new();
+    // Idem para las ordenes a servicios (grupo NumeroOrden) — cada una su QR.
+    private List<(int NumeroOrden, List<OrdenServicioItemDto> Items)> _ordenesSrv = new();
     // Sufijo " — Orden N" solo cuando hay mas de una orden del tipo (evita ruido cuando hay una sola).
     private static string OrdSufijo(int numeroOrden, int totalOrdenes)
         => totalOrdenes > 1 ? $" - Orden {numeroOrden}" : "";
@@ -837,6 +844,12 @@ else
             _fdSrv = await FormsSvc.GetActivoByCodigoSecundarioAsync("ORDEN_SERVICIOS");
             if (_fdSrv is not null) { try { _schSrv = JsonSerializer.Deserialize<FormSchema>(_fdSrv.SchemaJson) ?? new(); } catch { } }
             _srv = (await SrvSvc.ListarPorHistoriaAsync(HcId)).ToList();
+            // Una entrada por CADA orden (grupo NumeroOrden) de servicios.
+            _ordenesSrv = _srv
+                .GroupBy(s => s.NumeroOrden)
+                .OrderBy(g => g.Key)
+                .Select(g => (g.Key, g.OrderBy(s => s.Orden).ToList()))
+                .ToList();
         }
         if (_incluirInc)
         {
@@ -1055,11 +1068,7 @@ else
         if (_hc is null || _paciente is null) { return; }
 
         var tipos = new List<(string Tipo, List<OrdenItemPublicoDto> Items)>();
-        if (_incluirSrv && _srv.Count > 0)
-        {
-            tipos.Add(("SRV", _srv.Select(s => new OrdenItemPublicoDto(
-                s.Descripcion ?? "", s.CodigoServicio, s.Cantidad, null, null, s.Observaciones)).ToList()));
-        }
+        // SRV se maneja aparte (abajo) porque cada orden (NumeroOrden) emite/lee su propio QR.
         if (_incluirRem && _rem.Count > 0)
         {
             tipos.Add(("REM", _rem.Select(r => new OrdenItemPublicoDto(
@@ -1142,6 +1151,35 @@ else
                     }
                 }
                 catch { /* si una orden de insumos falla, las demas se imprimen igual */ }
+            }
+        }
+
+        // Servicios: una emision/QR por CADA orden (grupo NumeroOrden). La clave del
+        // diccionario coincide con la del render: "SRV" si hay una sola orden,
+        // "SRV#{n}" si hay varias.
+        if (_incluirSrv)
+        {
+            foreach (var (numeroOrden, srvItems) in _ordenesSrv)
+            {
+                if (srvItems.Count == 0) { continue; }
+                var key = _ordenesSrv.Count > 1 ? $"SRV#{numeroOrden}" : "SRV";
+                var items = srvItems.Select(s => new OrdenItemPublicoDto(
+                    s.Descripcion ?? "", s.CodigoServicio, s.Cantidad, null, null, s.Observaciones)).ToList();
+                try
+                {
+                    var em = await PubSvc.ObtenerEmisionActivaAsync(HcId, "SRV", numeroOrden);
+                    if (em is null && _autoEmitir && items.Count > 0)
+                    {
+                        await EmitirOrdenTipoAsync("SRV", items, numeroOrden);
+                        em = await PubSvc.ObtenerEmisionActivaAsync(HcId, "SRV", numeroOrden);
+                    }
+                    if (em is not null)
+                    {
+                        var qurl = $"{QrBaseUrl()}/verificar-orden/{Uri.EscapeDataString(em.Codigo)}";
+                        _emisionesOrden[key] = (em.Codigo, Qr.GenerarPngDataUri(qurl, 150));
+                    }
+                }
+                catch { /* si una orden de servicios falla, las demas se imprimen igual */ }
             }
         }
     }

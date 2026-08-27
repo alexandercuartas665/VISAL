@@ -72,7 +72,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .OrderBy(o => o.Orden)
             .Select(o => new OrdenServicioItemDto(
                 o.Id, o.HistoriaClinicaId, o.ServicioContratoId, o.CodigoServicio,
-                o.Descripcion, o.Cantidad, o.Observaciones, o.Orden))
+                o.Descripcion, o.Cantidad, o.Observaciones, o.Orden, o.NumeroOrden))
             .ToListAsync(ct);
 
         var ins = await db.HistoriaClinicaInsumos

@@ -152,11 +152,12 @@ public sealed class OrdenServicioService(
     {
         return await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
-            .OrderBy(x => x.Orden)
+            .OrderBy(x => x.NumeroOrden)
+            .ThenBy(x => x.Orden)
             .ThenBy(x => x.CreatedAt)
             .Select(x => new OrdenServicioItemDto(
                 x.Id, x.HistoriaClinicaId, x.ServicioContratoId,
-                x.CodigoServicio, x.Descripcion, x.Cantidad, x.Observaciones, x.Orden))
+                x.CodigoServicio, x.Descripcion, x.Cantidad, x.Observaciones, x.Orden, x.NumeroOrden))
             .ToListAsync(ct);
     }
 
@@ -170,15 +171,18 @@ public sealed class OrdenServicioService(
         }
         await db.EnsureAbiertaAsync(historiaId, ct);
 
-        // Calcular siguiente orden en la historia.
+        var numeroOrden = req.NumeroOrden <= 0 ? 1 : req.NumeroOrden;
+
+        // Siguiente Orden DENTRO de esta orden (grupo NumeroOrden), no global.
         var siguiente = 1 + await db.HistoriaClinicaOrdenesServicio
-            .Where(x => x.HistoriaClinicaId == historiaId)
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
             .Select(x => (int?)x.Orden).MaxAsync(ct) ?? 1;
 
         var entity = new HistoriaClinicaOrdenServicio
         {
             TenantId = tid,
             HistoriaClinicaId = historiaId,
+            NumeroOrden = numeroOrden,
             // Servicios que vienen del catalogo EXTERNO (CUPS) llegan con
             // ServicioContratoId == Guid.Empty desde el frontend. Los normalizamos
             // a null para que no violen el FK a servicios_contrato.
@@ -190,13 +194,14 @@ public sealed class OrdenServicioService(
             Orden = siguiente
         };
         db.HistoriaClinicaOrdenesServicio.Add(entity);
+        await RevocarEmisionSrvActivaAsync(historiaId, numeroOrden, actor, ct);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(historiaId, ct);
 
         return new OrdenServicioItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.ServicioContratoId,
             entity.CodigoServicio, entity.Descripcion, entity.Cantidad,
-            entity.Observaciones, entity.Orden);
+            entity.Observaciones, entity.Orden, entity.NumeroOrden);
     }
 
     public async Task<bool> ActualizarAsync(
@@ -207,6 +212,7 @@ public sealed class OrdenServicioService(
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Observaciones = Trim(req.Observaciones);
+        await RevocarEmisionSrvActivaAsync(entity.HistoriaClinicaId, entity.NumeroOrden, actor, ct);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
@@ -218,6 +224,7 @@ public sealed class OrdenServicioService(
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
         await db.EnsureAbiertaAsync(hcId, ct);
+        await RevocarEmisionSrvActivaAsync(hcId, entity.NumeroOrden, actor, ct);
         db.HistoriaClinicaOrdenesServicio.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
@@ -258,11 +265,27 @@ public sealed class OrdenServicioService(
             .ToList();
     }
 
+    public async Task<IReadOnlyList<ServicioDePaqueteDto>> ListarServiciosDePaqueteAsync(
+        Guid pacienteId, Guid paqueteId, CancellationToken ct = default)
+    {
+        var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
+        if (contratoIds.Count == 0) { return Array.Empty<ServicioDePaqueteDto>(); }
+
+        return await db.ServiciosContrato.AsNoTracking()
+            .Where(s => contratoIds.Contains(s.ContratoId) && s.PaqueteId == paqueteId)
+            .OrderBy(s => s.Descripcion)
+            .Select(s => new ServicioDePaqueteDto(
+                s.Id, s.CodigoServicio,
+                s.Descripcion ?? "(sin descripcion)"))
+            .ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<OrdenServicioItemDto>> AgregarPaqueteAsync(
-        Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, CancellationToken ct = default)
+        Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, int numeroOrden = 1, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         await db.EnsureAbiertaAsync(historiaId, ct);
+        if (numeroOrden <= 0) { numeroOrden = 1; }
 
         var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
         if (contratoIds.Count == 0) { return Array.Empty<OrdenServicioItemDto>(); }
@@ -274,15 +297,15 @@ public sealed class OrdenServicioService(
             .ToListAsync(ct);
         if (servicios.Count == 0) { return Array.Empty<OrdenServicioItemDto>(); }
 
-        // ServicioContratoId ya presentes en la orden -> no duplicar.
+        // ServicioContratoId ya presentes en ESTA orden -> no duplicar.
         var yaEnOrden = (await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == historiaId && x.ServicioContratoId != null)
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden && x.ServicioContratoId != null)
             .Select(x => x.ServicioContratoId)
             .ToListAsync(ct)).Where(v => v.HasValue).Select(v => v!.Value);
         var yaSet = new HashSet<Guid>(yaEnOrden);
 
         var siguiente = 1 + (await db.HistoriaClinicaOrdenesServicio
-            .Where(x => x.HistoriaClinicaId == historiaId)
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
             .Select(x => (int?)x.Orden).MaxAsync(ct) ?? 0);
 
         var nuevos = new List<HistoriaClinicaOrdenServicio>();
@@ -293,6 +316,7 @@ public sealed class OrdenServicioService(
             {
                 TenantId = tid,
                 HistoriaClinicaId = historiaId,
+                NumeroOrden = numeroOrden,
                 ServicioContratoId = s.Id,
                 CodigoServicio = Trim(s.CodigoServicio),
                 Descripcion = string.IsNullOrWhiteSpace(s.Descripcion) ? "(sin descripcion)" : s.Descripcion!.Trim(),
@@ -309,7 +333,42 @@ public sealed class OrdenServicioService(
 
         return nuevos.Select(e => new OrdenServicioItemDto(
             e.Id, e.HistoriaClinicaId, e.ServicioContratoId,
-            e.CodigoServicio, e.Descripcion, e.Cantidad, e.Observaciones, e.Orden)).ToList();
+            e.CodigoServicio, e.Descripcion, e.Cantidad, e.Observaciones, e.Orden, e.NumeroOrden)).ToList();
+    }
+
+    public async Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default)
+    {
+        if (numeroOrden <= 0) { numeroOrden = 1; }
+        await db.EnsureAbiertaAsync(historiaId, ct);
+        var items = await db.HistoriaClinicaOrdenesServicio
+            .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
+            .ToListAsync(ct);
+        if (items.Count == 0) { return false; }
+        await RevocarEmisionSrvActivaAsync(historiaId, numeroOrden, actor, ct);
+        db.HistoriaClinicaOrdenesServicio.RemoveRange(items);
+        await db.SaveChangesAsync(ct);
+        await prefill.ActualizarValoresAsync(historiaId, ct);
+        return true;
+    }
+
+    /// <summary>Al editar los servicios de una orden de una HC abierta, la emision
+    /// publica (QR) de esa orden deja de ser fiel. La revocamos (baja logica): la
+    /// impresion previa queda anulada y la proxima re-emite un QR nuevo. Mismo
+    /// patron que medicamentos. No hace SaveChanges (lo hace el caller).</summary>
+    private async Task RevocarEmisionSrvActivaAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct)
+    {
+        var emisiones = await db.OrdenesMedicamentosPublicas
+            .Where(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "SRV"
+                        && o.NumeroOrden == numeroOrden && o.RevocadaAt == null)
+            .ToListAsync(ct);
+        if (emisiones.Count == 0) { return; }
+        var now = DateTimeOffset.UtcNow;
+        foreach (var e in emisiones)
+        {
+            e.RevocadaAt = now;
+            e.RevocadaPor = actor == Guid.Empty ? (Guid?)null : actor;
+            e.RevocacionMotivo = "Revocada automaticamente al editar los servicios de la HC abierta.";
+        }
     }
 
     private static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

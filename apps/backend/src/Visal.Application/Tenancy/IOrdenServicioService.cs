@@ -28,14 +28,19 @@ public sealed record OrdenServicioItemDto(
     string Descripcion,
     string? Cantidad,
     string? Observaciones,
-    int Orden);
+    int Orden,
+    // Numero de la orden (grupo) dentro de la HC. 1..N. Cada orden se imprime y
+    // emite su QR por separado (igual que medicamentos).
+    int NumeroOrden = 1);
 
 public sealed record AgregarServicioRequest(
     Guid? ServicioContratoId,
     string? CodigoServicio,
     string Descripcion,
     string? Cantidad,
-    string? Observaciones);
+    string? Observaciones,
+    // Orden (grupo) a la que se agrega el servicio. Default 1 (comportamiento previo).
+    int NumeroOrden = 1);
 
 public sealed record ActualizarServicioRequest(
     string? Cantidad,
@@ -49,6 +54,14 @@ public sealed record PaquetePacienteDto(
     string Codigo,
     string Nombre,
     int CantidadServicios);
+
+/// <summary>Un servicio que compone un paquete (dentro de los contratos del
+/// paciente). Sirve para pintar el arbol paquete -> servicios en el modal
+/// "Agregar paquete" y para armar la observacion del registro-paquete.</summary>
+public sealed record ServicioDePaqueteDto(
+    Guid ServicioContratoId,
+    string? Codigo,
+    string Descripcion);
 
 public interface IOrdenServicioService
 {
@@ -65,11 +78,16 @@ public interface IOrdenServicioService
     Task<IReadOnlyList<PaquetePacienteDto>> ListarPaquetesDelPacienteAsync(
         Guid pacienteId, CancellationToken ct = default);
 
+    /// <summary>Servicios que componen un paquete dentro de los contratos del
+    /// paciente. Alimenta el arbol del modal "Agregar paquete".</summary>
+    Task<IReadOnlyList<ServicioDePaqueteDto>> ListarServiciosDePaqueteAsync(
+        Guid pacienteId, Guid paqueteId, CancellationToken ct = default);
+
     /// <summary>Agrega a la orden TODOS los servicios de un paquete que existan en
     /// los contratos del paciente. Omite los que ya estan en la orden. Devuelve las
     /// filas nuevas creadas.</summary>
     Task<IReadOnlyList<OrdenServicioItemDto>> AgregarPaqueteAsync(
-        Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, CancellationToken ct = default);
+        Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, int numeroOrden = 1, CancellationToken ct = default);
 
     /// <summary>Items actuales de la orden a servicios de la historia (ordenados por Orden).</summary>
     Task<IReadOnlyList<OrdenServicioItemDto>> ListarPorHistoriaAsync(
@@ -82,6 +100,10 @@ public interface IOrdenServicioService
         Guid itemId, ActualizarServicioRequest req, Guid actor, CancellationToken ct = default);
 
     Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Elimina TODA una orden (grupo NumeroOrden) con sus servicios y
+    /// revoca su emision publica (QR) si existia. Devuelve false si no habia items.</summary>
+    Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default);
 
     /// <summary>Conteo rapido para el badge en la pestana del modulo.</summary>
     Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default);

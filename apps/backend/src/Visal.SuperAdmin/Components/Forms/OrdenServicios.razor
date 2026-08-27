@@ -13,14 +13,17 @@
 
 <div class="os-bar">
     <div class="os-bar-left">
-        <label>Orden a Servicios Numero:</label>
-        <span class="os-bar-count">@_items.Count item(s)</span>
+        <label>Ordenes a Servicios:</label>
+        <span class="os-bar-count">@OrdenesPresentes().Count orden(es) &middot; @_items.Count item(s)</span>
     </div>
     <div class="os-bar-right">
-        <button class="btn btn-outline-primary btn-sm" title="Imprimir orden"
-                disabled="@(HistoriaClinicaId is null || _items.Count == 0)"
-                @onclick="ImprimirAsync">&#128424; Imprimir</button>
-        <button class="btn btn-outline-secondary btn-sm" disabled>&#128193; Historico</button>
+        @* La impresion se hace SIEMPRE desde el boton "Imprimir" general de la historia
+           (arriba): ahi cada orden a servicios sale como su propio documento con su QR.
+           Aqui no hay boton propio para no duplicar puntos de impresion (igual que
+           Ordenes de Medicamentos). *@
+        <span class="os-print-hint" style="font-size:12px;color:var(--muted-foreground);">
+            Para imprimir usa el bot&oacute;n <b>&#128424; Imprimir</b> de la historia (arriba). Cada orden sale por separado.
+        </span>
     </div>
 </div>
 
@@ -32,17 +35,40 @@
 }
 else
 {
+    @* ---- Selector de ordenes: N ordenes a servicios por HC (igual que medicamentos) ---- *@
+    <div class="os-orders">
+        @foreach (var n in OrdenesPresentes())
+        {
+            var nn = n;
+            <button type="button" class="os-order-chip @(_ordenActual == nn ? "active" : "")"
+                    @onclick="() => _ordenActual = nn">
+                Orden @nn <span class="os-order-cnt">@_items.Count(x => x.NumeroOrden == nn)</span>
+            </button>
+        }
+        <button type="button" class="os-order-new" @onclick="NuevaOrden" title="Crear otra orden a servicios">+ Nueva orden</button>
+        @if (_items.Any(x => x.NumeroOrden == _ordenActual))
+        {
+            <button type="button" class="os-order-del" @onclick="EliminarOrdenActualAsync"
+                    title="Eliminar esta orden con todos sus servicios">&#128465; Eliminar orden @_ordenActual</button>
+        }
+    </div>
+
     <div class="os-card">
         @* ---- Fila de captura: autocompletado + cantidad ---- *@
         <div class="os-row">
             <div class="os-f os-c-10 os-search-wrap">
                 <div class="os-search-head">
                     <label>@(_soloPaquetes ? "Nombre del Paquete" : "Nombre del Servicio")</label>
-                    <label class="os-solo-pkg" title="Buscar solo paquetes de los contratos del paciente">
-                        <input type="checkbox" checked="@_soloPaquetes"
-                               @onchange="e => OnSoloPaquetesChanged((bool)e.Value!)" />
-                        Solo paquetes
-                    </label>
+                    <div class="os-search-head-actions">
+                        <label class="os-solo-pkg" title="Buscar solo paquetes de los contratos del paciente">
+                            <input type="checkbox" checked="@_soloPaquetes"
+                                   @onchange="e => OnSoloPaquetesChanged((bool)e.Value!)" />
+                            Servicios del paquete
+                        </label>
+                        <button class="btn btn-outline-success btn-sm os-pkg-btn" title="Agregar un paquete como un solo registro"
+                                disabled="@(HistoriaClinicaId is null || PacienteId is null)"
+                                @onclick="AbrirPkgModal">&#128230; Agregar paquete</button>
+                    </div>
                 </div>
                 <input class="form-control form-control-sm"
                        placeholder="@(_soloPaquetes ? "Buscar paquete por codigo o nombre..." : "Buscar servicio por descripcion o codigo (min 2 caracteres)...")"
@@ -53,12 +79,17 @@ else
                     @if (_sugerenciasPkg.Count > 0)
                     {
                         <div class="os-suggest">
-                            @foreach (var p in _sugerenciasPkg)
+                            @foreach (var p in SugerenciasPkgVista())
                             {
-                                <button class="os-suggest-item os-suggest-pkg"
+                                var asignado = EsPaqueteAsignado(p.Codigo);
+                                <button class="os-suggest-item os-suggest-pkg @(asignado ? "os-suggest-pkg-asignado" : "")"
                                         @onclick="() => SeleccionarPaqueteAsync(p)">
                                     <div class="os-suggest-nm">
                                         @p.Nombre
+                                        @if (asignado)
+                                        {
+                                            <span class="os-suggest-asignado-tag" title="Paquete con el que llego el paciente">Asignado</span>
+                                        }
                                         <span class="os-suggest-pkg-tag">Paquete</span>
                                     </div>
                                     <div class="os-suggest-meta">
@@ -150,7 +181,7 @@ else
                 <thead>
                     <tr>
                         <th style="width:40px">#</th>
-                        <th style="width:110px">Cod. Servicio</th>
+                        <th style="width:78px">Cod. Servicio</th>
                         <th>Nombre del Servicio</th>
                         <th>Observaciones</th>
                         <th class="text-center" style="width:80px">Cant.</th>
@@ -158,13 +189,14 @@ else
                     </tr>
                 </thead>
                 <tbody>
-                    @if (_items.Count == 0)
+                    @{ var itemsOrden = _items.Where(x => x.NumeroOrden == _ordenActual).ToList(); }
+                    @if (itemsOrden.Count == 0)
                     {
-                        <tr><td colspan="6" class="text-center text-muted os-empty-row">Sin servicios agregados.</td></tr>
+                        <tr><td colspan="6" class="text-center text-muted os-empty-row">Sin servicios en la orden @_ordenActual.</td></tr>
                     }
                     else
                     {
-                        @foreach (var it in _items)
+                        @foreach (var it in itemsOrden)
                         {
                             <tr>
                                 <td class="text-center">@it.Orden</td>
@@ -173,10 +205,10 @@ else
                                     <strong>@it.Descripcion</strong>
                                 </td>
                                 <td>
-                                    <input class="form-control form-control-sm os-inline-input"
-                                           placeholder="Observaciones..."
-                                           value="@it.Observaciones"
-                                           @onchange="@(e => GuardarObservaciones(it, e.Value?.ToString()))" />
+                                    <textarea class="form-control form-control-sm os-inline-obs" rows="2"
+                                              placeholder="Observaciones..."
+                                              value="@it.Observaciones"
+                                              @onchange="@(e => GuardarObservaciones(it, e.Value?.ToString()))"></textarea>
                                 </td>
                                 <td>
                                     <input class="form-control form-control-sm os-inline-input text-center"
@@ -197,11 +229,117 @@ else
     </div>
 }
 
+@* ---- Modal "Agregar paquete": el paquete entra como UN solo registro-resumen ---- *@
+@if (_showPkgModal)
+{
+    <div class="os-modal-backdrop" @onclick="CerrarPkgModal">
+        <div class="os-modal" @onclick:stopPropagation="true">
+            <div class="os-modal-head">
+                <span>Agregar paquete a la orden @_ordenActual</span>
+                <button type="button" class="os-modal-x" @onclick="CerrarPkgModal" title="Cerrar">&times;</button>
+            </div>
+            <div class="os-modal-body">
+                @if (_paquetes.Count == 0)
+                {
+                    <div class="os-modal-empty">Este paciente no tiene paquetes en sus contratos.</div>
+                }
+                else
+                {
+                    <div class="os-modal-hint">
+                        Elige un paquete, marca los servicios que incluye y presiona "Cargar".
+                        El paquete se agrega como un unico registro (no se expande en servicios).
+                    </div>
+                    <input class="form-control form-control-sm os-modal-filtro"
+                           placeholder="Buscar paquete por codigo o nombre..."
+                           @bind="_pkgFiltro" @bind:event="oninput" />
+                    <div class="os-tree">
+                        @foreach (var p in PaquetesModalVista())
+                        {
+                            var pp = p;
+                            var abierto = _pkgExpandidos.Contains(pp.PaqueteId);
+                            var activo = _pkgSeleccionado == pp.PaqueteId;
+                            var asignado = EsPaqueteAsignado(pp.Codigo);
+                            <div class="os-tree-node @(activo ? "active" : "")">
+                                <button type="button" class="os-tree-head" @onclick="() => TogglePkgExpandAsync(pp)">
+                                    <span class="os-tree-caret">@((MarkupString)(abierto ? "&#9660;" : "&#9654;"))</span>
+                                    <span class="os-tree-nm">
+                                        @pp.Nombre
+                                        @if (asignado)
+                                        {
+                                            <span class="os-suggest-asignado-tag">Asignado</span>
+                                        }
+                                    </span>
+                                    <span class="os-tree-meta">
+                                        @if (!string.IsNullOrWhiteSpace(pp.Codigo)) { <span class="os-suggest-cod">@pp.Codigo</span> }
+                                        <span>&middot; @pp.CantidadServicios servicio(s)</span>
+                                    </span>
+                                </button>
+                                @if (abierto)
+                                {
+                                    <div class="os-tree-body">
+                                        @if (_pkgCargandoId == pp.PaqueteId)
+                                        {
+                                            <div class="os-tree-loading">Cargando servicios...</div>
+                                        }
+                                        else if (_pkgServiciosCache.TryGetValue(pp.PaqueteId, out var servs))
+                                        {
+                                            @if (servs.Count == 0)
+                                            {
+                                                <div class="os-tree-loading">Este paquete no tiene servicios en los contratos del paciente.</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="os-tree-tools">
+                                                    <button type="button" class="os-tree-toolbtn" @onclick="() => PkgSeleccionar(pp.PaqueteId, true)">Seleccionar todos</button>
+                                                    <button type="button" class="os-tree-toolbtn" @onclick="() => PkgSeleccionar(pp.PaqueteId, false)">Ninguno</button>
+                                                </div>
+                                                @foreach (var s in servs)
+                                                {
+                                                    var ss = s;
+                                                    var marcado = _pkgChecks.TryGetValue(pp.PaqueteId, out var set) && set.Contains(ss.ServicioContratoId);
+                                                    <label class="os-tree-serv">
+                                                        <input type="checkbox" checked="@marcado"
+                                                               @onchange="e => TogglePkgServicio(pp.PaqueteId, ss.ServicioContratoId, (bool)e.Value!)" />
+                                                        <span class="os-tree-serv-nm">@ss.Descripcion</span>
+                                                        @if (!string.IsNullOrWhiteSpace(ss.Codigo)) { <span class="os-suggest-cod">@ss.Codigo</span> }
+                                                    </label>
+                                                }
+                                            }
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="os-modal-foot">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CerrarPkgModal">Cancelar</button>
+                <button type="button" class="btn btn-success btn-sm"
+                        disabled="@(!PuedeCargarPkg || _pkgCargando)"
+                        @onclick="CargarPkgAsync">
+                    @(_pkgCargando ? "Cargando..." : "Cargar")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .os-bar { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; gap:10px; flex-wrap:wrap; }
     .os-bar-left { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:#0f172a; }
     .os-bar-right { display:flex; gap:6px; }
     .os-bar-count { background:#1565c0; color:#fff; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .os-orders { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+    .os-order-chip { border:1.5px solid #cbd5e1; background:#fff; color:#334155; border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+    .os-order-chip:hover { border-color:#93c5fd; }
+    .os-order-chip.active { background:#1565c0; border-color:#1565c0; color:#fff; }
+    .os-order-cnt { background:rgba(0,0,0,.12); border-radius:999px; padding:0 7px; font-size:11px; }
+    .os-order-chip.active .os-order-cnt { background:rgba(255,255,255,.25); }
+    .os-order-new { border:1.5px dashed #94a3b8; background:#f8fafc; color:#2563eb; border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:700; cursor:pointer; }
+    .os-order-new:hover { background:#eff6ff; }
+    .os-order-del { margin-left:auto; border:1px solid #fecaca; background:#fff; color:#b91c1c; border-radius:8px; padding:5px 12px; font-size:12px; font-weight:600; cursor:pointer; }
+    .os-order-del:hover { background:#fef2f2; }
     .os-card { border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#fff; position:relative; }
     .os-empty-hc { color:#64748b; text-align:center; padding:30px; font-style:italic; }
     .os-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
@@ -243,6 +381,10 @@ else
     .os-cod-cell { font-family:'JetBrains Mono','Consolas',monospace; font-size:11.5px; color:#0f172a; font-weight:700; }
     .os-empty-row { padding:30px !important; font-style:italic; }
     .os-inline-input { font-size:12px; }
+    /* Observaciones en la grilla: textarea multilinea para ver el texto completo. */
+    .os-inline-obs { font-size:12px; line-height:1.3; resize:vertical; min-height:38px; }
+    /* Columna de codigo mas angosta: parte codigos largos (paquete) sin ensanchar. */
+    .os-cod-cell { font-family:'JetBrains Mono','Consolas',monospace; font-size:11px; word-break:break-all; }
 
     /* Checkbox "Solo paquetes" en la cabecera del buscador */
     .os-search-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
@@ -250,6 +392,50 @@ else
     .os-search-head .os-solo-pkg { display:inline-flex; align-items:center; gap:5px; font-size:11px;
         font-weight:700; color:#0369a1; text-transform:none; letter-spacing:normal; margin-bottom:4px; cursor:pointer; }
     .os-search-head .os-solo-pkg input { margin:0; cursor:pointer; }
+    .os-search-head-actions { display:inline-flex; align-items:center; gap:12px; }
+    .os-pkg-btn { padding:2px 10px; font-size:11px; font-weight:700; white-space:nowrap; }
+
+    /* Paquete "Asignado": el que trajo el paciente va primero y resaltado en verde. */
+    .os-suggest-item.os-suggest-pkg-asignado { background:#ecfdf5; border-left:3px solid #059669; }
+    .os-suggest-item.os-suggest-pkg-asignado:hover { background:#d1fae5; }
+    .os-suggest-asignado-tag { display:inline-block; margin-left:8px; padding:1px 8px;
+                               background:#059669; color:#fff; border-radius:999px;
+                               font-size:10px; font-weight:700; letter-spacing:.03em;
+                               text-transform:uppercase; vertical-align:middle; }
+
+    /* Modal "Agregar paquete" */
+    .os-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1000;
+                         display:flex; align-items:center; justify-content:center; padding:16px; }
+    .os-modal { background:#fff; border-radius:12px; width:min(640px, 100%); max-height:85vh;
+                display:flex; flex-direction:column; box-shadow:0 24px 60px rgba(15,23,42,.35); overflow:hidden; }
+    .os-modal-head { display:flex; align-items:center; justify-content:space-between; gap:10px;
+                     padding:14px 18px; background:#1565c0; color:#fff; font-size:14px; font-weight:700; }
+    .os-modal-x { border:0; background:transparent; color:#fff; font-size:22px; line-height:1; cursor:pointer; padding:0 4px; }
+    .os-modal-body { padding:16px 18px; overflow-y:auto; }
+    .os-modal-filtro { margin-bottom:10px; }
+    .os-modal-empty { color:#64748b; font-style:italic; text-align:center; padding:24px; }
+    .os-modal-hint { font-size:12px; color:#475569; background:#f8fafc; border:1px solid #e2e8f0;
+                     border-radius:6px; padding:8px 10px; margin-bottom:12px; }
+    .os-tree { display:flex; flex-direction:column; gap:8px; }
+    .os-tree-node { border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; }
+    .os-tree-node.active { border-color:#1565c0; box-shadow:0 0 0 1px #1565c0 inset; }
+    .os-tree-head { display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+                    border:0; background:#f8fafc; cursor:pointer; padding:10px 12px; }
+    .os-tree-head:hover { background:#eff6ff; }
+    .os-tree-caret { font-size:10px; color:#64748b; width:14px; }
+    .os-tree-nm { font-size:13px; font-weight:700; color:#0f172a; flex:1; }
+    .os-tree-meta { font-size:11px; color:#64748b; display:flex; gap:6px; align-items:center; }
+    .os-tree-body { padding:8px 12px 12px 34px; display:flex; flex-direction:column; gap:6px; background:#fff; }
+    .os-tree-loading { font-size:12px; color:#64748b; font-style:italic; padding:4px 0; }
+    .os-tree-tools { display:flex; gap:8px; margin-bottom:4px; }
+    .os-tree-toolbtn { border:1px solid #cbd5e1; background:#fff; color:#334155; border-radius:6px;
+                       font-size:11px; font-weight:700; padding:2px 10px; cursor:pointer; }
+    .os-tree-toolbtn:hover { background:#f1f5f9; }
+    .os-tree-serv { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#0f172a; cursor:pointer; margin:0; }
+    .os-tree-serv input { margin:0; cursor:pointer; }
+    .os-tree-serv-nm { flex:1; }
+    .os-modal-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px;
+                     border-top:1px solid #e2e8f0; background:#f8fafc; }
 
     /* Telefono (hasta 768px): filas de captura y toolbar en 1 columna */
     @@media (max-width: 768px) {
@@ -279,8 +465,31 @@ else
     /// los contratos del paciente. Lo pasa HistoriasClinicasModulo.</summary>
     [Parameter] public Guid? PacienteId { get; set; }
 
+    /// <summary>Codigo del paquete con el que llego el paciente (si aplica). El
+    /// buscador de paquetes lo muestra primero y resaltado como "Asignado". Puede
+    /// ser null cuando no hay paquete asignado.</summary>
+    [Parameter] public string? PaqueteAsignadoCodigo { get; set; }
+
+    /// <summary>True si el codigo corresponde al paquete asignado del paciente
+    /// (comparacion insensible a mayusculas). Usado para resaltar y reordenar.</summary>
+    private bool EsPaqueteAsignado(string? codigo) =>
+        !string.IsNullOrWhiteSpace(PaqueteAsignadoCodigo)
+        && string.Equals(codigo?.Trim(), PaqueteAsignadoCodigo.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Vista del dropdown de paquetes con el asignado primero (OrderBy de
+    /// LINQ es estable: el resto conserva su orden). No altera el filtrado por
+    /// termino, solo reordena para el render.</summary>
+    private List<PaquetePacienteDto> SugerenciasPkgVista()
+    {
+        if (string.IsNullOrWhiteSpace(PaqueteAsignadoCodigo)) { return _sugerenciasPkg; }
+        return _sugerenciasPkg.OrderByDescending(p => EsPaqueteAsignado(p.Codigo)).ToList();
+    }
+
     private Guid? _ultimoIdCargado;
     private Guid? _ultimoPacienteCargado;
+    // Orden (grupo) actualmente seleccionada. Igual que medicamentos: N ordenes a
+    // servicios por HC; cada una se imprime y emite su QR por separado.
+    private int _ordenActual = 1;
     private List<PaquetePacienteDto> _paquetes = new();
     private string _terminoBusqueda = "";
     private List<ServicioSugerenciaDto> _sugerencias = new();
@@ -343,7 +552,7 @@ else
     private async Task AgregarPaquetePorIdAsync(Guid paqId)
     {
         if (HistoriaClinicaId is not Guid hid || PacienteId is not Guid pid) { return; }
-        var nuevos = await OrdSvc.AgregarPaqueteAsync(hid, pid, paqId, Guid.Empty);
+        var nuevos = await OrdSvc.AgregarPaqueteAsync(hid, pid, paqId, Guid.Empty, _ordenActual);
         if (nuevos.Count > 0)
         {
             _items.AddRange(nuevos);
@@ -360,7 +569,37 @@ else
     {
         if (HistoriaClinicaId is not Guid hid) { _items = new(); return; }
         _items = (await OrdSvc.ListarPorHistoriaAsync(hid)).ToList();
+        // Posicionar en la primera orden existente (o la 1 si no hay items).
+        _ordenActual = _items.Select(x => x.NumeroOrden).DefaultIfEmpty(1).Min();
         await NotifyCount();
+    }
+
+    /// <summary>Numeros de orden presentes (union de los que tienen items + la
+    /// orden activa), ordenados. Igual que medicamentos.</summary>
+    private List<int> OrdenesPresentes()
+    {
+        var set = new HashSet<int>(_items.Select(x => x.NumeroOrden)) { _ordenActual };
+        return set.OrderBy(n => n).ToList();
+    }
+
+    /// <summary>Crea otra orden a servicios: solo mueve la seleccion al siguiente
+    /// numero libre. La orden "existe" cuando se le agrega el primer servicio.</summary>
+    private void NuevaOrden() => _ordenActual = OrdenesPresentes().Max() + 1;
+
+    /// <summary>Elimina la orden activa con todos sus servicios (y revoca su QR).</summary>
+    private async Task EliminarOrdenActualAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (!_items.Any(x => x.NumeroOrden == _ordenActual)) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eliminar la orden {_ordenActual} con todos sus servicios? Esta accion no se puede deshacer.");
+        if (!ok) { return; }
+        var n = _ordenActual;
+        await OrdSvc.EliminarOrdenAsync(hid, n, Guid.Empty);
+        _items.RemoveAll(x => x.NumeroOrden == n);
+        _ordenActual = _items.Select(x => x.NumeroOrden).DefaultIfEmpty(1).Min();
+        await NotifyCount();
+        await NotifyItemsChanged();
     }
 
     private async Task NotifyCount()
@@ -425,7 +664,8 @@ else
                 _borrador.CodigoServicio,
                 _borrador.Descripcion!,
                 _borrador.Cantidad,
-                _borrador.Observaciones), Guid.Empty);
+                _borrador.Observaciones,
+                _ordenActual), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
             await NotifyItemsChanged();
@@ -474,6 +714,144 @@ else
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
         await JS.InvokeVoidAsync("open", $"/orden-doc/{hid}/ORDEN_SERVICIOS", "_blank");
+    }
+
+    // ---- Modal "Agregar paquete" (facet 2): el paquete entra como UN registro-resumen ----
+    /// <summary>Visible/oculto del modal.</summary>
+    private bool _showPkgModal;
+    /// <summary>Paquete activo (el que se cargara). Solo uno a la vez.</summary>
+    private Guid? _pkgSeleccionado;
+    /// <summary>Paquetes con el arbol expandido.</summary>
+    private readonly HashSet<Guid> _pkgExpandidos = new();
+    /// <summary>Cache de servicios por paquete para no recargar al re-expandir.</summary>
+    private readonly Dictionary<Guid, List<ServicioDePaqueteDto>> _pkgServiciosCache = new();
+    /// <summary>Servicios marcados por paquete (ServicioContratoId).</summary>
+    private readonly Dictionary<Guid, HashSet<Guid>> _pkgChecks = new();
+    /// <summary>Paquete cuyo detalle se esta cargando en este momento (spinner).</summary>
+    private Guid? _pkgCargandoId;
+    /// <summary>En curso el "Cargar" (crea el registro).</summary>
+    private bool _pkgCargando;
+
+    /// <summary>Habilita "Cargar": hay un paquete activo con al menos un servicio marcado.</summary>
+    private bool PuedeCargarPkg =>
+        _pkgSeleccionado is Guid pid
+        && _pkgChecks.TryGetValue(pid, out var set) && set.Count > 0;
+
+    /// <summary>Lista de paquetes del modal con el asignado primero (orden estable).</summary>
+    private string _pkgFiltro = "";
+
+    private List<PaquetePacienteDto> PaquetesModalVista()
+    {
+        IEnumerable<PaquetePacienteDto> q = _paquetes;
+        var f = _pkgFiltro?.Trim();
+        if (!string.IsNullOrWhiteSpace(f))
+        {
+            q = q.Where(p => (p.Nombre?.Contains(f, StringComparison.OrdinalIgnoreCase) ?? false)
+                          || (p.Codigo?.Contains(f, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+        if (!string.IsNullOrWhiteSpace(PaqueteAsignadoCodigo))
+        {
+            q = q.OrderByDescending(p => EsPaqueteAsignado(p.Codigo));
+        }
+        return q.ToList();
+    }
+
+    private void AbrirPkgModal()
+    {
+        if (HistoriaClinicaId is null || PacienteId is null) { return; }
+        _pkgSeleccionado = null;
+        _pkgFiltro = "";
+        _pkgExpandidos.Clear();
+        _pkgChecks.Clear();
+        _pkgServiciosCache.Clear();
+        _pkgCargandoId = null;
+        _showPkgModal = true;
+    }
+
+    private void CerrarPkgModal()
+    {
+        _showPkgModal = false;
+        _pkgSeleccionado = null;
+        _pkgExpandidos.Clear();
+        _pkgChecks.Clear();
+        _pkgServiciosCache.Clear();
+        _pkgCargandoId = null;
+    }
+
+    /// <summary>Expande/colapsa un paquete. Al expandir lo marca como activo y
+    /// carga sus servicios (lazy, con cache).</summary>
+    private async Task TogglePkgExpandAsync(PaquetePacienteDto p)
+    {
+        if (_pkgExpandidos.Contains(p.PaqueteId))
+        {
+            _pkgExpandidos.Remove(p.PaqueteId);
+            if (_pkgSeleccionado == p.PaqueteId) { _pkgSeleccionado = null; }
+            return;
+        }
+        _pkgExpandidos.Add(p.PaqueteId);
+        _pkgSeleccionado = p.PaqueteId;
+        await CargarServiciosPkgAsync(p.PaqueteId);
+    }
+
+    /// <summary>Carga (una vez) los servicios de un paquete y los deja todos marcados
+    /// por defecto.</summary>
+    private async Task CargarServiciosPkgAsync(Guid paqId)
+    {
+        if (PacienteId is not Guid pid) { return; }
+        if (_pkgServiciosCache.ContainsKey(paqId)) { return; }
+        _pkgCargandoId = paqId;
+        StateHasChanged();
+        var servs = (await OrdSvc.ListarServiciosDePaqueteAsync(pid, paqId)).ToList();
+        _pkgServiciosCache[paqId] = servs;
+        _pkgChecks[paqId] = new HashSet<Guid>(servs.Select(s => s.ServicioContratoId));
+        _pkgCargandoId = null;
+    }
+
+    private void TogglePkgServicio(Guid paqId, Guid servId, bool marcar)
+    {
+        if (!_pkgChecks.TryGetValue(paqId, out var set)) { set = new(); _pkgChecks[paqId] = set; }
+        if (marcar) { set.Add(servId); } else { set.Remove(servId); }
+        _pkgSeleccionado = paqId;
+    }
+
+    /// <summary>Marca todos / ninguno de los servicios de un paquete.</summary>
+    private void PkgSeleccionar(Guid paqId, bool todos)
+    {
+        if (!_pkgServiciosCache.TryGetValue(paqId, out var servs)) { return; }
+        _pkgChecks[paqId] = todos
+            ? new HashSet<Guid>(servs.Select(s => s.ServicioContratoId))
+            : new HashSet<Guid>();
+        _pkgSeleccionado = paqId;
+    }
+
+    /// <summary>"Cargar": crea UN solo registro (no facturable) que representa el
+    /// paquete completo: codigo = codigo del paquete, descripcion = nombre del
+    /// paquete, observaciones = "Incluye: ..." con los servicios marcados. No se
+    /// expande en servicios individuales (eso lo hace el buscador de paquetes).</summary>
+    private async Task CargarPkgAsync()
+    {
+        if (HistoriaClinicaId is not Guid hid) { return; }
+        if (_pkgSeleccionado is not Guid paqId) { return; }
+        if (!_pkgChecks.TryGetValue(paqId, out var checks) || checks.Count == 0) { return; }
+        var pkg = _paquetes.FirstOrDefault(x => x.PaqueteId == paqId);
+        if (pkg is null) { return; }
+
+        _pkgCargando = true;
+        try
+        {
+            var servs = _pkgServiciosCache.TryGetValue(paqId, out var list) ? list : new();
+            var incluye = servs.Where(s => checks.Contains(s.ServicioContratoId))
+                               .Select(s => s.Descripcion)
+                               .ToList();
+            var obs = "Incluye: " + string.Join(", ", incluye);
+            var creado = await OrdSvc.AgregarAsync(hid, new AgregarServicioRequest(
+                null, pkg.Codigo, pkg.Nombre, _borrador.Cantidad, obs, _ordenActual), Guid.Empty);
+            _items.Add(creado);
+            await NotifyCount();
+            await NotifyItemsChanged();
+            CerrarPkgModal();
+        }
+        finally { _pkgCargando = false; }
     }
 
     private sealed class BorradorServ

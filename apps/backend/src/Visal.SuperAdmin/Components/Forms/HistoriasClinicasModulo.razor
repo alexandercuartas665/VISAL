@@ -493,6 +493,7 @@
                             {
                                 <OrdenServicios HistoriaClinicaId="@_historiaSel?.Id"
                                                 PacienteId="@PacienteActivo?.Id"
+                                                PaqueteAsignadoCodigo="@_paqueteDeAsignacion?.PaqueteCodigo"
                                                 OnCountChanged="@(c => _servCount = c)"
                                                 OnItemsChanged="RecargarValoresDesdeBackendAsync" />
                             }

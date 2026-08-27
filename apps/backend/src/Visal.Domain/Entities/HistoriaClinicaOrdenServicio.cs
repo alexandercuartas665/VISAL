@@ -24,6 +24,15 @@ public class HistoriaClinicaOrdenServicio : TenantEntity
     /// que el legacy llama "COD. SERVICIO"). Es lo que viaja a la orden impresa.</summary>
     public string? CodigoServicio { get; set; }
 
+    /// <summary>
+    /// Numero de la orden (grupo) dentro de la misma HC. Permite tener 1..N
+    /// "Ordenes a Servicios" en una misma historia: todos los items con el mismo
+    /// (HistoriaClinicaId, NumeroOrden) forman una orden imprimible con su propio
+    /// QR/emision. Los items previos a esta columna quedan en la orden 1 (default
+    /// de la migracion). Mismo patron que medicamentos/insumos.
+    /// </summary>
+    public int NumeroOrden { get; set; } = 1;
+
     /// <summary>Snapshot de la descripcion del servicio (lo visible para el usuario).</summary>
     public string Descripcion { get; set; } = null!;
 

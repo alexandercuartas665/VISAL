@@ -1563,12 +1563,26 @@
         // asignado. Si TipoServicio es null/vacio, no aplicamos filtros (todo
         // visible). Se recarga en cada cambio de parametro por si el modal se
         // re-usa para otro servicio.
-        try { _pestanasOcultas = await MenuHcSvc.ObtenerPestanasOcultasAsync(TipoServicio); }
-        catch { _pestanasOcultas = new(StringComparer.OrdinalIgnoreCase); }
-        try { _aliasesPestanas = await MenuHcSvc.ObtenerAliasesAsync(); }
-        catch { _aliasesPestanas = new(StringComparer.OrdinalIgnoreCase); }
-        try { _ordenesPestanas = await MenuHcSvc.ObtenerOrdenesAsync(); }
-        catch { _ordenesPestanas = new(StringComparer.OrdinalIgnoreCase); }
+        // IMPORTANTE: va DENTRO de _dbLock (LockedAsync) porque en /atencion hay
+        // queries concurrentes sobre el mismo DbContext scoped (prefill, autosave,
+        // chat IA, panel WhatsApp). Sin serializar, esta query chocaba con
+        // "A second operation was started..." y el catch dejaba _pestanasOcultas
+        // vacio => se mostraban TODAS las pestanas (config ignorada).
+        try
+        {
+            await LockedAsync(async () =>
+            {
+                _pestanasOcultas = await MenuHcSvc.ObtenerPestanasOcultasAsync(TipoServicio);
+                _aliasesPestanas = await MenuHcSvc.ObtenerAliasesAsync();
+                _ordenesPestanas = await MenuHcSvc.ObtenerOrdenesAsync();
+            });
+        }
+        catch
+        {
+            _pestanasOcultas = new(StringComparer.OrdinalIgnoreCase);
+            _aliasesPestanas = new(StringComparer.OrdinalIgnoreCase);
+            _ordenesPestanas = new(StringComparer.OrdinalIgnoreCase);
+        }
         // Si la pestana seleccionada quedo oculta por config, saltamos a Historial.
         if (_pestanasOcultas.Contains(_tabSel)) { _tabSel = "Historial"; }
     }

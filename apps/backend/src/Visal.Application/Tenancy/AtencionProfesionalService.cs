@@ -306,7 +306,8 @@ public sealed class AtencionProfesionalService(
                     revUltima,
                     revMotivo,
                     horaCierre,
-                    historiaClinicaIds));
+                    historiaClinicaIds,
+                    t.ProfesionalId));
             }
         }
         return result;

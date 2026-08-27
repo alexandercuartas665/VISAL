@@ -826,8 +826,15 @@ else
     private string? MotivoBloqueoOrden(MiServicioAsignadoDto s)
     {
         if (s.NumeroSesionMostrar <= 1) { return null; }
+        // Candado POR PROFESIONAL: cada profesional lleva su propia secuencia. Solo
+        // bloquea si hay una sesion anterior pendiente DEL MISMO profesional (mismo
+        // criterio que el gate backend AtencionOrdenService). Asi, si a Juan se le
+        // asignan 1..10 y a Mariano 11..20, Mariano puede iniciar la 11 sin que Juan
+        // cierre la 10, pero no puede saltar a la 15 sin llevar 11..14. Los numeros
+        // mostrados son globales (NumeroSesionMostrar).
         var anterioresPendientes = _todos
             .Where(x => x.AsignacionId == s.AsignacionId
+                     && x.ProfesionalId == s.ProfesionalId
                      && x.NumeroSesionMostrar < s.NumeroSesionMostrar
                      && !x.Completado)
             .OrderBy(x => x.NumeroSesionMostrar)

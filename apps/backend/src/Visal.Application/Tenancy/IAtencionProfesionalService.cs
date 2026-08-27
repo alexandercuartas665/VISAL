@@ -64,7 +64,14 @@ public sealed record MiServicioAsignadoDto(
     /// El match es Contains case-insensitive, asi que sirve tanto el id completo
     /// como el corto de 8. Null cuando la sesion aun no tiene HC vinculada.
     /// </summary>
-    string? HistoriaClinicaIds = null);
+    string? HistoriaClinicaIds = null,
+    /// <summary>
+    /// Profesional (turno) al que pertenece esta sesion. Se usa para el candado de
+    /// orden POR PROFESIONAL en la grilla: cada profesional lleva su propia
+    /// secuencia, asi que solo bloquea si hay una sesion anterior pendiente DEL
+    /// MISMO profesional. Guid.Empty si el turno aun no tiene profesional asignado.
+    /// </summary>
+    Guid ProfesionalId = default);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

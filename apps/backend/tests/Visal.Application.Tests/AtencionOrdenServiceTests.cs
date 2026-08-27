@@ -265,6 +265,74 @@ public sealed class AtencionOrdenServiceTests
     }
 
     [Fact]
+    public async Task PorProfesional_CadaProfLlevaSuPropiaSecuencia()
+    {
+        // Juan tiene las sesiones 1..2, Mariano las 3..4 (ninguna completada).
+        // Mariano puede iniciar la 3 (su primera) sin que Juan cierre 1/2, pero
+        // NO puede saltar a la 4 sin cerrar la 3. Al cerrar la 3, la 4 pasa aunque
+        // 1/2 (de Juan) sigan pendientes.
+        var ctx = NewCtx();
+        var juan = Guid.NewGuid();
+        var mariano = Guid.NewGuid();
+
+        var pu = new PlatformUser { Email = "u@test", DisplayName = "U", AuthProvider = "local" };
+        ctx.PlatformUsers.Add(pu);
+        var rol = new Rol { TenantId = Tenant, Nombre = "Coordinador" };
+        ctx.Roles.Add(rol);
+        ctx.TenantUsers.Add(new TenantUser
+        {
+            TenantId = Tenant, PlatformUserId = pu.Id, Email = pu.Email,
+            TenantRole = TenantRole.Advisor, RolId = rol.Id
+        });
+        var paciente = new Paciente { TenantId = Tenant, NombreCompleto = "P", TipoDocumento = "CC", NumeroDocumento = "1" };
+        ctx.Pacientes.Add(paciente);
+        var asig = new Asignacion
+        {
+            TenantId = Tenant, PacienteId = paciente.Id, TipoServicio = "TERAPIA",
+            NombreServicio = "T", FormatoHistoria = "HC", ContratoCodigo = "C",
+            ServicioId = "S", Sucursal = "SD"
+        };
+        ctx.Asignaciones.Add(asig);
+
+        var profPorSesion = new[] { juan, juan, mariano, mariano };
+        var sesionIds = new List<Guid>();
+        for (var i = 1; i <= 4; i++)
+        {
+            var turno = new AsignacionTurno
+            {
+                TenantId = Tenant, AsignacionId = asig.Id,
+                ProfesionalId = profPorSesion[i - 1], Cantidad = 1,
+                CreatedAt = BaseCreatedAt.AddMinutes(i)
+            };
+            ctx.AsignacionTurnos.Add(turno);
+            ctx.AsignacionTurnoSesiones.Add(new AsignacionTurnoSesion
+            {
+                TenantId = Tenant, AsignacionTurnoId = turno.Id, SessionNo = 1,
+                FechaAtencion = DateOnly.FromDateTime(DateTime.UtcNow), Completado = false
+            });
+            sesionIds.Add(ctx.AsignacionTurnoSesiones.Local.Last().Id);
+        }
+        await ctx.SaveChangesAsync();
+
+        var sut = new AtencionOrdenService(ctx);
+
+        // Sesion 3 (primera de Mariano) pasa aunque 1 y 2 (Juan) esten pendientes.
+        Assert.Null(await sut.ValidarAperturaAsync(sesionIds[2], pu.Id));
+
+        // Sesion 4 (Mariano) bloquea porque su sesion 3 esta pendiente. Mensaje: sesion 3.
+        var b4 = await sut.ValidarAperturaAsync(sesionIds[3], pu.Id);
+        Assert.NotNull(b4);
+        Assert.Equal(3, b4!.SessionNoPendiente);
+        Assert.Contains("sesion 3", b4.Motivo);
+
+        // Cerrar la 3 -> la 4 pasa aunque 1 y 2 (Juan) sigan pendientes.
+        var s3 = await ctx.AsignacionTurnoSesiones.FirstAsync(s => s.Id == sesionIds[2]);
+        s3.Completado = true;
+        await ctx.SaveChangesAsync();
+        Assert.Null(await sut.ValidarAperturaAsync(sesionIds[3], pu.Id));
+    }
+
+    [Fact]
     public async Task SesionInexistente_DevuelveNull()
     {
         var ctx = NewCtx();

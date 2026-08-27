@@ -31,59 +31,67 @@ public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOr
 
         var turnoActual = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.Id == sesion.AsignacionTurnoId)
-            .Select(t => new { t.Id, t.AsignacionId })
+            .Select(t => new { t.Id, t.AsignacionId, t.ProfesionalId })
             .FirstOrDefaultAsync(ct);
         if (turnoActual is null) { return null; }
 
-        // Traer todos los turnos de la misma asignacion y calcular la posicion
-        // cronologica (base 1). Costo bajo: rara vez una asignacion pasa de
-        // ~20 turnos.
+        // Traer todos los turnos de la misma asignacion (con su profesional) y
+        // calcular la posicion cronologica GLOBAL (base 1) = lo que la UI muestra
+        // como "Sesion N". Costo bajo: rara vez una asignacion pasa de ~20 turnos.
         // Tiebreaker Id: seeds masivos generan turnos con CreatedAt identico
         // al microsegundo. Sin ThenBy(Id) el orden es no-determinista y no
         // coincide con el que calcula AtencionProfesionalService en la grilla.
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.AsignacionId == turnoActual.AsignacionId)
-            .Select(t => new { t.Id, t.CreatedAt })
+            .Select(t => new { t.Id, t.CreatedAt, t.ProfesionalId })
             .OrderBy(t => t.CreatedAt).ThenBy(t => t.Id)
             .ToListAsync(ct);
 
-        int posActual = turnos.FindIndex(t => t.Id == turnoActual.Id) + 1;
-        if (posActual <= 1) { return null; }
+        int posGlobalActual = turnos.FindIndex(t => t.Id == turnoActual.Id) + 1;
+        if (posGlobalActual <= 1) { return null; }
 
-        // Turnos anteriores (por posicion cronologica). Los "no completados"
-        // son: los que NO tienen pivote AsignacionTurnoSesion, o cuyo pivote
-        // esta Completado=false. Cerrar la HC vinculada al turno pone la
+        // El candado es POR PROFESIONAL: cada profesional lleva su propia secuencia
+        // independiente. Solo exigimos que esten completas las sesiones ANTERIORES
+        // del MISMO profesional. Ejemplo: si a Juan se le asignan las sesiones 1..10
+        // y a Mariano las 11..20, Mariano puede iniciar la 11 sin que Juan cierre la
+        // 10, pero NO puede saltar a la 15 sin llevar 11..14. Los numeros del mensaje
+        // son los GLOBALES (los que ve el usuario), aunque el control sea por prof.
+        var anterioresMismoProf = turnos
+            .Take(posGlobalActual - 1)   // turnos antes del actual (orden global asc)
+            .Where(t => t.ProfesionalId == turnoActual.ProfesionalId)
+            .ToList();
+        if (anterioresMismoProf.Count == 0) { return null; }
+
+        var idsAnteriores = anterioresMismoProf.Select(t => t.Id).ToList();
+
+        // "No completados" = turnos que NO tienen pivote AsignacionTurnoSesion, o
+        // cuyo pivote esta Completado=false. Cerrar la HC vinculada al turno pone la
         // sesion Completado=true (ver HistoriaClinicaService.Recalcular*).
-        var turnosAnterioresIds = turnos.Take(posActual - 1).Select(t => t.Id).ToList();
-        if (turnosAnterioresIds.Count == 0) { return null; }
-
         var completadosPorTurno = await db.AsignacionTurnoSesiones.AsNoTracking()
-            .Where(s => turnosAnterioresIds.Contains(s.AsignacionTurnoId))
+            .Where(s => idsAnteriores.Contains(s.AsignacionTurnoId))
             .Select(s => new { s.AsignacionTurnoId, s.Completado })
             .ToListAsync(ct);
         var completadoLookup = completadosPorTurno
             .GroupBy(x => x.AsignacionTurnoId)
             .ToDictionary(g => g.Key, g => g.Any(x => x.Completado));
 
-        for (int i = 0; i < turnosAnterioresIds.Count; i++)
+        foreach (var t in anterioresMismoProf)   // en orden global asc
         {
-            var tid = turnosAnterioresIds[i];
-            bool completado = completadoLookup.TryGetValue(tid, out var c) && c;
+            bool completado = completadoLookup.TryGetValue(t.Id, out var c) && c;
             if (!completado)
             {
-                int posPendiente = i + 1;
+                // Posicion GLOBAL de la sesion pendiente (la que ve el usuario).
+                int posPendienteGlobal = turnos.FindIndex(x => x.Id == t.Id) + 1;
                 // Buscar el pivote existente para incluir su Id en el bloqueo
-                // (si aun no existe, dejamos Guid.Empty — el caller usa el
-                // mensaje). Se usa para navegar directo a la sesion pendiente
-                // desde el frontend cuando aplica.
+                // (si aun no existe, dejamos Guid.Empty — el caller usa el mensaje).
                 var pivotePendiente = await db.AsignacionTurnoSesiones.AsNoTracking()
-                    .Where(s => s.AsignacionTurnoId == tid)
+                    .Where(s => s.AsignacionTurnoId == t.Id)
                     .Select(s => (Guid?)s.Id)
                     .FirstOrDefaultAsync(ct) ?? Guid.Empty;
 
                 return new AtencionOrdenBloqueo(
-                    $"Debes cerrar la sesion {posPendiente} antes de abrir la sesion {posActual}.",
-                    posPendiente,
+                    $"Debes cerrar la sesion {posPendienteGlobal} antes de abrir la sesion {posGlobalActual}.",
+                    posPendienteGlobal,
                     turnoActual.AsignacionId,
                     pivotePendiente);
             }

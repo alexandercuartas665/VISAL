@@ -1515,7 +1515,9 @@ else
         if (_cantidad < 1 && !esServicioDePaqueteCheck) { _error = "Debe indicar cantidad de servicios."; return; }
         if (string.IsNullOrWhiteSpace(_contratoIdSel)) { _error = "Debe seleccionar un contrato."; return; }
         if (string.IsNullOrWhiteSpace(_moduloSel)) { _error = "Debe seleccionar un tipo de servicio (modulo)."; return; }
-        if (string.IsNullOrWhiteSpace(_autorizacion)) { _error = "Debe indicar un Numero de Orden / Autorizacion."; return; }
+        // Cuando se marca "Autorizacion pendiente" NO se exige el numero de orden aqui:
+        // el registro se guarda sin autorizacion y se completa despues desde el Listado.
+        if (!_autorizacionPendiente && string.IsNullOrWhiteSpace(_autorizacion)) { _error = "Debe indicar un Numero de Orden / Autorizacion."; return; }
         if (_fechaInicio is not DateOnly fi) { _error = "Debe indicar una Fecha de Inicio."; return; }
         if (_fechaFinal is not DateOnly ff) { _error = "Debe indicar una Fecha Final."; return; }
         if (_mesVig < 1 || _mesVig > 12) { _error = "Debe indicar un Mes de Vigencia."; return; }

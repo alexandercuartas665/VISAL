@@ -165,7 +165,7 @@
                                             <td class="cd-obs">@p.Observaciones</td>
                                             <td>@p.TipoServicio</td>
                                             <td class="mono">@p.ContratoCodigo</td>
-                                            <td class="mono">@p.CodigoServicio</td>
+                                            <td class="mono">@ServicioCodigo.Mostrar(p.CodigoServicio)</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -199,7 +199,7 @@
                             <div class="ase-f ase-f-wide"><label>Especialidad</label><input class="form-control form-control-sm asg-ro" readonly value="@s.Especialidad" /></div>
 
                             <div class="ase-f ase-f-wide-3 cd-blue"><label>Servicio</label><input class="form-control form-control-sm" readonly value="@s.NombreServicio" /></div>
-                            <div class="ase-f ase-f-wide-3 cd-blue"><label>Codigo Servicio</label><input class="form-control form-control-sm mono" readonly value="@s.CodigoServicio" /></div>
+                            <div class="ase-f ase-f-wide-3 cd-blue"><label>Codigo Servicio</label><input class="form-control form-control-sm mono" readonly value="@ServicioCodigo.Mostrar(s.CodigoServicio)" /></div>
 
                             <div class="ase-f cd-blue"><label>ID Prof. Asig</label><input class="form-control form-control-sm" @bind="_idProfAsig" placeholder="" /></div>
                             <div class="ase-f cd-blue"><label>Profesional Pred</label><input class="form-control form-control-sm" @bind="_profesionalPred" placeholder="" /></div>

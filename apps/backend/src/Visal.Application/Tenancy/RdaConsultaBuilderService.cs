@@ -664,9 +664,11 @@ public sealed class RdaConsultaBuilderService(
                 AuthoredOnElement = new FhirDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-5)))
             };
             sr.Code = new CodeableConcept { Text = r.Descripcion };
-            if (!string.IsNullOrWhiteSpace(r.CodigoServicio))
+            // CUPS sin el sufijo de modalidad d/f (RIPS no lo maneja).
+            var cupsSrv = ServicioCodigo.Base(r.CodigoServicio);
+            if (!string.IsNullOrWhiteSpace(cupsSrv))
             {
-                sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", r.CodigoServicio, r.Descripcion));
+                sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, r.Descripcion));
             }
             list.Add(sr);
         }

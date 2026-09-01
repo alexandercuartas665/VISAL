@@ -1380,6 +1380,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
             b.Property(x => x.ServicioId).HasMaxLength(60).IsRequired();
             b.Property(x => x.NombreServicio).HasMaxLength(200).IsRequired();
+            b.Property(x => x.CodigoRips).HasMaxLength(40);
             b.Property(x => x.TipoServicio).HasMaxLength(40).IsRequired();
             b.Property(x => x.Modulo).HasMaxLength(40);
             b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
@@ -1397,12 +1398,14 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // el servicio la exige not-null en operaciones nuevas.
             b.Property(x => x.RipsViaIngresoCodigo).HasMaxLength(10);
             b.Property(x => x.RipsViaIngresoNombre).HasMaxLength(200);
+            b.Property(x => x.AutorizacionPendiente).HasDefaultValue(false);
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasCheckConstraint("ck_asignaciones_cantidad", "cantidad > 0");
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
             b.HasIndex(x => new { x.TenantId, x.Estado, x.MesVigencia, x.AnioServicio });
             b.HasIndex(x => x.LoteId);
             b.HasIndex(x => x.PaqueteInstanciaId);
+            b.HasIndex(x => new { x.TenantId, x.AutorizacionPendiente });
         });
 
         modelBuilder.Entity<AsignacionTurnoSesion>(b =>

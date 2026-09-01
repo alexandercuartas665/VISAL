@@ -27,6 +27,13 @@ public class Asignacion : TenantEntity
     public string ServicioId { get; set; } = null!;
     public string NombreServicio { get; set; } = null!;
 
+    /// <summary>Codigo del servicio "limpio" para RIPS/CUPS: es el CodigoServicio del
+    /// ServicioContrato SIN el sufijo de modalidad d/f (ej. "E891865d" -> "E891865").
+    /// Se captura como snapshot al crear/editar la asignacion porque RIPS no maneja ese
+    /// sufijo. Nullable por compatibilidad con asignaciones legacy (se recalcula al vuelo
+    /// desde el ServicioContrato cuando falta). Ver <c>ServicioCodigo.Base</c>.</summary>
+    public string? CodigoRips { get; set; }
+
     /// <summary>Tipo de servicio derivado de servicios_contrato.Modulo (CONSULTA/TERAPIA/ENFERMERIA/EQUIPOS/INSUMOS).</summary>
     public string TipoServicio { get; set; } = null!;
 
@@ -66,6 +73,12 @@ public class Asignacion : TenantEntity
     /// <summary>URL / ruta relativa del PDF de autorizacion adjunto. Opcional; solo se
     /// vuelve obligatorio cuando el ContratoAseguradora.RequierePdfAutorizacion es true.</summary>
     public string? PdfAutorizacionUrl { get; set; }
+
+    /// <summary>Marca que la asignacion se guardo SIN la autorizacion (numero y/o PDF)
+    /// y queda a la espera de completarla. Cuando es true, el flujo de creacion no exige
+    /// el PDF aunque el contrato lo pida; se completa despues desde el tab "Listado"
+    /// (filtro "Autorizaciones pendientes" -> modal) y al completar se pone en false.</summary>
+    public bool AutorizacionPendiente { get; set; }
 
     /// <summary>Tipo de pago del paciente: "CUOTA" (cuota moderadora), "COPAGO" o null si no aplica.</summary>
     public string? TipoPago { get; set; }

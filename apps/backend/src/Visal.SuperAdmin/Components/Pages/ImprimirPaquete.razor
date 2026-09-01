@@ -248,7 +248,7 @@ else
                             {
                                 <tr>
                                     <td class="num">@s.Orden</td>
-                                    <td class="mono">@(s.CodigoServicio ?? "-")</td>
+                                    <td class="mono">@(string.IsNullOrWhiteSpace(s.CodigoServicio) ? "-" : ServicioCodigo.Base(s.CodigoServicio))</td>
                                     <td><b>@s.Descripcion</b></td>
                                     <td class="num">@(string.IsNullOrWhiteSpace(s.Cantidad) ? "-" : s.Cantidad)</td>
                                     <td>@(s.Observaciones ?? "")</td>

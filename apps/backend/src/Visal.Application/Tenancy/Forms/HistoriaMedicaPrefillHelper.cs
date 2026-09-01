@@ -1,3 +1,5 @@
+using Visal.Application.Common;
+
 namespace Visal.Application.Tenancy.Forms;
 
 /// <summary>
@@ -248,7 +250,8 @@ public static class HistoriaMedicaPrefillHelper
         foreach (var s in items.OrderBy(x => x.Orden))
         {
             sb.Append(i++).Append(". ");
-            if (!string.IsNullOrWhiteSpace(s.CodigoServicio)) { sb.Append(s.CodigoServicio).Append(" - "); }
+            // El codigo viaja a la HC sin el sufijo de modalidad d/f (RIPS no lo maneja).
+            if (!string.IsNullOrWhiteSpace(s.CodigoServicio)) { sb.Append(ServicioCodigo.Base(s.CodigoServicio)).Append(" - "); }
             sb.Append(s.Descripcion);
             if (!string.IsNullOrWhiteSpace(s.Cantidad)) { sb.Append(" - ").Append(s.Cantidad); }
             if (!string.IsNullOrWhiteSpace(s.Observaciones)) { sb.Append(" - ").Append(s.Observaciones); }
@@ -618,9 +621,10 @@ public static class HistoriaMedicaPrefillHelper
             ["descripcion"] = s.Descripcion,
             ["nombre"] = s.Descripcion,
             ["servicio"] = s.Descripcion,
-            ["codigo"] = s.CodigoServicio,
-            ["codigoservicio"] = s.CodigoServicio,
-            ["codservicio"] = s.CodigoServicio,
+            // Codigo sin el sufijo de modalidad d/f (RIPS no lo maneja).
+            ["codigo"] = ServicioCodigo.Base(s.CodigoServicio),
+            ["codigoservicio"] = ServicioCodigo.Base(s.CodigoServicio),
+            ["codservicio"] = ServicioCodigo.Base(s.CodigoServicio),
             ["cantidad"] = s.Cantidad,
             ["observacion"] = s.Observaciones,
             ["obs"] = s.Observaciones,

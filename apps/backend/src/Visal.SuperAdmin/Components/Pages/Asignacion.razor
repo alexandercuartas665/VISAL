@@ -133,7 +133,7 @@
                         <option value="">(todos)</option>
                         @foreach (var p in _paquetesDisponibles)
                         {
-                            <option value="@p.Codigo">@p.Codigo &mdash; @p.Nombre</option>
+                            <option value="@p.Codigo">@ServicioCodigo.Mostrar(p.Codigo) &mdash; @p.Nombre</option>
                         }
                     </select>
                     @{
@@ -182,7 +182,15 @@
                                     <td><button class="btn btn-primary btn-sm" @onclick="() => PreseleccionarServicio(s)">Seleccionar</button></td>
                                     <td>
                                         <div class="asg-stack">
-                                            <div class="asg-stack-row"><span class="asg-stack-lbl">Cod</span><span class="mono">@s.Codigo</span></div>
+                                            <div class="asg-stack-row">
+                                                <span class="asg-stack-lbl">Cod</span>
+                                                <span class="mono">@ServicioCodigo.Base(s.Codigo)</span>
+                                                @{ var _modalSvc = ServicioCodigo.ModalidadLabel(s.Codigo); }
+                                                @if (_modalSvc is not null)
+                                                {
+                                                    <span class="asg-modal-badge" style="@(_modalSvc == "Dentro" ? "background:#dcfce7;color:#166534;" : "background:#fef3c7;color:#92400e;")">@_modalSvc</span>
+                                                }
+                                            </div>
                                             @if (!string.IsNullOrWhiteSpace(s.CodigoInterno) && s.CodigoInterno != s.Codigo)
                                             {
                                                 <div class="asg-stack-row"><span class="asg-stack-lbl">Int</span><span class="mono">@s.CodigoInterno</span></div>
@@ -294,14 +302,12 @@
                                 @c.NombreServicio
                                 @if (c.PaqueteCodigo is not null)
                                 {
-                                    <span class="asg-pkg-badge" title="Servicio del paquete @c.PaqueteCodigo">Paquete @c.PaqueteCodigo</span>
+                                    <span class="asg-pkg-badge" title="Servicio del paquete @c.PaqueteCodigo">Paquete @ServicioCodigo.Mostrar(c.PaqueteCodigo)</span>
                                 }
-                                @if (c.PaqueteValorPactado is decimal vp)
-                                {
-                                    <span class="asg-pkg-valor" title="Este registro lleva el valor pactado del paquete">$ @vp.ToString("N0")</span>
-                                }
+                                @* El valor pactado del paquete se conserva para facturacion pero
+                                   NO se muestra en la tarjeta (peticion: el valor no debe visualizarse). *@
                             </div>
-                            <div class="asg-cart-meta">Codigo: <code>@(c.Servicio.Codigo ?? "-")</code></div>
+                            <div class="asg-cart-meta">Codigo: <code>@(string.IsNullOrWhiteSpace(c.Servicio.Codigo) ? "-" : ServicioCodigo.Mostrar(c.Servicio.Codigo))</code></div>
                             <div class="asg-cart-meta">
                                 Cantidad: <strong>@c.Cantidad</strong>
                                 @if (c.Cantidad == 0 && c.PaqueteCodigo is not null)
@@ -337,8 +343,15 @@
                elegir un servicio en la grilla. El boton Agregar si sigue gateado por
                la preseleccion de servicio, porque sin servicio no hay nada que agregar. *@
             <div class="ase-form asg-form-col3">
-                <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_paciente == null)" /></div>
-                @if (_contratoSel is not null && _contratoSel.RequierePdfAutorizacion)
+                <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_paciente == null || _autorizacionPendiente)" /></div>
+                <div class="ase-f ase-f-wide">
+                    <label class="asg-chk">
+                        <input type="checkbox" @bind="_autorizacionPendiente" disabled="@(_paciente == null)" />
+                        <span>Autorizaci&oacute;n pendiente</span>
+                    </label>
+                    <div class="asg-hint">Guarda el registro sin n&uacute;mero ni PDF; queda marcado para completar despu&eacute;s desde el tab <b>Listado</b>.</div>
+                </div>
+                @if (_contratoSel is not null && _contratoSel.RequierePdfAutorizacion && !_autorizacionPendiente)
                 {
                     <div class="ase-f ase-f-wide">
                         <label>
@@ -487,6 +500,12 @@ else
                            @bind="_fNombreServ" @bind:event="oninput" />
                 </div>
                 <div class="ase-f ase-f-wide">
+                    <label class="asg-chk">
+                        <input type="checkbox" @bind="_fSoloPendiente" />
+                        <span>Solo autorizaciones pendientes</span>
+                    </label>
+                </div>
+                <div class="ase-f ase-f-wide">
                     <div class="d-flex gap-2">
                         <button class="btn btn-primary btn-sm" @onclick="AplicarFiltrosListado" disabled="@_listBusy">
                             @(_listBusy ? "Buscando..." : "Aplicar filtros")
@@ -540,7 +559,17 @@ else
                                 <td><span class="asg-state asg-st-@a.Estado.ToLower()">@a.Estado</span></td>
                                 <td>@FormatVigencia(a.AnioServicio, a.MesVigencia, a.MesFinal)</td>
                                 <td class="mono">@a.FechaInicio.ToString("dd/MM/yyyy")</td>
-                                <td class="mono">@(a.CodigoAutorizacion ?? "")</td>
+                                <td class="mono">
+                                    @if (a.AutorizacionPendiente)
+                                    {
+                                        <span class="asg-aut-pend" title="Autorizacion pendiente de completar">Pendiente</span>
+                                        <button class="btn btn-outline-primary btn-sm asg-aut-btn" @onclick="() => AbrirModalAutorizacion(a)">Completar</button>
+                                    }
+                                    else
+                                    {
+                                        @(a.CodigoAutorizacion ?? "")
+                                    }
+                                </td>
                                 <td class="text-muted small">@(a.Observaciones ?? "")</td>
                             </tr>
                         }
@@ -631,6 +660,48 @@ else
             <button class="btn btn-primary btn-lg asg-pago-confirmar" @onclick="ConfirmarPago"
                     disabled="@(!string.IsNullOrEmpty(_modalPagoTipo) && string.IsNullOrEmpty(_modalPagoCategoria))">
                 Confirmar
+            </button>
+        </div>
+    </div>
+}
+
+@* ============ Modal COMPLETAR AUTORIZACION ============ *@
+@if (_modalAut && _modalAutRow is not null)
+{
+    <div class="cie-backdrop" @onclick="CerrarModalAutorizacion"></div>
+    <div class="cie-modal asg-aut-modal">
+        <div class="cie-modal-h">
+            <h3>Completar autorizaci&oacute;n</h3>
+            <button class="cie-modal-close" @onclick="CerrarModalAutorizacion">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="asg-aut-ctx">
+                <div><b>Paciente:</b> @_modalAutRow.PacienteNombre <span class="mono">(@_modalAutRow.PacienteDocumento)</span></div>
+                <div><b>Servicio:</b> @_modalAutRow.NombreServicio</div>
+                <div><b>Contrato:</b> <span class="mono">@_modalAutRow.ContratoCodigo</span></div>
+            </div>
+            @if (_modalAutError is not null) { <div class="alert alert-danger py-2 px-3 my-2 small">@_modalAutError</div> }
+            <div class="ase-f">
+                <label>N&uacute;mero de autorizaci&oacute;n</label>
+                <input class="form-control form-control-sm" @bind="_modalAutCodigo" placeholder="Ej: 123456" />
+            </div>
+            <div class="ase-f">
+                <label>PDF de autorizaci&oacute;n</label>
+                <div class="asg-input-row">
+                    <InputFile OnChange="OnModalAutPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
+                    @if (!string.IsNullOrWhiteSpace(_modalAutPdfUrl))
+                    {
+                        <a class="btn btn-outline-secondary btn-sm" href="@_modalAutPdfUrl" target="_blank" title="Ver PDF">Ver</a>
+                    }
+                </div>
+                @if (_modalAutPdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
+                else if (!string.IsNullOrWhiteSpace(_modalAutPdfNombre)) { <div class="asg-hint asg-hint-ok">@_modalAutPdfNombre cargado.</div> }
+            </div>
+        </div>
+        <div class="asg-pago-footer">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModalAutorizacion">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAutorizacion" disabled="@_modalAutBusy">
+                @(_modalAutBusy ? "Guardando..." : "Guardar y marcar completado")
             </button>
         </div>
     </div>
@@ -839,6 +910,13 @@ else
     .asg-stack { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
     .asg-stack-row { display: flex; align-items: baseline; gap: 6px; }
     .asg-stack-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.02em; color: #64748b; min-width: 30px; font-weight: 600; }
+    .asg-modal-badge { font-size: 9.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; margin-left: 4px; line-height: 16px; display: inline-block; }
+    .asg-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #334155; cursor: pointer; }
+    .asg-chk input { width: 15px; height: 15px; }
+    .asg-aut-pend { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #fee2e2; color: #b91c1c; }
+    .asg-aut-btn { padding: 0 8px; line-height: 18px; margin-left: 6px; }
+    .asg-aut-ctx { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+    .asg-aut-modal { max-width: 520px; }
     .asg-tar { color: #1565c0; font-weight: 600; }
     .asg-historico, .asg-carrito { max-height: 480px; overflow: auto; }
     .asg-hist, .asg-cart-row { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; background: #fff; }
@@ -1088,6 +1166,8 @@ else
     private Dictionary<string, HashSet<string>> _paqueteServiciosCache =
         new(StringComparer.OrdinalIgnoreCase);
     private string? _autorizacion;
+    // Marca "guardar sin autorizacion (pendiente)" del formulario de registro.
+    private bool _autorizacionPendiente;
     private DateOnly? _fechaInicio = DateOnly.FromDateTime(DateTime.Now);
     private DateOnly? _fechaFinal;
     private string _anio = DateTime.Now.Year.ToString();
@@ -1134,6 +1214,7 @@ else
     private List<CatalogoTipoServicioDto> _tiposServicioCat = new();
     private string _fDocumento = "";
     private string _fNombreServ = "";
+    private bool _fSoloPendiente;
     private List<AsignacionListadoDto> _listado = new();
     private List<AseguradoraDto> _aseguradorasFiltro = new();
     private bool _listBusy;
@@ -1172,7 +1253,8 @@ else
                 aseId, null,
                 string.IsNullOrWhiteSpace(_fContratoCod) ? null : _fContratoCod,
                 string.IsNullOrWhiteSpace(_fModulo) ? null : _fModulo,
-                string.IsNullOrWhiteSpace(_fNombreServ) ? null : _fNombreServ);
+                string.IsNullOrWhiteSpace(_fNombreServ) ? null : _fNombreServ,
+                _fSoloPendiente);
             var lista = await Svc.ListarAsignacionesAsync(filtro);
             // Filtro por documento en memoria (evita joinar en el backend por texto libre).
             if (!string.IsNullOrWhiteSpace(_fDocumento))
@@ -1192,7 +1274,78 @@ else
         _fFechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
         _fFechaFin = DateOnly.FromDateTime(hoy);
         _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = "";
+        _fSoloPendiente = false;
         await AplicarFiltrosListado();
+    }
+
+    // ── Modal "Completar autorizacion" ──────────────────────────────────
+    private bool _modalAut;
+    private AsignacionListadoDto? _modalAutRow;
+    private string _modalAutCodigo = "";
+    private string? _modalAutPdfUrl;
+    private string? _modalAutPdfNombre;
+    private bool _modalAutPdfBusy;
+    private bool _modalAutBusy;
+    private string? _modalAutError;
+
+    private void AbrirModalAutorizacion(AsignacionListadoDto a)
+    {
+        _modalAutRow = a;
+        _modalAutCodigo = a.CodigoAutorizacion ?? "";
+        _modalAutPdfUrl = a.PdfAutorizacionUrl;
+        _modalAutPdfNombre = null;
+        _modalAutError = null;
+        _modalAut = true;
+    }
+
+    private void CerrarModalAutorizacion()
+    {
+        _modalAut = false;
+        _modalAutRow = null;
+        _modalAutError = null;
+    }
+
+    private async Task OnModalAutPdfUploaded(InputFileChangeEventArgs e)
+    {
+        _modalAutError = null;
+        _modalAutPdfBusy = true;
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10L * 1024 * 1024) { _modalAutError = "El PDF supera 10 MB."; return; }
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
+            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
+            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
+            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
+            var full = Path.Combine(dir, nombre);
+            await using (var fs = File.Create(full))
+            await using (var src = file.OpenReadStream(10L * 1024 * 1024))
+            {
+                await src.CopyToAsync(fs);
+            }
+            _modalAutPdfUrl = $"/uploads/autorizaciones/{nombre}";
+            _modalAutPdfNombre = file.Name;
+        }
+        catch (Exception ex) { _modalAutError = "No se pudo subir el PDF: " + ex.Message; }
+        finally { _modalAutPdfBusy = false; }
+    }
+
+    private async Task GuardarAutorizacion()
+    {
+        if (_modalAutRow is null) { return; }
+        if (string.IsNullOrWhiteSpace(_modalAutCodigo)) { _modalAutError = "Indica el numero de autorizacion."; return; }
+        _modalAutBusy = true;
+        _modalAutError = null;
+        try
+        {
+            await Svc.CompletarAutorizacionAsync(_modalAutRow.Id, _modalAutCodigo.Trim(), _modalAutPdfUrl, await Actor());
+            _ok = "Autorizacion completada.";
+            CerrarModalAutorizacion();
+            await AplicarFiltrosListado();
+        }
+        catch (InvalidOperationException ex) { _modalAutError = ex.Message; }
+        catch (Exception ex) { _modalAutError = "Error tecnico: " + ex.Message; }
+        finally { _modalAutBusy = false; }
     }
 
     private static string FormatVigencia(short? anio, short? mesVig, short? mesFin)
@@ -1650,8 +1803,9 @@ else
             if (_paciente is null) { _error = "Selecciona un paciente."; return; }
             if (_contratoSel is null) { _error = "Selecciona un contrato."; return; }
             if (_carrito.Count == 0) { _error = "Agrega al menos un servicio."; return; }
-            // Contrato exige PDF? bloquear si no fue cargado.
-            if (_contratoSel.RequierePdfAutorizacion && string.IsNullOrWhiteSpace(_pdfAutorizacionUrl))
+            // Contrato exige PDF? bloquear si no fue cargado — salvo que se guarde
+            // explicitamente como "autorizacion pendiente".
+            if (!_autorizacionPendiente && _contratoSel.RequierePdfAutorizacion && string.IsNullOrWhiteSpace(_pdfAutorizacionUrl))
             {
                 _error = $"El contrato {_contratoSel.CodigoContrato} exige adjuntar el PDF de autorizacion antes de guardar.";
                 return;
@@ -1707,13 +1861,17 @@ else
 
             var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items,
                 _pdfAutorizacionUrl,
-                _tipoPago, _categoriaPago, _valorPagoSugerido, _valorPagoReal);
+                _tipoPago, _categoriaPago, _valorPagoSugerido, _valorPagoReal,
+                _autorizacionPendiente);
             var r = await Svc.CrearLoteAsync(req, await Actor());
-            _ok = $"Lote guardado: {r.CantidadServicios} servicio(s) asignados.";
+            _ok = _autorizacionPendiente
+                ? $"Lote guardado: {r.CantidadServicios} servicio(s). Quedaron con AUTORIZACION PENDIENTE (complétalas en el tab Listado)."
+                : $"Lote guardado: {r.CantidadServicios} servicio(s) asignados.";
             _carrito = new();
             _paqueteServiciosCache.Clear();
             LimpiarPdf();
             LimpiarPago();
+            _autorizacionPendiente = false;
             _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();
         }
         catch (InvalidOperationException ex) { _error = ex.Message; }

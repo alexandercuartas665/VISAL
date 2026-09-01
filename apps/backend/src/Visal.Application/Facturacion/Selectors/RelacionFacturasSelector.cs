@@ -343,7 +343,12 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 modalidadFacturacion = sc.ModalidadFacturacion;
                 grupoServicioFacturacion = sc.GrupoServicioFacturacion;
                 servicioFacturacion = sc.ServicioFacturacion;
-                cupsCodigo = sc.CodigoServicio;
+                // CUPS sin el sufijo de modalidad d/f (RIPS no lo maneja). Preferimos
+                // el snapshot CodigoRips de la asignacion; si es legacy/null, lo
+                // derivamos del CodigoServicio del contrato al vuelo.
+                cupsCodigo = !string.IsNullOrWhiteSpace(asigRelevante.CodigoRips)
+                    ? asigRelevante.CodigoRips
+                    : ServicioCodigo.Base(sc.CodigoServicio);
                 cupsDescripcion = sc.Descripcion;
                 // Tipo Archivo RIPS (col 7 "Archivo json"): override por
                 // servicio del contrato. Si no esta configurado, mantenemos el

@@ -255,12 +255,26 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         // Validacion de PDF obligatorio segun contrato.
         var contrato = await db.ContratosAseguradora.FirstOrDefaultAsync(
             c => c.CodigoContrato == req.ContratoCodigo, ct);
-        if (contrato is not null && contrato.RequierePdfAutorizacion
+        // El PDF solo se exige cuando NO se guarda como "autorizacion pendiente".
+        if (!req.AutorizacionPendiente
+            && contrato is not null && contrato.RequierePdfAutorizacion
             && string.IsNullOrWhiteSpace(req.PdfAutorizacionUrl))
         {
             throw new InvalidOperationException(
                 $"El contrato {req.ContratoCodigo} exige adjuntar el PDF de autorizacion antes de guardar.");
         }
+
+        // Codigo RIPS (CUPS sin sufijo d/f) por servicio. El ServicioId del item es
+        // el GUID del ServicioContrato; resolvemos su CodigoServicio y le quitamos el
+        // sufijo de modalidad para el snapshot que consume facturacion/RIPS.
+        var servicioGuids = req.Items
+            .Select(i => Guid.TryParse(i.ServicioId, out var g) ? (Guid?)g : null)
+            .Where(g => g.HasValue).Select(g => g!.Value).Distinct().ToList();
+        var codigosPorId = servicioGuids.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await db.ServiciosContrato.AsNoTracking()
+                .Where(s => servicioGuids.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id, s => s.CodigoServicio, ct);
 
         // Defensa server-side de la regla "una sola fila lleva el valor pactado":
         // El frontend YA arma el request con el valor solo en el primer chip con
@@ -289,6 +303,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 Sucursal = req.Sucursal,
                 ServicioId = it.ServicioId,
                 NombreServicio = it.NombreServicio,
+                CodigoRips = CalcularCodigoRips(it.ServicioId, codigosPorId),
                 TipoServicio = it.TipoServicio,
                 Modulo = it.Modulo,
                 Cantidad = it.Cantidad,
@@ -307,6 +322,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 ValorPagoSugerido = req.ValorPagoSugerido,
                 ValorPagoReal = req.ValorPagoReal,
                 Estado = AsignacionEstado.Pendiente,
+                AutorizacionPendiente = req.AutorizacionPendiente,
                 PaqueteInstanciaId = it.PaqueteInstanciaId,
                 PaqueteCodigo = it.PaqueteCodigo,
                 PaqueteValorPactado = valorPactado,
@@ -316,6 +332,18 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
         await db.SaveChangesAsync(ct);
         return new LoteCreadoDto(lote.Id, req.Items.Count);
+    }
+
+    /// <summary>Resuelve el codigo RIPS (CUPS sin sufijo d/f) de un item a partir de su
+    /// ServicioId. Si es GUID, usa el CodigoServicio del ServicioContrato precargado;
+    /// si es un codigo suelto (paquete/legacy), le quita el sufijo directamente.</summary>
+    private static string? CalcularCodigoRips(string servicioId, IReadOnlyDictionary<Guid, string?> codigosPorId)
+    {
+        if (Guid.TryParse(servicioId, out var g))
+        {
+            return codigosPorId.TryGetValue(g, out var cod) ? ServicioCodigo.Base(cod) : null;
+        }
+        return ServicioCodigo.Base(servicioId);
     }
 
     public async Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default)
@@ -389,6 +417,16 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
         a.ServicioId = req.ServicioId;
         a.NombreServicio = req.NombreServicio;
+        // Recalcular el codigo RIPS (CUPS sin sufijo d/f) por si cambio el servicio.
+        string? codRipsSrv = null;
+        if (Guid.TryParse(req.ServicioId, out var srvGid))
+        {
+            var codSrv = await db.ServiciosContrato.AsNoTracking()
+                .Where(s => s.Id == srvGid).Select(s => s.CodigoServicio).FirstOrDefaultAsync(ct);
+            codRipsSrv = ServicioCodigo.Base(codSrv);
+        }
+        else { codRipsSrv = ServicioCodigo.Base(req.ServicioId); }
+        a.CodigoRips = codRipsSrv;
         a.TipoServicio = req.TipoServicio;
         a.Modulo = req.Modulo;
         a.Cantidad = req.Cantidad;
@@ -403,6 +441,37 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         a.FormatoHistoria = req.FormatoHistoria;
         a.RipsViaIngresoCodigo = req.RipsViaIngresoCodigo;
         a.RipsViaIngresoNombre = req.RipsViaIngresoNombre;
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> CompletarAutorizacionAsync(
+        Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
+        Guid actor, CancellationToken ct = default)
+    {
+        var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
+        if (a is null) { return false; }
+
+        if (string.IsNullOrWhiteSpace(codigoAutorizacion))
+        {
+            throw new InvalidOperationException("Debes indicar el numero de autorizacion.");
+        }
+
+        // Si el contrato exige PDF, debe existir uno (el ya guardado o el que se adjunta ahora).
+        var pdfFinal = string.IsNullOrWhiteSpace(pdfAutorizacionUrl) ? a.PdfAutorizacionUrl : pdfAutorizacionUrl;
+        var contrato = await db.ContratosAseguradora.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.CodigoContrato == a.ContratoCodigo, ct);
+        if (contrato is not null && contrato.RequierePdfAutorizacion
+            && string.IsNullOrWhiteSpace(pdfFinal))
+        {
+            throw new InvalidOperationException(
+                $"El contrato {a.ContratoCodigo} exige adjuntar el PDF de autorizacion para completar.");
+        }
+
+        a.CodigoAutorizacion = codigoAutorizacion.Trim();
+        if (!string.IsNullOrWhiteSpace(pdfAutorizacionUrl)) { a.PdfAutorizacionUrl = pdfAutorizacionUrl; }
+        a.AutorizacionPendiente = false;
 
         await db.SaveChangesAsync(ct);
         return true;
@@ -446,6 +515,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             var ns = filtro.NombreServicio.Trim().ToLower();
             q = q.Where(x => x.a.NombreServicio.ToLower().Contains(ns));
         }
+        if (filtro.SoloAutorizacionPendiente)
+        {
+            q = q.Where(x => x.a.AutorizacionPendiente);
+        }
 
         // Filtro por aseguradora: se hace via contrato_codigo -> ContratoAseguradora -> AseguradoraId.
         if (filtro.AseguradoraId is Guid ase)
@@ -478,7 +551,9 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 x.a.MesFinal,
                 x.a.CodigoAutorizacion,
                 x.a.Observaciones,
-                x.a.Sucursal
+                x.a.Sucursal,
+                x.a.AutorizacionPendiente,
+                x.a.PdfAutorizacionUrl
             })
             .ToListAsync(ct);
 
@@ -502,7 +577,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             r.FechaInicio, r.FechaFinal,
             r.AnioServicio, r.MesVigencia, r.MesFinal,
             r.CodigoAutorizacion, r.Observaciones,
-            r.Sucursal)).ToList();
+            r.Sucursal,
+            r.AutorizacionPendiente, r.PdfAutorizacionUrl)).ToList();
     }
 
     public async Task<IReadOnlyList<AsignacionPendienteDto>> ListarPendientesAsync(

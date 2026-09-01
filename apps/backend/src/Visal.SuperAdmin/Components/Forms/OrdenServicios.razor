@@ -124,7 +124,10 @@ else
                                     }
                                 </div>
                                 <div class="os-suggest-meta">
-                                    @if (!string.IsNullOrWhiteSpace(s.CodigoServicio)) { <span class="os-suggest-cod">@s.CodigoServicio</span> }
+                                    @if (!string.IsNullOrWhiteSpace(s.CodigoServicio))
+                                    {
+                                        <span class="os-suggest-cod">@ServicioCodigo.Base(s.CodigoServicio)</span>
+                                    }
                                     @if (!string.IsNullOrWhiteSpace(s.Modulo)) { <span>&middot; @s.Modulo</span> }
                                     @if (!string.IsNullOrWhiteSpace(s.Especialidad)) { <span>&middot; @s.Especialidad</span> }
                                     @if (!string.IsNullOrWhiteSpace(s.Aseguradora)) { <span>&middot; @s.Aseguradora</span> }
@@ -168,7 +171,7 @@ else
                 Servicio seleccionado:
                 @if (!string.IsNullOrWhiteSpace(_borrador.CodigoServicio))
                 {
-                    <span class="os-borrador-cod">@_borrador.CodigoServicio</span>
+                    <span class="os-borrador-cod">@ServicioCodigo.Base(_borrador.CodigoServicio)</span>
                 }
                 <strong>@_borrador.Descripcion</strong>
                 <button class="btn btn-link btn-sm os-borrador-x" @onclick="LimpiarBorrador" title="Quitar">&times;</button>
@@ -200,7 +203,7 @@ else
                         {
                             <tr>
                                 <td class="text-center">@it.Orden</td>
-                                <td class="os-cod-cell">@(it.CodigoServicio ?? "-")</td>
+                                <td class="os-cod-cell">@(string.IsNullOrWhiteSpace(it.CodigoServicio) ? "-" : ServicioCodigo.Base(it.CodigoServicio))</td>
                                 <td>
                                     <strong>@it.Descripcion</strong>
                                 </td>

@@ -302,7 +302,11 @@ public sealed record CrearLoteRequest(
     string? TipoPago = null,
     string? CategoriaCopago = null,
     decimal? ValorPagoSugerido = null,
-    decimal? ValorPagoReal = null);
+    decimal? ValorPagoReal = null,
+    // Cuando es true, el lote se guarda SIN exigir el PDF de autorizacion (aunque el
+    // contrato lo pida) y cada asignacion queda marcada como "autorizacion pendiente"
+    // para completarla despues desde el tab Listado.
+    bool AutorizacionPendiente = false);
 
 /// <summary>Filtros del tab "Listado" en /asignacion. Todos opcionales; los null/vacios
 /// simplemente no aplican. Fecha_inicial y fecha_final aplican sobre FechaInicio de la
@@ -310,7 +314,9 @@ public sealed record CrearLoteRequest(
 public sealed record AsignacionListadoFiltro(
     DateOnly? FechaInicial, DateOnly? FechaFinal,
     Guid? AseguradoraId, Guid? PacienteId,
-    string? ContratoCodigo, string? Modulo, string? NombreServicio);
+    string? ContratoCodigo, string? Modulo, string? NombreServicio,
+    // Cuando es true, solo devuelve asignaciones con la autorizacion pendiente.
+    bool SoloAutorizacionPendiente = false);
 
 /// <summary>Fila del listado tabular de asignaciones. Incluye todos los datos
 /// relacionados (paciente + aseguradora + contrato + programacion) para que el
@@ -324,7 +330,9 @@ public sealed record AsignacionListadoDto(
     DateOnly FechaInicio, DateOnly? FechaFinal,
     short? AnioServicio, short? MesVigencia, short? MesFinal,
     string? CodigoAutorizacion, string? Observaciones,
-    string? Sucursal);
+    string? Sucursal,
+    bool AutorizacionPendiente = false,
+    string? PdfAutorizacionUrl = null);
 
 /// <summary>Payload para actualizar una asignacion existente (solo si esta Pendiente).
 /// Se persiste sobre el mismo registro sin tocar el lote. Los campos vienen de la
@@ -373,6 +381,15 @@ public interface IAsignacionService
     /// <summary>Actualiza una asignacion existente. Solo se permite si esta Pendiente y
     /// no tiene turnos coordinados. Lanza InvalidOperationException si no se cumple.</summary>
     Task<bool> ActualizarAsignacionAsync(ActualizarAsignacionRequest req, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Completa la autorizacion de una asignacion que quedo pendiente: guarda el
+    /// numero de autorizacion (obligatorio) y, si se adjunta, la URL del PDF; luego quita
+    /// la marca de pendiente. Si el contrato exige PDF y la asignacion no tiene uno (ni se
+    /// adjunta ahora) lanza InvalidOperationException. Se puede completar en cualquier
+    /// estado de la asignacion (es un dato administrativo).</summary>
+    Task<bool> CompletarAutorizacionAsync(
+        Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
+        Guid actor, CancellationToken ct = default);
 
     /// <summary>Lista tabular de asignaciones para el tab "Listado" con filtros compuestos.
     /// Ordena por CreadoEn desc. Sin limite implicito; la UI puede paginar/scrollear.</summary>

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901140618_AddCodigoRipsAsignacion")]
+    partial class AddCodigoRipsAsignacion
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -646,12 +649,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("smallint")
                         .HasColumnName("anio_servicio");
 
-                    b.Property<bool>("AutorizacionPendiente")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("autorizacion_pendiente");
-
                     b.Property<int>("Cantidad")
                         .HasColumnType("integer")
                         .HasColumnName("cantidad");
@@ -819,9 +816,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("PaqueteInstanciaId")
                         .HasDatabaseName("ix_asignaciones_paquete_instancia_id");
-
-                    b.HasIndex("TenantId", "AutorizacionPendiente")
-                        .HasDatabaseName("ix_asignaciones_tenant_id_autorizacion_pendiente");
 
                     b.HasIndex("TenantId", "PacienteId")
                         .HasDatabaseName("ix_asignaciones_tenant_id_paciente_id");

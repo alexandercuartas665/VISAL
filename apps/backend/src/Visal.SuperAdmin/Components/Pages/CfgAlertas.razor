@@ -1,0 +1,565 @@
+@page "/config/alertas"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Admin
+@using Visal.Application.Tenancy.Alertas
+@using Visal.Application.Tenancy.WhatsApp
+@inject IAlertaService Svc
+@inject IHsmTemplateService HsmSvc
+@inject IJSRuntime JS
+
+<PageTitle>Alertas - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Alertas automaticas</h1>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-primary btn-sm" @onclick="EjecutarAhora" disabled="@_busy">
+            @(_busy ? "Ejecutando..." : "Ejecutar ahora")
+        </button>
+        <button class="btn btn-primary btn-sm" @onclick="NuevaRegla">+ Nueva regla</button>
+    </div>
+</div>
+
+@if (_msg is not null) { <div class="ase-ok">@_msg</div> }
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+<div class="d-flex gap-2 mb-3">
+    <button class="btn btn-sm @(_tab == "reglas" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => _tab = "reglas"'>Reglas</button>
+    <button class="btn btn-sm @(_tab == "bandeja" ? "btn-primary" : "btn-outline-secondary")" @onclick="AbrirBandeja">Bandeja de alertas</button>
+</div>
+
+@if (_tab == "reglas")
+{
+<div class="ase-card">
+    <div class="ase-card-h">Reglas configuradas</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Cada regla revisa las asignaciones y, cuando se cumple la condicion y el disparo,
+            envia una alerta al destinatario por correo o WhatsApp. Se ejecuta automaticamente
+            una vez al dia; usa <b>Ejecutar ahora</b> para probar sin esperar.
+        </p>
+
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Condicion</th>
+                        <th>Disparo</th>
+                        <th>Destinatario</th>
+                        <th>Canal</th>
+                        <th class="text-center">Activa</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_reglas.Count == 0)
+                    {
+                        <tr><td colspan="7" class="text-center text-muted p-3">Sin reglas. Crea la primera con "+ Nueva regla".</td></tr>
+                    }
+                    @foreach (var r in _reglas)
+                    {
+                        <tr>
+                            <td><b>@r.Nombre</b></td>
+                            <td>@CondicionTxt(r.Condicion)</td>
+                            <td class="small">@DisparoTxt(r)</td>
+                            <td class="small">@DestinatarioTxt(r)</td>
+                            <td>@(r.Canal == AlertaCanal.Correo ? "Correo" : "WhatsApp")</td>
+                            <td class="text-center">
+                                <input type="checkbox" checked="@r.Activa" @onchange="e => ToggleActiva(r, (bool)e.Value!)" />
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Editar(r)">Editar</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Eliminar(r)">Eliminar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+}
+
+@if (_tab == "bandeja")
+{
+<div class="ase-card">
+    <div class="ase-card-h">Bandeja de alertas emitidas</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Tarjetas de las alertas que se dispararon (correo/WhatsApp). Marca cada una
+            como <b>Atendida</b> o <b>Descartada</b> a medida que las gestionas.
+        </p>
+        @if (_envios.Count == 0)
+        {
+            <div class="text-muted p-3">Aun no hay alertas emitidas. Usa "Ejecutar ahora" en Reglas para generar.</div>
+        }
+        else
+        {
+            <div class="alertas-cards">
+                @foreach (var e in _envios)
+                {
+                    <div class="alerta-card @(e.EstadoGestion == AlertaGestion.Atendida ? "is-atendida" : e.EstadoGestion == AlertaGestion.Descartada ? "is-descartada" : "")">
+                        <div class="alerta-card-h">
+                            <span class="alerta-card-regla">@e.ReglaNombre</span>
+                            <span class="alerta-card-estado alerta-@e.EstadoGestion.ToString().ToLower()">@GestionTxt(e.EstadoGestion)</span>
+                        </div>
+                        <div class="alerta-card-pac">@e.PacienteNombre</div>
+                        <div class="alerta-card-meta">
+                            <span>@(e.Canal == AlertaCanal.Correo ? "&#9993; Correo" : "&#128241; WhatsApp")</span>
+                            @if (!string.IsNullOrWhiteSpace(e.Contacto)) { <span>&middot; @e.Contacto</span> }
+                            <span>&middot; @e.FechaEnvio.LocalDateTime.ToString("dd/MM/yy HH:mm")</span>
+                            @if (e.Exito) { <span class="alerta-ok">&middot; enviada</span> } else { <span class="alerta-err" title="@e.Error">&middot; error</span> }
+                        </div>
+                        @if (!e.Exito && !string.IsNullOrWhiteSpace(e.Error)) { <div class="alerta-card-error">@e.Error</div> }
+                        <div class="alerta-card-acts">
+                            @if (e.EstadoGestion != AlertaGestion.Atendida)
+                            {
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => Gestionar(e, AlertaGestion.Atendida)">Atendida</button>
+                            }
+                            @if (e.EstadoGestion != AlertaGestion.Descartada)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Gestionar(e, AlertaGestion.Descartada)">Descartar</button>
+                            }
+                            @if (e.EstadoGestion != AlertaGestion.Nueva)
+                            {
+                                <button class="btn btn-sm btn-link" @onclick="() => Gestionar(e, AlertaGestion.Nueva)">Reabrir</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+}
+
+@if (_form is not null)
+{
+    <div class="al-backdrop" @onclick="() => _form = null"></div>
+    <div class="al-modal">
+        <div class="al-modal-h">
+            <h3>@(_form.Id is null ? "Nueva regla" : "Editar regla")</h3>
+            <button class="al-modal-close" @onclick="() => _form = null">&times;</button>
+        </div>
+        <div class="al-modal-body">
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label class="form-label small fw-bold">Nombre</label>
+                    <input class="form-control form-control-sm" @bind="_form.Nombre" placeholder="Ej: Recordatorio sesiones pendientes" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold">Activa</label>
+                    <div><label class="asg-chk"><input type="checkbox" @bind="_form.Activa" /> <span>Regla activa</span></label></div>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label small fw-bold">Condicion</label>
+                    <select class="form-select form-select-sm" @bind="_form.Condicion">
+                        <option value="@AlertaCondicion.SesionPendiente">Paciente con sesion pendiente</option>
+                        <option value="@AlertaCondicion.AtencionesTerminadas">Paciente con todas las atenciones terminadas</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-bold">Filtro por tipo de servicio (opcional)</label>
+                    <input class="form-control form-control-sm" @bind="_form.FiltroModulo" placeholder="Ej: TERAPIA (vacio = todos)" />
+                </div>
+
+                @* ---- Disparo ---- *@
+                <div class="col-12"><hr class="my-1" /><span class="small fw-bold text-uppercase text-muted">Cuando disparar</span></div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold">Tipo de disparo</label>
+                    <select class="form-select form-select-sm" @bind="_form.DisparoTipo">
+                        <option value="@AlertaDisparoTipo.DiasDelMes">Dias fijos del mes</option>
+                        <option value="@AlertaDisparoTipo.MesesDespues">N meses despues</option>
+                    </select>
+                </div>
+                @if (_form.DisparoTipo == AlertaDisparoTipo.DiasDelMes)
+                {
+                    <div class="col-md-8">
+                        <label class="form-label small fw-bold">Dias del mes (separados por coma)</label>
+                        <input class="form-control form-control-sm" @bind="_form.DiasDelMes" placeholder="15,16,17" />
+                    </div>
+                }
+                else
+                {
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Meses despues</label>
+                        <input type="number" class="form-control form-control-sm" @bind="_form.MesesDespues" min="0" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Contados desde</label>
+                        <select class="form-select form-select-sm" @bind="_form.Ancla">
+                            <option value="@AlertaAnclaRelativa.UltimaAtencion">La ultima atencion</option>
+                            <option value="@AlertaAnclaRelativa.FinAsignacion">El fin de la asignacion</option>
+                        </select>
+                    </div>
+                }
+
+                @* ---- Destinatario ---- *@
+                <div class="col-12"><hr class="my-1" /><span class="small fw-bold text-uppercase text-muted">A quien</span></div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-bold">Destinatario</label>
+                    <select class="form-select form-select-sm" @bind="_form.Destinatario">
+                        <option value="@AlertaDestinatario.Paciente">El paciente</option>
+                        <option value="@AlertaDestinatario.DoctorAtendio">El doctor que atendio</option>
+                        <option value="@AlertaDestinatario.UsuarioSistema">Un usuario del sistema</option>
+                    </select>
+                </div>
+                @if (_form.Destinatario == AlertaDestinatario.UsuarioSistema)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label small fw-bold">Usuario</label>
+                        <select class="form-select form-select-sm" @bind="_form.UsuarioSel">
+                            <option value="">-- elige --</option>
+                            @foreach (var u in _usuarios)
+                            {
+                                <option value="@u.Id">@u.Nombre</option>
+                            }
+                        </select>
+                    </div>
+                }
+
+                @* ---- Canal ---- *@
+                <div class="col-12"><hr class="my-1" /><span class="small fw-bold text-uppercase text-muted">Como</span></div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold">Canal</label>
+                    <select class="form-select form-select-sm" @bind="_form.Canal">
+                        <option value="@AlertaCanal.Correo">Correo</option>
+                        <option value="@AlertaCanal.WhatsApp">WhatsApp (plantilla HSM)</option>
+                    </select>
+                </div>
+
+                @if (_form.Canal == AlertaCanal.Correo)
+                {
+                    <div class="col-md-8">
+                        <label class="form-label small fw-bold">Asunto</label>
+                        <input class="form-control form-control-sm" @bind="_form.Asunto" placeholder="Ej: Recordatorio de {servicio}" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small fw-bold">Cuerpo del correo</label>
+                        <textarea class="form-control form-control-sm" rows="5" @bind="_form.Cuerpo"
+                                  placeholder="Hola {paciente}, tienes pendiente {servicio}..."></textarea>
+                    </div>
+                }
+                else
+                {
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Linea WhatsApp (Gupshup)</label>
+                        <select class="form-select form-select-sm" @bind="_form.LineaSel">
+                            <option value="">-- elige --</option>
+                            @foreach (var l in _lineas)
+                            {
+                                <option value="@l.Id">@l.Nombre</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarPlantillas" disabled="@(string.IsNullOrEmpty(_form.LineaSel) || _cargandoPlantillas)">
+                            @(_cargandoPlantillas ? "Cargando..." : "Cargar plantillas")
+                        </button>
+                    </div>
+                    @if (_plantillas.Count > 0)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Plantilla HSM</label>
+                            <select class="form-select form-select-sm" @bind="_form.TemplateSel" @bind:after="OnTemplateChanged">
+                                <option value="">-- elige --</option>
+                                @foreach (var t in _plantillas)
+                                {
+                                    <option value="@t.Id">@t.ElementName (@t.Status, @t.ParameterCount par.)</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(_form.HsmTemplateId))
+                    {
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">
+                                Parametros de la plantilla (@_form.HsmParameterCount) — token por cada {{n}}
+                            </label>
+                            @for (int i = 0; i < _form.HsmParametros.Count; i++)
+                            {
+                                var idx = i;
+                                <div class="input-group input-group-sm mb-1" style="max-width:520px">
+                                    <span class="input-group-text">{{@(idx + 1)}}</span>
+                                    <input class="form-control" @bind="_form.HsmParametros[idx]" placeholder="Ej: {paciente}" />
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+
+                <div class="col-12">
+                    <div class="alert alert-secondary py-2 px-3 small mb-0">
+                        <b>Tokens disponibles:</b> {paciente}, {documento}, {servicio}, {contrato}, {cantidad},
+                        {doctor}, {fecha}, {fecha_inicio}, {fecha_fin}, {ultima_atencion}
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">Guardar regla</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _form = null">Cancelar</button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .al-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .al-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 92%; max-width: 780px; max-height: 90vh; background: #fff; border-radius: 12px; z-index: 1051; box-shadow: 0 10px 40px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+    .al-modal-h { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .al-modal-h h3 { margin: 0; font-size: 16px; color: #0f172a; }
+    .al-modal-close { border: 0; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .al-modal-body { padding: 16px 18px; overflow: auto; }
+    .alertas-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+    .alerta-card { border: 1px solid #e2e8f0; border-left: 4px solid #1565c0; border-radius: 8px; padding: 12px; background: #fff; }
+    .alerta-card.is-atendida { border-left-color: #16a34a; opacity: .85; }
+    .alerta-card.is-descartada { border-left-color: #94a3b8; opacity: .6; }
+    .alerta-card-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .alerta-card-regla { font-weight: 700; font-size: 13px; color: #0f172a; }
+    .alerta-card-estado { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+    .alerta-nueva { background: #dbeafe; color: #1e40af; }
+    .alerta-atendida { background: #dcfce7; color: #166534; }
+    .alerta-descartada { background: #f1f5f9; color: #64748b; }
+    .alerta-card-pac { font-size: 13px; color: #334155; }
+    .alerta-card-meta { font-size: 11px; color: #64748b; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .alerta-ok { color: #16a34a; }
+    .alerta-err { color: #dc2626; }
+    .alerta-card-error { font-size: 11px; color: #dc2626; margin-top: 4px; }
+    .alerta-card-acts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<AlertaReglaDto> _reglas = new();
+    private List<AlertaUsuarioDto> _usuarios = new();
+    private List<AlertaLineaDto> _lineas = new();
+    private List<GupshupTemplateInfo> _plantillas = new();
+    private Form? _form;
+    private bool _busy;
+    private bool _cargandoPlantillas;
+    private string? _msg;
+    private string? _error;
+    private string _tab = "reglas";
+    private List<AlertaEnvioDto> _envios = new();
+
+    private async Task AbrirBandeja()
+    {
+        _tab = "bandeja";
+        _error = null;
+        try { _envios = (await Svc.ListEnviosRecientesAsync()).ToList(); }
+        catch (Exception ex) { _error = "No se pudo cargar la bandeja: " + ex.Message; }
+    }
+
+    private async Task Gestionar(AlertaEnvioDto e, AlertaGestion estado)
+    {
+        await Svc.MarcarGestionAsync(e.Id, estado, await Actor());
+        _envios = (await Svc.ListEnviosRecientesAsync()).ToList();
+    }
+
+    private static string GestionTxt(AlertaGestion g) => g switch
+    {
+        AlertaGestion.Nueva => "Nueva",
+        AlertaGestion.Atendida => "Atendida",
+        AlertaGestion.Descartada => "Descartada",
+        _ => g.ToString(),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Cargar();
+    }
+
+    private async Task Cargar()
+    {
+        _reglas = (await Svc.ListAsync()).ToList();
+    }
+
+    private async Task NuevaRegla()
+    {
+        await AsegurarCatalogos();
+        _plantillas = new();
+        _form = new Form();
+        _msg = _error = null;
+    }
+
+    private async Task Editar(AlertaReglaDto r)
+    {
+        await AsegurarCatalogos();
+        _plantillas = new();
+        _form = new Form
+        {
+            Id = r.Id,
+            Nombre = r.Nombre,
+            Activa = r.Activa,
+            Orden = r.Orden,
+            Condicion = r.Condicion,
+            FiltroModulo = r.FiltroModulo,
+            DisparoTipo = r.DisparoTipo,
+            DiasDelMes = r.DiasDelMes ?? "15,16,17",
+            MesesDespues = r.MesesDespues ?? 3,
+            Ancla = r.AnclaRelativa ?? AlertaAnclaRelativa.UltimaAtencion,
+            Destinatario = r.Destinatario,
+            UsuarioSel = r.UsuarioSistemaId?.ToString() ?? "",
+            Canal = r.Canal,
+            Asunto = r.Asunto ?? "",
+            Cuerpo = r.Cuerpo ?? "",
+            LineaSel = r.HsmLineId?.ToString() ?? "",
+            HsmTemplateId = r.HsmTemplateId,
+            HsmTemplateName = r.HsmTemplateName,
+            TemplateSel = r.HsmTemplateId ?? "",
+            HsmParameterCount = r.HsmParameterCount,
+            HsmParametros = r.HsmParametros.ToList(),
+        };
+        _msg = _error = null;
+    }
+
+    private async Task AsegurarCatalogos()
+    {
+        if (_usuarios.Count == 0) { _usuarios = (await Svc.ListUsuariosAsync()).ToList(); }
+        if (_lineas.Count == 0) { _lineas = (await Svc.ListLineasGupshupAsync()).ToList(); }
+    }
+
+    private async Task CargarPlantillas()
+    {
+        if (_form is null || !Guid.TryParse(_form.LineaSel, out var lineId)) { return; }
+        _cargandoPlantillas = true;
+        _error = null;
+        try
+        {
+            var r = await HsmSvc.ListByLineAsync(lineId);
+            if (!r.Ok) { _error = r.Error ?? "No se pudieron cargar las plantillas."; _plantillas = new(); }
+            else { _plantillas = r.Templates.ToList(); }
+        }
+        catch (Exception ex) { _error = "Error cargando plantillas: " + ex.Message; }
+        finally { _cargandoPlantillas = false; }
+    }
+
+    private void OnTemplateChanged()
+    {
+        if (_form is null) { return; }
+        var t = _plantillas.FirstOrDefault(x => x.Id == _form.TemplateSel);
+        if (t is null) { return; }
+        _form.HsmTemplateId = t.Id;
+        _form.HsmTemplateName = t.ElementName;
+        _form.HsmParameterCount = t.ParameterCount;
+        // Ajustar la lista de tokens al numero de parametros.
+        while (_form.HsmParametros.Count < t.ParameterCount) { _form.HsmParametros.Add(""); }
+        while (_form.HsmParametros.Count > t.ParameterCount) { _form.HsmParametros.RemoveAt(_form.HsmParametros.Count - 1); }
+    }
+
+    private async Task Guardar()
+    {
+        if (_form is null) { return; }
+        _busy = true; _error = _msg = null;
+        try
+        {
+            Guid? usuarioId = Guid.TryParse(_form.UsuarioSel, out var uid) ? uid : null;
+            Guid? lineId = Guid.TryParse(_form.LineaSel, out var lid) ? lid : null;
+            var req = new AlertaReglaUpsertRequest(
+                _form.Id, _form.Nombre, _form.Activa, _form.Orden,
+                _form.Condicion, _form.FiltroModulo,
+                _form.DisparoTipo, _form.DiasDelMes, _form.MesesDespues, _form.Ancla,
+                _form.Destinatario, usuarioId,
+                _form.Canal, _form.Asunto, _form.Cuerpo,
+                lineId, _form.HsmTemplateId, _form.HsmTemplateName, _form.HsmParameterCount,
+                _form.HsmParametros);
+            await Svc.UpsertAsync(req, await Actor());
+            _msg = "Regla guardada.";
+            _form = null;
+            await Cargar();
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleActiva(AlertaReglaDto r, bool activa)
+    {
+        await Svc.ToggleActivaAsync(r.Id, activa, await Actor());
+        await Cargar();
+    }
+
+    private async Task Eliminar(AlertaReglaDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar la regla \"{r.Nombre}\"?");
+        if (!ok) { return; }
+        await Svc.DeleteAsync(r.Id, await Actor());
+        if (_form?.Id == r.Id) { _form = null; }
+        await Cargar();
+    }
+
+    private async Task EjecutarAhora()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            "Esto evaluara las reglas activas AHORA e ira enviando alertas reales a los destinatarios (respetando lo ya enviado este periodo). Continuar?");
+        if (!ok) { return; }
+        _busy = true; _error = _msg = null;
+        try
+        {
+            var hoy = DateOnly.FromDateTime(DateTime.Now);
+            var r = await Svc.EvaluarYDispararAsync(hoy, forzar: true, await Actor());
+            _msg = $"Listo: {r.Enviadas} enviada(s), {r.Saltadas} ya enviada(s), {r.Errores} con error.";
+            if (r.Mensajes.Count > 0) { _error = string.Join(" | ", r.Mensajes.Take(8)); }
+        }
+        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private static string CondicionTxt(AlertaCondicion c) => c switch
+    {
+        AlertaCondicion.SesionPendiente => "Sesion pendiente",
+        AlertaCondicion.AtencionesTerminadas => "Atenciones terminadas",
+        _ => c.ToString(),
+    };
+
+    private static string DisparoTxt(AlertaReglaDto r) => r.DisparoTipo == AlertaDisparoTipo.DiasDelMes
+        ? $"Dias {r.DiasDelMes}"
+        : $"{r.MesesDespues} mes(es) tras {(r.AnclaRelativa == AlertaAnclaRelativa.UltimaAtencion ? "ultima atencion" : "fin asignacion")}";
+
+    private static string DestinatarioTxt(AlertaReglaDto r) => r.Destinatario switch
+    {
+        AlertaDestinatario.Paciente => "Paciente",
+        AlertaDestinatario.DoctorAtendio => "Doctor que atendio",
+        AlertaDestinatario.UsuarioSistema => "Usuario: " + (r.UsuarioSistemaNombre ?? "?"),
+        _ => r.Destinatario.ToString(),
+    };
+
+    private sealed class Form
+    {
+        public Guid? Id { get; set; }
+        public string Nombre { get; set; } = "";
+        public bool Activa { get; set; } = true;
+        public int Orden { get; set; }
+        public AlertaCondicion Condicion { get; set; } = AlertaCondicion.SesionPendiente;
+        public string? FiltroModulo { get; set; }
+        public AlertaDisparoTipo DisparoTipo { get; set; } = AlertaDisparoTipo.DiasDelMes;
+        public string DiasDelMes { get; set; } = "15,16,17";
+        public int MesesDespues { get; set; } = 3;
+        public AlertaAnclaRelativa Ancla { get; set; } = AlertaAnclaRelativa.UltimaAtencion;
+        public AlertaDestinatario Destinatario { get; set; } = AlertaDestinatario.Paciente;
+        public string UsuarioSel { get; set; } = "";
+        public AlertaCanal Canal { get; set; } = AlertaCanal.Correo;
+        public string Asunto { get; set; } = "";
+        public string Cuerpo { get; set; } = "";
+        public string LineaSel { get; set; } = "";
+        public string TemplateSel { get; set; } = "";
+        public string? HsmTemplateId { get; set; }
+        public string? HsmTemplateName { get; set; }
+        public int HsmParameterCount { get; set; }
+        public List<string> HsmParametros { get; set; } = new();
+    }
+}

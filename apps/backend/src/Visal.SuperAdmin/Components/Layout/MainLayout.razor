@@ -63,3 +63,68 @@
         }
     });
 </script>
+
+<script>
+    // Menu lateral: colapsar/expandir agrupadores (nativo <details>, estado en
+    // localStorage) + buscador que filtra opciones por texto. Todo en JS puro
+    // porque el sidebar se renderiza estatico (SSR): no hay circuito Blazor aca.
+    (function () {
+        var KEY = 'visal.menu.collapsed';
+        function load() { try { return new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch (e) { return new Set(); } }
+        function save(s) { try { localStorage.setItem(KEY, JSON.stringify(Array.from(s))); } catch (e) { } }
+
+        function restore(g) {
+            var closed = load();
+            g.open = !closed.has(g.getAttribute('data-group'));
+        }
+
+        function filter(term) {
+            term = (term || '').trim().toLowerCase();
+            var groups = document.querySelectorAll('.visal-nav-group[data-group]');
+            var anyGlobal = false;
+            groups.forEach(function (g) {
+                var anyLocal = false;
+                g.querySelectorAll('.visal-nav-link').forEach(function (a) {
+                    var show = !term || (a.textContent || '').toLowerCase().indexOf(term) !== -1;
+                    a.style.display = show ? '' : 'none';
+                    if (show) { anyLocal = true; }
+                });
+                g.style.display = anyLocal ? '' : 'none';
+                if (anyLocal) { anyGlobal = true; }
+                if (term) { g.open = true; } else { restore(g); }
+            });
+            var empty = document.querySelector('[data-nav-empty]');
+            if (empty) { empty.hidden = !(term && !anyGlobal); }
+        }
+
+        function init() {
+            document.querySelectorAll('.visal-nav-group[data-group]').forEach(function (g) {
+                restore(g);
+                if (!g.__navWired) {
+                    g.__navWired = true;
+                    g.addEventListener('toggle', function () {
+                        var s = load(); var k = g.getAttribute('data-group');
+                        if (g.open) { s.delete(k); } else { s.add(k); }
+                        save(s);
+                    });
+                }
+            });
+            var input = document.querySelector('[data-nav-search]');
+            if (input && !input.__navWired) {
+                input.__navWired = true;
+                // Arranca readonly (anti-autofill del navegador); se libera al enfocar.
+                var liberar = function () { input.removeAttribute('readonly'); };
+                input.addEventListener('focus', liberar);
+                input.addEventListener('pointerdown', liberar);
+                input.addEventListener('input', function (e) { filter(e.target.value); });
+            }
+        }
+
+        if (document.readyState !== 'loading') { init(); }
+        else { document.addEventListener('DOMContentLoaded', init); }
+        // Re-init tras navegacion mejorada de Blazor (el sidebar puede re-renderizarse).
+        try { if (window.Blazor && Blazor.addEventListener) { Blazor.addEventListener('enhancedload', init); } } catch (e) { }
+        // Respaldo: reintentar poco despues por si el DOM del menu llega tarde.
+        setTimeout(init, 400);
+    })();
+</script>

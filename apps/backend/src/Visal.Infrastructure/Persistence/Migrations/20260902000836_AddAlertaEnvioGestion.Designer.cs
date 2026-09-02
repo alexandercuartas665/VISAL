@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260902000836_AddAlertaEnvioGestion")]
+    partial class AddAlertaEnvioGestion
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -9830,75 +9833,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tenant_payments_tenant_id");
 
                     b.ToTable("tenant_payments", (string)null);
-                });
-
-            modelBuilder.Entity("Visal.Domain.Entities.TenantRetellConfig", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<bool>("Activa")
-                        .HasColumnType("boolean")
-                        .HasColumnName("activa");
-
-                    b.Property<string>("AgentId")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)")
-                        .HasColumnName("agent_id");
-
-                    b.Property<string>("ApiKeyEncrypted")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("api_key_encrypted");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("created_by");
-
-                    b.Property<string>("FromNumber")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("from_number");
-
-                    b.Property<string>("TelnyxSipUsername")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)")
-                        .HasColumnName("telnyx_sip_username");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<Guid?>("UpdatedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("updated_by");
-
-                    b.Property<string>("WebhookToken")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("webhook_token");
-
-                    b.HasKey("Id")
-                        .HasName("pk_tenant_retell_configs");
-
-                    b.HasIndex("TenantId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_tenant_retell_configs_tenant_id");
-
-                    b.HasIndex("WebhookToken")
-                        .HasDatabaseName("ix_tenant_retell_configs_webhook_token");
-
-                    b.ToTable("tenant_retell_configs", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.TenantSubscription", b =>

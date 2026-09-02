@@ -95,6 +95,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
     public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
+    public DbSet<AlertaRegla> AlertaReglas => Set<AlertaRegla>();
+    public DbSet<AlertaEnvio> AlertaEnvios => Set<AlertaEnvio>();
+    public DbSet<LlamadaVoz> LlamadasVoz => Set<LlamadaVoz>();
+    public DbSet<TenantRetellConfig> TenantRetellConfigs => Set<TenantRetellConfig>();
     public DbSet<HcPestanaAlias> HcPestanaAliases => Set<HcPestanaAlias>();
     public DbSet<AtencionColumnaConfig> AtencionColumnaConfigs => Set<AtencionColumnaConfig>();
     public DbSet<TurnoProgramacion> TurnoProgramaciones => Set<TurnoProgramacion>();
@@ -208,6 +212,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<RevisionTipoEvento>().HaveConversion<string>().HaveMaxLength(30);
         configurationBuilder.Properties<RevisionResultado>().HaveConversion<string>().HaveMaxLength(20);
         configurationBuilder.Properties<RevisionActorTipo>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<AlertaCondicion>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<AlertaDisparoTipo>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<AlertaAnclaRelativa>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<AlertaDestinatario>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<AlertaCanal>().HaveConversion<string>().HaveMaxLength(40);
+        configurationBuilder.Properties<AlertaGestion>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<LlamadaVozEstado>().HaveConversion<string>().HaveMaxLength(30);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1406,6 +1417,53 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => x.LoteId);
             b.HasIndex(x => x.PaqueteInstanciaId);
             b.HasIndex(x => new { x.TenantId, x.AutorizacionPendiente });
+        });
+
+        // Motor de alertas: reglas configurables + outbox de envios (idempotencia).
+        modelBuilder.Entity<AlertaRegla>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.Property(x => x.FiltroModulo).HasMaxLength(40);
+            b.Property(x => x.DiasDelMes).HasMaxLength(60);
+            b.Property(x => x.Asunto).HasMaxLength(200);
+            b.Property(x => x.Cuerpo).HasMaxLength(4000);
+            b.Property(x => x.HsmTemplateId).HasMaxLength(80);
+            b.Property(x => x.HsmTemplateName).HasMaxLength(160);
+            b.Property(x => x.HsmParametrosJson).HasMaxLength(2000);
+            b.HasIndex(x => new { x.TenantId, x.Activa });
+        });
+
+        modelBuilder.Entity<AlertaEnvio>(b =>
+        {
+            b.Property(x => x.Periodo).HasMaxLength(16).IsRequired();
+            b.Property(x => x.Contacto).HasMaxLength(200);
+            b.Property(x => x.Error).HasMaxLength(1000);
+            b.Property(x => x.ExternalId).HasMaxLength(120);
+            b.HasIndex(x => new { x.TenantId, x.ReglaId, x.AsignacionId, x.Periodo }).IsUnique();
+        });
+
+        // Llamadas de voz IA (Retell/Telnyx) lanzadas desde Seguimiento.
+        modelBuilder.Entity<LlamadaVoz>(b =>
+        {
+            b.Property(x => x.CallId).HasMaxLength(80);
+            b.Property(x => x.FromNumber).HasMaxLength(20).IsRequired();
+            b.Property(x => x.ToNumber).HasMaxLength(20).IsRequired();
+            b.Property(x => x.AgentId).HasMaxLength(80);
+            b.Property(x => x.CostoUsd).HasPrecision(12, 4);
+            b.Property(x => x.Error).HasMaxLength(1000);
+            b.HasIndex(x => x.CallId);
+            b.HasIndex(x => new { x.TenantId, x.SeguimientoEncuestaId });
+        });
+
+        modelBuilder.Entity<TenantRetellConfig>(b =>
+        {
+            b.Property(x => x.ApiKeyEncrypted).HasMaxLength(1000);
+            b.Property(x => x.AgentId).HasMaxLength(80);
+            b.Property(x => x.FromNumber).HasMaxLength(20);
+            b.Property(x => x.WebhookToken).HasMaxLength(64);
+            b.Property(x => x.TelnyxSipUsername).HasMaxLength(80);
+            b.HasIndex(x => x.TenantId).IsUnique();
+            b.HasIndex(x => x.WebhookToken);
         });
 
         modelBuilder.Entity<AsignacionTurnoSesion>(b =>

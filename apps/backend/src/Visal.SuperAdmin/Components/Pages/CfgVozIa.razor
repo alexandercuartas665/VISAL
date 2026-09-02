@@ -1,0 +1,151 @@
+@page "/config/voz-ia"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Voz
+@inject ITenantVozConfigService Svc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Voz IA - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion de la Entidad</div>
+        <h1 class="ase-title">Voz IA (llamadas)</h1>
+    </div>
+</div>
+
+@if (_msg is not null) { <div class="ase-ok">@_msg</div> }
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+<div class="ase-card">
+    <div class="ase-card-h">Credenciales Retell / Telnyx</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Estas llaves permiten al sistema hacer las llamadas de voz con IA (Retell sobre
+            Telnyx). Se guardan <b>cifradas</b> en la base de datos; la API key nunca se
+            muestra. El n&uacute;mero ya debe estar importado en Retell.
+        </p>
+
+        <div class="row g-3" style="max-width:720px;">
+            <div class="col-md-12">
+                <label class="form-label small fw-bold">API Key de Retell</label>
+                <input type="password" class="form-control form-control-sm" @bind="_apiKey"
+                       placeholder="@(_tieneApiKey ? "•••••••• (ya configurada — deja vacio para conservarla)" : "Pega tu RETELL_API_KEY")" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-bold">Agent ID</label>
+                <input class="form-control form-control-sm" @bind="_agentId" placeholder="agent_..." />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-bold">N&uacute;mero saliente (E.164)</label>
+                <input class="form-control form-control-sm" @bind="_fromNumber" placeholder="+57XXXXXXXXXX" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-bold">Telnyx SIP Username (opcional)</label>
+                <input class="form-control form-control-sm" @bind="_telnyx" placeholder="Solo si Telnyx lo exige" />
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <label class="asg-chk"><input type="checkbox" @bind="_activa" /> <span>M&oacute;dulo de voz activo</span></label>
+            </div>
+        </div>
+
+        <div class="mt-3">
+            <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">
+                @(_busy ? "Guardando..." : "Guardar configuracion")
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="ase-card">
+    <div class="ase-card-h">Webhook (para configurar en Retell)</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Pega esta URL en el <b>webhook</b> del agente/cuenta en el dashboard de Retell.
+            Con ella el sistema recibe el resultado de cada llamada (transcripci&oacute;n, estado)
+            y actualiza la tarjeta de Seguimiento. El token identifica a tu agencia.
+        </p>
+        @if (string.IsNullOrWhiteSpace(_token))
+        {
+            <div class="text-muted small">Se generar&aacute; al guardar la configuraci&oacute;n.</div>
+        }
+        else
+        {
+            <div class="input-group input-group-sm" style="max-width:720px;">
+                <input class="form-control" readonly value="@WebhookUrl" />
+                <button class="btn btn-outline-secondary" @onclick="CopiarUrl" type="button">Copiar</button>
+                <button class="btn btn-outline-danger" @onclick="RegenerarToken" type="button" title="Invalida el token anterior">Regenerar</button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _apiKey = "";
+    private string? _agentId;
+    private string? _fromNumber;
+    private string? _telnyx;
+    private bool _activa = true;
+    private bool _tieneApiKey;
+    private string? _token;
+    private bool _busy;
+    private string? _msg;
+    private string? _error;
+
+    private string WebhookUrl => $"{Nav.BaseUri.TrimEnd('/')}/webhooks/retell/{_token}";
+
+    protected override async Task OnInitializedAsync() => await Cargar();
+
+    private async Task Cargar()
+    {
+        var c = await Svc.GetAsync();
+        _agentId = c.AgentId;
+        _fromNumber = c.FromNumber;
+        _telnyx = c.TelnyxSipUsername;
+        _activa = c.Activa;
+        _tieneApiKey = c.TieneApiKey;
+        _token = c.WebhookToken;
+        _apiKey = "";
+    }
+
+    private async Task Guardar()
+    {
+        _busy = true; _msg = _error = null;
+        try
+        {
+            var c = await Svc.SaveAsync(new VozConfigSaveRequest(
+                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                _agentId, _fromNumber, _telnyx, _activa), await Actor());
+            _tieneApiKey = c.TieneApiKey;
+            _token = c.WebhookToken;
+            _apiKey = "";
+            _msg = "Configuracion guardada.";
+        }
+        catch (Exception ex) { _error = "Error: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RegenerarToken()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Regenerar el token invalida el webhook anterior. Deberas actualizar la URL en Retell. Continuar?");
+        if (!ok) { return; }
+        _token = await Svc.RegenerarTokenAsync(await Actor());
+        _msg = "Token regenerado. Actualiza la URL en Retell.";
+    }
+
+    private async Task CopiarUrl()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", WebhookUrl); _msg = "URL copiada."; }
+        catch { _error = "No se pudo copiar."; }
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+}

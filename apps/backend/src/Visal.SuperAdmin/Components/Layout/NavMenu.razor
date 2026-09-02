@@ -60,30 +60,53 @@
         @* Menu dinamico por tenant: se arma desde la config guardada (o el default
            del catalogo). Cada opcion respeta su gate (permiso / atencion / admin /
            plataforma). Si por algo _menu no cargo (Groups vacio), cae al menu
-           hardcodeado de mas abajo como fallback — asi nunca queda sin menu. *@
+           hardcodeado de mas abajo como fallback — asi nunca queda sin menu.
+
+           Los agrupadores son colapsables (estado por usuario en localStorage) y
+           hay un buscador que filtra por texto — al buscar, todo se expande. *@
+        @* Buscador + colapsado nativos (<details>) para que funcionen aunque el
+           layout se renderice estatico (SSR). El JS de MainLayout filtra por texto,
+           recuerda que grupos quedaron cerrados (localStorage) y expande al buscar. *@
+        <div class="visal-nav-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            @* readonly + name no-usuario: evita que Chrome/Firefox autollenen el buscador
+               con las credenciales guardadas. El JS quita el readonly al enfocar. *@
+            <input type="search" name="visal_nav_q" placeholder="Buscar en el menu..."
+                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                   readonly data-nav-search />
+        </div>
+
         @foreach (var g in _menu.Groups)
         {
             var visibles = g.Items.Where(EsVisible).ToList();
             if (visibles.Count == 0) { continue; }
-            <div class="visal-nav-label">@g.Label</div>
-            @foreach (var it in visibles)
-            {
-                @if (it.External)
-                {
-                    <a class="visal-nav-link" href="@it.Href" target="_blank" rel="noopener noreferrer">
-                        @((MarkupString)MenuIcons.Svg(it.IconKey))
-                        <span>@it.Label</span>
-                    </a>
-                }
-                else
-                {
-                    <NavLink class="visal-nav-link" href="@it.Href" Match="@(it.ExactMatch ? NavLinkMatch.All : NavLinkMatch.Prefix)">
-                        @((MarkupString)MenuIcons.Svg(it.IconKey))
-                        <span>@it.Label</span>
-                    </NavLink>
-                }
-            }
+            <details class="visal-nav-group" data-group="@g.Label" open>
+                <summary class="visal-nav-label visal-nav-group-summary">
+                    <span>@g.Label</span>
+                    <svg class="visal-nav-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </summary>
+                <div class="visal-nav-group-body">
+                    @foreach (var it in visibles)
+                    {
+                        @if (it.External)
+                        {
+                            <a class="visal-nav-link" href="@it.Href" target="_blank" rel="noopener noreferrer">
+                                @((MarkupString)MenuIcons.Svg(it.IconKey))
+                                <span>@it.Label</span>
+                            </a>
+                        }
+                        else
+                        {
+                            <NavLink class="visal-nav-link" href="@it.Href" Match="@(it.ExactMatch ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                                @((MarkupString)MenuIcons.Svg(it.IconKey))
+                                <span>@it.Label</span>
+                            </NavLink>
+                        }
+                    }
+                </div>
+            </details>
         }
+        <div class="visal-nav-empty" data-nav-empty hidden>Sin resultados.</div>
     }
     else if (_showTenant)
     {

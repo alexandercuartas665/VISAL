@@ -59,6 +59,9 @@ public static class DependencyInjection
         services.AddHttpClient<Visal.Application.Admin.IWompiApiClient, Wompi.WompiApiClient>();
         services.AddHttpClient<Visal.Application.Admin.IEvolutionApiClient, Evolution.EvolutionApiClient>();
         services.AddHttpClient<Visal.Application.Admin.IGupshupApiClient, Gupshup.GupshupApiClient>();
+        // Voz IA (Retell/Telnyx): cliente HTTP tipado. La config (IRetellConfig) +
+        // el servicio de configuracion por tenant se registran en Application.
+        services.AddHttpClient<Visal.Application.Voz.IRetellClient, Voz.RetellHttpClient>();
         // Providers WhatsApp: resolver + implementaciones concretas (Evolution y
         // Gupshup). Scoped porque comparten DbContext scoped.
         services.AddScoped<WhatsApp.EvolutionWhatsAppProvider>();
@@ -95,6 +98,9 @@ public static class DependencyInjection
         // Scoped porque usa IApplicationDbContext scoped.
         services.AddScoped<Application.Revision.Ia.IPreRevisionIaPendingStore, Revision.PreRevisionIaPendingStore>();
         services.AddHostedService<Revision.PreRevisionIaWorker>();
+
+        // Motor de alertas: worker diario que evalua reglas y dispara envios.
+        services.AddHostedService<Alertas.AlertasWorker>();
 
         return services;
     }

@@ -846,6 +846,39 @@ app.MapPost("/webhooks/gupshup/{token}", async (
         : Results.Accepted();
 }).AllowAnonymous().DisableAntiforgery();
 
+// Webhook de Retell (llamadas de voz IA). Auth por token opaco en la ruta
+// (mismo patron que el webhook de Gupshup): /webhooks/retell/{token} debe
+// coincidir con RETELL_WEBHOOK_TOKEN. Leemos el raw body (para poder verificar
+// x-retell-signature a futuro) y respondemos 200 rapido para no provocar
+// reintentos del proveedor. El servicio busca la llamada por call_id.
+app.MapPost("/webhooks/retell/{token}", async (
+    string token,
+    HttpRequest request,
+    IApplicationDbContext db,
+    Visal.Application.Voz.IVozLlamadaService voz,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(token) || token.Length > 64) { return Results.Unauthorized(); }
+    // El token identifica a la agencia (una fila por tenant). Sin filtro de tenant.
+    var existe = await db.TenantRetellConfigs.IgnoreQueryFilters()
+        .AnyAsync(c => c.WebhookToken == token, ct);
+    if (!existe) { return Results.Unauthorized(); }
+
+    string raw;
+    using (var reader = new StreamReader(request.Body))
+    {
+        raw = await reader.ReadToEndAsync(ct);
+    }
+
+    var evento = Visal.Application.Voz.RetellWebhookParser.Parse(raw);
+    if (evento is null) { return Results.Ok(new { status = "ignored" }); }
+
+    try { await voz.ProcesarWebhookEventoAsync(evento, ct); }
+    catch { /* nunca 5xx a Retell: evitamos reintentos en bucle */ }
+
+    return Results.Ok(new { status = "ok" });
+}).AllowAnonymous().DisableAntiforgery();
+
 // Heuristica de afirmativo para auto-responder con el link de firma. Cubre:
 //   - Quick Reply de plantillas HSM (parser marca messageType=button_reply).
 //   - Respuestas de texto libre: "si", "sí", "si enviar", "enviar enlace",

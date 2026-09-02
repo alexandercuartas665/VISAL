@@ -68,6 +68,89 @@ public sealed class SeguimientoService(
             .ToList();
     }
 
+    public async Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarPorRangoAsync(int desdeMes, int hastaMes, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return []; }
+        if (hastaMes < desdeMes) { (desdeMes, hastaMes) = (hastaMes, desdeMes); }
+
+        var filas = await db.SeguimientoEncuestas.AsNoTracking()
+            .Where(x => x.Mes >= desdeMes && x.Mes <= hastaMes)
+            .Join(db.Pacientes.AsNoTracking(),
+                s => s.PacienteId,
+                p => p.Id,
+                (s, p) => new SeguimientoEncuestaDto(
+                    s.Id, s.PacienteId,
+                    p.NombreCompleto,
+                    p.TipoDocumento, p.NumeroDocumento,
+                    null, null,
+                    s.Mes, s.Estado, s.FechaLlamada,
+                    s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
+                    s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
+                    s.PersonaAtiende, s.Observaciones))
+            .ToListAsync(ct);
+
+        return filas
+            .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
+            .ThenBy(x => x.PacienteNombre)
+            .ToList();
+    }
+
+    public async Task<(int Creados, int Existentes)> TraerPacientesAsync(DateOnly desde, DateOnly hasta, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return (0, 0); }
+        if (hasta < desde) { (desde, hasta) = (hasta, desde); }
+
+        // Rango inclusivo por dia: [desde 00:00, (hasta+1) 00:00) en UTC.
+        var desdeDt = new DateTimeOffset(desde.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        var hastaDt = new DateTimeOffset(hasta.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+
+        // Pacientes con HC CERRADA cuyo cierre cae en el rango.
+        var cerradas = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.TenantId == tid
+                && h.Estado == HistoriaClinicaEstado.Cerrada
+                && h.FechaCierre != null
+                && h.FechaCierre >= desdeDt && h.FechaCierre < hastaDt)
+            .Select(h => new { h.PacienteId, h.FechaCierre })
+            .ToListAsync(ct);
+        if (cerradas.Count == 0) { return (0, 0); }
+
+        // Deseados: (paciente, mes de cierre) distintos.
+        var deseados = cerradas
+            .Select(h => (h.PacienteId, Mes: MesDe(h.FechaCierre!.Value)))
+            .Distinct()
+            .ToList();
+
+        var meses = deseados.Select(d => d.Mes).Distinct().ToList();
+        var yaExistentes = (await db.SeguimientoEncuestas.AsNoTracking()
+            .Where(x => meses.Contains(x.Mes))
+            .Select(x => new { x.PacienteId, x.Mes })
+            .ToListAsync(ct))
+            .Select(x => (x.PacienteId, x.Mes))
+            .ToHashSet();
+
+        int creados = 0, existentes = 0;
+        foreach (var d in deseados)
+        {
+            if (yaExistentes.Contains(d)) { existentes++; continue; }
+            db.SeguimientoEncuestas.Add(new SeguimientoEncuesta
+            {
+                TenantId = tid,
+                PacienteId = d.PacienteId,
+                Mes = d.Mes,
+                Estado = "Pendiente"
+            });
+            creados++;
+        }
+        if (creados > 0) { await db.SaveChangesAsync(ct); }
+        return (creados, existentes);
+    }
+
+    private static int MesDe(DateTimeOffset f)
+    {
+        var local = f.ToOffset(TimeSpan.FromHours(-5)); // mes de cierre en hora Colombia
+        return local.Year * 100 + local.Month;
+    }
+
     public async Task<bool> GuardarEncuestaAsync(Guid id, GuardarEncuestaRequest req, Guid actor, CancellationToken ct = default)
     {
         var entity = await db.SeguimientoEncuestas.FirstOrDefaultAsync(x => x.Id == id, ct);

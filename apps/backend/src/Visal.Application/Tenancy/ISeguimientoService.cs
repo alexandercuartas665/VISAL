@@ -45,6 +45,20 @@ public interface ISeguimientoService
     /// </summary>
     Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarPorMesAsync(int mes, CancellationToken ct = default);
 
+    /// <summary>
+    /// Lista los registros cuyo Mes cae en el rango [desdeMes, hastaMes] (YYYYMM).
+    /// NO auto-materializa: solo muestra las tarjetas ya traidas a la bandeja.
+    /// </summary>
+    Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarPorRangoAsync(int desdeMes, int hastaMes, CancellationToken ct = default);
+
+    /// <summary>
+    /// "Trae" a la bandeja (etapa Pendiente) a todo paciente con una historia
+    /// clinica CERRADA cuyo FechaCierre cae en [desde, hasta]. Crea una tarjeta
+    /// por (paciente, mes de cierre) si aun no existe. Devuelve cuantas creo y
+    /// cuantas ya existian.
+    /// </summary>
+    Task<(int Creados, int Existentes)> TraerPacientesAsync(DateOnly desde, DateOnly hasta, Guid actor, CancellationToken ct = default);
+
     /// <summary>Guarda la encuesta -> estado Realizada.</summary>
     Task<bool> GuardarEncuestaAsync(Guid id, GuardarEncuestaRequest req, Guid actor, CancellationToken ct = default);
 

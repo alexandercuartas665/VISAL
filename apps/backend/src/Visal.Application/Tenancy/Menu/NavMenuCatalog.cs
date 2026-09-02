@@ -77,6 +77,7 @@ public static class NavMenuCatalog
         new("automatizaciones", "Automatizaciones", "automatizaciones", "rayo", "automatizaciones", "Infraestructura & IA"),
         new("metricas", "Metricas", "metricas", "grafico", "metricas", "Infraestructura & IA"),
         new("ai-usage", "Auditoria uso IA", "admin/ai-usage", "medidor", "admin.ai-usage", "Infraestructura & IA"),
+        new("cfg-voz", "Voz IA (llamadas)", "config/voz-ia", "telefono", "cfg-voz", "Infraestructura & IA"),
 
         // ===== Configuracion del Sistema =====
         new("cfg-turnos", "Programaciones de turnos", "cfg-turnos", "calendario", "cfg-turnos", "Configuracion del Sistema"),
@@ -97,6 +98,7 @@ public static class NavMenuCatalog
         new("relaciones-formularios", "Relaciones de formularios", "relaciones-formularios", "enlace", "relaciones-formularios", "Configuracion del Sistema"),
         new("cfg-tipos-servicio", "Tipos de servicio", "config/tipos-servicio", "etiqueta", "cfg-tipos-servicio", "Configuracion del Sistema"),
         new("cfg-menu-hc", "Menu HC por servicio", "config/menu-hc", "menu", "cfg-menu-hc", "Configuracion del Sistema"),
+        new("cfg-alertas", "Alertas", "config/alertas", "campana", "cfg-alertas", "Configuracion del Sistema"),
         new("cfg-reportes", "Galeria de Reportes", "config/reportes", "grafico", null, "Configuracion del Sistema"),
         new("correos-pqr", "Correos -> PQR", "config/correos-pqr", "correo", null, "Configuracion del Sistema"),
         new("admin-reportes-catalogo", "Catalogo de Reportes", "admin/reportes-catalogo", "tabla", null, "Configuracion del Sistema", Gate: NavGate.Platform),

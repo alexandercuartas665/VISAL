@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @using Visal.Application.Tenancy
 @inject ISeguimientoService SegSvc
+@inject Visal.Application.Voz.IVozLlamadaService VozSvc
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
 
@@ -17,8 +18,13 @@
             <h1 class="seg-title">Seguimiento <span>mensual</span></h1>
         </div>
         <div class="seg-filters">
-            <label>Periodo (AAAA-MM)</label>
-            <input type="month" value="@_mesInput" @onchange="OnMesChange" />
+            <label>Desde</label>
+            <input type="date" @bind="_desde" />
+            <label>Hasta</label>
+            <input type="date" @bind="_hasta" />
+            <button class="btn-primary" @onclick="TraerAsync" disabled="@_traerBusy" title="Trae a la bandeja los pacientes con historia CERRADA en el rango">
+                @(_traerBusy ? "Trayendo..." : "Traer pacientes")
+            </button>
             <button class="btn-outline" @onclick="RecargarAsync">Recargar</button>
         </div>
     </div>
@@ -27,6 +33,8 @@
         <button class="seg-tab @(_tab == "kanban" ? "sel" : "")" @onclick='() => _tab = "kanban"'>Kanban</button>
         <button class="seg-tab @(_tab == "historial" ? "sel" : "")" @onclick='() => _tab = "historial"'>Historial</button>
     </div>
+
+    @if (_traerMsg is not null) { <div class="seg-msg" style="margin:.4rem 0;">@_traerMsg</div> }
 
     @if (_loading)
     {
@@ -41,8 +49,17 @@
             <div class="seg-kpi seg-kpi-total"><b>@_items.Count</b> Total</div>
         </div>
 
+        <div class="seg-voz-tools">
+            <span class="seg-voz-lbl">&#128222; Encuesta por llamada IA:</span>
+            <button class="btn-outline" @onclick="() => LlamarPendientes(true)" disabled="@_vozBusy" title="Valida cuantas se llamarian, sin llamar">Simular</button>
+            <button class="btn-primary" @onclick="() => LlamarPendientes(false)" disabled="@_vozBusy">
+                @(_vozBusy ? "Procesando..." : "Llamar a pendientes (IA)")
+            </button>
+            @if (_vozMsg is not null) { <span class="seg-voz-msg">@_vozMsg</span> }
+        </div>
+
         <div class="seg-kanban">
-            @RenderColumna("Pendiente", "Pendientes de llamar", "seg-col-pend")
+            @RenderColumna("Pendiente", "Bandeja - por llamar", "seg-col-pend")
             @RenderColumna("NoContactado", "No contactados", "seg-col-noc")
             @RenderColumna("Realizada", "Encuesta realizada", "seg-col-ok")
         </div>
@@ -205,6 +222,9 @@
 .seg-filters label { font-size:.8rem; color:#334155; }
 .seg-filters input[type="month"] { padding:.35rem .5rem; border:1px solid #cbd5e1; border-radius:6px; }
 
+.seg-voz-tools { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:0 0 1rem; padding:.6rem .85rem; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; }
+.seg-voz-lbl { font-size:.85rem; font-weight:600; color:#334155; }
+.seg-voz-msg { font-size:.82rem; color:#475569; }
 .seg-kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:.75rem; margin-bottom:1rem; }
 .seg-kpi { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .85rem; font-size:.85rem; color:#475569; }
 .seg-kpi b { display:block; font-size:1.4rem; color:#0f172a; }
@@ -326,8 +346,12 @@
         public string? Observaciones { get; set; }
     }
 
-    private string _mesInput = string.Empty; // formato "YYYY-MM"
-    private int _mesActual;
+    private DateOnly _desde = DateOnly.FromDateTime(new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1));
+    private DateOnly _hasta = DateOnly.FromDateTime(DateTime.Now);
+    private int _desdeMes => _desde.Year * 100 + _desde.Month;
+    private int _hastaMes => _hasta.Year * 100 + _hasta.Month;
+    private bool _traerBusy;
+    private string? _traerMsg;
     private bool _loading = true;
     private List<SeguimientoEncuestaDto> _items = new();
     private Guid? _openId;
@@ -353,34 +377,68 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var today = DateTime.UtcNow;
-        _mesInput = today.ToString("yyyy-MM");
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
         _actorNombre = auth.User?.Identity?.Name ?? string.Empty;
         await RecargarAsync();
     }
 
-    private async Task OnMesChange(ChangeEventArgs e)
-    {
-        _mesInput = e.Value?.ToString() ?? _mesInput;
-        await RecargarAsync();
-    }
-
     private async Task RecargarAsync()
     {
-        if (!DateTime.TryParse(_mesInput + "-01", out var d)) { return; }
-        _mesActual = d.Year * 100 + d.Month;
         _loading = true;
         StateHasChanged();
         try
         {
-            _items = (await SegSvc.ListarPorMesAsync(_mesActual)).ToList();
+            _items = (await SegSvc.ListarPorRangoAsync(_desdeMes, _hastaMes)).ToList();
         }
         finally
         {
             _loading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task TraerAsync()
+    {
+        _traerBusy = true; _traerMsg = null; StateHasChanged();
+        try
+        {
+            var (creados, existentes) = await SegSvc.TraerPacientesAsync(_desde, _hasta, await Actor());
+            _traerMsg = $"Traidos: {creados} nuevo(s) a la bandeja, {existentes} ya estaban.";
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _traerMsg = "Error al traer: " + ex.Message; }
+        finally { _traerBusy = false; StateHasChanged(); }
+    }
+
+    private bool _vozBusy;
+    private string? _vozMsg;
+
+    private async Task<Guid> Actor()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        return Guid.TryParse(auth.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : Guid.Empty;
+    }
+
+    private async Task LlamarPendientes(bool dryRun)
+    {
+        if (!dryRun)
+        {
+            var ok = await JS.InvokeAsync<bool>("confirm",
+                $"Esto hara LLAMADAS TELEFONICAS REALES con IA a todos los pacientes PENDIENTES en la bandeja ({_desde:dd/MM/yyyy} a {_hasta:dd/MM/yyyy}) que tengan telefono. Cada llamada tiene costo. Continuar?");
+            if (!ok) { return; }
+        }
+        _vozBusy = true; _vozMsg = null; StateHasChanged();
+        try
+        {
+            var r = await VozSvc.LlamarPendientesAsync(_desdeMes, _hastaMes, dryRun, await Actor());
+            _vozMsg = dryRun
+                ? $"Simulacion: {r.Lanzadas} se llamarian, {r.Omitidas} omitidas (sin telefono o ya en curso)."
+                : $"Listo: {r.Lanzadas} llamada(s) lanzada(s), {r.Omitidas} omitidas, {r.Errores} con error.";
+            if (r.Mensajes.Count > 0) { _vozMsg += " | " + string.Join(" · ", r.Mensajes.Take(5)); }
+            if (!dryRun) { await RecargarAsync(); }
+        }
+        catch (Exception ex) { _vozMsg = "Error: " + ex.Message; }
+        finally { _vozBusy = false; StateHasChanged(); }
     }
 
     private int Count(string estado) => _items.Count(x => x.Estado == estado);

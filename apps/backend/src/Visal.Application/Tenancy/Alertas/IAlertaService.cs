@@ -96,7 +96,9 @@ public interface IAlertaService
     /// </summary>
     /// <param name="telefonoOverride">Opcional: si se indica y el canal es WhatsApp,
     /// se usa ese numero como destino en vez del contacto resuelto (para pruebas).</param>
-    Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, Guid actor, CancellationToken ct = default);
+    /// <param name="forzarReenvio">Si es true, ignora la deduplicacion (reenvia aunque ya
+    /// se haya enviado en el periodo). Util para reprobar desde la simulacion.</param>
+    Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, CancellationToken ct = default);
 
     /// <summary>Bandeja: alertas emitidas mas recientes (tarjetas) con nombre de regla y paciente.</summary>
     Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, CancellationToken ct = default);

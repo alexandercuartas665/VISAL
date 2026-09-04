@@ -13,16 +13,19 @@ public sealed class AlertaService : IAlertaService
     private readonly IApplicationDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IEmailSender _email;
+    private readonly Email.INotificacionEmailSender _notiEmail;
     private readonly IHsmTemplateService _hsm;
     private readonly ILogger<AlertaService> _log;
 
     public AlertaService(
         IApplicationDbContext db, ITenantContext tenant,
-        IEmailSender email, IHsmTemplateService hsm, ILogger<AlertaService> log)
+        IEmailSender email, Email.INotificacionEmailSender notiEmail,
+        IHsmTemplateService hsm, ILogger<AlertaService> log)
     {
         _db = db;
         _tenant = tenant;
         _email = email;
+        _notiEmail = notiEmail;
         _hsm = hsm;
         _log = log;
     }
@@ -174,13 +177,13 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
         if (reglas.Count == 0) { return new(0, 0, 0, Array.Empty<string>()); }
 
-        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, telefonoOverride: null, actor, ct);
+        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, ct);
         _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores.",
             tid, nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores);
         return new(nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores, nucleo.Mensajes);
     }
 
-    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, Guid actor, CancellationToken ct = default)
+    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, CancellationToken ct = default)
     {
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (emitir && req.Id is null) { throw new InvalidOperationException("Guarda la regla antes de emitir la simulacion."); }
@@ -213,7 +216,7 @@ public sealed class AlertaService : IAlertaService
         };
 
         // Simula la fecha elegida con la logica real de disparo (no forzar).
-        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, actor, ct);
+        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, forzarReenvio, actor, ct);
         var filas = nucleo.Filas;
 
         string? aviso = null;
@@ -239,7 +242,7 @@ public sealed class AlertaService : IAlertaService
 
     private sealed record NucleoResult(int Enviadas, int Saltadas, int Errores, List<string> Mensajes, List<AlertaSimulacionFila> Filas);
 
-    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, Guid actor, CancellationToken ct)
+    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, bool forzarReenvio, Guid actor, CancellationToken ct)
     {
         var overrideTel = string.IsNullOrWhiteSpace(telefonoOverride) ? null : NormalizarTelefono(telefonoOverride);
 
@@ -333,9 +336,11 @@ public sealed class AlertaService : IAlertaService
                 };
                 var pacInfo = pacientes.TryGetValue(cand.PacienteId, out var pinfo) ? pinfo : null;
 
-                // Dedup: ya enviada con exito este periodo.
+                // Dedup: ya enviada con exito este periodo. Con forzarReenvio se ignora
+                // (se reenvia y se actualiza el mismo registro del outbox).
                 var key = (regla.Id, cand.AsignacionId, periodo);
-                if (enviosIdx.TryGetValue(key, out var previo) && previo.Exito)
+                enviosIdx.TryGetValue(key, out var previo);
+                if (previo is not null && previo.Exito && !forzarReenvio)
                 {
                     saltadas++;
                     filas.Add(new AlertaSimulacionFila(
@@ -378,7 +383,12 @@ public sealed class AlertaService : IAlertaService
                 {
                     var asunto = Render(regla.Asunto, ctx);
                     var cuerpo = Render(regla.Cuerpo, ctx);
-                    var r = await _email.SendAsync(contacto!, string.IsNullOrWhiteSpace(asunto) ? "Alerta VISAL" : asunto, ToHtml(cuerpo), ct);
+                    var asuntoFinal = string.IsNullOrWhiteSpace(asunto) ? "Alerta VISAL" : asunto;
+                    // Preferir la cuenta de correo (Gmail/PQR) de la agencia; envia texto plano
+                    // desde el buzon propio. Si no hay cuenta, cae al SMTP global (HTML).
+                    EmailSendResult r = await _notiEmail.TieneCuentaAsync(tid, ct)
+                        ? await _notiEmail.SendAsync(tid, contacto!, asuntoFinal, cuerpo, ct)
+                        : await _email.SendAsync(contacto!, asuntoFinal, ToHtml(cuerpo), ct);
                     ok = r.Ok; err = r.Error;
                 }
                 else // WhatsApp HSM

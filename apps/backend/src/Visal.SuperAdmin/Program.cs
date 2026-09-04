@@ -815,6 +815,7 @@ app.MapPost("/webhooks/gupshup/{token}", async (
     IApplicationDbContext db,
     Visal.Application.Tenancy.IChatIngestService ingest,
     Visal.Application.Tenancy.IFirmaRemotaService firma,
+    Visal.Application.Tenancy.Alertas.IAlertaInformeAutoResponder alertaInforme,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(token) || token.Length > 128) { return Results.Unauthorized(); }
@@ -838,7 +839,14 @@ app.MapPost("/webhooks/gupshup/{token}", async (
         && EsRespuestaAfirmativaFirma(payload.MessageType, payload.Body))
     {
         var baseUri = $"{request.Scheme}://{request.Host.Value}";
-        _ = await firma.AutoResponderConLinkAsync(line.TenantId, payload.ContactPhone, line.Id, baseUri, ct);
+        var firmaEnviadas = await firma.AutoResponderConLinkAsync(line.TenantId, payload.ContactPhone, line.Id, baseUri, ct);
+        // Si no habia una solicitud de firma pendiente, pero el telefono recibio una
+        // alerta por WhatsApp reciente, el afirmativo se interpreta como "quiero el
+        // informe" y respondemos con el enlace del mini-informe de terapias pendientes.
+        if (firmaEnviadas == 0)
+        {
+            _ = await alertaInforme.ResponderInformeSiAplicaAsync(line.TenantId, payload.ContactPhone, line.Id, baseUri, ct);
+        }
     }
 
     return result == Visal.Application.Tenancy.ChatIngestResult.Duplicate

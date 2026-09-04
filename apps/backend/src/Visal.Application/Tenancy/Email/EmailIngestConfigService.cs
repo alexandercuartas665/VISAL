@@ -10,14 +10,48 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
     private readonly ISecretProtector _secret;
     private readonly IImapEmailReader _reader;
     private readonly IEmailIngestProcessor _processor;
+    private readonly IPqrEmailReplySender _smtp;
 
     public EmailIngestConfigService(IApplicationDbContext db, ISecretProtector secret,
-        IImapEmailReader reader, IEmailIngestProcessor processor)
+        IImapEmailReader reader, IEmailIngestProcessor processor, IPqrEmailReplySender smtp)
     {
         _db = db;
         _secret = secret;
         _reader = reader;
         _processor = processor;
+        _smtp = smtp;
+    }
+
+    /// <summary>Envia un correo de prueba DESDE esta cuenta (Gmail App Password) para validar
+    /// que el buzon puede ENVIAR (no solo leer). Usa SMTP derivado del host IMAP.</summary>
+    public async Task<(bool Ok, string? Error)> EnviarPruebaAsync(Guid id, string toEmail, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail)) { return (false, "Indica el correo destino de la prueba."); }
+        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (cfg is null) { return (false, "Buzon no encontrado."); }
+        if (string.IsNullOrEmpty(cfg.AppPasswordEncrypted)) { return (false, "Primero guarda la App Password del buzon."); }
+
+        string password;
+        try { password = _secret.Unprotect(cfg.AppPasswordEncrypted); }
+        catch { return (false, "La App Password esta cifrada con una version anterior. Vuelve a guardarla."); }
+
+        var imap = (cfg.ImapHost ?? "").Trim();
+        var host = imap.StartsWith("imap.", StringComparison.OrdinalIgnoreCase)
+            ? "smtp." + imap["imap.".Length..]
+            : (imap.Length == 0 ? "smtp.gmail.com" : imap.Replace("imap", "smtp", StringComparison.OrdinalIgnoreCase));
+
+        var cuerpo = $"Correo de prueba de VISAL enviado desde el buzon {cfg.EmailAddress}. "
+                   + $"Si lo recibes, esta cuenta puede enviar notificaciones. ({DateTimeOffset.Now:dd/MM/yyyy HH:mm})";
+        var pars = new SmtpReplyParams(
+            host, 587, false,
+            cfg.EmailAddress, password,
+            cfg.EmailAddress, cfg.Nombre,
+            toEmail.Trim(), null,
+            "Prueba de envio - VISAL",
+            cuerpo, null,
+            Array.Empty<PqrReplyAttachment>());
+
+        return await _smtp.SendAsync(pars, ct);
     }
 
     public async Task<IReadOnlyList<EmailIngestConfigDto>> ListAsync(CancellationToken ct = default)

@@ -401,6 +401,9 @@
                             @(_simBusy ? "Emitiendo..." : "2. Emitir ahora (real)")
                         </button>
                     </div>
+                    <div class="mb-2">
+                        <label class="asg-chk small"><input type="checkbox" @bind="_simForzar" /> <span>Reenviar aunque ya se haya enviado este periodo (ignora deduplicacion)</span></label>
+                    </div>
                     @if (_form.Id is null)
                     {
                         <div class="small text-muted mb-2">Para el paso 2 (emitir) primero guarda la regla en la pestana Configuracion.</div>
@@ -528,6 +531,7 @@
     private string _modalTab = "config";
     private DateOnly _simFecha = DateOnly.FromDateTime(DateTime.Now);
     private string _simTelefono = "";
+    private bool _simForzar;
     private bool _simBusy;
     private AlertaSimulacionResult? _sim;
     private string? _simError;
@@ -722,7 +726,7 @@
 
     // ----------------- Simulacion -----------------
 
-    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; _simTelefono = ""; }
+    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; _simTelefono = ""; _simForzar = false; }
 
     private void AbrirSimulacion() { _modalTab = "sim"; }
 
@@ -746,7 +750,7 @@
         _simBusy = true; _simError = null;
         try
         {
-            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, _simTelefono, await Actor());
+            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, _simTelefono, _simForzar, await Actor());
             if (emitir) { await Cargar(); }
         }
         catch (InvalidOperationException ex) { _simError = ex.Message; }

@@ -66,6 +66,7 @@
                     <div class="ep-card-foot">
                         <button class="ep-btn ep-btn-sm" @onclick="() => AbrirEditor(b)">Editar</button>
                         <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProbarAsync(b)">Probar conexion</button>
+                        <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => AbrirPrueba(b)" title="Envia un correo de prueba desde esta cuenta para validar el envio">Enviar prueba</button>
                         <button class="ep-btn ep-btn-sm" disabled="@(_busyId == b.Id)" @onclick="() => ProcesarAsync(b)">
                             @if (_procesandoId == b.Id)
                             {
@@ -81,6 +82,15 @@
                         }
                         <button class="ep-btn ep-btn-sm ep-btn-danger" @onclick="() => EliminarAsync(b)">Eliminar</button>
                     </div>
+                    @if (_pruebaDe?.Id == b.Id)
+                    {
+                        <div style="display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+                            <input type="email" placeholder="Correo destino de la prueba" @bind="_pruebaEmail"
+                                   style="flex:1; min-width:200px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;" />
+                            <button class="ep-btn ep-btn-sm ep-btn-primary" disabled="@(_busyId == b.Id)" @onclick="() => EnviarCorreoPruebaAsync(b)">@(_busyId == b.Id ? "Enviando..." : "Enviar")</button>
+                            <button class="ep-btn ep-btn-sm" @onclick="() => _pruebaDe = null">Cancelar</button>
+                        </div>
+                    }
                     @if (_procesandoId == b.Id)
                     {
                         <div class="ep-prog">
@@ -499,6 +509,29 @@
         {
             var (ok, err, total) = await Svc.TestConnectionAsync(b.Id);
             Toast(ok ? $"Conexion OK. {total} correo(s) en la carpeta." : (err ?? "No se pudo conectar."), !ok);
+        }
+        catch (Exception ex) { Toast(ex.Message, true); }
+        finally { _busyId = null; }
+    }
+
+    private EmailIngestConfigDto? _pruebaDe;
+    private string _pruebaEmail = "";
+
+    private void AbrirPrueba(EmailIngestConfigDto b)
+    {
+        _pruebaDe = b;
+        _pruebaEmail = b.EmailAddress; // por defecto se prueba a la misma cuenta (self-test)
+    }
+
+    private async Task EnviarCorreoPruebaAsync(EmailIngestConfigDto b)
+    {
+        if (string.IsNullOrWhiteSpace(_pruebaEmail)) { Toast("Indica el correo destino de la prueba.", true); return; }
+        _busyId = b.Id;
+        try
+        {
+            var (ok, err) = await Svc.EnviarPruebaAsync(b.Id, _pruebaEmail.Trim());
+            Toast(ok ? $"Correo de prueba enviado a {_pruebaEmail.Trim()}." : (err ?? "No se pudo enviar."), !ok);
+            if (ok) { _pruebaDe = null; }
         }
         catch (Exception ex) { Toast(ex.Message, true); }
         finally { _busyId = null; }

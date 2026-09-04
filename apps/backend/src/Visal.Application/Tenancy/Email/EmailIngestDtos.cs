@@ -89,6 +89,9 @@ public interface IEmailIngestConfigService
     Task<Guid> SaveAsync(SaveEmailIngestConfigRequest req, CancellationToken ct = default);
     Task DeleteAsync(Guid id, CancellationToken ct = default);
     Task<(bool Ok, string? Error, int Total)> TestConnectionAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Envia un correo de prueba desde esta cuenta para validar el ENVIO (SMTP).</summary>
+    Task<(bool Ok, string? Error)> EnviarPruebaAsync(Guid id, string toEmail, CancellationToken ct = default);
     Task<EmailIngestRunResult> ProcessNowAsync(Guid id, IProgress<EmailIngestProgress>? progress = null, CancellationToken ct = default);
     Task<IReadOnlyList<EmailIngestLogDto>> ListLogsAsync(Guid configId, int take = 100, CancellationToken ct = default);
 

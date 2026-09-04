@@ -71,7 +71,16 @@ public sealed record MiServicioAsignadoDto(
     /// secuencia, asi que solo bloquea si hay una sesion anterior pendiente DEL
     /// MISMO profesional. Guid.Empty si el turno aun no tiene profesional asignado.
     /// </summary>
-    Guid ProfesionalId = default);
+    Guid ProfesionalId = default,
+    /// <summary>
+    /// Codigo del formato de la HistoriaClinica REALMENTE creada/vinculada a esta
+    /// sesion (FormDefinition.Codigo del pivote AsignacionTurnoSesionHc), es decir
+    /// el formato EJECUTADO — a diferencia de <see cref="FormatoHistoria"/> que es el
+    /// formato efectivo que el sistema USARIA hoy segun la config. Null cuando la
+    /// sesion aun no tiene HC. Util para auditar cuando la config cambio despues de
+    /// haberse ejecutado la atencion.
+    /// </summary>
+    string? FormatoHistoriaEjecutado = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

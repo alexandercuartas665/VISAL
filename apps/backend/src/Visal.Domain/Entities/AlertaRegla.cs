@@ -19,7 +19,12 @@ public class AlertaRegla : TenantEntity
     /// <summary>Condicion sobre la asignacion (sesion pendiente / atenciones terminadas).</summary>
     public AlertaCondicion Condicion { get; set; }
 
-    /// <summary>Filtro opcional por tipo de servicio (Modulo del contrato). Null = todos.</summary>
+    /// <summary>
+    /// Filtro opcional por servicio(s) de contrato (Entidades Aseguradoras). Se guarda
+    /// como CSV de codigos base de <see cref="ServicioContrato"/> (sin sufijo de modalidad
+    /// d/f, ej. "E891865,E891866"). Null/vacio = aplica a todos los servicios. Una
+    /// asignacion coincide si su codigo de servicio (base) esta en la lista.
+    /// </summary>
     public string? FiltroModulo { get; set; }
 
     // ---------------- Disparo ----------------

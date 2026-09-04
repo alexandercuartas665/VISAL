@@ -1442,8 +1442,31 @@
             // Poblar el filtro "Formato de historia" solo con los formatos donde el
             // paciente tiene actividad (no todo el catalogo de formatos activos).
             await CargarFormatosDelPacienteAsync();
+            // Si el modulo se abrio desde /atencion sobre una asignacion concreta,
+            // preseleccionamos esa asignacion en el filtro (si ya tiene HC) para que la
+            // lista arranque enfocada en ese servicio en vez de "Todas las atenciones".
+            PreseleccionarAsignacionDesdeAtencion();
             await AutoCargarHcEnCursoSiCorrespondeAsync();
+            // Si no habia HC en curso que auto-cargar pero el filtro quedo preseleccionado,
+            // mostramos las historias de esa asignacion para que se abra ya cargado.
+            if (_historias.Count == 0 && !string.IsNullOrEmpty(_filAsignacion))
+            {
+                await MostrarHistorias();
+            }
         });
+    }
+
+    /// <summary>Preselecciona en el filtro "Asignacion / atencion" la asignacion desde
+    /// la que se abrio el modulo (parametro AsignacionId, viene de /atencion), pero solo
+    /// si esa asignacion aparece en el combo (es decir, ya tiene al menos una HC). Si no,
+    /// deja "Todas las atenciones".</summary>
+    private void PreseleccionarAsignacionDesdeAtencion()
+    {
+        if (AsignacionId is not Guid aid) { return; }
+        if (_asignacionesDelPaciente.Any(a => a.AsignacionId == aid))
+        {
+            _filAsignacion = aid.ToString();
+        }
     }
 
     /// <summary>

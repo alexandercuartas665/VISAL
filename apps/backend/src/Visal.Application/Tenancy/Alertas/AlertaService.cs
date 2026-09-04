@@ -85,7 +85,7 @@ public sealed class AlertaService : IAlertaService
         entity.Activa = req.Activa;
         entity.Orden = req.Orden;
         entity.Condicion = req.Condicion;
-        entity.FiltroModulo = string.IsNullOrWhiteSpace(req.FiltroModulo) ? null : req.FiltroModulo.Trim();
+        entity.FiltroModulo = NormalizarModulos(req.FiltroModulo);
         entity.DisparoTipo = req.DisparoTipo;
         entity.DiasDelMes = req.DisparoTipo == AlertaDisparoTipo.DiasDelMes ? NormalizarDias(req.DiasDelMes) : null;
         entity.MesesDespues = req.DisparoTipo == AlertaDisparoTipo.MesesDespues ? req.MesesDespues : null;
@@ -141,23 +141,113 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<AlertaServicioDto>> ListServiciosContratoAsync(CancellationToken ct = default)
+    {
+        // Servicios de los contratos del tenant. Un mismo codigo puede repetirse en
+        // varios contratos; agrupamos por codigo base (sin sufijo d/f) para presentar
+        // una lista limpia y guardar el codigo base en la regla.
+        var filas = await _db.ServiciosContrato.AsNoTracking()
+            .Where(s => s.CodigoServicio != null && s.CodigoServicio != "")
+            .Select(s => new { s.CodigoServicio, s.Descripcion })
+            .ToListAsync(ct);
+
+        return filas
+            .Select(s => new { Codigo = ServicioCodigo.Base(s.CodigoServicio) ?? "", s.Descripcion })
+            .Where(s => !string.IsNullOrWhiteSpace(s.Codigo))
+            .GroupBy(s => s.Codigo, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new AlertaServicioDto(
+                g.Key,
+                g.Select(x => x.Descripcion).FirstOrDefault(d => !string.IsNullOrWhiteSpace(d)) ?? ""))
+            .OrderBy(s => s.Codigo, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     // ======================== Evaluacion ========================
 
     public async Task<AlertaEvaluacionResult> EvaluarYDispararAsync(DateOnly hoy, bool forzar, Guid actor, CancellationToken ct = default)
     {
-        var mensajes = new List<string>();
-        int enviadas = 0, saltadas = 0, errores = 0;
-        if (_tenant.TenantId is not Guid tid) { return new(0, 0, 0, mensajes); }
+        if (_tenant.TenantId is not Guid tid) { return new(0, 0, 0, Array.Empty<string>()); }
 
         var reglas = await _db.AlertaReglas.AsNoTracking()
             .Where(r => r.Activa)
             .OrderBy(r => r.Orden)
             .ToListAsync(ct);
-        if (reglas.Count == 0) { return new(0, 0, 0, mensajes); }
+        if (reglas.Count == 0) { return new(0, 0, 0, Array.Empty<string>()); }
+
+        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, actor, ct);
+        _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores.",
+            tid, nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores);
+        return new(nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores, nucleo.Mensajes);
+    }
+
+    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, Guid actor, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        if (emitir && req.Id is null) { throw new InvalidOperationException("Guarda la regla antes de emitir la simulacion."); }
+
+        // Regla transitoria construida desde la config del modal (guardada o no).
+        var regla = new AlertaRegla
+        {
+            Id = req.Id ?? Guid.Empty,
+            TenantId = tid,
+            Nombre = string.IsNullOrWhiteSpace(req.Nombre) ? "(simulacion)" : req.Nombre.Trim(),
+            Activa = true,
+            Orden = req.Orden,
+            Condicion = req.Condicion,
+            FiltroModulo = NormalizarModulos(req.FiltroModulo),
+            DisparoTipo = req.DisparoTipo,
+            DiasDelMes = req.DisparoTipo == AlertaDisparoTipo.DiasDelMes ? NormalizarDias(req.DiasDelMes) : null,
+            MesesDespues = req.DisparoTipo == AlertaDisparoTipo.MesesDespues ? req.MesesDespues : null,
+            AnclaRelativa = req.DisparoTipo == AlertaDisparoTipo.MesesDespues ? req.AnclaRelativa : null,
+            Destinatario = req.Destinatario,
+            UsuarioSistemaId = req.Destinatario == AlertaDestinatario.UsuarioSistema ? req.UsuarioSistemaId : null,
+            Canal = req.Canal,
+            Asunto = req.Canal == AlertaCanal.Correo ? req.Asunto : null,
+            Cuerpo = req.Canal == AlertaCanal.Correo ? req.Cuerpo : null,
+            HsmLineId = req.Canal == AlertaCanal.WhatsApp ? req.HsmLineId : null,
+            HsmTemplateId = req.Canal == AlertaCanal.WhatsApp ? req.HsmTemplateId : null,
+            HsmTemplateName = req.Canal == AlertaCanal.WhatsApp ? req.HsmTemplateName : null,
+            HsmParameterCount = req.Canal == AlertaCanal.WhatsApp ? req.HsmParameterCount : 0,
+            HsmParametrosJson = req.Canal == AlertaCanal.WhatsApp && req.HsmParametros is { Count: > 0 }
+                ? JsonSerializer.Serialize(req.HsmParametros) : null,
+        };
+
+        // Simula la fecha elegida con la logica real de disparo (no forzar).
+        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, actor, ct);
+        var filas = nucleo.Filas;
+
+        string? aviso = null;
+        if (regla.DisparoTipo == AlertaDisparoTipo.DiasDelMes && !ParseDias(regla.DiasDelMes).Contains(fecha.Day))
+        {
+            aviso = $"Ojo: los dias configurados son {regla.DiasDelMes}. El {fecha:dd/MM} no es uno de ellos, "
+                  + "por eso no hay candidatos. Elige un dia configurado para ver el disparo.";
+        }
+        else if (filas.Count == 0)
+        {
+            aviso = "Ningun paciente cumple la condicion y el filtro para esta fecha.";
+        }
+
+        return new AlertaSimulacionResult(
+            fecha, fecha.ToString("yyyy-MM"), emitir,
+            Coinciden: filas.Count,
+            Emitibles: filas.Count(f => f.Emitible),
+            SinContacto: filas.Count(f => f.Emitible == false && string.IsNullOrEmpty(f.ContactoUsado) && f.Estado.StartsWith("Sin", StringComparison.OrdinalIgnoreCase)),
+            YaEnviadas: filas.Count(f => f.Estado.StartsWith("Ya", StringComparison.OrdinalIgnoreCase)),
+            Enviadas: nucleo.Enviadas, Errores: nucleo.Errores,
+            Filas: filas, Aviso: aviso);
+    }
+
+    private sealed record NucleoResult(int Enviadas, int Saltadas, int Errores, List<string> Mensajes, List<AlertaSimulacionFila> Filas);
+
+    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, Guid actor, CancellationToken ct)
+    {
+        var mensajes = new List<string>();
+        var filas = new List<AlertaSimulacionFila>();
+        int enviadas = 0, saltadas = 0, errores = 0;
 
         // Candidatos: asignaciones con turnos + sus agregados de sesiones.
         var candidatos = await CargarCandidatosAsync(ct);
-        if (candidatos.Count == 0) { return new(0, 0, 0, mensajes); }
+        if (candidatos.Count == 0) { return new(0, 0, 0, mensajes, filas); }
 
         // Lookups de contacto.
         var pacienteIds = candidatos.Select(c => c.PacienteId).Distinct().ToList();
@@ -219,9 +309,10 @@ public sealed class AlertaService : IAlertaService
                     _ => false,
                 };
                 if (!cumple) { continue; }
-                if (!string.IsNullOrWhiteSpace(regla.FiltroModulo)
-                    && !string.Equals(cand.Modulo, regla.FiltroModulo, StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(cand.TipoServicio, regla.FiltroModulo, StringComparison.OrdinalIgnoreCase))
+                // Filtro por servicio(s) de contrato: la asignacion debe corresponder a uno
+                // de los codigos de servicio seleccionados (comparado por codigo base sin d/f).
+                var filtro = ParseModulos(regla.FiltroModulo);
+                if (filtro.Count > 0 && !(cand.CodigoBase is not null && filtro.Contains(cand.CodigoBase)))
                 {
                     continue;
                 }
@@ -229,17 +320,43 @@ public sealed class AlertaService : IAlertaService
                 // Disparo -> (dispara?, periodo)
                 if (!ResolverDisparo(regla, cand, hoy, forzar, out var periodo)) { continue; }
 
-                // Dedup.
+                // Datos de display del destinatario (para la simulacion).
+                var (destNombre, destCorreo, destTelefono) = ResolverDisplay(regla, cand, pacientes, profesionales, doctorEmails, reglaUsuarios, reglaUserCelulares);
+                var destTipo = regla.Destinatario switch
+                {
+                    AlertaDestinatario.Paciente => "Paciente",
+                    AlertaDestinatario.DoctorAtendio => "Doctor que atendio",
+                    AlertaDestinatario.UsuarioSistema => "Usuario del sistema",
+                    _ => regla.Destinatario.ToString(),
+                };
+                var pacInfo = pacientes.TryGetValue(cand.PacienteId, out var pinfo) ? pinfo : null;
+
+                // Dedup: ya enviada con exito este periodo.
                 var key = (regla.Id, cand.AsignacionId, periodo);
                 if (enviosIdx.TryGetValue(key, out var previo) && previo.Exito)
                 {
                     saltadas++;
+                    filas.Add(new AlertaSimulacionFila(
+                        pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
+                        destTipo, destNombre, destCorreo, destTelefono, regla.Canal, previo.Contacto,
+                        "Ya enviada este periodo", Emitible: false, EnvioOk: null, EnvioError: null));
                     continue;
                 }
 
-                // Contacto.
+                // Contacto que se usaria + contexto para render.
                 var (contacto, contactoError) = ResolverContacto(regla, cand, pacientes, profesionales, doctorEmails, reglaUsuarios, reglaUserCelulares);
                 var ctx = BuildContexto(cand, pacientes, profesionales, hoy);
+
+                if (dryRun)
+                {
+                    // Paso 1 (simulacion): no se envia nada, solo se muestra a quien iria.
+                    var emitible = contactoError is null;
+                    filas.Add(new AlertaSimulacionFila(
+                        pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
+                        destTipo, destNombre, destCorreo, destTelefono, regla.Canal, emitible ? contacto : null,
+                        emitible ? "Se emitiria" : ("Sin contacto: " + contactoError), Emitible: emitible, EnvioOk: null, EnvioError: null));
+                    continue;
+                }
 
                 bool ok; string? err; string? extId = null;
                 if (contactoError is not null)
@@ -298,13 +415,15 @@ public sealed class AlertaService : IAlertaService
 
                 if (ok) { enviadas++; }
                 else { errores++; mensajes.Add($"{regla.Nombre} / {ctx.PacienteNombre}: {err}"); }
+                filas.Add(new AlertaSimulacionFila(
+                    pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
+                    destTipo, destNombre, destCorreo, destTelefono, regla.Canal, contacto,
+                    ok ? "Enviada" : ("Error: " + err), Emitible: ok, EnvioOk: ok, EnvioError: err));
             }
         }
 
-        await _db.SaveChangesAsync(ct);
-        _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores.",
-            tid, enviadas, saltadas, errores);
-        return new(enviadas, saltadas, errores, mensajes);
+        if (!dryRun) { await _db.SaveChangesAsync(ct); }
+        return new NucleoResult(enviadas, saltadas, errores, mensajes, filas);
     }
 
     public async Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, CancellationToken ct = default)
@@ -348,7 +467,7 @@ public sealed class AlertaService : IAlertaService
 
     private sealed record Candidato(
         Guid AsignacionId, Guid PacienteId, string Servicio, string TipoServicio, string? Modulo,
-        string Contrato, int Cantidad, DateOnly FechaInicio, DateOnly? FechaFinal,
+        string? CodigoBase, string Contrato, int Cantidad, DateOnly FechaInicio, DateOnly? FechaFinal,
         bool HasPending, bool AllFinished, DateOnly? UltimaAtencion, Guid? ProfesionalId);
 
     private async Task<List<Candidato>> CargarCandidatosAsync(CancellationToken ct)
@@ -370,7 +489,7 @@ public sealed class AlertaService : IAlertaService
         var asigIds = turnosPorAsig.Keys.ToList();
         var asigs = await _db.Asignaciones.AsNoTracking()
             .Where(a => asigIds.Contains(a.Id))
-            .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo, a.ContratoCodigo, a.Cantidad, a.FechaInicio, a.FechaFinal })
+            .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo, a.CodigoRips, a.ContratoCodigo, a.Cantidad, a.FechaInicio, a.FechaFinal })
             .ToListAsync(ct);
 
         var res = new List<Candidato>(asigs.Count);
@@ -388,8 +507,10 @@ public sealed class AlertaService : IAlertaService
             var profId = ses.Where(x => x.Completado).OrderByDescending(x => x.FechaAtencion)
                 .Select(x => (Guid?)x.ProfesionalId).FirstOrDefault() ?? tinfo.PrimerProf;
 
+            var codigoBase = string.IsNullOrWhiteSpace(a.CodigoRips) ? null : ServicioCodigo.Base(a.CodigoRips);
+
             res.Add(new Candidato(a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo,
-                a.ContratoCodigo, a.Cantidad, a.FechaInicio, a.FechaFinal,
+                codigoBase, a.ContratoCodigo, a.Cantidad, a.FechaInicio, a.FechaFinal,
                 hasPending, allFinished, ultima, profId));
         }
         return res;
@@ -460,6 +581,43 @@ public sealed class AlertaService : IAlertaService
 
             default:
                 return (null, "Destinatario no soportado.");
+        }
+    }
+
+    /// <summary>Nombre/correo/telefono del destinatario para mostrar en la simulacion
+    /// (independiente del canal — muestra ambos datos de contacto disponibles).</summary>
+    private (string? Nombre, string? Correo, string? Telefono) ResolverDisplay(
+        AlertaRegla regla, Candidato cand,
+        IReadOnlyDictionary<Guid, PacienteInfo> pacientes,
+        IReadOnlyDictionary<Guid, (string Nombre, string? Celular)> profesionales,
+        IReadOnlyDictionary<Guid, string> doctorEmails,
+        IReadOnlyDictionary<Guid, (string Email, Guid? ProfId)> reglaUsuarios,
+        IReadOnlyDictionary<Guid, string?> reglaUserCelulares)
+    {
+        switch (regla.Destinatario)
+        {
+            case AlertaDestinatario.Paciente:
+                return pacientes.TryGetValue(cand.PacienteId, out var pac)
+                    ? (pac.NombreCompleto, Vacio(pac.Email), Vacio(pac.Telefono))
+                    : (null, null, null);
+
+            case AlertaDestinatario.DoctorAtendio:
+                if (cand.ProfesionalId is not Guid pid) { return (null, null, null); }
+                string? dnom = profesionales.TryGetValue(pid, out var pr) ? pr.Nombre : null;
+                string? dcel = profesionales.TryGetValue(pid, out var pr2) ? Vacio(pr2.Celular) : null;
+                string? dmail = doctorEmails.TryGetValue(pid, out var de) ? Vacio(de) : null;
+                return (dnom, dmail, dcel);
+
+            case AlertaDestinatario.UsuarioSistema:
+                if (regla.UsuarioSistemaId is not Guid uid || !reglaUsuarios.TryGetValue(uid, out var us))
+                {
+                    return (null, null, null);
+                }
+                string? ucel = us.ProfId is Guid upid && reglaUserCelulares.TryGetValue(upid, out var c) ? Vacio(c) : null;
+                return (us.Email, Vacio(us.Email), ucel);
+
+            default:
+                return (null, null, null);
         }
     }
 
@@ -535,6 +693,33 @@ public sealed class AlertaService : IAlertaService
     {
         var dias = ParseDias(csv).OrderBy(x => x).ToList();
         return dias.Count == 0 ? null : string.Join(",", dias);
+    }
+
+    /// <summary>Parsea la CSV de tipos de servicio a un set case-insensitive de codigos.</summary>
+    private static HashSet<string> ParseModulos(string? csv)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(csv)) { return set; }
+        foreach (var part in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            set.Add(part);
+        }
+        return set;
+    }
+
+    /// <summary>Normaliza la CSV de tipos de servicio (dedupe, orden estable). Null si vacia.</summary>
+    private static string? NormalizarModulos(string? csv)
+    {
+        var codigos = new List<string>();
+        var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(csv))
+        {
+            foreach (var part in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (vistos.Add(part)) { codigos.Add(part); }
+            }
+        }
+        return codigos.Count == 0 ? null : string.Join(",", codigos);
     }
 
     private static void ValidarRequest(AlertaReglaUpsertRequest req)

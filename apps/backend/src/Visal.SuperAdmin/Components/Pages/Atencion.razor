@@ -63,7 +63,7 @@ else
         <div class="at-fbar">
             <div class="at-fbar-search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input placeholder="Buscar por documento, nombre o id de historia medica..." @bind="_filtroPac" @bind:event="oninput" />
+                <input placeholder="Buscar por documento, nombre, codigo interno o id de historia medica..." @bind="_filtroPac" @bind:event="oninput" />
                 @if (!string.IsNullOrEmpty(_filtroPac))
                 {
                     <button class="at-fbar-search-clear" @onclick="() => _filtroPac = string.Empty" title="Limpiar">&times;</button>
@@ -772,6 +772,10 @@ else
                 var t = _filtroPac.Trim();
                 q = q.Where(s => s.NumeroDocPaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
                               || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
+                              // Tambien por codigo interno (CODINT): el corto de 8 que se
+                              // muestra en la columna, o cualquier tramo del id de la asignacion.
+                              || s.CodigoAsignacionInterna.Contains(t, StringComparison.OrdinalIgnoreCase)
+                              || s.AsignacionId.ToString().Contains(t, StringComparison.OrdinalIgnoreCase)
                               // Tambien por id de historia medica (GUID completo o el
                               // corto de 8 que muestra el modulo de Historias como "HC N").
                               || (s.HistoriaClinicaIds != null
@@ -1054,26 +1058,30 @@ else
         new ColDef("historia",      "Historia Medica", "Historia<br/>Medica",                     2),
         new ColDef("notas",         "Notas",           "Notas",                                   3),
         new ColDef("cod_int",       "CodInt",          "CodInt",                                  4),
-        new ColDef("cod_asig",      "CodAsig",         "CodAsig",                                 5),
-        new ColDef("fec_asig",      "FechaAsig",       "Fecha<br/>Asig",                          6),
-        new ColDef("orden",         "Orden",           "Orden",                                   7),
-        new ColDef("tipo",          "Tipo",            "Tipo",                                    8),
-        new ColDef("servicio",      "Servicio",        "Servicio",                                9),
-        new ColDef("pkg_cod",       "PaqueteCod",      "Paquete<br/>Cod",                        10),
-        new ColDef("pkg_nom",       "PaqueteNombre",   "Paquete<br/>Nombre",                     11),
-        new ColDef("session_no",    "SessionNo",       "Sesion",                                 12),
-        new ColDef("completado",    "Completado",     "Completado",                              13),
-        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        14),
-        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                15),
-        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                16),
-        new ColDef("profesional",   "Profesional",     "Profesional",                             17),
-        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          18),
+        // Codigo del formato de historia EJECUTADO: el de la HC realmente creada para
+        // la sesion (no el configurado hoy). Util para auditar cuando la config del
+        // servicio/formulario cambio despues de haberse atendido.
+        new ColDef("formato_hc",    "FormatoHC",       "Formato<br/>HC",                          5),
+        new ColDef("cod_asig",      "CodAsig",         "CodAsig",                                 6),
+        new ColDef("fec_asig",      "FechaAsig",       "Fecha<br/>Asig",                          7),
+        new ColDef("orden",         "Orden",           "Orden",                                   8),
+        new ColDef("tipo",          "Tipo",            "Tipo",                                    9),
+        new ColDef("servicio",      "Servicio",        "Servicio",                               10),
+        new ColDef("pkg_cod",       "PaqueteCod",      "Paquete<br/>Cod",                        11),
+        new ColDef("pkg_nom",       "PaqueteNombre",   "Paquete<br/>Nombre",                     12),
+        new ColDef("session_no",    "SessionNo",       "Sesion",                                 13),
+        new ColDef("completado",    "Completado",     "Completado",                              14),
+        new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        15),
+        new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                16),
+        new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                17),
+        new ColDef("profesional",   "Profesional",     "Profesional",                             18),
+        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          19),
         // HH:mm de HistoriaClinica.FechaCierre — cuando la HC vinculada a esta
         // sesion ya esta Cerrada. Colocado a la derecha de FechaNota (misma
         // sesion, mismo evento) para que el operador vea fecha + hora juntos.
-        new ColDef("hora_cierre",   "HoraCierre",      "Hora<br/>Cierre",                         19),
+        new ColDef("hora_cierre",   "HoraCierre",      "Hora<br/>Cierre",                         20),
         // Capa 08 Ola 3 — chip del estado del ciclo de revision de la HC del paciente.
-        new ColDef("revision_estado","Revision",        "Revision",                                20),
+        new ColDef("revision_estado","Revision",        "Revision",                                21),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -1158,6 +1166,14 @@ else
                 __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, s.CodigoAsignacionInterna);
+                __b.CloseElement();
+                break;
+            case "formato_hc":
+                // Formato EJECUTADO: el de la HC realmente creada para la sesion.
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, string.IsNullOrWhiteSpace(s.FormatoHistoriaEjecutado) ? "—" : s.FormatoHistoriaEjecutado);
                 __b.CloseElement();
                 break;
             case "cod_asig":

@@ -1423,7 +1423,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         modelBuilder.Entity<AlertaRegla>(b =>
         {
             b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
-            b.Property(x => x.FiltroModulo).HasMaxLength(40);
+            b.Property(x => x.FiltroModulo).HasMaxLength(400);
             b.Property(x => x.DiasDelMes).HasMaxLength(60);
             b.Property(x => x.Asunto).HasMaxLength(200);
             b.Property(x => x.Cuerpo).HasMaxLength(4000);

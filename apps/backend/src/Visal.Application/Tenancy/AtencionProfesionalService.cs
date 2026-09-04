@@ -125,6 +125,26 @@ public sealed class AtencionProfesionalService(
                     g => g.Key,
                     g => string.Join(" ", g.Select(x => x.HistoriaClinicaId.ToString())));
 
+        // Formato EJECUTADO por sesion: el codigo del FormDefinition de la HC que
+        // realmente se creo/vinculo a la sesion (via el pivote). A diferencia del
+        // formato "efectivo" que se calcula desde la config actual, este refleja lo
+        // que quedo guardado — util para detectar cuando la config del servicio cambio
+        // despues de ejecutada la atencion. Si hay varias HC por sesion, tomamos la
+        // mas reciente por apertura (ignorando Inactivas).
+        var formatoEjecutadoPorSesion = sesionIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await (
+                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+                join f in db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals f.Id
+                where sesionIds.Contains(p.SesionId) && h.Estado != HistoriaClinicaEstado.Inactiva
+                select new { p.SesionId, f.Codigo, h.FechaApertura })
+                .ToListAsync(ct))
+                .GroupBy(x => x.SesionId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(x => x.FechaApertura).First().Codigo);
+
         // Capa 08 Ola 3 — Chip de revision por fila del grid.
         // Para cada paciente traemos la HC MAS RECIENTE (Abierta o Cerrada) y su
         // revision viva (si existe). El chip resume el estado del ciclo — util
@@ -272,6 +292,13 @@ public sealed class AtencionProfesionalService(
                     historiaClinicaIds = hcIdsSesion;
                 }
 
+                // Formato EJECUTADO (el de la HC realmente creada para esta sesion).
+                string? formatoEjecutado = null;
+                if (sesion is not null && formatoEjecutadoPorSesion.TryGetValue(sesion.Id, out var feCod))
+                {
+                    formatoEjecutado = feCod;
+                }
+
                 // Sesion 1 (cronologica) usa el formato HC completo; de la 2da en adelante
                 // usa el formato de evolucion si el formato de HC lo tiene configurado.
                 var formatoEfectivo = a.FormatoHistoria;
@@ -307,7 +334,8 @@ public sealed class AtencionProfesionalService(
                     revMotivo,
                     horaCierre,
                     historiaClinicaIds,
-                    t.ProfesionalId));
+                    t.ProfesionalId,
+                    formatoEjecutado));
             }
         }
         return result;

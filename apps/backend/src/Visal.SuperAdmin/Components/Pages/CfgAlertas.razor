@@ -63,7 +63,13 @@
                     @foreach (var r in _reglas)
                     {
                         <tr>
-                            <td><b>@r.Nombre</b></td>
+                            <td>
+                                <b>@r.Nombre</b>
+                                @if (!string.IsNullOrWhiteSpace(r.FiltroModulo))
+                                {
+                                    <div class="small text-muted">Servicios: @r.FiltroModulo</div>
+                                }
+                            </td>
                             <td>@CondicionTxt(r.Condicion)</td>
                             <td class="small">@DisparoTxt(r)</td>
                             <td class="small">@DestinatarioTxt(r)</td>
@@ -146,6 +152,13 @@
             <button class="al-modal-close" @onclick="() => _form = null">&times;</button>
         </div>
         <div class="al-modal-body">
+            <div class="al-tabs">
+                <button class="al-tab @(_modalTab == "config" ? "is-active" : "")" @onclick='() => _modalTab = "config"'>Configuracion</button>
+                <button class="al-tab @(_modalTab == "sim" ? "is-active" : "")" @onclick="AbrirSimulacion">Simulacion</button>
+            </div>
+
+            @if (_modalTab == "config")
+            {
             <div class="row g-3">
                 <div class="col-md-8">
                     <label class="form-label small fw-bold">Nombre</label>
@@ -164,8 +177,60 @@
                     </select>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label small fw-bold">Filtro por tipo de servicio (opcional)</label>
-                    <input class="form-control form-control-sm" @bind="_form.FiltroModulo" placeholder="Ej: TERAPIA (vacio = todos)" />
+                    <label class="form-label small fw-bold">
+                        Filtro por servicio del contrato
+                        <span class="text-muted fw-normal">(opcional; vacio = todos)</span>
+                    </label>
+                    @if (_servicios.Count == 0)
+                    {
+                        <div class="text-muted small border rounded p-2">
+                            No hay servicios cargados en los contratos. Configuralos en
+                            <b>Entidades Aseguradoras</b>.
+                        </div>
+                    }
+                    else
+                    {
+                        @if (_form.FiltroModulos.Count > 0)
+                        {
+                            <div class="al-chips">
+                                @foreach (var code in _form.FiltroModulos)
+                                {
+                                    var c = code;
+                                    <span class="al-chip" title="@DescServicio(c)">
+                                        <span class="mono fw-bold">@c</span>
+                                        <span class="al-chip-desc">@DescServicio(c)</span>
+                                        <button type="button" class="al-chip-x" @onclick="() => QuitarServicio(c)" aria-label="Quitar">&times;</button>
+                                    </span>
+                                }
+                            </div>
+                        }
+                        <div class="al-ac">
+                            <input class="form-control form-control-sm" autocomplete="off"
+                                   placeholder="Escribe codigo o descripcion para agregar..."
+                                   @bind="_busqSvc" @bind:event="oninput" />
+                            @{ var _sug = Sugerencias(); }
+                            @if (!string.IsNullOrWhiteSpace(_busqSvc))
+                            {
+                                <div class="al-ac-list">
+                                    @if (_sug.Count == 0)
+                                    {
+                                        <div class="al-ac-empty">Sin coincidencias para "@_busqSvc".</div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var s in _sug)
+                                        {
+                                            var code = s.Codigo;
+                                            <button type="button" class="al-ac-item" @onclick="() => AgregarServicio(code)">
+                                                <span class="mono fw-bold">@s.Codigo</span> <span class="text-muted">@s.Descripcion</span>
+                                            </button>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <div class="small text-muted mt-1">@SeleccionTxt()</div>
+                    }
                 </div>
 
                 @* ---- Disparo ---- *@
@@ -300,10 +365,93 @@
                     </div>
                 </div>
             </div>
+            }
+
+            @if (_modalTab == "sim")
+            {
+                <div class="sim-wrap">
+                    <p class="text-muted small mb-2">
+                        Simula una fecha y prueba la consulta del sistema: <b>Paso 1</b> muestra que pacientes
+                        traeria la regla y a quien se emitiria (sin enviar). <b>Paso 2</b> emite de verdad para
+                        ver el ciclo completo. Usa la configuracion actual de la pestana <b>Configuracion</b>.
+                    </p>
+                    <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+                        <div>
+                            <label class="form-label small fw-bold mb-0">Fecha a simular</label>
+                            <input type="date" class="form-control form-control-sm" @bind="_simFecha" style="max-width:190px" />
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="SimularVer" disabled="@_simBusy">
+                            @(_simBusy ? "Consultando..." : "1. Ver a quien emitiria")
+                        </button>
+                        <button class="btn btn-danger btn-sm" @onclick="SimularEmitir" disabled="@(_simBusy || _form.Id is null)"
+                                title="@(_form.Id is null ? "Guarda la regla primero para poder emitir" : "Envia realmente a los destinatarios")">
+                            @(_simBusy ? "Emitiendo..." : "2. Emitir ahora (real)")
+                        </button>
+                    </div>
+                    @if (_form.Id is null)
+                    {
+                        <div class="small text-muted mb-2">Para el paso 2 (emitir) primero guarda la regla en la pestana Configuracion.</div>
+                    }
+
+                    @if (_simError is not null) { <div class="ase-alert small">@_simError</div> }
+
+                    @if (_sim is not null)
+                    {
+                        @if (!string.IsNullOrEmpty(_sim.Aviso)) { <div class="alert alert-warning py-2 px-3 small">@_sim.Aviso</div> }
+                        <div class="sim-totals small">
+                            <span>Fecha: <b>@_sim.Fecha.ToString("dd/MM/yyyy")</b></span>
+                            <span>Coinciden: <b>@_sim.Coinciden</b></span>
+                            <span>Se emitirian: <b>@_sim.Emitibles</b></span>
+                            @if (_sim.SinContacto > 0) { <span class="text-danger">Sin contacto: <b>@_sim.SinContacto</b></span> }
+                            @if (_sim.YaEnviadas > 0) { <span>Ya enviadas: <b>@_sim.YaEnviadas</b></span> }
+                            @if (_sim.Emitido) { <span class="text-success">Enviadas: <b>@_sim.Enviadas</b></span> }
+                            @if (_sim.Emitido && _sim.Errores > 0) { <span class="text-danger">Errores: <b>@_sim.Errores</b></span> }
+                        </div>
+
+                        @if (_sim.Filas.Count == 0)
+                        {
+                            <div class="text-muted small p-2">Sin candidatos para esta fecha.</div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive sim-table">
+                                <table class="table table-sm table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Paciente</th>
+                                            <th>Servicio</th>
+                                            <th>Destinatario</th>
+                                            <th>Correo</th>
+                                            <th>Telefono</th>
+                                            <th>Estado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var f in _sim.Filas)
+                                        {
+                                            <tr>
+                                                <td>@f.Paciente<div class="text-muted xsmall">@f.Documento</div></td>
+                                                <td>@f.Servicio<div class="text-muted xsmall mono">@f.CodigoServicio</div></td>
+                                                <td>@f.DestinatarioTipo<div class="text-muted xsmall">@f.DestinatarioNombre</div></td>
+                                                <td class="@(string.IsNullOrEmpty(f.Correo) ? "text-muted" : "")">@(string.IsNullOrEmpty(f.Correo) ? "—" : f.Correo)</td>
+                                                <td class="@(string.IsNullOrEmpty(f.Telefono) ? "text-muted" : "")">@(string.IsNullOrEmpty(f.Telefono) ? "—" : f.Telefono)</td>
+                                                <td><span class="sim-estado @SimEstadoClass(f)">@f.Estado</span></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                </div>
+            }
 
             <div class="d-flex gap-2 mt-3">
-                <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">Guardar regla</button>
-                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _form = null">Cancelar</button>
+                @if (_modalTab == "config")
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">Guardar regla</button>
+                }
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _form = null">Cerrar</button>
             </div>
         </div>
     </div>
@@ -332,6 +480,28 @@
     .alerta-err { color: #dc2626; }
     .alerta-card-error { font-size: 11px; color: #dc2626; margin-top: 4px; }
     .alerta-card-acts { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+    .al-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+    .al-chip { display: inline-flex; align-items: center; gap: 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 2px 6px 2px 10px; font-size: 12px; max-width: 100%; }
+    .al-chip-desc { color: #475569; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-chip-x { border: 0; background: transparent; color: #64748b; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+    .al-chip-x:hover { color: #dc2626; }
+    .al-ac { position: relative; }
+    .al-ac-list { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); max-height: 240px; overflow: auto; margin-top: 2px; }
+    .al-ac-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+    .al-ac-item:hover { background: #f1f5f9; }
+    .al-ac-empty { padding: 8px 10px; font-size: 12px; color: #64748b; }
+    .al-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e2e8f0; margin-bottom: 14px; }
+    .al-tab { border: 0; background: transparent; padding: 8px 14px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .al-tab.is-active { color: #1565c0; border-bottom-color: #1565c0; }
+    .sim-totals { display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 8px; color: #334155; }
+    .sim-table { max-height: 320px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .sim-table th { position: sticky; top: 0; background: #f8fafc; z-index: 1; font-size: 11px; text-transform: uppercase; color: #64748b; }
+    .xsmall { font-size: 11px; }
+    .sim-estado { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+    .sim-ok { background: #dbeafe; color: #1e40af; }
+    .sim-sent { background: #dcfce7; color: #166534; }
+    .sim-skip { background: #f1f5f9; color: #64748b; }
+    .sim-err { background: #fee2e2; color: #b91c1c; }
 </style>
 
 @code {
@@ -340,6 +510,13 @@
     private List<AlertaReglaDto> _reglas = new();
     private List<AlertaUsuarioDto> _usuarios = new();
     private List<AlertaLineaDto> _lineas = new();
+    private List<AlertaServicioDto> _servicios = new();
+    private string _busqSvc = "";
+    private string _modalTab = "config";
+    private DateOnly _simFecha = DateOnly.FromDateTime(DateTime.Now);
+    private bool _simBusy;
+    private AlertaSimulacionResult? _sim;
+    private string? _simError;
     private List<GupshupTemplateInfo> _plantillas = new();
     private Form? _form;
     private bool _busy;
@@ -385,6 +562,8 @@
     {
         await AsegurarCatalogos();
         _plantillas = new();
+        _busqSvc = "";
+        ResetSim();
         _form = new Form();
         _msg = _error = null;
     }
@@ -393,6 +572,8 @@
     {
         await AsegurarCatalogos();
         _plantillas = new();
+        _busqSvc = "";
+        ResetSim();
         _form = new Form
         {
             Id = r.Id,
@@ -400,7 +581,9 @@
             Activa = r.Activa,
             Orden = r.Orden,
             Condicion = r.Condicion,
-            FiltroModulo = r.FiltroModulo,
+            FiltroModulos = string.IsNullOrWhiteSpace(r.FiltroModulo)
+                ? new()
+                : r.FiltroModulo.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
             DisparoTipo = r.DisparoTipo,
             DiasDelMes = r.DiasDelMes ?? "15,16,17",
             MesesDespues = r.MesesDespues ?? 3,
@@ -424,6 +607,44 @@
     {
         if (_usuarios.Count == 0) { _usuarios = (await Svc.ListUsuariosAsync()).ToList(); }
         if (_lineas.Count == 0) { _lineas = (await Svc.ListLineasGupshupAsync()).ToList(); }
+        if (_servicios.Count == 0) { _servicios = (await Svc.ListServiciosContratoAsync()).ToList(); }
+    }
+
+    private void AgregarServicio(string codigo)
+    {
+        if (_form is null) { return; }
+        if (!_form.FiltroModulos.Contains(codigo)) { _form.FiltroModulos.Add(codigo); }
+        _busqSvc = ""; // limpia el buscador para agregar el siguiente
+    }
+
+    private void QuitarServicio(string codigo)
+    {
+        _form?.FiltroModulos.Remove(codigo);
+    }
+
+    /// <summary>Sugerencias del autocompletar: hasta 8 servicios que matchean la busqueda y
+    /// no estan ya seleccionados.</summary>
+    private List<AlertaServicioDto> Sugerencias()
+    {
+        const int Tope = 8;
+        var q = (_busqSvc ?? "").Trim();
+        if (string.IsNullOrEmpty(q)) { return new(); }
+        var seleccionados = _form?.FiltroModulos ?? new();
+        return _servicios
+            .Where(s => !seleccionados.Contains(s.Codigo))
+            .Where(s => s.Codigo.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || (s.Descripcion ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Take(Tope)
+            .ToList();
+    }
+
+    private string DescServicio(string codigo)
+        => _servicios.FirstOrDefault(s => s.Codigo == codigo)?.Descripcion ?? "";
+
+    private string SeleccionTxt()
+    {
+        if (_form is null || _form.FiltroModulos.Count == 0) { return "Aplica a todos los servicios."; }
+        return $"Seleccionados: {_form.FiltroModulos.Count} servicio(s).";
     }
 
     private async Task CargarPlantillas()
@@ -454,23 +675,28 @@
         while (_form.HsmParametros.Count > t.ParameterCount) { _form.HsmParametros.RemoveAt(_form.HsmParametros.Count - 1); }
     }
 
+    private AlertaReglaUpsertRequest BuildRequest()
+    {
+        Guid? usuarioId = Guid.TryParse(_form!.UsuarioSel, out var uid) ? uid : null;
+        Guid? lineId = Guid.TryParse(_form.LineaSel, out var lid) ? lid : null;
+        var filtroModulo = _form.FiltroModulos.Count == 0 ? null : string.Join(",", _form.FiltroModulos);
+        return new AlertaReglaUpsertRequest(
+            _form.Id, _form.Nombre, _form.Activa, _form.Orden,
+            _form.Condicion, filtroModulo,
+            _form.DisparoTipo, _form.DiasDelMes, _form.MesesDespues, _form.Ancla,
+            _form.Destinatario, usuarioId,
+            _form.Canal, _form.Asunto, _form.Cuerpo,
+            lineId, _form.HsmTemplateId, _form.HsmTemplateName, _form.HsmParameterCount,
+            _form.HsmParametros);
+    }
+
     private async Task Guardar()
     {
         if (_form is null) { return; }
         _busy = true; _error = _msg = null;
         try
         {
-            Guid? usuarioId = Guid.TryParse(_form.UsuarioSel, out var uid) ? uid : null;
-            Guid? lineId = Guid.TryParse(_form.LineaSel, out var lid) ? lid : null;
-            var req = new AlertaReglaUpsertRequest(
-                _form.Id, _form.Nombre, _form.Activa, _form.Orden,
-                _form.Condicion, _form.FiltroModulo,
-                _form.DisparoTipo, _form.DiasDelMes, _form.MesesDespues, _form.Ancla,
-                _form.Destinatario, usuarioId,
-                _form.Canal, _form.Asunto, _form.Cuerpo,
-                lineId, _form.HsmTemplateId, _form.HsmTemplateName, _form.HsmParameterCount,
-                _form.HsmParametros);
-            await Svc.UpsertAsync(req, await Actor());
+            await Svc.UpsertAsync(BuildRequest(), await Actor());
             _msg = "Regla guardada.";
             _form = null;
             await Cargar();
@@ -478,6 +704,46 @@
         catch (InvalidOperationException ex) { _error = ex.Message; }
         catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
         finally { _busy = false; }
+    }
+
+    // ----------------- Simulacion -----------------
+
+    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; }
+
+    private void AbrirSimulacion() { _modalTab = "sim"; }
+
+    private Task SimularVer() => SimularAsync(emitir: false);
+
+    private async Task SimularEmitir()
+    {
+        if (_form?.Id is null) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Esto EMITIRA de verdad las alertas para el {_simFecha:dd/MM/yyyy} a los destinatarios (respetando lo ya enviado). Continuar?");
+        if (!ok) { return; }
+        await SimularAsync(emitir: true);
+    }
+
+    private async Task SimularAsync(bool emitir)
+    {
+        if (_form is null) { return; }
+        _simBusy = true; _simError = null;
+        try
+        {
+            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, await Actor());
+            if (emitir) { await Cargar(); }
+        }
+        catch (InvalidOperationException ex) { _simError = ex.Message; }
+        catch (Exception ex) { _simError = "Error tecnico: " + ex.Message; }
+        finally { _simBusy = false; }
+    }
+
+    private static string SimEstadoClass(AlertaSimulacionFila f)
+    {
+        if (f.EnvioOk == true) { return "sim-sent"; }
+        if (f.EnvioOk == false) { return "sim-err"; }
+        if (f.Estado.StartsWith("Ya", StringComparison.OrdinalIgnoreCase)) { return "sim-skip"; }
+        if (f.Estado.StartsWith("Sin", StringComparison.OrdinalIgnoreCase)) { return "sim-err"; }
+        return "sim-ok";
     }
 
     private async Task ToggleActiva(AlertaReglaDto r, bool activa)
@@ -545,7 +811,7 @@
         public bool Activa { get; set; } = true;
         public int Orden { get; set; }
         public AlertaCondicion Condicion { get; set; } = AlertaCondicion.SesionPendiente;
-        public string? FiltroModulo { get; set; }
+        public List<string> FiltroModulos { get; set; } = new();
         public AlertaDisparoTipo DisparoTipo { get; set; } = AlertaDisparoTipo.DiasDelMes;
         public string DiasDelMes { get; set; } = "15,16,17";
         public int MesesDespues { get; set; } = 3;

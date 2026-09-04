@@ -537,23 +537,33 @@ public static class HistoriaMedicaPrefillHelper
     /// <summary>Calcula cantidad total = cantidad por toma * (24/intervalo_horas) * dias.
     /// La "frecuencia" es el INTERVALO en horas entre tomas (cada N horas), no
     /// las veces por dia. Asi: frec=24 -> 1 dosis/dia, frec=8 -> 3 dosis/dia,
-    /// frec=6 -> 4 dosis/dia. Devuelve null si alguno de los tres no es un
-    /// numero positivo (caso libre, ej. "PRN" o "indefinido").</summary>
+    /// frec=6 -> 4 dosis/dia.
+    /// Cuando NO se ingresan las horas (frecuencia vacia o no numerica, ej. "PRN"),
+    /// la cantidad se queda FIRME y es el total para esos dias (sin multiplicar).
+    /// Devuelve null si la cantidad no es un numero positivo, o si hay frecuencia
+    /// valida pero faltan los dias.</summary>
     public static string? CalcularTotalUnidades(string? cantidad, string? frecuencia, string? dias)
     {
-        if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var c)
-            && decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var f)
-            && int.TryParse(dias?.Trim(), out var d)
-            && c > 0 && f > 0 && d > 0)
+        if (!decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var c) || c <= 0)
         {
-            var total = c * (24m / f) * d;
-            return total == Math.Truncate(total)
-                ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            return null;
         }
-        return null;
+
+        var freqOk = decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var f) && f > 0;
+
+        static string Fmt(decimal total) => total == Math.Truncate(total)
+            ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+        // Sin horas: cantidad firme como total (no se multiplica).
+        if (!freqOk) { return Fmt(c); }
+
+        // Con horas: se requieren dias para el total por distribucion horaria.
+        if (!int.TryParse(dias?.Trim(), out var d) || d <= 0) { return null; }
+
+        return Fmt(c * (24m / f) * d);
     }
 
     private static Dictionary<string, string?> RemisionToFields(RemisionItemDto r)

@@ -452,29 +452,39 @@ else
         return $"cada {fn} horas";
     }
 
-    /// <summary>Cantidad total = cantidad por toma * (24/intervalo_horas) * dias.
-    /// La "frecuencia" que entra es el INTERVALO en horas (cada N horas), no
-    /// las veces por dia. Devuelve null si alguno no se puede parsear como
-    /// numero positivo. Misma logica que
-    /// HistoriaMedicaPrefillHelper.CalcularTotalUnidades pero replicada aqui
-    /// para evitar acoplar el componente al Application.</summary>
+    /// <summary>Cantidad total.
+    /// - Con frecuencia por horas: cantidad_por_toma * (24/intervalo_horas) * dias
+    ///   (la "frecuencia" es el INTERVALO en horas, cada N horas).
+    /// - SIN frecuencia por horas (campo "Cada (h)" vacio o no numerico): la cantidad
+    ///   se queda FIRME y es el total para esos dias, sin multiplicar. Esto cubre
+    ///   medicamentos que no se distribuyen por horas (se pide una cantidad total).
+    /// Devuelve null si la cantidad no es un numero positivo, o si hay frecuencia
+    /// valida pero faltan los dias (no se puede calcular el total por horas).</summary>
     private static string? CalcularTotal(string? cantidad, string? frecuencia, string? dias)
     {
-        if (decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var c)
-            && decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var f)
-            && int.TryParse(dias?.Trim(), out var d)
-            && c > 0 && f > 0 && d > 0)
+        if (!decimal.TryParse(cantidad?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var c) || c <= 0)
         {
-            // dosis por dia = 24 / intervalo
-            var total = c * (24m / f) * d;
-            return total == Math.Truncate(total)
-                ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            return null;
         }
-        return null;
+
+        var freqOk = decimal.TryParse(frecuencia?.Trim(), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var f) && f > 0;
+
+        // Sin horas: la cantidad es el total firme (no se multiplica por dosis/dia ni por dias).
+        if (!freqOk) { return FormatearTotal(c); }
+
+        // Con horas: se requieren dias para el total por distribucion horaria.
+        if (!int.TryParse(dias?.Trim(), out var d) || d <= 0) { return null; }
+
+        var total = c * (24m / f) * d; // dosis por dia = 24 / intervalo
+        return FormatearTotal(total);
     }
+
+    private static string FormatearTotal(decimal total)
+        => total == Math.Truncate(total)
+            ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task AgregarAsync()
     {

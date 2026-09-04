@@ -23,12 +23,13 @@ public static class RetellWebhookParser
 
             if (!root.TryGetProperty("call", out var call) || call.ValueKind != JsonValueKind.Object)
             {
-                return new RetellWebhookEvento(evento!, null, null, null, null, null, null, null, null, null);
+                return new RetellWebhookEvento(evento!, null, null, null, null, null, null, null, null, null, null);
             }
 
             var callId = Str(call, "call_id");
             var callStatus = Str(call, "call_status");
             var transcript = Str(call, "transcript");
+            var recordingUrl = Str(call, "recording_url");
             var start = Long(call, "start_timestamp");
             var end = Long(call, "end_timestamp");
             var duracion = (start is long s && end is long e && e >= s) ? (int?)((e - s) / 1000) : null;
@@ -44,7 +45,7 @@ public static class RetellWebhookParser
                 analisis = ca.GetRawText();
             }
 
-            return new RetellWebhookEvento(evento!, callId, callStatus, transcript, duracion, costo, start, end, disc, analisis);
+            return new RetellWebhookEvento(evento!, callId, callStatus, transcript, duracion, costo, start, end, disc, analisis, recordingUrl);
         }
         catch { return null; }
     }

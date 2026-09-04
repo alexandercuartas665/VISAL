@@ -9,6 +9,15 @@ public sealed record LlamadaVozDto(
 public sealed record VozLoteResult(
     int Lanzadas, int Omitidas, int Errores, bool DryRun, IReadOnlyList<string> Mensajes);
 
+/// <summary>Resultado de lanzar UNA llamada (individual o de prueba).</summary>
+public sealed record VozLlamadaAccionResult(bool Ok, string? Error, string? CallId);
+
+/// <summary>Detalle de una llamada para la UI (grabacion, transcripcion, etc.).</summary>
+public sealed record LlamadaDetalleDto(
+    Guid Id, string? CallId, string Estado, string? Error,
+    string? ToNumber, int? DuracionSegundos, decimal? CostoUsd,
+    string? RecordingUrl, string? Transcripcion, DateTimeOffset CreadoEn, bool EsPrueba);
+
 public interface IVozLlamadaService
 {
     /// <summary>
@@ -24,4 +33,16 @@ public interface IVozLlamadaService
 
     /// <summary>Estado de las llamadas de un mes, indexable por SeguimientoEncuestaId.</summary>
     Task<IReadOnlyList<LlamadaVozDto>> ListarPorMesAsync(int mes, CancellationToken ct = default);
+
+    /// <summary>Lanza UNA llamada IA para la encuesta indicada. Si <paramref name="telefonoOverride"/>
+    /// trae un numero, se llama a ese (para pruebas) en vez del telefono del paciente y la llamada
+    /// se marca como prueba.</summary>
+    Task<VozLlamadaAccionResult> LlamarUnaAsync(Guid encuestaId, string? telefonoOverride, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Lanza una llamada de PRUEBA a un numero arbitrario (desde la config de Voz IA).
+    /// No se asocia a ninguna encuesta.</summary>
+    Task<VozLlamadaAccionResult> LlamarPruebaAsync(string telefono, string? nombre, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Ultima llamada (con grabacion/transcripcion) de una encuesta, para mostrar en la UI.</summary>
+    Task<LlamadaDetalleDto?> ObtenerUltimaLlamadaAsync(Guid encuestaId, CancellationToken ct = default);
 }

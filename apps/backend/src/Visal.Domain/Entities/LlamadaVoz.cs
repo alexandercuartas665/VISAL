@@ -34,8 +34,14 @@ public class LlamadaVoz : TenantEntity
 
     public string? Transcripcion { get; set; }
 
+    /// <summary>URL publica de la grabacion de la llamada (recording_url de Retell).</summary>
+    public string? RecordingUrl { get; set; }
+
     /// <summary>Analisis post-llamada crudo (JSON) tal cual lo manda Retell.</summary>
     public string? AnalisisJson { get; set; }
+
+    /// <summary>true si fue una llamada de prueba (desde la config o con numero override).</summary>
+    public bool EsPrueba { get; set; }
 
     public DateTimeOffset? InicioLlamada { get; set; }
     public DateTimeOffset? FinLlamada { get; set; }

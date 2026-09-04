@@ -6,150 +6,200 @@
 @inject Visal.Application.Tenancy.ISedeCatalogoPublicoService SedesSvc
 @inject Visal.Application.Tenancy.ITenantBrandingPublicoService TenantBrand
 
-<PageTitle>Ingresar - @_displayName</PageTitle>
+<PageTitle>Ingresar - AXON visal</PageTitle>
 
-<div class="auth-shell @(StartSignup ? "is-signup" : "")">
+<div class="axon-shell @(StartSignup ? "is-signup" : "")">
 
-    <!-- Panel izquierdo: marca + bienvenida -->
-    <aside class="auth-aside">
-        <div class="auth-aside-deco auth-deco-tr"></div>
-        <div class="auth-aside-deco auth-deco-bl"></div>
+    <!-- Panel izquierdo: hero de marca -->
+    <aside class="axon-hero">
+        <div class="axon-hero-deco axon-deco-dots"></div>
+        <svg class="axon-hero-neuron" viewBox="0 0 200 200" fill="none" aria-hidden="true">
+            <g stroke="#2f8fd6" stroke-width="1.6" opacity=".5">
+                <path d="M100 100 L40 45 M100 100 L160 40 M100 100 L30 130 M100 100 L165 150 M100 100 L100 25 M100 100 L100 175 M100 100 L25 90 M100 100 L175 95"/>
+            </g>
+            <g fill="#2f8fd6" opacity=".85">
+                <circle cx="100" cy="100" r="10"/><circle cx="40" cy="45" r="5"/><circle cx="160" cy="40" r="4"/>
+                <circle cx="30" cy="130" r="4"/><circle cx="165" cy="150" r="5"/><circle cx="100" cy="25" r="4"/>
+                <circle cx="100" cy="175" r="4"/><circle cx="25" cy="90" r="3"/><circle cx="175" cy="95" r="4"/>
+            </g>
+        </svg>
 
-        <div class="auth-brand">
-            @if (!string.IsNullOrWhiteSpace(_logoUrl))
-            {
-                <img class="auth-brand-logo-img" src="@_logoUrl" alt="@_displayName" />
-            }
-            else
-            {
-                <div class="auth-brand-logo">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                </div>
-            }
-            <span class="auth-brand-name">@_displayName</span>
+        <div class="axon-brand">
+            <div class="axon-brand-logo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3 3 0 0 0 6 16a3 3 0 0 0 3 3 3 3 0 0 0 6 0 3 3 0 0 0 3-3 3 3 0 0 0 1-5.8A3 3 0 0 0 18 6a3 3 0 0 0-3-3 3 3 0 0 0-6 0Z"/>
+                    <path d="M12 3v18M8 8.5h2M14 12h2M8 15h1.5"/>
+                </svg>
+            </div>
+            <div class="axon-brand-txt">
+                <div class="axon-brand-name"><b>AXON</b> <span>visal</span></div>
+                <div class="axon-brand-sub">Plataforma de atención en salud</div>
+            </div>
         </div>
 
-        <div class="auth-aside-body">
-            <h2>@(_brand.LoginHeadline ?? "Atencion humana, agil y oportuna")</h2>
-            <p>@(_brand.LoginSubtext ?? "Coordina la atencion domiciliaria: pacientes, historias clinicas, profesionales y agendas en una sola plataforma.")</p>
-            <div class="auth-dots"><span></span><span></span><span></span></div>
+        <div class="axon-hero-body">
+            <h2 class="axon-hero-title">Conectamos<br />cuidado y<br /><span>tecnología</span></h2>
+            <p class="axon-hero-lead">Gestiona pacientes, historias clínicas, profesionales y agendas en una sola plataforma.</p>
+
+            <ul class="axon-feats">
+                <li>
+                    <span class="axon-feat-ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>
+                    </span>
+                    <div><b>Pacientes</b><small>Historias y seguimientos</small></div>
+                </li>
+                <li>
+                    <span class="axon-feat-ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                    </span>
+                    <div><b>Agendas</b><small>Programación inteligente</small></div>
+                </li>
+                <li>
+                    <span class="axon-feat-ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+                    </span>
+                    <div><b>Seguridad</b><small>Tu información siempre protegida</small></div>
+                </li>
+            </ul>
+        </div>
+
+        <div class="axon-hero-foot">
+            <span class="axon-hero-foot-ic">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 1 0-7.8 7.8l1 1L12 21.2l7.8-7.8 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg>
+            </span>
+            <span class="axon-hero-foot-txt">Atención humana,<br />ágil y oportuna</span>
+            <svg class="axon-pulse" viewBox="0 0 120 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16h22l6-11 9 22 7-15 5 8h56"/></svg>
         </div>
     </aside>
 
     <!-- Panel derecho: formularios -->
-    <main class="auth-main">
-        <div class="auth-form-wrap">
+    <main class="axon-panel">
+        <div class="axon-card">
 
             <!-- INICIAR SESION -->
-            <section class="auth-pane auth-pane-login">
-                <div class="auth-head">
-                    <h1>Iniciar sesion</h1>
+            <section class="axon-pane axon-pane-login">
+                <div class="axon-lock">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="axon-head">
+                    <h1>Iniciar sesión</h1>
                     <p>Bienvenido de nuevo. Ingresa a tu panel.</p>
                 </div>
 
                 @if (Error == 1)
                 {
-                    <div class="auth-alert auth-alert-error">Credenciales invalidas o cuenta sin acceso.</div>
+                    <div class="axon-alert axon-alert-error">Credenciales inválidas o cuenta sin acceso.</div>
                 }
                 @if (Reset == 1)
                 {
-                    <div class="auth-alert auth-alert-ok">Tu contrasena se actualizo. Ya puedes iniciar sesion.</div>
+                    <div class="axon-alert axon-alert-ok">Tu contraseña se actualizó. Ya puedes iniciar sesión.</div>
                 }
                 @if (!string.IsNullOrWhiteSpace(GError))
                 {
-                    <div class="auth-alert auth-alert-error">@GError</div>
+                    <div class="axon-alert axon-alert-error">@GError</div>
                 }
 
                 @if (_googleEnabled)
                 {
-                    <div class="auth-providers">
-                        <a class="auth-provider" href="/connect/google">
-                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-                            </svg>
-                            <span>Continuar con Google</span>
-                        </a>
-                    </div>
-                    <div class="auth-divider"><span>o con tu correo</span></div>
+                    <a class="axon-google" href="/connect/google">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                        </svg>
+                        <span>Continuar con Google</span>
+                    </a>
+                    <div class="axon-divider"><span>o con tu correo</span></div>
                 }
 
-                <form method="post" action="/auth/login" class="auth-form">
-                    <div class="auth-field">
+                <form method="post" action="/auth/login" class="axon-form">
+                    <div class="axon-field">
                         <label for="login-usuario">Usuario / Documento</label>
-                        <input id="login-usuario" name="usuario" type="text" required placeholder="Cedula o correo" autocomplete="username" />
-                    </div>
-                    <div class="auth-field">
-                        <div class="auth-label-row">
-                            <label for="login-password">Contrasena</label>
-                            <a class="auth-forgot" href="/recuperar">Olvidaste tu contrasena?</a>
-                        </div>
-                        <div class="auth-input-icon">
-                            <input id="login-password" name="password" type="password" required placeholder="Tu contrasena" autocomplete="current-password" />
-                            <button type="button" class="auth-eye" onclick="visalAuth.toggle('login-password', this)">MOSTRAR</button>
+                        <div class="axon-input">
+                            <svg class="axon-input-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <input id="login-usuario" name="usuario" type="text" required placeholder="Cédula o correo" autocomplete="username" />
                         </div>
                     </div>
-                    <div class="auth-field">
+                    <div class="axon-field">
+                        <div class="axon-label-row">
+                            <label for="login-password">Contraseña</label>
+                            <a class="axon-forgot" href="/recuperar">¿Olvidaste tu contraseña?</a>
+                        </div>
+                        <div class="axon-input">
+                            <svg class="axon-input-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            <input id="login-password" name="password" type="password" required placeholder="Tu contraseña" autocomplete="current-password" />
+                            <button type="button" class="axon-eye" title="Mostrar / ocultar" onclick="visalAuth.toggle('login-password', this)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="axon-field">
                         <label for="login-sede">Sede</label>
-                        <select id="login-sede" name="sede" required class="auth-select">
-                            <option value="" disabled selected>Selecciona SEDE</option>
-                            <option value="GLOBAL">GLOBAL</option>
-                            @foreach (var s in _sedes)
-                            {
-                                <option value="@s.Id">@s.Nombre</option>
-                            }
-                        </select>
+                        <div class="axon-input">
+                            <svg class="axon-input-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                            <select id="login-sede" name="sede" required class="axon-select">
+                                <option value="" disabled selected>Selecciona SEDE</option>
+                                <option value="GLOBAL">GLOBAL</option>
+                                @foreach (var s in _sedes)
+                                {
+                                    <option value="@s.Id">@s.Nombre</option>
+                                }
+                            </select>
+                            <svg class="axon-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                        </div>
                     </div>
-                    <button class="auth-submit" type="submit">
+                    <button class="axon-submit" type="submit">
                         <span>Ingresar</span>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                     </button>
                 </form>
 
-                <p class="auth-switch">
-                    No tienes una cuenta?
-                    <button type="button" onclick="visalAuth.show('signup')">Crea una aqui</button>
+                <p class="axon-switch">
+                    ¿No tienes una cuenta?
+                    <button type="button" onclick="visalAuth.show('signup')">Crea una aquí</button>
                 </p>
             </section>
 
             <!-- CREAR CUENTA (autogestion) -->
-            <section class="auth-pane auth-pane-signup">
-                <div class="auth-head">
+            <section class="axon-pane axon-pane-signup">
+                <div class="axon-lock">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+                </div>
+                <div class="axon-head">
                     <h1>Crear una cuenta</h1>
-                    <p>Registra tu agencia y empieza a vender en minutos.</p>
+                    <p>Registra tu agencia y empieza en minutos.</p>
                 </div>
 
                 @if (!string.IsNullOrWhiteSpace(RegError))
                 {
-                    <div class="auth-alert auth-alert-error">@RegError</div>
+                    <div class="axon-alert axon-alert-error">@RegError</div>
                 }
 
-                <form method="post" action="/auth/register" class="auth-form">
-                    <div class="auth-field">
+                <form method="post" action="/auth/register" class="axon-form">
+                    <div class="axon-field">
                         <label for="reg-agency">Nombre de tu agencia</label>
-                        <input id="reg-agency" name="agencyName" type="text" required placeholder="Ej. Travel Fans" />
+                        <div class="axon-input"><input id="reg-agency" name="agencyName" type="text" required placeholder="Ej. IPS Salud Vida" /></div>
                     </div>
-                    <div class="auth-field">
+                    <div class="axon-field">
                         <label for="reg-name">Tu nombre</label>
-                        <input id="reg-name" name="displayName" type="text" placeholder="Ej. Alexander Cuartas" />
+                        <div class="axon-input"><input id="reg-name" name="displayName" type="text" placeholder="Ej. Alexander Cuartas" /></div>
                     </div>
-                    <div class="auth-field">
-                        <label for="reg-email">Correo electronico</label>
-                        <input id="reg-email" name="email" type="email" required placeholder="tu.correo@ejemplo.com" />
+                    <div class="axon-field">
+                        <label for="reg-email">Correo electrónico</label>
+                        <div class="axon-input"><input id="reg-email" name="email" type="email" required placeholder="tu.correo@ejemplo.com" /></div>
                     </div>
-                    <div class="auth-field">
-                        <label for="reg-password">Contrasena</label>
-                        <div class="auth-input-icon">
-                            <input id="reg-password" name="password" type="password" required minlength="8" placeholder="Minimo 8 caracteres" />
-                            <button type="button" class="auth-eye" onclick="visalAuth.toggle('reg-password', this)">MOSTRAR</button>
+                    <div class="axon-field">
+                        <label for="reg-password">Contraseña</label>
+                        <div class="axon-input">
+                            <input id="reg-password" name="password" type="password" required minlength="8" placeholder="Mínimo 8 caracteres" />
+                            <button type="button" class="axon-eye" title="Mostrar / ocultar" onclick="visalAuth.toggle('reg-password', this)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
                         </div>
                     </div>
-                    <p class="auth-legal">
-                        Al registrarte aceptas los Terminos del Servicio y la Politica de Privacidad de @_displayName.
-                    </p>
-                    <button class="auth-submit" type="submit">
+                    <p class="axon-legal">Al registrarte aceptas los Términos del Servicio y la Política de Privacidad de AXON visal.</p>
+                    <button class="axon-submit" type="submit">
                         <span>Registrar cuenta</span>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                     </button>
@@ -157,46 +207,150 @@
 
                 @if (_googleEnabled)
                 {
-                    <div class="auth-divider"><span>o registrate con</span></div>
-                    <div class="auth-providers">
-                        <button type="button" class="auth-provider" onclick="visalAuth.googleSignup()">
-                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-                            </svg>
-                            <span>Continuar con Google</span>
-                        </button>
-                    </div>
-                    <p class="auth-hint" id="reg-google-hint" hidden>Escribe primero el nombre de tu agencia para continuar con Google.</p>
+                    <div class="axon-divider"><span>o regístrate con</span></div>
+                    <button type="button" class="axon-google" onclick="visalAuth.googleSignup()">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                        </svg>
+                        <span>Continuar con Google</span>
+                    </button>
+                    <p class="axon-hint" id="reg-google-hint" hidden>Escribe primero el nombre de tu agencia para continuar con Google.</p>
                 }
 
-                <p class="auth-switch">
-                    Ya tienes una cuenta?
-                    <button type="button" onclick="visalAuth.show('login')">Iniciar sesion</button>
+                <p class="axon-switch">
+                    ¿Ya tienes una cuenta?
+                    <button type="button" onclick="visalAuth.show('login')">Iniciar sesión</button>
                 </p>
             </section>
 
+            <footer class="axon-foot">
+                <svg viewBox="0 0 120 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="axon-foot-pulse"><path d="M2 16h22l6-11 9 22 7-15 5 8h56"/></svg>
+                <span>&copy; @DateTime.UtcNow.Year AXON visal. Todos los derechos reservados.</span>
+            </footer>
         </div>
-
-        <footer class="auth-footer">&copy; @DateTime.UtcNow.Year @_displayName. Todos los derechos reservados.</footer>
     </main>
 </div>
+
+<style>
+    .axon-shell { min-height: 100vh; display: grid; grid-template-columns: 1.05fr .95fr; background: #eef4fb; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f2b5b; }
+
+    /* ---------- Hero ---------- */
+    .axon-hero { position: relative; overflow: hidden; padding: 3rem 3.2rem; display: flex; flex-direction: column;
+        background: linear-gradient(150deg, #eaf3fc 0%, #dcebfb 45%, #cfe6fb 100%); }
+    .axon-hero-deco { position: absolute; inset: 0; pointer-events: none; }
+    .axon-deco-dots { background-image: radial-gradient(#8fbdea 1.4px, transparent 1.4px); background-size: 16px 16px; opacity: .18; top: 8%; left: 62%; width: 200px; height: 120px; inset: auto; position: absolute; }
+    .axon-hero-neuron { position: absolute; width: 340px; height: 340px; right: -40px; top: 46%; transform: translateY(-50%); opacity: .5; }
+    .axon-brand { display: flex; align-items: center; gap: .85rem; position: relative; z-index: 2; }
+    .axon-brand-logo { width: 54px; height: 54px; border-radius: 15px; display: grid; place-items: center; color: #fff;
+        background: linear-gradient(135deg, #1f7fd1, #17a2b8); box-shadow: 0 8px 20px rgba(31,127,209,.35); }
+    .axon-brand-logo svg { width: 30px; height: 30px; }
+    .axon-brand-name { font-size: 1.7rem; line-height: 1; letter-spacing: .3px; }
+    .axon-brand-name b { color: #143a72; font-weight: 800; }
+    .axon-brand-name span { color: #2f8fd6; font-weight: 500; }
+    .axon-brand-sub { font-size: .74rem; color: #5b7aa6; margin-top: .2rem; letter-spacing: .2px; }
+
+    .axon-hero-body { position: relative; z-index: 2; margin-top: auto; }
+    .axon-hero-title { font-size: 3.05rem; line-height: 1.06; font-weight: 800; color: #12336b; margin: 0 0 1.1rem; }
+    .axon-hero-title span { color: #2563eb; }
+    .axon-hero-lead { font-size: 1rem; color: #4d6690; max-width: 30ch; margin: 0 0 2rem; line-height: 1.5; }
+    .axon-feats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.05rem; }
+    .axon-feats li { display: flex; align-items: center; gap: .9rem; }
+    .axon-feat-ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; flex: none;
+        background: #dcebfb; color: #2f8fd6; box-shadow: inset 0 0 0 1px rgba(47,143,214,.15); }
+    .axon-feat-ic svg { width: 22px; height: 22px; }
+    .axon-feats b { display: block; font-size: .96rem; color: #143a72; }
+    .axon-feats small { display: block; font-size: .8rem; color: #6883a8; }
+
+    .axon-hero-foot { position: relative; z-index: 2; margin-top: 2.4rem; display: flex; align-items: center; gap: .8rem; color: #2f8fd6; }
+    .axon-hero-foot-ic { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; flex: none;
+        background: rgba(47,143,214,.12); color: #2f8fd6; }
+    .axon-hero-foot-ic svg { width: 24px; height: 24px; }
+    .axon-hero-foot-txt { font-size: 1.05rem; font-weight: 600; color: #23517f; line-height: 1.2; }
+    .axon-pulse { width: 120px; height: 30px; color: #17a2b8; margin-left: .2rem; }
+
+    /* ---------- Panel derecho ---------- */
+    .axon-panel { display: grid; place-items: center; padding: 2rem 1.5rem; background:
+        radial-gradient(1200px 500px at 80% -10%, #e3eefb 0%, transparent 60%), #f4f8fd; }
+    .axon-card { width: 100%; max-width: 440px; background: #fff; border-radius: 22px; padding: 2.2rem 2.3rem 1.4rem;
+        box-shadow: 0 20px 60px rgba(20,58,114,.14); border: 1px solid #eaf0f8; }
+    .axon-pane-signup { display: none; }
+    .axon-shell.is-signup .axon-pane-login { display: none; }
+    .axon-shell.is-signup .axon-pane-signup { display: block; }
+
+    .axon-lock { width: 64px; height: 64px; border-radius: 50%; margin: 0 auto .9rem; display: grid; place-items: center; color: #fff;
+        background: linear-gradient(135deg, #17a2b8, #1d68d4); box-shadow: 0 12px 26px rgba(23,104,212,.32); }
+    .axon-lock svg { width: 30px; height: 30px; }
+    .axon-head { text-align: center; margin-bottom: 1.3rem; }
+    .axon-head h1 { font-size: 1.7rem; font-weight: 800; color: #12336b; margin: 0; }
+    .axon-head p { font-size: .9rem; color: #6883a8; margin: .35rem 0 0; }
+
+    .axon-alert { border-radius: 10px; padding: .6rem .8rem; font-size: .85rem; margin-bottom: .9rem; }
+    .axon-alert-error { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+    .axon-alert-ok { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+
+    .axon-google { display: flex; align-items: center; justify-content: center; gap: .55rem; width: 100%;
+        border: 1px solid #dbe4f0; background: #fff; border-radius: 12px; padding: .7rem; font-size: .9rem; font-weight: 600; color: #334155;
+        cursor: pointer; text-decoration: none; }
+    .axon-google:hover { background: #f8fafc; }
+    .axon-divider { display: flex; align-items: center; gap: .7rem; color: #9fb2cc; font-size: .78rem; margin: 1rem 0; }
+    .axon-divider::before, .axon-divider::after { content: ""; flex: 1; height: 1px; background: #e5edf6; }
+
+    .axon-form { display: flex; flex-direction: column; gap: 1rem; }
+    .axon-field label { display: block; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #6a83a8; margin-bottom: .4rem; }
+    .axon-label-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .axon-forgot { font-size: .78rem; color: #2563eb; text-decoration: none; text-transform: none; letter-spacing: 0; font-weight: 600; }
+    .axon-forgot:hover { text-decoration: underline; }
+    .axon-input { position: relative; display: flex; align-items: center; background: #f1f6fc; border: 1px solid #e2eaf4; border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
+    .axon-input:focus-within { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); background: #fff; }
+    .axon-input-ic { width: 20px; height: 20px; color: #90a4c0; margin-left: .85rem; flex: none; }
+    .axon-input input, .axon-input select { flex: 1; border: 0; background: transparent; outline: none; padding: .8rem .9rem; font-size: .95rem; color: #12336b; min-width: 0; }
+    .axon-input input::placeholder { color: #9db1cc; }
+    .axon-select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+    .axon-caret { width: 18px; height: 18px; color: #90a4c0; margin-right: .85rem; flex: none; pointer-events: none; }
+    .axon-eye { border: 0; background: transparent; color: #8aa0bd; cursor: pointer; padding: 0 .85rem; display: grid; place-items: center; }
+    .axon-eye svg { width: 20px; height: 20px; }
+    .axon-input-error { border-color: #ef4444 !important; }
+
+    .axon-submit { margin-top: .4rem; display: flex; align-items: center; justify-content: center; gap: .5rem; width: 100%; border: 0; cursor: pointer;
+        border-radius: 12px; padding: .85rem; font-size: 1rem; font-weight: 700; color: #fff;
+        background: linear-gradient(90deg, #1d4ed8, #1786c9 55%, #17a2b8); box-shadow: 0 12px 26px rgba(23,104,212,.28); transition: filter .15s, transform .05s; }
+    .axon-submit:hover { filter: brightness(1.05); }
+    .axon-submit:active { transform: translateY(1px); }
+    .axon-submit svg { width: 20px; height: 20px; }
+
+    .axon-switch { text-align: center; font-size: .88rem; color: #64748b; margin: 1.1rem 0 0; }
+    .axon-switch button { border: 0; background: transparent; color: #2563eb; font-weight: 700; cursor: pointer; font-size: .88rem; }
+    .axon-switch button:hover { text-decoration: underline; }
+    .axon-legal { font-size: .74rem; color: #94a3b8; text-align: center; margin: 0; }
+    .axon-hint { font-size: .78rem; color: #b91c1c; text-align: center; margin: .3rem 0 0; }
+
+    .axon-foot { display: flex; align-items: center; justify-content: center; gap: .5rem; margin-top: 1.4rem; padding-top: 1rem;
+        border-top: 1px solid #eef2f8; color: #9fb2cc; font-size: .78rem; }
+    .axon-foot-pulse { width: 34px; height: 12px; color: #cbd8e8; }
+
+    @@media (max-width: 900px) {
+        .axon-shell { grid-template-columns: 1fr; }
+        .axon-hero { display: none; }
+        .axon-panel { min-height: 100vh; }
+    }
+</style>
 
 <script>
     window.visalAuth = {
         show: function (mode) {
-            var shell = document.querySelector('.auth-shell');
+            var shell = document.querySelector('.axon-shell');
             if (!shell) return;
             shell.classList.toggle('is-signup', mode === 'signup');
         },
         toggle: function (id, btn) {
             var input = document.getElementById(id);
             if (!input) return;
-            var show = input.type === 'password';
-            input.type = show ? 'text' : 'password';
-            btn.textContent = show ? 'OCULTAR' : 'MOSTRAR';
+            // Solo alterna el tipo; el boton conserva su icono de ojo.
+            input.type = input.type === 'password' ? 'text' : 'password';
+            if (btn) { btn.classList.toggle('is-on'); }
         },
         googleSignup: function () {
             var input = document.getElementById('reg-agency');
@@ -204,7 +358,7 @@
             var agency = input ? (input.value || '').trim() : '';
             if (!agency) {
                 if (hint) hint.hidden = false;
-                if (input) { input.classList.add('auth-input-error'); input.focus(); }
+                if (input) { input.classList.add('axon-input-error'); input.focus(); }
                 return;
             }
             if (hint) hint.hidden = true;

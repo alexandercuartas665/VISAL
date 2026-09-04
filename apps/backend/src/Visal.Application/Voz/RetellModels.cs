@@ -23,4 +23,5 @@ public sealed record RetellWebhookEvento(
     string Evento, string? CallId, string? CallStatus,
     string? Transcript, int? DuracionSegundos, decimal? CostoUsd,
     long? StartTimestamp, long? EndTimestamp,
-    string? DisconnectionReason, string? AnalisisJson);
+    string? DisconnectionReason, string? AnalisisJson,
+    string? RecordingUrl = null);

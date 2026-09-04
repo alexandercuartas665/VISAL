@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @using Visal.Application.Tenancy
+@using Visal.Application.Voz
 @inject ISeguimientoService SegSvc
 @inject Visal.Application.Voz.IVozLlamadaService VozSvc
 @inject AuthenticationStateProvider AuthStateProvider
@@ -55,6 +56,8 @@
             <button class="btn-primary" @onclick="() => LlamarPendientes(false)" disabled="@_vozBusy">
                 @(_vozBusy ? "Procesando..." : "Llamar a pendientes (IA)")
             </button>
+            <span style="flex:1"></span>
+            <input class="seg-pac-filter" type="search" placeholder="Filtrar paciente (nombre o documento)..." @bind="_filtroPac" @bind:event="oninput" />
             @if (_vozMsg is not null) { <span class="seg-voz-msg">@_vozMsg</span> }
         </div>
 
@@ -155,6 +158,36 @@
         </div>
 
         <div class="seg-modal-body">
+            <div class="seg-llamar">
+                <label>Llamar con IA <small>(puedes editar el numero para pruebas)</small></label>
+                <div class="seg-llamar-row">
+                    <input type="text" @bind="_llamarTel" placeholder="Numero a llamar" />
+                    <button class="btn-primary" @onclick="() => LlamarUno(seleccionado.Id)" disabled="@_llamando">
+                        @(_llamando ? "Llamando..." : "\U0001F4DE Llamar con IA")
+                    </button>
+                </div>
+                @if (_llamarMsg is not null) { <div class="seg-msg">@_llamarMsg</div> }
+                @if (_llamadaDetalle is LlamadaDetalleDto d)
+                {
+                    <div class="seg-llamada-det">
+                        <div class="seg-llamada-est">
+                            Ultima llamada: <b>@d.Estado</b>@(d.EsPrueba ? " (prueba)" : "")
+                            @(string.IsNullOrWhiteSpace(d.ToNumber) ? "" : $" · {d.ToNumber}")
+                            @(d.DuracionSegundos is int s ? $" · {s}s" : "")
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(d.Error)) { <div class="seg-msg">@d.Error</div> }
+                        @if (!string.IsNullOrWhiteSpace(d.RecordingUrl))
+                        {
+                            <audio controls src="@d.RecordingUrl" style="width:100%;margin-top:.4rem"></audio>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(d.Transcripcion))
+                        {
+                            <details class="seg-transcript-wrap"><summary>Ver transcripcion</summary><pre class="seg-transcript">@d.Transcripcion</pre></details>
+                        }
+                    </div>
+                }
+            </div>
+
             <div class="seg-form-row">
                 <label>Fecha y hora de llamada</label>
                 <input type="datetime-local" @bind="_edit.FechaLlamada" />
@@ -225,6 +258,16 @@
 .seg-voz-tools { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:0 0 1rem; padding:.6rem .85rem; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; }
 .seg-voz-lbl { font-size:.85rem; font-weight:600; color:#334155; }
 .seg-voz-msg { font-size:.82rem; color:#475569; }
+.seg-pac-filter { padding:.35rem .6rem; border:1px solid #cbd5e1; border-radius:6px; min-width:260px; font-size:.85rem; }
+.seg-llamar { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:.7rem .85rem; margin-bottom:1rem; }
+.seg-llamar > label { font-size:.85rem; font-weight:600; color:#1e40af; display:block; margin-bottom:.4rem; }
+.seg-llamar > label small { font-weight:400; color:#475569; }
+.seg-llamar-row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+.seg-llamar-row input { flex:1; min-width:180px; padding:.4rem .6rem; border:1px solid #cbd5e1; border-radius:6px; }
+.seg-llamada-det { margin-top:.6rem; font-size:.82rem; color:#334155; }
+.seg-llamada-est { margin-bottom:.2rem; }
+.seg-transcript-wrap { margin-top:.4rem; }
+.seg-transcript { white-space:pre-wrap; max-height:220px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:.6rem; border-radius:6px; font-size:.78rem; }
 .seg-kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:.75rem; margin-bottom:1rem; }
 .seg-kpi { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .85rem; font-size:.85rem; color:#475569; }
 .seg-kpi b { display:block; font-size:1.4rem; color:#0f172a; }
@@ -359,6 +402,13 @@
     private string _msg = string.Empty;
     private string _actorNombre = string.Empty;
 
+    // Filtro por paciente (kanban) + llamada individual con numero editable.
+    private string _filtroPac = "";
+    private string _llamarTel = "";
+    private bool _llamando;
+    private string? _llamarMsg;
+    private LlamadaDetalleDto? _llamadaDetalle;
+
     // Tabs: "kanban" | "historial"
     private string _tab = "kanban";
 
@@ -446,6 +496,14 @@
     private RenderFragment RenderColumna(string estado, string titulo, string colClass) => __b =>
     {
         var filas = _items.Where(x => x.Estado == estado).ToList();
+        // Filtro por paciente (nombre o documento), aplica a todas las columnas.
+        var q = (_filtroPac ?? "").Trim();
+        if (q.Length > 0)
+        {
+            filas = filas.Where(x =>
+                (x.PacienteNombre ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (x.PacienteDocumento ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
         // Filtro adicional para columna "Realizada": limitar a los ultimos N dias
         // por FechaLlamada. _diasRealizada = 0 significa "todos".
         if (estado == "Realizada" && _diasRealizada > 0)
@@ -498,11 +556,14 @@
         __b.CloseElement();
     };
 
-    private void Abrir(Guid id)
+    private async Task Abrir(Guid id)
     {
         _openId = id;
         _msg = string.Empty;
+        _llamarMsg = null;
+        _llamadaDetalle = null;
         var it = _items.First(x => x.Id == id);
+        _llamarTel = it.PacienteTelefono ?? "";
         _edit = new EditForm
         {
             FechaLlamada = it.FechaLlamada ?? DateTime.Now,
@@ -514,6 +575,29 @@
             PersonaAtiende = it.PersonaAtiende,
             Observaciones = it.Observaciones
         };
+        try { _llamadaDetalle = await VozSvc.ObtenerUltimaLlamadaAsync(id); } catch { _llamadaDetalle = null; }
+    }
+
+    private async Task LlamarUno(Guid id)
+    {
+        _llamarMsg = null;
+        if (string.IsNullOrWhiteSpace(_llamarTel)) { _llamarMsg = "Indica un numero a llamar."; return; }
+        var it = _items.First(x => x.Id == id);
+        var esOverride = _llamarTel.Trim() != (it.PacienteTelefono ?? "").Trim();
+        var conf = esOverride
+            ? $"Se hara una LLAMADA REAL con IA al {_llamarTel.Trim()} (numero de PRUEBA, distinto al del paciente). Tiene costo. Continuar?"
+            : $"Se hara una LLAMADA REAL con IA al paciente {it.PacienteNombre}. Tiene costo. Continuar?";
+        var ok = await JS.InvokeAsync<bool>("confirm", conf);
+        if (!ok) { return; }
+        _llamando = true;
+        try
+        {
+            var r = await VozSvc.LlamarUnaAsync(id, esOverride ? _llamarTel.Trim() : null, await Actor());
+            _llamarMsg = r.Ok ? $"Llamada lanzada. call_id: {r.CallId}" : (r.Error ?? "No se pudo lanzar.");
+            _llamadaDetalle = await VozSvc.ObtenerUltimaLlamadaAsync(id);
+        }
+        catch (Exception ex) { _llamarMsg = "Error: " + ex.Message; }
+        finally { _llamando = false; }
     }
 
     private void Cerrar()
@@ -611,8 +695,7 @@
             .ThenBy(x => x.PacienteNombre)
             .ToList();
         var next = lista[nav.Pos + delta];
-        Abrir(next.Id);
-        await Task.CompletedTask;
+        await Abrir(next.Id);
     }
 
     // === Drag & drop entre columnas kanban ===

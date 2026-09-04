@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Visal.Application.Voz
 @inject ITenantVozConfigService Svc
+@inject IVozLlamadaService VozSvc
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -81,8 +82,49 @@
     </div>
 </div>
 
+<div class="ase-card">
+    <div class="ase-card-h">Llamada de prueba</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Lanza una llamada IA real a un n&uacute;mero para validar la configuraci&oacute;n
+            (Retell/Telnyx). No se asocia a ninguna encuesta. Tiene costo.
+        </p>
+        <div class="input-group input-group-sm" style="max-width:520px;">
+            <input class="form-control" @bind="_pruebaTel" placeholder="Numero destino (ej. 3001234567)" />
+            <button class="btn btn-primary" type="button" @onclick="LlamarPrueba" disabled="@(_pruebaBusy || !_tieneApiKey)">
+                @(_pruebaBusy ? "Llamando..." : "Llamar de prueba")
+            </button>
+        </div>
+        @if (!_tieneApiKey) { <div class="text-muted small mt-1">Guarda primero la configuraci&oacute;n (API Key).</div> }
+        @if (_pruebaMsg is not null) { <div class="ase-ok mt-2">@_pruebaMsg</div> }
+        @if (_pruebaErr is not null) { <div class="ase-alert mt-2">@_pruebaErr</div> }
+    </div>
+</div>
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _pruebaTel = "";
+    private bool _pruebaBusy;
+    private string? _pruebaMsg;
+    private string? _pruebaErr;
+
+    private async Task LlamarPrueba()
+    {
+        _pruebaMsg = _pruebaErr = null;
+        if (string.IsNullOrWhiteSpace(_pruebaTel)) { _pruebaErr = "Indica un numero destino."; return; }
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Se hara una LLAMADA REAL con IA al {_pruebaTel.Trim()}. Tiene costo. Continuar?");
+        if (!ok) { return; }
+        _pruebaBusy = true;
+        try
+        {
+            var r = await VozSvc.LlamarPruebaAsync(_pruebaTel.Trim(), null, await Actor());
+            if (r.Ok) { _pruebaMsg = $"Llamada lanzada. call_id: {r.CallId}"; }
+            else { _pruebaErr = r.Error ?? "No se pudo lanzar la llamada."; }
+        }
+        catch (Exception ex) { _pruebaErr = "Error: " + ex.Message; }
+        finally { _pruebaBusy = false; }
+    }
 
     private string _apiKey = "";
     private string? _agentId;

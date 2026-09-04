@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Visal.Application.Common;
@@ -139,10 +140,12 @@ public sealed class VozLlamadaService : IVozLlamadaService
                 llamada.DuracionSegundos ??= ev.DuracionSegundos;
                 llamada.CostoUsd ??= ev.CostoUsd;
                 if (!string.IsNullOrWhiteSpace(ev.Transcript)) { llamada.Transcripcion = ev.Transcript; }
+                if (!string.IsNullOrWhiteSpace(ev.RecordingUrl)) { llamada.RecordingUrl = ev.RecordingUrl; }
                 llamada.Estado = noContactado ? LlamadaVozEstado.NoContactado : LlamadaVozEstado.Finalizada;
                 break;
             case "call_analyzed":
                 if (!string.IsNullOrWhiteSpace(ev.Transcript)) { llamada.Transcripcion = ev.Transcript; }
+                if (!string.IsNullOrWhiteSpace(ev.RecordingUrl)) { llamada.RecordingUrl = ev.RecordingUrl; }
                 llamada.AnalisisJson = ev.AnalisisJson ?? llamada.AnalisisJson;
                 llamada.DuracionSegundos ??= ev.DuracionSegundos;
                 llamada.CostoUsd ??= ev.CostoUsd;
@@ -167,7 +170,11 @@ public sealed class VozLlamadaService : IVozLlamadaService
                 {
                     enc.Estado = "Realizada";
                     enc.PersonaAtiende ??= "Agente IA";
-                    if (!string.IsNullOrWhiteSpace(llamada.Transcripcion))
+                    // Recoge los datos estructurados del analisis post-llamada (custom_analysis_data)
+                    // en el formulario de encuesta: preguntas 1-5, resumen y persona que atiende.
+                    MapearAnalisisAEncuesta(llamada.AnalisisJson, enc);
+                    // Si no vino resumen estructurado, deja la transcripcion como observacion.
+                    if (string.IsNullOrWhiteSpace(enc.Observaciones) && !string.IsNullOrWhiteSpace(llamada.Transcripcion))
                     {
                         enc.Observaciones = Truncar(llamada.Transcripcion!, 3500);
                     }
@@ -197,6 +204,173 @@ public sealed class VozLlamadaService : IVozLlamadaService
             .Select(g => g.First())
             .Select(l => new LlamadaVozDto(l.Id, l.SeguimientoEncuestaId, l.PacienteId, l.CallId, l.Estado.ToString(), l.Error, l.CreatedAt))
             .ToList();
+    }
+
+    public async Task<VozLlamadaAccionResult> LlamarUnaAsync(Guid encuestaId, string? telefonoOverride, Guid actor, CancellationToken ct = default)
+    {
+        await _config.EnsureLoadedAsync(ct);
+        if (!_config.EstaConfigurado) { throw new InvalidOperationException("Retell no esta configurado."); }
+        if (_tenant.TenantId is not Guid tid) { return new(false, "Sin tenant activo.", null); }
+
+        var enc = await _db.SeguimientoEncuestas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == encuestaId, ct);
+        if (enc is null) { return new(false, "Encuesta no encontrada.", null); }
+        var pac = await _db.Pacientes.AsNoTracking().Where(p => p.Id == enc.PacienteId)
+            .Select(p => new { p.Id, p.NombreCompleto, p.PrimerNombre, p.Telefono })
+            .FirstOrDefaultAsync(ct);
+        if (pac is null) { return new(false, "Paciente no encontrado.", null); }
+
+        var esPrueba = !string.IsNullOrWhiteSpace(telefonoOverride);
+        var to = TelefonoE164.Normalizar(esPrueba ? telefonoOverride : pac.Telefono);
+        if (to is null) { return new(false, "Telefono invalido.", null); }
+
+        return await CrearYRegistrarAsync(tid, enc.Id, pac.Id, pac.NombreCompleto, pac.PrimerNombre, to, esPrueba, ct);
+    }
+
+    public async Task<VozLlamadaAccionResult> LlamarPruebaAsync(string telefono, string? nombre, Guid actor, CancellationToken ct = default)
+    {
+        await _config.EnsureLoadedAsync(ct);
+        if (!_config.EstaConfigurado) { throw new InvalidOperationException("Retell no esta configurado."); }
+        if (_tenant.TenantId is not Guid tid) { return new(false, "Sin tenant activo.", null); }
+        var to = TelefonoE164.Normalizar(telefono);
+        if (to is null) { return new(false, "Telefono invalido (usa formato con indicativo, ej. 3001234567).", null); }
+
+        var nom = string.IsNullOrWhiteSpace(nombre) ? "Prueba" : nombre.Trim();
+        return await CrearYRegistrarAsync(tid, null, Guid.Empty, nom, nom, to, esPrueba: true, ct);
+    }
+
+    public async Task<LlamadaDetalleDto?> ObtenerUltimaLlamadaAsync(Guid encuestaId, CancellationToken ct = default)
+    {
+        var l = await _db.LlamadasVoz.AsNoTracking()
+            .Where(x => x.SeguimientoEncuestaId == encuestaId)
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (l is null) { return null; }
+        return new LlamadaDetalleDto(l.Id, l.CallId, l.Estado.ToString(), l.Error, l.ToNumber,
+            l.DuracionSegundos, l.CostoUsd, l.RecordingUrl, l.Transcripcion, l.CreatedAt, l.EsPrueba);
+    }
+
+    /// <summary>Crea la llamada en Retell y registra la LlamadaVoz. Guarda de una vez.</summary>
+    private async Task<VozLlamadaAccionResult> CrearYRegistrarAsync(
+        Guid tid, Guid? encuestaId, Guid pacienteId, string nombreCompleto, string? primerNombre,
+        string to, bool esPrueba, CancellationToken ct)
+    {
+        var sip = string.IsNullOrWhiteSpace(_config.TelnyxSipUsername)
+            ? null
+            : new Dictionary<string, string> { ["X-Telnyx-Username"] = _config.TelnyxSipUsername!.Trim() };
+        var vars = new Dictionary<string, string>
+        {
+            ["nombre"] = string.IsNullOrWhiteSpace(primerNombre) ? PrimerPalabra(nombreCompleto) : primerNombre!,
+            ["paciente"] = nombreCompleto,
+        };
+        var meta = new Dictionary<string, object>
+        {
+            ["tenant_id"] = tid.ToString(),
+            ["es_prueba"] = esPrueba,
+        };
+        if (encuestaId is Guid eid) { meta["encuesta_id"] = eid.ToString(); }
+        if (pacienteId != Guid.Empty) { meta["paciente_id"] = pacienteId.ToString(); }
+
+        var req = new CrearLlamadaRequest(_config.FromNumber!, to, _config.AgentId, vars, meta, sip);
+        var r = await _retell.CrearLlamadaAsync(req, ct);
+
+        _db.LlamadasVoz.Add(new LlamadaVoz
+        {
+            TenantId = tid,
+            SeguimientoEncuestaId = encuestaId,
+            PacienteId = pacienteId,
+            FromNumber = _config.FromNumber!,
+            ToNumber = to,
+            AgentId = _config.AgentId,
+            CallId = r.CallId,
+            Estado = r.Ok ? LlamadaVozEstado.Registrada : LlamadaVozEstado.Error,
+            Error = r.Ok ? null : r.Error,
+            EsPrueba = esPrueba,
+        });
+        await _db.SaveChangesAsync(ct);
+        return new(r.Ok, r.Error, r.CallId);
+    }
+
+    /// <summary>Vuelca los datos estructurados del analisis post-llamada (call_analysis.
+    /// custom_analysis_data + call_summary) al formulario de encuesta. Best-effort y
+    /// no pisa valores ya capturados manualmente.</summary>
+    private static void MapearAnalisisAEncuesta(string? analisisJson, SeguimientoEncuesta enc)
+    {
+        if (string.IsNullOrWhiteSpace(analisisJson)) { return; }
+        try
+        {
+            using var doc = JsonDocument.Parse(analisisJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) { return; }
+
+            // Resumen -> Observaciones.
+            if (root.TryGetProperty("call_summary", out var cs) && cs.ValueKind == JsonValueKind.String)
+            {
+                var resumen = cs.GetString();
+                if (!string.IsNullOrWhiteSpace(resumen)) { enc.Observaciones = Truncar(resumen!, 3500); }
+            }
+
+            if (!root.TryGetProperty("custom_analysis_data", out var cad) || cad.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            // Preguntas 1-5: acepta claves pregunta1/p1/pregunta_1 (case-insensitive).
+            for (int i = 1; i <= 5; i++)
+            {
+                if (GetPreguntaActual(enc, i).HasValue) { continue; }
+                var val = BuscarNumero(cad, $"pregunta{i}", $"pregunta_{i}", $"p{i}");
+                if (val is int n && n is >= 1 and <= 5) { SetPreguntaEnc(enc, i, n); }
+            }
+
+            // Persona que atiende.
+            if (string.IsNullOrWhiteSpace(enc.PersonaAtiende))
+            {
+                var persona = BuscarTexto(cad, "persona_atiende", "persona_que_atiende", "quien_contesta", "quien_atiende");
+                if (!string.IsNullOrWhiteSpace(persona)) { enc.PersonaAtiende = persona!.Trim(); }
+            }
+        }
+        catch { /* best-effort: analisis con forma inesperada se ignora */ }
+    }
+
+    private static int? GetPreguntaActual(SeguimientoEncuesta e, int i) => i switch
+    {
+        1 => e.Pregunta1, 2 => e.Pregunta2, 3 => e.Pregunta3, 4 => e.Pregunta4, 5 => e.Pregunta5, _ => null
+    };
+
+    private static void SetPreguntaEnc(SeguimientoEncuesta e, int i, int v)
+    {
+        switch (i)
+        {
+            case 1: e.Pregunta1 = v; break;
+            case 2: e.Pregunta2 = v; break;
+            case 3: e.Pregunta3 = v; break;
+            case 4: e.Pregunta4 = v; break;
+            case 5: e.Pregunta5 = v; break;
+        }
+    }
+
+    private static int? BuscarNumero(JsonElement obj, params string[] claves)
+    {
+        foreach (var prop in obj.EnumerateObject())
+        {
+            if (!claves.Any(k => string.Equals(k, prop.Name, StringComparison.OrdinalIgnoreCase))) { continue; }
+            if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt32(out var n)) { return n; }
+            if (prop.Value.ValueKind == JsonValueKind.String && int.TryParse(prop.Value.GetString(), out var s)) { return s; }
+        }
+        return null;
+    }
+
+    private static string? BuscarTexto(JsonElement obj, params string[] claves)
+    {
+        foreach (var prop in obj.EnumerateObject())
+        {
+            if (claves.Any(k => string.Equals(k, prop.Name, StringComparison.OrdinalIgnoreCase))
+                && prop.Value.ValueKind == JsonValueKind.String)
+            {
+                return prop.Value.GetString();
+            }
+        }
+        return null;
     }
 
     // -------------------- helpers --------------------

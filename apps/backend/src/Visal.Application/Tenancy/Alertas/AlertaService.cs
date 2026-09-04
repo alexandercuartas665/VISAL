@@ -174,13 +174,13 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
         if (reglas.Count == 0) { return new(0, 0, 0, Array.Empty<string>()); }
 
-        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, actor, ct);
+        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, telefonoOverride: null, actor, ct);
         _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores.",
             tid, nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores);
         return new(nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores, nucleo.Mensajes);
     }
 
-    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, Guid actor, CancellationToken ct = default)
+    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, Guid actor, CancellationToken ct = default)
     {
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (emitir && req.Id is null) { throw new InvalidOperationException("Guarda la regla antes de emitir la simulacion."); }
@@ -213,7 +213,7 @@ public sealed class AlertaService : IAlertaService
         };
 
         // Simula la fecha elegida con la logica real de disparo (no forzar).
-        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, actor, ct);
+        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, actor, ct);
         var filas = nucleo.Filas;
 
         string? aviso = null;
@@ -239,8 +239,10 @@ public sealed class AlertaService : IAlertaService
 
     private sealed record NucleoResult(int Enviadas, int Saltadas, int Errores, List<string> Mensajes, List<AlertaSimulacionFila> Filas);
 
-    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, Guid actor, CancellationToken ct)
+    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, Guid actor, CancellationToken ct)
     {
+        var overrideTel = string.IsNullOrWhiteSpace(telefonoOverride) ? null : NormalizarTelefono(telefonoOverride);
+
         var mensajes = new List<string>();
         var filas = new List<AlertaSimulacionFila>();
         int enviadas = 0, saltadas = 0, errores = 0;
@@ -346,6 +348,15 @@ public sealed class AlertaService : IAlertaService
                 // Contacto que se usaria + contexto para render.
                 var (contacto, contactoError) = ResolverContacto(regla, cand, pacientes, profesionales, doctorEmails, reglaUsuarios, reglaUserCelulares);
                 var ctx = BuildContexto(cand, pacientes, profesionales, hoy);
+
+                // Override de telefono (solo simulacion, canal WhatsApp): reemplaza el
+                // destino resuelto por el numero de prueba indicado en el modal.
+                if (overrideTel is not null && regla.Canal == AlertaCanal.WhatsApp)
+                {
+                    contacto = overrideTel;
+                    contactoError = null;
+                    destTelefono = overrideTel;
+                }
 
                 if (dryRun)
                 {

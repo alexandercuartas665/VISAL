@@ -94,7 +94,9 @@ public interface IAlertaService
     /// destinatario, correo y telefono), sin enviar. Si <paramref name="emitir"/> es true
     /// (paso 2) envia realmente y registra el outbox — requiere que la regla ya este guardada.
     /// </summary>
-    Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, Guid actor, CancellationToken ct = default);
+    /// <param name="telefonoOverride">Opcional: si se indica y el canal es WhatsApp,
+    /// se usa ese numero como destino en vez del contacto resuelto (para pruebas).</param>
+    Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, Guid actor, CancellationToken ct = default);
 
     /// <summary>Bandeja: alertas emitidas mas recientes (tarjetas) con nombre de regla y paciente.</summary>
     Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, CancellationToken ct = default);

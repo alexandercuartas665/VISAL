@@ -2,10 +2,13 @@
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Visal.Application.Admin
+@using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Alertas
 @using Visal.Application.Tenancy.WhatsApp
 @inject IAlertaService Svc
 @inject IHsmTemplateService HsmSvc
+@inject IInformeTerapiasService InformeSvc
+@inject NavigationManager Nav
 @inject IJSRuntime JS
 
 <PageTitle>Alertas - Visal</PageTitle>
@@ -16,6 +19,12 @@
         <h1 class="ase-title">Alertas automaticas</h1>
     </div>
     <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="AbrirInformeTerapias" title="Abre el informe de pacientes pendientes por terapias en una pestana nueva">
+            Informe terapias
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CopiarInformeTerapias" title="Copia el enlace publico del informe para pegarlo en un mensaje">
+            Copiar enlace informe
+        </button>
         <button class="btn btn-outline-primary btn-sm" @onclick="EjecutarAhora" disabled="@_busy">
             @(_busy ? "Ejecutando..." : "Ejecutar ahora")
         </button>
@@ -380,6 +389,10 @@
                             <label class="form-label small fw-bold mb-0">Fecha a simular</label>
                             <input type="date" class="form-control form-control-sm" @bind="_simFecha" style="max-width:190px" />
                         </div>
+                        <div>
+                            <label class="form-label small fw-bold mb-0">Telefono de prueba <span class="text-muted fw-normal">(opcional, WhatsApp)</span></label>
+                            <input class="form-control form-control-sm" @bind="_simTelefono" placeholder="Ej: 3217626882" style="max-width:200px" />
+                        </div>
                         <button class="btn btn-outline-primary btn-sm" @onclick="SimularVer" disabled="@_simBusy">
                             @(_simBusy ? "Consultando..." : "1. Ver a quien emitiria")
                         </button>
@@ -514,6 +527,7 @@
     private string _busqSvc = "";
     private string _modalTab = "config";
     private DateOnly _simFecha = DateOnly.FromDateTime(DateTime.Now);
+    private string _simTelefono = "";
     private bool _simBusy;
     private AlertaSimulacionResult? _sim;
     private string? _simError;
@@ -708,7 +722,7 @@
 
     // ----------------- Simulacion -----------------
 
-    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; }
+    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; _simTelefono = ""; }
 
     private void AbrirSimulacion() { _modalTab = "sim"; }
 
@@ -717,8 +731,11 @@
     private async Task SimularEmitir()
     {
         if (_form?.Id is null) { return; }
+        var destinoTxt = string.IsNullOrWhiteSpace(_simTelefono)
+            ? "a los destinatarios resueltos"
+            : $"al telefono de prueba {_simTelefono.Trim()} (override WhatsApp)";
         var ok = await JS.InvokeAsync<bool>("confirm",
-            $"Esto EMITIRA de verdad las alertas para el {_simFecha:dd/MM/yyyy} a los destinatarios (respetando lo ya enviado). Continuar?");
+            $"Esto EMITIRA de verdad las alertas para el {_simFecha:dd/MM/yyyy} {destinoTxt} (respetando lo ya enviado). Continuar?");
         if (!ok) { return; }
         await SimularAsync(emitir: true);
     }
@@ -729,7 +746,7 @@
         _simBusy = true; _simError = null;
         try
         {
-            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, await Actor());
+            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, _simTelefono, await Actor());
             if (emitir) { await Cargar(); }
         }
         catch (InvalidOperationException ex) { _simError = ex.Message; }
@@ -759,6 +776,26 @@
         await Svc.DeleteAsync(r.Id, await Actor());
         if (_form?.Id == r.Id) { _form = null; }
         await Cargar();
+    }
+
+    private string EnlaceInforme() => InformeSvc.GenerarEnlace(Nav.BaseUri);
+
+    private async Task AbrirInformeTerapias()
+    {
+        _error = _msg = null;
+        try { await JS.InvokeVoidAsync("open", EnlaceInforme(), "_blank"); }
+        catch (Exception ex) { _error = "No se pudo abrir el informe: " + ex.Message; }
+    }
+
+    private async Task CopiarInformeTerapias()
+    {
+        _error = _msg = null;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", EnlaceInforme());
+            _msg = "Enlace del informe copiado. Pegalo en el mensaje de la alerta.";
+        }
+        catch (Exception ex) { _error = "No se pudo copiar: " + ex.Message; }
     }
 
     private async Task EjecutarAhora()

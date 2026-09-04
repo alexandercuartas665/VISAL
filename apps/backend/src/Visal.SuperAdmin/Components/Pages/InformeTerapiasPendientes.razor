@@ -1,0 +1,120 @@
+@page "/informe/terapias-pendientes"
+@attribute [AllowAnonymous]
+@layout Visal.SuperAdmin.Components.Layout.EmptyLayout
+@using Microsoft.AspNetCore.Authorization
+@using Visal.Application.Tenancy
+@inject IInformeTerapiasService Svc
+
+<PageTitle>Terapias pendientes - @(_data?.TenantNombre ?? "Visal")</PageTitle>
+
+<div class="inf-shell">
+    <div class="inf-card">
+        @if (_invalido)
+        {
+            <div class="inf-brand"><div class="inf-brand-name">Visal</div></div>
+            <div class="inf-state inf-state-err">
+                <div class="inf-state-h">Enlace invalido o vencido</div>
+                <p>Este enlace no es valido o ya expiro. Solicita uno nuevo desde el sistema.</p>
+            </div>
+        }
+        else if (_data is not null)
+        {
+            <div class="inf-brand">
+                @if (!string.IsNullOrWhiteSpace(_data.LogoUrl))
+                {
+                    <img src="@_data.LogoUrl" class="inf-brand-logo" alt="" />
+                }
+                <div class="inf-brand-name">@_data.TenantNombre</div>
+                <div class="inf-brand-sub">Pacientes pendientes por terapias</div>
+                <div class="inf-fecha">Generado el @_data.Fecha.ToString("dd/MM/yyyy")</div>
+            </div>
+
+            <div class="inf-resumen">
+                <span class="inf-badge">@_data.Filas.Count paciente(s)</span>
+                <span class="inf-badge inf-badge-alt">@_data.Filas.Sum(f => f.SesionesPendientes) sesion(es) pendientes</span>
+            </div>
+
+            @if (_data.Filas.Count == 0)
+            {
+                <div class="inf-state inf-state-ok">
+                    <div class="inf-state-ico">&#10003;</div>
+                    <div class="inf-state-h">Sin terapias pendientes</div>
+                    <p>No hay pacientes con sesiones de terapia pendientes en este momento.</p>
+                </div>
+            }
+            else
+            {
+                <div class="inf-table-wrap">
+                    <table class="inf-table">
+                        <thead>
+                            <tr>
+                                <th>Paciente</th>
+                                <th>Servicio</th>
+                                <th class="inf-center">Pendientes</th>
+                                <th>Ultima atencion</th>
+                                <th>Profesional</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var f in _data.Filas)
+                            {
+                                <tr>
+                                    <td><b>@f.Paciente</b><div class="inf-xsmall">@f.Documento</div></td>
+                                    <td>@f.Servicio</td>
+                                    <td class="inf-center"><span class="inf-pill">@f.SesionesPendientes</span></td>
+                                    <td>@(f.UltimaAtencion is { } u ? u.ToString("dd/MM/yyyy") : "-")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(f.Profesional) ? "-" : f.Profesional)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            <div class="inf-foot">Informe generado por Visal - IPS. Uso interno.</div>
+        }
+        else
+        {
+            <div class="inf-state">Cargando informe...</div>
+        }
+    </div>
+</div>
+
+<style>
+    .inf-shell { min-height: 100vh; background: #f1f5f9; display: flex; justify-content: center; padding: 24px 12px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .inf-card { width: 100%; max-width: 860px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; box-shadow: 0 8px 30px rgba(15,23,42,.08); padding: 22px; }
+    .inf-brand { text-align: center; border-bottom: 1px solid #eef2f7; padding-bottom: 14px; margin-bottom: 14px; }
+    .inf-brand-logo { max-height: 54px; margin-bottom: 6px; }
+    .inf-brand-name { font-size: 18px; font-weight: 800; color: #0f172a; }
+    .inf-brand-sub { font-size: 14px; color: #1565c0; font-weight: 600; }
+    .inf-fecha { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .inf-resumen { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
+    .inf-badge { background: #dbeafe; color: #1e40af; font-weight: 700; font-size: 12px; border-radius: 999px; padding: 4px 12px; }
+    .inf-badge-alt { background: #fef3c7; color: #92400e; }
+    .inf-table-wrap { overflow-x: auto; }
+    .inf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .inf-table th { text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #e2e8f0; padding: 8px 10px; }
+    .inf-table td { border-bottom: 1px solid #eef2f7; padding: 8px 10px; color: #334155; vertical-align: top; }
+    .inf-center { text-align: center; }
+    .inf-xsmall { font-size: 11px; color: #94a3b8; }
+    .inf-pill { background: #fee2e2; color: #b91c1c; font-weight: 700; border-radius: 999px; padding: 1px 9px; }
+    .inf-state { text-align: center; padding: 28px 10px; color: #334155; }
+    .inf-state-h { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .inf-state-ico { font-size: 30px; color: #16a34a; }
+    .inf-state-err .inf-state-h { color: #b91c1c; }
+    .inf-foot { text-align: center; font-size: 11px; color: #94a3b8; margin-top: 16px; }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "t")] public string? T { get; set; }
+
+    private InformeTerapiasResult? _data;
+    private bool _invalido;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var tid = Svc.ValidarToken(T ?? "");
+        if (tid is not Guid t) { _invalido = true; return; }
+        _data = await Svc.ObtenerAsync(t);
+        if (_data is null) { _invalido = true; }
+    }
+}

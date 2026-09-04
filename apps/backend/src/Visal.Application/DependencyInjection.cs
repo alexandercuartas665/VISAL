@@ -48,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.WhatsApp.IWhatsAppMetricsService, Tenancy.WhatsApp.WhatsAppMetricsService>();
         services.AddScoped<Tenancy.WhatsApp.IWhatsAppTemplateBindingService, Tenancy.WhatsApp.WhatsAppTemplateBindingService>();
         services.AddScoped<Tenancy.Alertas.IAlertaService, Tenancy.Alertas.AlertaService>();
+        services.AddScoped<Tenancy.IInformeTerapiasService, Tenancy.InformeTerapiasService>();
         services.AddScoped<Voz.IVozLlamadaService, Voz.VozLlamadaService>();
         services.AddScoped<Voz.IRetellConfig, Voz.RetellConfig>();
         services.AddScoped<Voz.ITenantVozConfigService, Voz.TenantVozConfigService>();

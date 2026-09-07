@@ -81,8 +81,24 @@
                     <div class="ase-form">
                         <div class="ase-f"><label>Numero Documento *</label><input class="form-control form-control-sm" @bind="_doc" /></div>
                         <div class="ase-f"><label>Tipo Documento</label>
+                            @{
+                                var tiposDoc = CatItems(CatalogoPacienteTipo.TipoDocumento).ToList();
+                            }
                             <select class="form-select form-select-sm" @bind="_tipoDoc">
-                                <option>CC</option><option>CE</option><option>TI</option><option>RC</option><option>PA</option><option>MS</option>
+                                @if (tiposDoc.Count == 0)
+                                {
+                                    @* Fallback a los estandar mientras el tenant no configure los suyos
+                                       en /cfg-pacientes. El seeder normalmente ya los siembra. *@
+                                    <option>CC</option><option>CE</option><option>TI</option><option>RC</option><option>PA</option><option>MS</option>
+                                }
+                                else
+                                {
+                                    @* Valor = Codigo (lo que se guarda en Paciente.TipoDocumento, string). *@
+                                    @foreach (var c in tiposDoc)
+                                    {
+                                        <option value="@c.Codigo">@c.Codigo@(string.IsNullOrWhiteSpace(c.Nombre) || c.Nombre == c.Codigo ? "" : $" - {c.Nombre}")</option>
+                                    }
+                                }
                             </select>
                         </div>
                         <div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="_pNombre" /></div>

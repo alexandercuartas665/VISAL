@@ -27,5 +27,9 @@ public enum CatalogoPacienteTipo
     /// <summary>Regimen de afiliacion del paciente (contributivo, subsidiado, particular, especial, etc).</summary>
     Regimen,
     /// <summary>Estado operativo del paciente (activo, inactivo, egresado, fallecido, retirado, etc). Se guarda como Nombre en Paciente.Estado.</summary>
-    Estado
+    Estado,
+    /// <summary>Tipo de documento de identidad del paciente (CC, CE, TI, RC, PA, MS, y los propios de cada tenant).
+    /// Se guarda como Codigo en Paciente.TipoDocumento (string). DEBE ir al final del enum: el discriminador
+    /// se persiste como ordinal int, insertarlo en otra posicion renumeraria las filas existentes.</summary>
+    TipoDocumento
 }

@@ -533,6 +533,64 @@ public sealed class DatabaseSeeder
     }
 
     /// <summary>
+    /// Siembra los tipos de documento estandar (CC, CE, TI, RC, PA, MS) en el
+    /// catalogo de pacientes para TODOS los tenants, idempotente. A diferencia de
+    /// <see cref="EnsureCatalogosPacienteDefaultAsync"/> (solo el tenant Demo), el
+    /// tipo de documento es OBLIGATORIO en cada admision, asi que cada tenant debe
+    /// tener disponibles los estandar. Luego cada tenant agrega/edita/inactiva los
+    /// suyos desde /cfg-pacientes. Antes estos valores estaban hardcodeados en el
+    /// &lt;select&gt; de Admision.razor. Idempotente por (TenantId, Tipo, Codigo).
+    /// </summary>
+    public async Task EnsureTipoDocumentoDefaultAsync(CancellationToken cancellationToken = default)
+    {
+        (string codigo, string nombre)[] estandar =
+        {
+            ("CC", "Cedula de Ciudadania"),
+            ("CE", "Cedula de Extranjeria"),
+            ("TI", "Tarjeta de Identidad"),
+            ("RC", "Registro Civil"),
+            ("PA", "Pasaporte"),
+            ("MS", "Menor Sin Identificacion")
+        };
+
+        const Visal.Domain.Enums.CatalogoPacienteTipo tipo =
+            Visal.Domain.Enums.CatalogoPacienteTipo.TipoDocumento;
+
+        var tenantIds = await _db.Tenants.IgnoreQueryFilters()
+            .Select(t => t.Id)
+            .ToListAsync(cancellationToken);
+        if (tenantIds.Count == 0) { return; }
+
+        // Codigos de tipo-documento ya presentes por tenant, para no duplicar.
+        var existentes = (await _db.CatalogosPaciente.IgnoreQueryFilters()
+                .Where(c => c.Tipo == tipo)
+                .Select(c => new { c.TenantId, c.Codigo })
+                .ToListAsync(cancellationToken))
+            .Select(x => (x.TenantId, x.Codigo))
+            .ToHashSet();
+
+        int agregados = 0;
+        foreach (var tenantId in tenantIds)
+        {
+            foreach (var (codigo, nombre) in estandar)
+            {
+                if (existentes.Contains((tenantId, codigo))) { continue; }
+                _db.CatalogosPaciente.Add(new CatalogoPaciente
+                {
+                    TenantId = tenantId,
+                    Tipo = tipo,
+                    Codigo = codigo,
+                    Nombre = nombre,
+                    Activo = true
+                });
+                agregados++;
+            }
+        }
+        if (agregados > 0) { await _db.SaveChangesAsync(cancellationToken); }
+        _logger.LogInformation("Tipos de documento por defecto: {N} agregados en {T} tenant(s).", agregados, tenantIds.Count);
+    }
+
+    /// <summary>
     /// Siembra los 6 tipos de turno base (Capa 6 - Gestion de Turnos) para el tenant
     /// demo si no los tiene. Colores identicos a los hardcoded del legacy vis_admturnos
     /// para que la migracion de plantillas antiguas mantenga la paleta familiar.

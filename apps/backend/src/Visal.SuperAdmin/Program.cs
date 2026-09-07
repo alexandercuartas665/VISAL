@@ -143,6 +143,7 @@ else
     await seeder.EnsureSedesVisalAsync();
     await seeder.EnsureVisalRealUsersAsync();
     await seeder.EnsureCatalogosPacienteDefaultAsync();
+    await seeder.EnsureTipoDocumentoDefaultAsync();
     await seeder.EnsureCie11ConfigAsync();
     await seeder.EnsureTiposTurnoDefaultAsync();
 

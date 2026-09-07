@@ -76,6 +76,7 @@
 
     private readonly (CatalogoPacienteTipo tipo, string label)[] _tabs =
     {
+        (CatalogoPacienteTipo.TipoDocumento, "Tipo Documento"),
         (CatalogoPacienteTipo.TipoUsuario, "Tipo Usuario"),
         (CatalogoPacienteTipo.ClasificacionPaciente, "Clasificacion Paciente"),
         (CatalogoPacienteTipo.ClasificacionGrupoPatologia, "Clasif. Grupo Patologia"),
@@ -89,7 +90,7 @@
         (CatalogoPacienteTipo.Estado, "Estado paciente")
     };
 
-    private CatalogoPacienteTipo _tab = CatalogoPacienteTipo.TipoUsuario;
+    private CatalogoPacienteTipo _tab = CatalogoPacienteTipo.TipoDocumento;
     private List<Row> _rows = new();
     private List<CatalogoPacienteDto> _items = new();
     private string? _error, _ok;

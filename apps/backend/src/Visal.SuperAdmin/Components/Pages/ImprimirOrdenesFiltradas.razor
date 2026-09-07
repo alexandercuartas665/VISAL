@@ -250,13 +250,19 @@ else
             {
                 todas = todas.Where(x => string.Equals(x.Estado, "Abierta", StringComparison.OrdinalIgnoreCase)).ToList();
             }
-            // FAT-4 — orden que respeta la eleccion del usuario en /ordenes.
-            // "atencion" = FechaAtencion (fallback cierre/apertura), "cierre" = FechaCierre (fallback apertura).
-            // Descendente para que las HCs mas recientes salgan primero — igual que Ordenes.razor.
-            var ordenarPor = Get(q, "ordenarPor") ?? "atencion";
-            todas = ordenarPor == "atencion"
-                ? todas.OrderByDescending(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura).ToList()
-                : todas.OrderByDescending(x => x.FechaCierre ?? x.FechaApertura).ToList();
+            // Orden del paquete impreso: PACIENTE -> COD. ASIGNACION -> SESION.
+            // Asi cada paciente sale agrupado, y dentro de cada asignacion (lote)
+            // los documentos salen en orden de sesion ascendente (#1, #2, #3, ...),
+            // que es el orden clinico de lectura. Ordenar por AsignacionLoteId
+            // equivale a ordenar por el "Cod. asignacion" visible (sus primeros 8
+            // hex). Las HC sin sesion/lote (legacy) caen al final de su grupo.
+            // Se toma la fecha como desempate final para un orden estable.
+            todas = todas
+                .OrderBy(x => x.PacienteNombre, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.AsignacionLoteId)
+                .ThenBy(x => x.SesionNumero ?? int.MaxValue)
+                .ThenBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura)
+                .ToList();
 
             _totalEncontrado = todas.Count;
             _pacientesUnicos = todas.Select(x => x.PacienteId).Distinct().Count();

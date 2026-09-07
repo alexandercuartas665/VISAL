@@ -224,6 +224,7 @@ else
             _formatoCodigoFiltro = Get(q, "formatoCodigo");
             _estadoFiltro = Get(q, "estado");
             _especialistaFiltro = Get(q, "especialista");
+            var codigoAsignacion = Get(q, "codigoAsignacion");
             if (q.TryGetValue("desde", out var dd) && DateOnly.TryParse(dd.ToString(), out var d1)) { _desdeFiltro = d1; }
             if (q.TryGetValue("hasta", out var dh) && DateOnly.TryParse(dh.ToString(), out var d2)) { _hastaFiltro = d2; }
             Guid? aseguradoraId = null;
@@ -239,7 +240,8 @@ else
                 SoloCerradas: string.Equals(_estadoFiltro, "Cerrada", StringComparison.OrdinalIgnoreCase),
                 AseguradoraId: aseguradoraId,
                 SucursalId: sucursalId,
-                FormatoCodigo: _formatoCodigoFiltro);
+                FormatoCodigo: _formatoCodigoFiltro,
+                CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim());
 
             var todas = (await OcSvc.BuscarAsync(filtro)).ToList();
             // Post-filtro "Solo Abiertas" (mismo criterio que Ordenes.razor: SoloCerradas

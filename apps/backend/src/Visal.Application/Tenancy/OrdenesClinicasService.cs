@@ -48,6 +48,42 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             q = q.Where(h => h.Id >= hcLo && h.Id <= hcHi);
         }
 
+        if (!string.IsNullOrWhiteSpace(filtro.CodigoAsignacion)
+            && TryBuildCodigoHcRango(filtro.CodigoAsignacion, out var loteLo, out var loteHi))
+        {
+            // El "codigo de asignacion" son los primeros hasta 8 hex del GUID del
+            // lote (AsignacionLote) que ata todos los servicios del paciente.
+            // Resolvemos el set de HCs que cuelgan de los lotes en ese rango,
+            // recorriendo Lote -> Asignacion.LoteId -> Turno.AsignacionId ->
+            // Sesion.AsignacionTurnoId -> pivote.SesionId -> HistoriaClinicaId, y
+            // acotamos la query principal con ese set. Data-set chico (una clinica),
+            // asi que los saltos en cadena son baratos y evitan un JOIN de 5 tablas
+            // que el traductor EF Core no digiere tras los query filters de tenant.
+            var loteIds = await db.AsignacionLotes.AsNoTracking()
+                .Where(l => l.Id >= loteLo && l.Id <= loteHi)
+                .Select(l => l.Id)
+                .ToListAsync(ct);
+            var asigIdsDeLote = await db.Asignaciones.AsNoTracking()
+                .Where(a => loteIds.Contains(a.LoteId))
+                .Select(a => a.Id)
+                .ToListAsync(ct);
+            var turnoIdsDeLote = await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => asigIdsDeLote.Contains(t.AsignacionId))
+                .Select(t => t.Id)
+                .ToListAsync(ct);
+            var sesionIdsDeLote = await db.AsignacionTurnoSesiones.AsNoTracking()
+                .Where(s => turnoIdsDeLote.Contains(s.AsignacionTurnoId))
+                .Select(s => s.Id)
+                .ToListAsync(ct);
+            var hcIdsDeLote = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .Where(p => sesionIdsDeLote.Contains(p.SesionId))
+                .Select(p => p.HistoriaClinicaId)
+                .Distinct()
+                .ToListAsync(ct);
+            // Set vacio => sin coincidencias (Contains sobre lista vacia no trae filas).
+            q = q.Where(h => hcIdsDeLote.Contains(h.Id));
+        }
+
         // LEFT JOIN a `revisiones_clinica` para traer el estado agregado + veredicto
         // agente sin romper filas de HCs que aun no entraron al ciclo (Capa 08 Ola 2).
         // La EPS del paciente se resuelve DESPUES via lookup en memoria (los
@@ -266,6 +302,14 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(t => new { t.Id, t.AsignacionId })
                 .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
         var asigIds = turnoToAsig.Values.Distinct().ToList();
+        // Codigo de asignacion (lote) por HC: Asignacion.Id -> Asignacion.LoteId.
+        // Todas las HCs cuyos servicios cuelgan del mismo lote comparten codigo.
+        var asigToLote = asigIds.Count == 0
+            ? new Dictionary<Guid, Guid>()
+            : await db.Asignaciones.AsNoTracking()
+                .Where(a => asigIds.Contains(a.Id))
+                .Select(a => new { a.Id, a.LoteId })
+                .ToDictionaryAsync(x => x.Id, x => x.LoteId, ct);
         var turnoOrden = new Dictionary<Guid, int>();
         if (asigIds.Count > 0)
         {
@@ -317,6 +361,13 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             {
                 sesionNumero = nGlobal;
             }
+            Guid? asigLoteId = null;
+            if (hcToTurno.TryGetValue(r.Hc.Id, out var turnoForLote)
+                && turnoToAsig.TryGetValue(turnoForLote, out var asigForLote)
+                && asigToLote.TryGetValue(asigForLote, out var loteForHc))
+            {
+                asigLoteId = loteForHc;
+            }
             return new OrdenClinicaItemDto(
                 r.Hc.Id,
                 r.Pa.Id,
@@ -351,7 +402,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 sedeId,
                 sesionNumero,
                 srvExt.GetValueOrDefault(r.Hc.Id, 0),
-                r.Hc.FechaAtencion
+                r.Hc.FechaAtencion,
+                asigLoteId
             );
         }).ToList();
     }
@@ -450,7 +502,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
         // Headers (linea 1): mismos titulos que la tabla en pantalla.
         string[] headers = {
-            "Paciente", "Documento", "Formato", "Sesion", "Especialista", "Aseguradora", "Sede",
+            "Paciente", "Documento", "Cod. asignacion", "Formato", "Sesion", "Especialista", "Aseguradora", "Sede",
             "Estado", "Fecha", "Fecha cierre", "Hora cierre", "Total ordenes", "Revision", "Agente IA",
             "Medicamentos", "Servicios", "Insumos", "Remisiones", "Incapacidades",
             "Certificaciones", "RxImag", "Laboratorios", "Insumos externos",
@@ -475,32 +527,36 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 it.InsExtCount + it.EscalasCount + it.EvolucionesCount + it.ConsentimientosCount;
             var fecha = (it.FechaCierre ?? it.FechaApertura).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
+            var codAsignacion = it.AsignacionLoteId is Guid lid
+                ? lid.ToString()[..8].ToUpperInvariant()
+                : "";
             hoja.Cell(row, 1).Value = it.PacienteNombre;
             hoja.Cell(row, 2).Value = $"{it.PacienteTipoDoc} {it.PacienteDoc}".Trim();
-            hoja.Cell(row, 3).Value = it.FormatoNombre;
-            hoja.Cell(row, 4).Value = it.SesionNumero.HasValue ? $"#{it.SesionNumero.Value}" : "";
-            hoja.Cell(row, 5).Value = it.EspecialistaNombre ?? "";
-            hoja.Cell(row, 6).Value = it.AseguradoraNombre ?? "";
-            hoja.Cell(row, 7).Value = it.SedeNombre ?? "";
-            hoja.Cell(row, 8).Value = it.Estado;
-            hoja.Cell(row, 9).Value = fecha;
-            hoja.Cell(row, 10).Value = it.FechaCierre?.ToLocalTime().ToString("yyyy-MM-dd") ?? "";
-            hoja.Cell(row, 11).Value = it.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "";
-            hoja.Cell(row, 12).Value = totalOrdenes;
-            hoja.Cell(row, 13).Value = it.RevisionEstado?.ToString() ?? "";
-            hoja.Cell(row, 14).Value = it.RevisionAgente?.ToString() ?? "";
-            hoja.Cell(row, 15).Value = it.MedicamentosCount;
-            hoja.Cell(row, 16).Value = it.ServiciosCount;
-            hoja.Cell(row, 17).Value = it.InsumosCount;
-            hoja.Cell(row, 18).Value = it.RemisionesCount;
-            hoja.Cell(row, 19).Value = it.IncapacidadesCount;
-            hoja.Cell(row, 20).Value = it.CertificacionesCount;
-            hoja.Cell(row, 21).Value = it.RxImagCount;
-            hoja.Cell(row, 22).Value = it.LabExtCount;
-            hoja.Cell(row, 23).Value = it.InsExtCount;
-            hoja.Cell(row, 24).Value = it.EscalasCount;
-            hoja.Cell(row, 25).Value = it.EvolucionesCount;
-            hoja.Cell(row, 26).Value = it.ConsentimientosCount;
+            hoja.Cell(row, 3).Value = codAsignacion;
+            hoja.Cell(row, 4).Value = it.FormatoNombre;
+            hoja.Cell(row, 5).Value = it.SesionNumero.HasValue ? $"#{it.SesionNumero.Value}" : "";
+            hoja.Cell(row, 6).Value = it.EspecialistaNombre ?? "";
+            hoja.Cell(row, 7).Value = it.AseguradoraNombre ?? "";
+            hoja.Cell(row, 8).Value = it.SedeNombre ?? "";
+            hoja.Cell(row, 9).Value = it.Estado;
+            hoja.Cell(row, 10).Value = fecha;
+            hoja.Cell(row, 11).Value = it.FechaCierre?.ToLocalTime().ToString("yyyy-MM-dd") ?? "";
+            hoja.Cell(row, 12).Value = it.FechaCierre?.ToLocalTime().ToString("HH:mm") ?? "";
+            hoja.Cell(row, 13).Value = totalOrdenes;
+            hoja.Cell(row, 14).Value = it.RevisionEstado?.ToString() ?? "";
+            hoja.Cell(row, 15).Value = it.RevisionAgente?.ToString() ?? "";
+            hoja.Cell(row, 16).Value = it.MedicamentosCount;
+            hoja.Cell(row, 17).Value = it.ServiciosCount;
+            hoja.Cell(row, 18).Value = it.InsumosCount;
+            hoja.Cell(row, 19).Value = it.RemisionesCount;
+            hoja.Cell(row, 20).Value = it.IncapacidadesCount;
+            hoja.Cell(row, 21).Value = it.CertificacionesCount;
+            hoja.Cell(row, 22).Value = it.RxImagCount;
+            hoja.Cell(row, 23).Value = it.LabExtCount;
+            hoja.Cell(row, 24).Value = it.InsExtCount;
+            hoja.Cell(row, 25).Value = it.EscalasCount;
+            hoja.Cell(row, 26).Value = it.EvolucionesCount;
+            hoja.Cell(row, 27).Value = it.ConsentimientosCount;
         }
 
         hoja.Columns().AdjustToContents(1, Math.Max(1, rows.Count + 1));

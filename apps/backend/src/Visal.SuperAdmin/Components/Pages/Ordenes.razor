@@ -442,6 +442,13 @@ else
                    @bind="_codigoHcFiltro" @onkeyup="OnKeyup" />
         </div>
         <div class="oc-f">
+            <label title="Codigo del lote de asignacion que ata todos los servicios del paciente">Cód. asignación</label>
+            <input class="form-control form-control-sm mono"
+                   placeholder="Ej. 01A06E26"
+                   title="Trae todas las HC cuyos servicios cuelgan del mismo lote de asignacion"
+                   @bind="_codigoAsignacionFiltro" @onkeyup="OnKeyup" />
+        </div>
+        <div class="oc-f">
             <label>Fecha desde</label>
             <input type="date" class="form-control form-control-sm" @bind="_desde" />
         </div>
@@ -684,6 +691,7 @@ else
                         <th style="min-width:220px">Paciente</th>
                         <th style="width:160px">Documento</th>
                         <th style="width:96px" title="Numero corto de la HC (primeros 8 del identificador). Se puede buscar por este codigo en el filtro HC N°.">HC N°</th>
+                        <th style="width:110px" title="Codigo del lote de asignacion que ata todos los servicios del paciente (primeros 8 del identificador del lote). Las HC del mismo lote comparten codigo. Se puede filtrar por el.">Cód. asignación</th>
                         <th>Formato HC</th>
                         <th class="text-center" style="width:70px" title="Numero global de sesion dentro de la asignacion que origino la HC">Sesion</th>
                         <th style="width:180px">Especialista</th>
@@ -821,6 +829,9 @@ else
                             </td>
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
                             <td class="mono" title="HC N°">@r.HistoriaClinicaId.ToString()[..8].ToUpperInvariant()</td>
+                            <td class="mono" title="Codigo de asignacion (lote que ata todos los servicios)">
+                                @(r.AsignacionLoteId is Guid lid ? lid.ToString()[..8].ToUpperInvariant() : "-")
+                            </td>
                             <td>@r.FormatoNombre</td>
                             <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
                             <td>@(r.EspecialistaNombre ?? "-")</td>
@@ -1514,6 +1525,7 @@ else
 
     private string _filtroPaciente = "";
     private string _codigoHcFiltro = "";
+    private string _codigoAsignacionFiltro = "";
     private DateTime? _desde;
     private DateTime? _hasta;
     private string _especialista = "";
@@ -1657,7 +1669,8 @@ else
                 AseguradoraId: Guid.TryParse(_aseguradoraFiltro, out var aseId) ? aseId : (Guid?)null,
                 SucursalId: Guid.TryParse(_sucursalFiltro, out var sedeId) ? sedeId : (Guid?)null,
                 FormatoCodigo: string.IsNullOrWhiteSpace(_formatoFiltro) ? null : _formatoFiltro,
-                CodigoHc: string.IsNullOrWhiteSpace(_codigoHcFiltro) ? null : _codigoHcFiltro.Trim());
+                CodigoHc: string.IsNullOrWhiteSpace(_codigoHcFiltro) ? null : _codigoHcFiltro.Trim(),
+                CodigoAsignacion: string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? null : _codigoAsignacionFiltro.Trim());
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -1675,7 +1688,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _codigoHcFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = "";
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = "";
         await Buscar();
     }
 
@@ -1697,6 +1710,7 @@ else
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
+        if (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro)) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(_codigoAsignacionFiltro.Trim())}"); }
         // FAT-4 — el orden del listado impreso respeta el criterio elegido en el toolbar.
         qs.Add($"ordenarPor={Uri.EscapeDataString(_ordenarPor)}");
         return qs.Count == 0
@@ -1725,6 +1739,7 @@ else
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
+        if (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro)) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(_codigoAsignacionFiltro.Trim())}"); }
         return qs.Count == 0 ? "/ordenes/export.xlsx" : $"/ordenes/export.xlsx?{string.Join("&", qs)}";
     }
 

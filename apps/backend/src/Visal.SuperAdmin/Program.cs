@@ -1319,6 +1319,7 @@ app.MapGet("/ordenes/export.xlsx", async (
     Guid? sucursalId,
     string? estado,
     string? formatoCodigo,
+    string? codigoAsignacion,
     Visal.Application.Tenancy.IOrdenesClinicasService svc,
     CancellationToken ct) =>
 {
@@ -1330,7 +1331,8 @@ app.MapGet("/ordenes/export.xlsx", async (
         SoloCerradas: string.Equals(estado, "Cerrada", StringComparison.OrdinalIgnoreCase),
         AseguradoraId: aseguradoraId,
         SucursalId: sucursalId,
-        FormatoCodigo: string.IsNullOrWhiteSpace(formatoCodigo) ? null : formatoCodigo);
+        FormatoCodigo: string.IsNullOrWhiteSpace(formatoCodigo) ? null : formatoCodigo,
+        CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim());
     var archivo = await svc.ExportarExcelAsync(f, ct);
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();

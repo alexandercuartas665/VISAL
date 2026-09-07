@@ -65,7 +65,14 @@ public sealed record OrdenClinicaItemDto(
     /// con <c>IsFechaAtencion=true</c>. Null cuando el formato no marca ningun
     /// campo o ninguno tiene valor. En /ordenes el usuario puede elegir ordenar
     /// por esta fecha o por FechaCierre.</summary>
-    DateTimeOffset? FechaAtencion = null);
+    DateTimeOffset? FechaAtencion = null,
+    /// <summary>Id del lote de asignacion (<c>AsignacionLote</c>) que agrupa TODOS
+    /// los servicios que se le asignaron al paciente en una misma operacion — el
+    /// "codigo de asignacion" que ata todos los servicios. Se resuelve via
+    /// HC -> AsignacionTurnoSesionHc -> Sesion -> Turno -> Asignacion.LoteId.
+    /// Null cuando la HC no vino de /atencion o quedo huerfana. En la UI se
+    /// muestra como los primeros 8 hex del GUID (igual que el "HC N°").</summary>
+    Guid? AsignacionLoteId = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,
@@ -85,7 +92,12 @@ public sealed record OrdenesClinicasFiltro(
     /// <summary>Filtra por el "HC N°" que ve el usuario: los primeros 8 hex del
     /// GUID de la HC (ej. "019F973B"). Case-insensitive y por prefijo, asi que
     /// sirve el codigo completo o una parte. Vacio = sin filtro.</summary>
-    string? CodigoHc = null);
+    string? CodigoHc = null,
+    /// <summary>Filtra por el "codigo de asignacion" (lote) que ata todos los
+    /// servicios del paciente: los primeros hasta 8 hex del GUID del
+    /// <c>AsignacionLote</c>. Case-insensitive y por prefijo. Trae todas las HCs
+    /// cuyos servicios cuelgan de ese lote. Vacio = sin filtro.</summary>
+    string? CodigoAsignacion = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);

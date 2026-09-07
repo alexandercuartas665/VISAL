@@ -2,10 +2,10 @@
 @layout Visal.SuperAdmin.Components.Layout.EmptyLayout
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
-@using System.Text.Json
+@implements IDisposable
+@using System.Threading
 @using Microsoft.AspNetCore.WebUtilities
 @using Visal.Application.Tenancy
-@using Visal.Application.Tenancy.Forms
 @using Visal.SuperAdmin.Components.Forms
 @inject IOrdenesClinicasService OcSvc
 @inject IHistoriaClinicaService HcSvc
@@ -107,7 +107,7 @@ else
         <a class="dbtn" href="javascript:window.close()">&times; Cerrar</a>
         <button class="dbtn primary" @onclick="PrintAsync">&#128424; Imprimir todo / Guardar PDF</button>
         <span class="spacer"></span>
-        <span class="meta">@_hcs.Count HC(s) · @_pacientesUnicos paciente(s)</span>
+        <span class="meta">@_items.Count HC(s) · @_pacientesUnicos paciente(s)</span>
     </div>
 
     <div class="hcs-summary">
@@ -146,7 +146,7 @@ else
         </div>
     }
 
-    @if (_hcs.Count == 0)
+    @if (_items.Count == 0)
     {
         <div class="hcs-empty">
             No hay HCs que coincidan con los filtros aplicados.
@@ -155,29 +155,15 @@ else
     else
     {
         <div class="pack">
-            @foreach (var item in _hcs)
+            @* Por cada HC del listado (ya ordenado paciente -> cod. asignacion ->
+               sesion) se renderiza el PAQUETE COMPLETO con el mismo componente que
+               usa el print por-fila: formato principal + evoluciones ligadas +
+               medicamentos + servicios + ... (Docs="ALL"). Sin auto-emitir ni
+               auto-print: es reimpresion/consulta y el usuario dispara la impresion
+               con el boton de arriba. *@
+            @foreach (var item in _items)
             {
-                if (item.Schema is null)
-                {
-                    <div class="pack-doc" style="padding:14px;">
-                        <p><em>No se pudo cargar el schema del formato para @item.PacienteNombre (@item.Detail.FormatoCodigo).</em></p>
-                    </div>
-                    continue;
-                }
-                var fechaLinea = item.Detail.FechaCierre is DateTimeOffset fc
-                    ? $"Cerrada: {fc.ToLocalTime():dd/MM/yyyy HH:mm}"
-                    : $"Apertura: {item.Detail.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}";
-                <DocumentoImprimible Schema="item.Schema"
-                                     Values="item.Values"
-                                     PacienteNombre="item.PacienteNombre"
-                                     PacienteTipoDoc="item.PacienteTipoDoc"
-                                     PacienteDoc="item.PacienteDoc"
-                                     EspecialistaNombre="item.Detail.EspecialistaNombre"
-                                     MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(item.Detail.FormatoCodigo)"
-                                     OrdenNum="@item.Detail.Id.ToString().Substring(0,8).ToUpperInvariant()"
-                                     FechaLinea="@fechaLinea"
-                                     TipoCortoHeader="HC"
-                                     TituloFallback="@item.Detail.FormatoNombre" />
+                <PaqueteHcImprimible HcId="item.HistoriaClinicaId" Docs="ALL" AutoEmitir="false" AutoPrint="false" LoadGate="_loadGate" />
             }
         </div>
     }
@@ -193,7 +179,13 @@ else
     private const int MaxHcs = 2000;
 
     private bool _loading = true;
-    private List<HcRender> _hcs = new();
+    // Gate para que los componentes PaqueteHcImprimible carguen de a uno (comparten
+    // el DbContext scoped del circuito, que no admite consultas concurrentes).
+    private readonly SemaphoreSlim _loadGate = new(1, 1);
+    // HCs del listado, ya ordenadas (paciente -> cod. asignacion -> sesion). Cada
+    // una se renderiza con el componente PaqueteHcImprimible, que carga su propio
+    // paquete completo. Aqui solo necesitamos el id y los campos de orden.
+    private List<OrdenClinicaItemDto> _items = new();
     private int _pacientesUnicos;
     private int _totalEncontrado;
     private bool _excedeTope;
@@ -204,14 +196,6 @@ else
     private string? _especialistaFiltro;
     private DateOnly? _desdeFiltro;
     private DateOnly? _hastaFiltro;
-
-    private sealed record HcRender(
-        HistoriaClinicaDetailDto Detail,
-        FormSchema? Schema,
-        Dictionary<string, string?> Values,
-        string PacienteNombre,
-        string PacienteTipoDoc,
-        string PacienteDoc);
 
     protected override async Task OnInitializedAsync()
     {
@@ -264,6 +248,23 @@ else
                 .ThenBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura)
                 .ToList();
 
+            // Evita duplicados en modo terapia: las HC de evolucion ligadas a una HC
+            // base que TAMBIEN esta en el listado no se listan como fila propia — se
+            // imprimen agrupadas bajo su base (el componente las anexa numeradas). Si
+            // el base no esta en el listado, la evolucion se lista normal (no se pierde).
+            var ligadas = new HashSet<Guid>();
+            foreach (var it in todas)
+            {
+                foreach (var e in await HcSvc.GetEvolucionesLigadasAsync(it.HistoriaClinicaId))
+                {
+                    ligadas.Add(e.Historia.Id);
+                }
+            }
+            if (ligadas.Count > 0)
+            {
+                todas = todas.Where(x => !ligadas.Contains(x.HistoriaClinicaId)).ToList();
+            }
+
             _totalEncontrado = todas.Count;
             _pacientesUnicos = todas.Select(x => x.PacienteId).Distinct().Count();
             if (todas.Count > MaxHcs)
@@ -272,27 +273,10 @@ else
                 todas = todas.Take(MaxHcs).ToList();
             }
 
-            // Cargar detail+schema+values por cada HC. Loop secuencial simple:
-            // <=100 HCs, cada GetAsync es un roundtrip. Suficiente para el
-            // caso de uso; si escalamos, se puede paralelizar con SemaphoreSlim.
-            foreach (var r in todas)
-            {
-                var detail = await HcSvc.GetAsync(r.HistoriaClinicaId);
-                if (detail is null) { continue; }
-                FormSchema? schema = null;
-                if (!string.IsNullOrWhiteSpace(detail.SchemaJson))
-                {
-                    try { schema = JsonSerializer.Deserialize<FormSchema>(detail.SchemaJson); }
-                    catch { schema = null; }
-                }
-                Dictionary<string, string?> values = new();
-                if (!string.IsNullOrWhiteSpace(detail.ValoresJson))
-                {
-                    try { values = JsonSerializer.Deserialize<Dictionary<string, string?>>(detail.ValoresJson) ?? new(); }
-                    catch { values = new(); }
-                }
-                _hcs.Add(new HcRender(detail, schema, values, r.PacienteNombre, r.PacienteTipoDoc, r.PacienteDoc));
-            }
+            // El paquete de cada HC lo carga el componente PaqueteHcImprimible
+            // (schema + valores + evoluciones ligadas + ordenes). Aqui solo
+            // guardamos la lista ordenada; cada componente hace su propia carga.
+            _items = todas;
         }
         finally { _loading = false; }
     }
@@ -305,4 +289,6 @@ else
     }
 
     private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
+
+    public void Dispose() => _loadGate.Dispose();
 }

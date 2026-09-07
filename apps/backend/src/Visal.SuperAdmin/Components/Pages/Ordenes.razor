@@ -687,32 +687,35 @@ else
                         @* Acciones movida al INICIO y fijada con position:sticky
                            (via CSS .oc-tbl :first-child). Ancho reducido a 60px
                            porque ya no lleva botones inline — solo el kebab. *@
+                        @* Headers clicables: un click ordena por esa columna; otro click
+                           en la misma invierte el sentido. Acc./Hora/Documentos no ordenan. *@
                         <th class="text-center" style="width:60px">Acc.</th>
-                        <th style="min-width:220px">Paciente</th>
-                        <th style="width:160px">Documento</th>
-                        <th style="width:96px" title="Numero corto de la HC (primeros 8 del identificador). Se puede buscar por este codigo en el filtro HC N°.">HC N°</th>
-                        <th style="width:110px" title="Codigo del lote de asignacion que ata todos los servicios del paciente (primeros 8 del identificador del lote). Las HC del mismo lote comparten codigo. Se puede filtrar por el.">Cód. asignación</th>
-                        <th>Formato HC</th>
-                        <th class="text-center" style="width:70px" title="Numero global de sesion dentro de la asignacion que origino la HC">Sesion</th>
-                        <th style="width:180px">Especialista</th>
-                        <th style="width:180px" title="EPS bajo la cual se ejecuto la atencion (contrato principal del paciente)">EPS</th>
-                        <th style="width:160px" title="Sede (sucursal) donde se atiende al paciente">Agencia</th>
-                        <th class="text-center" style="width:110px">Estado</th>
+                        <th class="oc-th-sort" style="min-width:220px" title="Ordenar por paciente" @onclick='() => Ordenar("paciente")'>Paciente @Caret("paciente")</th>
+                        <th class="oc-th-sort" style="width:160px" title="Ordenar por documento" @onclick='() => Ordenar("documento")'>Documento @Caret("documento")</th>
+                        <th class="oc-th-sort" style="width:96px" title="Numero corto de la HC (primeros 8 del identificador). Click para ordenar." @onclick='() => Ordenar("hc")'>HC N° @Caret("hc")</th>
+                        <th class="oc-th-sort" style="width:110px" title="Codigo del lote de asignacion que ata todos los servicios del paciente. Click para ordenar." @onclick='() => Ordenar("asignacion")'>Cód. asignación @Caret("asignacion")</th>
+                        <th class="oc-th-sort" title="Ordenar por formato" @onclick='() => Ordenar("formato")'>Formato HC @Caret("formato")</th>
+                        <th class="text-center oc-th-sort" style="width:70px" title="Numero global de sesion dentro de la asignacion. Click para ordenar." @onclick='() => Ordenar("sesion")'>Sesion @Caret("sesion")</th>
+                        <th class="oc-th-sort" style="width:180px" title="Ordenar por especialista" @onclick='() => Ordenar("especialista")'>Especialista @Caret("especialista")</th>
+                        <th class="oc-th-sort" style="width:180px" title="EPS bajo la cual se ejecuto la atencion. Click para ordenar." @onclick='() => Ordenar("eps")'>EPS @Caret("eps")</th>
+                        <th class="oc-th-sort" style="width:160px" title="Sede (sucursal) del paciente. Click para ordenar." @onclick='() => Ordenar("agencia")'>Agencia @Caret("agencia")</th>
+                        <th class="text-center oc-th-sort" style="width:110px" title="Ordenar por estado" @onclick='() => Ordenar("estado")'>Estado @Caret("estado")</th>
                         @* FAT-4 — Cabecera cambia segun el criterio Ordenar por.
                            Cuando el criterio es "atencion" muestra la fecha capturada por el
                            profesional en el schema (mayor entre campos con IsFechaAtencion);
                            cuando es "cierre" muestra la fecha del cierre definitivo. *@
-                        <th class="text-center" style="width:110px"
-                            title="@(_ordenarPor == "atencion" ? "Fecha real de la atencion (schema del formulario). Fallback a fecha de cierre si no esta configurada." : "Fecha de cierre de la HC")">
-                            @(_ordenarPor == "atencion" ? "Fecha atencion" : "Fecha cierre")
+                        <th class="text-center oc-th-sort" style="width:110px"
+                            title="@(_ordenarPor == "atencion" ? "Fecha real de la atencion (schema del formulario). Fallback a fecha de cierre. Click para ordenar." : "Fecha de cierre de la HC. Click para ordenar.")"
+                            @onclick='() => Ordenar("fecha")'>
+                            @(_ordenarPor == "atencion" ? "Fecha atencion" : "Fecha cierre") @Caret("fecha")
                         </th>
                         <th class="text-center" style="width:80px"
                             title="@(_ordenarPor == "atencion" ? "Hora local de la atencion" : "Hora local del cierre")">
                             Hora
                         </th>
                         <th class="text-center" style="width:320px">Documentos</th>
-                        <th class="text-center" style="width:130px" title="Estado del ciclo de revision (Capa 08)">Revision</th>
-                        <th class="text-center" style="width:130px" title="Ultimo veredicto del agente IA">Pre-revision agente</th>
+                        <th class="text-center oc-th-sort" style="width:130px" title="Estado del ciclo de revision (Capa 08). Click para ordenar." @onclick='() => Ordenar("revision")'>Revision @Caret("revision")</th>
+                        <th class="text-center oc-th-sort" style="width:130px" title="Ultimo veredicto del agente IA. Click para ordenar." @onclick='() => Ordenar("agente")'>Pre-revision agente @Caret("agente")</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1238,6 +1241,12 @@ else
 }
 
 <style>
+    /* Ordenamiento por columnas: click en el header ordena asc/desc */
+    .oc-tbl thead th.oc-th-sort { cursor:pointer; user-select:none; }
+    .oc-tbl thead th.oc-th-sort:hover { filter:brightness(1.08); }
+    .oc-sort { margin-left:4px; font-size:10px; opacity:.4; }
+    .oc-sort-on { opacity:1; }
+
     /* Modal doble columna "Ver revision" */
     .oc-rv-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1050; }
     .oc-rv-modal {
@@ -2433,9 +2442,65 @@ else
                 }
             }
         }
-        // FAT-4 — re-ordenamos en cliente segun el criterio elegido en el toolbar.
-        // FechaOrden(r) hace el fallback: atencion -> cierre -> apertura.
-        return baseSet.OrderByDescending(r => FechaOrden(r));
+        return AplicarOrden(baseSet);
+    }
+
+    // ── Ordenamiento por columnas (click en el header) ───────────────────────
+    // _sortCol vacio => orden por defecto (fecha desc, criterio del toolbar).
+    // Un click en un header setea la columna asc; otro click en la misma invierte.
+    private string? _sortCol;
+    private bool _sortDesc;
+
+    private void Ordenar(string col)
+    {
+        if (string.Equals(_sortCol, col, StringComparison.Ordinal)) { _sortDesc = !_sortDesc; }
+        else { _sortCol = col; _sortDesc = false; }
+        _kebabRowId = null; // cerrar cualquier kebab abierto al reordenar
+    }
+
+    /// <summary>Indicador de orden para el header: neutro cuando la columna no es
+    /// la activa, flecha arriba/abajo cuando lo es.</summary>
+    private MarkupString Caret(string col)
+    {
+        if (!string.Equals(_sortCol, col, StringComparison.Ordinal))
+        {
+            // &#8693; = flecha doble arriba/abajo (neutro)
+            return (MarkupString)"<span class=\"oc-sort\">&#8693;</span>";
+        }
+        // &#9650; = triangulo arriba (asc); &#9660; = triangulo abajo (desc)
+        var arrow = _sortDesc ? "&#9660;" : "&#9650;";
+        return (MarkupString)$"<span class=\"oc-sort oc-sort-on\">{arrow}</span>";
+    }
+
+    /// <summary>Aplica el orden elegido por el usuario. Sin columna activa,
+    /// mantiene el orden por defecto (fecha desc del toolbar). La clave se
+    /// selecciona por columna; se agrega un desempate estable (paciente + id de
+    /// HC) para que filas con igual clave no salten entre renders.</summary>
+    private IEnumerable<OrdenClinicaItemDto> AplicarOrden(IEnumerable<OrdenClinicaItemDto> set)
+    {
+        if (string.IsNullOrEmpty(_sortCol))
+        {
+            return set.OrderByDescending(r => FechaOrden(r));
+        }
+        Func<OrdenClinicaItemDto, object?> key = _sortCol switch
+        {
+            "paciente"     => r => r.PacienteNombre,
+            "documento"    => r => r.PacienteDoc,
+            "hc"           => r => r.HistoriaClinicaId,
+            "asignacion"   => r => r.AsignacionLoteId,
+            "formato"      => r => r.FormatoNombre,
+            "sesion"       => r => r.SesionNumero ?? int.MaxValue,
+            "especialista" => r => r.EspecialistaNombre,
+            "eps"          => r => r.AseguradoraNombre,
+            "agencia"      => r => r.SedeNombre,
+            "estado"       => r => r.Estado,
+            "revision"     => r => r.RevisionEstado,
+            "agente"       => r => r.RevisionAgente,
+            "fecha"        => r => FechaOrden(r),
+            _              => r => FechaOrden(r),
+        };
+        var ordenada = _sortDesc ? set.OrderByDescending(key) : set.OrderBy(key);
+        return ordenada.ThenBy(r => r.PacienteNombre).ThenBy(r => r.HistoriaClinicaId);
     }
 
     /// <summary>FAT-4 — Fecha efectiva para ordenar/mostrar segun el criterio del toolbar.

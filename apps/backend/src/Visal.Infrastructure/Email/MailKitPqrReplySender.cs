@@ -17,9 +17,19 @@ public sealed class MailKitPqrReplySender : IPqrEmailReplySender
         try
         {
             var msg = new MimeMessage();
-            msg.From.Add(new MailboxAddress(string.IsNullOrWhiteSpace(p.FromName) ? p.FromEmail : p.FromName, p.FromEmail));
+            var from = new MailboxAddress(string.IsNullOrWhiteSpace(p.FromName) ? p.FromEmail : p.FromName.Trim(), p.FromEmail);
+            msg.From.Add(from);
             msg.To.Add(new MailboxAddress(string.IsNullOrWhiteSpace(p.ToName) ? p.ToEmail : p.ToName, p.ToEmail));
+            // Reply-To = el mismo buzon: las respuestas del destinatario llegan a la
+            // cuenta que envia (y ayuda al puntaje de entregabilidad).
+            msg.ReplyTo.Add(from);
             msg.Subject = p.Subject;
+
+            // Cabecera List-Unsubscribe (correo automatizado): Gmail/Outlook la premian.
+            if (!string.IsNullOrWhiteSpace(p.ListUnsubscribe))
+            {
+                msg.Headers.Add("List-Unsubscribe", p.ListUnsubscribe.Trim());
+            }
 
             // Enhebrado: In-Reply-To + References apuntan al Message-ID original.
             if (!string.IsNullOrWhiteSpace(p.InReplyToMessageId))
@@ -30,7 +40,14 @@ public sealed class MailKitPqrReplySender : IPqrEmailReplySender
                 msg.References.Add(mid);
             }
 
-            var body = new BodyBuilder { TextBody = p.BodyText };
+            // Enviar SIEMPRE multipart texto+HTML: un correo con parte HTML bien
+            // formada puntua mejor que uno de solo texto plano. Si el caller no da
+            // HTML, se genera una version simple a partir del texto.
+            var body = new BodyBuilder
+            {
+                TextBody = p.BodyText,
+                HtmlBody = string.IsNullOrWhiteSpace(p.BodyHtml) ? TextoAHtml(p.BodyText) : p.BodyHtml
+            };
             foreach (var a in p.Attachments ?? Array.Empty<PqrReplyAttachment>())
             {
                 if (a.Bytes is null || a.Bytes.Length == 0) { continue; }
@@ -55,5 +72,17 @@ public sealed class MailKitPqrReplySender : IPqrEmailReplySender
         {
             return (false, $"No se pudo enviar el correo: {ex.Message}");
         }
+    }
+
+    /// <summary>Genera una parte HTML simple a partir del texto plano: escapa HTML y
+    /// convierte saltos de linea en &lt;br&gt;, envuelto en un contenedor legible. No
+    /// interpreta markdown; solo asegura que el correo salga multipart texto+HTML.</summary>
+    private static string TextoAHtml(string? texto)
+    {
+        var contenido = System.Net.WebUtility.HtmlEncode(texto ?? "")
+            .Replace("\r\n", "\n").Replace("\r", "\n")
+            .Replace("\n", "<br>");
+        return "<div style=\"font-family:'Segoe UI',Arial,sans-serif;font-size:14px;"
+             + "line-height:1.5;color:#1f2937;\">" + contenido + "</div>";
     }
 }

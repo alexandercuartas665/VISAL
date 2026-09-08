@@ -43,7 +43,13 @@ public sealed class NotificacionEmailSender : INotificacionEmailSender
             string.IsNullOrWhiteSpace(subject) ? "Notificacion VISAL" : subject,
             bodyText ?? "",
             null,
-            Array.Empty<PqrReplyAttachment>());
+            Array.Empty<PqrReplyAttachment>(),
+            // BodyHtml null -> el sender arma el multipart texto+HTML.
+            BodyHtml: null,
+            // List-Unsubscribe (mailto al mismo buzon): estas notificaciones son
+            // automatizadas; la cabecera mejora el puntaje anti-spam y da una via de
+            // baja honesta (responder al buzon). Gmail/Outlook la valoran.
+            ListUnsubscribe: $"<mailto:{cfg.EmailAddress}?subject=Baja%20de%20notificaciones>");
 
         var (ok, error) = await _sender.SendAsync(pars, ct);
         return new EmailSendResult(ok, error);

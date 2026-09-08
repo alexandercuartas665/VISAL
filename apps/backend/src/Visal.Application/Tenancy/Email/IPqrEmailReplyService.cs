@@ -52,7 +52,14 @@ public sealed record SmtpReplyParams(
     string ToEmail, string? ToName,
     string Subject, string BodyText,
     string? InReplyToMessageId,
-    IReadOnlyList<PqrReplyAttachment> Attachments);
+    IReadOnlyList<PqrReplyAttachment> Attachments,
+    // Opcionales (mejoran la entregabilidad / bajan el puntaje de spam):
+    //  - BodyHtml: parte HTML del correo. Si es null, el sender genera una desde
+    //    BodyText para enviar SIEMPRE multipart texto+HTML (mejor que solo texto).
+    //  - ListUnsubscribe: valor de la cabecera List-Unsubscribe (ej. un mailto:).
+    //    Gmail/Outlook la premian en correo automatizado. Usar en notificaciones.
+    string? BodyHtml = null,
+    string? ListUnsubscribe = null);
 
 /// <summary>Cliente SMTP MailKit que envia una respuesta con el buzon del tenant. Nunca lanza:
 /// devuelve (Ok, Error). No loggea la clave.</summary>

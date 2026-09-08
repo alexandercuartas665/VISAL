@@ -4,6 +4,7 @@
 @inject IInsumoService InsumoSvc
 @inject ICatalogoServicioService CatSvc
 @inject ISucursalService SucSvc
+@inject IConfiguracionClinicaService ConfigSvc
 @inject ITenantContext Tenant
 @inject IJSRuntime JS
 
@@ -268,6 +269,11 @@ else
     /// flag dejan pasar.</summary>
     private bool _sedeExigeMipres;
 
+    /// <summary>Config del tenant: al cargar un insumo manual sin codigo, se le pone
+    /// el CUP por defecto para no dejar la columna vacia (RIPS). Ver Config de Empresa.</summary>
+    private bool _permitirManuales;
+    private const string CupPorDefecto = "00X12";
+
     // Autocomplete contra el catalogo de Insumos.
     private List<CatalogoServicioDto> _sugerencias = new();
     private bool _mostrarSugerencias;
@@ -292,6 +298,7 @@ else
             {
                 _sedeExigeMipres = await SucSvc.GetMipresObligatorioAsync(sid);
             }
+            _permitirManuales = await ConfigSvc.GetPermitirOrdenesManualesAsync();
         }
     }
 
@@ -402,8 +409,12 @@ else
             // guardamos el texto libre de cantidad como fallback.
             var totalPosologia = CalcularTotal(_borrador.PosolCantidad, _borrador.Frecuencia, _borrador.Dias);
             var cantidadPersistida = totalPosologia ?? _borrador.PosolCantidad?.Trim();
+            // Carga manual (suelto) sin codigo: se estampa el CUP por defecto para
+            // no dejar la columna vacia (RIPS). Solo cuando el flag del tenant esta on.
+            var codigoIns = _borrador.Codigo;
+            if (_permitirManuales && string.IsNullOrWhiteSpace(codigoIns)) { codigoIns = CupPorDefecto; }
             var creado = await InsumoSvc.AgregarAsync(hid, new AgregarInsumoRequest(
-                _borrador.Codigo,
+                codigoIns,
                 _borrador.Descripcion!,
                 cantidadPersistida,
                 _borrador.Observaciones,

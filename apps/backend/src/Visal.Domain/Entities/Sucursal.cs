@@ -42,4 +42,12 @@ public class Sucursal : TenantEntity
     /// decide si quiere el gate anti-facturacion-sin-revision. Default false.
     /// </summary>
     public bool ExigirHcRevisadaParaFacturar { get; set; }
+
+    /// <summary>
+    /// Codigo de aceptacion de la sede. Al crear un paciente NUEVO en Admision, el
+    /// sistema lo lleva por defecto al campo "Codigo de aceptacion" del paciente
+    /// segun la sede con la que el usuario inicio sesion (claim sucursal_id). Si el
+    /// usuario entra como GLOBAL (sin sede), no se prellena nada. Opcional.
+    /// </summary>
+    public string? CodigoAceptacion { get; set; }
 }

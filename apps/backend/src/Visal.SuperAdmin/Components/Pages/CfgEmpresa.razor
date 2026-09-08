@@ -24,7 +24,7 @@
     </div>
     <div class="table-responsive">
         <table class="table table-sm align-middle">
-            <thead><tr><th>Codigo</th><th>Nombre</th><th>Ciudad</th><th>Direccion</th><th>Telefono</th><th title="Correo de la sede. Alimenta el snapshot Relacion de Facturas (columna Correo electronico)">Correo</th><th title="Codigo de habilitacion REPS de la sede (Fase 4 Facturacion, 12 digitos)">Cod. habilitacion</th><th>Activa</th><th title="Exige codigo MIPRES al entregar medicamentos e insumos">MIPRES obligatorio</th><th title="Cuando esta marcado, el snapshot Relacion de Facturas excluye sesiones cuya HC no este Aprobada por revision clinica">HC revisada obligatoria</th><th></th></tr></thead>
+            <thead><tr><th>Codigo</th><th>Nombre</th><th>Ciudad</th><th>Direccion</th><th>Telefono</th><th title="Correo de la sede. Alimenta el snapshot Relacion de Facturas (columna Correo electronico)">Correo</th><th title="Codigo de habilitacion REPS de la sede (Fase 4 Facturacion, 12 digitos)">Cod. habilitacion</th><th title="Codigo de aceptacion de la sede. Se lleva por defecto al crear un paciente nuevo, segun la sede con la que el usuario inicio sesion (GLOBAL no lleva nada)">Cod. aceptacion</th><th>Activa</th><th title="Exige codigo MIPRES al entregar medicamentos e insumos">MIPRES obligatorio</th><th title="Cuando esta marcado, el snapshot Relacion de Facturas excluye sesiones cuya HC no este Aprobada por revision clinica">HC revisada obligatoria</th><th></th></tr></thead>
             <tbody>
                 @foreach (var s in _items)
                 {
@@ -36,6 +36,7 @@
                         <td><input class="form-control form-control-sm" style="width:120px" @bind="s.Telefono" /></td>
                         <td><input class="form-control form-control-sm" style="width:180px" type="email" @bind="s.Email" placeholder="sede@ipsvisalrt.com" /></td>
                         <td><input class="form-control form-control-sm mono" style="width:140px" maxlength="20" @bind="s.CodigoHabilitacion" placeholder="730010353101" /></td>
+                        <td><input class="form-control form-control-sm mono" style="width:140px" maxlength="120" @bind="s.CodigoAceptacion" placeholder="Cod. aceptacion" /></td>
                         <td class="text-center"><input type="checkbox" class="form-check-input" @bind="s.Activo" /></td>
                         <td class="text-center" title="Cuando esta marcado, la HC bloquea Agregar medicamentos/insumos sin URL MIPRES">
                             <input type="checkbox" class="form-check-input" @bind="s.MipresObligatorio" />
@@ -73,6 +74,23 @@
             <small class="text-muted">
                 El modulo del profesional valida que el paciente tenga una historia clinica registrada
                 en los ultimos N meses antes de permitir nuevas notas. Default 3.
+            </small>
+        </div>
+        <div class="ase-f">
+            <label class="ase-chk">
+                <input type="checkbox" @bind="_permitirManuales" />
+                <span>Permitir cargar medicamentos, servicios e insumos manualmente (sueltos)</span>
+            </label>
+            <div class="ase-input-row" style="margin-top:6px;">
+                <button class="btn btn-primary btn-sm" @onclick="SaveManuales" disabled="@_busyManuales">
+                    @(_busyManuales ? "Guardando..." : "Guardar")
+                </button>
+            </div>
+            <small class="text-muted">
+                Con el toggle encendido, en la historia clinica los tabs Medicamentos, Servicios e
+                Insumos permiten escribir el item aunque no este en el catalogo. Si se agrega sin
+                codigo, el sistema le pone el CUP por defecto <b>00X12</b> para no dejar la columna
+                vacia (RIPS). Apagado (default) = solo catalogo en Medicamentos y Servicios.
             </small>
         </div>
     </div>
@@ -145,6 +163,8 @@
     private bool _busyClinica;
     private bool _bloquearOverload;
     private bool _busyOverload;
+    private bool _permitirManuales;
+    private bool _busyManuales;
     private List<string> _etapasEmbudo = new();
     private string _etapaPqrs = "PQRS";
     private string _etapaContacto = "PQRS";
@@ -155,6 +175,7 @@
         await Load();
         _mesesHC = await ClinicaSvc.GetMesesValidezHistoriaClinicaAsync();
         _bloquearOverload = await ClinicaSvc.GetBloquearOverloadTurnosAsync();
+        _permitirManuales = await ClinicaSvc.GetPermitirOrdenesManualesAsync();
 
         _etapasEmbudo = BuildEtapaOptions(await ClinicaSvc.ListEtapasEmbudoAsync());
         _etapaPqrs = await ClinicaSvc.GetEtapaFormularioWebAsync("pqrs") ?? "PQRS";
@@ -222,6 +243,20 @@
         catch (InvalidOperationException ex) { _error = ex.Message; }
         finally { _busyOverload = false; }
     }
+    private async Task SaveManuales()
+    {
+        _error = _ok = null; _busyManuales = true;
+        try
+        {
+            await ClinicaSvc.SetPermitirOrdenesManualesAsync(_permitirManuales, await Actor());
+            _ok = _permitirManuales
+                ? "Carga manual activada: la HC permite medicamentos, servicios e insumos sueltos (CUP por defecto 00X12)."
+                : "Carga manual desactivada: Medicamentos y Servicios vuelven a exigir catalogo.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busyManuales = false; }
+    }
+
     private void Add() => _items.Add(new Row { Activo = true });
 
     private async Task Save(Row r)
@@ -229,7 +264,7 @@
         _error = _ok = null;
         try
         {
-            var saved = await Svc.SaveAsync(new SaveSucursalRequest(r.Id, r.Codigo, r.Nombre, r.Direccion, r.Ciudad, r.Telefono, r.Activo, r.MipresObligatorio, r.CodigoHabilitacion, r.ExigirHcRevisadaParaFacturar, r.Email), await Actor());
+            var saved = await Svc.SaveAsync(new SaveSucursalRequest(r.Id, r.Codigo, r.Nombre, r.Direccion, r.Ciudad, r.Telefono, r.Activo, r.MipresObligatorio, r.CodigoHabilitacion, r.ExigirHcRevisadaParaFacturar, r.Email, r.CodigoAceptacion), await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             r.Id = saved.Id; _ok = "Sucursal guardada.";
         }
@@ -262,6 +297,7 @@
         public bool MipresObligatorio { get; set; }
         public string? CodigoHabilitacion { get; set; }
         public bool ExigirHcRevisadaParaFacturar { get; set; }
-        public static Row From(SucursalDto d) => new() { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Direccion = d.Direccion, Ciudad = d.Ciudad, Telefono = d.Telefono, Email = d.Email, Activo = d.Activo, MipresObligatorio = d.MipresObligatorio, CodigoHabilitacion = d.CodigoHabilitacion, ExigirHcRevisadaParaFacturar = d.ExigirHcRevisadaParaFacturar };
+        public string? CodigoAceptacion { get; set; }
+        public static Row From(SucursalDto d) => new() { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Direccion = d.Direccion, Ciudad = d.Ciudad, Telefono = d.Telefono, Email = d.Email, Activo = d.Activo, MipresObligatorio = d.MipresObligatorio, CodigoHabilitacion = d.CodigoHabilitacion, ExigirHcRevisadaParaFacturar = d.ExigirHcRevisadaParaFacturar, CodigoAceptacion = d.CodigoAceptacion };
     }
 }

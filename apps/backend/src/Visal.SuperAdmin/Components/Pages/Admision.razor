@@ -1358,6 +1358,10 @@
 
     // Admin PAD
     private string? _codAcept;
+    // Codigo de aceptacion de la sede con la que el usuario inicio sesion (claim
+    // sucursal_id). Se lleva por defecto al crear un paciente NUEVO. Null si el
+    // usuario entra como GLOBAL (sin sede) o la sede no tiene codigo configurado.
+    private string? _codAceptSedeLogin;
     private DateOnly? _fComenta, _fIngreso, _fEgreso;
     private string _aseId = "";
     private string _ipsComenta = "";
@@ -1660,6 +1664,18 @@
         // disponibles para asignar en cascada.
         _aseguradoras = (await AseSvc.ListAseguradorasAsync(soloConContratoVigente: true)).ToList();
         _sedes = (await SucSvc.ListAsync()).ToList();
+        // Codigo de aceptacion por defecto para pacientes NUEVOS: el de la sede con
+        // la que el usuario inicio sesion (claim sucursal_id). GLOBAL (sin sede) o
+        // sede sin codigo -> queda vacio.
+        _codAceptSedeLogin = null;
+        if (AuthState is not null)
+        {
+            var stSede = await AuthState;
+            if (Guid.TryParse(stSede.User.FindFirst("sucursal_id")?.Value, out var sucLoginId))
+            {
+                _codAceptSedeLogin = _sedes.FirstOrDefault(s => s.Id == sucLoginId)?.CodigoAceptacion;
+            }
+        }
         _catalogos = (await CatSvc.ListAsync(null)).ToList();
         _paises = (await GeoSvc.ListPaisesAsync()).ToList();
         await ResolverPuedeReabrirAsync();
@@ -1845,7 +1861,9 @@
         _doc = ""; _tipoDoc = "CC";
         _pNombre = _sNombre = _pApellido = _sApellido = null;
         _fnac = null; _edad = null;
-        _codAcept = null; _fComenta = _fIngreso = _fEgreso = null; _aseId = "";
+        // Paciente NUEVO: el codigo de aceptacion se prellena con el de la sede del
+        // login (vacio si el usuario entro como GLOBAL). El usuario puede editarlo.
+        _codAcept = _codAceptSedeLogin; _fComenta = _fIngreso = _fEgreso = null; _aseId = "";
         _ipsComenta = ""; _contratosAse = new();
         _diasEst = _opIngreso = null;
         _incapacidad = _grupoRh = _estado = null;

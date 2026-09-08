@@ -1,6 +1,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Application.Common
 @inject IOrdenMedicamentoService OrdSvc
+@inject IConfiguracionClinicaService ConfigSvc
 @inject IJSRuntime JS
 
 @*
@@ -90,6 +91,19 @@ else
                 else if (!string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2 && !_buscando)
                 {
                     <div class="od-suggest od-suggest-empty">Sin resultados para "@_terminoBusqueda"</div>
+                }
+                @* Carga manual (suelto): solo con el flag del tenant. Permite agregar
+                   el medicamento tal como se escribio, sin exigir catalogo. *@
+                @if (_permitirManuales && !string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2)
+                {
+                    <button type="button" class="od-manual-btn" @onclick="UsarManual"
+                            title="Agregar como texto libre (sin catalogo). El codigo quedara con el CUP por defecto @CupPorDefecto.">
+                        + Usar "@_terminoBusqueda.Trim()" (manual)
+                    </button>
+                }
+                @if (_permitirManuales && _borrador.MedicamentoId is null && !string.IsNullOrWhiteSpace(_borrador.NombreMedicamento))
+                {
+                    <div class="od-manual-pend">Manual: <b>@_borrador.NombreMedicamento</b> <span class="od-manual-cup">CUP @CupPorDefecto</span></div>
                 }
             </div>
             <div class="od-f od-c-4">
@@ -224,6 +238,10 @@ else
     .od-c-6 { grid-column: span 6; }
 
     .od-search-wrap { position:relative; }
+    .od-manual-btn { display:block; width:100%; text-align:left; margin-top:4px; padding:7px 10px; border:1.5px dashed #94a3b8; border-radius:6px; background:#f8fafc; color:#2563eb; font-weight:600; cursor:pointer; font-size:12px; }
+    .od-manual-btn:hover { background:#eff6ff; border-color:#93c5fd; }
+    .od-manual-pend { margin-top:6px; font-size:12px; color:#0f172a; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:6px; padding:5px 8px; }
+    .od-manual-cup { margin-left:8px; font-family:'JetBrains Mono','Consolas',monospace; font-size:11px; color:#047857; }
     .od-suggest { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 12px 30px rgba(15,23,42,.12); max-height:300px; overflow-y:auto; z-index:50; margin-top:4px; }
     .od-suggest-item { display:block; width:100%; text-align:left; padding:10px 12px; border:0; background:transparent; cursor:pointer; border-bottom:1px solid #f1f5f9; }
     .od-suggest-item:hover { background:#eff6ff; }
@@ -296,6 +314,11 @@ else
 
     private BorradorMed _borrador = new();
 
+    /// <summary>Config del tenant: permite cargar el medicamento como texto libre
+    /// (suelto) aunque no este en el catalogo CUM. Ver Configuracion de Empresa.</summary>
+    private bool _permitirManuales;
+    private const string CupPorDefecto = "00X12";
+
     protected override async Task OnParametersSetAsync()
     {
         if (HistoriaClinicaId != _ultimoIdCargado)
@@ -305,8 +328,22 @@ else
             _terminoBusqueda = "";
             _sugerencias.Clear();
             _pageSize = _pageStep;
+            _permitirManuales = await ConfigSvc.GetPermitirOrdenesManualesAsync();
             await CargarItemsAsync();
         }
+    }
+
+    /// <summary>Carga manual (suelto): usa el texto escrito como nombre del
+    /// medicamento sin exigir catalogo. El codigo queda vacio y al Agregar se le
+    /// pone el CUP por defecto. Solo disponible con el flag del tenant activo.</summary>
+    private void UsarManual()
+    {
+        var t = _terminoBusqueda?.Trim();
+        if (string.IsNullOrWhiteSpace(t)) { return; }
+        _borrador.MedicamentoId = null;
+        _borrador.Codigo = null;
+        _borrador.NombreMedicamento = t;
+        _sugerencias.Clear();
     }
 
     private async Task CargarItemsAsync()
@@ -494,9 +531,13 @@ else
         try
         {
             var preview = PosologiaPreview();
+            // Carga manual (suelto) sin codigo: se estampa el CUP por defecto para
+            // no dejar la columna vacia (RIPS). Solo cuando el flag del tenant esta on.
+            var codigo = _borrador.Codigo;
+            if (_permitirManuales && string.IsNullOrWhiteSpace(codigo)) { codigo = CupPorDefecto; }
             var creado = await OrdSvc.AgregarAsync(hid, new AgregarMedicamentoRequest(
                 _borrador.MedicamentoId,
-                _borrador.Codigo,
+                codigo,
                 _borrador.NombreMedicamento!,
                 _borrador.Cantidad,
                 _borrador.Frecuencia,

@@ -11,7 +11,8 @@ public sealed record SucursalDto(
     bool MipresObligatorio,
     string? CodigoHabilitacion,
     bool ExigirHcRevisadaParaFacturar = false,
-    string? Email = null);
+    string? Email = null,
+    string? CodigoAceptacion = null);
 
 public sealed record SaveSucursalRequest(
     Guid? Id,
@@ -24,7 +25,8 @@ public sealed record SaveSucursalRequest(
     bool MipresObligatorio,
     string? CodigoHabilitacion = null,
     bool ExigirHcRevisadaParaFacturar = false,
-    string? Email = null);
+    string? Email = null,
+    string? CodigoAceptacion = null);
 
 public interface ISucursalService
 {

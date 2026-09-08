@@ -9,6 +9,7 @@ public sealed class ConfiguracionClinicaService(IApplicationDbContext db, ITenan
     private const string KeyMesesHC = "clinica.meses_validez_historia";
     private const int DefaultMeses = 3;
     private const string KeyBloquearOverloadTurnos = "turnos.bloquear_overload";
+    private const string KeyPermitirOrdenesManuales = "clinica.permitir_ordenes_manuales";
 
     // Etapa destino del embudo por tipo de formulario web. Los lee FormWebhookService por tenant.
     public const string KeyEtapaFormPqrs = "formularios.etapa_pqrs";
@@ -64,6 +65,35 @@ public sealed class ConfiguracionClinicaService(IApplicationDbContext db, ITenan
             {
                 TenantId = tid,
                 ConfigKey = KeyBloquearOverloadTurnos,
+                ConfigValue = valor
+            });
+        }
+        else
+        {
+            cfg.ConfigValue = valor;
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<bool> GetPermitirOrdenesManualesAsync(CancellationToken ct = default)
+    {
+        var cfg = await db.TenantConfigurations.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConfigKey == KeyPermitirOrdenesManuales, ct);
+        return cfg is not null && bool.TryParse(cfg.ConfigValue, out var v) && v;
+    }
+
+    public async Task SetPermitirOrdenesManualesAsync(bool permitir, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        var cfg = await db.TenantConfigurations.FirstOrDefaultAsync(c => c.ConfigKey == KeyPermitirOrdenesManuales, ct);
+        var valor = permitir ? "true" : "false";
+        if (cfg is null)
+        {
+            db.TenantConfigurations.Add(new TenantConfiguration
+            {
+                TenantId = tid,
+                ConfigKey = KeyPermitirOrdenesManuales,
                 ConfigValue = valor
             });
         }

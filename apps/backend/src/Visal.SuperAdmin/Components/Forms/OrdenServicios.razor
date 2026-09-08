@@ -1,5 +1,6 @@
 @using Visal.Application.Tenancy
 @inject IOrdenServicioService OrdSvc
+@inject IConfiguracionClinicaService ConfigSvc
 @inject IJSRuntime JS
 
 @*
@@ -140,6 +141,15 @@ else
                 else if (!string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2 && !_buscando)
                 {
                     <div class="os-suggest os-suggest-empty">Sin resultados para "@_terminoBusqueda"</div>
+                }
+                @* Carga manual (suelto): solo con el flag del tenant y en modo servicio
+                   (no paquetes). Agrega el servicio tal como se escribio, sin catalogo. *@
+                @if (_permitirManuales && !_soloPaquetes && !string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2)
+                {
+                    <button type="button" class="os-manual-btn" @onclick="UsarManual"
+                            title="Agregar como texto libre (sin catalogo). El codigo quedara con el CUP por defecto @CupPorDefecto.">
+                        + Usar "@_terminoBusqueda.Trim()" (manual)
+                    </button>
                 }
             </div>
             <div class="os-f os-c-2">
@@ -353,6 +363,8 @@ else
     .os-c-11 { grid-column: span 11; }
 
     .os-search-wrap { position:relative; }
+    .os-manual-btn { display:block; width:100%; text-align:left; margin-top:4px; padding:7px 10px; border:1.5px dashed #94a3b8; border-radius:6px; background:#f8fafc; color:#2563eb; font-weight:600; cursor:pointer; font-size:12px; }
+    .os-manual-btn:hover { background:#eff6ff; border-color:#93c5fd; }
     .os-suggest { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 12px 30px rgba(15,23,42,.12); max-height:320px; overflow-y:auto; z-index:50; margin-top:4px; }
     .os-suggest-item { display:block; width:100%; text-align:left; padding:10px 12px; border:0; background:transparent; cursor:pointer; border-bottom:1px solid #f1f5f9; }
     .os-suggest-item:hover { background:#eff6ff; }
@@ -508,6 +520,11 @@ else
 
     private BorradorServ _borrador = new();
 
+    /// <summary>Config del tenant: permite cargar el servicio como texto libre
+    /// (suelto) aunque no este en el catalogo de contratos. Ver Configuracion de Empresa.</summary>
+    private bool _permitirManuales;
+    private const string CupPorDefecto = "00X12";
+
     protected override async Task OnParametersSetAsync()
     {
         if (HistoriaClinicaId != _ultimoIdCargado)
@@ -516,6 +533,7 @@ else
             _borrador = new();
             _terminoBusqueda = "";
             _sugerencias.Clear();
+            _permitirManuales = await ConfigSvc.GetPermitirOrdenesManualesAsync();
             await CargarItemsAsync();
         }
         if (PacienteId != _ultimoPacienteCargado)
@@ -655,6 +673,19 @@ else
         _terminoBusqueda = "";
     }
 
+    /// <summary>Carga manual (suelto): usa el texto escrito como descripcion del
+    /// servicio sin exigir catalogo. El codigo queda vacio y al Agregar se le pone
+    /// el CUP por defecto. Solo con el flag del tenant activo.</summary>
+    private void UsarManual()
+    {
+        var t = _terminoBusqueda?.Trim();
+        if (string.IsNullOrWhiteSpace(t)) { return; }
+        _borrador.ServicioContratoId = null;
+        _borrador.CodigoServicio = null;
+        _borrador.Descripcion = t;
+        _sugerencias.Clear();
+    }
+
     private async Task AgregarAsync()
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
@@ -662,9 +693,13 @@ else
         _agregando = true;
         try
         {
+            // Carga manual (suelto) sin codigo: se estampa el CUP por defecto para
+            // no dejar la columna vacia (RIPS). Solo cuando el flag del tenant esta on.
+            var codigoSrv = _borrador.CodigoServicio;
+            if (_permitirManuales && string.IsNullOrWhiteSpace(codigoSrv)) { codigoSrv = CupPorDefecto; }
             var creado = await OrdSvc.AgregarAsync(hid, new AgregarServicioRequest(
                 _borrador.ServicioContratoId,
-                _borrador.CodigoServicio,
+                codigoSrv,
                 _borrador.Descripcion!,
                 _borrador.Cantidad,
                 _borrador.Observaciones,

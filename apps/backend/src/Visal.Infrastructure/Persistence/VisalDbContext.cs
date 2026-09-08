@@ -1288,6 +1288,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Telefono).HasMaxLength(40);
             b.Property(x => x.Email).HasMaxLength(200);
             b.Property(x => x.CodigoHabilitacion).HasMaxLength(20);
+            b.Property(x => x.CodigoAceptacion).HasMaxLength(120);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
         });
 

@@ -25,6 +25,17 @@ public interface IConfiguracionClinicaService
     Task SetBloquearOverloadTurnosAsync(bool bloquear, Guid actor, CancellationToken ct = default);
 
     /// <summary>
+    /// Cuando esta activo, la HC permite cargar medicamentos, servicios e insumos
+    /// "sueltos" (texto libre, sin exigir que esten en el catalogo). Al agregar un
+    /// item manual sin codigo, el sistema le pone el CUP por defecto "00X12" para no
+    /// dejar la columna vacia (RIPS). Default false = comportamiento actual
+    /// (Medicamentos y Servicios solo por catalogo). Ver Configuracion de Empresa.
+    /// </summary>
+    Task<bool> GetPermitirOrdenesManualesAsync(CancellationToken ct = default);
+
+    Task SetPermitirOrdenesManualesAsync(bool permitir, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
     /// Etapa del embudo a la que se enruta cada formulario web (webhook /webhooks/formularios).
     /// tipo: "pqrs" o "contacto". Devuelve null si no esta configurado (el webhook cae a "PQRS").
     /// </summary>

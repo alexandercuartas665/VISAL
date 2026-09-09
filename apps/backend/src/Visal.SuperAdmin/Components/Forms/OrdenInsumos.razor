@@ -96,22 +96,27 @@ else
                ese numero se guarda como Cantidad en la tabla del detalle. *@
             <div class="oi-f oi-c-4">
                 <div class="oi-posol">
-                    <div class="oi-posol-grid">
+                    <div class="oi-posol-grid oi-posol-grid-4">
                         <div>
                             <label class="oi-mini">Cantidad</label>
                             <input class="form-control form-control-sm text-center"
-                                   @bind="_borrador.PosolCantidad" @bind:event="oninput" />
+                                   @bind="_borrador.PosolCantidad" @bind:event="oninput" @bind:after="SyncTotal" />
                         </div>
                         <div>
                             <label class="oi-mini" title="Intervalo entre dosis en horas (8 = cada 8 horas, 24 = una vez al dia)">Cada (h)</label>
                             <input class="form-control form-control-sm text-center"
-                                   @bind="_borrador.Frecuencia" @bind:event="oninput"
+                                   @bind="_borrador.Frecuencia" @bind:event="oninput" @bind:after="SyncTotal"
                                    placeholder="8" />
                         </div>
                         <div>
                             <label class="oi-mini">Dias</label>
                             <input class="form-control form-control-sm text-center"
-                                   @bind="_borrador.Dias" @bind:event="oninput" />
+                                   @bind="_borrador.Dias" @bind:event="oninput" @bind:after="SyncTotal" />
+                        </div>
+                        <div>
+                            <label class="oi-mini" title="Cantidad total a entregar. Se calcula sola pero puedes editarla antes de agregar.">Total</label>
+                            <input class="form-control form-control-sm text-center oi-total-input"
+                                   @bind="_borrador.Total" @bind:event="oninput" placeholder="auto" />
                         </div>
                     </div>
                     <div class="oi-posol-preview">@PosologiaPreview()</div>
@@ -174,7 +179,12 @@ else
                                 <td>@it.Orden</td>
                                 <td>@(string.IsNullOrWhiteSpace(it.Codigo) ? "—" : it.Codigo)</td>
                                 <td>@it.Descripcion</td>
-                                <td>@(string.IsNullOrWhiteSpace(it.Cantidad) ? "—" : it.Cantidad)</td>
+                                <td>
+                                    <input class="form-control form-control-sm text-center oi-total-cell"
+                                           value="@it.Cantidad"
+                                           title="Total a entregar. Editable."
+                                           @onchange="@(e => GuardarCantidad(it, e.Value?.ToString()))" />
+                                </td>
                                 <td>@(string.IsNullOrWhiteSpace(it.Observaciones) ? "—" : it.Observaciones)</td>
                                 <td>
                                     @if (!string.IsNullOrWhiteSpace(it.MipresUrl))
@@ -225,6 +235,9 @@ else
     /* Bloque de posologia (identico al de OrdenMedicamentos, prefijo oi- en vez de od-) */
     .oi-posol { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:8px; padding:8px; }
     .oi-posol-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+    .oi-posol-grid-4 { grid-template-columns:repeat(4, 1fr); }
+    .oi-total-input { font-weight:700; background:#f0fdf4; }
+    .oi-total-cell { max-width:90px; margin:0 auto; }
     .oi-mini { font-size:10px !important; text-align:center; }
     .oi-posol-preview { font-size:11px; color:#64748b; font-style:italic; text-align:center; margin-top:6px; min-height:14px; }
     .oi-list { margin-top:16px; }
@@ -419,12 +432,12 @@ else
         _agregando = true;
         try
         {
-            // Calcula el total (cantidad_por_toma * (24/intervalo_horas) * dias)
-            // y lo persiste como el valor "Cantidad" del item — el que se ve en
-            // la tabla del detalle. Si la posologia esta incompleta o no numerica,
-            // guardamos el texto libre de cantidad como fallback.
-            var totalPosologia = CalcularTotal(_borrador.PosolCantidad, _borrador.Frecuencia, _borrador.Dias);
-            var cantidadPersistida = totalPosologia ?? _borrador.PosolCantidad?.Trim();
+            // El "Total" (columna Cantidad del item) es el que edito el usuario si lo
+            // hay; si no, el calculado (cantidad_por_toma * (24/intervalo_horas) * dias);
+            // y si tampoco se puede calcular, el texto libre de cantidad como fallback.
+            var cantidadPersistida = !string.IsNullOrWhiteSpace(_borrador.Total)
+                ? _borrador.Total.Trim()
+                : (CalcularTotal(_borrador.PosolCantidad, _borrador.Frecuencia, _borrador.Dias) ?? _borrador.PosolCantidad?.Trim());
             // Carga manual (suelto): si el flag esta on y no hay codigo, se autonumera
             // (NS-001, NS-002, ...). Si el profesional escribio un codigo, se respeta.
             var codigoIns = _borrador.Codigo;
@@ -502,6 +515,23 @@ else
         return null;
     }
 
+    /// <summary>Recalcula el Total del borrador desde cantidad/frecuencia/dias. Se
+    /// dispara al editar esos campos; el usuario puede luego sobreescribir el Total.</summary>
+    private void SyncTotal()
+    {
+        _borrador.Total = CalcularTotal(_borrador.PosolCantidad, _borrador.Frecuencia, _borrador.Dias);
+    }
+
+    /// <summary>Edicion inline de la Cantidad (total) en la tabla de items.</summary>
+    private async Task GuardarCantidad(InsumoItemDto it, string? nueva)
+    {
+        var val = string.IsNullOrWhiteSpace(nueva) ? null : nueva.Trim();
+        await InsumoSvc.ActualizarAsync(it.Id, new ActualizarInsumoRequest(val, it.Observaciones, it.MipresUrl), Guid.Empty);
+        var idx = _items.FindIndex(x => x.Id == it.Id);
+        if (idx >= 0) { _items[idx] = it with { Cantidad = val }; }
+        await NotifyItemsChanged();
+    }
+
     private async Task EliminarAsync(InsumoItemDto it)
     {
         var ok = await JS.InvokeAsync<bool>("confirm", $"Quitar el insumo \"{it.Descripcion}\"?");
@@ -528,6 +558,9 @@ else
         public string? PosolCantidad { get; set; }
         public string? Frecuencia { get; set; }
         public string? Dias { get; set; }
+        /// <summary>Total a entregar (columna Cantidad del item). Se auto-calcula al
+        /// cambiar cantidad/frecuencia/dias, pero el profesional puede editarlo.</summary>
+        public string? Total { get; set; }
         public string? Observaciones { get; set; }
         public string? MipresUrl { get; set; }
     }

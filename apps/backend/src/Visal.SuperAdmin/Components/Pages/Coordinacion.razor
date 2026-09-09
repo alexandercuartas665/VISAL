@@ -74,6 +74,20 @@
                             </div>
                         </div>
                         <div class="ase-f">
+                            <label>Sede</label>
+                            @if (_puedeElegirSede)
+                            {
+                                <select class="form-select form-select-sm" @bind="_sedeSel">
+                                    <option value="">(Todas las sedes)</option>
+                                    @foreach (var sd in _sedes) { <option value="@sd">@sd</option> }
+                                </select>
+                            }
+                            else
+                            {
+                                <input class="form-control form-control-sm asg-ro" readonly value="@(_miSucursalNombre ?? "(Todas)")" title="Sede fijada por tu usuario" />
+                            }
+                        </div>
+                        <div class="ase-f">
                             <label>Estado</label>
                             <select class="form-select form-select-sm" @bind="_estado">
                                 <option value="@AsignacionEstadoFiltro.Pendientes">PENDIENTES</option>
@@ -121,6 +135,7 @@
                                         <th style="width:60px">Reasig.</th>
                                         <th>Orden</th>
                                         <th>Paciente</th>
+                                        <th>Sede</th>
                                         <th>Servicio</th>
                                         <th>Cantidad</th>
                                         <th>Estado</th>
@@ -158,7 +173,11 @@
                                                 }
                                             </td>
                                             <td class="mono">@p.Orden</td>
-                                            <td>@p.PacienteNombre</td>
+                                            <td>
+                                                <div>@p.PacienteNombre</div>
+                                                <div class="small text-muted mono">@(string.IsNullOrWhiteSpace(p.PacienteDocumento) ? "—" : $"{p.PacienteTipoDoc} {p.PacienteDocumento}".Trim())</div>
+                                            </td>
+                                            <td class="small">@(string.IsNullOrWhiteSpace(p.Sucursal) ? "—" : p.Sucursal)</td>
                                             <td>@p.NombreServicio</td>
                                             <td class="text-center">@p.Cantidad</td>
                                             <td><span class="cd-estado-pill @cls">@label</span></td>
@@ -951,6 +970,13 @@ else if (_tabSel == "Calendario")
     /// sede. Si el usuario entro con SEDE=GLOBAL (admin), queda null y ve todo.</summary>
     private string? _miSucursalNombre;
 
+    /// <summary>Sedes disponibles para el filtro (solo se usa cuando el usuario es
+    /// GLOBAL y puede elegir). Cuando el usuario tiene sede fija, el filtro queda
+    /// bloqueado a <see cref="_miSucursalNombre"/>.</summary>
+    private List<string> _sedes = new();
+    private bool _puedeElegirSede;
+    private string _sedeSel = "";
+
     // Filtros.
     private string _tipoSel = "";
     private AsignacionEstadoFiltro _estado = AsignacionEstadoFiltro.Pendientes;
@@ -1112,10 +1138,22 @@ else if (_tabSel == "Calendario")
             // claim (admin con SEDE=GLOBAL) o no se resuelve, dejamos null para
             // que el usuario vea todas las sedes.
             var sucClaim = st.User.FindFirst("sucursal_id")?.Value;
+            var sedes = await SucSvc.ListAsync();
             if (Guid.TryParse(sucClaim, out var sucId))
             {
-                var sedes = await SucSvc.ListAsync();
                 _miSucursalNombre = sedes.FirstOrDefault(s => s.Id == sucId)?.Nombre;
+                // Usuario con sede fija: el filtro de sede queda bloqueado a la suya.
+                _puedeElegirSede = false;
+            }
+            else
+            {
+                // Usuario GLOBAL: puede elegir cualquier sede en el filtro.
+                _puedeElegirSede = true;
+                _sedes = sedes.Select(s => s.Nombre)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct()
+                    .OrderBy(n => n)
+                    .ToList();
             }
         }
         catch (Exception ex) { _error = "Error inicial: " + ex.Message; }
@@ -1142,10 +1180,15 @@ else if (_tabSel == "Calendario")
             var modulos = string.IsNullOrEmpty(_tipoSel) ? _modulos : new List<string> { _tipoSel };
             // _mes == 0 significa "todos los meses" -> no enviamos filtro al servicio.
             int? mesFiltro = _mes >= 1 && _mes <= 12 ? _mes : null;
+            // Sede a filtrar: si el usuario tiene sede fija manda la suya; si es GLOBAL
+            // y eligio una sede en el filtro, esa; si no eligio, null (todas).
+            var sedeFiltro = _puedeElegirSede
+                ? (string.IsNullOrWhiteSpace(_sedeSel) ? null : _sedeSel)
+                : _miSucursalNombre;
             _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
                 string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
                 string.IsNullOrWhiteSpace(_doc) ? null : _doc,
-                _miSucursalNombre)).ToList();
+                sedeFiltro)).ToList();
             _solicitudSel = null;
             _especialistas = new();
             if (_pendientes.Count == 0) { _ok = "Sin servicios para esta combinacion."; }
@@ -1156,7 +1199,7 @@ else if (_tabSel == "Calendario")
 
     private void LimpiarFiltros()
     {
-        _tipoSel = ""; _noOrden = ""; _doc = "";
+        _tipoSel = ""; _noOrden = ""; _doc = ""; _sedeSel = "";
         _estado = AsignacionEstadoFiltro.Pendientes;
         // Volvemos al default ancho: ano actual + todos los meses (no esconder nada).
         _anio = DateTime.Now.Year; _mes = 0;

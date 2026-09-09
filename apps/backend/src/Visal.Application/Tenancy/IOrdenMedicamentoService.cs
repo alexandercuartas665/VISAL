@@ -24,7 +24,8 @@ public sealed record OrdenMedicamentoItemDto(
     string? Observacion,
     int Orden,
     string? MipresUrl,
-    int NumeroOrden = 1);
+    int NumeroOrden = 1,
+    string? CantidadTotal = null);
 
 public sealed record AgregarMedicamentoRequest(
     Guid? MedicamentoId,
@@ -36,7 +37,8 @@ public sealed record AgregarMedicamentoRequest(
     string? Posologia,
     string? Observacion,
     string? MipresUrl = null,
-    int NumeroOrden = 1);
+    int NumeroOrden = 1,
+    string? CantidadTotal = null);
 
 public sealed record ActualizarMedicamentoRequest(
     string? Cantidad,
@@ -44,7 +46,8 @@ public sealed record ActualizarMedicamentoRequest(
     string? Dias,
     string? Posologia,
     string? Observacion,
-    string? MipresUrl = null);
+    string? MipresUrl = null,
+    string? CantidadTotal = null);
 
 public interface IOrdenMedicamentoService
 {

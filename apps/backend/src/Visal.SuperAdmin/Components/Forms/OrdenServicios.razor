@@ -147,7 +147,7 @@ else
                 @if (_permitirManuales && !_soloPaquetes && !string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2)
                 {
                     <button type="button" class="os-manual-btn" @onclick="UsarManual"
-                            title="Agregar como texto libre (sin catalogo). El codigo quedara con el CUP por defecto @CupPorDefecto.">
+                            title="Agregar como texto libre (sin catalogo). Si no escribes un codigo, se numera automatico (@(PrefijoConsecutivo)001).">
                         + Usar "@_terminoBusqueda.Trim()" (manual)
                     </button>
                 }
@@ -159,6 +159,17 @@ else
             </div>
         </div>
 
+        @if (_permitirManuales)
+        {
+            <div class="os-row">
+                <div class="os-f os-c-4">
+                    <label>Codigo (opcional)</label>
+                    <input class="form-control form-control-sm mono"
+                           placeholder="Vacio = @(PrefijoConsecutivo)001 (auto)"
+                           @bind="_borrador.CodigoServicio" @bind:event="oninput" />
+                </div>
+            </div>
+        }
         <div class="os-row">
             <div class="os-f os-c-11">
                 <label>Observaciones</label>
@@ -516,14 +527,34 @@ else
     private List<OrdenServicioItemDto> _items = new();
     private bool _buscando;
     private bool _agregando;
-    private System.Threading.CancellationTokenSource? _debounceCts;
+    // Serializa las queries al DbContext scoped (ver OrdenInsumos): dos busquedas
+    // concurrentes o una cancelada + una nueva rompen EF con "second operation
+    // started on this context". No se cancela la query; se descarta por secuencia.
+    private readonly System.Threading.SemaphoreSlim _busquedaLock = new(1, 1);
+    private int _busquedaSeq;
 
     private BorradorServ _borrador = new();
 
     /// <summary>Config del tenant: permite cargar el servicio como texto libre
     /// (suelto) aunque no este en el catalogo de contratos. Ver Configuracion de Empresa.</summary>
     private bool _permitirManuales;
-    private const string CupPorDefecto = "00X12";
+    /// <summary>Prefijo del codigo auto-consecutivo para servicios manuales sin
+    /// codigo (SER-001, SER-002, ...). El profesional puede escribir el suyo.</summary>
+    private const string PrefijoConsecutivo = "SER-";
+
+    /// <summary>Siguiente codigo consecutivo SER-001, SER-002... segun los codigos
+    /// ya presentes en la HC. Empieza en 001.</summary>
+    private string SiguienteConsecutivo(string prefijo)
+    {
+        var max = 0;
+        foreach (var it in _items)
+        {
+            var c = it.CodigoServicio;
+            if (string.IsNullOrWhiteSpace(c) || !c.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase)) { continue; }
+            if (int.TryParse(c.Substring(prefijo.Length).Trim(), out var n) && n > max) { max = n; }
+        }
+        return $"{prefijo}{(max + 1):000}";
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -649,19 +680,29 @@ else
             return;
         }
 
-        _debounceCts?.Cancel();
-        _debounceCts = new();
-        var token = _debounceCts.Token;
+        var q = _terminoBusqueda;
+        if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 2)
+        {
+            _sugerencias.Clear();
+            return;
+        }
+        var mySeq = ++_busquedaSeq;
         try
         {
-            await Task.Delay(200, token);
+            await Task.Delay(200);
+            if (mySeq != _busquedaSeq) { return; }
             _buscando = true;
-            var t = _terminoBusqueda;
-            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, 12, PacienteId, token)).ToList();
-            _buscando = false;
-            StateHasChanged();
+            await _busquedaLock.WaitAsync();
+            try
+            {
+                if (mySeq != _busquedaSeq) { return; }
+                _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(q, 12, PacienteId)).ToList();
+                _buscando = false;
+                StateHasChanged();
+            }
+            finally { _busquedaLock.Release(); }
         }
-        catch (TaskCanceledException) { /* siguiente tecleo cancelo */ }
+        catch (Exception) { /* la proxima tecla reintenta */ }
     }
 
     private void SeleccionarSugerencia(ServicioSugerenciaDto s)
@@ -693,10 +734,10 @@ else
         _agregando = true;
         try
         {
-            // Carga manual (suelto) sin codigo: se estampa el CUP por defecto para
-            // no dejar la columna vacia (RIPS). Solo cuando el flag del tenant esta on.
+            // Carga manual (suelto): si el flag esta on y no hay codigo, se autonumera
+            // (SER-001, SER-002, ...). Si el profesional escribio un codigo, se respeta.
             var codigoSrv = _borrador.CodigoServicio;
-            if (_permitirManuales && string.IsNullOrWhiteSpace(codigoSrv)) { codigoSrv = CupPorDefecto; }
+            if (_permitirManuales && string.IsNullOrWhiteSpace(codigoSrv)) { codigoSrv = SiguienteConsecutivo(PrefijoConsecutivo); }
             var creado = await OrdSvc.AgregarAsync(hid, new AgregarServicioRequest(
                 _borrador.ServicioContratoId,
                 codigoSrv,

@@ -50,6 +50,11 @@ public class HistoriaClinicaMedicamento : TenantEntity
     /// <summary>Texto humano de la posologia ya armada: "1 cada 8 horas durante 7 dias".</summary>
     public string? Posologia { get; set; }
 
+    /// <summary>Cantidad TOTAL a entregar. El sistema la calcula (cantidad_por_toma *
+    /// dosis_por_dia * dias) pero el profesional puede editarla antes/despues de
+    /// agregar. Si es null, la UI muestra el total calculado. Texto libre.</summary>
+    public string? CantidadTotal { get; set; }
+
     /// <summary>Observacion clinica del medicamento (libre).</summary>
     public string? Observacion { get; set; }
 

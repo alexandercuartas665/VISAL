@@ -54,7 +54,7 @@ public sealed class OrdenMedicamentoService(
             .Select(x => new OrdenMedicamentoItemDto(
                 x.Id, x.HistoriaClinicaId, x.MedicamentoId, x.CodigoMedicamento,
                 x.NombreMedicamento, x.Cantidad, x.Frecuencia, x.Dias,
-                x.Posologia, x.Observacion, x.Orden, x.MipresUrl, x.NumeroOrden))
+                x.Posologia, x.Observacion, x.Orden, x.MipresUrl, x.NumeroOrden, x.CantidadTotal))
             .ToListAsync(ct);
     }
 
@@ -91,6 +91,7 @@ public sealed class OrdenMedicamentoService(
             Frecuencia = Trim(req.Frecuencia),
             Dias = Trim(req.Dias),
             Posologia = Trim(req.Posologia),
+            CantidadTotal = Trim(req.CantidadTotal),
             Observacion = Trim(req.Observacion),
             MipresUrl = Trim(req.MipresUrl),
             Orden = siguiente
@@ -106,7 +107,7 @@ public sealed class OrdenMedicamentoService(
         return new OrdenMedicamentoItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.MedicamentoId, entity.CodigoMedicamento,
             entity.NombreMedicamento, entity.Cantidad, entity.Frecuencia, entity.Dias,
-            entity.Posologia, entity.Observacion, entity.Orden, entity.MipresUrl, entity.NumeroOrden);
+            entity.Posologia, entity.Observacion, entity.Orden, entity.MipresUrl, entity.NumeroOrden, entity.CantidadTotal);
     }
 
     public async Task<bool> ActualizarAsync(
@@ -120,6 +121,7 @@ public sealed class OrdenMedicamentoService(
         entity.Frecuencia = Trim(req.Frecuencia);
         entity.Dias = Trim(req.Dias);
         entity.Posologia = Trim(req.Posologia);
+        entity.CantidadTotal = Trim(req.CantidadTotal);
         entity.Observacion = Trim(req.Observacion);
         if (req.MipresUrl is not null) { entity.MipresUrl = Trim(req.MipresUrl); }
         await db.SaveChangesAsync(ct);

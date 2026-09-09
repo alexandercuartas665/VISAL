@@ -97,33 +97,38 @@ else
                 @if (_permitirManuales && !string.IsNullOrWhiteSpace(_terminoBusqueda) && _terminoBusqueda.Trim().Length >= 2)
                 {
                     <button type="button" class="od-manual-btn" @onclick="UsarManual"
-                            title="Agregar como texto libre (sin catalogo). El codigo quedara con el CUP por defecto @CupPorDefecto.">
+                            title="Agregar como texto libre (sin catalogo). Si no escribes un codigo, se numera automatico (@(PrefijoConsecutivo)001).">
                         + Usar "@_terminoBusqueda.Trim()" (manual)
                     </button>
                 }
                 @if (_permitirManuales && _borrador.MedicamentoId is null && !string.IsNullOrWhiteSpace(_borrador.NombreMedicamento))
                 {
-                    <div class="od-manual-pend">Manual: <b>@_borrador.NombreMedicamento</b> <span class="od-manual-cup">CUP @CupPorDefecto</span></div>
+                    <div class="od-manual-pend">Manual: <b>@_borrador.NombreMedicamento</b> <span class="od-manual-cup">cod. @(string.IsNullOrWhiteSpace(_borrador.Codigo) ? "auto " + PrefijoConsecutivo + "…" : _borrador.Codigo)</span></div>
                 }
             </div>
             <div class="od-f od-c-4">
                 <div class="od-posol">
-                    <div class="od-posol-grid">
+                    <div class="od-posol-grid od-posol-grid-4">
                         <div>
                             <label class="od-mini">Cantidad</label>
                             <input class="form-control form-control-sm text-center"
-                                   @bind="_borrador.Cantidad" @bind:event="oninput" />
+                                   @bind="_borrador.Cantidad" @bind:event="oninput" @bind:after="SyncTotal" />
                         </div>
                         <div>
                             <label class="od-mini" title="Intervalo entre dosis en horas (8 = cada 8 horas, 24 = una vez al dia)">Cada (h)</label>
                             <input class="form-control form-control-sm text-center"
-                                   @bind="_borrador.Frecuencia" @bind:event="oninput"
+                                   @bind="_borrador.Frecuencia" @bind:event="oninput" @bind:after="SyncTotal"
                                    placeholder="8" />
                         </div>
                         <div>
                             <label class="od-mini">Dias</label>
                             <input class="form-control form-control-sm text-center"
-                                   @bind="_borrador.Dias" @bind:event="oninput" />
+                                   @bind="_borrador.Dias" @bind:event="oninput" @bind:after="SyncTotal" />
+                        </div>
+                        <div>
+                            <label class="od-mini" title="Cantidad total a entregar. Se calcula sola pero puedes editarla antes de agregar.">Total</label>
+                            <input class="form-control form-control-sm text-center od-total-input"
+                                   @bind="_borrador.Total" @bind:event="oninput" placeholder="auto" />
                         </div>
                     </div>
                     <div class="od-posol-preview">@PosologiaPreview()</div>
@@ -138,6 +143,20 @@ else
                 </button>
             </div>
         </div>
+
+        @* Codigo manual: solo con el flag del tenant. Si se deja vacio, al agregar
+           se numera automatico (MDO-001, MDO-002, ...). *@
+        @if (_permitirManuales)
+        {
+            <div class="od-row">
+                <div class="od-f od-c-4">
+                    <label>Codigo (opcional)</label>
+                    <input class="form-control form-control-sm mono"
+                           placeholder="Vacio = @(PrefijoConsecutivo)001 (auto)"
+                           @bind="_borrador.Codigo" @bind:event="oninput" />
+                </div>
+            </div>
+        }
 
         @* ---- Fila 2: observacion del medicamento en captura (evita tener que
              agregar el item primero e ir a la tabla a editar la observacion). ---- *@
@@ -182,7 +201,7 @@ else
                     {
                         @foreach (var it in itemsOrden)
                         {
-                            var total = CalcularTotal(it.Cantidad, it.Frecuencia, it.Dias);
+                            var totalCalc = CalcularTotal(it.Cantidad, it.Frecuencia, it.Dias);
                             <tr>
                                 <td class="text-center">@it.Orden</td>
                                 <td class="od-codigo">@(string.IsNullOrWhiteSpace(it.CodigoMedicamento) ? "—" : it.CodigoMedicamento)</td>
@@ -194,7 +213,13 @@ else
                                            value="@it.Posologia"
                                            @onchange="@(e => GuardarPosologia(it, e.Value?.ToString()))" />
                                 </td>
-                                <td class="text-center od-total">@(total ?? "—")</td>
+                                <td class="text-center od-total">
+                                    <input class="form-control form-control-sm text-center od-inline-input od-total-cell"
+                                           value="@(it.CantidadTotal ?? totalCalc)"
+                                           placeholder="@(totalCalc ?? "—")"
+                                           title="Total a entregar. Editable; vacio = total calculado."
+                                           @onchange="@(e => GuardarTotal(it, e.Value?.ToString()))" />
+                                </td>
                                 <td>
                                     <input class="form-control form-control-sm od-inline-input"
                                            placeholder="Observacion clinica..."
@@ -259,6 +284,9 @@ else
 
     .od-posol { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:8px; padding:8px; }
     .od-posol-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+    .od-posol-grid-4 { grid-template-columns:repeat(4, 1fr); }
+    .od-total-input { font-weight:700; background:#f0fdf4; }
+    .od-total-cell { max-width:80px; margin:0 auto; }
     .od-mini { font-size:10px !important; text-align:center; }
     .od-posol-preview { font-size:11px; color:#64748b; font-style:italic; text-align:center; margin-top:6px; min-height:14px; }
     .od-add { width:100%; }
@@ -304,7 +332,6 @@ else
     private List<OrdenMedicamentoItemDto> _items = new();
     private bool _buscando;
     private bool _agregando;
-    private System.Threading.CancellationTokenSource? _debounceCts;
 
     /// <summary>Tope de sugerencias por consulta. Empieza en 50 y sube en +50
     /// cada vez que el usuario pulsa "Cargar mas resultados". Se reinicia al
@@ -317,7 +344,9 @@ else
     /// <summary>Config del tenant: permite cargar el medicamento como texto libre
     /// (suelto) aunque no este en el catalogo CUM. Ver Configuracion de Empresa.</summary>
     private bool _permitirManuales;
-    private const string CupPorDefecto = "00X12";
+    /// <summary>Prefijo del codigo auto-consecutivo para items manuales sin codigo
+    /// (MDO-001, MDO-002, ...). El profesional puede escribir su propio codigo.</summary>
+    private const string PrefijoConsecutivo = "MDO-";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -389,26 +418,42 @@ else
         if (OnCountChanged.HasDelegate) { await OnCountChanged.InvokeAsync(_items.Count); }
     }
 
-    /// <summary>Lanza busqueda al catalogo con debounce de ~200ms para no saturar.
-    /// Cada nuevo tecleo reinicia _pageSize al step base — asi el usuario no arrastra
-    /// un tope inflado de una busqueda anterior.</summary>
+    // Serializa las queries al DbContext scoped: en Blazor Server dos busquedas
+    // concurrentes (o una cancelada + una nueva) rompen EF Core con "second
+    // operation started on this context". No se cancela la query en vuelo; se
+    // descarta el resultado por secuencia. Mismo patron que OrdenInsumos.
+    private readonly System.Threading.SemaphoreSlim _busquedaLock = new(1, 1);
+    private int _busquedaSeq;
+
+    /// <summary>Lanza busqueda al catalogo con debounce de ~200ms. Reinicia _pageSize
+    /// al step base y serializa contra el DbContext con semaforo + secuencia.</summary>
     private async Task OnTerminoChanged(ChangeEventArgs e)
     {
         _terminoBusqueda = e.Value?.ToString() ?? "";
         _pageSize = _pageStep;
-        _debounceCts?.Cancel();
-        _debounceCts = new();
-        var token = _debounceCts.Token;
+        var t = _terminoBusqueda;
+        if (string.IsNullOrWhiteSpace(t) || t.Trim().Length < 2)
+        {
+            _sugerencias.Clear();
+            return;
+        }
+        var mySeq = ++_busquedaSeq;
         try
         {
-            await Task.Delay(200, token);
+            await Task.Delay(200);
+            if (mySeq != _busquedaSeq) { return; }
             _buscando = true;
-            var t = _terminoBusqueda;
-            _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, _pageSize, token)).ToList();
-            _buscando = false;
-            StateHasChanged();
+            await _busquedaLock.WaitAsync();
+            try
+            {
+                if (mySeq != _busquedaSeq) { return; }
+                _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(t, _pageSize)).ToList();
+                _buscando = false;
+                StateHasChanged();
+            }
+            finally { _busquedaLock.Release(); }
         }
-        catch (TaskCanceledException) { /* siguiente tecleo cancelo */ }
+        catch (Exception) { /* la proxima tecla reintenta */ }
     }
 
     /// <summary>Sube el tope en +_pageStep y re-consulta. Aparece cuando
@@ -418,11 +463,12 @@ else
         if (string.IsNullOrWhiteSpace(_terminoBusqueda) || _buscando) { return; }
         _pageSize += _pageStep;
         _buscando = true;
+        await _busquedaLock.WaitAsync();
         try
         {
             _sugerencias = (await OrdSvc.BuscarSugerenciasAsync(_terminoBusqueda, _pageSize)).ToList();
         }
-        finally { _buscando = false; }
+        finally { _buscando = false; _busquedaLock.Release(); }
     }
 
     private void SeleccionarSugerencia(MedicamentoSugerenciaDto s)
@@ -523,6 +569,39 @@ else
             ? ((int)total).ToString(System.Globalization.CultureInfo.InvariantCulture)
             : total.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
+    /// <summary>Recalcula el Total del borrador desde cantidad/frecuencia/dias. Se
+    /// dispara al editar esos campos; el usuario puede luego sobreescribir el Total.</summary>
+    private void SyncTotal()
+    {
+        _borrador.Total = CalcularTotal(_borrador.Cantidad, _borrador.Frecuencia, _borrador.Dias);
+    }
+
+    /// <summary>Siguiente codigo consecutivo con el prefijo dado (MDO-001, MDO-002,
+    /// ...), mirando los codigos ya presentes en la HC. Empieza en 001.</summary>
+    private string SiguienteConsecutivo(string prefijo)
+    {
+        var max = 0;
+        foreach (var it in _items)
+        {
+            var c = it.CodigoMedicamento;
+            if (string.IsNullOrWhiteSpace(c) || !c.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase)) { continue; }
+            if (int.TryParse(c.Substring(prefijo.Length).Trim(), out var n) && n > max) { max = n; }
+        }
+        return $"{prefijo}{(max + 1):000}";
+    }
+
+    /// <summary>Edicion inline del Total en la tabla de items. Persiste el override
+    /// (o lo limpia si queda vacio, volviendo al total calculado).</summary>
+    private async Task GuardarTotal(OrdenMedicamentoItemDto it, string? nuevoTotal)
+    {
+        var val = string.IsNullOrWhiteSpace(nuevoTotal) ? null : nuevoTotal.Trim();
+        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, it.Posologia, it.Observacion, CantidadTotal: val);
+        await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
+        var idx = _items.FindIndex(x => x.Id == it.Id);
+        if (idx >= 0) { _items[idx] = it with { CantidadTotal = val }; }
+        await NotifyItemsChanged();
+    }
+
     private async Task AgregarAsync()
     {
         if (HistoriaClinicaId is not Guid hid) { return; }
@@ -531,10 +610,14 @@ else
         try
         {
             var preview = PosologiaPreview();
-            // Carga manual (suelto) sin codigo: se estampa el CUP por defecto para
-            // no dejar la columna vacia (RIPS). Solo cuando el flag del tenant esta on.
+            // Carga manual (suelto): si el flag esta on y no hay codigo, se autonumera
+            // (MDO-001, MDO-002, ...). Si el profesional escribio un codigo, se respeta.
             var codigo = _borrador.Codigo;
-            if (_permitirManuales && string.IsNullOrWhiteSpace(codigo)) { codigo = CupPorDefecto; }
+            if (_permitirManuales && string.IsNullOrWhiteSpace(codigo)) { codigo = SiguienteConsecutivo(PrefijoConsecutivo); }
+            // Total: el editado por el usuario si lo hay; si no, el calculado.
+            var totalFinal = string.IsNullOrWhiteSpace(_borrador.Total)
+                ? CalcularTotal(_borrador.Cantidad, _borrador.Frecuencia, _borrador.Dias)
+                : _borrador.Total.Trim();
             var creado = await OrdSvc.AgregarAsync(hid, new AgregarMedicamentoRequest(
                 _borrador.MedicamentoId,
                 codigo,
@@ -545,7 +628,8 @@ else
                 preview,
                 _borrador.Observacion,
                 _borrador.MipresUrl,
-                _ordenActual), Guid.Empty);
+                _ordenActual,
+                totalFinal), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
             await NotifyItemsChanged();
@@ -563,7 +647,7 @@ else
 
     private async Task GuardarPosologia(OrdenMedicamentoItemDto it, string? nuevaPosologia)
     {
-        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, nuevaPosologia, it.Observacion);
+        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, nuevaPosologia, it.Observacion, CantidadTotal: it.CantidadTotal);
         await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
         var idx = _items.FindIndex(x => x.Id == it.Id);
         if (idx >= 0) { _items[idx] = it with { Posologia = nuevaPosologia }; }
@@ -572,7 +656,7 @@ else
 
     private async Task GuardarObservacion(OrdenMedicamentoItemDto it, string? nuevaObs)
     {
-        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, it.Posologia, nuevaObs);
+        var req = new ActualizarMedicamentoRequest(it.Cantidad, it.Frecuencia, it.Dias, it.Posologia, nuevaObs, CantidadTotal: it.CantidadTotal);
         await OrdSvc.ActualizarAsync(it.Id, req, Guid.Empty);
         var idx = _items.FindIndex(x => x.Id == it.Id);
         if (idx >= 0) { _items[idx] = it with { Observacion = nuevaObs }; }
@@ -604,6 +688,9 @@ else
         public string? Cantidad { get; set; }
         public string? Frecuencia { get; set; }
         public string? Dias { get; set; }
+        /// <summary>Total a entregar. Se auto-calcula al cambiar cantidad/frecuencia/dias
+        /// pero el profesional puede editarlo antes de agregar.</summary>
+        public string? Total { get; set; }
         public string? Observacion { get; set; }
         public string? MipresUrl { get; set; }
     }

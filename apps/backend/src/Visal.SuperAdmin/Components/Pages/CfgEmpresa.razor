@@ -88,9 +88,10 @@
             </div>
             <small class="text-muted">
                 Con el toggle encendido, en la historia clinica los tabs Medicamentos, Servicios e
-                Insumos permiten escribir el item aunque no este en el catalogo. Si se agrega sin
-                codigo, el sistema le pone el CUP por defecto <b>00X12</b> para no dejar la columna
-                vacia (RIPS). Apagado (default) = solo catalogo en Medicamentos y Servicios.
+                Insumos permiten escribir el item aunque no este en el catalogo, y agregar su codigo
+                manualmente. Si se agrega sin codigo, el sistema lo numera automatico y consecutivo
+                (<b>MDO-001</b> medicamentos, <b>INS-001</b> insumos, <b>SER-001</b> servicios).
+                Apagado (default) = solo catalogo en Medicamentos y Servicios.
             </small>
         </div>
     </div>
@@ -250,7 +251,7 @@
         {
             await ClinicaSvc.SetPermitirOrdenesManualesAsync(_permitirManuales, await Actor());
             _ok = _permitirManuales
-                ? "Carga manual activada: la HC permite medicamentos, servicios e insumos sueltos (CUP por defecto 00X12)."
+                ? "Carga manual activada: la HC permite medicamentos, servicios e insumos sueltos, con codigo manual o autonumerado (MDO-/INS-/SER-)."
                 : "Carga manual desactivada: Medicamentos y Servicios vuelven a exigir catalogo.";
         }
         catch (InvalidOperationException ex) { _error = ex.Message; }

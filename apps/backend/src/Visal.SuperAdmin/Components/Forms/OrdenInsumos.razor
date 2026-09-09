@@ -272,7 +272,23 @@ else
     /// <summary>Config del tenant: al cargar un insumo manual sin codigo, se le pone
     /// el CUP por defecto para no dejar la columna vacia (RIPS). Ver Config de Empresa.</summary>
     private bool _permitirManuales;
-    private const string CupPorDefecto = "00X12";
+    /// <summary>Prefijo del codigo auto-consecutivo para insumos manuales sin codigo
+    /// (INS-001, INS-002, ...). El profesional puede escribir el suyo en el campo Codigo.</summary>
+    private const string PrefijoConsecutivo = "INS-";
+
+    /// <summary>Siguiente codigo consecutivo INS-001, INS-002... segun los codigos ya
+    /// presentes en la HC. Empieza en 001.</summary>
+    private string SiguienteConsecutivo(string prefijo)
+    {
+        var max = 0;
+        foreach (var it in _items)
+        {
+            var c = it.Codigo;
+            if (string.IsNullOrWhiteSpace(c) || !c.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase)) { continue; }
+            if (int.TryParse(c.Substring(prefijo.Length).Trim(), out var n) && n > max) { max = n; }
+        }
+        return $"{prefijo}{(max + 1):000}";
+    }
 
     // Autocomplete contra el catalogo de Insumos.
     private List<CatalogoServicioDto> _sugerencias = new();
@@ -409,10 +425,10 @@ else
             // guardamos el texto libre de cantidad como fallback.
             var totalPosologia = CalcularTotal(_borrador.PosolCantidad, _borrador.Frecuencia, _borrador.Dias);
             var cantidadPersistida = totalPosologia ?? _borrador.PosolCantidad?.Trim();
-            // Carga manual (suelto) sin codigo: se estampa el CUP por defecto para
-            // no dejar la columna vacia (RIPS). Solo cuando el flag del tenant esta on.
+            // Carga manual (suelto): si el flag esta on y no hay codigo, se autonumera
+            // (NS-001, NS-002, ...). Si el profesional escribio un codigo, se respeta.
             var codigoIns = _borrador.Codigo;
-            if (_permitirManuales && string.IsNullOrWhiteSpace(codigoIns)) { codigoIns = CupPorDefecto; }
+            if (_permitirManuales && string.IsNullOrWhiteSpace(codigoIns)) { codigoIns = SiguienteConsecutivo(PrefijoConsecutivo); }
             var creado = await InsumoSvc.AgregarAsync(hid, new AgregarInsumoRequest(
                 codigoIns,
                 _borrador.Descripcion!,

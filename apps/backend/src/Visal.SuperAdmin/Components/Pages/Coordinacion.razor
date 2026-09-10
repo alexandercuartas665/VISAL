@@ -351,6 +351,71 @@ else if (_tabSel == "Coordinaciones")
     else
     {
         <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-form cd-form">
+                <div class="ase-f ase-f-wide">
+                    <label>Tipo asignacion</label>
+                    <select class="form-select form-select-sm" @bind="_coTipoSel">
+                        <option value="">Todos los tipos</option>
+                        @foreach (var m in _modulos) { <option value="@m">@m</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Perido</label>
+                    <select class="form-select form-select-sm" @bind="_coAnio">
+                        @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Mes Vigente</label>
+                    <select class="form-select form-select-sm" @bind="_coMes">
+                        <option value="0">(Todos los meses)</option>
+                        @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Fecha asignacion</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_coFecha" />
+                </div>
+                <div class="ase-f">
+                    <label>Sede</label>
+                    @if (_puedeElegirSede)
+                    {
+                        <select class="form-select form-select-sm" @bind="_coSedeSel">
+                            <option value="">(Todas las sedes)</option>
+                            @foreach (var sd in _sedes) { <option value="@sd">@sd</option> }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="form-control form-control-sm asg-ro" readonly value="@(_miSucursalNombre ?? "(Todas)")" title="Sede fijada por tu usuario" />
+                    }
+                </div>
+                <div class="ase-f">
+                    <label>EPS</label>
+                    <select class="form-select form-select-sm" @bind="_coEpsSel">
+                        <option value="">(Todas las EPS)</option>
+                        @foreach (var eps in _epsList) { <option value="@eps">@eps</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>No Orden</label>
+                    <input class="form-control form-control-sm mono" @bind="_coNoOrden" placeholder="" />
+                </div>
+                <div class="ase-f">
+                    <label>Numero Documento</label>
+                    <input class="form-control form-control-sm mono" @bind="_coDoc" placeholder="BUSQUEDA DE PACIENTE" />
+                </div>
+                <div class="ase-f ase-f-wide cd-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="CargarCoordinaciones" disabled="@_busy">
+                        @(_busy ? "Cargando..." : "Cargar coordinaciones")
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosCoord">Limpiar</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="ase-card">
             <div class="cd-coord-h">
                 <div>
                     <div class="ase-card-h" style="margin-bottom:2px;">Coordinaciones eliminables</div>
@@ -377,6 +442,7 @@ else if (_tabSel == "Coordinaciones")
                         <thead>
                             <tr>
                                 <th>Paciente</th>
+                                <th>Fecha asig.</th>
                                 <th>Contrato</th>
                                 <th>Servicio</th>
                                 <th>Sede</th>
@@ -396,6 +462,7 @@ else if (_tabSel == "Coordinaciones")
                                     <div class="fw-600">@c.PacienteNombre</div>
                                     <div class="small text-muted">@c.PacienteDoc</div>
                                 </td>
+                                <td class="small mono">@(c.FechaAsignacion?.ToString("dd/MM/yyyy") ?? "-")</td>
                                 <td>@c.ContratoCodigo</td>
                                 <td>
                                     <div>@c.NombreServicio</div>
@@ -990,6 +1057,16 @@ else if (_tabSel == "Calendario")
     private List<string> _epsList = new();
     private string _epsSel = "";
 
+    // Filtros del tab "Coordinaciones" (independientes del tab Solicitudes).
+    private string _coTipoSel = "";
+    private int _coAnio = DateTime.Now.Year;
+    private int _coMes = 0;
+    private string _coNoOrden = "";
+    private string _coDoc = "";
+    private string _coSedeSel = "";
+    private string _coEpsSel = "";
+    private DateOnly? _coFecha;
+
     // Filtros.
     private string _tipoSel = "";
     private AsignacionEstadoFiltro _estado = AsignacionEstadoFiltro.Pendientes;
@@ -1541,11 +1618,31 @@ else if (_tabSel == "Calendario")
         _busy = true; _error = null; _ok = null;
         try
         {
-            var raw = await Svc.ListarCoordinacionesEliminablesAsync(_modulos, _miSucursalNombre);
+            // Mismos filtros que el tab Solicitudes + fecha de la asignacion.
+            var modulos = string.IsNullOrEmpty(_coTipoSel) ? _modulos : new List<string> { _coTipoSel };
+            int? mesFiltro = _coMes >= 1 && _coMes <= 12 ? _coMes : null;
+            var sedeFiltro = _puedeElegirSede
+                ? (string.IsNullOrWhiteSpace(_coSedeSel) ? null : _coSedeSel)
+                : _miSucursalNombre;
+            var raw = await Svc.ListarCoordinacionesEliminablesAsync(
+                modulos,
+                sedeFiltro,
+                _coAnio,
+                mesFiltro,
+                string.IsNullOrWhiteSpace(_coNoOrden) ? null : _coNoOrden,
+                string.IsNullOrWhiteSpace(_coDoc) ? null : _coDoc,
+                string.IsNullOrWhiteSpace(_coEpsSel) ? null : _coEpsSel,
+                _coFecha);
             _coordList = raw.ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private void LimpiarFiltrosCoord()
+    {
+        _coTipoSel = ""; _coNoOrden = ""; _coDoc = ""; _coSedeSel = ""; _coEpsSel = "";
+        _coAnio = DateTime.Now.Year; _coMes = 0; _coFecha = null;
     }
 
     private void AbrirModalEliminarCoord(CoordinacionEliminableDto c)

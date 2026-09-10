@@ -107,6 +107,10 @@
             {
                 <span><b>Doc:</b> @PacienteTipoDoc @PacienteDoc</span>
             }
+            @if (!string.IsNullOrWhiteSpace(PacienteEps))
+            {
+                <span><b>EPS:</b> @PacienteEps</span>
+            }
             @if (!string.IsNullOrWhiteSpace(EspecialistaNombre))
             {
                 <span><b>Atiende:</b> @EspecialistaNombre</span>
@@ -167,6 +171,7 @@
     [Parameter] public string? PacienteNombre { get; set; }
     [Parameter] public string? PacienteTipoDoc { get; set; }
     [Parameter] public string? PacienteDoc { get; set; }
+    [Parameter] public string? PacienteEps { get; set; }
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public string? OrdenNum { get; set; }
     /// <summary>Subtitulo opcional bajo el titulo del formato (p.ej. "Orden 1 de 2"

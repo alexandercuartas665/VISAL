@@ -107,6 +107,7 @@ else
                                          PacienteNombre="@(_paciente?.NombreCompleto)"
                                          PacienteTipoDoc="@(_paciente?.TipoDocumento)"
                                          PacienteDoc="@(_paciente?.NumeroDocumento)"
+                                         PacienteEps="@_epsOrden"
                                          EspecialistaNombre="@_hc.EspecialistaNombre"
                                          MostrarPieFormula="true"
                                          FechaLinea="@FechaLineaHc()"
@@ -588,6 +589,10 @@ else
     private bool _loading = true;
     private Guid _loadedHcId;  // guarda contra recargas repetidas en el mismo HcId
     private HistoriaClinicaDetailDto? _hc;
+
+    /// <summary>EPS/aseguradora que imprimen las ordenes: la CONGELADA en la asignacion
+    /// de la que proviene la HC; si no hay ese enlace, la EPS en vivo del paciente.</summary>
+    private string? _epsOrden;
     private PacienteAsignacionDto? _paciente;
 
     // Que docs incluir, calculados desde el parametro Docs
@@ -750,6 +755,9 @@ else
         _hc = await HcSvc.GetAsync(HcId);
         if (_hc is null) { return; }
         _paciente = await AsigSvc.GetPacienteAsync(_hc.PacienteId);
+        // EPS que imprimen las ordenes: la congelada en la asignacion de esta HC; si
+        // no hay ese enlace (ej. orden suelta) cae a la EPS en vivo del paciente.
+        _epsOrden = await AsigSvc.ResolverEpsAsignacionPorHcAsync(HcId) ?? _paciente?.Eps;
 
         // Si va a salir HC, cargar su schema + valores.
         if (_incluirHc)
@@ -1256,6 +1264,11 @@ else
 
     private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea, string? subtitulo = null) => __builder =>
     {
+        // La EPS/aseguradora (congelada de la asignacion) solo se imprime en las
+        // ORDENES, no en HC/evoluciones/escalas/consentimientos.
+        var _tc = (tipoCorto ?? "").ToUpperInvariant();
+        var _esOrden = _tc is "MED" or "SRV" or "INS" or "REM" or "REGMED" or "RXEXT" or "LABEXT" or "SRVEXT";
+        var eps = _esOrden ? _epsOrden : null;
         // El titulo del documento es el del HEADER del schema (lo que el
         // disenador escribio en "Titulo" del editor de formularios, ej.
         // "HISTORIA CLINICA GENERAL"). Si esta vacio se cae a `titulo`, que
@@ -1299,6 +1312,10 @@ else
             <div class="pack-hdr-meta">
                 <span><b>Paciente:</b> @(_paciente?.NombreCompleto ?? "-")</span>
                 <span><b>Doc:</b> @(_paciente?.TipoDocumento) @(_paciente?.NumeroDocumento)</span>
+                @if (!string.IsNullOrWhiteSpace(eps))
+                {
+                    <span><b>EPS:</b> @eps</span>
+                }
                 @if (!string.IsNullOrWhiteSpace(_hc.EspecialistaNombre))
                 {
                     <span><b>Atiende:</b> @_hc.EspecialistaNombre</span>

@@ -280,6 +280,22 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         // El frontend YA arma el request con el valor solo en el primer chip con
         // Cantidad>0 por PaqueteInstanciaId. Aqui re-validamos y forzamos la regla
         // por si algun cliente enviase datos inconsistentes (bug o UI vieja).
+        // EPS/aseguradora que se congela en cada asignacion: la del CONTRATO bajo el
+        // que se asigna el servicio (historicamente correcto para las ordenes). Si el
+        // contrato no resuelve, cae a la aseguradora principal del paciente. Se congela
+        // para que las re-impresiones no deriven si luego cambian la EPS en Admision.
+        string? aseguradoraNombreSnap = null;
+        if (contrato is not null)
+        {
+            aseguradoraNombreSnap = await db.Aseguradoras.AsNoTracking()
+                .Where(a => a.Id == contrato.AseguradoraId).Select(a => a.Nombre).FirstOrDefaultAsync(ct);
+        }
+        if (string.IsNullOrWhiteSpace(aseguradoraNombreSnap) && paciente.AseguradoraId is Guid aseSnapId)
+        {
+            aseguradoraNombreSnap = await db.Aseguradoras.AsNoTracking()
+                .Where(a => a.Id == aseSnapId).Select(a => a.Nombre).FirstOrDefaultAsync(ct);
+        }
+
         var yaAsignadoValor = new HashSet<Guid>();
         foreach (var it in req.Items)
         {
@@ -308,6 +324,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 Modulo = it.Modulo,
                 Cantidad = it.Cantidad,
                 ContratoCodigo = req.ContratoCodigo,
+                AseguradoraNombre = aseguradoraNombreSnap,
                 CodigoAutorizacion = it.CodigoAutorizacion,
                 AnioServicio = it.AnioServicio,
                 MesVigencia = it.MesVigencia,
@@ -1560,9 +1577,25 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     // downstream (HC/nota). La UI las agrupa por asignacion_id y ofrece un
     // boton eliminar. La eliminacion re-valida antes de tocar la BD.
 
+    public async Task<string?> ResolverEpsAsignacionPorHcAsync(Guid historiaId, CancellationToken ct = default)
+    {
+        // HC -> pivote sesion/HC -> sesion -> turno -> asignacion (AseguradoraNombre).
+        return await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(pv => pv.HistoriaClinicaId == historiaId
+                      && pv.Sesion != null && pv.Sesion.AsignacionTurno != null
+                      && pv.Sesion.AsignacionTurno.Asignacion != null
+                      && pv.Sesion.AsignacionTurno.Asignacion.AseguradoraNombre != null)
+            .Select(pv => pv.Sesion!.AsignacionTurno!.Asignacion!.AseguradoraNombre)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<IReadOnlyList<CoordinacionEliminableDto>> ListarCoordinacionesEliminablesAsync(
         IReadOnlyList<string> modulosPermitidos,
         string? sucursalNombre = null,
+        int? anio = null, int? mesVigencia = null,
+        string? noOrden = null, string? documentoPaciente = null,
+        string? aseguradoraNombre = null,
+        DateOnly? fechaAsignacion = null,
         CancellationToken ct = default)
     {
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
@@ -1601,6 +1634,26 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             var s = sucursalNombre.Trim();
             q = q.Where(a => a.Sucursal == s);
         }
+        // Filtros equivalentes a los del tab Solicitudes + fecha de la asignacion.
+        if (anio is int ay) { q = q.Where(a => a.AnioServicio == (short)ay); }
+        if (mesVigencia is int mv && mv >= 1 && mv <= 12) { q = q.Where(a => a.MesVigencia == (short)mv); }
+        if (!string.IsNullOrWhiteSpace(noOrden))
+        {
+            var n = noOrden.Trim();
+            q = q.Where(a => a.CodigoAutorizacion != null && a.CodigoAutorizacion.Contains(n));
+        }
+        if (!string.IsNullOrWhiteSpace(documentoPaciente))
+        {
+            var d = documentoPaciente.Trim();
+            q = q.Where(a => a.Paciente != null && a.Paciente.NumeroDocumento.Contains(d));
+        }
+        if (!string.IsNullOrWhiteSpace(aseguradoraNombre))
+        {
+            var asg = aseguradoraNombre.Trim();
+            q = q.Where(a => a.Paciente != null && a.Paciente.Aseguradora != null
+                          && a.Paciente.Aseguradora.Nombre == asg);
+        }
+        if (fechaAsignacion is DateOnly fa) { q = q.Where(a => a.FechaInicio == fa); }
 
         var asigs = await q
             .OrderByDescending(a => a.CreatedAt)
@@ -1670,7 +1723,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 EspecialistasNombres: string.Join(", ", espNombres),
                 PrimeraFecha: sesList.Count > 0 ? sesList.Min() : null,
                 UltimaFecha: sesList.Count > 0 ? sesList.Max() : null,
-                CreadoEn: a.CreatedAt));
+                CreadoEn: a.CreatedAt,
+                FechaAsignacion: a.FechaInicio));
         }
         return result;
     }

@@ -228,7 +228,8 @@ public sealed record CoordinacionEliminableDto(
     string EspecialistasNombres,
     DateOnly? PrimeraFecha,
     DateOnly? UltimaFecha,
-    DateTimeOffset CreadoEn);
+    DateTimeOffset CreadoEn,
+    DateOnly? FechaAsignacion);
 
 /// <summary>Filtro de estado para el grid de Coordinacion. Equivale al cmbEstado del legacy.</summary>
 public enum AsignacionEstadoFiltro
@@ -504,9 +505,19 @@ public interface IAsignacionService
     /// El resultado se puede eliminar con seguridad porque no hay artefacto
     /// clinico downstream.
     /// </summary>
+    /// <summary>EPS/aseguradora congelada en la asignacion de la que proviene esta HC
+    /// (via pivote sesion→turno→asignacion). Null si la HC no tiene ese enlace
+    /// (ej. ordenes sueltas) o la asignacion no tiene el snapshot. El caller cae a la
+    /// EPS en vivo del paciente cuando esto es null.</summary>
+    Task<string?> ResolverEpsAsignacionPorHcAsync(Guid historiaId, CancellationToken ct = default);
+
     Task<IReadOnlyList<CoordinacionEliminableDto>> ListarCoordinacionesEliminablesAsync(
         IReadOnlyList<string> modulosPermitidos,
         string? sucursalNombre = null,
+        int? anio = null, int? mesVigencia = null,
+        string? noOrden = null, string? documentoPaciente = null,
+        string? aseguradoraNombre = null,
+        DateOnly? fechaAsignacion = null,
         CancellationToken ct = default);
 
     /// <summary>

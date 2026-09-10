@@ -44,6 +44,14 @@ public class Asignacion : TenantEntity
 
     public string ContratoCodigo { get; set; } = null!;
 
+    /// <summary>Snapshot del nombre de la EPS/aseguradora del paciente al momento de
+    /// crear la asignacion. Se congela aqui para que las ordenes (formula, servicios,
+    /// insumos, etc.) impriman SIEMPRE la EPS vigente en ese momento y una
+    /// re-impresion no derive si luego cambian la aseguradora del paciente en
+    /// Admision. Null en asignaciones viejas sin backfill o si el paciente no tenia
+    /// aseguradora.</summary>
+    public string? AseguradoraNombre { get; set; }
+
     /// <summary>Numero de orden / autorizacion de la aseguradora.</summary>
     public string? CodigoAutorizacion { get; set; }
 

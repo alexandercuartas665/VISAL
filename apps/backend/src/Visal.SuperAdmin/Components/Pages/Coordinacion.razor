@@ -176,6 +176,7 @@
                                             <td>
                                                 <div>@p.PacienteNombre</div>
                                                 <div class="small text-muted mono">@(string.IsNullOrWhiteSpace(p.PacienteDocumento) ? "—" : $"{p.PacienteTipoDoc} {p.PacienteDocumento}".Trim())</div>
+                                                <div class="small text-muted">@(string.IsNullOrWhiteSpace(p.PacienteAseguradora) ? "—" : p.PacienteAseguradora)</div>
                                             </td>
                                             <td class="small">@(string.IsNullOrWhiteSpace(p.Sucursal) ? "—" : p.Sucursal)</td>
                                             <td>@p.NombreServicio</td>

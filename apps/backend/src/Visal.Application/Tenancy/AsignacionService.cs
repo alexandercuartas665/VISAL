@@ -647,7 +647,14 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
         var pacs = await db.Pacientes.AsNoTracking()
             .Where(p => pacIds.Contains(p.Id))
-            .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto, p.TipoDocumento })
+            .Select(p => new
+            {
+                p.Id,
+                p.NumeroDocumento,
+                p.NombreCompleto,
+                p.TipoDocumento,
+                Aseguradora = p.Aseguradora != null ? p.Aseguradora.Nombre : null
+            })
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
         // Suma de turnos ya creados por asignacion -> para mostrar "Parcial" en el grid
@@ -700,7 +707,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 coordinados,
                 Guid.TryParse(a.ServicioId, out var sgid) && espDict.TryGetValue(sgid, out var esp) ? esp : null,
                 a.PdfAutorizacionUrl,
-                a.Sucursal);
+                a.Sucursal,
+                p?.Aseguradora);
         }).ToList();
     }
 

@@ -92,7 +92,8 @@ public sealed record AsignacionPendienteDto(
     int TurnosCoordinados,
     string? Especialidad,
     string? PdfAutorizacionUrl,
-    string? Sucursal);
+    string? Sucursal,
+    string? PacienteAseguradora);
 
 /// <summary>Profesional disponible para asignar al servicio (alimenta "Seleccione Medico Especialista").</summary>
 public sealed record EspecialistaDto(Guid Id, string NumeroDocumento, string NombreCompleto, string? TipoProfesional);

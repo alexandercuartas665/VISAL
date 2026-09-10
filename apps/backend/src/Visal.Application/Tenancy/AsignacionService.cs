@@ -587,6 +587,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         int? anio = null, int? mesVigencia = null,
         string? noOrden = null, string? documentoPaciente = null,
         string? sucursalNombre = null,
+        string? aseguradoraNombre = null,
         CancellationToken ct = default)
     {
         // Sin modulos permitidos -> grid vacio (el usuario no es coordinador de ningun modulo).
@@ -636,6 +637,15 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             // (admin global, vista historica, etc.).
             var s = sucursalNombre.Trim();
             q = q.Where(a => a.Sucursal == s);
+        }
+        if (!string.IsNullOrWhiteSpace(aseguradoraNombre))
+        {
+            // Filtro por EPS/aseguradora del paciente (mismo nombre que se muestra en
+            // la grilla, tomado de Paciente.Aseguradora.Nombre). El caller pasa null
+            // cuando no se eligio ninguna.
+            var asg = aseguradoraNombre.Trim();
+            q = q.Where(a => a.Paciente != null && a.Paciente.Aseguradora != null
+                          && a.Paciente.Aseguradora.Nombre == asg);
         }
 
         var asigs = await q

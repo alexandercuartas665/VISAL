@@ -409,6 +409,7 @@ public interface IAsignacionService
         int? anio = null, int? mesVigencia = null,
         string? noOrden = null, string? documentoPaciente = null,
         string? sucursalNombre = null,
+        string? aseguradoraNombre = null,
         CancellationToken ct = default);
 
     /// <summary>

@@ -6,6 +6,7 @@
 @inject IAsignacionService Svc
 @inject IUsuarioAdminService UsuSvc
 @inject ISucursalService SucSvc
+@inject IAseguradoraService AsegSvc
 
 <PageTitle>Coordinacion - Visal</PageTitle>
 
@@ -86,6 +87,13 @@
                             {
                                 <input class="form-control form-control-sm asg-ro" readonly value="@(_miSucursalNombre ?? "(Todas)")" title="Sede fijada por tu usuario" />
                             }
+                        </div>
+                        <div class="ase-f">
+                            <label>EPS</label>
+                            <select class="form-select form-select-sm" @bind="_epsSel">
+                                <option value="">(Todas las EPS)</option>
+                                @foreach (var eps in _epsList) { <option value="@eps">@eps</option> }
+                            </select>
                         </div>
                         <div class="ase-f">
                             <label>Estado</label>
@@ -978,6 +986,10 @@ else if (_tabSel == "Calendario")
     private bool _puedeElegirSede;
     private string _sedeSel = "";
 
+    /// <summary>EPS/aseguradoras disponibles para el filtro (nombres).</summary>
+    private List<string> _epsList = new();
+    private string _epsSel = "";
+
     // Filtros.
     private string _tipoSel = "";
     private AsignacionEstadoFiltro _estado = AsignacionEstadoFiltro.Pendientes;
@@ -1156,6 +1168,14 @@ else if (_tabSel == "Calendario")
                     .OrderBy(n => n)
                     .ToList();
             }
+
+            // EPS/aseguradoras para el filtro (todas, cualquier usuario).
+            var asegs = await AsegSvc.ListAseguradorasAsync();
+            _epsList = asegs.Select(a => a.Nombre)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct()
+                .OrderBy(n => n)
+                .ToList();
         }
         catch (Exception ex) { _error = "Error inicial: " + ex.Message; }
     }
@@ -1189,7 +1209,8 @@ else if (_tabSel == "Calendario")
             _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
                 string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
                 string.IsNullOrWhiteSpace(_doc) ? null : _doc,
-                sedeFiltro)).ToList();
+                sedeFiltro,
+                string.IsNullOrWhiteSpace(_epsSel) ? null : _epsSel)).ToList();
             _solicitudSel = null;
             _especialistas = new();
             if (_pendientes.Count == 0) { _ok = "Sin servicios para esta combinacion."; }
@@ -1200,7 +1221,7 @@ else if (_tabSel == "Calendario")
 
     private void LimpiarFiltros()
     {
-        _tipoSel = ""; _noOrden = ""; _doc = ""; _sedeSel = "";
+        _tipoSel = ""; _noOrden = ""; _doc = ""; _sedeSel = ""; _epsSel = "";
         _estado = AsignacionEstadoFiltro.Pendientes;
         // Volvemos al default ancho: ano actual + todos los meses (no esconder nada).
         _anio = DateTime.Now.Year; _mes = 0;

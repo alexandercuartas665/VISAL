@@ -1646,7 +1646,15 @@ else
             try
             {
                 var frozen = JsonSerializer.Deserialize<Dictionary<string, string?>>(emision.BagJson);
-                if (frozen is not null) { return frozen; }
+                if (frozen is not null)
+                {
+                    // El diagnostico NO se congela con la orden: es dato de la HC, y el
+                    // medico puede completar la historia (agregar un diagnostico que
+                    // olvido) despues de emitir. Se toma siempre en vivo para que la
+                    // formula lo refleje sin alterar los medicamentos/firma firmados.
+                    AplicarDiagnosticoEnVivo(frozen);
+                    return frozen;
+                }
             }
             catch { }
         }
@@ -1669,6 +1677,46 @@ else
             valores["profesional_nombre"] = _hc?.EspecialistaNombre;
         }
         return valores;
+    }
+
+    /// <summary>Aplica SOLO el/los mapeo(s) de diagnostico (source "diagnosticos.*")
+    /// de la ruta historiaMedica sobre un bag ya existente, tomando los diagnosticos
+    /// EN VIVO de la HC. Se usa sobre el snapshot congelado de una orden emitida para
+    /// que la formula refleje diagnosticos que el medico haya completado despues de
+    /// emitir, sin tocar los medicamentos ni la firma (que si son inmutables).</summary>
+    private void AplicarDiagnosticoEnVivo(Dictionary<string, string?> bag)
+    {
+        if (_fdMed is null || _hc is null) { return; }
+        try
+        {
+            var rutas = PrefillRouteSet.FromJson(_fdMed.PrefillRoutesJson);
+            var ruta = rutas.Routes.FirstOrDefault(r =>
+                string.Equals(r.SourceModule, "historiaMedica", StringComparison.OrdinalIgnoreCase));
+            if (ruta is null) { return; }
+
+            var dxs = HcDiagnosticosReader.Leer(_hc.SchemaJson, _hc.ValoresJson);
+            var fuentes = new HistoriaMedicaPrefillHelper.HmFuentes(
+                Array.Empty<OrdenMedicamentoItemDto>(),
+                new List<RemisionItemDto>(), new List<IncapacidadItemDto>(), new List<CertificacionItemDto>(),
+                new List<OrdenServicioItemDto>(), new List<InsumoItemDto>(),
+                new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(), new List<OrdenExternaItemDto>(),
+                new List<SuministroMedicamentoItemDto>(),
+                dxs);
+            var stringFuente = HistoriaMedicaPrefillHelper.BuildValores(fuentes);
+
+            foreach (var m in ruta.Mappings)
+            {
+                if (string.IsNullOrWhiteSpace(m.Source) || string.IsNullOrWhiteSpace(m.Target)) { continue; }
+                if (!m.Source.StartsWith("diagnosticos.", StringComparison.OrdinalIgnoreCase)) { continue; }
+                // El diagnostico de la formula (ORD-MEDI) es un campo de texto; tomamos
+                // el string derivado en vivo (ej. "CIE 10: [Z251] ...").
+                if (stringFuente.TryGetValue(m.Source, out var v))
+                {
+                    bag[m.Target] = v;
+                }
+            }
+        }
+        catch { }
     }
 
     private static bool IsImageUrl(string? v)

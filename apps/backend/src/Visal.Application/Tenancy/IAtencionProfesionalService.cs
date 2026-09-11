@@ -80,7 +80,11 @@ public sealed record MiServicioAsignadoDto(
     /// sesion aun no tiene HC. Util para auditar cuando la config cambio despues de
     /// haberse ejecutado la atencion.
     /// </summary>
-    string? FormatoHistoriaEjecutado = null);
+    string? FormatoHistoriaEjecutado = null,
+    /// <summary>Sede/sucursal de la asignacion (Asignacion.Sucursal) — la sede donde
+    /// se presta el servicio. Se muestra como columna "Sede" en la parrilla de
+    /// Atencion. Null/vacio si la asignacion no tiene sede.</summary>
+    string? Sede = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

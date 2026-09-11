@@ -335,7 +335,8 @@ public sealed class AtencionProfesionalService(
                     horaCierre,
                     historiaClinicaIds,
                     t.ProfesionalId,
-                    formatoEjecutado));
+                    formatoEjecutado,
+                    a.Sucursal));
             }
         }
         return result;

@@ -1074,14 +1074,15 @@ else
         new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        15),
         new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                16),
         new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                17),
-        new ColDef("profesional",   "Profesional",     "Profesional",                             18),
-        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          19),
+        new ColDef("sede",          "Sede",            "Sede",                                    18),
+        new ColDef("profesional",   "Profesional",     "Profesional",                             19),
+        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          20),
         // HH:mm de HistoriaClinica.FechaCierre — cuando la HC vinculada a esta
         // sesion ya esta Cerrada. Colocado a la derecha de FechaNota (misma
         // sesion, mismo evento) para que el operador vea fecha + hora juntos.
-        new ColDef("hora_cierre",   "HoraCierre",      "Hora<br/>Cierre",                         20),
+        new ColDef("hora_cierre",   "HoraCierre",      "Hora<br/>Cierre",                         21),
         // Capa 08 Ola 3 — chip del estado del ciclo de revision de la HC del paciente.
-        new ColDef("revision_estado","Revision",        "Revision",                                21),
+        new ColDef("revision_estado","Revision",        "Revision",                                22),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -1255,6 +1256,12 @@ else
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.NombrePaciente);
+                __b.CloseElement();
+                break;
+            case "sede":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                __b.AddContent(seq++, string.IsNullOrWhiteSpace(s.Sede) ? "—" : s.Sede);
                 __b.CloseElement();
                 break;
             case "profesional":

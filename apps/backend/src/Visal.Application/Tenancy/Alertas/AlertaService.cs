@@ -302,14 +302,13 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
         var enviosIdx = enviosPrevios.ToDictionary(e => (e.ReglaId, e.AsignacionId, e.Periodo));
 
-        // Colapso de WhatsApp: un profesional puede tener varias asignaciones que
-        // disparan la misma regla en el mismo periodo. La notificacion a WhatsApp debe
-        // enviarse UNA sola vez por (contacto, periodo) — el informe ya agrega todas
-        // sus terapias. Sembramos con los envios WhatsApp exitosos previos para no
-        // reenviar entre corridas. Las asignaciones extra se registran como "agrupada".
-        var whatsappNotificado = new HashSet<string>(enviosPrevios
-            .Where(e => e.Canal == AlertaCanal.WhatsApp && e.Exito && !string.IsNullOrEmpty(e.Contacto))
-            .Select(e => $"{e.Contacto}|{e.Periodo}"));
+        // Colapso de WhatsApp DENTRO de esta corrida: un profesional puede tener varias
+        // asignaciones que disparan la misma regla en el mismo periodo; la notificacion
+        // se envia UNA sola vez por (contacto, periodo) y las demas quedan "Agrupada"
+        // (el informe ya agrega todas sus terapias). No se siembra con historial: la
+        // deduplicacion entre corridas ya la maneja el chequeo por-asignacion (previo
+        // .Exito && !forzarReenvio); sembrar bloquearia el reenvio forzado.
+        var whatsappNotificado = new HashSet<string>();
 
         foreach (var regla in reglas)
         {

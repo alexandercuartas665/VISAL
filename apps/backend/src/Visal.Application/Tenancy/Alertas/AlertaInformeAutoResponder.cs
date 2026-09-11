@@ -68,8 +68,15 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
             if (conv is null) { return 0; }
         }
 
+        // Acota el informe al profesional dueño de este celular: el enlace que se
+        // manda al profesional debe traer SOLO sus terapias pendientes, no las de
+        // todos. Se resuelve por coincidencia de los ultimos 10 digitos del celular
+        // (el Celular en ficha puede venir con o sin indicativo/espacios). Si no hay
+        // match (ej. el numero no es de un profesional), el enlace queda tenant-wide.
+        var profesionalId = await ResolverProfesionalPorTelefonoAsync(tenantId, digits, ct);
+
         string url;
-        try { url = _informe.GenerarEnlace(baseUri, tenantId); }
+        try { url = _informe.GenerarEnlace(baseUri, tenantId, profesionalId); }
         catch (Exception ex)
         {
             _log.LogWarning(ex, "AutoResponderInforme tenant={Tenant}: no se pudo generar el enlace", tenantId);
@@ -85,6 +92,27 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         }
         _log.LogWarning("AutoResponderInforme tenant={Tenant} telefono={Tel}: fallo el envio ({Err})", tenantId, Mask(digits), res.Error);
         return 0;
+    }
+
+    /// <summary>Busca el profesional del tenant cuyo celular coincide (ultimos 10
+    /// digitos) con el telefono dado. Null si ninguno coincide. El match por 10
+    /// digitos tolera indicativo (57) y formato (espacios/guiones) en la ficha.</summary>
+    private async Task<Guid?> ResolverProfesionalPorTelefonoAsync(Guid tenantId, string digits, CancellationToken ct)
+    {
+        var local = digits.Length >= 10 ? digits[^10..] : digits;
+        if (local.Length < 7) { return null; }
+        var profs = await _db.Profesionales.AsNoTracking().IgnoreQueryFilters()
+            .Where(p => p.TenantId == tenantId && p.Celular != null && p.Celular != "")
+            .Select(p => new { p.Id, p.Celular })
+            .ToListAsync(ct);
+        foreach (var p in profs)
+        {
+            var cd = new string((p.Celular ?? "").Where(char.IsDigit).ToArray());
+            if (cd.Length == 0) { continue; }
+            var cdLocal = cd.Length >= 10 ? cd[^10..] : cd;
+            if (cdLocal == local) { return p.Id; }
+        }
+        return null;
     }
 
     /// <summary>Solo digitos; antepone 57 si son 10 (celular CO). Null si vacio.</summary>

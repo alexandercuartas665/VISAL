@@ -112,9 +112,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var tid = Svc.ValidarToken(T ?? "");
-        if (tid is not Guid t) { _invalido = true; return; }
-        _data = await Svc.ObtenerAsync(t);
+        var info = Svc.ValidarToken(T ?? "");
+        if (info is null) { _invalido = true; return; }
+        _data = await Svc.ObtenerAsync(info.TenantId, info.ProfesionalId);
         if (_data is null) { _invalido = true; }
     }
 }

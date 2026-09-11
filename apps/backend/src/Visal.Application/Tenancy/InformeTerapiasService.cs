@@ -18,31 +18,48 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
     // El token lleva tenant + vencimiento, cifrado con ISecretProtector. Prefijo
     // "inf1" para poder versionar/validar el formato al desproteger.
-    public string GenerarEnlace(string baseUri, Guid? tenantId = null, int diasValidez = 30)
+    public string GenerarEnlace(string baseUri, Guid? tenantId = null, Guid? profesionalId = null, int diasValidez = 30)
     {
         var tid = tenantId ?? _tenant.TenantId
             ?? throw new InvalidOperationException("Sin tenant activo para generar el enlace.");
         var exp = DateTimeOffset.UtcNow.AddDays(diasValidez <= 0 ? 30 : diasValidez).ToUnixTimeSeconds();
-        var token = _protector.Protect($"inf1|{tid:N}|{exp}");
+        // inf1 = tenant-wide (compat). inf2 = acotado a un profesional.
+        var plain = profesionalId is Guid pid
+            ? $"inf2|{tid:N}|{pid:N}|{exp}"
+            : $"inf1|{tid:N}|{exp}";
+        var token = _protector.Protect(plain);
         var b = (baseUri ?? "").TrimEnd('/');
         return $"{b}/informe/terapias-pendientes?t={Uri.EscapeDataString(token)}";
     }
 
-    public Guid? ValidarToken(string token)
+    public InformeTokenInfo? ValidarToken(string token)
     {
         if (string.IsNullOrWhiteSpace(token)) { return null; }
         string plain;
         try { plain = _protector.Unprotect(token); }
         catch { return null; }
         var parts = plain.Split('|');
-        if (parts.Length != 3 || parts[0] != "inf1") { return null; }
-        if (!Guid.TryParse(parts[1], out var tid)) { return null; }
-        if (!long.TryParse(parts[2], out var exp)) { return null; }
-        if (DateTimeOffset.FromUnixTimeSeconds(exp) < DateTimeOffset.UtcNow) { return null; }
-        return tid;
+        // inf1|tenant|exp   (tenant-wide)
+        if (parts.Length == 3 && parts[0] == "inf1")
+        {
+            if (!Guid.TryParse(parts[1], out var tid1)) { return null; }
+            if (!long.TryParse(parts[2], out var exp1)) { return null; }
+            if (DateTimeOffset.FromUnixTimeSeconds(exp1) < DateTimeOffset.UtcNow) { return null; }
+            return new InformeTokenInfo(tid1, null);
+        }
+        // inf2|tenant|profesional|exp   (acotado a un profesional)
+        if (parts.Length == 4 && parts[0] == "inf2")
+        {
+            if (!Guid.TryParse(parts[1], out var tid2)) { return null; }
+            if (!Guid.TryParse(parts[2], out var pid)) { return null; }
+            if (!long.TryParse(parts[3], out var exp2)) { return null; }
+            if (DateTimeOffset.FromUnixTimeSeconds(exp2) < DateTimeOffset.UtcNow) { return null; }
+            return new InformeTokenInfo(tid2, pid);
+        }
+        return null;
     }
 
-    public async Task<InformeTerapiasResult?> ObtenerAsync(Guid tenantId, CancellationToken ct = default)
+    public async Task<InformeTerapiasResult?> ObtenerAsync(Guid tenantId, Guid? profesionalId = null, CancellationToken ct = default)
     {
         // Tenant (no es tenant-scoped): se consulta directo por Id.
         var tenant = await _db.Tenants.AsNoTracking()
@@ -55,8 +72,15 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
         // Consultas con IgnoreQueryFilters + filtro explicito por tenant: la pagina
         // es anonima (sin cookie de tenant), asi que el filtro global no aplica.
-        var turnos = await _db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
-            .Where(t => t.TenantId == tenantId)
+        var turnosQ = _db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId);
+        // Acota a un profesional cuando el enlace se genero para el (auto-respuesta
+        // de la alerta a ese profesional): solo sus turnos.
+        if (profesionalId is Guid pid)
+        {
+            turnosQ = turnosQ.Where(t => t.ProfesionalId == pid);
+        }
+        var turnos = await turnosQ
             .Select(t => new { t.Id, t.AsignacionId, t.ProfesionalId, t.Cantidad })
             .ToListAsync(ct);
         if (turnos.Count == 0)

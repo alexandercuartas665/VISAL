@@ -94,11 +94,33 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         return 0;
     }
 
-    /// <summary>Busca el profesional del tenant cuyo celular coincide (ultimos 10
-    /// digitos) con el telefono dado. Null si ninguno coincide. El match por 10
-    /// digitos tolera indicativo (57) y formato (espacios/guiones) en la ficha.</summary>
+    /// <summary>Resuelve el profesional al que se acota el informe para este telefono.
+    /// 1) El profesional de la asignacion del AlertaEnvio WhatsApp mas reciente a ese
+    ///    numero (lo mas fiable: es el alerta que realmente se le mando, funciona
+    ///    incluso con el telefono de prueba del simulador). 2) Fallback: el profesional
+    ///    cuyo celular coincide (ultimos 10 digitos). Null si nada coincide (informe
+    ///    tenant-wide).</summary>
     private async Task<Guid?> ResolverProfesionalPorTelefonoAsync(Guid tenantId, string digits, CancellationToken ct)
     {
+        var corte = DateTimeOffset.UtcNow - Ventana;
+
+        // 1) Desde el AlertaEnvio mas reciente a este numero -> su asignacion -> profesional del turno.
+        var asigId = await _db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
+            .Where(e => e.TenantId == tenantId && e.Canal == AlertaCanal.WhatsApp && e.Exito
+                        && e.Contacto == digits && e.FechaEnvio >= corte)
+            .OrderByDescending(e => e.FechaEnvio)
+            .Select(e => (Guid?)e.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        if (asigId is Guid aid)
+        {
+            var profId = await _db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
+                .Where(t => t.TenantId == tenantId && t.AsignacionId == aid && t.ProfesionalId != Guid.Empty)
+                .Select(t => (Guid?)t.ProfesionalId)
+                .FirstOrDefaultAsync(ct);
+            if (profId is Guid pOk) { return pOk; }
+        }
+
+        // 2) Fallback: por celular (ultimos 10 digitos, tolera indicativo/formato).
         var local = digits.Length >= 10 ? digits[^10..] : digits;
         if (local.Length < 7) { return null; }
         var profs = await _db.Profesionales.AsNoTracking().IgnoreQueryFilters()

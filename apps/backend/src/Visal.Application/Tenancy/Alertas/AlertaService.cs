@@ -302,6 +302,15 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
         var enviosIdx = enviosPrevios.ToDictionary(e => (e.ReglaId, e.AsignacionId, e.Periodo));
 
+        // Colapso de WhatsApp: un profesional puede tener varias asignaciones que
+        // disparan la misma regla en el mismo periodo. La notificacion a WhatsApp debe
+        // enviarse UNA sola vez por (contacto, periodo) — el informe ya agrega todas
+        // sus terapias. Sembramos con los envios WhatsApp exitosos previos para no
+        // reenviar entre corridas. Las asignaciones extra se registran como "agrupada".
+        var whatsappNotificado = new HashSet<string>(enviosPrevios
+            .Where(e => e.Canal == AlertaCanal.WhatsApp && e.Exito && !string.IsNullOrEmpty(e.Contacto))
+            .Select(e => $"{e.Contacto}|{e.Periodo}"));
+
         foreach (var regla in reglas)
         {
             foreach (var cand in candidatos)
@@ -374,7 +383,7 @@ public sealed class AlertaService : IAlertaService
                     continue;
                 }
 
-                bool ok; string? err; string? extId = null;
+                bool ok; string? err; string? extId = null; bool agrupada = false;
                 if (contactoError is not null)
                 {
                     ok = false; err = contactoError;
@@ -399,15 +408,27 @@ public sealed class AlertaService : IAlertaService
                     }
                     else
                     {
-                        var parametros = RenderParametros(regla, ctx);
-                        if (parametros.Count != regla.HsmParameterCount)
+                        var waKey = $"{contacto}|{periodo}";
+                        if (whatsappNotificado.Contains(waKey))
                         {
-                            ok = false; err = $"La plantilla exige {regla.HsmParameterCount} parametros y la regla tiene {parametros.Count}.";
+                            // Ya se envio un WhatsApp a este profesional en este periodo:
+                            // no reenviamos. Se registra como exitoso (agrupado) para
+                            // mantener el tracking y que el informe agregue todo lo suyo.
+                            ok = true; err = null; agrupada = true;
                         }
                         else
                         {
-                            var r = await _hsm.SendTestAsync(lineId, regla.HsmTemplateId!, contacto!, parametros, actor, ct);
-                            ok = r.Ok; err = r.Error;
+                            var parametros = RenderParametros(regla, ctx);
+                            if (parametros.Count != regla.HsmParameterCount)
+                            {
+                                ok = false; err = $"La plantilla exige {regla.HsmParameterCount} parametros y la regla tiene {parametros.Count}.";
+                            }
+                            else
+                            {
+                                var r = await _hsm.SendTestAsync(lineId, regla.HsmTemplateId!, contacto!, parametros, actor, ct);
+                                ok = r.Ok; err = r.Error;
+                                if (ok) { whatsappNotificado.Add(waKey); }
+                            }
                         }
                     }
                 }
@@ -434,12 +455,14 @@ public sealed class AlertaService : IAlertaService
                 previo.Error = err;
                 previo.ExternalId = extId;
 
-                if (ok) { enviadas++; }
+                if (agrupada) { saltadas++; }
+                else if (ok) { enviadas++; }
                 else { errores++; mensajes.Add($"{regla.Nombre} / {ctx.PacienteNombre}: {err}"); }
                 filas.Add(new AlertaSimulacionFila(
                     pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
                     destTipo, destNombre, destCorreo, destTelefono, regla.Canal, contacto,
-                    ok ? "Enviada" : ("Error: " + err), Emitible: ok, EnvioOk: ok, EnvioError: err));
+                    agrupada ? "Agrupada (ya notificado al profesional este periodo)" : (ok ? "Enviada" : ("Error: " + err)),
+                    Emitible: ok, EnvioOk: agrupada ? (bool?)null : ok, EnvioError: err));
             }
         }
 

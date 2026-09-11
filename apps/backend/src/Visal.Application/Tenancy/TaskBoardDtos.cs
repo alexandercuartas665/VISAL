@@ -71,7 +71,14 @@ public sealed record TaskCardSummaryDto(
     int CommentsCount, int AttachmentsCount,
     /// <summary>Valores de los campos dinamicos del tablero (FieldKey -> valor), para la vista tabla.
     /// null/vacio si la tarjeta no tiene valores. Solo lo llena <c>ListCardsAsync</c>.</summary>
-    IReadOnlyDictionary<string, string?>? FieldValues = null);
+    IReadOnlyDictionary<string, string?>? FieldValues = null,
+    /// <summary>Nombre de quien creo la tarjeta (para mostrar en la tarjeta).</summary>
+    string? CreadorNombre = null,
+    /// <summary>Fecha/hora de creacion de la tarjeta.</summary>
+    DateTimeOffset? CreadoEn = null,
+    /// <summary>Momento en que la tarjeta entro a la columna actual (para "cuanto lleva
+    /// en esta columna"). Si null, la UI usa CreadoEn.</summary>
+    DateTimeOffset? EnColumnaDesde = null);
 
 public sealed record TaskCardDetailDto(
     TaskCardSummaryDto Card,

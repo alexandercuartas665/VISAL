@@ -39,4 +39,13 @@ public class TaskCard : TenantEntity
     /// Portado del patron Lead.FieldValuesJson de CUBOT.travels.
     /// </summary>
     public string? FieldValuesJson { get; set; }
+
+    /// <summary>Nombre para mostrar de quien creo la tarjeta (snapshot al crear). Se
+    /// muestra en la tarjeta junto con CreatedAt. Null en tarjetas viejas sin backfill.</summary>
+    public string? CreatorName { get; set; }
+
+    /// <summary>Momento en que la tarjeta entro a su columna ACTUAL. Se setea al crear
+    /// y cada vez que se mueve a otra columna. Sirve para mostrar "cuanto lleva en la
+    /// columna". Null = usar CreatedAt como referencia.</summary>
+    public DateTimeOffset? ColumnEnteredAt { get; set; }
 }

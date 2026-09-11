@@ -44,6 +44,10 @@ public interface ITaskBoardService
     Task<TaskCardSummaryDto?> CreateCardAsync(CreateTaskCardRequest request, Guid actorPlatformUserId, string actorDisplayName, CancellationToken ct = default);
     Task<TaskCardSummaryDto?> UpdateCardAsync(Guid cardId, UpdateTaskCardRequest request, Guid actorPlatformUserId, string actorDisplayName, CancellationToken ct = default);
     Task<bool> MoveCardAsync(Guid cardId, MoveTaskCardRequest request, Guid actorPlatformUserId, string actorDisplayName, CancellationToken ct = default);
+    /// <summary>Sube la tarjeta una posicion dentro de su columna (mayor prioridad).</summary>
+    Task<bool> MoveCardUpAsync(Guid cardId, Guid actorPlatformUserId, CancellationToken ct = default);
+    /// <summary>Baja la tarjeta una posicion dentro de su columna (menor prioridad).</summary>
+    Task<bool> MoveCardDownAsync(Guid cardId, Guid actorPlatformUserId, CancellationToken ct = default);
     Task<bool> ArchiveCardAsync(Guid cardId, Guid actorPlatformUserId, string actorDisplayName, CancellationToken ct = default);
     Task<bool> DeleteCardAsync(Guid cardId, Guid actorPlatformUserId, CancellationToken ct = default);
 

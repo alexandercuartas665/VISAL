@@ -382,7 +382,10 @@ public sealed class TaskBoardService : ITaskBoardService
                 chk.Total, chk.Done,
                 comments.TryGetValue(c.Id, out var cm) ? cm : 0,
                 attachments.TryGetValue(c.Id, out var at) ? at : 0,
-                DeserializeFieldValues(c.FieldValuesJson));
+                DeserializeFieldValues(c.FieldValuesJson),
+                c.CreatorName,
+                c.CreatedAt,
+                c.ColumnEnteredAt ?? c.CreatedAt);
         }).ToList();
     }
 
@@ -429,6 +432,8 @@ public sealed class TaskBoardService : ITaskBoardService
             Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim(),
             Color = string.IsNullOrWhiteSpace(req.Color) ? null : req.Color.Trim(),
             DueAt = req.DueAt, SortOrder = nextOrder, CreatedBy = actor,
+            CreatorName = actorDisplayName,
+            ColumnEnteredAt = DateTimeOffset.UtcNow,
         };
         _db.TaskCards.Add(card);
         _db.TaskCardActivities.Add(new TaskCardActivity
@@ -482,6 +487,8 @@ public sealed class TaskBoardService : ITaskBoardService
         card.UpdatedBy = actor;
         if (origColId != req.ColumnId)
         {
+            // Reinicia el cronometro de "tiempo en columna" al cambiar de columna.
+            card.ColumnEnteredAt = DateTimeOffset.UtcNow;
             _db.TaskCardActivities.Add(new TaskCardActivity
             {
                 TenantId = card.TenantId, TaskCardId = card.Id, Type = TaskActivityType.Action,
@@ -492,6 +499,42 @@ public sealed class TaskBoardService : ITaskBoardService
         await _db.SaveChangesAsync(ct);
         return true;
     }
+
+    /// <summary>Sube (dir=-1) o baja (dir=+1) la tarjeta una posicion dentro de su
+    /// columna, reindexando el SortOrder de toda la columna a 0..N para evitar
+    /// empates/huecos. Devuelve false si la tarjeta ya esta en el extremo.</summary>
+    private async Task<bool> MoverVerticalAsync(Guid cardId, int dir, Guid actor, CancellationToken ct)
+    {
+        var card = await _db.TaskCards.FirstOrDefaultAsync(c => c.Id == cardId, ct);
+        if (card is null || !await HasAccessAsync(card.BoardId, actor, ct)) { return false; }
+        // Mismo orden que muestra la parrilla (SortOrder, luego CreatedAt desc).
+        var cards = await _db.TaskCards
+            .Where(c => c.ColumnId == card.ColumnId && !c.IsArchived)
+            .OrderBy(c => c.SortOrder).ThenByDescending(c => c.CreatedAt)
+            .ToListAsync(ct);
+        var idx = cards.FindIndex(c => c.Id == cardId);
+        var destino = idx + dir;
+        if (idx < 0 || destino < 0 || destino >= cards.Count) { return false; }
+        (cards[idx], cards[destino]) = (cards[destino], cards[idx]);
+        var ahora = DateTimeOffset.UtcNow;
+        for (var i = 0; i < cards.Count; i++)
+        {
+            if (cards[i].SortOrder != i)
+            {
+                cards[i].SortOrder = i;
+                cards[i].UpdatedAt = ahora;
+                cards[i].UpdatedBy = actor;
+            }
+        }
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public Task<bool> MoveCardUpAsync(Guid cardId, Guid actor, CancellationToken ct = default)
+        => MoverVerticalAsync(cardId, -1, actor, ct);
+
+    public Task<bool> MoveCardDownAsync(Guid cardId, Guid actor, CancellationToken ct = default)
+        => MoverVerticalAsync(cardId, +1, actor, ct);
 
     public async Task<bool> ArchiveCardAsync(Guid cardId, Guid actor, string actorDisplayName, CancellationToken ct = default)
     {

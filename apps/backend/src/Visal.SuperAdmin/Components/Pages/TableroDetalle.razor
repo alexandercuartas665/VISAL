@@ -112,7 +112,15 @@ else
                                  @ondragstart="@(() => _draggingCardId = card.Id)"
                                  @ondragend="@(() => _draggingCardId = null)"
                                  @onclick="@(() => OpenCardAsync(card.Id))">
-                                <div class="td-card-title">@card.Title</div>
+                                <div class="td-card-top">
+                                    <div class="td-card-title">@card.Title</div>
+                                    <div class="td-card-prio" @onclick:stopPropagation="true">
+                                        <button class="td-prio-btn" title="Subir prioridad"
+                                                @onclick="@(() => MoverArribaAsync(card.Id))" @onclick:stopPropagation="true">▲</button>
+                                        <button class="td-prio-btn" title="Bajar prioridad"
+                                                @onclick="@(() => MoverAbajoAsync(card.Id))" @onclick:stopPropagation="true">▼</button>
+                                    </div>
+                                </div>
                                 @if (card.Tags.Count > 0)
                                 {
                                     <div class="td-card-tags">
@@ -148,6 +156,16 @@ else
                                             }
                                         </span>
                                     }
+                                </div>
+                                <div class="td-card-foot">
+                                    <span title="Creada por / fecha de creacion">
+                                        👤 @(string.IsNullOrWhiteSpace(card.CreadorNombre) ? "—" : card.CreadorNombre)
+                                        @if (card.CreadoEn is DateTimeOffset ce)
+                                        {
+                                            <text> · @ce.ToLocalTime().ToString("dd/MM/yy HH:mm")</text>
+                                        }
+                                    </span>
+                                    <span class="td-card-encol" title="Tiempo en esta columna">⏱ @TiempoRelativo(card.EnColumnaDesde ?? card.CreadoEn)</span>
                                 </div>
                             </div>
                         }
@@ -1214,6 +1232,13 @@ else
     .td-card { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px; cursor:pointer; transition:box-shadow 0.1s; }
     .td-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.06); }
     .td-card-title { font-weight:600; color:#0f172a; font-size:13px; line-height:1.3; }
+    .td-card-top { display:flex; align-items:flex-start; gap:6px; }
+    .td-card-top .td-card-title { flex:1; }
+    .td-card-prio { display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
+    .td-prio-btn { border:1px solid #e2e8f0; background:#f8fafc; color:#475569; width:20px; height:16px; line-height:1; border-radius:4px; cursor:pointer; font-size:9px; padding:0; }
+    .td-prio-btn:hover { background:#e2e8f0; color:#0f172a; }
+    .td-card-foot { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; padding-top:6px; border-top:1px dashed #eef2f7; font-size:10px; color:#94a3b8; align-items:center; justify-content:space-between; }
+    .td-card-encol { display:inline-flex; align-items:center; gap:2px; font-weight:600; color:#64748b; }
     .td-card-tags { display:flex; flex-wrap:wrap; gap:3px; margin-top:6px; }
     .td-tag { font-size:10px; padding:1px 6px; border-radius:8px; color:#334155; font-weight:600; }
     .td-card-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:11px; color:#64748b; align-items:center; }
@@ -1940,6 +1965,35 @@ else
     {
         await ReplySvc.EliminarPlantillaAsync(id);
         _replyPlantillas = (await ReplySvc.ListPlantillasAsync()).ToList();
+    }
+
+    // ---- Reordenar prioridad (subir/bajar dentro de la columna) ----
+
+    private async Task MoverArribaAsync(Guid cardId)
+    {
+        if (await BoardsSvc.MoveCardUpAsync(cardId, _actorId)) { await ReloadAllAsync(); }
+    }
+
+    private async Task MoverAbajoAsync(Guid cardId)
+    {
+        if (await BoardsSvc.MoveCardDownAsync(cardId, _actorId)) { await ReloadAllAsync(); }
+    }
+
+    /// <summary>Texto tipo "hace 3d 4h" / "hace 2h" / "hace 15m" para el tiempo que
+    /// la tarjeta lleva en la columna (o desde su creacion).</summary>
+    private static string TiempoRelativo(DateTimeOffset? desde)
+    {
+        if (desde is not DateTimeOffset d) { return ""; }
+        var t = DateTimeOffset.UtcNow - d.ToUniversalTime();
+        if (t < TimeSpan.Zero) { t = TimeSpan.Zero; }
+        if (t.TotalDays >= 1)
+        {
+            var dias = (int)t.TotalDays; var horas = t.Hours;
+            return horas > 0 ? $"{dias}d {horas}h" : $"{dias}d";
+        }
+        if (t.TotalHours >= 1) { return $"{(int)t.TotalHours}h {t.Minutes}m"; }
+        if (t.TotalMinutes >= 1) { return $"{(int)t.TotalMinutes}m"; }
+        return "recien";
     }
 
     // ---- Drag&drop ----

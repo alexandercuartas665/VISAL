@@ -475,6 +475,20 @@ else
                 // QR por orden: la emision activa se busca para (HC, MED, numero de orden).
                 _emision = await PubSvc.ObtenerEmisionActivaAsync(HcId, "MED", NumeroOrden ?? 1);
                 _emisionBag = _emision is null ? new() : DeserializarBag(_emision.BagJson);
+                // Auto-regenerar si el snapshot emitido quedo desactualizado respecto
+                // a los datos actuales de la orden (p.ej. una correccion de cantidad
+                // hecha despues de haber llegado a la vista de impresion, que emite el
+                // snapshot). Evita tener que revocar a mano: se revoca la emision
+                // vieja y se emite una nueva con el contenido correcto. El guard
+                // _regenerando corta la reentrada (EmitirOrdenAsync vuelve a llamar
+                // OnParametersSetAsync al final).
+                if (!_regenerando && _emision is not null && _meds.Count > 0
+                    && await SnapshotDesactualizadoAsync())
+                {
+                    _regenerando = true;
+                    try { await RegenerarEmisionAsync(); }
+                    finally { _regenerando = false; }
+                }
                 break;
             case "INSUMOS":
                 _insumos = (await InsumoSvc.ListarPorHistoriaAsync(HcId))
@@ -530,6 +544,53 @@ else
             _pendingPrint = false;
             await PrintAsync();
         }
+    }
+
+    // Corta la reentrada de la auto-regeneracion: EmitirOrdenAsync vuelve a llamar
+    // OnParametersSetAsync al final, que re-evaluaria el snapshot.
+    private bool _regenerando;
+
+    /// <summary>True si las celdas de tabla (medicamentos/diagnosticos) del snapshot
+    /// emitido difieren de las que se generarian ahora con los datos actuales de la
+    /// orden. Compara solo las claves de tabla ("tbl:") para ignorar campos volatiles
+    /// (fecha/hora/codigo) que cambian en cada render.</summary>
+    private async Task<bool> SnapshotDesactualizadoAsync()
+    {
+        if (_emisionBag.Count == 0) { return false; }
+        var (actual, _, _) = await ConstruirBagOrdenAsync();
+        static IEnumerable<KeyValuePair<string, string?>> Celdas(Dictionary<string, string?> d)
+            => d.Where(kv => kv.Key.StartsWith("tbl:", StringComparison.Ordinal));
+        // Alguna celda actual distinta (o ausente) en el snapshot -> desactualizado.
+        foreach (var kv in Celdas(actual))
+        {
+            _emisionBag.TryGetValue(kv.Key, out var prev);
+            if (!string.Equals(prev ?? "", kv.Value ?? "", StringComparison.Ordinal)) { return true; }
+        }
+        // Alguna celda con contenido en el snapshot que ya no existe en el actual
+        // (p.ej. un medicamento eliminado) -> desactualizado.
+        foreach (var kv in Celdas(_emisionBag))
+        {
+            if (!actual.ContainsKey(kv.Key) && !string.IsNullOrEmpty(kv.Value)) { return true; }
+        }
+        return false;
+    }
+
+    /// <summary>Revoca la emision vigente y emite una nueva con el contenido actual.
+    /// Se usa cuando el snapshot quedo desactualizado, para que el medico solo tenga
+    /// que reabrir/reimprimir sin revocar a mano.</summary>
+    private async Task RegenerarEmisionAsync()
+    {
+        if (_emision is null) { return; }
+        try
+        {
+            var actor = await ActorIdAsync();
+            await PubSvc.RevocarAsync(_emision.Id, actor, "Regeneracion automatica: la orden cambio tras la emision");
+            _emision = null; _emisionBag = new();
+            await EmitirOrdenAsync();   // emite nueva (codigo nuevo) desde datos actuales
+            _emision = await PubSvc.ObtenerEmisionActivaAsync(HcId, "MED", NumeroOrden ?? 1);
+            _emisionBag = _emision is null ? new() : DeserializarBag(_emision.BagJson);
+        }
+        catch (Exception ex) { _emitError = ex.Message; }
     }
 
     /// <summary>Emite (firma) la orden ORD-MEDI: arma el bag prellenado del formato,

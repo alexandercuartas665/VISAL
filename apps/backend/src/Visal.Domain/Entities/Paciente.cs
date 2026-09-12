@@ -114,6 +114,12 @@ public class Paciente : TenantEntity
     // ===== Estado del registro =====
     public bool Activo { get; set; } = true;
 
+    /// <summary>Marca el paciente como "de prueba": permite gestionarlo desde el
+    /// modulo Pacientes de prueba y limpiar toda su actividad clinica/operativa
+    /// (historias, atenciones, notas, firmas, etc.) conservando el registro del
+    /// paciente, su afiliacion y sus contactos de emergencia.</summary>
+    public bool EsPrueba { get; set; }
+
     // ===== Estado de admision (Abierto / Cerrado) =====
     /// <summary>
     /// Estado del proceso de admision del paciente. Un paciente Abierto es un

@@ -98,6 +98,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IRolService, Tenancy.RolService>();
         services.AddScoped<Tenancy.ISucursalService, Tenancy.SucursalService>();
         services.AddScoped<Tenancy.IPacienteService, Tenancy.PacienteService>();
+        services.AddScoped<Tenancy.IPacientePruebaService, Tenancy.PacientePruebaService>();
         services.AddScoped<Tenancy.IUsuarioAdminService, Tenancy.UsuarioAdminService>();
         services.AddScoped<Tenancy.IEmpresaSelectorService, Tenancy.EmpresaSelectorService>();
         services.AddScoped<Tenancy.ISedeSelectorService, Tenancy.SedeSelectorService>();

@@ -1,0 +1,269 @@
+@page "/pacientes-prueba"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@inject IPacientePruebaService Svc
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthProvider
+
+<PageTitle>Pacientes de prueba - Visal</PageTitle>
+
+<style>
+    .pp-wrap { max-width: 1000px; margin: 0 auto; padding: 8px 4px; }
+    .pp-eyebrow { font-size: 12px; color: var(--muted-foreground); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .pp-title { font-size: 22px; font-weight: 700; margin: 2px 0 2px; color: var(--foreground); }
+    .pp-sub { color: var(--muted-foreground); font-size: 13px; margin-bottom: 16px; }
+    .pp-card { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 16px; margin-bottom: 18px; }
+    .pp-card h2 { font-size: 15px; font-weight: 700; margin: 0 0 12px; color: var(--foreground); }
+    .pp-row { display: flex; gap: 8px; align-items: center; }
+    .pp-input { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--background); color: var(--foreground); }
+    .pp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .pp-table th { text-align: left; color: var(--muted-foreground); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .pp-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--foreground); vertical-align: middle; }
+    .pp-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .pp-badge.test { background: #fde68a; color: #92400e; }
+    .pp-muted { color: var(--muted-foreground); }
+    .pp-btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px; font-weight: 600; cursor: pointer; color: var(--foreground); }
+    .pp-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .pp-btn.danger { border-color: #dc2626; color: #dc2626; }
+    .pp-btn.danger:hover { background: #dc2626; color: #fff; }
+    .pp-btn:disabled { opacity: .5; cursor: default; }
+    .pp-alert { padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+    .pp-alert.err { background: #fee2e2; color: #991b1b; }
+    .pp-alert.ok { background: #dcfce7; color: #166534; }
+    .pp-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .pp-modal { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; max-width: 460px; width: 92%; }
+    .pp-modal h3 { margin: 0 0 8px; font-size: 16px; color: var(--foreground); }
+    .pp-conteo { list-style: none; padding: 0; margin: 10px 0; font-size: 13px; }
+    .pp-conteo li { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--border); color: var(--foreground); }
+    .pp-conteo b { color: var(--foreground); }
+</style>
+
+<div class="pp-wrap">
+    <div class="pp-eyebrow">Configuracion del Sistema</div>
+    <h1 class="pp-title">Pacientes de prueba</h1>
+    <div class="pp-sub">Marca pacientes como "de prueba" y limpia toda su actividad clinica y operativa (historias, atenciones, notas, ordenes, firmas...) conservando el registro del paciente, su afiliacion y sus contactos de emergencia.</div>
+
+    @if (!_autorizado)
+    {
+        <div class="pp-alert err">No tienes permiso para acceder a este modulo. Es solo para administradores.</div>
+    }
+    else
+    {
+        @if (_error is not null) { <div class="pp-alert err">@_error</div> }
+        @if (_ok is not null) { <div class="pp-alert ok">@_ok</div> }
+
+        <!-- Buscar y marcar -->
+        <div class="pp-card">
+            <h2>Marcar un paciente como de prueba</h2>
+            <div class="pp-row">
+                <input class="pp-input" placeholder="Buscar por nombre o documento (min. 2 caracteres)..."
+                       @bind="_termino" @bind:event="oninput" @onkeyup="OnBuscarKey" />
+                <button class="pp-btn" @onclick="BuscarAsync" disabled="@_busy">Buscar</button>
+            </div>
+            @if (_resultados.Count > 0)
+            {
+                <table class="pp-table" style="margin-top:12px;">
+                    <thead><tr><th>Paciente</th><th>Documento</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _resultados)
+                        {
+                            <tr>
+                                <td>@r.NombreCompleto @(r.EsPrueba ? (MarkupString)"<span class='pp-badge test'>prueba</span>" : (MarkupString)"")</td>
+                                <td class="pp-muted">@r.TipoDocumento @r.NumeroDocumento</td>
+                                <td style="text-align:right;">
+                                    @if (r.EsPrueba)
+                                    {
+                                        <span class="pp-muted">ya marcado</span>
+                                    }
+                                    else
+                                    {
+                                        <button class="pp-btn" @onclick="() => MarcarAsync(r.Id, true)" disabled="@_busy">Marcar como prueba</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else if (_buscó && !_busy)
+            {
+                <div class="pp-muted" style="margin-top:10px;">Sin resultados.</div>
+            }
+        </div>
+
+        <!-- Lista de pacientes de prueba -->
+        <div class="pp-card">
+            <h2>Pacientes de prueba (@_lista.Count)</h2>
+            @if (_lista.Count == 0)
+            {
+                <div class="pp-muted">Aun no hay pacientes marcados como de prueba.</div>
+            }
+            else
+            {
+                <table class="pp-table">
+                    <thead><tr><th>Paciente</th><th>Documento</th><th>Historias</th><th>Atenciones</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var p in _lista)
+                        {
+                            <tr>
+                                <td>@p.NombreCompleto</td>
+                                <td class="pp-muted">@p.TipoDocumento @p.NumeroDocumento</td>
+                                <td>@p.Historias</td>
+                                <td>@p.Atenciones</td>
+                                <td style="text-align:right; white-space:nowrap;">
+                                    <button class="pp-btn danger" @onclick="() => AbrirLimpiarAsync(p)" disabled="@_busy">Limpiar</button>
+                                    <button class="pp-btn" @onclick="() => MarcarAsync(p.Id, false)" disabled="@_busy" title="Quitar la marca de prueba">Quitar marca</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+</div>
+
+@if (_confirmar is not null)
+{
+    <div class="pp-modal-bg" @onclick="CerrarConfirmar">
+        <div class="pp-modal" @onclick:stopPropagation="true">
+            <h3>Limpiar a @_confirmar.NombreCompleto</h3>
+            <div class="pp-muted" style="font-size:13px;">Se borrara de forma permanente la siguiente actividad. Se conservan el paciente, su afiliacion y sus contactos de emergencia.</div>
+            @if (_conteo is not null)
+            {
+                <ul class="pp-conteo">
+                    <li><span>Historias clinicas</span><b>@_conteo.Historias</b></li>
+                    <li><span>Atenciones (turnos)</span><b>@_conteo.Atenciones</b></li>
+                    <li><span>Escalas</span><b>@_conteo.Escalas</b></li>
+                    <li><span>Documentos / evoluciones</span><b>@_conteo.Documentos</b></li>
+                    <li><span>Medicamentos</span><b>@_conteo.Medicamentos</b></li>
+                    <li><span>Notas medicas</span><b>@_conteo.Notas</b></li>
+                    <li><span>Firmas solicitadas</span><b>@_conteo.Firmas</b></li>
+                    <li><span>Encuestas de seguimiento</span><b>@_conteo.Encuestas</b></li>
+                </ul>
+            }
+            else
+            {
+                <div class="pp-muted" style="margin:10px 0;">Calculando...</div>
+            }
+            @if (_error is not null) { <div class="pp-alert err">@_error</div> }
+            <div class="pp-row" style="justify-content:flex-end; margin-top:8px;">
+                <button class="pp-btn" @onclick="CerrarConfirmar" disabled="@_busy">Cancelar</button>
+                <button class="pp-btn danger" @onclick="ConfirmarLimpiarAsync" disabled="@_busy">@(_busy ? "Limpiando..." : "Si, limpiar")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _autorizado;
+    private bool _busy;
+    private bool _buscó;
+    private string? _error;
+    private string? _ok;
+    private string _termino = "";
+    private List<PacienteBusquedaDto> _resultados = new();
+    private List<PacientePruebaDto> _lista = new();
+    private PacientePruebaDto? _confirmar;
+    private PacientePruebaConteoDto? _conteo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _autorizado = await EsAdminAsync();
+        if (_autorizado) { await RecargarListaAsync(); }
+    }
+
+    private async Task<bool> EsAdminAsync()
+    {
+        if (AuthState is null) { return false; }
+        var user = (await AuthState).User;
+        // Super admin de plataforma.
+        var plataforma = user.FindFirst("platform_role")?.Value ?? "";
+        if (plataforma.Contains("SuperAdmin", StringComparison.OrdinalIgnoreCase)
+            || plataforma.Contains("Platform", StringComparison.OrdinalIgnoreCase)) { return true; }
+        // Admin de la agencia (Owner/Admin/Administrador).
+        foreach (var claim in new[] { "tenant_role", "rol_nombre" })
+        {
+            var v = user.FindFirst(claim)?.Value ?? "";
+            if (v.Contains("Owner", StringComparison.OrdinalIgnoreCase)
+                || v.Contains("Admin", StringComparison.OrdinalIgnoreCase)) { return true; }
+        }
+        return false;
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var idStr = (await AuthState).User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return Guid.TryParse(idStr, out var g) ? g : Guid.Empty;
+    }
+
+    private async Task RecargarListaAsync()
+    {
+        try { _lista = (await Svc.ListarAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnBuscarKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await BuscarAsync(); }
+    }
+
+    private async Task BuscarAsync()
+    {
+        _error = null; _ok = null; _busy = true; _buscó = true;
+        try { _resultados = (await Svc.BuscarAsync(_termino)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task MarcarAsync(Guid pacienteId, bool esPrueba)
+    {
+        _error = null; _ok = null; _busy = true;
+        try
+        {
+            var actor = await ActorAsync();
+            await Svc.MarcarAsync(pacienteId, esPrueba, actor);
+            _ok = esPrueba ? "Paciente marcado como de prueba." : "Marca de prueba retirada.";
+            await RecargarListaAsync();
+            if (_resultados.Count > 0) { _resultados = (await Svc.BuscarAsync(_termino)).ToList(); }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task AbrirLimpiarAsync(PacientePruebaDto p)
+    {
+        _error = null; _ok = null; _confirmar = p; _conteo = null;
+        try { _conteo = await Svc.ContarAsync(p.Id); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void CerrarConfirmar()
+    {
+        if (_busy) { return; }
+        _confirmar = null; _conteo = null; _error = null;
+    }
+
+    private async Task ConfirmarLimpiarAsync()
+    {
+        if (_confirmar is null) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            var actor = await ActorAsync();
+            var r = await Svc.LimpiarAsync(_confirmar.Id, actor);
+            _ok = $"Limpieza de {_confirmar.NombreCompleto}: {r.Total} registros borrados "
+                + $"(historias {r.Historias}, atenciones {r.Atenciones}, ordenes {r.OrdenesEmitidas}, "
+                + $"notas {r.Notas}, firmas {r.Firmas}, encuestas {r.Encuestas}, otros {r.Otros}).";
+            _confirmar = null; _conteo = null;
+            await RecargarListaAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

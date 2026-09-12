@@ -88,6 +88,7 @@ public static class NavMenuCatalog
         new("cfg-paquetes", "Paquetes", "cfg-paquetes", "caja", "cfg-paquetes", "Configuracion del Sistema"),
         new("cfg-cuotas-copagos", "Cuotas / Copagos", "cfg-cuotas-copagos", "moneda", "cfg-cuotas-copagos", "Configuracion del Sistema"),
         new("cfg-pacientes", "Configuracion Pacientes", "cfg-pacientes", "engrane", "cfg-pacientes", "Configuracion del Sistema"),
+        new("pacientes-prueba", "Pacientes de prueba", "pacientes-prueba", "usuarios", null, "Configuracion del Sistema", Gate: NavGate.AdminAgency),
         new("cie11", "Configuracion CIE-11", "cie11", "libro", "cie11", "Configuracion del Sistema"),
         new("medicamentos", "Base de datos Medicamentos", "medicamentos", "pastilla", "medicamentos", "Configuracion del Sistema"),
         new("diagnosticos", "Base de datos Diagnosticos", "diagnosticos", "estetoscopio", "diagnosticos", "Configuracion del Sistema"),

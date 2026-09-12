@@ -1,5 +1,6 @@
 using Visal.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Visal.Application.Common;
 
@@ -158,4 +159,9 @@ public interface IApplicationDbContext
     DbSet<TenantNavMenuConfig> TenantNavMenuConfigs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Acceso a transacciones y ejecucion de SQL parametrizado. Lo usa el
+    /// servicio de limpieza de pacientes de prueba, que borra en varias tablas
+    /// (algunas sin DbSet) dentro de una sola transaccion.</summary>
+    DatabaseFacade Database { get; }
 }

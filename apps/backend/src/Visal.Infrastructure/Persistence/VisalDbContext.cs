@@ -1339,6 +1339,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Estado de admision del paciente. Default "Abierto" para pacientes existentes.
             b.Property(x => x.EstadoAdmision).HasMaxLength(20).HasDefaultValue("Abierto").IsRequired();
             b.HasIndex(x => new { x.TenantId, x.EstadoAdmision });
+            // Paciente de prueba: default false para pacientes existentes.
+            b.Property(x => x.EsPrueba).HasDefaultValue(false);
+            b.HasIndex(x => new { x.TenantId, x.EsPrueba });
         });
 
         modelBuilder.Entity<PacienteContactoEmergencia>(b =>

@@ -362,6 +362,11 @@ else
                             UsuarioIdentificacion: datosProf?.Identificacion,
                             UsuarioRegistroMedico: datosProf?.RegistroMedico,
                             UsuarioFirmaUrl: datosProf?.FirmaUrl), rutas);
+                        // Modulo "profesional": nombre/documento/registro del
+                        // doctor logueado con las keys nativas. Sin esta llamada
+                        // las rutas sourceModule="profesional" quedaban sin
+                        // aplicar al iniciar el documento y salia "No refiere".
+                        ProfesionalPrefillHelper.Aplicar(valores, datosProf, rutas);
                     }
                     catch { }
 

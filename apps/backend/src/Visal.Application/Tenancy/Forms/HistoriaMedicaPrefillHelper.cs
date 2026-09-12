@@ -497,7 +497,13 @@ public static class HistoriaMedicaPrefillHelper
         // Cantidad total = cantidad por toma * frecuencia/dia * dias, cuando los
         // tres son numericos. Es lo que el doctor pone en "Cantidad Total" de
         // la orden impresa para autorizar despacho en farmacia.
-        var total = CalcularTotalUnidades(m.Cantidad, m.Frecuencia, m.Dias);
+        // PERO si la orden ya trae CantidadTotal guardado se respeta ese valor:
+        // el usuario pudo fijarlo a mano o con reglas que no se derivan de la
+        // frecuencia-en-horas (ej. "1 cada semana por 30 dias" = 4, donde la
+        // frecuencia queda vacia y el calculo daria solo la cantidad firme).
+        var total = !string.IsNullOrWhiteSpace(m.CantidadTotal)
+            ? m.CantidadTotal!.Trim()
+            : CalcularTotalUnidades(m.Cantidad, m.Frecuencia, m.Dias);
         return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["descripcion"] = m.NombreMedicamento,

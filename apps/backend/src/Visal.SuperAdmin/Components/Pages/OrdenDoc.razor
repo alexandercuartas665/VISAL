@@ -543,7 +543,13 @@ else
         {
             var (bag, profNombre, profRegistro) = await ConstruirBagOrdenAsync();
             var items = _meds.Select(m => new OrdenItemPublicoDto(
-                m.NombreMedicamento, m.CodigoMedicamento, m.Cantidad, m.Frecuencia, m.Dias, m.Posologia)).ToList();
+                m.NombreMedicamento, m.CodigoMedicamento,
+                // La "Cantidad" publica (y de la formula) es el TOTAL a despachar:
+                // se respeta el CantidadTotal de la orden y, si no viene, se calcula.
+                !string.IsNullOrWhiteSpace(m.CantidadTotal)
+                    ? m.CantidadTotal
+                    : (HistoriaMedicaPrefillHelper.CalcularTotalUnidades(m.Cantidad, m.Frecuencia, m.Dias) ?? m.Cantidad),
+                m.Frecuencia, m.Dias, m.Posologia)).ToList();
             var fecha = DateTimeOffset.Now;
             var actor = await ActorIdAsync();
             var req = new EmitirOrdenRequest(

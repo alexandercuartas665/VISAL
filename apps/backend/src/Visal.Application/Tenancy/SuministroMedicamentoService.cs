@@ -55,7 +55,9 @@ public sealed class SuministroMedicamentoService(
         {
             TenantId = tid,
             HistoriaClinicaId = historiaId,
-            FechaHora = req.FechaHora,
+            // Npgsql exige UTC (offset 0) para timestamptz; la UI envia la fecha
+            // con offset local (-05). Se normaliza a UTC preservando el instante.
+            FechaHora = req.FechaHora.ToUniversalTime(),
             Presentacion = req.Presentacion.Trim(),
             Dosis = Trim(req.Dosis),
             Cantidad = Trim(req.Cantidad),
@@ -88,7 +90,7 @@ public sealed class SuministroMedicamentoService(
         }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         // No tocamos UsuarioCreacion* — es snapshot del original.
-        entity.FechaHora = req.FechaHora;
+        entity.FechaHora = req.FechaHora.ToUniversalTime();
         entity.Presentacion = req.Presentacion.Trim();
         entity.Dosis = Trim(req.Dosis);
         entity.Cantidad = Trim(req.Cantidad);

@@ -1038,7 +1038,14 @@ else
         _showHistoriaSel = s;
     }
 
-    private void CerrarHistoria() { _showHistoriaSel = null; _pacienteCtx = null; }
+    // Al cerrar el modal de historia recargamos la parrilla: si adentro se cerro
+    // definitivamente una HC, el flag Completado de la sesion ya cambio en la BD y
+    // asi se refleja en pantalla sin tener que recargar la pagina a mano.
+    private async Task CerrarHistoria()
+    {
+        _showHistoriaSel = null; _pacienteCtx = null;
+        await Cargar();
+    }
 
     // ===== Config de columnas de la tabla MIS SERVICIOS ASIGNADOS =====
     // Nivel tenant: el admin decide que columnas se ven, con que alias y en que orden.

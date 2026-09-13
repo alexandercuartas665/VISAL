@@ -273,7 +273,8 @@ else
 
         @* ============ REGISTRO DE MEDICAMENTOS SUMINISTRADOS ============ *@
         @* Bitacora de administracion: fecha/hora + presentacion + dosis + via +
-           usuario. Sin firma (es un registro operativo, no una prescripcion). *@
+           usuario. Lleva pie (diagnostico + firma del profesional tratante + QR)
+           igual que las demas ordenes del paquete. *@
         @if (_incluirRegMed && _regMed.Count > 0)
         {
             <div class="pack-doc">
@@ -304,6 +305,7 @@ else
                         }
                     </tbody>
                 </table>
+                <PieOrdenImprimible Diagnostico="@_pieDiagnostico" FirmaUrl="@_pieFirmaUrl" ProfNombre="@_pieProfNombre" ProfRegistro="@_pieProfRegistro" FechaImpresion="@_pieFecha" ProgramaUrl="@_pieUrl" QrImg="@PieQr("REGMED")" Codigo="@PieCod("REGMED")" />
             </div>
         }
 
@@ -956,7 +958,8 @@ else
         // Pie clinico compartido por las ordenes (diagnostico + firma tratante + footer).
         // Solo se resuelve si el paquete incluye alguna orden que lo lleva.
         if (_incluirSrv || _incluirRem || _incluirIns || _incluirInc || _incluirCert
-            || _incluirRxExt || _incluirLabExt || _incluirSrvExt || _incluirInsExt)
+            || _incluirRxExt || _incluirLabExt || _incluirSrvExt || _incluirInsExt
+            || _incluirRegMed)
         {
             await CargarPieOrdenesAsync();
             // Emite/reusa la verificacion publica por tipo y arma el QR del pie.
@@ -1103,6 +1106,13 @@ else
         {
             tipos.Add(("CERT", _cert.Select(c => new OrdenItemPublicoDto(
                 c.Titulo ?? "", null, null, null, null, null)).ToList()));
+        }
+        // Registro de medicamentos suministrados: se emite/verifica con su propio QR
+        // (Presentacion / Dosis / Via) igual que las demas ordenes del paquete.
+        if (_incluirRegMed && _regMed.Count > 0)
+        {
+            tipos.Add(("REGMED", _regMed.Select(s => new OrdenItemPublicoDto(
+                s.Presentacion ?? "", null, s.Cantidad, null, null, s.Via)).ToList()));
         }
 
         foreach (var (tipo, items) in tipos)

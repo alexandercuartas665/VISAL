@@ -103,6 +103,7 @@ public interface IOrdenMedicamentoPublicaService
         "LABEXT" => "Orden de Laboratorios",
         "SRVEXT" => "Orden de Servicios Externos",
         "INSEXT" => "Orden de Insumos Externos",
+        "REGMED" => "Registro de Medicamentos Suministrados",
         _ => "Orden de Medicamentos",
     };
 

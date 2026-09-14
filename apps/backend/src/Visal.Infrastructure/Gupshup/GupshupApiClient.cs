@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Visal.Application.Admin;
 
 namespace Visal.Infrastructure.Gupshup;
@@ -22,10 +23,12 @@ public sealed class GupshupApiClient : IGupshupApiClient
     private const string BaseUrl = "https://api.gupshup.io";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
     private readonly HttpClient _http;
+    private readonly ILogger<GupshupApiClient> _logger;
 
-    public GupshupApiClient(HttpClient http)
+    public GupshupApiClient(HttpClient http, ILogger<GupshupApiClient> logger)
     {
         _http = http;
+        _logger = logger;
     }
 
     public Task<GupshupSendResult> SendTextAsync(
@@ -75,6 +78,7 @@ public sealed class GupshupApiClient : IGupshupApiClient
     public Task<GupshupSendResult> SendTemplateAsync(
         string apiKey, string source, string destination,
         string templateId, IReadOnlyList<string> parameters,
+        string? appName = null, string? headerMediaUrl = null, string? headerMediaType = null,
         CancellationToken cancellationToken = default)
     {
         // template = {"id":"<uuid>","params":["a","b"]}. Endpoint /wa/api/v1/template/msg;
@@ -87,6 +91,15 @@ public sealed class GupshupApiClient : IGupshupApiClient
             ["destination"] = destination,
             ["template"] = template,
         };
+        if (!string.IsNullOrWhiteSpace(appName)) { form["src.name"] = appName!; }
+        // Si la plantilla tiene header multimedia, Gupshup exige el media en "message".
+        if (!string.IsNullOrWhiteSpace(headerMediaUrl))
+        {
+            var mt = (headerMediaType ?? "image").Trim().ToLowerInvariant();
+            if (mt != "image" && mt != "video" && mt != "document") { mt = "image"; }
+            var media = new Dictionary<string, object> { ["link"] = headerMediaUrl! };
+            form["message"] = JsonSerializer.Serialize(new Dictionary<string, object> { [mt] = media, ["type"] = mt });
+        }
         return PostFormAsync("/wa/api/v1/template/msg", apiKey, form, cancellationToken);
     }
 
@@ -142,6 +155,10 @@ public sealed class GupshupApiClient : IGupshupApiClient
                 using var resp = await _http.SendAsync(request, cts.Token);
                 if (!resp.IsSuccessStatusCode) { continue; }
                 var body = await resp.Content.ReadAsStringAsync(cts.Token);
+                // DIAGNOSTICO temporal: ver la forma real de la respuesta (header/botones)
+                // para plantillas con header multimedia. No expone apikey ni destinos.
+                _logger.LogWarning("Gupshup templates raw body: {Body}",
+                    body.Length > 6000 ? body.Substring(0, 6000) : body);
                 return ParseTemplates(body);
             }
             catch { /* red o timeout: probar siguiente candidato */ }
@@ -428,11 +445,46 @@ public sealed class GupshupApiClient : IGupshupApiClient
                 // rechaza la entrega (mensaje "Enviada" pero no llega).
                 var placeholders = CountPlaceholders(content) + CountButtonUrlPlaceholders(t);
                 if (string.IsNullOrEmpty(id)) { continue; }
-                list.Add(new GupshupTemplateInfo(id, name, lang, cat, st, content, placeholders));
+                var (hdrUrl, hdrType) = ExtractHeaderMedia(t);
+                list.Add(new GupshupTemplateInfo(id, name, lang, cat, st, content, placeholders, hdrUrl, hdrType));
             }
         }
         catch { /* body no JSON o shape inesperada: devolvemos lo que llevamos */ }
         return list;
+    }
+
+    /// <summary>Extrae el header multimedia (link + tipo) de una plantilla desde su
+    /// containerMeta (o del nivel raiz). Best-effort: prueba varios nombres de campo
+    /// segun la cuenta Gupshup. Devuelve (null,null) si no hay header multimedia.</summary>
+    private static (string? Url, string? Type) ExtractHeaderMedia(JsonElement t)
+    {
+        try
+        {
+            if (t.TryGetProperty("containerMeta", out var cm) && cm.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(cm.GetString()))
+            {
+                using var doc = JsonDocument.Parse(cm.GetString()!);
+                return ExtractHeaderFromMeta(doc.RootElement);
+            }
+            return ExtractHeaderFromMeta(t);
+        }
+        catch { return (null, null); }
+    }
+
+    private static (string?, string?) ExtractHeaderFromMeta(JsonElement m)
+    {
+        if (m.ValueKind != JsonValueKind.Object) { return (null, null); }
+        var type = (Str(m, "templateType") ?? Str(m, "format") ?? Str(m, "headerType") ?? "").ToLowerInvariant();
+        if (type is "" or "text") { type = null; }
+        var url = Str(m, "mediaUrl") ?? Str(m, "sampleMedia") ?? Str(m, "exampleMedia")
+               ?? Str(m, "headerMediaUrl") ?? Str(m, "mediaSample") ?? Str(m, "sampleText");
+        if (url is null)
+        {
+            var h = Str(m, "header");
+            if (h is not null && (h.StartsWith("http://") || h.StartsWith("https://"))) { url = h; }
+        }
+        if (url is null || !(url.StartsWith("http://") || url.StartsWith("https://"))) { return (null, null); }
+        return (url, type ?? "image");
     }
 
     private static (string? Id, string? Status) ExtractCreatedTemplate(string body)

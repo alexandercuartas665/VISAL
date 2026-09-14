@@ -63,13 +63,15 @@ internal sealed class HsmTemplateService : IHsmTemplateService
     }
 
     public async Task<HsmSendResult> SendTestAsync(Guid lineId, string templateId, string phone,
-        IReadOnlyList<string> parameters, Guid actorUserId, CancellationToken ct = default)
+        IReadOnlyList<string> parameters, Guid actorUserId,
+        string? headerMediaUrl = null, string? headerMediaType = null, CancellationToken ct = default)
     {
         var creds = await ResolveAsync(lineId, ct);
         if (creds is null) { return new HsmSendResult(false, "Linea sin App Gupshup configurada."); }
         var digits = new string(phone.Where(char.IsDigit).ToArray());
         if (string.IsNullOrEmpty(digits)) { return new HsmSendResult(false, "Indica el numero destino."); }
-        var r = await _client.SendTemplateAsync(creds.Value.ApiKey, creds.Value.Source, digits, templateId, parameters, ct);
+        var r = await _client.SendTemplateAsync(creds.Value.ApiKey, creds.Value.Source, digits, templateId, parameters,
+            creds.Value.AppName, headerMediaUrl, headerMediaType, ct);
         _audit.Write(actorUserId, "gupshup.template.send-test", "WhatsAppLine", lineId,
             previousValue: null,
             newValue: new { to = digits, templateId, ok = r.Ok, messageId = r.MessageId },

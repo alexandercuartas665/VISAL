@@ -20,7 +20,11 @@ public sealed record GupshupBalanceResult(bool Ok, string? Error, decimal? Balan
 /// <param name="ParameterCount">Cantidad de placeholders detectados en el body.</param>
 public sealed record GupshupTemplateInfo(
     string Id, string ElementName, string LanguageCode, string Category,
-    string Status, string Body, int ParameterCount);
+    string Status, string Body, int ParameterCount,
+    // Header multimedia de la plantilla (imagen/video/documento). Si la plantilla
+    // tiene header de imagen, el envio (template/msg) DEBE incluir ese media en el
+    // campo "message"; sin el, Gupshup acepta el submit pero Meta no entrega.
+    string? HeaderMediaUrl = null, string? HeaderMediaType = null);
 
 /// <summary>Resultado de un listado de plantillas.</summary>
 public sealed record GupshupTemplateListResult(bool Ok, string? Error, IReadOnlyList<GupshupTemplateInfo> Templates);
@@ -82,6 +86,11 @@ public interface IGupshupApiClient
     Task<GupshupSendResult> SendTemplateAsync(
         string apiKey, string source, string destination,
         string templateId, IReadOnlyList<string> parameters,
+        // src.name: nombre de la App Gupshup (algunas cuentas lo exigen).
+        string? appName = null,
+        // Header multimedia de la plantilla: si la plantilla tiene header de imagen,
+        // se envia en el campo "message" (obligatorio para que Meta la entregue).
+        string? headerMediaUrl = null, string? headerMediaType = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

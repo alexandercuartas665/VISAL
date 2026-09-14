@@ -20,7 +20,8 @@ public interface IHsmTemplateService
     /// <summary>Envio de prueba de una plantilla ya aprobada al numero
     /// indicado. Reusa el connector de WhatsApp (no duplica auditoria).</summary>
     Task<HsmSendResult> SendTestAsync(Guid lineId, string templateId, string phone,
-        IReadOnlyList<string> parameters, Guid actorUserId, CancellationToken ct = default);
+        IReadOnlyList<string> parameters, Guid actorUserId,
+        string? headerMediaUrl = null, string? headerMediaType = null, CancellationToken ct = default);
 }
 
 public sealed record HsmTemplateListResult(bool Ok, string? Error, IReadOnlyList<GupshupTemplateInfo> Templates);

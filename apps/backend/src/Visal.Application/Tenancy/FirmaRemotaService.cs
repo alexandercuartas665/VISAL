@@ -141,7 +141,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 var profesional = await ResolverNombreProfesionalAsync(actorTenantUserId, ct);
                 var parms = BuildTemplateParams(binding.ParameterCount, recipient, profesional);
                 var digits = new string(req.Telefono.Where(char.IsDigit).ToArray());
-                var hsmRes = await _hsm.SendTestAsync(binding.LineId, binding.TemplateId, digits, parms, actorTenantUserId, ct);
+                var hsmRes = await _hsm.SendTestAsync(binding.LineId, binding.TemplateId, digits, parms, actorTenantUserId, ct: ct);
                 if (hsmRes.Ok)
                 {
                     _log.LogDebug("FirmaWA HSM solicitud={SolicitudId} template={Template} ok=True", solicitudId, binding.TemplateName);

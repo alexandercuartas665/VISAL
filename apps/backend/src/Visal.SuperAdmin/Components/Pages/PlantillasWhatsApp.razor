@@ -244,6 +244,14 @@ else
                         con el valor de esa variable (lo que va despues de la parte fija de la URL).
                     </div>
                 </div>
+                <div class="field">
+                    <label class="form-label">URL imagen de encabezado (solo si la plantilla tiene header de imagen)</label>
+                    <input class="form-control" @bind="_sendHeaderUrl"
+                           placeholder="https://.../logo.png (dejar vacio si no tiene header de imagen)" />
+                    <div class="text-muted" style="font-size:11px;margin-top:4px;">
+                        Las plantillas con logo/imagen en el encabezado exigen enviar esa imagen; pega aqui su URL.
+                    </div>
+                </div>
                 @if (_sendMsg is not null)
                 {
                     <div class="@(_sendOk ? "text-success" : "text-danger") small">@_sendMsg</div>
@@ -283,6 +291,7 @@ else
     private GupshupTemplateInfo? _sendTpl;
     private string? _sendPhone;
     private List<string> _sendParams = new();
+    private string? _sendHeaderUrl;
     private string? _sendMsg;
     private bool _sendOk;
 
@@ -428,7 +437,9 @@ else
         try
         {
             var actor = await ActorAsync();
-            var r = await HsmSvc.SendTestAsync(lid, t.Id, _sendPhone!.Trim(), _sendParams.ToList(), actor);
+            var hdrUrl = string.IsNullOrWhiteSpace(_sendHeaderUrl) ? t.HeaderMediaUrl : _sendHeaderUrl!.Trim();
+            var r = await HsmSvc.SendTestAsync(lid, t.Id, _sendPhone!.Trim(), _sendParams.ToList(), actor,
+                hdrUrl, t.HeaderMediaType ?? "image");
             _sendOk = r.Ok;
             _sendMsg = r.Ok ? "Enviada." : (r.Error ?? "Error al enviar.");
         }

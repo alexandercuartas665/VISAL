@@ -424,7 +424,7 @@ public sealed class AlertaService : IAlertaService
                             }
                             else
                             {
-                                var r = await _hsm.SendTestAsync(lineId, regla.HsmTemplateId!, contacto!, parametros, actor, ct);
+                                var r = await _hsm.SendTestAsync(lineId, regla.HsmTemplateId!, contacto!, parametros, actor, ct: ct);
                                 ok = r.Ok; err = r.Error;
                                 if (ok) { whatsappNotificado.Add(waKey); }
                             }

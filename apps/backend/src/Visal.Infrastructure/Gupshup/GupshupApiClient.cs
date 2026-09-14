@@ -421,7 +421,12 @@ public sealed class GupshupApiClient : IGupshupApiClient
                 var cat = Str(t, "category") ?? "";
                 var st = (Str(t, "status") ?? "").ToUpperInvariant();
                 var content = Str(t, "data") ?? Str(t, "content") ?? Str(t, "body") ?? "";
-                var placeholders = CountPlaceholders(content);
+                // Total de parametros = variables del cuerpo + variables en las URL
+                // de botones. Gupshup numera la variable del boton aparte, pero en el
+                // envio (template/msg) va como param adicional despues de los del
+                // cuerpo; sin contarla, el envio omite el parametro del boton y Meta
+                // rechaza la entrega (mensaje "Enviada" pero no llega).
+                var placeholders = CountPlaceholders(content) + CountButtonUrlPlaceholders(t);
                 if (string.IsNullOrEmpty(id)) { continue; }
                 list.Add(new GupshupTemplateInfo(id, name, lang, cat, st, content, placeholders));
             }
@@ -447,6 +452,51 @@ public sealed class GupshupApiClient : IGupshupApiClient
 
     private static string? Str(JsonElement obj, string prop)
         => obj.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    // Cuenta las variables {{n}} en las URL de botones tipo URL. Gupshup las
+    // numera aparte del cuerpo, pero en el envio (template/msg) se pasan como
+    // params adicionales despues de los del cuerpo. Best-effort: si la respuesta
+    // no trae botones (o con otra forma), devuelve 0 y no altera el conteo previo,
+    // asi las plantillas sin boton (p.ej. firma_solicitud_consentida) no cambian.
+    private static int CountButtonUrlPlaceholders(JsonElement t)
+    {
+        try
+        {
+            if (t.TryGetProperty("buttons", out var b) && b.ValueKind == JsonValueKind.Array)
+            {
+                return CountUrlVars(b);
+            }
+            if (t.TryGetProperty("containerMeta", out var cm) && cm.ValueKind == JsonValueKind.String)
+            {
+                var metaStr = cm.GetString();
+                if (!string.IsNullOrWhiteSpace(metaStr))
+                {
+                    using var meta = JsonDocument.Parse(metaStr);
+                    if (meta.RootElement.ValueKind == JsonValueKind.Object
+                        && meta.RootElement.TryGetProperty("buttons", out var b2)
+                        && b2.ValueKind == JsonValueKind.Array)
+                    {
+                        return CountUrlVars(b2);
+                    }
+                }
+            }
+        }
+        catch { /* forma inesperada: no contamos botones */ }
+        return 0;
+    }
+
+    private static int CountUrlVars(JsonElement buttons)
+    {
+        var total = 0;
+        foreach (var btn in buttons.EnumerateArray())
+        {
+            if (btn.ValueKind != JsonValueKind.Object) { continue; }
+            var type = (Str(btn, "type") ?? "").ToUpperInvariant();
+            if (type != "URL") { continue; }
+            total += CountPlaceholders(Str(btn, "url") ?? "");
+        }
+        return total;
+    }
 
     // Cuenta {{1}}{{2}}... para saber cuantos parametros pide la plantilla.
     // La UI valida que el envio traiga N valores exactos.

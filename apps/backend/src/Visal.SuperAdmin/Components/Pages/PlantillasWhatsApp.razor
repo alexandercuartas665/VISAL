@@ -222,20 +222,28 @@ else
                     <label class="form-label">Numero destino *</label>
                     <input class="form-control" @bind="_sendPhone" placeholder="573001234567 (con codigo pais, sin +)" />
                 </div>
-                @if (st.ParameterCount > 0)
-                {
-                    <div class="field">
-                        <label class="form-label">Parametros ({{1}} a {{@st.ParameterCount}})</label>
-                        @for (var i = 0; i < st.ParameterCount; i++)
+                <div class="field">
+                    <label class="form-label">Parametros (cuerpo {{1}}, {{2}}...)</label>
+                    @for (var i = 0; i < _sendParams.Count; i++)
+                    {
+                        var idx = i;
+                        <input class="form-control" style="margin-bottom:6px;"
+                               placeholder="@($"Valor {{{{{idx + 1}}}}}")"
+                               value="@_sendParams[idx]"
+                               @onchange="e => _sendParams[idx] = e.Value?.ToString() ?? string.Empty" />
+                    }
+                    <div style="display:flex;gap:8px;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _sendParams.Add(string.Empty)">+ parametro</button>
+                        @if (_sendParams.Count > 0)
                         {
-                            var idx = i;
-                            <input class="form-control" style="margin-bottom:6px;"
-                                   placeholder="@($"Valor {{{{{idx + 1}}}}}")"
-                                   value="@_sendParams[idx]"
-                                   @onchange="e => _sendParams[idx] = e.Value?.ToString() ?? string.Empty" />
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _sendParams.RemoveAt(_sendParams.Count - 1)">&minus; parametro</button>
                         }
                     </div>
-                }
+                    <div class="text-muted" style="font-size:11px;margin-top:4px;">
+                        Si la plantilla tiene un boton con URL variable, agrega un parametro EXTRA al final
+                        con el valor de esa variable (lo que va despues de la parte fija de la URL).
+                    </div>
+                </div>
                 @if (_sendMsg is not null)
                 {
                     <div class="@(_sendOk ? "text-success" : "text-danger") small">@_sendMsg</div>
@@ -274,7 +282,7 @@ else
     private bool _sendOpen;
     private GupshupTemplateInfo? _sendTpl;
     private string? _sendPhone;
-    private string[] _sendParams = Array.Empty<string>();
+    private List<string> _sendParams = new();
     private string? _sendMsg;
     private bool _sendOk;
 
@@ -405,7 +413,8 @@ else
     {
         _sendTpl = t;
         _sendPhone = null;
-        _sendParams = new string[t.ParameterCount];
+        _sendParams = new List<string>();
+        for (var i = 0; i < t.ParameterCount; i++) { _sendParams.Add(string.Empty); }
         _sendMsg = null;
         _sendOk = false;
         _sendOpen = true;

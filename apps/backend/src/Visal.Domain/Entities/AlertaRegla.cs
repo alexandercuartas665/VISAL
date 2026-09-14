@@ -71,4 +71,11 @@ public class AlertaRegla : TenantEntity
     /// (ej. ["{paciente}","{servicio}","{fecha}"]). Se renderizan con los datos de la
     /// asignacion antes de enviar. Su longitud debe igualar <see cref="HsmParameterCount"/>.</summary>
     public string? HsmParametrosJson { get; set; }
+
+    /// <summary>URL de la imagen de encabezado (header) de la plantilla HSM cuando la
+    /// plantilla tiene header multimedia. Gupshup exige reenviar el link del media en
+    /// cada envio; sin esto Meta marca "enviada" pero no entrega. Null = plantilla sin
+    /// header multimedia. Se autollena con el header detectado de la plantilla y es
+    /// editable en la config de la regla.</summary>
+    public string? HsmHeaderUrl { get; set; }
 }

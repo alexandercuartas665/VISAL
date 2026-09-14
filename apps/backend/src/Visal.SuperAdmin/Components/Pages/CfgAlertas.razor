@@ -364,6 +364,17 @@
                                 </div>
                             }
                         </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">
+                                URL imagen de encabezado <span class="text-muted fw-normal">(header multimedia; requerido si la plantilla lleva imagen)</span>
+                            </label>
+                            <input class="form-control form-control-sm" @bind="_form.HsmHeaderUrl" style="max-width:640px"
+                                   placeholder="https://.../logo.png" />
+                            <div class="form-text small">
+                                Se autollena con el header detectado de la plantilla. Gupshup exige reenviar este link
+                                en cada envio; sin el, Meta marca "enviada" pero no entrega. Dejalo vacio si la plantilla no tiene imagen.
+                            </div>
+                        </div>
                     }
                 }
 
@@ -381,8 +392,10 @@
                 <div class="sim-wrap">
                     <p class="text-muted small mb-2">
                         Simula una fecha y prueba la consulta del sistema: <b>Paso 1</b> muestra que pacientes
-                        traeria la regla y a quien se emitiria (sin enviar). <b>Paso 2</b> emite de verdad para
-                        ver el ciclo completo. Usa la configuracion actual de la pestana <b>Configuracion</b>.
+                        traeria la regla y a quien se emitiria (sin enviar), con el <b>enlace del informe</b> de cada
+                        doctor para que lo abras y verifiques. Marca en la columna izquierda a quien quieras enviar.
+                        <b>Paso 2</b> emite de verdad solo a los <b>marcados</b>. Usa la configuracion actual de la
+                        pestana <b>Configuracion</b>.
                     </p>
                     <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
                         <div>
@@ -434,11 +447,15 @@
                                 <table class="table table-sm table-hover align-middle mb-0">
                                     <thead>
                                         <tr>
+                                            <th style="width:34px" title="Seleccionar a quien emitir en el Paso 2">
+                                                <input type="checkbox" checked="@TodosSeleccionados()" @onchange="ToggleSeleccionarTodos" />
+                                            </th>
                                             <th>Paciente</th>
                                             <th>Servicio</th>
                                             <th>Destinatario</th>
                                             <th>Correo</th>
                                             <th>Telefono</th>
+                                            <th>Informe</th>
                                             <th>Estado</th>
                                         </tr>
                                     </thead>
@@ -446,11 +463,25 @@
                                         @foreach (var f in _sim.Filas)
                                         {
                                             <tr>
+                                                <td>
+                                                    @if (f.AsignacionId != Guid.Empty)
+                                                    {
+                                                        <input type="checkbox" checked="@_seleccion.Contains(f.AsignacionId)"
+                                                               @onchange="e => ToggleFila(f.AsignacionId, (bool)(e.Value ?? false))" />
+                                                    }
+                                                </td>
                                                 <td>@f.Paciente<div class="text-muted xsmall">@f.Documento</div></td>
                                                 <td>@f.Servicio<div class="text-muted xsmall mono">@f.CodigoServicio</div></td>
                                                 <td>@f.DestinatarioTipo<div class="text-muted xsmall">@f.DestinatarioNombre</div></td>
                                                 <td class="@(string.IsNullOrEmpty(f.Correo) ? "text-muted" : "")">@(string.IsNullOrEmpty(f.Correo) ? "—" : f.Correo)</td>
                                                 <td class="@(string.IsNullOrEmpty(f.Telefono) ? "text-muted" : "")">@(string.IsNullOrEmpty(f.Telefono) ? "—" : f.Telefono)</td>
+                                                <td>
+                                                    @if (!string.IsNullOrEmpty(f.InformeUrl))
+                                                    {
+                                                        <a href="@f.InformeUrl" target="_blank" rel="noopener" class="xsmall">Abrir informe</a>
+                                                    }
+                                                    else { <span class="text-muted">—</span> }
+                                                </td>
                                                 <td><span class="sim-estado @SimEstadoClass(f)">@f.Estado</span></td>
                                             </tr>
                                         }
@@ -535,6 +566,9 @@
     private bool _simBusy;
     private AlertaSimulacionResult? _sim;
     private string? _simError;
+    // Asignaciones marcadas en la tabla de simulacion: el Paso 2 (emitir real) solo
+    // envia a estas. Se pre-marca con todas las emitibles tras el Paso 1.
+    private readonly HashSet<Guid> _seleccion = new();
     private List<GupshupTemplateInfo> _plantillas = new();
     private Form? _form;
     private bool _busy;
@@ -617,6 +651,7 @@
             TemplateSel = r.HsmTemplateId ?? "",
             HsmParameterCount = r.HsmParameterCount,
             HsmParametros = r.HsmParametros.ToList(),
+            HsmHeaderUrl = r.HsmHeaderUrl ?? "",
         };
         _msg = _error = null;
     }
@@ -688,6 +723,9 @@
         _form.HsmTemplateId = t.Id;
         _form.HsmTemplateName = t.ElementName;
         _form.HsmParameterCount = t.ParameterCount;
+        // Autollenar la URL del header con la detectada de la plantilla (si Gupshup la
+        // expone). Si no se detecta, se respeta lo que el usuario haya escrito.
+        if (!string.IsNullOrWhiteSpace(t.HeaderMediaUrl)) { _form.HsmHeaderUrl = t.HeaderMediaUrl!; }
         // Ajustar la lista de tokens al numero de parametros.
         while (_form.HsmParametros.Count < t.ParameterCount) { _form.HsmParametros.Add(""); }
         while (_form.HsmParametros.Count > t.ParameterCount) { _form.HsmParametros.RemoveAt(_form.HsmParametros.Count - 1); }
@@ -705,7 +743,8 @@
             _form.Destinatario, usuarioId,
             _form.Canal, _form.Asunto, _form.Cuerpo,
             lineId, _form.HsmTemplateId, _form.HsmTemplateName, _form.HsmParameterCount,
-            _form.HsmParametros);
+            _form.HsmParametros,
+            string.IsNullOrWhiteSpace(_form.HsmHeaderUrl) ? null : _form.HsmHeaderUrl.Trim());
     }
 
     private async Task Guardar()
@@ -726,7 +765,7 @@
 
     // ----------------- Simulacion -----------------
 
-    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; _simTelefono = ""; _simForzar = false; }
+    private void ResetSim() { _modalTab = "config"; _sim = null; _simError = null; _simBusy = false; _simTelefono = ""; _simForzar = false; _seleccion.Clear(); }
 
     private void AbrirSimulacion() { _modalTab = "sim"; }
 
@@ -735,8 +774,13 @@
     private async Task SimularEmitir()
     {
         if (_form?.Id is null) { return; }
+        if (_seleccion.Count == 0)
+        {
+            _simError = "Marca al menos un doctor en la tabla (columna izquierda) para emitir. Usa \"1. Ver a quien emitiria\" primero.";
+            return;
+        }
         var destinoTxt = string.IsNullOrWhiteSpace(_simTelefono)
-            ? "a los destinatarios resueltos"
+            ? $"a {_seleccion.Count} destinatario(s) marcado(s)"
             : $"al telefono de prueba {_simTelefono.Trim()} (override WhatsApp)";
         var ok = await JS.InvokeAsync<bool>("confirm",
             $"Esto EMITIRA de verdad las alertas para el {_simFecha:dd/MM/yyyy} {destinoTxt} (respetando lo ya enviado). Continuar?");
@@ -750,12 +794,47 @@
         _simBusy = true; _simError = null;
         try
         {
-            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, _simTelefono, _simForzar, await Actor());
+            IReadOnlyCollection<Guid>? solo = emitir ? _seleccion.ToList() : null;
+            _sim = await Svc.SimularReglaAsync(BuildRequest(), _simFecha, emitir, _simTelefono, _simForzar, await Actor(),
+                baseUri: Nav.BaseUri, soloAsignaciones: solo);
+            if (!emitir)
+            {
+                // Paso 1: pre-marcar todas las filas emitibles para que "Emitir" por defecto
+                // vaya a todas; el usuario desmarca las que no quiera.
+                _seleccion.Clear();
+                foreach (var f in _sim.Filas)
+                {
+                    if (f.Emitible && f.AsignacionId != Guid.Empty) { _seleccion.Add(f.AsignacionId); }
+                }
+            }
             if (emitir) { await Cargar(); }
         }
         catch (InvalidOperationException ex) { _simError = ex.Message; }
         catch (Exception ex) { _simError = "Error tecnico: " + ex.Message; }
         finally { _simBusy = false; }
+    }
+
+    // ---- Seleccion de filas (checkboxes) ----
+    private void ToggleFila(Guid asignacionId, bool on)
+    {
+        if (asignacionId == Guid.Empty) { return; }
+        if (on) { _seleccion.Add(asignacionId); } else { _seleccion.Remove(asignacionId); }
+    }
+
+    private IEnumerable<Guid> FilasSeleccionables()
+        => _sim?.Filas.Where(f => f.Emitible && f.AsignacionId != Guid.Empty).Select(f => f.AsignacionId) ?? Enumerable.Empty<Guid>();
+
+    private bool TodosSeleccionados()
+    {
+        var ids = FilasSeleccionables().ToList();
+        return ids.Count > 0 && ids.All(_seleccion.Contains);
+    }
+
+    private void ToggleSeleccionarTodos(ChangeEventArgs e)
+    {
+        var on = (bool)(e.Value ?? false);
+        _seleccion.Clear();
+        if (on) { foreach (var id in FilasSeleccionables()) { _seleccion.Add(id); } }
     }
 
     private static string SimEstadoClass(AlertaSimulacionFila f)
@@ -868,5 +947,6 @@
         public string? HsmTemplateName { get; set; }
         public int HsmParameterCount { get; set; }
         public List<string> HsmParametros { get; set; } = new();
+        public string HsmHeaderUrl { get; set; } = "";
     }
 }

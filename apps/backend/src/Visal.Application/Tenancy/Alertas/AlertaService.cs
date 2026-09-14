@@ -15,18 +15,20 @@ public sealed class AlertaService : IAlertaService
     private readonly IEmailSender _email;
     private readonly Email.INotificacionEmailSender _notiEmail;
     private readonly IHsmTemplateService _hsm;
+    private readonly IInformeTerapiasService _informe;
     private readonly ILogger<AlertaService> _log;
 
     public AlertaService(
         IApplicationDbContext db, ITenantContext tenant,
         IEmailSender email, Email.INotificacionEmailSender notiEmail,
-        IHsmTemplateService hsm, ILogger<AlertaService> log)
+        IHsmTemplateService hsm, IInformeTerapiasService informe, ILogger<AlertaService> log)
     {
         _db = db;
         _tenant = tenant;
         _email = email;
         _notiEmail = notiEmail;
         _hsm = hsm;
+        _informe = informe;
         _log = log;
     }
 
@@ -103,6 +105,7 @@ public sealed class AlertaService : IAlertaService
         entity.HsmTemplateName = req.Canal == AlertaCanal.WhatsApp ? req.HsmTemplateName : null;
         entity.HsmParameterCount = req.Canal == AlertaCanal.WhatsApp ? req.HsmParameterCount : 0;
         entity.HsmParametrosJson = req.Canal == AlertaCanal.WhatsApp ? paramsJson : null;
+        entity.HsmHeaderUrl = req.Canal == AlertaCanal.WhatsApp ? Vacio(req.HsmHeaderUrl) : null;
 
         await _db.SaveChangesAsync(ct);
         return entity.Id;
@@ -177,13 +180,13 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
         if (reglas.Count == 0) { return new(0, 0, 0, Array.Empty<string>()); }
 
-        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, ct);
+        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, baseUri: null, soloAsignaciones: null, ct);
         _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores.",
             tid, nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores);
         return new(nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores, nucleo.Mensajes);
     }
 
-    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, CancellationToken ct = default)
+    public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri = null, IReadOnlyCollection<Guid>? soloAsignaciones = null, CancellationToken ct = default)
     {
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (emitir && req.Id is null) { throw new InvalidOperationException("Guarda la regla antes de emitir la simulacion."); }
@@ -213,10 +216,11 @@ public sealed class AlertaService : IAlertaService
             HsmParameterCount = req.Canal == AlertaCanal.WhatsApp ? req.HsmParameterCount : 0,
             HsmParametrosJson = req.Canal == AlertaCanal.WhatsApp && req.HsmParametros is { Count: > 0 }
                 ? JsonSerializer.Serialize(req.HsmParametros) : null,
+            HsmHeaderUrl = req.Canal == AlertaCanal.WhatsApp ? Vacio(req.HsmHeaderUrl) : null,
         };
 
         // Simula la fecha elegida con la logica real de disparo (no forzar).
-        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, forzarReenvio, actor, ct);
+        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, forzarReenvio, actor, baseUri, soloAsignaciones, ct);
         var filas = nucleo.Filas;
 
         string? aviso = null;
@@ -242,9 +246,11 @@ public sealed class AlertaService : IAlertaService
 
     private sealed record NucleoResult(int Enviadas, int Saltadas, int Errores, List<string> Mensajes, List<AlertaSimulacionFila> Filas);
 
-    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, bool forzarReenvio, Guid actor, CancellationToken ct)
+    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri, IReadOnlyCollection<Guid>? soloAsignaciones, CancellationToken ct)
     {
         var overrideTel = string.IsNullOrWhiteSpace(telefonoOverride) ? null : NormalizarTelefono(telefonoOverride);
+        var baseUriInforme = string.IsNullOrWhiteSpace(baseUri) ? null : baseUri!.Trim();
+        var filtroAsignaciones = soloAsignaciones is { Count: > 0 } ? new HashSet<Guid>(soloAsignaciones) : null;
 
         var mensajes = new List<string>();
         var filas = new List<AlertaSimulacionFila>();
@@ -344,17 +350,34 @@ public sealed class AlertaService : IAlertaService
                 };
                 var pacInfo = pacientes.TryGetValue(cand.PacienteId, out var pinfo) ? pinfo : null;
 
+                // Seleccion de la simulacion (Paso 2 real): si el usuario marco filas
+                // concretas en la tabla, el envio se limita a esas asignaciones. En
+                // dry-run (Paso 1) no aplica: se listan todos los candidatos.
+                if (!dryRun && filtroAsignaciones is not null && !filtroAsignaciones.Contains(cand.AsignacionId))
+                {
+                    continue;
+                }
+
+                // Enlace del informe acotado al doctor de esta fila (solo para mostrar en
+                // la tabla y poder abrirlo/validarlo; no altera lo que se envia).
+                string? informeUrl = baseUriInforme is not null && cand.ProfesionalId is Guid infPid
+                    ? SafeEnlaceInforme(baseUriInforme, tid, infPid)
+                    : null;
+
                 // Dedup: ya enviada con exito este periodo. Con forzarReenvio se ignora
-                // (se reenvia y se actualiza el mismo registro del outbox).
+                // (se reenvia y se actualiza el mismo registro del outbox). Con telefono
+                // de prueba (override) tambien se ignora: es una prueba que va a mi numero
+                // y no debe quedar bloqueada por lo ya enviado a los reales.
                 var key = (regla.Id, cand.AsignacionId, periodo);
                 enviosIdx.TryGetValue(key, out var previo);
-                if (previo is not null && previo.Exito && !forzarReenvio)
+                if (previo is not null && previo.Exito && !forzarReenvio && overrideTel is null)
                 {
                     saltadas++;
                     filas.Add(new AlertaSimulacionFila(
                         pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
                         destTipo, destNombre, destCorreo, destTelefono, regla.Canal, previo.Contacto,
-                        "Ya enviada este periodo", Emitible: false, EnvioOk: null, EnvioError: null));
+                        "Ya enviada este periodo", Emitible: false, EnvioOk: null, EnvioError: null,
+                        AsignacionId: cand.AsignacionId, ProfesionalId: cand.ProfesionalId, InformeUrl: informeUrl));
                     continue;
                 }
 
@@ -378,7 +401,8 @@ public sealed class AlertaService : IAlertaService
                     filas.Add(new AlertaSimulacionFila(
                         pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
                         destTipo, destNombre, destCorreo, destTelefono, regla.Canal, emitible ? contacto : null,
-                        emitible ? "Se emitiria" : ("Sin contacto: " + contactoError), Emitible: emitible, EnvioOk: null, EnvioError: null));
+                        emitible ? "Se emitiria" : ("Sin contacto: " + contactoError), Emitible: emitible, EnvioOk: null, EnvioError: null,
+                        AsignacionId: cand.AsignacionId, ProfesionalId: cand.ProfesionalId, InformeUrl: informeUrl));
                     continue;
                 }
 
@@ -424,7 +448,8 @@ public sealed class AlertaService : IAlertaService
                             }
                             else
                             {
-                                var r = await _hsm.SendTestAsync(lineId, regla.HsmTemplateId!, contacto!, parametros, actor, ct: ct);
+                                var r = await _hsm.SendTestAsync(lineId, regla.HsmTemplateId!, contacto!, parametros, actor,
+                                    headerMediaUrl: regla.HsmHeaderUrl, ct: ct);
                                 ok = r.Ok; err = r.Error;
                                 if (ok) { whatsappNotificado.Add(waKey); }
                             }
@@ -432,27 +457,32 @@ public sealed class AlertaService : IAlertaService
                     }
                 }
 
-                // Registrar/actualizar outbox.
-                if (previo is null)
+                // Registrar/actualizar outbox — SOLO en envio real. Con telefono de prueba
+                // (override) es una prueba a mi numero: no se toca la deduplicacion real
+                // para no "olvidar" el numero verdadero ni marcar como enviado a los doctores.
+                if (overrideTel is null)
                 {
-                    previo = new AlertaEnvio
+                    if (previo is null)
                     {
-                        TenantId = tid,
-                        ReglaId = regla.Id,
-                        AsignacionId = cand.AsignacionId,
-                        PacienteId = cand.PacienteId,
-                        Periodo = periodo,
-                        Canal = regla.Canal,
-                        Destinatario = regla.Destinatario,
-                    };
-                    _db.AlertaEnvios.Add(previo);
-                    enviosIdx[key] = previo;
+                        previo = new AlertaEnvio
+                        {
+                            TenantId = tid,
+                            ReglaId = regla.Id,
+                            AsignacionId = cand.AsignacionId,
+                            PacienteId = cand.PacienteId,
+                            Periodo = periodo,
+                            Canal = regla.Canal,
+                            Destinatario = regla.Destinatario,
+                        };
+                        _db.AlertaEnvios.Add(previo);
+                        enviosIdx[key] = previo;
+                    }
+                    previo.Contacto = contacto;
+                    previo.FechaEnvio = DateTimeOffset.UtcNow;
+                    previo.Exito = ok;
+                    previo.Error = err;
+                    previo.ExternalId = extId;
                 }
-                previo.Contacto = contacto;
-                previo.FechaEnvio = DateTimeOffset.UtcNow;
-                previo.Exito = ok;
-                previo.Error = err;
-                previo.ExternalId = extId;
 
                 if (agrupada) { saltadas++; }
                 else if (ok) { enviadas++; }
@@ -461,7 +491,8 @@ public sealed class AlertaService : IAlertaService
                     pacInfo?.NombreCompleto ?? "", pacInfo?.NumeroDocumento ?? "", cand.Servicio, cand.CodigoBase ?? "",
                     destTipo, destNombre, destCorreo, destTelefono, regla.Canal, contacto,
                     agrupada ? "Agrupada (ya notificado al profesional este periodo)" : (ok ? "Enviada" : ("Error: " + err)),
-                    Emitible: ok, EnvioOk: agrupada ? (bool?)null : ok, EnvioError: err));
+                    Emitible: ok, EnvioOk: agrupada ? (bool?)null : ok, EnvioError: err,
+                    AsignacionId: cand.AsignacionId, ProfesionalId: cand.ProfesionalId, InformeUrl: informeUrl));
             }
         }
 
@@ -710,6 +741,15 @@ public sealed class AlertaService : IAlertaService
 
     private static string? Vacio(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
+    /// <summary>Genera el enlace del informe acotado a un profesional para mostrarlo en la
+    /// tabla de simulacion. Best-effort: si algo falla (sin base, sin tenant) devuelve null
+    /// para no romper la simulacion.</summary>
+    private string? SafeEnlaceInforme(string baseUri, Guid tenantId, Guid profesionalId)
+    {
+        try { return _informe.GenerarEnlace(baseUri, tenantId, profesionalId); }
+        catch { return null; }
+    }
+
     /// <summary>Normaliza a solo digitos y antepone 57 si son 10 (celular CO). Null si vacio.</summary>
     private static string? NormalizarTelefono(string? raw)
     {
@@ -815,6 +855,7 @@ public sealed class AlertaService : IAlertaService
             r.DisparoTipo, r.DiasDelMes, r.MesesDespues, r.AnclaRelativa,
             r.Destinatario, r.UsuarioSistemaId, usuarioNombre,
             r.Canal, r.Asunto, r.Cuerpo,
-            r.HsmLineId, r.HsmTemplateId, r.HsmTemplateName, r.HsmParameterCount, parametros);
+            r.HsmLineId, r.HsmTemplateId, r.HsmTemplateName, r.HsmParameterCount, parametros,
+            r.HsmHeaderUrl);
     }
 }

@@ -10,7 +10,7 @@ public sealed record AlertaReglaDto(
     AlertaDestinatario Destinatario, Guid? UsuarioSistemaId, string? UsuarioSistemaNombre,
     AlertaCanal Canal, string? Asunto, string? Cuerpo,
     Guid? HsmLineId, string? HsmTemplateId, string? HsmTemplateName, int HsmParameterCount,
-    IReadOnlyList<string> HsmParametros);
+    IReadOnlyList<string> HsmParametros, string? HsmHeaderUrl = null);
 
 /// <summary>Payload para crear/actualizar una regla. Id null = crear.</summary>
 public sealed record AlertaReglaUpsertRequest(
@@ -20,7 +20,7 @@ public sealed record AlertaReglaUpsertRequest(
     AlertaDestinatario Destinatario, Guid? UsuarioSistemaId,
     AlertaCanal Canal, string? Asunto, string? Cuerpo,
     Guid? HsmLineId, string? HsmTemplateId, string? HsmTemplateName, int HsmParameterCount,
-    IReadOnlyList<string>? HsmParametros);
+    IReadOnlyList<string>? HsmParametros, string? HsmHeaderUrl = null);
 
 /// <summary>Linea Gupshup disponible para el canal WhatsApp de una regla.</summary>
 public sealed record AlertaLineaDto(Guid Id, string Nombre);
@@ -42,7 +42,8 @@ public sealed record AlertaSimulacionFila(
     string DestinatarioTipo, string? DestinatarioNombre,
     string? Correo, string? Telefono,
     AlertaCanal Canal, string? ContactoUsado,
-    string Estado, bool Emitible, bool? EnvioOk, string? EnvioError);
+    string Estado, bool Emitible, bool? EnvioOk, string? EnvioError,
+    Guid AsignacionId = default, Guid? ProfesionalId = null, string? InformeUrl = null);
 
 /// <summary>Resultado de simular una regla en una fecha: filas + totales. En modo emitir
 /// (paso 2) tambien envia realmente y reporta Enviadas/Errores.</summary>
@@ -98,7 +99,13 @@ public interface IAlertaService
     /// se usa ese numero como destino en vez del contacto resuelto (para pruebas).</param>
     /// <param name="forzarReenvio">Si es true, ignora la deduplicacion (reenvia aunque ya
     /// se haya enviado en el periodo). Util para reprobar desde la simulacion.</param>
-    Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, CancellationToken ct = default);
+    /// <param name="baseUri">Base publica de la app (ej. NavigationManager.BaseUri) para
+    /// construir el enlace del informe por doctor que se muestra en cada fila. Null/vacio
+    /// = no se genera el enlace.</param>
+    /// <param name="soloAsignaciones">Opcional: cuando <paramref name="emitir"/> es true,
+    /// limita el envio real a estas asignaciones (checkboxes de la tabla). Null/vacio =
+    /// emite a todas las filas candidatas (comportamiento anterior).</param>
+    Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri = null, IReadOnlyCollection<Guid>? soloAsignaciones = null, CancellationToken ct = default);
 
     /// <summary>Bandeja: alertas emitidas mas recientes (tarjetas) con nombre de regla y paciente.</summary>
     Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, CancellationToken ct = default);

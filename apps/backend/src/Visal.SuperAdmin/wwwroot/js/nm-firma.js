@@ -106,6 +106,15 @@
             return canvas.toDataURL('image/png');
         },
 
+        // Inicializa TODOS los canvas que matcheen el selector (p.ej. varios
+        // campos de firma en un mismo formulario). init() es idempotente por
+        // canvas, asi que se puede llamar en cada render sin duplicar listeners.
+        initAll: function (selector) {
+            const list = document.querySelectorAll(selector || 'canvas.fv-firma-pad');
+            list.forEach(function (c) { if (c.id) { window.visalFirma.init(c.id); } });
+            return list.length;
+        },
+
         // Pinta una firma existente (data url) sobre el canvas.
         load: function (canvasId, dataUrl) {
             const canvas = document.getElementById(canvasId);

@@ -451,6 +451,28 @@ else
         if (OnValueChanged.HasDelegate) { await OnValueChanged.InvokeAsync(new(key, value)); }
     }
 
+    /// <summary>Captura la firma dibujada en el pad (canvas) y la guarda como data
+    /// URL en el valor del campo. Si el pad esta vacio no hace nada.</summary>
+    private async Task GuardarFirmaAsync(string key, string canvasId)
+    {
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string?>("visalFirma.getDataUrl", canvasId);
+            if (string.IsNullOrWhiteSpace(dataUrl)) { return; }
+            await SetValue(key, dataUrl);
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+
+    /// <summary>Limpia el trazo del pad de firma.</summary>
+    private async Task LimpiarFirmaAsync(string canvasId)
+    {
+        try { await JS.InvokeVoidAsync("visalFirma.clear", canvasId); }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+
     protected override void OnParametersSet()
     {
         // Calcular valores iniciales al abrir/cambiar de schema.
@@ -468,6 +490,8 @@ else
         {
             await JS.InvokeVoidAsync("visalFormToc.setup");
             await JS.InvokeVoidAsync("visalVoice.setup");
+            // Inicializa los pads de firma manual (campos de firma vacios).
+            await JS.InvokeVoidAsync("visalFirma.initAll", ".fv-firma-pad");
         }
         catch (Microsoft.JSInterop.JSDisconnectedException) { /* circuito cerrado */ }
         catch (TaskCanceledException) { /* navegacion en curso */ }
@@ -851,12 +875,37 @@ else
         // los data URIs base64 tienen miles de caracteres y ensucian la vista,
         // y nadie va a editar una URL/data URI de firma a mano. El valor
         // persiste via el estado ya cargado por GetValue/SetValue.
-        if (IsFirmaField(node.Name) && IsImageUrlLike(val))
+        if (IsFirmaField(node.Name))
         {
-            <div class="fv-firma-prev">
-                <img src="@val" alt="firma" class="fv-firma-img"
-                     style="max-height:90px;max-width:100%;border:1px solid #e2e8f0;border-radius:4px;background:#fff;padding:4px;display:block;margin-bottom:6px;" />
-            </div>
+            // Con firma (URL/data URI): mostrar la imagen. Si es editable, un boton
+            // "Cambiar" limpia el valor para volver a firmar en el pad.
+            if (IsImageUrlLike(val))
+            {
+                <div class="fv-firma-prev">
+                    <img src="@val" alt="firma" class="fv-firma-img"
+                         style="max-height:90px;max-width:100%;border:1px solid #e2e8f0;border-radius:4px;background:#fff;padding:4px;display:block;margin-bottom:6px;" />
+                    @if (!ro)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetValue(key, string.Empty)">Cambiar firma</button>
+                    }
+                </div>
+                return;
+            }
+            // Sin firma y editable: pad de firma manual (dibujo con mouse/dedo).
+            if (!ro)
+            {
+                var padId = $"fv-firma-{node.Id}";
+                <div class="fv-firma-pad-wrap" style="margin-bottom:6px;">
+                    <canvas id="@padId" class="fv-firma-pad"
+                            style="width:100%;max-width:360px;height:120px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;touch-action:none;display:block;"></canvas>
+                    <div style="display:flex;gap:6px;margin-top:4px;">
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => GuardarFirmaAsync(key, padId)">Guardar firma</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => LimpiarFirmaAsync(padId)">Limpiar</button>
+                    </div>
+                </div>
+                return;
+            }
+            // Sin firma y solo lectura: nada que mostrar.
             return;
         }
 

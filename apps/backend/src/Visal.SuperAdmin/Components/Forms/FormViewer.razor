@@ -3,6 +3,7 @@
 @inject Visal.Application.Common.IQrCodeGenerator Qr
 @inject Microsoft.Extensions.Configuration.IConfiguration Config
 @inject NavigationManager Nav
+@inject Visal.Application.Tenancy.IProfesionalConfigService ProfSvc
 
 @* ============================================================
    FormViewer: renderiza un FormSchema como una vista
@@ -478,6 +479,78 @@ else
         // Calcular valores iniciales al abrir/cambiar de schema.
         RecalculateAll();
         RecalculateAll();
+        BuildSiblingMap();
+    }
+
+    // ===== Selector de profesional (campo fieldType="profesional") =====
+    private List<Visal.Application.Tenancy.ProfesionalDto> _profesionales = new();
+    // name del campo -> otros campos de su misma seccion (para autollenar firma/registro).
+    private Dictionary<string, List<FormNode>> _seccionSiblings = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Solo cargamos el catalogo de profesionales si el formato usa el selector.
+        if (Schema is not null && WalkNodes(Schema.Children)
+                .Any(n => string.Equals(n.FieldType, "profesional", StringComparison.OrdinalIgnoreCase)))
+        {
+            try { _profesionales = (await ProfSvc.ListProfesionalesAsync(null)).ToList(); }
+            catch { _profesionales = new(); }
+        }
+    }
+
+    /// <summary>Mapea cada campo a los demas campos de su MISMA seccion, para que al
+    /// elegir un profesional se llene la firma/registro del bloque correcto.</summary>
+    private void BuildSiblingMap()
+    {
+        _seccionSiblings = new(StringComparer.OrdinalIgnoreCase);
+        if (Schema is null) { return; }
+        void Recurse(IEnumerable<FormNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.IsSection && n.Children is not null)
+                {
+                    var campos = n.Children.Where(c => !c.IsSection && !string.IsNullOrWhiteSpace(c.Name)).ToList();
+                    foreach (var c in campos)
+                    {
+                        _seccionSiblings[c.Name!] = campos.Where(o => !ReferenceEquals(o, c)).ToList();
+                    }
+                    Recurse(n.Children.Where(c => c.IsSection));
+                }
+            }
+        }
+        Recurse(Schema.Children);
+    }
+
+    /// <summary>Al elegir un profesional en el desplegable: pone el nombre y, en la
+    /// misma seccion, autollena su firma (imagen) y su registro/documento.</summary>
+    private async Task SeleccionarProfesionalAsync(FormNode node, string key, string? idStr)
+    {
+        if (string.IsNullOrWhiteSpace(idStr)) { await SetValue(key, string.Empty); return; }
+        if (!Guid.TryParse(idStr, out var id)) { return; }
+        var prof = _profesionales.FirstOrDefault(p => p.Id == id);
+        if (prof is null) { return; }
+        await SetValue(key, prof.NombreCompleto);
+        string? firmaUrl = null;
+        try { firmaUrl = (await ProfSvc.GetProfesionalAsync(id))?.FirmaUrl; } catch { }
+        if (node.Name is null || !_seccionSiblings.TryGetValue(node.Name, out var sibs)) { return; }
+        foreach (var s in sibs)
+        {
+            if (string.IsNullOrWhiteSpace(s.Name)) { continue; }
+            var sn = s.Name!.ToLowerInvariant();
+            if (IsFirmaImageField(s.Name))
+            {
+                if (!string.IsNullOrWhiteSpace(firmaUrl)) { await SetValue(s.Name!, firmaUrl); }
+            }
+            else if (sn.Contains("registro") || sn.Contains("_reg") || sn.Contains("cargo"))
+            {
+                if (!string.IsNullOrWhiteSpace(prof.RegistroMedico)) { await SetValue(s.Name!, prof.RegistroMedico); }
+            }
+            else if (sn.Contains("cc") || sn.Contains("documento") || sn.Contains("_doc"))
+            {
+                if (!string.IsNullOrWhiteSpace(prof.NumeroDocumento)) { await SetValue(s.Name!, prof.NumeroDocumento); }
+            }
+        }
     }
 
     /// <summary>Re-arma el observer del TOC despues de cada render. El JS hace
@@ -802,6 +875,21 @@ else
         !string.IsNullOrWhiteSpace(name) &&
         name.Contains("firma", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Campo que realmente guarda una IMAGEN de firma (para preview/pad).
+    /// Excluye los campos cuyo Name contiene "firma" pero son de texto (nombre,
+    /// cargo, registro, documento...), como firma_fisiatra_nombre o firma_to_cargo
+    /// de la junta medica: esos NO deben mostrar el pad de firma.</summary>
+    private static bool IsFirmaImageField(string? name)
+    {
+        if (!IsFirmaField(name)) { return false; }
+        var n = name!.ToLowerInvariant();
+        foreach (var w in new[] { "nombre", "cargo", "registro", "_reg", "documento", "_doc", "cedula", "cc_", "_cc", "fecha" })
+        {
+            if (n.Contains(w)) { return false; }
+        }
+        return true;
+    }
+
     /// <summary>Detecta si un Name corresponde a un campo de HUELLA. Los formatos
     /// de consentimiento (PP-FO-17, PP-FO-18, PP-FO-88, PP-FO-113) traen ~21
     /// campos "huella_xxx" que hoy vienen tipados como textarea; los renderizamos
@@ -875,7 +963,7 @@ else
         // los data URIs base64 tienen miles de caracteres y ensucian la vista,
         // y nadie va a editar una URL/data URI de firma a mano. El valor
         // persiste via el estado ya cargado por GetValue/SetValue.
-        if (IsFirmaField(node.Name))
+        if (IsFirmaImageField(node.Name))
         {
             // Con firma (URL/data URI): mostrar la imagen. Si es editable, un boton
             // "Cambiar" limpia el valor para volver a firmar en el pad.
@@ -943,6 +1031,18 @@ else
 
         switch (node.FieldType)
         {
+            case "profesional":
+                // Desplegable de profesionales del tenant. Al elegir uno, se llena
+                // el nombre y, en la MISMA seccion, su firma (imagen) y su registro.
+                <select class="form-control" disabled="@ro"
+                        @onchange="e => SeleccionarProfesionalAsync(node, key, e.Value?.ToString())">
+                    <option value="">@(string.IsNullOrWhiteSpace(val) ? "— Selecciona profesional —" : val + " (cambiar)")</option>
+                    @foreach (var p in _profesionales)
+                    {
+                        <option value="@p.Id" selected="@(string.Equals(p.NombreCompleto, val, StringComparison.OrdinalIgnoreCase))">@p.NombreCompleto@(string.IsNullOrWhiteSpace(p.RegistroMedico) ? "" : " — RM " + p.RegistroMedico)</option>
+                    }
+                </select>
+                break;
             case "qr":
                 @RenderQr(node)
                 break;

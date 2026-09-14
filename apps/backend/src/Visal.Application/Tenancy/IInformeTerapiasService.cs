@@ -42,4 +42,9 @@ public interface IInformeTerapiasService
     /// <paramref name="profesionalId"/> viene, filtra a ese profesional. Null si el
     /// tenant no existe.</summary>
     Task<InformeTerapiasResult?> ObtenerAsync(Guid tenantId, Guid? profesionalId = null, CancellationToken ct = default);
+
+    /// <summary>Registra que se abrio el enlace del informe (control de lectura). Best-effort:
+    /// si falla no debe romper la pagina. La pagina es anonima, por eso recibe el tenant y el
+    /// profesional decodificados del token.</summary>
+    Task RegistrarAccesoAsync(Guid tenantId, Guid? profesionalId, CancellationToken ct = default);
 }

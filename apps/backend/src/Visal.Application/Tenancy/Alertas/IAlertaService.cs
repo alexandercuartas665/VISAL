@@ -52,6 +52,20 @@ public sealed record AlertaSimulacionResult(
     int Coinciden, int Emitibles, int SinContacto, int YaEnviadas, int Enviadas, int Errores,
     IReadOnlyList<AlertaSimulacionFila> Filas, string? Aviso);
 
+/// <summary>Fila del control de lectura del informe: un doctor con cuantas alertas se le
+/// enviaron en el periodo y cuantas veces abrio su enlace del informe.</summary>
+public sealed record ControlLecturaDoctorDto(
+    Guid ProfesionalId, string Nombre, string? Celular,
+    int Enviados, int Aperturas, DateTimeOffset? UltimaApertura, DateTimeOffset? UltimoEnvio);
+
+/// <summary>Control de lectura del informe para un periodo: doctores a los que se les
+/// envio la alerta, separados entre los que abrieron el enlace (consumieron) y los que
+/// no (no leyeron). Alimenta los dos mini-reportes y la alerta a gerencia.</summary>
+public sealed record ControlLecturaResult(
+    string Periodo, int TotalDoctores, int Consumieron, int NoLeyeron,
+    IReadOnlyList<ControlLecturaDoctorDto> ListaConsumieron,
+    IReadOnlyList<ControlLecturaDoctorDto> ListaNoLeyeron);
+
 /// <summary>Tarjeta de una alerta emitida (bandeja del modulo Alertas).</summary>
 public sealed record AlertaEnvioDto(
     Guid Id, string ReglaNombre, string PacienteNombre, string? Contacto,
@@ -112,4 +126,9 @@ public interface IAlertaService
 
     /// <summary>Marca la gestion de una tarjeta de alerta (Nueva/Atendida/Descartada).</summary>
     Task<bool> MarcarGestionAsync(Guid envioId, AlertaGestion estado, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Control de lectura del informe para un periodo "yyyy-MM": cruza los doctores
+    /// a los que se les envio la alerta contra los accesos registrados a su enlace, y los
+    /// separa en "consumieron" y "no leyeron". Para los dos mini-reportes del modulo.</summary>
+    Task<ControlLecturaResult> ObtenerControlLecturaAsync(string periodo, CancellationToken ct = default);
 }

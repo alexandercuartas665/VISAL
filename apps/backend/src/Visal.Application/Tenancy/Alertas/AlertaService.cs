@@ -180,10 +180,140 @@ public sealed class AlertaService : IAlertaService
             .ToListAsync(ct);
         if (reglas.Count == 0) { return new(0, 0, 0, Array.Empty<string>()); }
 
-        var nucleo = await EvaluarNucleoAsync(tid, reglas, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, baseUri: null, soloAsignaciones: null, ct);
-        _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores.",
-            tid, nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores);
-        return new(nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores, nucleo.Mensajes);
+        // Las reglas de control (InformeNoLeido) son agregadas (un resumen a gerencia),
+        // no per-paciente: se procesan aparte del nucleo por-candidato.
+        var reglasNormales = reglas.Where(r => r.Condicion != AlertaCondicion.InformeNoLeido).ToList();
+        var nucleo = await EvaluarNucleoAsync(tid, reglasNormales, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, baseUri: null, soloAsignaciones: null, ct);
+
+        var (agEnv, agErr, agMsgs) = await DispararInformeNoLeidoAsync(tid, reglas, hoy, forzar, ct);
+
+        var mensajes = new List<string>(nucleo.Mensajes);
+        mensajes.AddRange(agMsgs);
+        _log.LogInformation("Alertas evaluadas tenant {Tenant}: {Env} enviadas, {Skip} saltadas, {Err} errores (control gerencia: {Ag} enviadas, {AgErr} errores).",
+            tid, nucleo.Enviadas, nucleo.Saltadas, nucleo.Errores, agEnv, agErr);
+        return new(nucleo.Enviadas + agEnv, nucleo.Saltadas, nucleo.Errores + agErr, mensajes);
+    }
+
+    /// <summary>Alerta agregada de control a gerencia: por cada regla InformeNoLeido que
+    /// dispare hoy, arma el resumen de doctores a los que se les envio la alerta del informe
+    /// en el periodo y NO abrieron su enlace, y lo envia por correo al usuario de gerencia.
+    /// Deduplicado por (regla, periodo) con una fila de outbox de asignacion vacia.</summary>
+    private async Task<(int Enviadas, int Errores, List<string> Msgs)> DispararInformeNoLeidoAsync(
+        Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, CancellationToken ct)
+    {
+        var msgs = new List<string>();
+        int enviadas = 0, errores = 0;
+        var candidatas = reglas.Where(r => r.Condicion == AlertaCondicion.InformeNoLeido).ToList();
+        if (candidatas.Count == 0) { return (0, 0, msgs); }
+
+        var periodo = hoy.ToString("yyyy-MM");
+        foreach (var regla in candidatas)
+        {
+            bool dispara = forzar
+                || (regla.DisparoTipo == AlertaDisparoTipo.DiasDelMes && ParseDias(regla.DiasDelMes).Contains(hoy.Day));
+            if (!dispara) { continue; }
+
+            if (regla.UsuarioSistemaId is not Guid uid)
+            {
+                errores++; msgs.Add($"{regla.Nombre}: sin usuario de gerencia configurado."); continue;
+            }
+            var user = await _db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == uid, ct);
+            var correo = Vacio(user?.Email);
+            if (correo is null)
+            {
+                errores++; msgs.Add($"{regla.Nombre}: el usuario de gerencia no tiene correo."); continue;
+            }
+
+            // Dedup por (regla, periodo): fila de outbox con asignacion vacia.
+            var previo = await _db.AlertaEnvios
+                .FirstOrDefaultAsync(e => e.ReglaId == regla.Id && e.AsignacionId == Guid.Empty && e.Periodo == periodo, ct);
+            if (previo is not null && previo.Exito && !forzar) { continue; }
+
+            var datos = await ControlLecturaCoreAsync(tid, periodo, ct);
+            var noLey = datos.Where(d => d.Aperturas == 0).OrderBy(d => d.Nombre, StringComparer.OrdinalIgnoreCase).ToList();
+
+            var asunto = string.IsNullOrWhiteSpace(regla.Asunto)
+                ? $"Control de lectura de informes {periodo}"
+                : regla.Asunto!;
+
+            bool ok; string? err;
+            if (await _notiEmail.TieneCuentaAsync(tid, ct))
+            {
+                var r = await _notiEmail.SendAsync(tid, correo, asunto, BuildNoLeidoTexto(periodo, datos.Count, noLey), ct);
+                ok = r.Ok; err = r.Error;
+            }
+            else
+            {
+                var r = await _email.SendAsync(correo, asunto, BuildNoLeidoHtml(periodo, datos.Count, noLey), ct);
+                ok = r.Ok; err = r.Error;
+            }
+
+            if (previo is null)
+            {
+                previo = new AlertaEnvio
+                {
+                    TenantId = tid, ReglaId = regla.Id, AsignacionId = Guid.Empty, PacienteId = Guid.Empty,
+                    Periodo = periodo, Canal = AlertaCanal.Correo, Destinatario = AlertaDestinatario.UsuarioSistema,
+                };
+                _db.AlertaEnvios.Add(previo);
+            }
+            previo.Contacto = correo;
+            previo.FechaEnvio = DateTimeOffset.UtcNow;
+            previo.Exito = ok;
+            previo.Error = err;
+            await _db.SaveChangesAsync(ct);
+
+            if (ok) { enviadas++; } else { errores++; msgs.Add($"{regla.Nombre}: {err}"); }
+        }
+        return (enviadas, errores, msgs);
+    }
+
+    private static string BuildNoLeidoTexto(string periodo, int totalDoctores, List<ControlLecturaDoctorDto> noLey)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("Control de lectura de informes - periodo ").Append(periodo).Append('\n');
+        sb.Append($"Doctores notificados: {totalDoctores}. No leyeron su informe: {noLey.Count}.\n\n");
+        if (noLey.Count == 0) { sb.Append("Todos los doctores notificados abrieron su enlace. Sin pendientes.\n"); return sb.ToString(); }
+        sb.Append("Doctores que NO abrieron su enlace:\n");
+        var i = 1;
+        foreach (var d in noLey)
+        {
+            sb.Append(i++).Append(". ").Append(d.Nombre);
+            if (!string.IsNullOrWhiteSpace(d.Celular)) { sb.Append(" (").Append(d.Celular).Append(')'); }
+            sb.Append(" - envios: ").Append(d.Enviados);
+            if (d.UltimoEnvio is { } ue) { sb.Append(", ultimo envio: ").Append(ue.ToLocalTime().ToString("dd/MM/yyyy")); }
+            sb.Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildNoLeidoHtml(string periodo, int totalDoctores, List<ControlLecturaDoctorDto> noLey)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<div style=\"font-family:Arial,sans-serif;font-size:14px;color:#0f172a\">");
+        sb.Append($"<h2 style=\"margin:0 0 4px\">Control de lectura de informes</h2>");
+        sb.Append($"<p style=\"margin:0 0 12px;color:#475569\">Periodo <b>{System.Net.WebUtility.HtmlEncode(periodo)}</b> · Doctores notificados: <b>{totalDoctores}</b> · No leyeron: <b>{noLey.Count}</b></p>");
+        if (noLey.Count == 0)
+        {
+            sb.Append("<p style=\"color:#16a34a\">Todos los doctores notificados abrieron su enlace. Sin pendientes.</p></div>");
+            return sb.ToString();
+        }
+        sb.Append("<table style=\"border-collapse:collapse;font-size:13px\"><thead><tr>");
+        sb.Append("<th style=\"text-align:left;border-bottom:2px solid #e2e8f0;padding:6px 10px\">Doctor</th>");
+        sb.Append("<th style=\"text-align:left;border-bottom:2px solid #e2e8f0;padding:6px 10px\">Celular</th>");
+        sb.Append("<th style=\"text-align:center;border-bottom:2px solid #e2e8f0;padding:6px 10px\">Envios</th>");
+        sb.Append("<th style=\"text-align:left;border-bottom:2px solid #e2e8f0;padding:6px 10px\">Ultimo envio</th></tr></thead><tbody>");
+        foreach (var d in noLey)
+        {
+            sb.Append("<tr>");
+            sb.Append($"<td style=\"padding:6px 10px;border-bottom:1px solid #eef2f7\"><b>{System.Net.WebUtility.HtmlEncode(d.Nombre)}</b></td>");
+            sb.Append($"<td style=\"padding:6px 10px;border-bottom:1px solid #eef2f7\">{System.Net.WebUtility.HtmlEncode(d.Celular ?? "-")}</td>");
+            sb.Append($"<td style=\"padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:center\">{d.Enviados}</td>");
+            sb.Append($"<td style=\"padding:6px 10px;border-bottom:1px solid #eef2f7\">{(d.UltimoEnvio is { } ue ? ue.ToLocalTime().ToString("dd/MM/yyyy") : "-")}</td>");
+            sb.Append("</tr>");
+        }
+        sb.Append("</tbody></table></div>");
+        return sb.ToString();
     }
 
     public async Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri = null, IReadOnlyCollection<Guid>? soloAsignaciones = null, CancellationToken ct = default)
@@ -482,6 +612,10 @@ public sealed class AlertaService : IAlertaService
                     previo.Exito = ok;
                     previo.Error = err;
                     previo.ExternalId = extId;
+                    // Guardar el profesional destinatario para el control de lectura del
+                    // informe (cruce "a quien se envio" vs "quien abrio el enlace").
+                    previo.ProfesionalId = regla.Destinatario == AlertaDestinatario.DoctorAtendio
+                        ? cand.ProfesionalId : null;
                 }
 
                 if (agrupada) { saltadas++; }
@@ -533,6 +667,72 @@ public sealed class AlertaService : IAlertaService
         e.EstadoGestion = estado;
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<ControlLecturaResult> ObtenerControlLecturaAsync(string periodo, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        periodo = string.IsNullOrWhiteSpace(periodo) ? DateTime.Now.ToString("yyyy-MM") : periodo.Trim();
+
+        var datos = await ControlLecturaCoreAsync(tid, periodo, ct);
+        var consum = datos.Where(d => d.Aperturas > 0).OrderByDescending(d => d.UltimaApertura).ToList();
+        var noLey = datos.Where(d => d.Aperturas == 0).OrderBy(d => d.Nombre, StringComparer.OrdinalIgnoreCase).ToList();
+        return new ControlLecturaResult(periodo, datos.Count, consum.Count, noLey.Count, consum, noLey);
+    }
+
+    /// <summary>Nucleo del control de lectura: doctores a los que se les envio la alerta en
+    /// el periodo con su conteo de envios y de aperturas del enlace. Reusado por el reporte
+    /// y por la alerta a gerencia.</summary>
+    private async Task<List<ControlLecturaDoctorDto>> ControlLecturaCoreAsync(Guid tid, string periodo, CancellationToken ct)
+    {
+        var envios = await _db.AlertaEnvios.AsNoTracking()
+            .Where(e => e.Destinatario == AlertaDestinatario.DoctorAtendio
+                     && e.Exito && e.Periodo == periodo && e.ProfesionalId != null)
+            .Select(e => new { ProfId = e.ProfesionalId!.Value, e.FechaEnvio })
+            .ToListAsync(ct);
+        if (envios.Count == 0) { return new(); }
+
+        var porDoctor = envios.GroupBy(e => e.ProfId)
+            .ToDictionary(g => g.Key, g => (Enviados: g.Count(), UltimoEnvio: g.Max(x => x.FechaEnvio)));
+        var profIds = porDoctor.Keys.ToList();
+
+        var (ini, fin) = RangoMes(periodo);
+        var accesos = await _db.InformeAccesos.AsNoTracking()
+            .Where(a => a.ProfesionalId != null && profIds.Contains(a.ProfesionalId.Value)
+                     && a.AccedidoEn >= ini && a.AccedidoEn < fin)
+            .Select(a => new { ProfId = a.ProfesionalId!.Value, a.AccedidoEn })
+            .ToListAsync(ct);
+        var aperturas = accesos.GroupBy(a => a.ProfId)
+            .ToDictionary(g => g.Key, g => (Count: g.Count(), Ultima: g.Max(x => x.AccedidoEn)));
+
+        var profs = (await _db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NombreCompleto, p.Celular })
+            .ToListAsync(ct))
+            .ToDictionary(p => p.Id, p => (p.NombreCompleto, p.Celular));
+
+        var res = new List<ControlLecturaDoctorDto>(profIds.Count);
+        foreach (var pid in profIds)
+        {
+            var env = porDoctor[pid];
+            var tieneAp = aperturas.TryGetValue(pid, out var ap);
+            var (nombre, cel) = profs.TryGetValue(pid, out var pn) ? (pn.NombreCompleto, pn.Celular) : ("(profesional desconocido)", (string?)null);
+            res.Add(new ControlLecturaDoctorDto(
+                pid, nombre, cel, env.Enviados,
+                tieneAp ? ap.Count : 0, tieneAp ? ap.Ultima : (DateTimeOffset?)null, env.UltimoEnvio));
+        }
+        return res;
+    }
+
+    /// <summary>Rango [inicio, fin) en UTC del mes "yyyy-MM". Fallback al mes actual.</summary>
+    private static (DateTimeOffset Ini, DateTimeOffset Fin) RangoMes(string periodo)
+    {
+        int y = DateTime.Now.Year, m = DateTime.Now.Month;
+        var parts = (periodo ?? "").Split('-');
+        if (parts.Length == 2 && int.TryParse(parts[0], out var py) && int.TryParse(parts[1], out var pm)
+            && pm is >= 1 and <= 12) { y = py; m = pm; }
+        var ini = new DateTimeOffset(new DateTime(y, m, 1, 0, 0, 0, DateTimeKind.Utc));
+        return (ini, ini.AddMonths(1));
     }
 
     // ======================== Internos ========================
@@ -822,6 +1022,16 @@ public sealed class AlertaService : IAlertaService
         if (req.Destinatario == AlertaDestinatario.UsuarioSistema && req.UsuarioSistemaId is null)
         {
             throw new InvalidOperationException("Elige el usuario del sistema destinatario.");
+        }
+        // Control a gerencia (InformeNoLeido): es agregado y por correo; el cuerpo se
+        // genera automaticamente. Solo exige un usuario de gerencia como destinatario.
+        if (req.Condicion == AlertaCondicion.InformeNoLeido)
+        {
+            if (req.Destinatario != AlertaDestinatario.UsuarioSistema || req.UsuarioSistemaId is null)
+            {
+                throw new InvalidOperationException("El control a gerencia debe dirigirse a un usuario del sistema (gerencia).");
+            }
+            return;
         }
         if (req.Canal == AlertaCanal.Correo)
         {

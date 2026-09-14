@@ -166,6 +166,20 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         return new InformeTerapiasResult(tenant.Name, tenant.LogoUrl, hoy, filas);
     }
 
+    public async Task RegistrarAccesoAsync(Guid tenantId, Guid? profesionalId, CancellationToken ct = default)
+    {
+        // La pagina es anonima (sin tenant en contexto): fijamos TenantId explicito.
+        var acceso = new Visal.Domain.Entities.InformeAcceso
+        {
+            TenantId = tenantId,
+            ProfesionalId = profesionalId,
+            AccedidoEn = DateTimeOffset.UtcNow,
+            TokenTipo = profesionalId is null ? "inf1" : "inf2",
+        };
+        _db.InformeAccesos.Add(acceso);
+        await _db.SaveChangesAsync(ct);
+    }
+
     private static bool Contiene(string? s, string term)
         => !string.IsNullOrWhiteSpace(s) && s.Contains(term, StringComparison.OrdinalIgnoreCase);
 }

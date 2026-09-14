@@ -38,6 +38,7 @@
 <div class="d-flex gap-2 mb-3">
     <button class="btn btn-sm @(_tab == "reglas" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => _tab = "reglas"'>Reglas</button>
     <button class="btn btn-sm @(_tab == "bandeja" ? "btn-primary" : "btn-outline-secondary")" @onclick="AbrirBandeja">Bandeja de alertas</button>
+    <button class="btn btn-sm @(_tab == "control" ? "btn-primary" : "btn-outline-secondary")" @onclick="AbrirControl">Control de lectura</button>
 </div>
 
 @if (_tab == "reglas")
@@ -152,6 +153,138 @@
 </div>
 }
 
+@if (_tab == "control")
+{
+<div class="ase-card">
+    <div class="ase-card-h">Control de lectura del informe</div>
+    <div class="ase-card-body">
+        <p class="text-muted small">
+            Cruza los doctores a los que se les <b>envio</b> la alerta del informe en el periodo
+            contra quienes <b>abrieron</b> su enlace. Asi sabes quien consume el informe y quien no.
+            La alerta de control (condicion "doctores que no leen") manda este resumen a gerencia.
+        </p>
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+            <div>
+                <label class="form-label small fw-bold mb-0">Periodo <span class="text-muted fw-normal">(AAAA-MM)</span></label>
+                <input type="text" class="form-control form-control-sm" @bind="_controlPeriodo" placeholder="2026-09" style="max-width:170px" />
+            </div>
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadControl" disabled="@_controlBusy">
+                @(_controlBusy ? "Cargando..." : "Actualizar")
+            </button>
+        </div>
+
+        @if (_controlError is not null) { <div class="ase-alert small">@_controlError</div> }
+
+        @if (_control is not null)
+        {
+            @if (_control.TotalDoctores == 0)
+            {
+                <div class="text-muted p-3">
+                    No hay envios a doctores registrados en <b>@_control.Periodo</b>. Ejecuta alertas de
+                    doctor (WhatsApp) en este periodo para empezar a medir la lectura.
+                </div>
+            }
+            else
+            {
+                <div class="ctrl-top">
+                    <svg viewBox="0 0 140 140" width="132" height="132" aria-hidden="true">
+                        <circle cx="70" cy="70" r="54" fill="none" stroke="#e2e8f0" stroke-width="16"></circle>
+                        <circle cx="70" cy="70" r="54" fill="none" stroke="#16a34a" stroke-width="16"
+                                stroke-dasharray="@_dashCons" stroke-dashoffset="0" transform="rotate(-90 70 70)"></circle>
+                        <circle cx="70" cy="70" r="54" fill="none" stroke="#dc2626" stroke-width="16"
+                                stroke-dasharray="@_dashNo" stroke-dashoffset="@_offNo" transform="rotate(-90 70 70)"></circle>
+                        <text x="70" y="66" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">@_pctCons%</text>
+                        <text x="70" y="88" text-anchor="middle" font-size="11" fill="#64748b">leyeron</text>
+                    </svg>
+                    <div class="ctrl-legend">
+                        <div><span class="ctrl-dot" style="background:#16a34a"></span> Consumieron: <b>@_control.Consumieron</b></div>
+                        <div><span class="ctrl-dot" style="background:#dc2626"></span> No leyeron: <b>@_control.NoLeyeron</b></div>
+                        <div class="text-muted small mt-1">Doctores notificados: <b>@_control.TotalDoctores</b> &middot; periodo @_control.Periodo</div>
+                    </div>
+                </div>
+
+                <div class="ctrl-grid">
+                    @* --- Mini-reporte: Consumieron --- *@
+                    <div class="ctrl-mini">
+                        <div class="ctrl-mini-h ctrl-mini-g">Consumieron (@_control.Consumieron)</div>
+                        @if (_control.Consumieron == 0)
+                        {
+                            <div class="text-muted small p-2">Ningun doctor abrio su enlace en el periodo.</div>
+                        }
+                        else
+                        {
+                            <div class="ctrl-bars">
+                                @foreach (var d in _control.ListaConsumieron.Take(8))
+                                {
+                                    <div class="bar-row">
+                                        <span class="bar-lbl" title="@d.Nombre">@Corto(d.Nombre)</span>
+                                        <span class="bar-track"><span class="bar-fill" style="width:@Pct(d.Aperturas, _maxAp)%;background:#16a34a"></span></span>
+                                        <span class="bar-val">@d.Aperturas</span>
+                                    </div>
+                                }
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr><th>Doctor</th><th class="text-center">Aperturas</th><th>Ultima</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var d in _control.ListaConsumieron)
+                                        {
+                                            <tr>
+                                                <td>@d.Nombre</td>
+                                                <td class="text-center">@d.Aperturas</td>
+                                                <td>@(d.UltimaApertura is { } u ? u.LocalDateTime.ToString("dd/MM HH:mm") : "-")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+
+                    @* --- Mini-reporte: No leyeron --- *@
+                    <div class="ctrl-mini">
+                        <div class="ctrl-mini-h ctrl-mini-r">No leyeron (@_control.NoLeyeron)</div>
+                        @if (_control.NoLeyeron == 0)
+                        {
+                            <div class="text-muted small p-2">Todos los doctores notificados abrieron su enlace. &#10003;</div>
+                        }
+                        else
+                        {
+                            <div class="ctrl-bars">
+                                @foreach (var d in _control.ListaNoLeyeron.Take(8))
+                                {
+                                    <div class="bar-row">
+                                        <span class="bar-lbl" title="@d.Nombre">@Corto(d.Nombre)</span>
+                                        <span class="bar-track"><span class="bar-fill" style="width:@Pct(d.Enviados, _maxEn)%;background:#dc2626"></span></span>
+                                        <span class="bar-val">@d.Enviados</span>
+                                    </div>
+                                }
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr><th>Doctor</th><th>Celular</th><th class="text-center">Envios</th><th>Ultimo envio</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var d in _control.ListaNoLeyeron)
+                                        {
+                                            <tr>
+                                                <td>@d.Nombre</td>
+                                                <td>@(string.IsNullOrWhiteSpace(d.Celular) ? "-" : d.Celular)</td>
+                                                <td class="text-center">@d.Enviados</td>
+                                                <td>@(d.UltimoEnvio is { } ue ? ue.LocalDateTime.ToString("dd/MM/yyyy") : "-")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+}
+
 @if (_form is not null)
 {
     <div class="al-backdrop" @onclick="() => _form = null"></div>
@@ -180,9 +313,10 @@
 
                 <div class="col-md-6">
                     <label class="form-label small fw-bold">Condicion</label>
-                    <select class="form-select form-select-sm" @bind="_form.Condicion">
+                    <select class="form-select form-select-sm" @bind="_form.Condicion" @bind:after="OnCondicionChanged">
                         <option value="@AlertaCondicion.SesionPendiente">Paciente con sesion pendiente</option>
                         <option value="@AlertaCondicion.AtencionesTerminadas">Paciente con todas las atenciones terminadas</option>
+                        <option value="@AlertaCondicion.InformeNoLeido">Control a gerencia: doctores que no leen el informe</option>
                     </select>
                 </div>
                 <div class="col-md-6">
@@ -299,6 +433,18 @@
 
                 @* ---- Canal ---- *@
                 <div class="col-12"><hr class="my-1" /><span class="small fw-bold text-uppercase text-muted">Como</span></div>
+                @if (_form.Condicion == AlertaCondicion.InformeNoLeido)
+                {
+                    <div class="col-12">
+                        <div class="alert alert-info py-2 px-3 small mb-0">
+                            <b>Control a gerencia.</b> Se envia por <b>correo</b> al usuario de gerencia elegido arriba;
+                            el cuerpo (doctores que no leyeron su informe + resumen) se genera automaticamente en cada
+                            corrida. Configura el <b>disparo</b> (dias del mes) para decidir cuando se manda.
+                        </div>
+                    </div>
+                }
+                else
+                {
                 <div class="col-md-4">
                     <label class="form-label small fw-bold">Canal</label>
                     <select class="form-select form-select-sm" @bind="_form.Canal">
@@ -384,6 +530,7 @@
                         {doctor}, {fecha}, {fecha_inicio}, {fecha_fin}, {ultima_atencion}
                     </div>
                 </div>
+                }
             </div>
             }
 
@@ -505,6 +652,21 @@
 }
 
 <style>
+    /* Control de lectura */
+    .ctrl-top { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
+    .ctrl-legend > div { font-size: 14px; color: #334155; margin-bottom: 2px; }
+    .ctrl-dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+    .ctrl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+    .ctrl-mini { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #fff; }
+    .ctrl-mini-h { font-weight: 700; font-size: 14px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #eef2f7; }
+    .ctrl-mini-g { color: #15803d; border-bottom-color: #bbf7d0; }
+    .ctrl-mini-r { color: #b91c1c; border-bottom-color: #fecaca; }
+    .ctrl-bars { margin-bottom: 12px; }
+    .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+    .bar-lbl { width: 120px; flex: 0 0 120px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { flex: 1; height: 12px; background: #f1f5f9; border-radius: 6px; overflow: hidden; }
+    .bar-fill { display: block; height: 100%; border-radius: 6px; }
+    .bar-val { width: 26px; flex: 0 0 26px; text-align: right; font-weight: 700; color: #334155; }
     .al-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
     .al-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 92%; max-width: 780px; max-height: 90vh; background: #fff; border-radius: 12px; z-index: 1051; box-shadow: 0 10px 40px rgba(0,0,0,.25); display: flex; flex-direction: column; }
     .al-modal-h { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
@@ -578,6 +740,15 @@
     private string _tab = "reglas";
     private List<AlertaEnvioDto> _envios = new();
 
+    // --- Control de lectura ---
+    private string _controlPeriodo = DateTime.Now.ToString("yyyy-MM");
+    private ControlLecturaResult? _control;
+    private bool _controlBusy;
+    private string? _controlError;
+    // Valores derivados del donut/barras (se calculan al cargar para no meter codigo en el markup).
+    private string _dashCons = "0 0", _dashNo = "0 0", _offNo = "0";
+    private int _pctCons, _maxAp = 1, _maxEn = 1;
+
     private async Task AbrirBandeja()
     {
         _tab = "bandeja";
@@ -585,6 +756,47 @@
         try { _envios = (await Svc.ListEnviosRecientesAsync()).ToList(); }
         catch (Exception ex) { _error = "No se pudo cargar la bandeja: " + ex.Message; }
     }
+
+    private async Task AbrirControl()
+    {
+        _tab = "control";
+        _error = null;
+        await LoadControl();
+    }
+
+    private async Task LoadControl()
+    {
+        _controlBusy = true; _controlError = null;
+        try
+        {
+            _control = await Svc.ObtenerControlLecturaAsync(_controlPeriodo);
+            CalcularGrafico();
+        }
+        catch (Exception ex) { _controlError = "No se pudo cargar el control: " + ex.Message; }
+        finally { _controlBusy = false; }
+    }
+
+    private void CalcularGrafico()
+    {
+        if (_control is null || _control.TotalDoctores == 0)
+        {
+            _dashCons = _dashNo = "0 0"; _offNo = "0"; _pctCons = 0; _maxAp = _maxEn = 1;
+            return;
+        }
+        var circ = 2 * Math.PI * 54;
+        var consLen = (double)_control.Consumieron / _control.TotalDoctores * circ;
+        _dashCons = $"{Inv(consLen)} {Inv(circ)}";
+        _dashNo = $"{Inv(circ - consLen)} {Inv(circ)}";
+        _offNo = Inv(-consLen);
+        _pctCons = (int)Math.Round(100.0 * _control.Consumieron / _control.TotalDoctores);
+        _maxAp = _control.ListaConsumieron.Count > 0 ? Math.Max(1, _control.ListaConsumieron.Max(d => d.Aperturas)) : 1;
+        _maxEn = _control.ListaNoLeyeron.Count > 0 ? Math.Max(1, _control.ListaNoLeyeron.Max(d => d.Enviados)) : 1;
+    }
+
+    // Formato invariante para atributos SVG (evita coma decimal de es-CO).
+    private static string Inv(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private static int Pct(int part, int max) => max <= 0 ? 0 : (int)Math.Round(100.0 * part / max);
+    private static string Corto(string s) => string.IsNullOrEmpty(s) ? "" : (s.Length <= 18 ? s : s.Substring(0, 17) + "…");
 
     private async Task Gestionar(AlertaEnvioDto e, AlertaGestion estado)
     {
@@ -713,6 +925,19 @@
         }
         catch (Exception ex) { _error = "Error cargando plantillas: " + ex.Message; }
         finally { _cargandoPlantillas = false; }
+    }
+
+    private void OnCondicionChanged()
+    {
+        if (_form is null) { return; }
+        // El control a gerencia es agregado: siempre correo a un usuario del sistema y
+        // disparo por dias del mes. Forzamos esos valores para que la config sea coherente.
+        if (_form.Condicion == AlertaCondicion.InformeNoLeido)
+        {
+            _form.Destinatario = AlertaDestinatario.UsuarioSistema;
+            _form.Canal = AlertaCanal.Correo;
+            _form.DisparoTipo = AlertaDisparoTipo.DiasDelMes;
+        }
     }
 
     private void OnTemplateChanged()
@@ -909,6 +1134,7 @@
     {
         AlertaCondicion.SesionPendiente => "Sesion pendiente",
         AlertaCondicion.AtencionesTerminadas => "Atenciones terminadas",
+        AlertaCondicion.InformeNoLeido => "Control informe (gerencia)",
         _ => c.ToString(),
     };
 

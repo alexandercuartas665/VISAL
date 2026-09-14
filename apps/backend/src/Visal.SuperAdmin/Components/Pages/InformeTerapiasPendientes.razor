@@ -115,6 +115,11 @@
         var info = Svc.ValidarToken(T ?? "");
         if (info is null) { _invalido = true; return; }
         _data = await Svc.ObtenerAsync(info.TenantId, info.ProfesionalId);
-        if (_data is null) { _invalido = true; }
+        if (_data is null) { _invalido = true; return; }
+
+        // Control de lectura: registrar que el doctor abrio su enlace. Best-effort;
+        // nunca debe impedir que se vea el informe.
+        try { await Svc.RegistrarAccesoAsync(info.TenantId, info.ProfesionalId); }
+        catch { /* el registro es secundario al informe */ }
     }
 }

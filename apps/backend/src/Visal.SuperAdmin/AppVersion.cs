@@ -11,5 +11,5 @@ namespace Visal.SuperAdmin;
 /// </summary>
 public static class AppVersion
 {
-    public const string Current = "0.2.7";
+    public const string Current = "0.2.8";
 }

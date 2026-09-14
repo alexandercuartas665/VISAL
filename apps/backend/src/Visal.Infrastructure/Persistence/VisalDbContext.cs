@@ -97,6 +97,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
     public DbSet<AlertaRegla> AlertaReglas => Set<AlertaRegla>();
     public DbSet<AlertaEnvio> AlertaEnvios => Set<AlertaEnvio>();
+    public DbSet<InformeAcceso> InformeAccesos => Set<InformeAcceso>();
     public DbSet<LlamadaVoz> LlamadasVoz => Set<LlamadaVoz>();
     public DbSet<TenantRetellConfig> TenantRetellConfigs => Set<TenantRetellConfig>();
     public DbSet<HcPestanaAlias> HcPestanaAliases => Set<HcPestanaAlias>();
@@ -1444,6 +1445,14 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Error).HasMaxLength(1000);
             b.Property(x => x.ExternalId).HasMaxLength(120);
             b.HasIndex(x => new { x.TenantId, x.ReglaId, x.AsignacionId, x.Periodo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.ProfesionalId, x.Periodo });
+        });
+
+        // Bitacora de apertura del enlace del informe de terapias (control de lectura).
+        modelBuilder.Entity<InformeAcceso>(b =>
+        {
+            b.Property(x => x.TokenTipo).HasMaxLength(8).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.ProfesionalId, x.AccedidoEn });
         });
 
         // Llamadas de voz IA (Retell/Telnyx) lanzadas desde Seguimiento.

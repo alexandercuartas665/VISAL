@@ -7,6 +7,10 @@ public enum AlertaCondicion
     SesionPendiente = 1,
     /// <summary>Todas las atenciones esperadas del servicio quedaron cerradas (Terminado).</summary>
     AtencionesTerminadas = 2,
+    /// <summary>Control gerencial (agregado, no por paciente): doctores a los que se les
+    /// envio la alerta del informe en el periodo y NO abrieron su enlace. Se envia un
+    /// unico resumen al destinatario (gerencia). Ignora el filtro de servicio.</summary>
+    InformeNoLeido = 3,
 }
 
 /// <summary>Como se decide en que dia dispara la regla.</summary>

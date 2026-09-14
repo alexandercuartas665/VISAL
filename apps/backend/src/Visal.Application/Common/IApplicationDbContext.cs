@@ -88,6 +88,7 @@ public interface IApplicationDbContext
     DbSet<HcPestanaAlias> HcPestanaAliases { get; }
     DbSet<AlertaRegla> AlertaReglas { get; }
     DbSet<AlertaEnvio> AlertaEnvios { get; }
+    DbSet<InformeAcceso> InformeAccesos { get; }
     DbSet<LlamadaVoz> LlamadasVoz { get; }
     DbSet<TenantRetellConfig> TenantRetellConfigs { get; }
     DbSet<AtencionColumnaConfig> AtencionColumnaConfigs { get; }

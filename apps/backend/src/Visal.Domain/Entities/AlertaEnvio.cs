@@ -16,6 +16,12 @@ public class AlertaEnvio : TenantEntity
     public Guid AsignacionId { get; set; }
     public Guid PacienteId { get; set; }
 
+    /// <summary>Profesional destinatario cuando la alerta va al doctor que atendio
+    /// (<see cref="AlertaDestinatario.DoctorAtendio"/>). Permite el control de lectura
+    /// del informe: cruzar a quien se le envio contra quien abrio su enlace. Null para
+    /// destinatarios paciente / usuario del sistema.</summary>
+    public Guid? ProfesionalId { get; set; }
+
     /// <summary>Clave de periodo para dedup (ej. "2026-09"): mes calendario para
     /// disparos por dia del mes; mes objetivo (ancla + N meses) para disparos relativos.</summary>
     public string Periodo { get; set; } = null!;

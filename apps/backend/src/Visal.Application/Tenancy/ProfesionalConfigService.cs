@@ -201,7 +201,7 @@ public sealed class ProfesionalConfigService : IProfesionalConfigService
         p.TipoProfesionalId = req.TipoProfesionalId;
         p.RegistroMedico = req.RegistroMedico?.Trim();
         p.Ciudad = req.Ciudad?.Trim();
-        p.Celular = req.Celular?.Trim();
+        p.Celular = Common.TelefonoHelper.NormalizarCelularCo(req.Celular);
         p.FirmaUrl = req.FirmaUrl;
         p.RolPredeterminadoId = req.RolPredeterminadoId;
         await _db.SaveChangesAsync(ct);

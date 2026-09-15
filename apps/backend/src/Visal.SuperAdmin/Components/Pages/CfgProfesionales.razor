@@ -213,7 +213,13 @@ else
                     </div>
                     <div class="ase-f"><label>Registro Medico</label><input class="form-control form-control-sm" @bind="_registro" /></div>
                     <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
-                    <div class="ase-f"><label>Celular</label><input class="form-control form-control-sm" @bind="_celular" /></div>
+                    <div class="ase-f"><label>Celular</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">+57</span>
+                            <input class="form-control" @bind="CelularLocal" maxlength="10" inputmode="numeric" placeholder="3001234567" />
+                        </div>
+                        <div class="ase-hint">Celular colombiano de 10 digitos. Se guarda con indicativo 57 (para WhatsApp).</div>
+                    </div>
                 </div>
 
                 <div class="ase-subcats">
@@ -567,6 +573,25 @@ else
     private string? _nombreCompleto, _pNombre, _sNombre, _pApellido, _sApellido;
     private string _tipoProfId = "";
     private string? _registro, _ciudad, _celular, _firmaUrl;
+
+    /// <summary>Vista del celular sin el indicativo (lo que se teclea junto al "+57").
+    /// Al leer, quita un "57" inicial; al escribir, guarda "57" + 10 digitos en <see cref="_celular"/>.</summary>
+    private string CelularLocal
+    {
+        get
+        {
+            var d = new string((_celular ?? "").Where(char.IsDigit).ToArray());
+            if (d.Length == 12 && d.StartsWith("57")) { d = d[2..]; }
+            return d;
+        }
+        set
+        {
+            var d = new string((value ?? "").Where(char.IsDigit).ToArray());
+            if (d.Length > 10) { d = d[^10..]; }
+            _celular = string.IsNullOrEmpty(d) ? null : "57" + d;
+        }
+    }
+
     private HashSet<Guid> _subSel = new();
     private List<string> _agencias = new();
     private List<SucursalDto> _sedes = new();

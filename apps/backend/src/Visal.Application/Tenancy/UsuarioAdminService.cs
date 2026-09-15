@@ -100,7 +100,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         pu.SegundoNombre = req.SegundoNombre?.Trim();
         pu.PrimerApellido = req.PrimerApellido?.Trim();
         pu.SegundoApellido = req.SegundoApellido?.Trim();
-        pu.Celular = req.Celular?.Trim();
+        pu.Celular = Common.TelefonoHelper.NormalizarCelularCo(req.Celular);
         pu.Fijo = req.Fijo?.Trim();
         pu.Ciudad = req.Ciudad?.Trim();
         pu.Direccion = req.Direccion?.Trim();

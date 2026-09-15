@@ -71,7 +71,12 @@ else
 
             <div class="ase-card-h" style="margin-top:14px;">Contacto y ubicacion</div>
             <div class="ase-form">
-                <div class="ase-f"><label>Celular</label><input class="form-control form-control-sm" @bind="_celular" placeholder="Solo digitos" /></div>
+                <div class="ase-f"><label>Celular</label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">+57</span>
+                        <input class="form-control" @bind="CelularLocal" maxlength="10" inputmode="numeric" placeholder="3001234567" />
+                    </div>
+                </div>
                 <div class="ase-f"><label>Telefono fijo</label><input class="form-control form-control-sm" @bind="_fijo" /></div>
                 <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
                 <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_direccion" /></div>
@@ -225,6 +230,23 @@ else
     private string _email = "";
     private string? _pNombre, _sNombre, _pApellido, _sApellido;
     private string? _celular, _fijo, _ciudad, _direccion;
+
+    /// <summary>Celular sin indicativo para el input junto al "+57"; guarda "57"+10 digitos.</summary>
+    private string CelularLocal
+    {
+        get
+        {
+            var d = new string((_celular ?? "").Where(char.IsDigit).ToArray());
+            if (d.Length == 12 && d.StartsWith("57")) { d = d[2..]; }
+            return d;
+        }
+        set
+        {
+            var d = new string((value ?? "").Where(char.IsDigit).ToArray());
+            if (d.Length > 10) { d = d[^10..]; }
+            _celular = string.IsNullOrEmpty(d) ? null : "57" + d;
+        }
+    }
     private string? _avatarUrl;
 
     // Firma

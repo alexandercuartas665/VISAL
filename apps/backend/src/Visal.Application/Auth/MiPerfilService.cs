@@ -83,7 +83,7 @@ public sealed class MiPerfilService(IApplicationDbContext db, ITenantContext ten
         pu.SegundoNombre = Trim(req.SegundoNombre);
         pu.PrimerApellido = Trim(req.PrimerApellido);
         pu.SegundoApellido = Trim(req.SegundoApellido);
-        pu.Celular = Trim(req.Celular);
+        pu.Celular = Common.TelefonoHelper.NormalizarCelularCo(req.Celular);
         pu.Fijo = Trim(req.Fijo);
         pu.Ciudad = Trim(req.Ciudad);
         pu.Direccion = Trim(req.Direccion);

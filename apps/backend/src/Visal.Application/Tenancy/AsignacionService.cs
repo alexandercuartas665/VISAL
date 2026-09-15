@@ -1570,6 +1570,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         ["INSUMOS"] = new[] { "INSUMO" },
         ["EQUIPO"] = new[] { "EQUIPOS" },
         ["EQUIPOS"] = new[] { "EQUIPO" },
+        ["CONSULTA"] = new[] { "CONSULTAS" },
+        ["CONSULTAS"] = new[] { "CONSULTA" },
     };
 
     // ================== TAB "COORDINACIONES" ==================

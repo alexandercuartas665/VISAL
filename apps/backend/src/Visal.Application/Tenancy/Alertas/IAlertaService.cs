@@ -10,7 +10,7 @@ public sealed record AlertaReglaDto(
     AlertaDestinatario Destinatario, Guid? UsuarioSistemaId, string? UsuarioSistemaNombre,
     AlertaCanal Canal, string? Asunto, string? Cuerpo,
     Guid? HsmLineId, string? HsmTemplateId, string? HsmTemplateName, int HsmParameterCount,
-    IReadOnlyList<string> HsmParametros, string? HsmHeaderUrl = null);
+    IReadOnlyList<string> HsmParametros, string? HsmHeaderUrl = null, Guid? SeguimientoReglaId = null);
 
 /// <summary>Payload para crear/actualizar una regla. Id null = crear.</summary>
 public sealed record AlertaReglaUpsertRequest(
@@ -20,7 +20,7 @@ public sealed record AlertaReglaUpsertRequest(
     AlertaDestinatario Destinatario, Guid? UsuarioSistemaId,
     AlertaCanal Canal, string? Asunto, string? Cuerpo,
     Guid? HsmLineId, string? HsmTemplateId, string? HsmTemplateName, int HsmParameterCount,
-    IReadOnlyList<string>? HsmParametros, string? HsmHeaderUrl = null);
+    IReadOnlyList<string>? HsmParametros, string? HsmHeaderUrl = null, Guid? SeguimientoReglaId = null);
 
 /// <summary>Linea Gupshup disponible para el canal WhatsApp de una regla.</summary>
 public sealed record AlertaLineaDto(Guid Id, string Nombre);
@@ -66,12 +66,17 @@ public sealed record ControlLecturaResult(
     IReadOnlyList<ControlLecturaDoctorDto> ListaConsumieron,
     IReadOnlyList<ControlLecturaDoctorDto> ListaNoLeyeron);
 
-/// <summary>Tarjeta de una alerta emitida (bandeja del modulo Alertas).</summary>
+/// <summary>Tarjeta de la bandeja de alertas. Las alertas al doctor se agrupan por
+/// profesional (una tarjeta con N pacientes); las de paciente/usuario van una por
+/// destinatario. <paramref name="Titulo"/> es el destinatario (doctor/paciente/usuario),
+/// <paramref name="Detalle"/> el subtexto (ej. "3 pacientes" o documento), y
+/// <paramref name="EnvioIds"/> los envios que agrupa (para gestionar toda la tarjeta).</summary>
 public sealed record AlertaEnvioDto(
-    Guid Id, string ReglaNombre, string PacienteNombre, string? Contacto,
+    Guid Id, string ReglaNombre, string Titulo, string? Detalle, string? Contacto,
     AlertaCanal Canal, AlertaDestinatario Destinatario,
     DateTimeOffset FechaEnvio, bool Exito, string? Error,
-    AlertaGestion EstadoGestion, string Periodo);
+    AlertaGestion EstadoGestion, string Periodo,
+    int Cantidad, IReadOnlyList<Guid> EnvioIds);
 
 /// <summary>
 /// Motor de reglas de alerta por tenant: CRUD de reglas y el evaluador que el
@@ -127,8 +132,16 @@ public interface IAlertaService
     /// <summary>Marca la gestion de una tarjeta de alerta (Nueva/Atendida/Descartada).</summary>
     Task<bool> MarcarGestionAsync(Guid envioId, AlertaGestion estado, Guid actor, CancellationToken ct = default);
 
+    /// <summary>Marca la gestion de varios envios de una vez (una tarjeta agrupada de la bandeja).</summary>
+    Task<bool> MarcarGestionLoteAsync(IReadOnlyCollection<Guid> envioIds, AlertaGestion estado, Guid actor, CancellationToken ct = default);
+
     /// <summary>Control de lectura del informe para un periodo "yyyy-MM": cruza los doctores
     /// a los que se les envio la alerta contra los accesos registrados a su enlace, y los
-    /// separa en "consumieron" y "no leyeron". Para los dos mini-reportes del modulo.</summary>
-    Task<ControlLecturaResult> ObtenerControlLecturaAsync(string periodo, CancellationToken ct = default);
+    /// separa en "consumieron" y "no leyeron". Si <paramref name="reglaObjetivoId"/> viene,
+    /// acota el control a esa regla de alerta; null = todas las alertas de doctor.</summary>
+    Task<ControlLecturaResult> ObtenerControlLecturaAsync(string periodo, Guid? reglaObjetivoId = null, CancellationToken ct = default);
+
+    /// <summary>Reglas de alerta dirigidas al doctor (para el selector "sobre cual alerta"
+    /// del control de lectura). Excluye las propias reglas de control.</summary>
+    Task<IReadOnlyList<AlertaReglaDto>> ListReglasDoctorAsync(CancellationToken ct = default);
 }

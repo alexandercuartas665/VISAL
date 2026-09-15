@@ -78,4 +78,9 @@ public class AlertaRegla : TenantEntity
     /// header multimedia. Se autollena con el header detectado de la plantilla y es
     /// editable en la config de la regla.</summary>
     public string? HsmHeaderUrl { get; set; }
+
+    /// <summary>Solo para reglas de control (<see cref="AlertaCondicion.InformeNoLeido"/>):
+    /// la regla de alerta (de doctor) sobre la que se hace el seguimiento de lectura del
+    /// informe. Null = todas las alertas de doctor del periodo.</summary>
+    public Guid? SeguimientoReglaId { get; set; }
 }

@@ -123,7 +123,10 @@
                             <span class="alerta-card-regla">@e.ReglaNombre</span>
                             <span class="alerta-card-estado alerta-@e.EstadoGestion.ToString().ToLower()">@GestionTxt(e.EstadoGestion)</span>
                         </div>
-                        <div class="alerta-card-pac">@e.PacienteNombre</div>
+                        <div class="alerta-card-pac">
+                            @e.Titulo
+                            @if (!string.IsNullOrEmpty(e.Detalle)) { <span class="text-muted xsmall">· @e.Detalle</span> }
+                        </div>
                         <div class="alerta-card-meta">
                             <span>@(e.Canal == AlertaCanal.Correo ? "&#9993; Correo" : "&#128241; WhatsApp")</span>
                             @if (!string.IsNullOrWhiteSpace(e.Contacto)) { <span>&middot; @e.Contacto</span> }
@@ -167,6 +170,16 @@
             <div>
                 <label class="form-label small fw-bold mb-0">Periodo <span class="text-muted fw-normal">(AAAA-MM)</span></label>
                 <input type="text" class="form-control form-control-sm" @bind="_controlPeriodo" placeholder="2026-09" style="max-width:170px" />
+            </div>
+            <div>
+                <label class="form-label small fw-bold mb-0">Alerta</label>
+                <select class="form-select form-select-sm" @bind="_controlReglaSel" style="max-width:260px">
+                    <option value="">Todas las alertas de doctor</option>
+                    @foreach (var r in _reglasDoctor)
+                    {
+                        <option value="@r.Id">@r.Nombre</option>
+                    }
+                </select>
             </div>
             <button class="btn btn-outline-primary btn-sm" @onclick="LoadControl" disabled="@_controlBusy">
                 @(_controlBusy ? "Cargando..." : "Actualizar")
@@ -435,6 +448,17 @@
                 <div class="col-12"><hr class="my-1" /><span class="small fw-bold text-uppercase text-muted">Como</span></div>
                 @if (_form.Condicion == AlertaCondicion.InformeNoLeido)
                 {
+                    <div class="col-md-8">
+                        <label class="form-label small fw-bold">Sobre cual alerta hacer el seguimiento</label>
+                        <select class="form-select form-select-sm" @bind="_form.SeguimientoReglaSel">
+                            <option value="">Todas las alertas de doctor</option>
+                            @foreach (var r in _reglasDoctor)
+                            {
+                                <option value="@r.Id">@r.Nombre</option>
+                            }
+                        </select>
+                        <div class="form-text small">El informe de "no leyeron" se acota a los doctores notificados por esta alerta (o todas).</div>
+                    </div>
                     <div class="col-12">
                         <div class="alert alert-info py-2 px-3 small mb-0">
                             <b>Control a gerencia.</b> Se envia por <b>correo</b> al usuario de gerencia elegido arriba;
@@ -742,6 +766,8 @@
 
     // --- Control de lectura ---
     private string _controlPeriodo = DateTime.Now.ToString("yyyy-MM");
+    private string _controlReglaSel = "";
+    private List<AlertaReglaDto> _reglasDoctor = new();
     private ControlLecturaResult? _control;
     private bool _controlBusy;
     private string? _controlError;
@@ -761,6 +787,8 @@
     {
         _tab = "control";
         _error = null;
+        try { _reglasDoctor = (await Svc.ListReglasDoctorAsync()).ToList(); }
+        catch { _reglasDoctor = new(); }
         await LoadControl();
     }
 
@@ -769,7 +797,8 @@
         _controlBusy = true; _controlError = null;
         try
         {
-            _control = await Svc.ObtenerControlLecturaAsync(_controlPeriodo);
+            Guid? objetivo = Guid.TryParse(_controlReglaSel, out var rid) ? rid : null;
+            _control = await Svc.ObtenerControlLecturaAsync(_controlPeriodo, objetivo);
             CalcularGrafico();
         }
         catch (Exception ex) { _controlError = "No se pudo cargar el control: " + ex.Message; }
@@ -800,7 +829,7 @@
 
     private async Task Gestionar(AlertaEnvioDto e, AlertaGestion estado)
     {
-        await Svc.MarcarGestionAsync(e.Id, estado, await Actor());
+        await Svc.MarcarGestionLoteAsync(e.EnvioIds, estado, await Actor());
         _envios = (await Svc.ListEnviosRecientesAsync()).ToList();
     }
 
@@ -864,6 +893,7 @@
             HsmParameterCount = r.HsmParameterCount,
             HsmParametros = r.HsmParametros.ToList(),
             HsmHeaderUrl = r.HsmHeaderUrl ?? "",
+            SeguimientoReglaSel = r.SeguimientoReglaId?.ToString() ?? "",
         };
         _msg = _error = null;
     }
@@ -873,6 +903,7 @@
         if (_usuarios.Count == 0) { _usuarios = (await Svc.ListUsuariosAsync()).ToList(); }
         if (_lineas.Count == 0) { _lineas = (await Svc.ListLineasGupshupAsync()).ToList(); }
         if (_servicios.Count == 0) { _servicios = (await Svc.ListServiciosContratoAsync()).ToList(); }
+        _reglasDoctor = (await Svc.ListReglasDoctorAsync()).ToList();
     }
 
     private void AgregarServicio(string codigo)
@@ -969,7 +1000,8 @@
             _form.Canal, _form.Asunto, _form.Cuerpo,
             lineId, _form.HsmTemplateId, _form.HsmTemplateName, _form.HsmParameterCount,
             _form.HsmParametros,
-            string.IsNullOrWhiteSpace(_form.HsmHeaderUrl) ? null : _form.HsmHeaderUrl.Trim());
+            string.IsNullOrWhiteSpace(_form.HsmHeaderUrl) ? null : _form.HsmHeaderUrl.Trim(),
+            Guid.TryParse(_form.SeguimientoReglaSel, out var segId) ? segId : null);
     }
 
     private async Task Guardar()
@@ -1174,5 +1206,6 @@
         public int HsmParameterCount { get; set; }
         public List<string> HsmParametros { get; set; } = new();
         public string HsmHeaderUrl { get; set; } = "";
+        public string SeguimientoReglaSel { get; set; } = "";
     }
 }

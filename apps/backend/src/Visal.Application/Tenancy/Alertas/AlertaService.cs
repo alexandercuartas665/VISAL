@@ -106,6 +106,7 @@ public sealed class AlertaService : IAlertaService
         entity.HsmParameterCount = req.Canal == AlertaCanal.WhatsApp ? req.HsmParameterCount : 0;
         entity.HsmParametrosJson = req.Canal == AlertaCanal.WhatsApp ? paramsJson : null;
         entity.HsmHeaderUrl = req.Canal == AlertaCanal.WhatsApp ? Vacio(req.HsmHeaderUrl) : null;
+        entity.SeguimientoReglaId = req.Condicion == AlertaCondicion.InformeNoLeido ? req.SeguimientoReglaId : null;
 
         await _db.SaveChangesAsync(ct);
         return entity.Id;
@@ -229,7 +230,7 @@ public sealed class AlertaService : IAlertaService
                 .FirstOrDefaultAsync(e => e.ReglaId == regla.Id && e.AsignacionId == Guid.Empty && e.Periodo == periodo, ct);
             if (previo is not null && previo.Exito && !forzar) { continue; }
 
-            var datos = await ControlLecturaCoreAsync(tid, periodo, ct);
+            var datos = await ControlLecturaCoreAsync(tid, periodo, regla.SeguimientoReglaId, ct);
             var noLey = datos.Where(d => d.Aperturas == 0).OrderBy(d => d.Nombre, StringComparer.OrdinalIgnoreCase).ToList();
 
             var asunto = string.IsNullOrWhiteSpace(regla.Asunto)
@@ -651,30 +652,83 @@ public sealed class AlertaService : IAlertaService
         var pacientes = await _db.Pacientes.AsNoTracking()
             .Where(p => pacIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+        var profIds = envios.Where(e => e.ProfesionalId is Guid).Select(e => e.ProfesionalId!.Value).Distinct().ToList();
+        var profesionales = profIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.Profesionales.AsNoTracking()
+                .Where(p => profIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
 
-        return envios.Select(e => new AlertaEnvioDto(
-            e.Id,
-            reglas.TryGetValue(e.ReglaId, out var rn) ? rn : "(regla eliminada)",
-            pacientes.TryGetValue(e.PacienteId, out var pn) ? pn : "(paciente)",
-            e.Contacto, e.Canal, e.Destinatario, e.FechaEnvio, e.Exito, e.Error, e.EstadoGestion, e.Periodo))
-            .ToList();
+        string ReglaNombre(Guid id) => reglas.TryGetValue(id, out var rn) ? rn : "(regla eliminada)";
+
+        var cards = new List<AlertaEnvioDto>();
+
+        // 1) Alertas al DOCTOR con profesional: una tarjeta por (regla, profesional, periodo).
+        var doctorEnvios = envios.Where(e => e.Destinatario == AlertaDestinatario.DoctorAtendio && e.ProfesionalId is Guid);
+        foreach (var g in doctorEnvios.GroupBy(e => new { e.ReglaId, ProfId = e.ProfesionalId!.Value, e.Periodo }))
+        {
+            var items = g.OrderByDescending(x => x.FechaEnvio).ToList();
+            var rep = items[0];
+            var nombre = profesionales.TryGetValue(g.Key.ProfId, out var pnm) ? pnm : "(profesional)";
+            cards.Add(new AlertaEnvioDto(
+                rep.Id, ReglaNombre(g.Key.ReglaId), nombre,
+                $"{items.Count} paciente(s)", rep.Contacto, rep.Canal, rep.Destinatario,
+                items.Max(x => x.FechaEnvio), items.Any(x => x.Exito),
+                items.FirstOrDefault(x => !x.Exito)?.Error,
+                GestionAgregada(items.Select(x => x.EstadoGestion)), rep.Periodo,
+                items.Count, items.Select(x => x.Id).ToList()));
+        }
+
+        // 2) Resto (paciente / usuario del sistema / doctor sin profesional): una por envio.
+        foreach (var e in envios.Where(e => !(e.Destinatario == AlertaDestinatario.DoctorAtendio && e.ProfesionalId is Guid)))
+        {
+            var titulo = pacientes.TryGetValue(e.PacienteId, out var pn) ? pn : "(paciente)";
+            cards.Add(new AlertaEnvioDto(
+                e.Id, ReglaNombre(e.ReglaId), titulo, null,
+                e.Contacto, e.Canal, e.Destinatario, e.FechaEnvio, e.Exito, e.Error, e.EstadoGestion, e.Periodo,
+                1, new[] { e.Id }));
+        }
+
+        return cards.OrderByDescending(c => c.FechaEnvio).ToList();
+    }
+
+    /// <summary>Estado agregado de una tarjeta con varios envios: Atendida/Descartada solo
+    /// si TODOS lo estan; si hay mezcla, se considera Nueva (queda pendiente de gestionar).</summary>
+    private static AlertaGestion GestionAgregada(IEnumerable<AlertaGestion> estados)
+    {
+        var lista = estados.Distinct().ToList();
+        return lista.Count == 1 ? lista[0] : AlertaGestion.Nueva;
     }
 
     public async Task<bool> MarcarGestionAsync(Guid envioId, AlertaGestion estado, Guid actor, CancellationToken ct = default)
+        => await MarcarGestionLoteAsync(new[] { envioId }, estado, actor, ct);
+
+    public async Task<bool> MarcarGestionLoteAsync(IReadOnlyCollection<Guid> envioIds, AlertaGestion estado, Guid actor, CancellationToken ct = default)
     {
-        var e = await _db.AlertaEnvios.FirstOrDefaultAsync(x => x.Id == envioId, ct);
-        if (e is null) { return false; }
-        e.EstadoGestion = estado;
+        if (envioIds is null || envioIds.Count == 0) { return false; }
+        var filas = await _db.AlertaEnvios.Where(x => envioIds.Contains(x.Id)).ToListAsync(ct);
+        if (filas.Count == 0) { return false; }
+        foreach (var e in filas) { e.EstadoGestion = estado; }
         await _db.SaveChangesAsync(ct);
         return true;
     }
 
-    public async Task<ControlLecturaResult> ObtenerControlLecturaAsync(string periodo, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AlertaReglaDto>> ListReglasDoctorAsync(CancellationToken ct = default)
+    {
+        var reglas = await _db.AlertaReglas.AsNoTracking()
+            .Where(r => r.Destinatario == AlertaDestinatario.DoctorAtendio
+                     && r.Condicion != AlertaCondicion.InformeNoLeido)
+            .OrderBy(r => r.Orden).ThenBy(r => r.Nombre)
+            .ToListAsync(ct);
+        return reglas.Select(r => ToDto(r, null)).ToList();
+    }
+
+    public async Task<ControlLecturaResult> ObtenerControlLecturaAsync(string periodo, Guid? reglaObjetivoId = null, CancellationToken ct = default)
     {
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         periodo = string.IsNullOrWhiteSpace(periodo) ? DateTime.Now.ToString("yyyy-MM") : periodo.Trim();
 
-        var datos = await ControlLecturaCoreAsync(tid, periodo, ct);
+        var datos = await ControlLecturaCoreAsync(tid, periodo, reglaObjetivoId, ct);
         var consum = datos.Where(d => d.Aperturas > 0).OrderByDescending(d => d.UltimaApertura).ToList();
         var noLey = datos.Where(d => d.Aperturas == 0).OrderBy(d => d.Nombre, StringComparer.OrdinalIgnoreCase).ToList();
         return new ControlLecturaResult(periodo, datos.Count, consum.Count, noLey.Count, consum, noLey);
@@ -683,11 +737,13 @@ public sealed class AlertaService : IAlertaService
     /// <summary>Nucleo del control de lectura: doctores a los que se les envio la alerta en
     /// el periodo con su conteo de envios y de aperturas del enlace. Reusado por el reporte
     /// y por la alerta a gerencia.</summary>
-    private async Task<List<ControlLecturaDoctorDto>> ControlLecturaCoreAsync(Guid tid, string periodo, CancellationToken ct)
+    private async Task<List<ControlLecturaDoctorDto>> ControlLecturaCoreAsync(Guid tid, string periodo, Guid? reglaObjetivoId, CancellationToken ct)
     {
-        var envios = await _db.AlertaEnvios.AsNoTracking()
+        var q = _db.AlertaEnvios.AsNoTracking()
             .Where(e => e.Destinatario == AlertaDestinatario.DoctorAtendio
-                     && e.Exito && e.Periodo == periodo && e.ProfesionalId != null)
+                     && e.Exito && e.Periodo == periodo && e.ProfesionalId != null);
+        if (reglaObjetivoId is Guid robj) { q = q.Where(e => e.ReglaId == robj); }
+        var envios = await q
             .Select(e => new { ProfId = e.ProfesionalId!.Value, e.FechaEnvio })
             .ToListAsync(ct);
         if (envios.Count == 0) { return new(); }
@@ -1066,6 +1122,6 @@ public sealed class AlertaService : IAlertaService
             r.Destinatario, r.UsuarioSistemaId, usuarioNombre,
             r.Canal, r.Asunto, r.Cuerpo,
             r.HsmLineId, r.HsmTemplateId, r.HsmTemplateName, r.HsmParameterCount, parametros,
-            r.HsmHeaderUrl);
+            r.HsmHeaderUrl, r.SeguimientoReglaId);
     }
 }

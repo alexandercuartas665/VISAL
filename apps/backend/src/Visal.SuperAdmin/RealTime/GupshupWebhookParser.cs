@@ -85,7 +85,9 @@ public static class GupshupWebhookParser
         var messageType = innerType switch
         {
             "text" => "text",
-            "button" or "button_reply" or "quick_reply" => "button_reply",
+            // iOS suele entregar los quick-reply de plantilla como "interactive"
+            // (formato Meta), Android como "button". Cubrimos ambos + variantes.
+            "button" or "button_reply" or "quick_reply" or "interactive" or "reply" => "button_reply",
             _ => "media",
         };
 
@@ -110,33 +112,55 @@ public static class GupshupWebhookParser
             "audio" => "(audio)",
             "location" => Location(inner),
             "contacts" => "(contacto)",
-            "button" or "button_reply" or "quick_reply" => ButtonLabel(inner),
+            "button" or "button_reply" or "quick_reply" or "interactive" or "reply" => ButtonLabel(inner),
             _ => $"({innerType})",
         };
     }
 
-    /// <summary>Extrae el texto visible del boton respondido. Gupshup usa
-    /// distintos campos segun la version del payload — cubrimos los mas
-    /// comunes: <c>title</c>, <c>text</c>, <c>reply.title</c>.</summary>
+    /// <summary>Extrae el texto visible del boton respondido. Gupshup/Meta usan
+    /// distintos campos y anidamientos segun la version del payload y el SO del
+    /// cliente (iOS suele mandar "interactive" con button_reply/list_reply
+    /// anidado; Android manda "button" con title/text plano). Cubrimos las formas
+    /// comunes de forma tolerante.</summary>
     private static string ButtonLabel(JsonElement inner)
     {
-        if (inner.TryGetProperty("title", out var titleEl) && titleEl.ValueKind == JsonValueKind.String)
+        // 1) title/text/payload planos.
+        var direct = FirstString(inner, "title", "text", "payload");
+        if (direct is not null) { return direct; }
+
+        // 2) reply.title / button_reply.title / list_reply.title (un nivel).
+        foreach (var wrap in new[] { "reply", "button_reply", "list_reply", "interactive" })
         {
-            var t = titleEl.GetString();
-            if (!string.IsNullOrWhiteSpace(t)) { return t!; }
-        }
-        if (inner.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String)
-        {
-            var t = textEl.GetString();
-            if (!string.IsNullOrWhiteSpace(t)) { return t!; }
-        }
-        if (inner.TryGetProperty("reply", out var reply) && reply.ValueKind == JsonValueKind.Object
-            && reply.TryGetProperty("title", out var rt) && rt.ValueKind == JsonValueKind.String)
-        {
-            var t = rt.GetString();
-            if (!string.IsNullOrWhiteSpace(t)) { return t!; }
+            if (inner.TryGetProperty(wrap, out var w) && w.ValueKind == JsonValueKind.Object)
+            {
+                var nested = FirstString(w, "title", "text", "payload");
+                if (nested is not null) { return nested; }
+                // interactive puede envolver button_reply/list_reply un nivel mas.
+                foreach (var wrap2 in new[] { "button_reply", "list_reply" })
+                {
+                    if (w.TryGetProperty(wrap2, out var w2) && w2.ValueKind == JsonValueKind.Object)
+                    {
+                        var deep = FirstString(w2, "title", "text");
+                        if (deep is not null) { return deep; }
+                    }
+                }
+            }
         }
         return "(boton)";
+    }
+
+    /// <summary>Primer campo string no vacio de <paramref name="el"/> entre <paramref name="names"/>.</summary>
+    private static string? FirstString(JsonElement el, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String)
+            {
+                var s = v.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) { return s!; }
+            }
+        }
+        return null;
     }
 
     private static string Caption(JsonElement inner, string kind)

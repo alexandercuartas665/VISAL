@@ -817,6 +817,7 @@ app.MapPost("/webhooks/gupshup/{token}", async (
     Visal.Application.Tenancy.IChatIngestService ingest,
     Visal.Application.Tenancy.IFirmaRemotaService firma,
     Visal.Application.Tenancy.Alertas.IAlertaInformeAutoResponder alertaInforme,
+    ILoggerFactory loggerFactory,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(token) || token.Length > 128) { return Results.Unauthorized(); }
@@ -826,6 +827,34 @@ app.MapPost("/webhooks/gupshup/{token}", async (
     if (line is null) { return Results.Unauthorized(); }
 
     using var doc = await System.Text.Json.JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+
+    // [DIAG-INBOUND] Temporal: registrar la FORMA del inbound para depurar el boton
+    // de respuesta en iPhone (que llega distinto a Android). Para no loguear texto
+    // libre privado, solo volcamos el raw cuando NO es un mensaje de texto (botones,
+    // interactive, etc. — cuyos titulos no son datos sensibles). Quitar tras validar.
+    try
+    {
+        var diag = loggerFactory.CreateLogger("GupshupInboundDiag");
+        var rootType = doc.RootElement.TryGetProperty("type", out var rtEl) && rtEl.ValueKind == System.Text.Json.JsonValueKind.String ? rtEl.GetString() : "?";
+        string innerType = "?";
+        if (doc.RootElement.TryGetProperty("payload", out var opEl) && opEl.ValueKind == System.Text.Json.JsonValueKind.Object
+            && opEl.TryGetProperty("type", out var itEl) && itEl.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            innerType = itEl.GetString() ?? "?";
+        }
+        if (!string.Equals(innerType, "text", StringComparison.OrdinalIgnoreCase))
+        {
+            var raw = doc.RootElement.GetRawText();
+            if (raw.Length > 900) { raw = raw.Substring(0, 900); }
+            diag.LogWarning("[DIAG-INBOUND] rootType={Root} innerType={Inner} raw={Raw}", rootType, innerType, raw);
+        }
+        else
+        {
+            diag.LogWarning("[DIAG-INBOUND] rootType={Root} innerType=text (contenido omitido)", rootType);
+        }
+    }
+    catch { /* diagnostico best-effort */ }
+
     var payload = Visal.SuperAdmin.RealTime.GupshupWebhookParser.Parse(doc.RootElement);
     if (payload is null) { return Results.Ok(new { status = "ignored" }); }
 

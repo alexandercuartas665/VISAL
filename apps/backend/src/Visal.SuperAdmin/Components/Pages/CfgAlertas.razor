@@ -106,12 +106,76 @@
     <div class="ase-card-h">Bandeja de alertas emitidas</div>
     <div class="ase-card-body">
         <p class="text-muted small">
-            Tarjetas de las alertas que se dispararon (correo/WhatsApp). Marca cada una
-            como <b>Atendida</b> o <b>Descartada</b> a medida que las gestionas.
+            Alertas que se dispararon (correo/WhatsApp). Las de doctor se agrupan por profesional.
+            Marca <b>Atendida</b>/<b>Descartada</b> o <b>elimina</b> lo que ya no quieras.
         </p>
+
+        @* --- Filtros + modos --- *@
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            <div>
+                <label class="form-label small fw-bold mb-0">Desde</label>
+                <input type="date" class="form-control form-control-sm" @bind="_bDesde" style="max-width:160px" />
+            </div>
+            <div>
+                <label class="form-label small fw-bold mb-0">Hasta</label>
+                <input type="date" class="form-control form-control-sm" @bind="_bHasta" style="max-width:160px" />
+            </div>
+            <div>
+                <label class="form-label small fw-bold mb-0">Alerta</label>
+                <select class="form-select form-select-sm" @bind="_bReglaSel" style="max-width:240px">
+                    <option value="">Todas</option>
+                    @foreach (var r in _reglasTodas)
+                    {
+                        <option value="@r.Id">@r.Nombre</option>
+                    }
+                </select>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" @onclick="AplicarFiltrosBandeja" disabled="@_bBusy">@(_bBusy ? "..." : "Aplicar")</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltrosBandeja">Limpiar filtros</button>
+            <div class="ms-auto d-flex gap-2">
+                <button class="btn btn-sm @(_bModoTabla ? "btn-outline-secondary" : "btn-primary")" @onclick="() => _bModoTabla = false">Tarjetas</button>
+                <button class="btn btn-sm @(_bModoTabla ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _bModoTabla = true">Tabla</button>
+                @if (_envios.Count > 0)
+                {
+                    <button class="btn btn-sm btn-outline-danger" @onclick="EliminarBandejaFiltrada" title="Elimina las alertas que se ven con el filtro actual">Eliminar filtrados (@_envios.Count)</button>
+                }
+            </div>
+        </div>
+
         @if (_envios.Count == 0)
         {
-            <div class="text-muted p-3">Aun no hay alertas emitidas. Usa "Ejecutar ahora" en Reglas para generar.</div>
+            <div class="text-muted p-3">No hay alertas para el filtro actual. Usa "Ejecutar ahora" en Reglas para generar.</div>
+        }
+        else if (_bModoTabla)
+        {
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Alerta</th><th>Destinatario</th><th>Canal</th><th>Contacto</th>
+                            <th>Fecha</th><th>Estado</th><th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _envios)
+                        {
+                            <tr>
+                                <td>@e.ReglaNombre</td>
+                                <td>@e.Titulo @if (!string.IsNullOrEmpty(e.Detalle)) { <span class="text-muted xsmall">· @e.Detalle</span> }</td>
+                                <td>@(e.Canal == AlertaCanal.Correo ? "Correo" : "WhatsApp")</td>
+                                <td class="mono xsmall">@(string.IsNullOrWhiteSpace(e.Contacto) ? "—" : e.Contacto)</td>
+                                <td class="xsmall">@e.FechaEnvio.LocalDateTime.ToString("dd/MM/yy HH:mm")</td>
+                                <td><span class="alerta-card-estado alerta-@e.EstadoGestion.ToString().ToLower()">@GestionTxt(e.EstadoGestion)</span></td>
+                                <td class="text-nowrap">
+                                    @if (e.EstadoGestion != AlertaGestion.Atendida) { <button class="btn btn-sm btn-link text-success p-0 me-2" @onclick="() => Gestionar(e, AlertaGestion.Atendida)">Atendida</button> }
+                                    @if (e.EstadoGestion != AlertaGestion.Descartada) { <button class="btn btn-sm btn-link text-secondary p-0 me-2" @onclick="() => Gestionar(e, AlertaGestion.Descartada)">Descartar</button> }
+                                    <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => EliminarTarjeta(e)">Eliminar</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         }
         else
         {
@@ -147,6 +211,7 @@
                             {
                                 <button class="btn btn-sm btn-link" @onclick="() => Gestionar(e, AlertaGestion.Nueva)">Reabrir</button>
                             }
+                            <button class="btn btn-sm btn-link text-danger ms-auto" @onclick="() => EliminarTarjeta(e)">Eliminar</button>
                         </div>
                     </div>
                 }
@@ -763,6 +828,12 @@
     private string? _error;
     private string _tab = "reglas";
     private List<AlertaEnvioDto> _envios = new();
+    // --- Bandeja: filtros y modo ---
+    private DateOnly? _bDesde, _bHasta;
+    private string _bReglaSel = "";
+    private bool _bModoTabla;
+    private bool _bBusy;
+    private List<AlertaReglaDto> _reglasTodas = new();
 
     // --- Control de lectura ---
     private string _controlPeriodo = DateTime.Now.ToString("yyyy-MM");
@@ -779,8 +850,48 @@
     {
         _tab = "bandeja";
         _error = null;
-        try { _envios = (await Svc.ListEnviosRecientesAsync()).ToList(); }
+        try { _reglasTodas = (await Svc.ListAsync()).ToList(); }
+        catch { _reglasTodas = new(); }
+        await CargarBandeja();
+    }
+
+    private async Task CargarBandeja()
+    {
+        _bBusy = true; _error = null;
+        try
+        {
+            Guid? rid = Guid.TryParse(_bReglaSel, out var g) ? g : null;
+            _envios = (await Svc.ListEnviosRecientesAsync(200, _bDesde, _bHasta, rid)).ToList();
+        }
         catch (Exception ex) { _error = "No se pudo cargar la bandeja: " + ex.Message; }
+        finally { _bBusy = false; }
+    }
+
+    private Task AplicarFiltrosBandeja() => CargarBandeja();
+
+    private async Task LimpiarFiltrosBandeja()
+    {
+        _bDesde = _bHasta = null; _bReglaSel = "";
+        await CargarBandeja();
+    }
+
+    private async Task EliminarTarjeta(AlertaEnvioDto e)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eliminar de la bandeja \"{e.ReglaNombre} - {e.Titulo}\"? No se puede deshacer.");
+        if (!ok) { return; }
+        await Svc.EliminarEnviosAsync(e.EnvioIds, await Actor());
+        await CargarBandeja();
+    }
+
+    private async Task EliminarBandejaFiltrada()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eliminar las {_envios.Count} alerta(s) del filtro actual? No se puede deshacer.");
+        if (!ok) { return; }
+        var ids = _envios.SelectMany(e => e.EnvioIds).Distinct().ToList();
+        await Svc.EliminarEnviosAsync(ids, await Actor());
+        await CargarBandeja();
     }
 
     private async Task AbrirControl()
@@ -830,7 +941,7 @@
     private async Task Gestionar(AlertaEnvioDto e, AlertaGestion estado)
     {
         await Svc.MarcarGestionLoteAsync(e.EnvioIds, estado, await Actor());
-        _envios = (await Svc.ListEnviosRecientesAsync()).ToList();
+        await CargarBandeja();
     }
 
     private static string GestionTxt(AlertaGestion g) => g switch

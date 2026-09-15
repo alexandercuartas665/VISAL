@@ -635,10 +635,14 @@ public sealed class AlertaService : IAlertaService
         return new NucleoResult(enviadas, saltadas, errores, mensajes, filas);
     }
 
-    public async Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, DateOnly? desde = null, DateOnly? hasta = null, Guid? reglaId = null, CancellationToken ct = default)
     {
         if (max <= 0) { max = 200; }
-        var envios = await _db.AlertaEnvios.AsNoTracking()
+        var q = _db.AlertaEnvios.AsNoTracking().AsQueryable();
+        if (desde is DateOnly d1) { var ini = new DateTimeOffset(d1.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)); q = q.Where(e => e.FechaEnvio >= ini); }
+        if (hasta is DateOnly d2) { var fin = new DateTimeOffset(d2.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)); q = q.Where(e => e.FechaEnvio < fin); }
+        if (reglaId is Guid rid) { q = q.Where(e => e.ReglaId == rid); }
+        var envios = await q
             .OrderByDescending(e => e.FechaEnvio)
             .Take(max)
             .ToListAsync(ct);
@@ -711,6 +715,16 @@ public sealed class AlertaService : IAlertaService
         foreach (var e in filas) { e.EstadoGestion = estado; }
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<int> EliminarEnviosAsync(IReadOnlyCollection<Guid> envioIds, Guid actor, CancellationToken ct = default)
+    {
+        if (envioIds is null || envioIds.Count == 0) { return 0; }
+        var filas = await _db.AlertaEnvios.Where(x => envioIds.Contains(x.Id)).ToListAsync(ct);
+        if (filas.Count == 0) { return 0; }
+        _db.AlertaEnvios.RemoveRange(filas);
+        await _db.SaveChangesAsync(ct);
+        return filas.Count;
     }
 
     public async Task<IReadOnlyList<AlertaReglaDto>> ListReglasDoctorAsync(CancellationToken ct = default)

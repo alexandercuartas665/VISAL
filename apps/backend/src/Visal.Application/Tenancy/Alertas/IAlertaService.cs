@@ -126,8 +126,13 @@ public interface IAlertaService
     /// emite a todas las filas candidatas (comportamiento anterior).</param>
     Task<AlertaSimulacionResult> SimularReglaAsync(AlertaReglaUpsertRequest req, DateOnly fecha, bool emitir, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri = null, IReadOnlyCollection<Guid>? soloAsignaciones = null, CancellationToken ct = default);
 
-    /// <summary>Bandeja: alertas emitidas mas recientes (tarjetas) con nombre de regla y paciente.</summary>
-    Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, CancellationToken ct = default);
+    /// <summary>Bandeja: alertas emitidas mas recientes (tarjetas/tabla) con filtros
+    /// opcionales por rango de fecha y por regla. Las de doctor van agrupadas por profesional.</summary>
+    Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, DateOnly? desde = null, DateOnly? hasta = null, Guid? reglaId = null, CancellationToken ct = default);
+
+    /// <summary>Elimina definitivamente los envios indicados de la bandeja (todas las
+    /// filas de una tarjeta agrupada, o las de un filtro).</summary>
+    Task<int> EliminarEnviosAsync(IReadOnlyCollection<Guid> envioIds, Guid actor, CancellationToken ct = default);
 
     /// <summary>Marca la gestion de una tarjeta de alerta (Nueva/Atendida/Descartada).</summary>
     Task<bool> MarcarGestionAsync(Guid envioId, AlertaGestion estado, Guid actor, CancellationToken ct = default);

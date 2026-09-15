@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Visal.Application.Common;
@@ -58,14 +59,32 @@ public sealed class RdaReintentoService(
     /// timeout / no se pudo validar (EVOL). Rechazos estructurales NO se reintentan.</summary>
     private static bool EsFallaTransitoria(EstadoRdaEvento estado, string? erroresJson)
     {
-        if (estado == EstadoRdaEvento.Error) { return true; }
+        if (estado == EstadoRdaEvento.Error) { return true; }   // red / 5xx / timeout
         if (estado != EstadoRdaEvento.Rechazado) { return false; }
         if (string.IsNullOrWhiteSpace(erroresJson)) { return false; }
+
+        // Codigos HTTP de servicio/gateway (no rechazo estructural del bundle): el sandbox
+        // de MinSalud alterna 504/404/429 cuando su infra esta inestable -> reintentar.
+        var http = ExtraerHttpStatus(erroresJson);
+        if (http is 404 or 408 or 425 or 429 or (>= 500 and <= 599)) { return true; }
+
+        // Rechazos por servicio de validacion indisponible (EVOL) o similares.
         var t = erroresJson.ToLowerInvariant();
         return t.Contains("indisponible")
             || t.Contains("no fue posible validarlo")
             || t.Contains("timeout") || t.Contains("time out")
             || t.Contains("temporal") || t.Contains("unavailable")
-            || t.Contains("504") || t.Contains("intente");
+            || t.Contains("intente");
+    }
+
+    private static int? ExtraerHttpStatus(string erroresJson)
+    {
+        try
+        {
+            using var d = JsonDocument.Parse(erroresJson);
+            if (d.RootElement.TryGetProperty("httpStatus", out var h) && h.TryGetInt32(out var v)) { return v; }
+        }
+        catch { /* errores_json no JSON */ }
+        return null;
     }
 }

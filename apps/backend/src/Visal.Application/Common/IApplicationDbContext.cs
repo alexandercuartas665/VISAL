@@ -106,6 +106,7 @@ public interface IApplicationDbContext
     DbSet<InteroperabilidadConfig> InteroperabilidadConfigs { get; }
     DbSet<InteroperabilidadCredencialSede> InteroperabilidadCredencialesSede { get; }
     DbSet<RdaEvento> RdaEventos { get; }
+    DbSet<RdaEventoIntento> RdaEventoIntentos { get; }
     DbSet<FacturacionSnapshot> FacturacionSnapshots { get; }
     DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas { get; }
     DbSet<FacturacionSnapshotColumnaConfig> FacturacionSnapshotColumnaConfigs { get; }

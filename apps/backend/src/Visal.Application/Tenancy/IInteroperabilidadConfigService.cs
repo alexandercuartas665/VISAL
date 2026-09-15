@@ -18,7 +18,10 @@ public sealed record InteroperabilidadConfigDto(
     string PathEnvioRda,
     string PathEnvioRdaConsulta,
     string PathConsultarPaciente,
-    string PathConsultarProfesional);
+    string PathConsultarProfesional,
+    bool ReintentoActivo = false,
+    int ReintentoIntervaloMin = 15,
+    int ReintentoMaxIntentos = 20);
 
 /// <summary>
 /// Payload para guardar la config general. Los secretos son opcionales: si vienen
@@ -35,7 +38,10 @@ public sealed record InteroperabilidadConfigSaveRequest(
     string? PathEnvioRda,
     string? PathEnvioRdaConsulta,
     string? PathConsultarPaciente,
-    string? PathConsultarProfesional);
+    string? PathConsultarProfesional,
+    bool ReintentoActivo = false,
+    int ReintentoIntervaloMin = 15,
+    int ReintentoMaxIntentos = 20);
 
 /// <summary>
 /// Fila del grid de credenciales por sede + ambiente. <c>TieneClientSecret</c> indica

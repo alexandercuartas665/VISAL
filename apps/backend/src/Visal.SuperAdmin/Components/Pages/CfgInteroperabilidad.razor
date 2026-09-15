@@ -117,6 +117,35 @@
             <input class="form-control form-control-sm mono" @bind="_pathConsultaProf"
                    placeholder="/Practitioner/$consultar-profesional-salud" />
         </div>
+
+        <div class="ase-f" style="grid-column:1 / 3;border-top:1px dashed #ccc;padding-top:12px;margin-top:6px;">
+            <label style="font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;">
+                Reintento automatico de envios fallidos
+            </label>
+        </div>
+        <div class="ase-f" style="display:flex;align-items:center;gap:8px;">
+            <label class="asg-chk small" style="margin:0;">
+                <input type="checkbox" @bind="_reintentoActivo" />
+                <span>Reintentar automaticamente los RDA que fallan por causa transitoria (timeout / servicio de MinSalud indisponible)</span>
+            </label>
+        </div>
+        <div class="ase-f" style="display:flex;gap:16px;">
+            <div>
+                <label>Intervalo (minutos)</label>
+                <input type="number" min="1" class="form-control form-control-sm" @bind="_reintentoIntervalo" style="max-width:120px" />
+            </div>
+            <div>
+                <label>Maximo de intentos</label>
+                <input type="number" min="1" class="form-control form-control-sm" @bind="_reintentoMax" style="max-width:120px" />
+            </div>
+        </div>
+        <div class="ase-f" style="grid-column:1 / 3;">
+            <div class="text-muted" style="font-size:11px;">
+                El sistema reintenta cada N minutos hasta el maximo. Solo aplica a fallas transitorias
+                (5xx/timeout, o rechazo por servicio indisponible como EVOL); los rechazos estructurales
+                del bundle NO se reintentan. Cada intento queda en la traza del evento.
+            </div>
+        </div>
     </div>
 </div>
 
@@ -353,6 +382,9 @@
     private string? _pathEnvioConsulta;
     private string? _pathConsulta;
     private string? _pathConsultaProf;
+    private bool _reintentoActivo;
+    private int _reintentoIntervalo = 15;
+    private int _reintentoMax = 20;
     private bool _savingConfig;
 
     // ----- Credenciales por sede -----
@@ -390,6 +422,9 @@
                 _pathEnvioConsulta = _cfg.PathEnvioRdaConsulta;
                 _pathConsulta = _cfg.PathConsultarPaciente;
                 _pathConsultaProf = _cfg.PathConsultarProfesional;
+                _reintentoActivo = _cfg.ReintentoActivo;
+                _reintentoIntervalo = _cfg.ReintentoIntervaloMin;
+                _reintentoMax = _cfg.ReintentoMaxIntentos;
             }
             _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
             _sucursales = (await SucSvc.ListAsync()).ToList();
@@ -407,7 +442,8 @@
             var req = new InteroperabilidadConfigSaveRequest(
                 _endSandbox, _endProd, _azureTid, _scope,
                 _apimSandboxNuevo, _apimProdNuevo, _ambiente,
-                _pathEnvio, _pathEnvioConsulta, _pathConsulta, _pathConsultaProf);
+                _pathEnvio, _pathEnvioConsulta, _pathConsulta, _pathConsultaProf,
+                _reintentoActivo, _reintentoIntervalo, _reintentoMax);
             _cfg = await InterSvc.SaveConfigAsync(req, actor);
             _apimSandboxNuevo = null; _apimProdNuevo = null;
             _ok = "Configuracion guardada.";

@@ -37,7 +37,7 @@ public sealed class IhceSenderService(
     private static readonly Dictionary<string, string> _orgUuidCache = new();
     private static readonly SemaphoreSlim _orgUuidLock = new(1, 1);
 
-    public async Task<EnvioRdaResultado> EnviarRdaAsync(Guid rdaEventoId, Guid actor, CancellationToken ct = default)
+    public async Task<EnvioRdaResultado> EnviarRdaAsync(Guid rdaEventoId, Guid actor, bool automatico = false, CancellationToken ct = default)
     {
         var ev = await db.RdaEventos.FirstOrDefaultAsync(x => x.Id == rdaEventoId, ct)
             ?? throw new InvalidOperationException($"RdaEvento {rdaEventoId} no existe.");
@@ -167,10 +167,26 @@ public sealed class IhceSenderService(
             ev.ErroresJson = SerializeError(call);
         }
         ev.Estado = nuevo;
+
+        // Traza de este intento (manual o automatico) para auditar el historial completo.
+        var msgIntento = call.Exito
+            ? $"OK ({call.ElapsedMs} ms)" + (referencia is null ? "" : $" ref={referencia}")
+            : ResumenErrorIntento(call);
+        db.RdaEventoIntentos.Add(new RdaEventoIntento
+        {
+            TenantId = ev.TenantId,
+            RdaEventoId = ev.Id,
+            Numero = ev.Intentos,
+            Fecha = ev.UltimoIntento ?? DateTimeOffset.UtcNow,
+            EstadoResultado = nuevo,
+            HttpStatus = call.HttpStatus,
+            Mensaje = msgIntento,
+            Automatico = automatico,
+        });
         await db.SaveChangesAsync(ct);
 
-        log.LogInformation("RDA {Id} -> HTTP {Status} -> Estado {Estado} ({Ms} ms) por {Actor}",
-            ev.Id, call.HttpStatus, nuevo, call.ElapsedMs, actor);
+        log.LogInformation("RDA {Id} -> HTTP {Status} -> Estado {Estado} ({Ms} ms) por {Actor} (auto={Auto})",
+            ev.Id, call.HttpStatus, nuevo, call.ElapsedMs, actor, automatico);
 
         return new EnvioRdaResultado(call, ev.Id, nuevo, referencia);
     }
@@ -781,6 +797,34 @@ public sealed class IhceSenderService(
             body = call.ResponseBody,
             elapsedMs = call.ElapsedMs
         }, new JsonSerializerOptions { WriteIndented = true });
+
+    /// <summary>Resumen corto de un intento fallido para la traza: HTTP + el diagnostics
+    /// del OperationOutcome (o el message del error), sin todo el cuerpo crudo.</summary>
+    private static string ResumenErrorIntento(IhceCallResult call)
+    {
+        var baseMsg = $"HTTP {call.HttpStatus}: {call.Mensaje}";
+        var body = call.ResponseBody;
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("issue", out var issues) && issues.ValueKind == JsonValueKind.Array && issues.GetArrayLength() > 0
+                    && issues[0].TryGetProperty("diagnostics", out var dg) && dg.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(dg.GetString()))
+                {
+                    baseMsg = $"{baseMsg} — {dg.GetString()}";
+                }
+                else if (root.TryGetProperty("message", out var mm) && mm.ValueKind == JsonValueKind.String)
+                {
+                    baseMsg = $"{baseMsg} — {mm.GetString()}";
+                }
+            }
+            catch { /* cuerpo no JSON */ }
+        }
+        return baseMsg.Length <= 1900 ? baseMsg : baseMsg.Substring(0, 1900);
+    }
 
     public async Task<IpPublicaResult> ConsultarIpPublicaAsync(CancellationToken ct = default)
     {

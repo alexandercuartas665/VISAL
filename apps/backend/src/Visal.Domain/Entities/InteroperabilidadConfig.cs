@@ -39,4 +39,12 @@ public class InteroperabilidadConfig : TenantEntity
     public string PathEnvioRdaConsulta { get; set; } = "/Composition/$enviar-rda-consulta";
     public string PathConsultarPaciente { get; set; } = "/Patient/$consultar-paciente-exacto";
     public string PathConsultarProfesional { get; set; } = "/Practitioner/$consultar-profesional-salud";
+
+    // -- Reintento automatico de envios que fallaron por causa TRANSITORIA (5xx/timeout
+    //    del gateway, o rechazo por servicio de MinSalud indisponible, ej. EVOL caido).
+    //    Un worker reintenta cada ReintentoIntervaloMin minutos hasta ReintentoMaxIntentos
+    //    intentos. Los rechazos estructurales (bundle mal formado) NO se reintentan.
+    public bool ReintentoActivo { get; set; }
+    public int ReintentoIntervaloMin { get; set; } = 15;
+    public int ReintentoMaxIntentos { get; set; } = 20;
 }

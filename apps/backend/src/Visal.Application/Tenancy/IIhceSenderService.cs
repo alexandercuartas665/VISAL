@@ -60,7 +60,7 @@ public interface IIhceSenderService
     /// 4xx -> Rechazado; 5xx o timeout -> Error. Guarda la respuesta cruda en
     /// ErroresJson para auditoria.
     /// </summary>
-    Task<EnvioRdaResultado> EnviarRdaAsync(Guid rdaEventoId, Guid actor, CancellationToken ct = default);
+    Task<EnvioRdaResultado> EnviarRdaAsync(Guid rdaEventoId, Guid actor, bool automatico = false, CancellationToken ct = default);
 
     /// <summary>
     /// Consulta paciente exacto en el IHCE (resumen consolidado de antecedentes).

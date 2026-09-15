@@ -1511,7 +1511,7 @@ if (app.Environment.IsDevelopment())
         try
         {
             var build = await builder.ConstruirAsync(hcId, actor, ct);
-            var envio = await sender.EnviarRdaAsync(build.RdaEventoId, actor, ct);
+            var envio = await sender.EnviarRdaAsync(build.RdaEventoId, actor, ct: ct);
             return Results.Json(new
             {
                 hcId,

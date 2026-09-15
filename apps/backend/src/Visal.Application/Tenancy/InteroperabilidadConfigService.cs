@@ -67,6 +67,11 @@ public sealed class InteroperabilidadConfigService(
             c.ApimSubskeyProduccionCifrada = secrets.Protect(req.ApimSubskeyProduccionNueva.Trim());
         }
 
+        // Reintento automatico.
+        c.ReintentoActivo = req.ReintentoActivo;
+        c.ReintentoIntervaloMin = req.ReintentoIntervaloMin <= 0 ? 15 : req.ReintentoIntervaloMin;
+        c.ReintentoMaxIntentos = req.ReintentoMaxIntentos <= 0 ? 20 : req.ReintentoMaxIntentos;
+
         await db.SaveChangesAsync(ct);
         log.LogInformation("Interoperabilidad config guardada por {Actor} (tenant {Tid})", actor, tid);
         return Map(c);
@@ -261,7 +266,10 @@ public sealed class InteroperabilidadConfigService(
         c.PathEnvioRda,
         c.PathEnvioRdaConsulta,
         c.PathConsultarPaciente,
-        c.PathConsultarProfesional);
+        c.PathConsultarProfesional,
+        c.ReintentoActivo,
+        c.ReintentoIntervaloMin,
+        c.ReintentoMaxIntentos);
 
     private sealed class AzureTokenOk
     {

@@ -101,6 +101,8 @@ public static class DependencyInjection
 
         // Motor de alertas: worker diario que evalua reglas y dispara envios.
         services.AddHostedService<Alertas.AlertasWorker>();
+        // Reintento automatico de envios RDA fallidos por causa transitoria (EVOL/timeout).
+        services.AddHostedService<Interoperabilidad.RdaReintentoWorker>();
 
         return services;
     }

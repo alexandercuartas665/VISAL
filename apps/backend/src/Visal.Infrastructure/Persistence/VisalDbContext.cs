@@ -145,6 +145,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<InteroperabilidadConfig> InteroperabilidadConfigs => Set<InteroperabilidadConfig>();
     public DbSet<InteroperabilidadCredencialSede> InteroperabilidadCredencialesSede => Set<InteroperabilidadCredencialSede>();
     public DbSet<RdaEvento> RdaEventos => Set<RdaEvento>();
+    public DbSet<RdaEventoIntento> RdaEventoIntentos => Set<RdaEventoIntento>();
     public DbSet<FacturacionSnapshot> FacturacionSnapshots => Set<FacturacionSnapshot>();
     public DbSet<FacturacionSnapshotFila> FacturacionSnapshotFilas => Set<FacturacionSnapshotFila>();
     public DbSet<FacturacionSnapshotColumnaConfig> FacturacionSnapshotColumnaConfigs => Set<FacturacionSnapshotColumnaConfig>();
@@ -1590,6 +1591,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.BundleHash }).IsUnique();
             // Feed de la lista en /interoperabilidad/rda (Ola 4): ultimos eventos por estado.
             b.HasIndex(x => new { x.TenantId, x.Estado, x.FechaGeneracion });
+        });
+
+        // Traza de intentos de envio (manual + automatico) de un RDA.
+        modelBuilder.Entity<RdaEventoIntento>(b =>
+        {
+            b.Property(x => x.Mensaje).HasMaxLength(2000);
+            b.HasIndex(x => new { x.TenantId, x.RdaEventoId, x.Fecha });
         });
 
         modelBuilder.Entity<FacturacionSnapshot>(b =>

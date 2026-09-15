@@ -142,6 +142,14 @@
                 <option value="eapb">Consultar EAPB (nombre)</option>
             </select>
         </div>
+        @if (_probadorServicio == "paciente")
+        {
+            <div class="ase-f">
+                <label>Operador (CC profesional registrado)</label>
+                <input class="form-control form-control-sm mono" @bind="_probadorHumanUser" placeholder="ej. 20897165" />
+                <div class="text-muted" style="font-size:11px;">MinSalud exige un profesional registrado como "humanuser" para consultar pacientes.</div>
+            </div>
+        }
         <button class="btn btn-primary btn-sm" @onclick="EjecutarProbador" disabled="@_probadorBusy">
             @if (_probadorBusy) { <span>Ejecutando…</span> } else { <span>Ejecutar</span> }
         </button>
@@ -679,6 +687,7 @@
     private string _probadorTipoDoc = "CC";
     private string? _probadorNumDoc;
     private string _probadorServicio = "profesional";
+    private string _probadorHumanUser = "20897165";
     private bool _probadorBusy;
     private IhceCallResult? _probadorResult;
 
@@ -961,7 +970,8 @@
                     HealthcareProviderIdentifier: valor,
                     Name: null)),
                 "eapb" => await Sender.ConsultarEapbAsync(new ConsultaEapbRequest(valor)),
-                _ => await Sender.ConsultarPacienteAsync(new ConsultaPacienteRequest(_probadorTipoDoc, valor))
+                _ => await Sender.ConsultarPacienteAsync(new ConsultaPacienteRequest(_probadorTipoDoc, valor,
+                        string.IsNullOrWhiteSpace(_probadorHumanUser) ? null : $"CC-{_probadorHumanUser.Trim()}"))
             };
         }
         catch (Exception ex) { _error = ex.Message; }

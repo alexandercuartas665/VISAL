@@ -27,7 +27,7 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         _log = log;
     }
 
-    public async Task<int> ResponderInformeSiAplicaAsync(Guid tenantId, string contactPhone, Guid lineId, string baseUri, CancellationToken ct = default)
+    public async Task<int> ResponderInformeSiAplicaAsync(Guid tenantId, string contactPhone, Guid lineId, string baseUri, bool exigirAlertaPrevia = true, CancellationToken ct = default)
     {
         var digits = Normalizar(contactPhone);
         if (digits is null) { return 0; }
@@ -35,14 +35,21 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         var ahora = DateTimeOffset.UtcNow;
         var corte = ahora - Ventana;
 
-        // ¿Este telefono recibio una alerta por WhatsApp reciente (con exito)? Si no, no aplica.
-        var esDestinatarioAlerta = await _db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
-            .AnyAsync(e => e.TenantId == tenantId
-                           && e.Canal == AlertaCanal.WhatsApp
-                           && e.Exito
-                           && e.Contacto == digits
-                           && e.FechaEnvio >= corte, ct);
-        if (!esDestinatarioAlerta) { return 0; }
+        // ¿Este telefono recibio una alerta por WhatsApp reciente (con exito)?
+        // Para respuestas de TEXTO exigimos que si (evita responder a chats sueltos).
+        // Para clics de BOTON de nuestra plantilla no lo exigimos: un boton solo lo
+        // puede tocar quien recibio la plantilla, asi el flujo funciona aunque el envio
+        // no haya quedado en el outbox (test / telefono de prueba).
+        if (exigirAlertaPrevia)
+        {
+            var esDestinatarioAlerta = await _db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
+                .AnyAsync(e => e.TenantId == tenantId
+                               && e.Canal == AlertaCanal.WhatsApp
+                               && e.Exito
+                               && e.Contacto == digits
+                               && e.FechaEnvio >= corte, ct);
+            if (!esDestinatarioAlerta) { return 0; }
+        }
 
         // Dedupe: si ya mandamos un enlace de informe a este telefono hace <30s, no repetir.
         var conv = await _db.Conversations.IgnoreQueryFilters()

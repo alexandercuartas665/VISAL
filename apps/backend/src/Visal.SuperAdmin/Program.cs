@@ -875,7 +875,12 @@ app.MapPost("/webhooks/gupshup/{token}", async (
         // informe" y respondemos con el enlace del mini-informe de terapias pendientes.
         if (firmaEnviadas == 0)
         {
-            _ = await alertaInforme.ResponderInformeSiAplicaAsync(line.TenantId, payload.ContactPhone, line.Id, baseUri, ct);
+            // Un clic de BOTON de nuestra plantilla (button_reply) dispara el enlace
+            // aunque el numero no tenga alerta previa en el outbox (funciona con "Enviar
+            // test" y con emision a telefono de prueba). Una respuesta de TEXTO sigue
+            // exigiendo alerta previa para no responder a chats sueltos.
+            var esBoton = string.Equals(payload.MessageType, "button_reply", StringComparison.OrdinalIgnoreCase);
+            _ = await alertaInforme.ResponderInformeSiAplicaAsync(line.TenantId, payload.ContactPhone, line.Id, baseUri, exigirAlertaPrevia: !esBoton, ct: ct);
         }
     }
 

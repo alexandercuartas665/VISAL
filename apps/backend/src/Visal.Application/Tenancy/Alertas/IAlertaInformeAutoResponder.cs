@@ -10,5 +10,11 @@ namespace Visal.Application.Tenancy.Alertas;
 public interface IAlertaInformeAutoResponder
 {
     /// <summary>Devuelve 1 si respondio con el enlace del informe; 0 si no aplica.</summary>
-    Task<int> ResponderInformeSiAplicaAsync(Guid tenantId, string contactPhone, Guid lineId, string baseUri, CancellationToken ct = default);
+    /// <param name="exigirAlertaPrevia">Si es true (defecto), solo responde a numeros que
+    /// recibieron una alerta por WhatsApp reciente. Si es false, responde igual — pensado
+    /// para clics de BOTON de nuestras plantillas (un boton solo lo toca quien recibio la
+    /// plantilla), de modo que funciona aunque el envio no haya quedado en el outbox (ej.
+    /// "Enviar test" o emision con telefono de prueba). El informe se acota al doctor por
+    /// su celular cuando hay coincidencia; si no, queda tenant-wide.</param>
+    Task<int> ResponderInformeSiAplicaAsync(Guid tenantId, string contactPhone, Guid lineId, string baseUri, bool exigirAlertaPrevia = true, CancellationToken ct = default);
 }

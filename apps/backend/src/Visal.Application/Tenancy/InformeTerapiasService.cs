@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
@@ -177,6 +178,22 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
             TokenTipo = profesionalId is null ? "inf1" : "inf2",
         };
         _db.InformeAccesos.Add(acceso);
+
+        // Abrir el enlace = el profesional gestiono la alerta: marcamos sus alertas de
+        // doctor recientes (aun "Nueva") como Atendida. Enlace anonimo -> tenant explicito
+        // + IgnoreQueryFilters. Solo aplica a enlaces acotados a un profesional (inf2).
+        if (profesionalId is Guid pid)
+        {
+            var corte = DateTimeOffset.UtcNow.AddDays(-45);
+            var pendientes = await _db.AlertaEnvios.IgnoreQueryFilters()
+                .Where(e => e.TenantId == tenantId && e.ProfesionalId == pid
+                         && e.Destinatario == AlertaDestinatario.DoctorAtendio
+                         && e.EstadoGestion == AlertaGestion.Nueva
+                         && e.FechaEnvio >= corte)
+                .ToListAsync(ct);
+            foreach (var e in pendientes) { e.EstadoGestion = AlertaGestion.Atendida; }
+        }
+
         await _db.SaveChangesAsync(ct);
     }
 

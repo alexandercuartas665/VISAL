@@ -777,6 +777,28 @@ else
                 catch { _valores = new(); }
             }
 
+            // Refresco de la firma del profesional tratante: el ValoresJson congela la
+            // ruta del archivo de firma al cerrar la HC, pero si el profesional
+            // reemplaza su imagen de firma el archivo viejo se borra del disco y el
+            // snapshot queda apuntando a un archivo inexistente (la HC imprime SIN
+            // firma). Re-resolvemos la firma vigente del tratante (mismo criterio que
+            // el pie de ordenes y el consentimiento) para que el documento use un
+            // archivo valido. La identidad firmante (nombre/registro) sigue congelada.
+            try
+            {
+                if (_fdHc is not null && !string.IsNullOrWhiteSpace(_fdHc.PrefillRoutesJson)
+                    && _hc.ProfesionalId is Guid profFirmaId && profFirmaId != Guid.Empty)
+                {
+                    var firmaProfActual = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(profFirmaId);
+                    if (!string.IsNullOrWhiteSpace(firmaProfActual))
+                    {
+                        var rutasHc = PrefillRouteSet.FromJson(_fdHc.PrefillRoutesJson);
+                        FirmasPrefillHelper.Aplicar(_valores, firmaPacienteUrl: null, firmaProfActual, rutasHc);
+                    }
+                }
+            }
+            catch { /* si falla, se imprime con el JSON congelado tal cual */ }
+
             // Modo terapia: si la HC impresa es la primera sesion de una terapia,
             // anexamos las evoluciones (sesiones consecuentes) cerradas. Devuelve
             // vacio en cualquier otro caso (HC normal, no-primera-sesion, sin evos).

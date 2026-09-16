@@ -438,7 +438,8 @@
         StateHasChanged();
         try
         {
-            _items = (await SegSvc.ListarPorRangoAsync(_desdeMes, _hastaMes)).ToList();
+            _items = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
+                () => SegSvc.ListarPorRangoAsync(_desdeMes, _hastaMes))).ToList();
         }
         finally
         {

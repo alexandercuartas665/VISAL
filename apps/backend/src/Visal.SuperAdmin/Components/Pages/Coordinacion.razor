@@ -1222,13 +1222,14 @@ else if (_tabSel == "Calendario")
                 _error = "No se pudo identificar al usuario.";
                 return;
             }
-            _modulos = (await UsuSvc.GetModulosCoordinacionAsync(puId)).ToList();
+            _modulos = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
+                () => UsuSvc.GetModulosCoordinacionAsync(puId))).ToList();
 
             // Resolver el nombre de la sucursal del claim sucursal_id. Si no hay
             // claim (admin con SEDE=GLOBAL) o no se resuelve, dejamos null para
             // que el usuario vea todas las sedes.
             var sucClaim = st.User.FindFirst("sucursal_id")?.Value;
-            var sedes = await SucSvc.ListAsync();
+            var sedes = await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(() => SucSvc.ListAsync());
             if (Guid.TryParse(sucClaim, out var sucId))
             {
                 _miSucursalNombre = sedes.FirstOrDefault(s => s.Id == sucId)?.Nombre;
@@ -1247,7 +1248,7 @@ else if (_tabSel == "Calendario")
             }
 
             // EPS/aseguradoras para el filtro (todas, cualquier usuario).
-            var asegs = await AsegSvc.ListAseguradorasAsync();
+            var asegs = await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(() => AsegSvc.ListAseguradorasAsync());
             _epsList = asegs.Select(a => a.Nombre)
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .Distinct()
@@ -1283,11 +1284,12 @@ else if (_tabSel == "Calendario")
             var sedeFiltro = _puedeElegirSede
                 ? (string.IsNullOrWhiteSpace(_sedeSel) ? null : _sedeSel)
                 : _miSucursalNombre;
-            _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
-                string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
-                string.IsNullOrWhiteSpace(_doc) ? null : _doc,
-                sedeFiltro,
-                string.IsNullOrWhiteSpace(_epsSel) ? null : _epsSel)).ToList();
+            _pendientes = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
+                () => Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
+                    string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
+                    string.IsNullOrWhiteSpace(_doc) ? null : _doc,
+                    sedeFiltro,
+                    string.IsNullOrWhiteSpace(_epsSel) ? null : _epsSel))).ToList();
             _solicitudSel = null;
             _especialistas = new();
             if (_pendientes.Count == 0) { _ok = "Sin servicios para esta combinacion."; }

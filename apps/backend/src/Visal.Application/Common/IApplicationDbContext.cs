@@ -97,6 +97,7 @@ public interface IApplicationDbContext
     DbSet<TipoTurno> TiposTurno { get; }
     DbSet<PlantillaAgenda> PlantillasAgenda { get; }
     DbSet<PlantillaAgendaTurno> PlantillaAgendaTurnos { get; }
+    DbSet<AgendaProfesionalTurno> AgendaProfesionalTurnos { get; }
     DbSet<CatalogoTipoServicio> CatalogosTipoServicio { get; }
     DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados { get; }
     DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }

@@ -112,7 +112,10 @@ public sealed record TurnoCoordinadoRequest(
     decimal? Tarifa = null,
     Guid? TurnoProgramacionId = null,
     string? TurnoRowNombre = null,
-    int? DiaArranque = null);
+    int? DiaArranque = null,
+    // Hora del slot cuando el turno se agenda desde el modulo de asignacion por
+    // agendas (cita a una hora concreta). Null en la coordinacion clasica.
+    TimeOnly? HoraInicio = null);
 
 /// <summary>Turno ya guardado para una asignacion.</summary>
 public sealed record TurnoCoordinadoDto(

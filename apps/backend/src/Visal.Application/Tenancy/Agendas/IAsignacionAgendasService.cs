@@ -12,7 +12,9 @@ public enum EstadoDiaAgenda
     /// <summary>Dia inactivo de la sede (cierra el dia).</summary>
     Inactivo,
     /// <summary>Novedad del profesional de dia completo (vacaciones/incapacidad/permiso).</summary>
-    Novedad
+    Novedad,
+    /// <summary>Hay turno pero ya no quedan cupos libres (todos asignados).</summary>
+    Completo
 }
 
 /// <summary>Un servicio (modulo) que tiene al menos un doctor con agenda.</summary>
@@ -47,7 +49,34 @@ public interface IAsignacionAgendasService
     /// <summary>Doctores con agenda que atienden el modulo dado (match por TipoProfesional).</summary>
     Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresConAgendaAsync(string moduloCodigo, CancellationToken ct = default);
 
-    /// <summary>Disponibilidad del doctor en la sede, desde (anioInicio, mesInicio) por N meses.</summary>
+    /// <summary>Disponibilidad del doctor en la sede, desde (anioInicio, mesInicio) por N meses.
+    /// Descuenta del cupo de cada dia los turnos ya asignados a ese doctor en esa fecha.</summary>
     Task<DisponibilidadAgendaDto> ObtenerDisponibilidadAsync(
         Guid profesionalId, Guid sucursalId, int anioInicio, int mesInicio, int meses = 2, CancellationToken ct = default);
+
+    /// <summary>Horas de inicio de slot libres de un doctor en una fecha: los slots que
+    /// generan los turnos de ese dia de la semana (paso = intervalo), menos los ya ocupados
+    /// por turnos existentes con hora en esa fecha.</summary>
+    Task<IReadOnlyList<TimeOnly>> SlotsDisponiblesAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default);
+
+    /// <summary>Agenda una cita en un dia/hora concreta reusando el flujo de Asignacion:
+    /// crea la Asignacion (lote de 1) y su AsignacionTurno con el doctor, la fecha y la hora.
+    /// Devuelve el Id de la Asignacion creada.</summary>
+    Task<Guid> AgendarAsync(AgendarDesdeAgendaRequest req, Guid actor, CancellationToken ct = default);
 }
+
+/// <summary>Datos para agendar una cita desde un dia disponible del explorador.</summary>
+public sealed record AgendarDesdeAgendaRequest(
+    Guid ProfesionalId,
+    Guid PacienteId,
+    string ContratoCodigo,
+    string ServicioContratoId,
+    string NombreServicio,
+    string TipoServicio,
+    string? Modulo,
+    string Sucursal,
+    DateOnly Fecha,
+    TimeOnly HoraInicio,
+    string ViaIngresoCodigo,
+    string ViaIngresoNombre,
+    string? Observaciones);

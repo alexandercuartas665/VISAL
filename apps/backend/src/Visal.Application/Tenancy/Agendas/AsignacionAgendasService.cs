@@ -6,7 +6,8 @@ namespace Visal.Application.Tenancy.Agendas;
 
 public sealed class AsignacionAgendasService(
     IApplicationDbContext db,
-    IFestivosColombiaService festivos) : IAsignacionAgendasService
+    IFestivosColombiaService festivos,
+    IAsignacionService asignaciones) : IAsignacionAgendasService
 {
     public async Task<IReadOnlyList<ServicioConAgendaDto>> ListarServiciosConAgendaAsync(CancellationToken ct = default)
     {
@@ -119,6 +120,15 @@ public sealed class AsignacionAgendasService(
             .Where(n => n.ProfesionalId == profesionalId && n.FechaDesde <= ultimoDia && n.FechaHasta >= primerDia)
             .ToListAsync(ct);
 
+        // Turnos ya asignados al doctor por fecha (para descontar cupos ocupados).
+        var asignadosPorFecha = (await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => t.ProfesionalId == profesionalId && t.FechaInicio != null
+                         && t.FechaInicio >= primerDia && t.FechaInicio <= ultimoDia)
+                .GroupBy(t => t.FechaInicio!.Value)
+                .Select(g => new { Fecha = g.Key, Ocupados = g.Sum(x => x.Cantidad) })
+                .ToListAsync(ct))
+            .ToDictionary(x => x.Fecha, x => x.Ocupados);
+
         string? NovedadDiaCompleto(DateOnly f)
         {
             var n = novedades.FirstOrDefault(x => x.HoraDesde == null && x.HoraHasta == null
@@ -146,7 +156,13 @@ public sealed class AsignacionAgendasService(
                 if (festivosMapa.TryGetValue(f, out var fest)) { estado = EstadoDiaAgenda.Festivo; detalle = fest; }
                 else if (inactivos.TryGetValue(f, out var mot)) { estado = EstadoDiaAgenda.Inactivo; detalle = string.IsNullOrWhiteSpace(mot) ? "Dia inactivo" : mot; }
                 else if (NovedadDiaCompleto(f) is string nd) { estado = EstadoDiaAgenda.Novedad; detalle = nd; }
-                else if (cupos > 0) { estado = EstadoDiaAgenda.Disponible; cuposDia = cupos; detalle = NovedadParcial(f); }
+                else if (cupos > 0)
+                {
+                    var ocupados = asignadosPorFecha.TryGetValue(f, out var oc) ? oc : 0;
+                    var restantes = cupos - ocupados;
+                    if (restantes > 0) { estado = EstadoDiaAgenda.Disponible; cuposDia = restantes; detalle = NovedadParcial(f); }
+                    else { estado = EstadoDiaAgenda.Completo; detalle = $"{ocupados}/{cupos} cupos ocupados"; }
+                }
                 else { estado = EstadoDiaAgenda.SinTurno; }
                 dias.Add(new DiaDisponibilidadDto(f, estado, cuposDia, detalle));
             }
@@ -154,6 +170,67 @@ public sealed class AsignacionAgendasService(
             cursor = cursor.AddMonths(1);
         }
         return new DisponibilidadAgendaDto(profesionalId, sucursalId, mesesOut);
+    }
+
+    public async Task<IReadOnlyList<TimeOnly>> SlotsDisponiblesAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default)
+    {
+        var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
+            .Where(t => t.ProfesionalId == profesionalId && t.DiaSemana == fecha.DayOfWeek)
+            .OrderBy(t => t.HoraInicio).ToListAsync(ct);
+        if (turnos.Count == 0) { return Array.Empty<TimeOnly>(); }
+
+        // Slots ya ocupados por turnos existentes con hora en esa fecha.
+        var ocupados = (await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => t.ProfesionalId == profesionalId && t.FechaInicio == fecha && t.HoraInicio != null)
+                .Select(t => t.HoraInicio!.Value).ToListAsync(ct))
+            .ToHashSet();
+
+        var slots = new List<TimeOnly>();
+        foreach (var tu in turnos)
+        {
+            if (tu.IntervaloMinutos <= 0) { continue; }
+            var finSpan = tu.HoraFin.ToTimeSpan();
+            for (var t = tu.HoraInicio;
+                 t.ToTimeSpan().Add(TimeSpan.FromMinutes(tu.IntervaloMinutos)) <= finSpan;
+                 t = t.AddMinutes(tu.IntervaloMinutos))
+            {
+                if (!ocupados.Contains(t)) { slots.Add(t); }
+            }
+        }
+        return slots.Distinct().OrderBy(t => t).ToList();
+    }
+
+    public async Task<Guid> AgendarAsync(AgendarDesdeAgendaRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(req.ContratoCodigo)) { throw new InvalidOperationException("Selecciona el contrato del paciente."); }
+        if (string.IsNullOrWhiteSpace(req.ServicioContratoId)) { throw new InvalidOperationException("Selecciona el servicio del contrato."); }
+        if (string.IsNullOrWhiteSpace(req.ViaIngresoCodigo)) { throw new InvalidOperationException("Selecciona la via de ingreso RIPS."); }
+        if (string.IsNullOrWhiteSpace(req.Sucursal)) { throw new InvalidOperationException("Selecciona la sede."); }
+
+        // 1) Crear la Asignacion (lote de 1 item), reusando el flujo estandar.
+        var item = new AsignacionItemRequest(
+            req.ServicioContratoId, req.NombreServicio, req.TipoServicio, req.Modulo,
+            1, null,
+            (short)req.Fecha.Year, (short)req.Fecha.Month, null,
+            req.Fecha, null,
+            req.Observaciones, null,
+            RipsViaIngresoCodigo: req.ViaIngresoCodigo, RipsViaIngresoNombre: req.ViaIngresoNombre);
+        var lote = await asignaciones.CrearLoteAsync(
+            new CrearLoteRequest(req.PacienteId, req.ContratoCodigo, req.Sucursal, new[] { item }), actor, ct);
+
+        // 2) Recuperar la Asignacion recien creada del lote.
+        var asigId = await db.Asignaciones.AsNoTracking()
+            .Where(a => a.LoteId == lote.LoteId)
+            .Select(a => a.Id).FirstAsync(ct);
+
+        // 3) Asignar el doctor con la fecha y la hora del slot (queda Asignado).
+        await asignaciones.AsignarServicioAsync(
+            new AsignarServicioRequest(asigId, new[]
+            {
+                new TurnoCoordinadoRequest(req.ProfesionalId, 1, null, req.Fecha, (short)req.Fecha.Month, HoraInicio: req.HoraInicio)
+            }), actor, ct);
+
+        return asigId;
     }
 
     /// <summary>Match tolerante plural/singular entre el nombre de un tipo de profesional

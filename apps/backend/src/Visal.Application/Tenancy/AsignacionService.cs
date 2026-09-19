@@ -980,6 +980,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                         HorasPorTurno = t.HorasPorTurno,
                         FechaInicio = t.FechaInicio,
                         MesAsignar = t.MesAsignar,
+                        HoraInicio = t.HoraInicio,
                         Tarifa = t.Tarifa,
                         // PQ6: denormalizar campos de paquete desde la Asignacion
                         // para poder GROUP BY paquete_instancia_id en reportes.

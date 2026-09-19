@@ -1,10 +1,13 @@
 @page "/asignacion-agendas"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Agendas
 @inject IAsignacionAgendasService Svc
 @inject ISucursalService Sedes
+@inject IAsignacionService Asig
+@inject ICatalogoPacienteService CatPac
 
 <PageTitle>Asignacion por agendas - Visal</PageTitle>
 
@@ -110,8 +113,9 @@
                             @foreach (var dia in mes.Dias)
                             {
                                 var hoy = dia.Fecha == _hoy ? " cal-hoy" : "";
-                                var clase = $"cal-cell {ClaseDia(dia.Estado)}{hoy}";
-                                <div class="@clase" title="@Tooltip(dia)">
+                                var clic = dia.Estado == EstadoDiaAgenda.Disponible ? " cal-clic" : "";
+                                var clase = $"cal-cell {ClaseDia(dia.Estado)}{hoy}{clic}";
+                                <div class="@clase" title="@Tooltip(dia)" @onclick="() => AbrirAgendar(dia)">
                                     <div class="cal-num">@dia.Fecha.Day</div>
                                     @if (dia.Estado == EstadoDiaAgenda.Disponible) { <div class="aa-cupos">@dia.Cupos</div> }
                                 </div>
@@ -121,7 +125,8 @@
                 }
             </div>
             <div class="aa-legend text-muted">
-                <span><span class="cal-dot d-disp"></span> Disponible (nº = cupos)</span>
+                <span><span class="cal-dot d-disp"></span> Disponible (nº = cupos) — clic para agendar</span>
+                <span><span class="cal-dot d-completo"></span> Completo (sin cupos)</span>
                 <span><span class="cal-dot d-sinturno"></span> Sin turno</span>
                 <span><span class="cal-dot d-fest"></span> Festivo</span>
                 <span><span class="cal-dot d-inact"></span> Dia inactivo (sede)</span>
@@ -130,6 +135,114 @@
         }
     </div>
 </div>
+
+@* ============= MODAL AGENDAR ============= *@
+@if (_agOpen)
+{
+    <div class="cie-backdrop" @onclick="() => _agOpen = false"></div>
+    <div class="cie-modal" style="width:560px; max-width:96vw;">
+        <div class="cie-modal-h">
+            <h3>Agendar cita &middot; @_agFecha.ToString("dd/MM/yyyy")</h3>
+            <button class="cie-modal-close" @onclick="() => _agOpen = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="text-muted small" style="margin-bottom:10px;">
+                @_doctorSel?.NombreCompleto &middot; @_servicioNombre &middot; @SedeNombre()
+            </div>
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Hora</label>
+                    <select class="form-select form-select-sm" @bind="_agSlot">
+                        <option value="">-- Selecciona hora --</option>
+                        @foreach (var s in _agSlots)
+                        {
+                            <option value="@s.ToString("HH\\:mm")">@s.ToString("HH\\:mm")</option>
+                        }
+                    </select>
+                    @if (_agSlots.Count == 0) { <div class="text-muted small mt-1">No quedan slots libres ese dia.</div> }
+                </div>
+
+                <div class="ase-f">
+                    <label>Paciente</label>
+                    @if (_agPacSel is null)
+                    {
+                        <div style="display:flex;gap:6px;">
+                            <input class="form-control form-control-sm" placeholder="Documento o nombre..."
+                                   @bind="_agPacQuery" @bind:event="oninput" @onkeyup="BuscarPacientesKey" />
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="BuscarPacientesAsync">Buscar</button>
+                        </div>
+                        @if (_agPacResultados.Count > 0)
+                        {
+                            <div class="aa-paclist">
+                                @foreach (var p in _agPacResultados)
+                                {
+                                    <div class="aa-pacrow" @onclick="() => SeleccionarPacienteAsync(p)">
+                                        <strong>@p.NombreCompleto</strong> <span class="text-muted">@p.NumeroDocumento</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div><strong>@_agPacSel.NombreCompleto</strong> <span class="text-muted">@_agPacSel.NumeroDocumento</span></div>
+                            <button class="btn btn-link btn-sm" @onclick="LimpiarPaciente">cambiar</button>
+                        </div>
+                    }
+                </div>
+
+                @if (_agPacSel is not null)
+                {
+                    <div class="ase-f">
+                        <label>Contrato</label>
+                        <select class="form-select form-select-sm" @bind="_agContratoId" @bind:after="OnContratoChanged">
+                            <option value="@Guid.Empty">-- Selecciona --</option>
+                            @foreach (var c in _agContratos)
+                            {
+                                <option value="@c.ContratoId">@c.CodigoContrato — @c.AseguradoraNombre</option>
+                            }
+                        </select>
+                        @if (_agContratos.Count == 0) { <div class="text-muted small mt-1">El paciente no tiene contratos.</div> }
+                    </div>
+
+                    <div class="ase-f">
+                        <label>Servicio del contrato (@_servicio)</label>
+                        <select class="form-select form-select-sm" @bind="_agServicioId" disabled="@(_agServicios.Count == 0)">
+                            <option value="@Guid.Empty">-- Selecciona --</option>
+                            @foreach (var s in _agServicios)
+                            {
+                                <option value="@s.Id">@(s.Descripcion) @(s.Codigo is null ? "" : $"({s.Codigo})")</option>
+                            }
+                        </select>
+                        @if (_agContratoId != Guid.Empty && _agServicios.Count == 0) { <div class="text-muted small mt-1">Sin servicios de este modulo en el contrato.</div> }
+                    </div>
+                }
+
+                <div class="ase-f">
+                    <label>Via de ingreso (RIPS)</label>
+                    <select class="form-select form-select-sm" @bind="_agViaCod">
+                        <option value="">-- Selecciona --</option>
+                        @foreach (var v in _agVias)
+                        {
+                            <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="ase-f">
+                    <label>Nota <small class="text-muted">(opcional)</small></label>
+                    <input class="form-control form-control-sm" @bind="_agNota" placeholder="Observacion de la cita" />
+                </div>
+            </div>
+            @if (_agError is not null) { <div class="text-danger small mt-2">@_agError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _agOpen = false">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAgendaAsync" disabled="@_agBusy">Agendar</button>
+        </div>
+    </div>
+}
 
 <style>
     .aa-wrap { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
@@ -153,19 +266,38 @@
     .cal-hoy { outline: 2px solid #2563eb; outline-offset: -2px; }
     .d-disp, .cal-disp { }
     .cal-disp { background: #f0fdf4; border-color: #bbf7d0; }
+    .cal-clic { cursor: pointer; }
+    .cal-clic:hover { background: #dcfce7; }
+    .cal-completo { background: #eef2f7; border-color: #cbd5e1; }
     .cal-sinturno { background: #f8fafc; }
     .cal-fest { background: #fef2f2; border-color: #fecaca; }
     .cal-inact { background: #fff7ed; border-color: #fed7aa; }
     .cal-nov { background: #faf5ff; border-color: #e9d5ff; }
     .cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
     .d-disp { background: #22c55e; }
+    .d-completo { background: #94a3b8; }
     .d-sinturno { background: #cbd5e1; }
     .d-fest { background: #ef4444; }
     .d-inact { background: #f97316; }
     .d-nov { background: #a855f7; }
+
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 96vw; max-height: 92vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+    .ase-form { display: flex; flex-direction: column; gap: 12px; }
+    .ase-f label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 3px; }
+    .aa-paclist { border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 6px; max-height: 160px; overflow: auto; }
+    .aa-pacrow { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .aa-pacrow:hover { background: #f1f5f9; }
 </style>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private static readonly string[] Meses =
     {
         "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -190,6 +322,25 @@
     private int _mesInicio;
     private DateOnly _hoy;
 
+    // ----- Modal agendar -----
+    private bool _agOpen;
+    private bool _agBusy;
+    private string? _agError;
+    private DateOnly _agFecha;
+    private string _servicioNombre = "";
+    private List<TimeOnly> _agSlots = new();
+    private string _agSlot = "";
+    private string _agPacQuery = "";
+    private List<PacienteAsignacionDto> _agPacResultados = new();
+    private PacienteAsignacionDto? _agPacSel;
+    private List<ContratoMiniDto> _agContratos = new();
+    private Guid _agContratoId = Guid.Empty;
+    private List<ServicioCatalogoDto> _agServicios = new();
+    private Guid _agServicioId = Guid.Empty;
+    private List<CatalogoPacienteDto> _agVias = new();
+    private string _agViaCod = "";
+    private string _agNota = "";
+
     protected override async Task OnInitializedAsync()
     {
         _hoy = DateOnly.FromDateTime(DateTime.Today);
@@ -199,6 +350,13 @@
             _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList();
             if (_sedes.Count > 0) { _sucursalId = _sedes[0].Id; }
             _servicios = (await Svc.ListarServiciosConAgendaAsync()).ToList();
+            try
+            {
+                _agVias = (await CatPac.ListAsync(CatalogoPacienteTipo.RipsViaIngreso))
+                    .Where(v => v.Activo).OrderBy(v => v.Codigo, StringComparer.Ordinal).ToList();
+                _agViaCod = _agVias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? "";
+            }
+            catch { _agVias = new(); }
         }
         catch (Exception ex) { _error = ex.Message; }
         _loadingServicios = false;
@@ -251,9 +409,101 @@
         await CargarDisponibilidadAsync();
     }
 
+    // ---------------- Modal agendar ----------------
+    private async Task AbrirAgendar(DiaDisponibilidadDto dia)
+    {
+        if (dia.Estado != EstadoDiaAgenda.Disponible) { return; }
+        _agFecha = dia.Fecha;
+        _servicioNombre = _servicios.FirstOrDefault(s => s.Codigo == _servicio)?.Nombre ?? _servicio;
+        _agError = null;
+        _agSlot = ""; _agPacQuery = ""; _agPacResultados = new(); _agPacSel = null;
+        _agContratos = new(); _agContratoId = Guid.Empty; _agServicios = new(); _agServicioId = Guid.Empty;
+        _agNota = "";
+        _agViaCod = _agVias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? _agVias.FirstOrDefault()?.Codigo ?? "";
+        _agSlots = (await Svc.SlotsDisponiblesAsync(_doctorId, _agFecha)).ToList();
+        _agOpen = true;
+    }
+
+    private async Task BuscarPacientesKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await BuscarPacientesAsync(); }
+    }
+
+    private async Task BuscarPacientesAsync()
+    {
+        var q = (_agPacQuery ?? "").Trim();
+        if (q.Length < 2) { _agPacResultados = new(); return; }
+        try { _agPacResultados = (await Asig.BuscarPacientesAsync(q, null)).ToList(); }
+        catch (Exception ex) { _agError = ex.Message; }
+    }
+
+    private async Task SeleccionarPacienteAsync(PacienteAsignacionDto p)
+    {
+        _agError = null;
+        var full = await Asig.GetPacienteAsync(p.Id);
+        _agPacSel = full ?? p;
+        _agContratos = (full?.Contratos ?? p.Contratos ?? new List<ContratoMiniDto>()).ToList();
+        _agPacResultados = new();
+        _agContratoId = _agContratos.Count == 1 ? _agContratos[0].ContratoId : Guid.Empty;
+        _agServicios = new(); _agServicioId = Guid.Empty;
+        if (_agContratoId != Guid.Empty) { await OnContratoChanged(); }
+    }
+
+    private void LimpiarPaciente()
+    {
+        _agPacSel = null; _agContratos = new(); _agContratoId = Guid.Empty;
+        _agServicios = new(); _agServicioId = Guid.Empty;
+    }
+
+    private async Task OnContratoChanged()
+    {
+        _agServicioId = Guid.Empty; _agServicios = new();
+        if (_agContratoId == Guid.Empty) { return; }
+        try { _agServicios = (await Asig.ServiciosPorContratoAsync(_agContratoId, _servicio)).ToList(); }
+        catch (Exception ex) { _agError = ex.Message; }
+    }
+
+    private async Task GuardarAgendaAsync()
+    {
+        _agError = null;
+        if (string.IsNullOrWhiteSpace(_agSlot)) { _agError = "Selecciona la hora."; return; }
+        if (_agPacSel is null) { _agError = "Selecciona un paciente."; return; }
+        if (_agContratoId == Guid.Empty) { _agError = "Selecciona el contrato."; return; }
+        if (_agServicioId == Guid.Empty) { _agError = "Selecciona el servicio del contrato."; return; }
+        if (string.IsNullOrWhiteSpace(_agViaCod)) { _agError = "Selecciona la via de ingreso."; return; }
+
+        var contrato = _agContratos.First(c => c.ContratoId == _agContratoId);
+        var servicio = _agServicios.First(s => s.Id == _agServicioId);
+        var via = _agVias.FirstOrDefault(v => v.Codigo == _agViaCod);
+        var hora = TimeOnly.ParseExact(_agSlot, "HH\\:mm");
+
+        _agBusy = true;
+        try
+        {
+            var req = new AgendarDesdeAgendaRequest(
+                _doctorId, _agPacSel.Id, contrato.CodigoContrato,
+                servicio.Id.ToString(), servicio.Descripcion, servicio.Modulo ?? _servicio, servicio.Modulo,
+                SedeNombre(), _agFecha, hora,
+                _agViaCod, via?.Nombre ?? _agViaCod, _agNota);
+            await Svc.AgendarAsync(req, await ActorAsync());
+            _agOpen = false;
+            await CargarDisponibilidadAsync();
+        }
+        catch (Exception ex) { _agError = ex.Message; }
+        finally { _agBusy = false; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+
     private static string ClaseDia(EstadoDiaAgenda e) => e switch
     {
         EstadoDiaAgenda.Disponible => "cal-disp",
+        EstadoDiaAgenda.Completo => "cal-completo",
         EstadoDiaAgenda.Festivo => "cal-fest",
         EstadoDiaAgenda.Inactivo => "cal-inact",
         EstadoDiaAgenda.Novedad => "cal-nov",
@@ -262,12 +512,15 @@
 
     private static string Tooltip(DiaDisponibilidadDto d) => d.Estado switch
     {
-        EstadoDiaAgenda.Disponible => d.Detalle is null ? $"Disponible ({d.Cupos} cupos)" : $"Disponible ({d.Cupos} cupos) — {d.Detalle}",
+        EstadoDiaAgenda.Disponible => d.Detalle is null ? $"Disponible ({d.Cupos} cupos) — clic para agendar" : $"Disponible ({d.Cupos} cupos) — {d.Detalle}",
+        EstadoDiaAgenda.Completo => $"Completo — {d.Detalle}",
         EstadoDiaAgenda.Festivo => $"Festivo: {d.Detalle}",
         EstadoDiaAgenda.Inactivo => $"Dia inactivo: {d.Detalle}",
         EstadoDiaAgenda.Novedad => $"Novedad: {d.Detalle}",
         _ => "Sin turno"
     };
+
+    private string SedeNombre() => _sedes.FirstOrDefault(s => s.Id == _sucursalId)?.Nombre ?? "";
 
     private static string NombreMes(int m) => Meses[m - 1];
 }

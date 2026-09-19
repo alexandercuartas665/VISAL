@@ -1,0 +1,279 @@
+@page "/config/calendario"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Agendas
+@inject ICalendarioService Svc
+@inject ISucursalService Sedes
+@inject IJSRuntime JS
+
+<PageTitle>Calendario - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Calendario</h1>
+        <small class="text-muted">
+            Festivos nacionales (calculados) y dias inactivos por sede. El festivo cierra el dia;
+            ademas puedes marcar dias inactivos propios de una sede (cierre, jornada administrativa).
+        </small>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card" style="padding:16px 18px;">
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+            <span class="text-muted" style="font-size:13px;">Sede:</span>
+            <select class="form-select form-select-sm" style="max-width:280px;" @bind="_sucursalId" @bind:after="CargarAsync">
+                @foreach (var s in _sedes)
+                {
+                    <option value="@s.Id">@s.Nombre</option>
+                }
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
+            <button class="btn btn-sm btn-outline-secondary" @onclick="MesAnterior">&larr;</button>
+            <strong style="min-width:150px;text-align:center;">@NombreMes(_mes) @_anio</strong>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="MesSiguiente">&rarr;</button>
+            <button class="btn btn-sm btn-link" @onclick="IrHoy">Hoy</button>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_sedes.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">No hay sedes configuradas.</div>
+    }
+    else if (_mesData is not null)
+    {
+        <div class="cal-grid cal-head">
+            @foreach (var d in new[] { "Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom" })
+            {
+                <div class="cal-dow">@d</div>
+            }
+        </div>
+        <div class="cal-grid">
+            @for (var i = 0; i < _offset; i++)
+            {
+                <div class="cal-cell cal-empty"></div>
+            }
+            @foreach (var dia in _mesData.Dias)
+            {
+                var cls = dia.EsFestivo ? "cal-festivo" : (dia.EsInactivo ? "cal-inactivo" : "");
+                var hoy = dia.Fecha == _hoy ? " cal-hoy" : "";
+                var clase = $"cal-cell {cls}{hoy}";
+                <div class="@clase" @onclick="() => AbrirDia(dia)" title="@Tooltip(dia)">
+                    <div class="cal-num">@dia.Fecha.Day</div>
+                    @if (dia.EsFestivo) { <div class="cal-tag cal-tag-fest">Festivo</div> }
+                    @if (dia.EsInactivo) { <div class="cal-tag cal-tag-inact">Inactivo</div> }
+                </div>
+            }
+        </div>
+        <div style="display:flex;gap:16px;margin-top:12px;font-size:12px;" class="text-muted">
+            <span><span class="cal-dot cal-dot-fest"></span> Festivo nacional</span>
+            <span><span class="cal-dot cal-dot-inact"></span> Dia inactivo (sede)</span>
+        </div>
+    }
+</div>
+
+@* ============= MODAL DIA ============= *@
+@if (_modalDia && _diaSel is not null)
+{
+    <div class="cie-backdrop" @onclick="() => _modalDia = false"></div>
+    <div class="cie-modal" style="width:440px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>@_diaSel.Fecha.ToString("dddd d 'de' MMMM yyyy", Cultura)</h3>
+            <button class="cie-modal-close" @onclick="() => _modalDia = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            @if (_diaSel.EsFestivo)
+            {
+                <div class="ase-ok" style="margin-bottom:12px;">Festivo nacional: <strong>@_diaSel.FestivoNombre</strong>. Cierra el dia automaticamente.</div>
+            }
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Motivo del dia inactivo <small class="text-muted">(opcional)</small></label>
+                    <input class="form-control form-control-sm" @bind="_fMotivo" placeholder="Ej: Cierre por mantenimiento" />
+                </div>
+            </div>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:space-between;gap:8px;">
+            <div>
+                @if (_diaSel.EsInactivo)
+                {
+                    <button class="btn btn-outline-danger btn-sm" @onclick="QuitarInactivoAsync" disabled="@_busy">Quitar inactivo</button>
+                }
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _modalDia = false">Cerrar</button>
+                <button class="btn btn-primary btn-sm" @onclick="MarcarInactivoAsync" disabled="@_busy">
+                    @(_diaSel.EsInactivo ? "Guardar motivo" : "Marcar inactivo")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .cal-head { margin-bottom: 6px; }
+    .cal-dow { text-align: center; font-size: 12px; font-weight: 700; color: #64748b; padding: 4px 0; }
+    .cal-cell { min-height: 74px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; cursor: pointer; background: #fff; transition: background .1s; }
+    .cal-cell:hover { background: #f1f5f9; }
+    .cal-empty { border: none; background: transparent; cursor: default; }
+    .cal-num { font-weight: 700; font-size: 13px; color: #0f172a; }
+    .cal-festivo { background: #fef2f2; border-color: #fecaca; }
+    .cal-festivo:hover { background: #fee2e2; }
+    .cal-inactivo { background: #fff7ed; border-color: #fed7aa; }
+    .cal-inactivo:hover { background: #ffedd5; }
+    .cal-hoy { outline: 2px solid #2563eb; outline-offset: -2px; }
+    .cal-tag { font-size: 10px; font-weight: 700; margin-top: 3px; padding: 1px 5px; border-radius: 5px; display: inline-block; }
+    .cal-tag-fest { background: #ef4444; color: #fff; }
+    .cal-tag-inact { background: #f97316; color: #fff; }
+    .cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
+    .cal-dot-fest { background: #ef4444; }
+    .cal-dot-inact { background: #f97316; }
+
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; text-transform: capitalize; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Cultura = new("es-CO");
+    private static readonly string[] Meses =
+    {
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    };
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private List<SucursalDto> _sedes = new();
+    private Guid _sucursalId;
+    private int _anio;
+    private int _mes;
+    private DateOnly _hoy;
+
+    private MesCalendarioDto? _mesData;
+    private int _offset; // celdas vacias antes del dia 1 (lunes = 0)
+
+    private bool _modalDia;
+    private DiaCalendarioDto? _diaSel;
+    private string _fMotivo = "";
+    private string? _modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hoy = DateOnly.FromDateTime(DateTime.Today);
+        _anio = _hoy.Year; _mes = _hoy.Month;
+        try
+        {
+            _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList();
+            if (_sedes.Count > 0) { _sucursalId = _sedes[0].Id; await CargarAsync(); }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        _loading = false;
+    }
+
+    private async Task CargarAsync()
+    {
+        if (_sucursalId == Guid.Empty) { _mesData = null; return; }
+        _error = _ok = null;
+        try
+        {
+            _mesData = await Svc.ObtenerMesAsync(_sucursalId, _anio, _mes);
+            // Offset lunes-based: DayOfWeek Sunday=0..Saturday=6 -> Monday=0..Sunday=6
+            var primero = new DateOnly(_anio, _mes, 1);
+            _offset = ((int)primero.DayOfWeek + 6) % 7;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task MesAnterior()
+    {
+        if (--_mes < 1) { _mes = 12; _anio--; }
+        await CargarAsync();
+    }
+
+    private async Task MesSiguiente()
+    {
+        if (++_mes > 12) { _mes = 1; _anio++; }
+        await CargarAsync();
+    }
+
+    private async Task IrHoy()
+    {
+        _anio = _hoy.Year; _mes = _hoy.Month;
+        await CargarAsync();
+    }
+
+    private void AbrirDia(DiaCalendarioDto dia)
+    {
+        _diaSel = dia; _fMotivo = dia.Motivo ?? ""; _modalError = null;
+        _modalDia = true;
+    }
+
+    private async Task MarcarInactivoAsync()
+    {
+        if (_diaSel is null) { return; }
+        _busy = true; _modalError = null;
+        try
+        {
+            await Svc.MarcarInactivoAsync(_sucursalId, _diaSel.Fecha, _fMotivo, await ActorAsync());
+            _ok = $"Dia {_diaSel.Fecha:dd/MM/yyyy} marcado como inactivo.";
+            _modalDia = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task QuitarInactivoAsync()
+    {
+        if (_diaSel?.InactivoId is not Guid id) { return; }
+        _busy = true; _modalError = null;
+        try
+        {
+            await Svc.QuitarInactivoAsync(id, await ActorAsync());
+            _ok = $"Dia {_diaSel.Fecha:dd/MM/yyyy} reactivado.";
+            _modalDia = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static string NombreMes(int m) => Meses[m - 1];
+
+    private static string Tooltip(DiaCalendarioDto d)
+    {
+        if (d.EsFestivo) { return $"Festivo: {d.FestivoNombre}"; }
+        if (d.EsInactivo) { return string.IsNullOrWhiteSpace(d.Motivo) ? "Dia inactivo" : $"Inactivo: {d.Motivo}"; }
+        return "Marcar inactivo";
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+}

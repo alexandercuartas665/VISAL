@@ -108,6 +108,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<PlantillaAgenda> PlantillasAgenda => Set<PlantillaAgenda>();
     public DbSet<PlantillaAgendaTurno> PlantillaAgendaTurnos => Set<PlantillaAgendaTurno>();
     public DbSet<AgendaProfesionalTurno> AgendaProfesionalTurnos => Set<AgendaProfesionalTurno>();
+    public DbSet<DiaInactivoSede> DiasInactivosSede => Set<DiaInactivoSede>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -1029,6 +1030,12 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.DiaSemana).HasMaxLength(12);
             b.HasIndex(x => new { x.TenantId, x.ProfesionalId, x.DiaSemana });
+        });
+
+        modelBuilder.Entity<DiaInactivoSede>(b =>
+        {
+            b.Property(x => x.Motivo).HasMaxLength(200);
+            b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Fecha }).IsUnique();
         });
 
         modelBuilder.Entity<CatalogoTipoServicio>(b =>

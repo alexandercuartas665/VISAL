@@ -109,6 +109,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<PlantillaAgendaTurno> PlantillaAgendaTurnos => Set<PlantillaAgendaTurno>();
     public DbSet<AgendaProfesionalTurno> AgendaProfesionalTurnos => Set<AgendaProfesionalTurno>();
     public DbSet<DiaInactivoSede> DiasInactivosSede => Set<DiaInactivoSede>();
+    public DbSet<NovedadProfesional> NovedadesProfesional => Set<NovedadProfesional>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -227,6 +228,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<LlamadaVozEstado>().HaveConversion<string>().HaveMaxLength(30);
         // DayOfWeek (BCL) como texto ("Monday"...) para las agendas: legible y estable.
         configurationBuilder.Properties<DayOfWeek>().HaveConversion<string>().HaveMaxLength(12);
+        configurationBuilder.Properties<TipoNovedadProfesional>().HaveConversion<string>().HaveMaxLength(20);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1036,6 +1038,12 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Motivo).HasMaxLength(200);
             b.HasIndex(x => new { x.TenantId, x.SucursalId, x.Fecha }).IsUnique();
+        });
+
+        modelBuilder.Entity<NovedadProfesional>(b =>
+        {
+            b.Property(x => x.Nota).HasMaxLength(300);
+            b.HasIndex(x => new { x.TenantId, x.ProfesionalId, x.FechaDesde });
         });
 
         modelBuilder.Entity<CatalogoTipoServicio>(b =>

@@ -1,0 +1,280 @@
+@page "/config/novedades"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Agendas
+@using Visal.Domain.Enums
+@inject INovedadProfesionalService Svc
+@inject IProfesionalConfigService Profes
+@inject IJSRuntime JS
+
+<PageTitle>Novedades - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Novedades de profesionales</h1>
+        <small class="text-muted">
+            Vacaciones, incapacidades y permisos por profesional. Cierran su agenda en el rango de
+            fechas (o en una franja horaria). La asignacion por agendas las restara de su disponibilidad.
+        </small>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="ase-card" style="padding:16px 18px;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <span class="text-muted" style="font-size:13px;">Profesional:</span>
+        <select class="form-select form-select-sm" style="max-width:340px;" @bind="_profesionalId" @bind:after="CargarAsync">
+            <option value="@Guid.Empty">-- Selecciona --</option>
+            @foreach (var p in _profes)
+            {
+                <option value="@p.Id">@p.NombreCompleto</option>
+            }
+        </select>
+        @if (_profesionalId != Guid.Empty)
+        {
+            <button class="btn btn-primary btn-sm" style="margin-left:auto;" @onclick="Nueva" disabled="@_busy">+ Nueva novedad</button>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_profesionalId == Guid.Empty)
+    {
+        <div class="ase-empty" style="padding:24px;">Selecciona un profesional para ver y crear sus novedades.</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:24px;">Este profesional no tiene novedades registradas.</div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:130px">Tipo</th>
+                        <th>Rango</th>
+                        <th style="width:150px">Horario</th>
+                        <th>Nota</th>
+                        <th style="width:90px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var n in _rows)
+                    {
+                        <tr>
+                            <td><span class="badge @BadgeClase(n.Tipo)">@TipoLabel(n.Tipo)</span></td>
+                            <td>
+                                @if (n.FechaDesde == n.FechaHasta) { @n.FechaDesde.ToString("dd/MM/yyyy") }
+                                else { @($"{n.FechaDesde:dd/MM/yyyy} — {n.FechaHasta:dd/MM/yyyy}") }
+                            </td>
+                            <td>
+                                @if (n.DiaCompleto) { <span class="text-muted">Dia completo</span> }
+                                else { @($"{n.HoraDesde:hh\\:mm} — {n.HoraHasta:hh\\:mm}") }
+                            </td>
+                            <td class="text-muted">@(string.IsNullOrWhiteSpace(n.Nota) ? "—" : n.Nota)</td>
+                            <td class="text-end">
+                                <button class="btn btn-link btn-sm" title="Editar" @onclick="() => Editar(n)">&#9998;</button>
+                                <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(n)">&#128465;</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ============= MODAL NOVEDAD ============= *@
+@if (_modal)
+{
+    <div class="cie-backdrop" @onclick="() => _modal = false"></div>
+    <div class="cie-modal" style="width:520px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>@(_editId is null ? "Nueva novedad" : "Editar novedad")</h3>
+            <button class="cie-modal-close" @onclick="() => _modal = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Tipo</label>
+                    <select class="form-select form-select-sm" @bind="_fTipo">
+                        <option value="@TipoNovedadProfesional.Vacaciones">Vacaciones</option>
+                        <option value="@TipoNovedadProfesional.Incapacidad">Incapacidad</option>
+                        <option value="@TipoNovedadProfesional.Permiso">Permiso</option>
+                        <option value="@TipoNovedadProfesional.Otro">Otro</option>
+                    </select>
+                </div>
+                <div style="display:flex;gap:12px;">
+                    <div class="ase-f" style="flex:1;">
+                        <label>Desde</label>
+                        <input class="form-control form-control-sm" type="date" @bind="_fDesde" />
+                    </div>
+                    <div class="ase-f" style="flex:1;">
+                        <label>Hasta</label>
+                        <input class="form-control form-control-sm" type="date" @bind="_fHasta" />
+                    </div>
+                </div>
+                <label class="ase-chk" style="margin:4px 0;">
+                    <input type="checkbox" @bind="_fDiaCompleto" /> <span>Dia completo</span>
+                </label>
+                @if (!_fDiaCompleto)
+                {
+                    <div style="display:flex;gap:12px;">
+                        <div class="ase-f" style="flex:1;">
+                            <label>Hora desde</label>
+                            <input class="form-control form-control-sm" type="time" @bind="_fHoraDesde" />
+                        </div>
+                        <div class="ase-f" style="flex:1;">
+                            <label>Hora hasta</label>
+                            <input class="form-control form-control-sm" type="time" @bind="_fHoraHasta" />
+                        </div>
+                    </div>
+                }
+                <div class="ase-f">
+                    <label>Nota <small class="text-muted">(opcional)</small></label>
+                    <input class="form-control form-control-sm" @bind="_fNota" placeholder="Ej: Incapacidad EPS 3 dias" />
+                </div>
+            </div>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _modal = false">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAsync" disabled="@_busy">@(_editId is null ? "Crear" : "Guardar")</button>
+        </div>
+    </div>
+}
+
+<style>
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private List<ProfesionalDto> _profes = new();
+    private Guid _profesionalId = Guid.Empty;
+    private List<NovedadProfesionalDto> _rows = new();
+
+    private bool _modal;
+    private Guid? _editId;
+    private TipoNovedadProfesional _fTipo = TipoNovedadProfesional.Vacaciones;
+    private DateOnly _fDesde = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly _fHasta = DateOnly.FromDateTime(DateTime.Today);
+    private bool _fDiaCompleto = true;
+    private TimeOnly _fHoraDesde = new(8, 0);
+    private TimeOnly _fHoraHasta = new(12, 0);
+    private string _fNota = "";
+    private string? _modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _profes = (await Profes.ListProfesionalesAsync(null)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        _loading = false;
+    }
+
+    private async Task CargarAsync()
+    {
+        _error = _ok = null;
+        if (_profesionalId == Guid.Empty) { _rows = new(); return; }
+        try { _rows = (await Svc.ListarPorProfesionalAsync(_profesionalId)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void Nueva()
+    {
+        _editId = null; _modalError = null;
+        _fTipo = TipoNovedadProfesional.Vacaciones;
+        _fDesde = _fHasta = DateOnly.FromDateTime(DateTime.Today);
+        _fDiaCompleto = true; _fHoraDesde = new(8, 0); _fHoraHasta = new(12, 0);
+        _fNota = "";
+        _modal = true;
+    }
+
+    private void Editar(NovedadProfesionalDto n)
+    {
+        _editId = n.Id; _modalError = null;
+        _fTipo = n.Tipo; _fDesde = n.FechaDesde; _fHasta = n.FechaHasta;
+        _fDiaCompleto = n.DiaCompleto;
+        _fHoraDesde = n.HoraDesde ?? new(8, 0);
+        _fHoraHasta = n.HoraHasta ?? new(12, 0);
+        _fNota = n.Nota ?? "";
+        _modal = true;
+    }
+
+    private async Task GuardarAsync()
+    {
+        _modalError = null;
+        if (_fHasta < _fDesde) { _modalError = "La fecha 'Hasta' no puede ser anterior a 'Desde'."; return; }
+        if (!_fDiaCompleto && _fHoraHasta <= _fHoraDesde) { _modalError = "La hora 'Hasta' debe ser mayor que 'Desde'."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            TimeOnly? hd = _fDiaCompleto ? null : _fHoraDesde;
+            TimeOnly? hh = _fDiaCompleto ? null : _fHoraHasta;
+            var cmd = new GuardarNovedadProfesionalCmd(_editId, _fTipo, _fDesde, _fHasta, hd, hh, _fNota);
+            await Svc.GuardarAsync(_profesionalId, cmd, await ActorAsync());
+            _ok = _editId is null ? "Novedad creada." : "Novedad actualizada.";
+            _modal = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarAsync(NovedadProfesionalDto n)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Eliminar esta novedad?")) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.EliminarAsync(n.Id, await ActorAsync());
+            _ok = "Novedad eliminada.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static string TipoLabel(TipoNovedadProfesional t) => t switch
+    {
+        TipoNovedadProfesional.Vacaciones => "Vacaciones",
+        TipoNovedadProfesional.Incapacidad => "Incapacidad",
+        TipoNovedadProfesional.Permiso => "Permiso",
+        _ => "Otro"
+    };
+
+    private static string BadgeClase(TipoNovedadProfesional t) => t switch
+    {
+        TipoNovedadProfesional.Vacaciones => "bg-info",
+        TipoNovedadProfesional.Incapacidad => "bg-danger",
+        TipoNovedadProfesional.Permiso => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+}

@@ -152,6 +152,8 @@ public static class DependencyInjection
         // Agendas (Ola 3): festivos de Colombia (calculador puro) + calendario por sede.
         services.AddSingleton<Tenancy.Agendas.IFestivosColombiaService, Tenancy.Agendas.FestivosColombiaService>();
         services.AddScoped<Tenancy.Agendas.ICalendarioService, Tenancy.Agendas.CalendarioService>();
+        // Agendas (Ola 4): novedades por profesional (vacaciones/incapacidad/permiso).
+        services.AddScoped<Tenancy.Agendas.INovedadProfesionalService, Tenancy.Agendas.NovedadProfesionalService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         // Facturacion — motor generico de snapshots + builders por tipo.
         services.AddScoped<Facturacion.IFacturacionSnapshotService, Facturacion.FacturacionSnapshotService>();

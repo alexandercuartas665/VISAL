@@ -270,19 +270,11 @@
             }
         }
 
-        var _showSysCfgGroup = Puede("cfg-turnos") || Puede("cfg-agendas") || Puede("cfg-agendas-prof") || Puede("cfg-calendario") || Puede("cfg-novedades") || Puede("cfg-profesionales")
-                            || Puede("cfg-aseguradoras") || Puede("cfg-tipos-profesional")
-                            || Puede("cfg-subcategorias") || Puede("cfg-paquetes")
-                            || Puede("cfg-cuotas-copagos") || Puede("cfg-pacientes")
-                            || Puede("cie11") || Puede("medicamentos") || Puede("diagnosticos")
-                            || Puede("catalogo.rx") || Puede("catalogo.laboratorios")
-                            || Puede("catalogo.servicios") || Puede("catalogo.insumos")
-                            || Puede("relaciones-formularios") || Puede("cfg-tipos-servicio")
-                            || Puede("cfg-menu-hc") || Puede("cfg-tipologia-archivos")
-                            || Puede("admin.sql-console");
-        if (_showSysCfgGroup)
+        var _showIntramuralGroup = Puede("cfg-turnos") || Puede("cfg-agendas") || Puede("cfg-agendas-prof")
+                            || Puede("cfg-calendario") || Puede("cfg-novedades");
+        if (_showIntramuralGroup)
         {
-            <div class="visal-nav-label">Configuracion del Sistema</div>
+            <div class="visal-nav-label">Intramural</div>
 
             @if (Puede("cfg-turnos"))
             {
@@ -323,6 +315,21 @@
                     <span>Novedades de profesionales</span>
                 </NavLink>
             }
+        }
+
+        var _showSysCfgGroup = Puede("cfg-profesionales")
+                            || Puede("cfg-aseguradoras") || Puede("cfg-tipos-profesional")
+                            || Puede("cfg-subcategorias") || Puede("cfg-paquetes")
+                            || Puede("cfg-cuotas-copagos") || Puede("cfg-pacientes")
+                            || Puede("cie11") || Puede("medicamentos") || Puede("diagnosticos")
+                            || Puede("catalogo.rx") || Puede("catalogo.laboratorios")
+                            || Puede("catalogo.servicios") || Puede("catalogo.insumos")
+                            || Puede("relaciones-formularios") || Puede("cfg-tipos-servicio")
+                            || Puede("cfg-menu-hc") || Puede("cfg-tipologia-archivos")
+                            || Puede("admin.sql-console");
+        if (_showSysCfgGroup)
+        {
+            <div class="visal-nav-label">Configuracion del Sistema</div>
 
             @if (Puede("cfg-profesionales"))
             {

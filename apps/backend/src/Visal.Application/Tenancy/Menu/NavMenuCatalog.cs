@@ -46,6 +46,7 @@ public static class NavMenuCatalog
         "Interoperabilidad",
         "Facturacion",
         "Infraestructura & IA",
+        "Intramural",
         "Configuracion del Sistema",
         "Configuracion de la Entidad",
         "Mi agencia",
@@ -79,12 +80,14 @@ public static class NavMenuCatalog
         new("ai-usage", "Auditoria uso IA", "admin/ai-usage", "medidor", "admin.ai-usage", "Infraestructura & IA"),
         new("cfg-voz", "Voz IA (llamadas)", "config/voz-ia", "telefono", "cfg-voz", "Infraestructura & IA"),
 
+        // ===== Intramural (programacion de agenda: turnos, agendas, calendario, novedades) =====
+        new("cfg-turnos", "Programaciones de turnos", "cfg-turnos", "calendario", "cfg-turnos", "Intramural"),
+        new("cfg-agendas", "Agendas base", "config/agendas", "calendario", "cfg-agendas", "Intramural"),
+        new("cfg-agendas-prof", "Agendas de profesionales", "config/agendas-profesionales", "usuarios", "cfg-agendas-prof", "Intramural"),
+        new("cfg-calendario", "Calendario", "config/calendario", "calendario", "cfg-calendario", "Intramural"),
+        new("cfg-novedades", "Novedades de profesionales", "config/novedades", "campana", "cfg-novedades", "Intramural"),
+
         // ===== Configuracion del Sistema =====
-        new("cfg-turnos", "Programaciones de turnos", "cfg-turnos", "calendario", "cfg-turnos", "Configuracion del Sistema"),
-        new("cfg-agendas", "Agendas base", "config/agendas", "calendario", "cfg-agendas", "Configuracion del Sistema"),
-        new("cfg-agendas-prof", "Agendas de profesionales", "config/agendas-profesionales", "usuarios", "cfg-agendas-prof", "Configuracion del Sistema"),
-        new("cfg-calendario", "Calendario", "config/calendario", "calendario", "cfg-calendario", "Configuracion del Sistema"),
-        new("cfg-novedades", "Novedades de profesionales", "config/novedades", "campana", "cfg-novedades", "Configuracion del Sistema"),
         new("cfg-profesionales", "Profesionales", "cfg-profesionales", "usuarios", "cfg-profesionales", "Configuracion del Sistema"),
         new("cfg-aseguradoras", "Entidades Aseguradoras", "cfg-aseguradoras", "escudo", "cfg-aseguradoras", "Configuracion del Sistema"),
         new("cfg-tipos-profesional", "Tipos de Profesional", "cfg-tipos-profesional", "etiqueta", "cfg-tipos-profesional", "Configuracion del Sistema"),

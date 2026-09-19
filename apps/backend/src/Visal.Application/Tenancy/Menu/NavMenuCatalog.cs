@@ -81,6 +81,7 @@ public static class NavMenuCatalog
 
         // ===== Configuracion del Sistema =====
         new("cfg-turnos", "Programaciones de turnos", "cfg-turnos", "calendario", "cfg-turnos", "Configuracion del Sistema"),
+        new("cfg-agendas", "Agendas base", "config/agendas", "calendario", "cfg-agendas", "Configuracion del Sistema"),
         new("cfg-profesionales", "Profesionales", "cfg-profesionales", "usuarios", "cfg-profesionales", "Configuracion del Sistema"),
         new("cfg-aseguradoras", "Entidades Aseguradoras", "cfg-aseguradoras", "escudo", "cfg-aseguradoras", "Configuracion del Sistema"),
         new("cfg-tipos-profesional", "Tipos de Profesional", "cfg-tipos-profesional", "etiqueta", "cfg-tipos-profesional", "Configuracion del Sistema"),

@@ -145,6 +145,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IAtencionOrdenService, Tenancy.AtencionOrdenService>();
         services.AddScoped<Tenancy.Turnos.ITurnoProgramacionService, Tenancy.Turnos.TurnoProgramacionService>();
         services.AddScoped<Tenancy.Turnos.ITipoTurnoService, Tenancy.Turnos.TipoTurnoService>();
+        // Agendas (Ola 1): plantillas de agenda reutilizables.
+        services.AddScoped<Tenancy.Agendas.IPlantillaAgendaService, Tenancy.Agendas.PlantillaAgendaService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         // Facturacion — motor generico de snapshots + builders por tipo.
         services.AddScoped<Facturacion.IFacturacionSnapshotService, Facturacion.FacturacionSnapshotService>();

@@ -105,6 +105,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TurnoProgramacion> TurnoProgramaciones => Set<TurnoProgramacion>();
     public DbSet<TurnoProgramacionSucursal> TurnoProgramacionSucursales => Set<TurnoProgramacionSucursal>();
     public DbSet<TipoTurno> TiposTurno => Set<TipoTurno>();
+    public DbSet<PlantillaAgenda> PlantillasAgenda => Set<PlantillaAgenda>();
+    public DbSet<PlantillaAgendaTurno> PlantillaAgendaTurnos => Set<PlantillaAgendaTurno>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -221,6 +223,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         configurationBuilder.Properties<AlertaCanal>().HaveConversion<string>().HaveMaxLength(40);
         configurationBuilder.Properties<AlertaGestion>().HaveConversion<string>().HaveMaxLength(20);
         configurationBuilder.Properties<LlamadaVozEstado>().HaveConversion<string>().HaveMaxLength(30);
+        // DayOfWeek (BCL) como texto ("Monday"...) para las agendas: legible y estable.
+        configurationBuilder.Properties<DayOfWeek>().HaveConversion<string>().HaveMaxLength(12);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1000,6 +1004,24 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ColorBorde).HasMaxLength(9).IsRequired();
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
+        });
+
+        modelBuilder.Entity<PlantillaAgenda>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Descripcion).HasMaxLength(300);
+            b.HasIndex(x => new { x.TenantId, x.Nombre }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Activa });
+            b.HasMany(x => x.Turnos)
+                .WithOne(x => x.PlantillaAgenda!)
+                .HasForeignKey(x => x.PlantillaAgendaId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlantillaAgendaTurno>(b =>
+        {
+            b.Property(x => x.DiaSemana).HasMaxLength(12);
+            b.HasIndex(x => new { x.TenantId, x.PlantillaAgendaId, x.DiaSemana });
         });
 
         modelBuilder.Entity<CatalogoTipoServicio>(b =>

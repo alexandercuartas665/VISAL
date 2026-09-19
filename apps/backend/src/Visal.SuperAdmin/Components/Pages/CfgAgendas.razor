@@ -1,0 +1,369 @@
+@page "/config/agendas"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy.Agendas
+@inject IPlantillaAgendaService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Agendas base - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Configuracion del Sistema</div>
+        <h1 class="ase-title">Agendas base</h1>
+        <small class="text-muted">
+            Plantillas de agenda reutilizables (horarios recurrentes por dia y tamano del bloque).
+            Se definen aqui una vez y luego se importan a cada profesional. Cupos = (fin - inicio) / bloque.
+        </small>
+    </div>
+    @if (_sel is null)
+    {
+        <button class="btn btn-primary" @onclick="NuevaPlantilla" disabled="@_busy">+ Nueva agenda</button>
+    }
+    else
+    {
+        <button class="btn btn-outline-secondary" @onclick="Volver">&larr; Volver a la lista</button>
+    }
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@* ===================== VISTA LISTA ===================== *@
+@if (_sel is null)
+{
+    <div class="ase-card">
+        @if (_loading)
+        {
+            <div class="ase-empty">Cargando...</div>
+        }
+        else if (_rows.Count == 0)
+        {
+            <div class="ase-empty" style="padding:30px;">Aun no hay agendas base. Crea la primera con "+ Nueva agenda".</div>
+        }
+        else
+        {
+            <div class="med-tbl-wrap">
+                <table class="table table-sm med-tbl">
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Descripcion</th>
+                            <th style="width:90px" class="text-center">Activa</th>
+                            <th style="width:200px"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rows)
+                        {
+                            <tr class="@(r.Activa ? "" : "rf-row-inactiva")">
+                                <td><strong>@r.Nombre</strong></td>
+                                <td class="text-muted">@(string.IsNullOrWhiteSpace(r.Descripcion) ? "—" : r.Descripcion)</td>
+                                <td class="text-center">
+                                    @if (r.Activa) { <span class="badge bg-success">Activa</span> }
+                                    else { <span class="badge bg-secondary">Apagada</span> }
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-outline-secondary btn-sm" title="Gestionar turnos" @onclick="() => AbrirDetalleAsync(r.Id)">Turnos</button>
+                                    <button class="btn btn-link btn-sm" title="Editar datos" @onclick="() => EditarPlantilla(r)">&#9998;</button>
+                                    <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarPlantillaAsync(r)">&#128465;</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+@* ===================== VISTA DETALLE (turnos) ===================== *@
+else
+{
+    <div style="margin-bottom:14px;">
+        <h2 style="margin:0;font-size:1.15rem;">@_sel.Nombre</h2>
+        @if (!string.IsNullOrWhiteSpace(_sel.Descripcion)) { <div class="text-muted">@_sel.Descripcion</div> }
+    </div>
+
+    <div class="ase-card" style="padding:0;overflow:hidden;max-width:900px;">
+        @foreach (var (day, label) in Week)
+        {
+            var dayTurnos = _sel.Turnos.Where(t => t.DiaSemana == day).OrderBy(t => t.HoraInicio).ToList();
+            var total = dayTurnos.Sum(t => t.Cupos);
+            <div style="padding:16px 20px;border-bottom:1px solid var(--bs-border-color,#e2e8f0);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:@(dayTurnos.Count > 0 ? "10px" : "0")">
+                    <div>
+                        <span style="font-weight:700;">@label</span>
+                        @if (total > 0) { <span class="badge bg-secondary" style="margin-left:8px;">@total cupos</span> }
+                        else { <span class="text-muted" style="margin-left:8px;font-size:13px;font-style:italic;">Dia no operativo</span> }
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => NuevoTurno(day)" disabled="@_busy">+ Anadir turno</button>
+                </div>
+                @foreach (var t in dayTurnos)
+                {
+                    <div style="display:flex;align-items:center;gap:14px;background:#f8fafc;padding:9px 14px;border-radius:10px;margin-bottom:8px;">
+                        <span style="font-weight:700;">@t.HoraInicio.ToString("HH:mm") &ndash; @t.HoraFin.ToString("HH:mm")</span>
+                        <span class="text-muted" style="font-size:13px;">bloque @t.IntervaloMinutos min</span>
+                        <span class="badge bg-success" style="margin-left:auto;">@t.Cupos cupos</span>
+                        <button class="btn btn-sm btn-link" @onclick="() => EditarTurno(t)">Editar</button>
+                        <button class="btn btn-sm btn-link text-danger" @onclick="() => EliminarTurnoAsync(t)" disabled="@_busy">Quitar</button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@* ============= MODAL PLANTILLA (crear/editar datos) ============= *@
+@if (_modalPlantilla)
+{
+    <div class="cie-backdrop" @onclick="() => _modalPlantilla = false"></div>
+    <div class="cie-modal" style="width:520px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>@(_editId is null ? "Nueva agenda base" : "Editar agenda base")</h3>
+            <button class="cie-modal-close" @onclick="() => _modalPlantilla = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Nombre *</label>
+                    <input class="form-control form-control-sm" @bind="_fNombre" placeholder="Ej: Agenda manana" />
+                </div>
+                <div class="ase-f">
+                    <label>Descripcion <small class="text-muted">(opcional)</small></label>
+                    <input class="form-control form-control-sm" @bind="_fDescripcion" placeholder="Ej: Lunes a viernes 8:00 a 12:00" />
+                </div>
+                <label class="ase-chk" style="margin-top:4px;">
+                    <input type="checkbox" @bind="_fActiva" /> <span>Activa</span>
+                </label>
+            </div>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _modalPlantilla = false">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarPlantillaAsync" disabled="@_busy">@(_editId is null ? "Crear" : "Guardar")</button>
+        </div>
+    </div>
+}
+
+@* ============= MODAL TURNO (crear/editar) ============= *@
+@if (_modalTurno)
+{
+    <div class="cie-backdrop" @onclick="() => _modalTurno = false"></div>
+    <div class="cie-modal" style="width:460px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>@(_turnoId is null ? "Nuevo turno" : "Editar turno") &middot; @DayLabel(_fDia)</h3>
+            <button class="cie-modal-close" @onclick="() => _modalTurno = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="ase-form">
+                <div style="display:flex;gap:12px;">
+                    <div class="ase-f" style="flex:1;">
+                        <label>Desde</label>
+                        <input class="form-control form-control-sm" type="time" @bind="_fDesde" />
+                    </div>
+                    <div class="ase-f" style="flex:1;">
+                        <label>Hasta</label>
+                        <input class="form-control form-control-sm" type="time" @bind="_fHasta" />
+                    </div>
+                </div>
+                <div class="ase-f">
+                    <label>Tamano de bloque (min)</label>
+                    <input class="form-control form-control-sm" type="number" min="5" step="5" @bind="_fIntervalo" />
+                </div>
+                <div class="text-muted" style="font-size:13px;">Cupos resultantes: <strong>@PreviewCupos()</strong></div>
+            </div>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _modalTurno = false">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarTurnoAsync" disabled="@_busy">Guardar turno</button>
+        </div>
+    </div>
+}
+
+<style>
+    .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        max-width: 95vw; max-height: 90vh; background: #fff;
+        border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25);
+        z-index: 1051; display: flex; flex-direction: column;
+    }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private static readonly (DayOfWeek Day, string Label)[] Week =
+    {
+        (DayOfWeek.Monday, "Lunes"),
+        (DayOfWeek.Tuesday, "Martes"),
+        (DayOfWeek.Wednesday, "Miercoles"),
+        (DayOfWeek.Thursday, "Jueves"),
+        (DayOfWeek.Friday, "Viernes"),
+        (DayOfWeek.Saturday, "Sabado"),
+        (DayOfWeek.Sunday, "Domingo")
+    };
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private List<PlantillaAgendaDto> _rows = new();
+    private PlantillaAgendaDto? _sel;
+
+    // Modal plantilla
+    private bool _modalPlantilla;
+    private Guid? _editId;
+    private string _fNombre = "";
+    private string _fDescripcion = "";
+    private bool _fActiva = true;
+
+    // Modal turno
+    private bool _modalTurno;
+    private Guid? _turnoId;
+    private DayOfWeek _fDia;
+    private TimeOnly _fDesde = new(8, 0);
+    private TimeOnly _fHasta = new(12, 0);
+    private int _fIntervalo = 30;
+
+    private string? _modalError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarAsync();
+        _loading = false;
+    }
+
+    private async Task CargarAsync()
+    {
+        try { _rows = (await Svc.ListarAsync(incluirInactivas: true)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task AbrirDetalleAsync(Guid id)
+    {
+        _error = _ok = null;
+        try { _sel = await Svc.ObtenerAsync(id); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task RecargarDetalleAsync()
+    {
+        if (_sel is null) { return; }
+        _sel = await Svc.ObtenerAsync(_sel.Id);
+    }
+
+    private void Volver() { _sel = null; _error = _ok = null; }
+
+    // ----- Plantilla -----
+    private void NuevaPlantilla()
+    {
+        _editId = null; _modalError = null;
+        _fNombre = ""; _fDescripcion = ""; _fActiva = true;
+        _modalPlantilla = true;
+    }
+
+    private void EditarPlantilla(PlantillaAgendaDto r)
+    {
+        _editId = r.Id; _modalError = null;
+        _fNombre = r.Nombre; _fDescripcion = r.Descripcion ?? ""; _fActiva = r.Activa;
+        _modalPlantilla = true;
+    }
+
+    private async Task GuardarPlantillaAsync()
+    {
+        _modalError = null;
+        if (string.IsNullOrWhiteSpace(_fNombre)) { _modalError = "El nombre es obligatorio."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var cmd = new GuardarPlantillaAgendaCmd(_editId, _fNombre, _fDescripcion, _fActiva);
+            await Svc.GuardarAsync(cmd, await ActorAsync());
+            _ok = _editId is null ? "Agenda creada." : "Agenda actualizada.";
+            _modalPlantilla = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarPlantillaAsync(PlantillaAgendaDto r)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Eliminar la agenda '{r.Nombre}' y todos sus turnos?")) { return; }
+        _error = _ok = null; _busy = true;
+        try
+        {
+            await Svc.EliminarAsync(r.Id, await ActorAsync());
+            _ok = "Agenda eliminada.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ----- Turnos -----
+    private void NuevoTurno(DayOfWeek day)
+    {
+        _turnoId = null; _modalError = null;
+        _fDia = day; _fDesde = new(8, 0); _fHasta = new(12, 0); _fIntervalo = 30;
+        _modalTurno = true;
+    }
+
+    private void EditarTurno(PlantillaAgendaTurnoDto t)
+    {
+        _turnoId = t.Id; _modalError = null;
+        _fDia = t.DiaSemana; _fDesde = t.HoraInicio; _fHasta = t.HoraFin; _fIntervalo = t.IntervaloMinutos;
+        _modalTurno = true;
+    }
+
+    private int PreviewCupos() => PlantillaAgendaCalculos.Cupos(_fDesde, _fHasta, _fIntervalo);
+
+    private async Task GuardarTurnoAsync()
+    {
+        _modalError = null;
+        if (_sel is null) { return; }
+        if (_fHasta <= _fDesde) { _modalError = "La hora 'Hasta' debe ser mayor que 'Desde'."; return; }
+        if (_fIntervalo <= 0) { _modalError = "El bloque debe ser mayor a 0."; return; }
+        _busy = true;
+        try
+        {
+            var cmd = new GuardarPlantillaAgendaTurnoCmd(_turnoId, _fDia, _fDesde, _fHasta, _fIntervalo);
+            await Svc.GuardarTurnoAsync(_sel.Id, cmd, await ActorAsync());
+            _modalTurno = false;
+            await RecargarDetalleAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarTurnoAsync(PlantillaAgendaTurnoDto t)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Quitar este turno?")) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await Svc.EliminarTurnoAsync(t.Id, await ActorAsync());
+            await RecargarDetalleAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static string DayLabel(DayOfWeek d) => Week.First(w => w.Day == d).Label;
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+}

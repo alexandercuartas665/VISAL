@@ -1,0 +1,273 @@
+@page "/asignacion-agendas"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Agendas
+@inject IAsignacionAgendasService Svc
+@inject ISucursalService Sedes
+
+<PageTitle>Asignacion por agendas - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Asignacion por agendas</h1>
+        <small class="text-muted">
+            Explora la disponibilidad por agenda: elige un servicio (solo los que tienen doctores con
+            agenda), un doctor y una sede, y mira los dias disponibles del mes actual y el siguiente.
+        </small>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+<div class="aa-wrap">
+    @* ===== Filtro ===== *@
+    <div class="ase-card aa-filter">
+        <div class="ase-f">
+            <label>Servicio</label>
+            <select class="form-select form-select-sm" @bind="_servicio" @bind:after="OnServicioChanged">
+                <option value="">-- Selecciona --</option>
+                @foreach (var s in _servicios)
+                {
+                    <option value="@s.Codigo">@s.Nombre (@s.Doctores)</option>
+                }
+            </select>
+            @if (_loadingServicios) { <div class="text-muted small mt-1">Cargando servicios...</div> }
+            else if (_servicios.Count == 0) { <div class="text-muted small mt-1">No hay servicios con doctores con agenda.</div> }
+        </div>
+
+        <div class="ase-f">
+            <label>Doctor</label>
+            <select class="form-select form-select-sm" @bind="_doctorId" @bind:after="OnDoctorChanged" disabled="@(_doctores.Count == 0)">
+                <option value="@Guid.Empty">-- Selecciona --</option>
+                @foreach (var d in _doctores)
+                {
+                    <option value="@d.ProfesionalId">@d.NombreCompleto</option>
+                }
+            </select>
+            @if (_servicio.Length > 0 && _doctores.Count == 0) { <div class="text-muted small mt-1">Sin doctores con agenda para este servicio.</div> }
+        </div>
+
+        <div class="ase-f">
+            <label>Sede</label>
+            <select class="form-select form-select-sm" @bind="_sucursalId" @bind:after="OnSedeChanged">
+                @foreach (var s in _sedes)
+                {
+                    <option value="@s.Id">@s.Nombre</option>
+                }
+            </select>
+            <div class="text-muted small mt-1">La sede define los dias inactivos que cierran la agenda.</div>
+        </div>
+
+        @if (_doctorSel is not null)
+        {
+            <div class="aa-docinfo">
+                <div><strong>@_doctorSel.NombreCompleto</strong></div>
+                <div class="text-muted small">@(_doctorSel.TipoProfesional ?? "—") &middot; @_doctorSel.Turnos turno(s) &middot; @_doctorSel.CuposSemana cupos/sem</div>
+            </div>
+        }
+    </div>
+
+    @* ===== Disponibilidad ===== *@
+    <div class="ase-card aa-disp">
+        <div class="aa-disp-head">
+            <div>
+                <span style="font-weight:700;">Disponibilidad</span>
+                @if (_doctorSel is not null) { <span class="text-muted"> &middot; @_doctorSel.NombreCompleto</span> }
+            </div>
+            @if (_disp is not null)
+            {
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="MesAnterior">&larr;</button>
+                    <button class="btn btn-sm btn-link" @onclick="IrHoy">Hoy</button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="MesSiguiente">&rarr;</button>
+                </div>
+            }
+        </div>
+
+        @if (_doctorId == Guid.Empty)
+        {
+            <div class="ase-empty" style="padding:40px;">Elige un servicio y un doctor para ver la disponibilidad.</div>
+        }
+        else if (_loadingDisp)
+        {
+            <div class="ase-empty" style="padding:40px;">Calculando disponibilidad...</div>
+        }
+        else if (_disp is not null)
+        {
+            <div class="aa-months">
+                @foreach (var mes in _disp.Meses)
+                {
+                    var offset = ((int)new DateOnly(mes.Anio, mes.Mes, 1).DayOfWeek + 6) % 7;
+                    <div class="aa-month">
+                        <div class="aa-month-title">@NombreMes(mes.Mes) @mes.Anio</div>
+                        <div class="cal-grid cal-head">
+                            @foreach (var d in new[] { "Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom" }) { <div class="cal-dow">@d</div> }
+                        </div>
+                        <div class="cal-grid">
+                            @for (var i = 0; i < offset; i++) { <div class="cal-cell cal-empty"></div> }
+                            @foreach (var dia in mes.Dias)
+                            {
+                                var hoy = dia.Fecha == _hoy ? " cal-hoy" : "";
+                                var clase = $"cal-cell {ClaseDia(dia.Estado)}{hoy}";
+                                <div class="@clase" title="@Tooltip(dia)">
+                                    <div class="cal-num">@dia.Fecha.Day</div>
+                                    @if (dia.Estado == EstadoDiaAgenda.Disponible) { <div class="aa-cupos">@dia.Cupos</div> }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="aa-legend text-muted">
+                <span><span class="cal-dot d-disp"></span> Disponible (nº = cupos)</span>
+                <span><span class="cal-dot d-sinturno"></span> Sin turno</span>
+                <span><span class="cal-dot d-fest"></span> Festivo</span>
+                <span><span class="cal-dot d-inact"></span> Dia inactivo (sede)</span>
+                <span><span class="cal-dot d-nov"></span> Novedad</span>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .aa-wrap { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+    @@media (max-width: 900px) { .aa-wrap { grid-template-columns: 1fr; } }
+    .aa-filter { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+    .aa-docinfo { border-top: 1px solid #e2e8f0; padding-top: 10px; }
+    .aa-disp { padding: 16px 18px; }
+    .aa-disp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .aa-months { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @@media (max-width: 720px) { .aa-months { grid-template-columns: 1fr; } }
+    .aa-month-title { font-weight: 700; text-align: center; margin-bottom: 8px; }
+    .aa-cupos { font-size: 11px; font-weight: 700; color: #16a34a; margin-top: 2px; }
+    .aa-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; }
+
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+    .cal-head { margin-bottom: 5px; }
+    .cal-dow { text-align: center; font-size: 11px; font-weight: 700; color: #64748b; }
+    .cal-cell { min-height: 52px; border: 1px solid #e2e8f0; border-radius: 7px; padding: 4px 5px; background: #fff; }
+    .cal-empty { border: none; background: transparent; }
+    .cal-num { font-weight: 700; font-size: 12px; color: #0f172a; }
+    .cal-hoy { outline: 2px solid #2563eb; outline-offset: -2px; }
+    .d-disp, .cal-disp { }
+    .cal-disp { background: #f0fdf4; border-color: #bbf7d0; }
+    .cal-sinturno { background: #f8fafc; }
+    .cal-fest { background: #fef2f2; border-color: #fecaca; }
+    .cal-inact { background: #fff7ed; border-color: #fed7aa; }
+    .cal-nov { background: #faf5ff; border-color: #e9d5ff; }
+    .cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
+    .d-disp { background: #22c55e; }
+    .d-sinturno { background: #cbd5e1; }
+    .d-fest { background: #ef4444; }
+    .d-inact { background: #f97316; }
+    .d-nov { background: #a855f7; }
+</style>
+
+@code {
+    private static readonly string[] Meses =
+    {
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    };
+
+    private bool _loadingServicios = true;
+    private bool _loadingDisp;
+    private string? _error;
+
+    private List<ServicioConAgendaDto> _servicios = new();
+    private List<SucursalDto> _sedes = new();
+    private List<DoctorConAgendaDto> _doctores = new();
+
+    private string _servicio = "";
+    private Guid _doctorId = Guid.Empty;
+    private Guid _sucursalId = Guid.Empty;
+    private DoctorConAgendaDto? _doctorSel;
+
+    private DisponibilidadAgendaDto? _disp;
+    private int _anioInicio;
+    private int _mesInicio;
+    private DateOnly _hoy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hoy = DateOnly.FromDateTime(DateTime.Today);
+        _anioInicio = _hoy.Year; _mesInicio = _hoy.Month;
+        try
+        {
+            _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList();
+            if (_sedes.Count > 0) { _sucursalId = _sedes[0].Id; }
+            _servicios = (await Svc.ListarServiciosConAgendaAsync()).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        _loadingServicios = false;
+    }
+
+    private async Task OnServicioChanged()
+    {
+        _doctorId = Guid.Empty; _doctorSel = null; _disp = null; _doctores = new();
+        if (_servicio.Length == 0) { return; }
+        try { _doctores = (await Svc.ListarDoctoresConAgendaAsync(_servicio)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnDoctorChanged()
+    {
+        _doctorSel = _doctores.FirstOrDefault(d => d.ProfesionalId == _doctorId);
+        _anioInicio = _hoy.Year; _mesInicio = _hoy.Month;
+        await CargarDisponibilidadAsync();
+    }
+
+    private async Task OnSedeChanged()
+    {
+        if (_doctorId != Guid.Empty) { await CargarDisponibilidadAsync(); }
+    }
+
+    private async Task CargarDisponibilidadAsync()
+    {
+        if (_doctorId == Guid.Empty) { _disp = null; return; }
+        _loadingDisp = true; _error = null;
+        try { _disp = await Svc.ObtenerDisponibilidadAsync(_doctorId, _sucursalId, _anioInicio, _mesInicio, 2); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loadingDisp = false; }
+    }
+
+    private async Task MesAnterior()
+    {
+        if (--_mesInicio < 1) { _mesInicio = 12; _anioInicio--; }
+        await CargarDisponibilidadAsync();
+    }
+
+    private async Task MesSiguiente()
+    {
+        if (++_mesInicio > 12) { _mesInicio = 1; _anioInicio++; }
+        await CargarDisponibilidadAsync();
+    }
+
+    private async Task IrHoy()
+    {
+        _anioInicio = _hoy.Year; _mesInicio = _hoy.Month;
+        await CargarDisponibilidadAsync();
+    }
+
+    private static string ClaseDia(EstadoDiaAgenda e) => e switch
+    {
+        EstadoDiaAgenda.Disponible => "cal-disp",
+        EstadoDiaAgenda.Festivo => "cal-fest",
+        EstadoDiaAgenda.Inactivo => "cal-inact",
+        EstadoDiaAgenda.Novedad => "cal-nov",
+        _ => "cal-sinturno"
+    };
+
+    private static string Tooltip(DiaDisponibilidadDto d) => d.Estado switch
+    {
+        EstadoDiaAgenda.Disponible => d.Detalle is null ? $"Disponible ({d.Cupos} cupos)" : $"Disponible ({d.Cupos} cupos) — {d.Detalle}",
+        EstadoDiaAgenda.Festivo => $"Festivo: {d.Detalle}",
+        EstadoDiaAgenda.Inactivo => $"Dia inactivo: {d.Detalle}",
+        EstadoDiaAgenda.Novedad => $"Novedad: {d.Detalle}",
+        _ => "Sin turno"
+    };
+
+    private static string NombreMes(int m) => Meses[m - 1];
+}

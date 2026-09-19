@@ -58,6 +58,7 @@ public static class NavMenuCatalog
         new("admision", "Admision", "admision", "admision", "pacientes", "Operacion Clinica"),
         new("asignacion", "Asignacion", "asignacion", "portapapeles", "asignacion", "Operacion Clinica"),
         new("coordinacion", "Coordinacion", "coordinacion", "red", "coordinacion", "Operacion Clinica"),
+        new("asignacion-agendas", "Asignacion por agendas", "asignacion-agendas", "calendario", "asignacion-agendas", "Operacion Clinica"),
         new("atencion", "Atencion", "atencion", "corazon", null, "Operacion Clinica", Gate: NavGate.Atencion),
         new("ordenes", "Ordenes Clinicas", "ordenes", "check-doc", "ordenes", "Operacion Clinica"),
         new("seguimiento", "Seguimiento", "seguimiento", "telefono", null, "Operacion Clinica"),

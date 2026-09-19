@@ -154,6 +154,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.Agendas.ICalendarioService, Tenancy.Agendas.CalendarioService>();
         // Agendas (Ola 4): novedades por profesional (vacaciones/incapacidad/permiso).
         services.AddScoped<Tenancy.Agendas.INovedadProfesionalService, Tenancy.Agendas.NovedadProfesionalService>();
+        // Agendas (asignacion): explorador de disponibilidad por agenda (solo lectura).
+        services.AddScoped<Tenancy.Agendas.IAsignacionAgendasService, Tenancy.Agendas.AsignacionAgendasService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();
         // Facturacion — motor generico de snapshots + builders por tipo.
         services.AddScoped<Facturacion.IFacturacionSnapshotService, Facturacion.FacturacionSnapshotService>();

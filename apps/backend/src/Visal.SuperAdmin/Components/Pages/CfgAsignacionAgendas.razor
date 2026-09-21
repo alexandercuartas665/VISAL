@@ -16,8 +16,8 @@
         <div class="ase-eyebrow">Operacion Clinica</div>
         <h1 class="ase-title">Asignacion por agendas</h1>
         <small class="text-muted">
-            Elige el paciente, su contrato y un servicio (solo los que tienen doctores con agenda),
-            el doctor y la sede; luego agenda una cita en un dia disponible (mes actual y siguiente).
+            Busca el paciente y su contrato, elige un servicio (solo los que un doctor con agenda presta)
+            y el doctor; luego agenda una cita en un dia disponible (mes actual y siguiente).
         </small>
     </div>
 </div>
@@ -25,100 +25,123 @@
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 
 <div class="aa-wrap">
-    @* ===== Filtro ===== *@
-    <div class="ase-card aa-filter">
-        <div class="ase-f">
-            <label>Paciente</label>
-            @if (_pacSel is null)
-            {
-                <div style="display:flex;gap:6px;">
-                    <input class="form-control form-control-sm" placeholder="Documento o nombre..."
-                           @bind="_pacQuery" @bind:event="oninput" @onkeyup="BuscarPacientesKey" />
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="BuscarPacientesAsync">Buscar</button>
-                </div>
-                @if (_pacResultados.Count > 0)
-                {
-                    <div class="aa-paclist">
-                        @foreach (var p in _pacResultados)
-                        {
-                            <div class="aa-pacrow" @onclick="() => SeleccionarPacienteAsync(p)">
-                                <strong>@p.NombreCompleto</strong> <span class="text-muted">@p.NumeroDocumento</span>
-                            </div>
-                        }
+    @* ===== Columna izquierda: paciente + servicio ===== *@
+    <div class="aa-left">
+        <div class="ase-card aa-pad">
+            <div class="ase-card-h">1. Buscar paciente</div>
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Numero Documento</label>
+                    <div class="asg-input-row">
+                        <input class="form-control form-control-sm mono" placeholder="Busqueda por identificacion"
+                               @bind="_pacQuery" @bind:event="oninput" @onkeyup="BuscarPacientesKey" />
+                        <button class="btn btn-primary btn-sm" title="Buscar" @onclick="BuscarPacientesAsync">&#128269;</button>
                     </div>
-                }
-            }
-            else
-            {
-                <div class="aa-pacsel">
-                    <div><strong>@_pacSel.NombreCompleto</strong><br /><span class="text-muted small">@_pacSel.NumeroDocumento</span></div>
-                    <button class="btn btn-link btn-sm" @onclick="LimpiarPaciente">cambiar</button>
+                    @if (_pacResultados.Count > 0)
+                    {
+                        <div class="aa-paclist">
+                            @foreach (var p in _pacResultados)
+                            {
+                                <div class="aa-pacrow" @onclick="() => SeleccionarPacienteAsync(p)">
+                                    <strong>@p.NombreCompleto</strong> <span class="text-muted">@p.NumeroDocumento</span>
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
-            }
+                <div class="asg-2col">
+                    <div class="ase-f"><label>Numero Historia</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_pacSel?.NumeroDocumento" /></div>
+                    <div class="ase-f"><label>Tipo doc</label><input class="form-control form-control-sm mono asg-ro" readonly value="@_pacSel?.TipoDocumento" /></div>
+                </div>
+                <div class="ase-f"><label>Nombre paciente</label><input class="form-control form-control-sm asg-ro" readonly value="@_pacSel?.NombreCompleto" /></div>
+                <div class="asg-2col">
+                    <div class="ase-f"><label>Sede</label><input class="form-control form-control-sm asg-ro" readonly value="@_pacSel?.Sede" /></div>
+                    <div class="ase-f"><label>Municipio</label><input class="form-control form-control-sm asg-ro" readonly value="@_pacSel?.Ciudad" /></div>
+                </div>
+                <div class="ase-f">
+                    <label>Contratos</label>
+                    <select class="form-select form-select-sm" @bind="_contratoId" @bind:after="OnContratoChanged" disabled="@(_pacSel is null)">
+                        @if (_pacSel is null) { <option value="@Guid.Empty">Carga un paciente primero</option> }
+                        else if (_contratos.Count == 0) { <option value="@Guid.Empty">Paciente sin contratos</option> }
+                        else
+                        {
+                            <option value="@Guid.Empty">Selecciona un contrato</option>
+                            @for (var i = 0; i < _contratos.Count; i++)
+                            {
+                                var c = _contratos[i];
+                                <option value="@c.ContratoId">@(i + 1). @c.CodigoContrato - @c.AseguradoraNombre</option>
+                            }
+                        }
+                    </select>
+                </div>
+            </div>
         </div>
 
-        @if (_pacSel is not null)
-        {
-            <div class="ase-f">
-                <label>Contrato</label>
-                <select class="form-select form-select-sm" @bind="_contratoId" @bind:after="OnContratoChanged">
-                    <option value="@Guid.Empty">-- Selecciona --</option>
-                    @foreach (var c in _contratos)
-                    {
-                        <option value="@c.ContratoId">@c.CodigoContrato — @c.AseguradoraNombre</option>
-                    }
-                </select>
-                @if (_contratos.Count == 0) { <div class="text-muted small mt-1">El paciente no tiene contratos.</div> }
+        <div class="ase-card aa-pad">
+            <div class="ase-card-h">2. Seleccione el Servicio</div>
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Busqueda por servicio</label>
+                    <input class="form-control form-control-sm" placeholder="Buscar por descripcion o codigo..."
+                           @bind="_svcFiltro" @bind:event="oninput" @bind:after="BuscarServiciosAsync" disabled="@(_contratoId == Guid.Empty)" />
+                </div>
             </div>
-        }
-
-        @if (_contratoId != Guid.Empty)
-        {
-            <div class="ase-f">
-                <label>Servicio</label>
-                <select class="form-select form-select-sm" @bind="_servicio" @bind:after="OnServicioChanged">
-                    <option value="">-- Selecciona --</option>
-                    @foreach (var s in _servicios)
-                    {
-                        <option value="@s.Codigo">@s.Nombre (@s.Doctores)</option>
-                    }
-                </select>
-                @if (_servicios.Count == 0) { <div class="text-muted small mt-1">Este contrato no tiene servicios con doctores con agenda.</div> }
-            </div>
-
-            <div class="ase-f">
-                <label>Doctor</label>
-                <select class="form-select form-select-sm" @bind="_doctorId" @bind:after="OnDoctorChanged" disabled="@(_doctores.Count == 0)">
-                    <option value="@Guid.Empty">-- Selecciona --</option>
-                    @foreach (var d in _doctores)
-                    {
-                        <option value="@d.ProfesionalId">@d.NombreCompleto</option>
-                    }
-                </select>
-            </div>
-        }
-
-        <div class="ase-f">
-            <label>Sede</label>
-            <select class="form-select form-select-sm" @bind="_sucursalId" @bind:after="OnSedeChanged">
-                @foreach (var s in _sedes)
+            <div class="aa-svc-wrap">
+                @if (_contratoId == Guid.Empty)
                 {
-                    <option value="@s.Id">@s.Nombre</option>
+                    <div class="ase-empty" style="padding:16px;">Selecciona un contrato primero.</div>
                 }
-            </select>
-            <div class="text-muted small mt-1">La sede define los dias inactivos que cierran la agenda.</div>
+                else if (_serviciosContrato.Count == 0)
+                {
+                    <div class="ase-empty" style="padding:16px;">Sin servicios con doctor con agenda para este contrato.</div>
+                }
+                else
+                {
+                    <table class="table table-sm asg-tbl">
+                        <thead>
+                            <tr><th style="width:96px"></th><th>Codigo</th><th>Descripcion</th><th style="width:70px" class="text-center" title="Doctores con agenda que lo prestan">Doc</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _serviciosContrato)
+                            {
+                                <tr class="@(_servicioSel?.ServicioContratoId == s.ServicioContratoId ? "asg-row-sel" : "")">
+                                    <td><button class="btn btn-primary btn-sm" @onclick="() => SeleccionarServicioAsync(s)">Elegir</button></td>
+                                    <td><span class="mono">@s.Codigo</span></td>
+                                    <td>@s.Descripcion</td>
+                                    <td class="text-center"><span class="badge bg-success">@s.Doctores</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
         </div>
 
-        @if (_doctorSel is not null)
+        @if (_servicioSel is not null)
         {
-            <div class="aa-docinfo">
-                <div><strong>@_doctorSel.NombreCompleto</strong></div>
-                <div class="text-muted small">@(_doctorSel.TipoProfesional ?? "—") &middot; @_doctorSel.Turnos turno(s) &middot; @_doctorSel.CuposSemana cupos/sem</div>
+            <div class="ase-card aa-pad">
+                <div class="ase-card-h">3. Doctor y sede</div>
+                <div class="ase-form">
+                    <div class="ase-f">
+                        <label>Doctor (con agenda que presta el servicio)</label>
+                        <select class="form-select form-select-sm" @bind="_doctorId" @bind:after="OnDoctorChanged" disabled="@(_doctores.Count == 0)">
+                            <option value="@Guid.Empty">-- Selecciona --</option>
+                            @foreach (var d in _doctores) { <option value="@d.ProfesionalId">@d.NombreCompleto</option> }
+                        </select>
+                        @if (_doctores.Count == 0) { <div class="text-muted small mt-1">Sin doctores con agenda para este servicio.</div> }
+                    </div>
+                    <div class="ase-f">
+                        <label>Sede (para dias inactivos)</label>
+                        <select class="form-select form-select-sm" @bind="_sucursalId" @bind:after="OnSedeChanged">
+                            @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
+                        </select>
+                    </div>
+                </div>
             </div>
         }
     </div>
 
-    @* ===== Disponibilidad ===== *@
+    @* ===== Columna derecha: disponibilidad ===== *@
     <div class="ase-card aa-disp">
         <div class="aa-disp-head">
             <div>
@@ -172,10 +195,10 @@
             </div>
             <div class="aa-legend text-muted">
                 <span><span class="cal-dot d-disp"></span> Disponible (nº = cupos) — clic para agendar</span>
-                <span><span class="cal-dot d-completo"></span> Completo (sin cupos)</span>
+                <span><span class="cal-dot d-completo"></span> Completo</span>
                 <span><span class="cal-dot d-sinturno"></span> Sin turno</span>
                 <span><span class="cal-dot d-fest"></span> Festivo</span>
-                <span><span class="cal-dot d-inact"></span> Dia inactivo (sede)</span>
+                <span><span class="cal-dot d-inact"></span> Inactivo (sede)</span>
                 <span><span class="cal-dot d-nov"></span> Novedad</span>
             </div>
         }
@@ -183,54 +206,35 @@
 </div>
 
 @* ============= MODAL AGENDAR ============= *@
-@if (_agOpen)
+@if (_agOpen && _servicioSel is not null)
 {
     <div class="cie-backdrop" @onclick="() => _agOpen = false"></div>
-    <div class="cie-modal" style="width:540px; max-width:96vw;">
+    <div class="cie-modal" style="width:520px; max-width:96vw;">
         <div class="cie-modal-h">
             <h3>Agendar cita &middot; @_agFecha.ToString("dd/MM/yyyy")</h3>
             <button class="cie-modal-close" @onclick="() => _agOpen = false">&times;</button>
         </div>
         <div class="cie-modal-body">
             <div class="text-muted small" style="margin-bottom:10px;">
-                @_pacSel?.NombreCompleto &middot; @_doctorSel?.NombreCompleto &middot; @_servicioNombre &middot; @SedeNombre()
+                @_pacSel?.NombreCompleto &middot; @_doctorSel?.NombreCompleto<br />
+                <span class="mono">@_servicioSel.Codigo</span> @_servicioSel.Descripcion &middot; @SedeNombre()
             </div>
             <div class="ase-form">
                 <div class="ase-f">
                     <label>Hora</label>
                     <select class="form-select form-select-sm" @bind="_agSlot">
                         <option value="">-- Selecciona hora --</option>
-                        @foreach (var s in _agSlots)
-                        {
-                            <option value="@s.ToString("HH\\:mm")">@s.ToString("HH\\:mm")</option>
-                        }
+                        @foreach (var s in _agSlots) { <option value="@s.ToString("HH\\:mm")">@s.ToString("HH\\:mm")</option> }
                     </select>
                     @if (_agSlots.Count == 0) { <div class="text-muted small mt-1">No quedan slots libres ese dia.</div> }
                 </div>
-
-                <div class="ase-f">
-                    <label>Servicio del contrato</label>
-                    <select class="form-select form-select-sm" @bind="_agServicioContratoId" disabled="@(_agServiciosContrato.Count == 0)">
-                        <option value="@Guid.Empty">-- Selecciona --</option>
-                        @foreach (var s in _agServiciosContrato)
-                        {
-                            <option value="@s.Id">@(s.Descripcion) @(s.Codigo is null ? "" : $"({s.Codigo})")</option>
-                        }
-                    </select>
-                    @if (_agServiciosContrato.Count == 0) { <div class="text-muted small mt-1">Sin servicios de este modulo en el contrato.</div> }
-                </div>
-
                 <div class="ase-f">
                     <label>Via de ingreso (RIPS)</label>
                     <select class="form-select form-select-sm" @bind="_agViaCod">
                         <option value="">-- Selecciona --</option>
-                        @foreach (var v in _vias)
-                        {
-                            <option value="@v.Codigo">@v.Codigo - @v.Nombre</option>
-                        }
+                        @foreach (var v in _vias) { <option value="@v.Codigo">@v.Codigo - @v.Nombre</option> }
                     </select>
                 </div>
-
                 <div class="ase-f">
                     <label>Nota <small class="text-muted">(opcional)</small></label>
                     <input class="form-control form-control-sm" @bind="_agNota" placeholder="Observacion de la cita" />
@@ -247,11 +251,25 @@
 @if (_ok is not null) { <div class="ase-ok" style="position:fixed;bottom:16px;right:16px;z-index:1200;">@_ok</div> }
 
 <style>
-    .aa-wrap { display: grid; grid-template-columns: 320px 1fr; gap: 18px; align-items: start; }
-    @@media (max-width: 900px) { .aa-wrap { grid-template-columns: 1fr; } }
-    .aa-filter { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
-    .aa-pacsel { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #f8fafc; padding: 8px 10px; border-radius: 8px; }
-    .aa-docinfo { border-top: 1px solid #e2e8f0; padding-top: 10px; }
+    .aa-wrap { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
+    @@media (max-width: 980px) { .aa-wrap { grid-template-columns: 1fr; } }
+    .aa-left { display: flex; flex-direction: column; gap: 14px; }
+    .aa-pad { padding: 14px 16px; }
+    .ase-card-h { font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 12px; }
+    .ase-form { display: flex; flex-direction: column; gap: 10px; }
+    .ase-f label { display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
+    .asg-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .asg-input-row { display: flex; gap: 6px; }
+    .asg-ro { background: #f8fafc; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .aa-paclist { border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 6px; max-height: 170px; overflow: auto; }
+    .aa-pacrow { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .aa-pacrow:hover { background: #f1f5f9; }
+    .aa-svc-wrap { max-height: 300px; overflow: auto; margin-top: 4px; }
+    .asg-tbl { font-size: 12px; margin: 0; }
+    .asg-tbl th { position: sticky; top: 0; background: #f8fafc; }
+    .asg-row-sel { background: #eff6ff; }
+
     .aa-disp { padding: 16px 18px; }
     .aa-disp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
     .aa-months { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -259,7 +277,6 @@
     .aa-month-title { font-weight: 700; text-align: center; margin-bottom: 8px; }
     .aa-cupos { font-size: 11px; font-weight: 700; color: #16a34a; margin-top: 2px; }
     .aa-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; }
-
     .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
     .cal-head { margin-bottom: 5px; }
     .cal-dow { text-align: center; font-size: 11px; font-weight: 700; color: #64748b; }
@@ -276,12 +293,8 @@
     .cal-inact { background: #fff7ed; border-color: #fed7aa; }
     .cal-nov { background: #faf5ff; border-color: #e9d5ff; }
     .cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
-    .d-disp { background: #22c55e; }
-    .d-completo { background: #94a3b8; }
-    .d-sinturno { background: #cbd5e1; }
-    .d-fest { background: #ef4444; }
-    .d-inact { background: #f97316; }
-    .d-nov { background: #a855f7; }
+    .d-disp { background: #22c55e; } .d-completo { background: #94a3b8; } .d-sinturno { background: #cbd5e1; }
+    .d-fest { background: #ef4444; } .d-inact { background: #f97316; } .d-nov { background: #a855f7; }
 
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
     .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 96vw; max-height: 92vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
@@ -290,21 +303,13 @@
     .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
     .cie-modal-body { padding: 18px; overflow: auto; }
     .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
-    .ase-form { display: flex; flex-direction: column; gap: 12px; }
-    .ase-f label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 3px; }
-    .aa-paclist { border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 6px; max-height: 180px; overflow: auto; }
-    .aa-pacrow { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
-    .aa-pacrow:hover { background: #f1f5f9; }
 </style>
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private static readonly string[] Meses =
-    {
-        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-    };
+    { "Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre" };
 
     private string? _error;
     private string? _ok;
@@ -321,11 +326,10 @@
     private List<ContratoMiniDto> _contratos = new();
     private Guid _contratoId = Guid.Empty;
 
-    // Servicios (modulos con doctores con agenda, intersectados con el contrato)
-    private List<ServicioConAgendaDto> _serviciosConAgenda = new(); // global
-    private List<ServicioConAgendaDto> _servicios = new();          // filtrado por contrato
-    private string _servicio = "";
-    private string _servicioNombre = "";
+    // Servicios del contrato con doctor con agenda
+    private string _svcFiltro = "";
+    private List<ServicioContratoAgendaDto> _serviciosContrato = new();
+    private ServicioContratoAgendaDto? _servicioSel;
 
     // Doctor
     private List<DoctorConAgendaDto> _doctores = new();
@@ -349,8 +353,6 @@
     private DateOnly _agFecha;
     private List<TimeOnly> _agSlots = new();
     private string _agSlot = "";
-    private List<ServicioCatalogoDto> _agServiciosContrato = new();
-    private Guid _agServicioContratoId = Guid.Empty;
     private string _agViaCod = "";
     private string _agNota = "";
 
@@ -362,7 +364,6 @@
         {
             _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList();
             if (_sedes.Count > 0) { _sucursalId = _sedes[0].Id; }
-            _serviciosConAgenda = (await Svc.ListarServiciosConAgendaAsync()).ToList();
             try
             {
                 _vias = (await CatPac.ListAsync(CatalogoPacienteTipo.RipsViaIngreso))
@@ -374,10 +375,7 @@
     }
 
     // ---------------- Paciente ----------------
-    private async Task BuscarPacientesKey(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter") { await BuscarPacientesAsync(); }
-    }
+    private async Task BuscarPacientesKey(KeyboardEventArgs e) { if (e.Key == "Enter") { await BuscarPacientesAsync(); } }
 
     private async Task BuscarPacientesAsync()
     {
@@ -399,15 +397,9 @@
         if (_contratoId != Guid.Empty) { await OnContratoChanged(); }
     }
 
-    private void LimpiarPaciente()
-    {
-        _pacSel = null; _contratos = new(); _contratoId = Guid.Empty;
-        ResetDesdeContrato();
-    }
-
     private void ResetDesdeContrato()
     {
-        _servicios = new(); _servicio = ""; _servicioNombre = "";
+        _svcFiltro = ""; _serviciosContrato = new(); _servicioSel = null;
         _doctores = new(); _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
     }
 
@@ -415,26 +407,26 @@
     {
         ResetDesdeContrato();
         if (_contratoId == Guid.Empty) { return; }
-        try
-        {
-            var modulos = (await Asig.TiposServicioPorContratoAsync(_contratoId))
-                .Select(m => (m ?? "").Trim().ToUpperInvariant()).ToHashSet();
-            // Interseccion: modulos con doctores con agenda presentes en este contrato.
-            _servicios = _serviciosConAgenda.Where(s => modulos.Contains(s.Codigo.ToUpperInvariant())).ToList();
-        }
-        catch (Exception ex) { _error = ex.Message; }
+        await BuscarServiciosAsync();
     }
 
-    // ---------------- Servicio / Doctor ----------------
-    private async Task OnServicioChanged()
+    // ---------------- Servicio ----------------
+    private async Task BuscarServiciosAsync()
     {
-        _doctores = new(); _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
-        _servicioNombre = _servicios.FirstOrDefault(s => s.Codigo == _servicio)?.Nombre ?? _servicio;
-        if (_servicio.Length == 0) { return; }
-        try { _doctores = (await Svc.ListarDoctoresConAgendaAsync(_servicio)).ToList(); }
+        if (_contratoId == Guid.Empty) { _serviciosContrato = new(); return; }
+        try { _serviciosContrato = (await Svc.ListarServiciosContratoConAgendaAsync(_contratoId, _svcFiltro)).ToList(); }
         catch (Exception ex) { _error = ex.Message; }
     }
 
+    private async Task SeleccionarServicioAsync(ServicioContratoAgendaDto s)
+    {
+        _servicioSel = s;
+        _doctores = new(); _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
+        try { _doctores = (await Svc.ListarDoctoresPorServicioContratoAsync(s.ServicioContratoId)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // ---------------- Doctor / disponibilidad ----------------
     private async Task OnDoctorChanged()
     {
         _doctorSel = _doctores.FirstOrDefault(d => d.ProfesionalId == _doctorId);
@@ -442,10 +434,7 @@
         await CargarDisponibilidadAsync();
     }
 
-    private async Task OnSedeChanged()
-    {
-        if (_doctorId != Guid.Empty) { await CargarDisponibilidadAsync(); }
-    }
+    private async Task OnSedeChanged() { if (_doctorId != Guid.Empty) { await CargarDisponibilidadAsync(); } }
 
     private async Task CargarDisponibilidadAsync()
     {
@@ -460,31 +449,24 @@
     private async Task MesSiguiente() { if (++_mesInicio > 12) { _mesInicio = 1; _anioInicio++; } await CargarDisponibilidadAsync(); }
     private async Task IrHoy() { _anioInicio = _hoy.Year; _mesInicio = _hoy.Month; await CargarDisponibilidadAsync(); }
 
-    // ---------------- Modal agendar ----------------
+    // ---------------- Agendar ----------------
     private async Task AbrirAgendar(DiaDisponibilidadDto dia)
     {
-        if (dia.Estado != EstadoDiaAgenda.Disponible) { return; }
-        _agFecha = dia.Fecha; _agError = null;
-        _agSlot = ""; _agNota = "";
-        _agServicioContratoId = Guid.Empty;
+        if (dia.Estado != EstadoDiaAgenda.Disponible || _servicioSel is null) { return; }
+        _agFecha = dia.Fecha; _agError = null; _agSlot = ""; _agNota = "";
         _agViaCod = _vias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? _vias.FirstOrDefault()?.Codigo ?? "";
         _agSlots = (await Svc.SlotsDisponiblesAsync(_doctorId, _agFecha)).ToList();
-        try { _agServiciosContrato = (await Asig.ServiciosPorContratoAsync(_contratoId, _servicio)).ToList(); }
-        catch { _agServiciosContrato = new(); }
-        if (_agServiciosContrato.Count == 1) { _agServicioContratoId = _agServiciosContrato[0].Id; }
         _agOpen = true;
     }
 
     private async Task GuardarAgendaAsync()
     {
         _agError = null;
+        if (_servicioSel is null || _pacSel is null || _contratoId == Guid.Empty) { _agError = "Falta paciente/contrato/servicio."; return; }
         if (string.IsNullOrWhiteSpace(_agSlot)) { _agError = "Selecciona la hora."; return; }
-        if (_agServicioContratoId == Guid.Empty) { _agError = "Selecciona el servicio del contrato."; return; }
         if (string.IsNullOrWhiteSpace(_agViaCod)) { _agError = "Selecciona la via de ingreso."; return; }
-        if (_pacSel is null || _contratoId == Guid.Empty) { _agError = "Falta paciente o contrato."; return; }
 
         var contrato = _contratos.First(c => c.ContratoId == _contratoId);
-        var servicio = _agServiciosContrato.First(s => s.Id == _agServicioContratoId);
         var via = _vias.FirstOrDefault(v => v.Codigo == _agViaCod);
         var hora = TimeOnly.ParseExact(_agSlot, "HH\\:mm");
 
@@ -493,7 +475,8 @@
         {
             var req = new AgendarDesdeAgendaRequest(
                 _doctorId, _pacSel.Id, contrato.CodigoContrato,
-                servicio.Id.ToString(), servicio.Descripcion, servicio.Modulo ?? _servicio, servicio.Modulo,
+                _servicioSel.ServicioContratoId.ToString(), _servicioSel.Descripcion,
+                _servicioSel.Modulo ?? "", _servicioSel.Modulo,
                 SedeNombre(), _agFecha, hora,
                 _agViaCod, via?.Nombre ?? _agViaCod, _agNota);
             await Svc.AgendarAsync(req, await ActorAsync());
@@ -527,7 +510,6 @@
     };
 
     private string SedeNombre() => _sedes.FirstOrDefault(s => s.Id == _sucursalId)?.Nombre ?? "";
-
     private static string NombreMes(int m) => Meses[m - 1];
 
     private async Task<Guid> ActorAsync()

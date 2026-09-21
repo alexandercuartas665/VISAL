@@ -172,6 +172,72 @@ public sealed class AsignacionAgendasService(
         return new DisponibilidadAgendaDto(profesionalId, sucursalId, mesesOut);
     }
 
+    public async Task<IReadOnlyList<ServicioContratoAgendaDto>> ListarServiciosContratoConAgendaAsync(Guid contratoId, string? filtro, CancellationToken ct = default)
+    {
+        if (contratoId == Guid.Empty) { return Array.Empty<ServicioContratoAgendaDto>(); }
+
+        var profIdsConAgenda = await db.AgendaProfesionalTurnos.AsNoTracking()
+            .Select(t => t.ProfesionalId).Distinct().ToListAsync(ct);
+        if (profIdsConAgenda.Count == 0) { return Array.Empty<ServicioContratoAgendaDto>(); }
+
+        // CUPS que presta cada doctor con agenda -> doctores por codigo.
+        var prov = await db.ProfesionalServicios.AsNoTracking()
+            .Where(s => profIdsConAgenda.Contains(s.ProfesionalId))
+            .Select(s => new { s.Codigo, s.ProfesionalId })
+            .ToListAsync(ct);
+        if (prov.Count == 0) { return Array.Empty<ServicioContratoAgendaDto>(); }
+        var doctoresPorCodigo = prov.GroupBy(x => x.Codigo)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.ProfesionalId).Distinct().Count());
+        var codigos = doctoresPorCodigo.Keys.ToList();
+
+        var f = (filtro ?? "").Trim().ToLowerInvariant();
+        var q = db.ServiciosContrato.AsNoTracking()
+            .Where(s => s.ContratoId == contratoId && s.CodigoServicio != null && codigos.Contains(s.CodigoServicio));
+        if (f.Length > 0)
+        {
+            q = q.Where(s => s.CodigoServicio!.ToLower().Contains(f) || s.Descripcion.ToLower().Contains(f));
+        }
+        var rows = await q.OrderBy(s => s.Descripcion).Take(200).ToListAsync(ct);
+
+        return rows.Select(s => new ServicioContratoAgendaDto(
+            s.Id, s.CodigoServicio, s.Descripcion, s.Modulo, s.Especialidad,
+            s.CodigoServicio != null && doctoresPorCodigo.TryGetValue(s.CodigoServicio, out var d) ? d : 0)).ToList();
+    }
+
+    public async Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresPorServicioContratoAsync(Guid servicioContratoId, CancellationToken ct = default)
+    {
+        var sc = await db.ServiciosContrato.AsNoTracking().FirstOrDefaultAsync(s => s.Id == servicioContratoId, ct);
+        if (sc?.CodigoServicio is not string cups || cups.Length == 0) { return Array.Empty<DoctorConAgendaDto>(); }
+
+        var profIdsConAgenda = await db.AgendaProfesionalTurnos.AsNoTracking()
+            .Select(t => t.ProfesionalId).Distinct().ToListAsync(ct);
+        var proveedores = await db.ProfesionalServicios.AsNoTracking()
+            .Where(s => s.Codigo == cups && profIdsConAgenda.Contains(s.ProfesionalId))
+            .Select(s => s.ProfesionalId).Distinct().ToListAsync(ct);
+        if (proveedores.Count == 0) { return Array.Empty<DoctorConAgendaDto>(); }
+
+        var profs = await db.Profesionales.AsNoTracking()
+            .Where(p => proveedores.Contains(p.Id))
+            .OrderBy(p => p.NombreCompleto)
+            .Select(p => new { p.Id, p.NombreCompleto, p.TipoProfesionalId })
+            .ToListAsync(ct);
+        var tipoNombre = await db.TiposProfesional.AsNoTracking().ToDictionaryAsync(t => t.Id, t => t.Nombre, ct);
+
+        var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
+            .Where(t => proveedores.Contains(t.ProfesionalId)).ToListAsync(ct);
+        var turnosPorProf = turnos.GroupBy(t => t.ProfesionalId)
+            .ToDictionary(g => g.Key, g => (Turnos: g.Count(),
+                Cupos: g.Sum(t => PlantillaAgendaCalculos.Cupos(t.HoraInicio, t.HoraFin, t.IntervaloMinutos))));
+
+        return profs.Select(p =>
+        {
+            var r = turnosPorProf.TryGetValue(p.Id, out var v) ? v : (Turnos: 0, Cupos: 0);
+            return new DoctorConAgendaDto(p.Id, p.NombreCompleto,
+                p.TipoProfesionalId is Guid tid && tipoNombre.TryGetValue(tid, out var tn) ? tn : null,
+                r.Turnos, r.Cupos);
+        }).ToList();
+    }
+
     public async Task<IReadOnlyList<TimeOnly>> SlotsDisponiblesAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default)
     {
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()

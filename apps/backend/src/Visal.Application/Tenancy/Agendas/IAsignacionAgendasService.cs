@@ -23,6 +23,10 @@ public sealed record ServicioConAgendaDto(string Codigo, string Nombre, int Doct
 /// <summary>Un doctor con agenda que atiende un servicio (modulo).</summary>
 public sealed record DoctorConAgendaDto(Guid ProfesionalId, string NombreCompleto, string? TipoProfesional, int Turnos, int CuposSemana);
 
+/// <summary>Un servicio del contrato del paciente que algun doctor con agenda presta.</summary>
+public sealed record ServicioContratoAgendaDto(
+    Guid ServicioContratoId, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, int Doctores);
+
 /// <summary>Disponibilidad de un dia concreto.</summary>
 public sealed record DiaDisponibilidadDto(DateOnly Fecha, EstadoDiaAgenda Estado, int Cupos, string? Detalle);
 
@@ -48,6 +52,14 @@ public interface IAsignacionAgendasService
 
     /// <summary>Doctores con agenda que atienden el modulo dado (match por TipoProfesional).</summary>
     Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresConAgendaAsync(string moduloCodigo, CancellationToken ct = default);
+
+    /// <summary>Servicios del contrato del paciente que al menos un doctor con agenda presta
+    /// (match por CUPS ProfesionalServicio.Codigo = ServicioContrato.CodigoServicio). Filtro
+    /// opcional por descripcion o codigo.</summary>
+    Task<IReadOnlyList<ServicioContratoAgendaDto>> ListarServiciosContratoConAgendaAsync(Guid contratoId, string? filtro, CancellationToken ct = default);
+
+    /// <summary>Doctores con agenda que prestan el servicio de contrato indicado (por su CUPS).</summary>
+    Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresPorServicioContratoAsync(Guid servicioContratoId, CancellationToken ct = default);
 
     /// <summary>Disponibilidad del doctor en la sede, desde (anioInicio, mesInicio) por N meses.
     /// Descuenta del cupo de cada dia los turnos ya asignados a ese doctor en esa fecha.</summary>

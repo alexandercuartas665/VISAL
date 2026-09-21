@@ -1072,6 +1072,12 @@ else
         // la sesion (no el configurado hoy). Util para auditar cuando la config del
         // servicio/formulario cambio despues de haberse atendido.
         new ColDef("formato_hc",    "FormatoHC",       "Formato<br/>HC",                          5),
+        // Formato que el sistema SERVIRIA hoy al abrir el modal de HC (nombre del
+        // FormDefinition resuelto desde la config del servicio, ya considerando
+        // evolucion para sesion >= 2). A diferencia de "formato_hc" (el EJECUTADO,
+        // que sale "—" hasta que exista la HC), este se ve SIEMPRE y responde
+        // "que se va a cargar cuando abra". Avisa si el codigo no resuelve.
+        new ColDef("formato_cfg",   "FormatoServir",   "Formato<br/>a servir",                    5),
         new ColDef("cod_asig",      "CodAsig",         "CodAsig",                                 6),
         new ColDef("fec_asig",      "FechaAsig",       "Fecha<br/>Asig",                          7),
         new ColDef("orden",         "Orden",           "Orden",                                   8),
@@ -1187,6 +1193,36 @@ else
                 __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
                 __b.AddContent(seq++, string.IsNullOrWhiteSpace(s.FormatoHistoriaEjecutado) ? "—" : s.FormatoHistoriaEjecutado);
+                __b.CloseElement();
+                break;
+            case "formato_cfg":
+                // Formato CONFIGURADO que se serviria al abrir el modal.
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                if (!string.IsNullOrWhiteSpace(s.FormatoHistoriaNombre))
+                {
+                    // Resuelve a un formato activo: mostramos el nombre legible y el
+                    // codigo efectivo como tooltip.
+                    __b.AddAttribute(seq++, "title", s.FormatoHistoria ?? "");
+                    __b.AddContent(seq++, s.FormatoHistoriaNombre);
+                }
+                else if (!string.IsNullOrWhiteSpace(s.FormatoHistoria))
+                {
+                    // Hay codigo configurado pero NO resuelve a un formato activo: al
+                    // abrir no se cargara ningun formato. Lo marcamos en rojo.
+                    __b.AddAttribute(seq++, "class", "mono");
+                    __b.AddAttribute(seq++, "style", "color:#dc2626;");
+                    __b.AddAttribute(seq++, "title", $"El codigo '{s.FormatoHistoria}' no resuelve a un formato activo: al abrir no cargara ningun formato.");
+                    __b.AddContent(seq++, "⚠ " + s.FormatoHistoria);
+                }
+                else
+                {
+                    // Sin formato configurado en el servicio: el modal abrira sin
+                    // formato forzado (el usuario tendria que elegir uno manualmente).
+                    __b.AddAttribute(seq++, "class", "text-muted");
+                    __b.AddAttribute(seq++, "title", "El servicio no tiene formato de historia configurado.");
+                    __b.AddContent(seq++, "(sin formato)");
+                }
                 __b.CloseElement();
                 break;
             case "cod_asig":

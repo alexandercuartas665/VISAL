@@ -93,6 +93,22 @@ public sealed class FirmaResolverService : IFirmaResolverService
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<bool> PersistirFirmaUrlSiFaltaAsync(Guid profesionalId, string firmaUrl, CancellationToken ct = default)
+    {
+        if (profesionalId == Guid.Empty || string.IsNullOrWhiteSpace(firmaUrl)) { return false; }
+        // Se necesita seguimiento (sin AsNoTracking) para actualizar. El query
+        // filter por tenant asegura que solo alcanzamos profesionales del tenant.
+        var prof = await _db.Profesionales
+            .FirstOrDefaultAsync(p => p.Id == profesionalId, ct);
+        if (prof is null) { return false; }
+        // Auto-sanar SOLO cuando la ficha no tiene firma. Nunca sobrescribir una
+        // firma ya cargada del catalogo (esa es la fuente de verdad deliberada).
+        if (!string.IsNullOrWhiteSpace(prof.FirmaUrl)) { return false; }
+        prof.FirmaUrl = firmaUrl;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default)
     {
         if (pacienteId == Guid.Empty || indice1Based < 1) { return (null, null, null); }

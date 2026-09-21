@@ -1453,7 +1453,11 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
             b.Property(x => x.ServicioId).HasMaxLength(60).IsRequired();
-            b.Property(x => x.NombreServicio).HasMaxLength(200).IsRequired();
+            // Sin cap de longitud: las descripciones CUPS de servicios pueden ser
+            // largas (incluyen listas de insumos y exclusiones, p.ej. "TERAPIA
+            // ENTEROSTOMAL DOMICILIARIA ... Incluye: ..." > 200 chars). Antes era
+            // varchar(200) y desbordaba al asignar (Postgres 22001 value too long).
+            b.Property(x => x.NombreServicio).HasColumnType("text").IsRequired();
             b.Property(x => x.CodigoRips).HasMaxLength(40);
             b.Property(x => x.TipoServicio).HasMaxLength(40).IsRequired();
             b.Property(x => x.Modulo).HasMaxLength(40);

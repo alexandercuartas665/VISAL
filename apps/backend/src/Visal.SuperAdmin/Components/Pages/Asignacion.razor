@@ -1343,8 +1343,8 @@ else
             CerrarModalAutorizacion();
             await AplicarFiltrosListado();
         }
-        catch (InvalidOperationException ex) { _modalAutError = ex.Message; }
-        catch (Exception ex) { _modalAutError = "Error tecnico: " + ex.Message; }
+        catch (InvalidOperationException ex) { _modalAutError = UiError.Negocio("ASG", 103, ex.Message); }
+        catch (Exception ex) { _modalAutError = UiError.Tecnico("ASG", 903, ex); }
         finally { _modalAutBusy = false; }
     }
 
@@ -1774,8 +1774,8 @@ else
             }
             _servicioSel = null;
         }
-        catch (InvalidOperationException ex) { _error = ex.Message; }
-        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        catch (InvalidOperationException ex) { _error = UiError.Negocio("ASG", 101, ex.Message); }
+        catch (Exception ex) { _error = UiError.Tecnico("ASG", 901, ex); }
         finally { _busy = false; }
     }
 
@@ -1793,8 +1793,8 @@ else
             _ok = "Asignacion eliminada.";
             _error = null;
         }
-        catch (InvalidOperationException ex) { _error = ex.Message; _ok = null; }
-        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; _ok = null; }
+        catch (InvalidOperationException ex) { _error = UiError.Negocio("ASG", 102, ex.Message); _ok = null; }
+        catch (Exception ex) { _error = UiError.Tecnico("ASG", 902, ex); _ok = null; }
     }
 
     private async Task Guardar()
@@ -1876,8 +1876,8 @@ else
             _autorizacionPendiente = false;
             _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();
         }
-        catch (InvalidOperationException ex) { _error = ex.Message; }
-        catch (Exception ex) { _error = "Error tecnico: " + ex.Message; }
+        catch (InvalidOperationException ex) { _error = UiError.Negocio("ASG", 100, ex.Message); }
+        catch (Exception ex) { _error = UiError.Tecnico("ASG", 900, ex); }
         finally { _busy = false; }
     }
 

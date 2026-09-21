@@ -22,6 +22,7 @@
 @inject INotaMedicaService NotaSvc
 @inject IHcMenuConfigService MenuHcSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject IWebHostEnvironment Env
 @inject IPacienteService PacientesSvc
 @inject ICatalogoPacienteService CatPacSvc
 @inject ITenantAdminService TenantsSvc
@@ -1631,10 +1632,25 @@
         if (_formatoForzadoId is not Guid fid) { return; }
         _autoCargaIntentada = true;
 
-        var miProf = await ResolverMiProfesionalIdAsync();
-        if (miProf is not Guid pidProf) { return; }
-
-        var hcId = await HcSvc.BuscarAbiertaDelProfesionalAsync(p.Id, pidProf, fid);
+        Guid? hcId;
+        // Con contexto de sesion (modal abierto desde /atencion): reanudar SOLO la
+        // HC abierta de ESA sesion. Es lo correcto cuando el paciente tiene varias
+        // sesiones del mismo formato (p.ej. notas de enfermeria); sin este alcance
+        // por sesion el modal reanudaba cualquier HC abierta del mismo
+        // (paciente+profesional+formato) y el usuario terminaba cerrando una sesion
+        // distinta a la que abrio, dejando la suya sin cerrar.
+        if (AsignacionTurnoId is Guid atId && SessionNo is int sno && sno >= 1)
+        {
+            hcId = await HcSvc.BuscarAbiertaDeSesionAsync(atId, sno);
+        }
+        else
+        {
+            // Sin contexto de sesion (modal abierto fuera de /atencion): comportamiento
+            // clasico — reanudar la HC en curso del profesional sobre ese formato.
+            var miProf = await ResolverMiProfesionalIdAsync();
+            if (miProf is not Guid pidProf) { return; }
+            hcId = await HcSvc.BuscarAbiertaDelProfesionalAsync(p.Id, pidProf, fid);
+        }
         if (hcId is not Guid id) { return; }
 
         // Cargar las HC del paciente (para tenerlas en la lista lateral) y
@@ -2537,6 +2553,12 @@
         _autosaveCts?.Cancel();
         if (_historiaSel is HistoriaRow h)
         {
+            // Auto-sanar la firma del profesional ANTES de cerrar: si el doctor
+            // dibujo su firma en este documento y su ficha aun no tiene firma
+            // cargada, la persistimos en profesionales.firma_url para que los
+            // proximos documentos la resuelvan en vivo y la ficha deje de salir
+            // "sin firma". No debe bloquear el cierre si algo falla.
+            await AutoguardarFirmaProfesionalSiFaltaAsync(h);
             await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), await ResolverActorAsync());
             h.Estado = "Cerrada";
         }
@@ -2544,6 +2566,95 @@
         _imprimirMsg = null;
         _saveStatus = "limpio";
         _ultimoGuardado = null;
+    }
+
+    /// <summary>
+    /// Si el profesional dueño de la HC dibujó su firma en este documento (el
+    /// campo mapeado por la ruta prefill sourceModule = "firmaProfesional" trae
+    /// un data URL base64) y su ficha aún NO tiene firma cargada, guarda esa
+    /// firma como PNG servible y la persiste en profesionales.firma_url. Así
+    /// se auto-sana el estado de firma del profesional y los próximos documentos
+    /// la resuelven en vivo desde la ficha (deja de imprimirse firma "congelada"
+    /// mientras el módulo Profesionales la muestra como faltante).
+    ///
+    /// Reglas de seguridad:
+    ///  - Nunca pisa una firma existente del catálogo (solo completa si falta).
+    ///  - Nunca bloquea el cierre de la HC: cualquier error se traga en silencio.
+    ///  - Solo escribe archivo si de verdad falta la firma (evita huérfanos).
+    /// </summary>
+    private async Task AutoguardarFirmaProfesionalSiFaltaAsync(HistoriaRow h)
+    {
+        try
+        {
+            if (h.ProfesionalId is not Guid pid || pid == Guid.Empty) { return; }
+            if (_prefillRoutesActual is null) { return; }
+
+            // Localizar el/los campo(s) destino de la firma del profesional segun
+            // las rutas de prefill del formulario (mismo criterio que FirmasPrefillHelper).
+            var rutaFirma = _prefillRoutesActual.Routes.FirstOrDefault(r =>
+                string.Equals(r.SourceModule, "firmaProfesional", StringComparison.OrdinalIgnoreCase));
+            if (rutaFirma is null || rutaFirma.Mappings.Count == 0) { return; }
+
+            // Tomar el primer target que contenga un data URL de imagen (la firma
+            // dibujada por el doctor). Si el campo trae una URL ya resuelta
+            // (/uploads/...), no hay nada nuevo que guardar.
+            string? dataUrl = null;
+            foreach (var m in rutaFirma.Mappings)
+            {
+                if (string.IsNullOrWhiteSpace(m.Target)) { continue; }
+                if (_valores.TryGetValue(m.Target, out var v)
+                    && !string.IsNullOrWhiteSpace(v)
+                    && v.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                {
+                    dataUrl = v;
+                    break;
+                }
+            }
+            if (dataUrl is null) { return; }
+
+            // Solo continuar si la ficha del profesional NO tiene firma (evita
+            // escribir un archivo huerfano cuando ya hay firma en el catalogo).
+            var firmaActual = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+            if (!string.IsNullOrWhiteSpace(firmaActual)) { return; }
+
+            // Parsear "data:image/<tipo>;base64,<datos>".
+            var coma = dataUrl.IndexOf(',');
+            if (coma < 0) { return; }
+            var meta = dataUrl.Substring(5, coma - 5); // "image/png;base64"
+            var base64 = dataUrl.Substring(coma + 1);
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(base64); }
+            catch { return; }
+            if (bytes.Length == 0) { return; }
+
+            var mime = meta.Split(';')[0].Trim().ToLowerInvariant(); // "image/png"
+            var ext = mime switch
+            {
+                "image/png" => ".png",
+                "image/jpeg" or "image/jpg" => ".jpg",
+                "image/webp" => ".webp",
+                "image/gif" => ".gif",
+                _ => ".png"
+            };
+
+            var dir = System.IO.Path.Combine(Env.WebRootPath, "uploads", "firmas");
+            System.IO.Directory.CreateDirectory(dir);
+            var name = $"firma-{Guid.NewGuid():N}{ext}";
+            await System.IO.File.WriteAllBytesAsync(System.IO.Path.Combine(dir, name), bytes);
+            var url = $"/uploads/firmas/{name}";
+
+            // Persistir en la ficha SOLO si sigue faltando (chequeo atomico en el
+            // servicio). Si otra via ya la cargo entre tanto, borramos el archivo.
+            var guardo = await FirmaResolverSvc.PersistirFirmaUrlSiFaltaAsync(pid, url);
+            if (!guardo)
+            {
+                try { System.IO.File.Delete(System.IO.Path.Combine(dir, name)); } catch { /* huerfano tolerable */ }
+            }
+        }
+        catch
+        {
+            // Auto-sanado best-effort: nunca debe impedir cerrar la HC.
+        }
     }
 
     /// <summary>

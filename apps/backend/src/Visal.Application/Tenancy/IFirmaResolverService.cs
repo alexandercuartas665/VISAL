@@ -57,6 +57,19 @@ public interface IFirmaResolverService
     Task<PrefillProfesionalDatosDto?> ResolverDatosProfesionalAsync(
         Guid? profesionalId, Guid? platformUserId, Guid? tenantId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Auto-sana la firma del profesional: si el profesional NO tiene
+    /// <c>FirmaUrl</c> cargada en su ficha y en un documento acaba de dibujar
+    /// su firma (que ya fue guardada como PNG servible), persiste esa URL en
+    /// <c>profesionales.firma_url</c> para que los proximos documentos la
+    /// resuelvan en vivo desde el profesional (y la ficha deje de salir "sin
+    /// firma"). NUNCA pisa una firma existente del catalogo: si ya hay una,
+    /// devuelve false sin tocar nada. Devuelve true solo cuando efectivamente
+    /// completo la firma faltante. El filtro por tenant del DbContext garantiza
+    /// que solo se toca un profesional del tenant activo.
+    /// </summary>
+    Task<bool> PersistirFirmaUrlSiFaltaAsync(Guid profesionalId, string firmaUrl, CancellationToken ct = default);
 }
 
 /// <summary>Datos que la ruta sistema (usuario logueado) puede consumir del

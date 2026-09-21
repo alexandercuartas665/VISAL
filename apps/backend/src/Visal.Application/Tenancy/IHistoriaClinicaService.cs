@@ -157,6 +157,16 @@ public interface IHistoriaClinicaService
     Task<Guid?> BuscarAbiertaDelProfesionalAsync(Guid pacienteId, Guid profesionalId, Guid formDefinitionId, CancellationToken ct = default);
 
     /// <summary>
+    /// Busca la HC ABIERTA vinculada EXACTAMENTE a la sesion (AsignacionTurnoId +
+    /// SessionNo) desde la que se abrio el modal en /atencion. Es la forma correcta
+    /// de reanudar la HC en curso cuando el paciente tiene varias sesiones del mismo
+    /// formato (p.ej. notas de enfermeria): a diferencia de
+    /// <see cref="BuscarAbiertaDelProfesionalAsync"/>, NO reanuda una HC de otra
+    /// sesion. Null si esa sesion no tiene HC abierta (el usuario debe iniciarla).
+    /// </summary>
+    Task<Guid?> BuscarAbiertaDeSesionAsync(Guid asignacionTurnoId, int sessionNo, CancellationToken ct = default);
+
+    /// <summary>
     /// Duplica una HC existente: crea una nueva HC en estado Abierta, con el mismo
     /// FormDefinitionId y PacienteId, copiando el ValoresJson origen y todos los items
     /// clinicos (medicamentos, insumos, remisiones, incapacidades, certificaciones,

@@ -56,6 +56,40 @@ public sealed class AtencionProfesionalService(
             .ToListAsync(ct);
         var asigDict = asigs.ToDictionary(a => a.Id);
 
+        // Formato de HC configurado por servicio: el snapshot Asignacion.FormatoHistoria
+        // deberia venir copiado de ServicioContrato.Historia al crear la asignacion,
+        // pero hay asignaciones cuyo snapshot quedo VACIO (creadas antes de configurar
+        // el formato, o por un flujo que no lo copio). En esos casos caemos al valor
+        // VIVO del ServicioContrato (misma fuente que el snapshot deberia tener), para
+        // que la parrilla muestre —y el modal fuerce— el formato realmente configurado
+        // en vez de "(sin formato)". Asignacion.ServicioId (string) guarda el Guid del
+        // ServicioContrato.
+        var servicioIdsSinFmt = asigs
+            .Where(a => string.IsNullOrWhiteSpace(a.FormatoHistoria) && !string.IsNullOrWhiteSpace(a.ServicioId))
+            .Select(a => a.ServicioId)
+            .Distinct()
+            .ToList();
+        var historiaPorServicioContrato = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (servicioIdsSinFmt.Count > 0)
+        {
+            var guids = servicioIdsSinFmt
+                .Select(s => Guid.TryParse(s, out var g) ? (Guid?)g : null)
+                .Where(g => g.HasValue).Select(g => g!.Value).ToList();
+            if (guids.Count > 0)
+            {
+                var scs = await db.ServiciosContrato.AsNoTracking()
+                    .Where(sc => guids.Contains(sc.Id) && sc.Historia != null && sc.Historia != "")
+                    .Select(sc => new { sc.Id, sc.Historia })
+                    .ToListAsync(ct);
+                foreach (var sc in scs) { historiaPorServicioContrato[sc.Id.ToString()] = sc.Historia!; }
+            }
+        }
+        // Formato base de una asignacion: snapshot si lo tiene; si no, el vivo del ServicioContrato.
+        string? FormatoBaseDe(Asignacion a) =>
+            !string.IsNullOrWhiteSpace(a.FormatoHistoria)
+                ? a.FormatoHistoria
+                : (a.ServicioId != null && historiaPorServicioContrato.TryGetValue(a.ServicioId, out var hv) ? hv : null);
+
         var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
         var pacs = await db.Pacientes.AsNoTracking()
             .Where(p => pacIds.Contains(p.Id))
@@ -209,7 +243,7 @@ public sealed class AtencionProfesionalService(
         // en vez del HC completo. Sigue siendo una HistoriaClinica por debajo, asi que
         // facturacion / candado de orden / Completado / revision quedan intactos.
         var formatosHc = asigs
-            .Select(a => a.FormatoHistoria)
+            .Select(a => FormatoBaseDe(a))
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Select(c => c!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -227,6 +261,30 @@ public sealed class AtencionProfesionalService(
             {
                 if (!string.IsNullOrWhiteSpace(d.Codigo)) { evolucionPorFormato[d.Codigo] = d.FormatoEvolucionCodigo!; }
                 if (!string.IsNullOrWhiteSpace(d.CodigoSecundario)) { evolucionPorFormato[d.CodigoSecundario!] = d.FormatoEvolucionCodigo!; }
+            }
+        }
+
+        // Nombre legible del formato que el sistema SERVIRIA al abrir el modal de HC.
+        // Se resuelve SOLO contra formularios ACTIVOS (mismo criterio que el modal en
+        // HistoriasClinicasModulo), por Codigo o CodigoSecundario. Cubre tanto los
+        // formatos base (formatosHc) como los de evolucion (valores de evolucionPorFormato):
+        // si un codigo configurado no aparece aqui, es que NO resuelve a un formato
+        // activo y la UI debe avisarlo ("no cargara ningun formato").
+        var codigosParaNombre = new HashSet<string>(formatosHc, StringComparer.OrdinalIgnoreCase);
+        foreach (var evo in evolucionPorFormato.Values) { codigosParaNombre.Add(evo); }
+        var nombrePorFormato = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (codigosParaNombre.Count > 0)
+        {
+            var defsN = await db.FormDefinitions.AsNoTracking()
+                .Where(f => f.Activo
+                            && (codigosParaNombre.Contains(f.Codigo)
+                                || (f.CodigoSecundario != null && codigosParaNombre.Contains(f.CodigoSecundario))))
+                .Select(f => new { f.Codigo, f.CodigoSecundario, f.Nombre })
+                .ToListAsync(ct);
+            foreach (var d in defsN)
+            {
+                if (!string.IsNullOrWhiteSpace(d.Codigo)) { nombrePorFormato[d.Codigo] = d.Nombre; }
+                if (!string.IsNullOrWhiteSpace(d.CodigoSecundario)) { nombrePorFormato[d.CodigoSecundario!] = d.Nombre; }
             }
         }
 
@@ -301,12 +359,17 @@ public sealed class AtencionProfesionalService(
 
                 // Sesion 1 (cronologica) usa el formato HC completo; de la 2da en adelante
                 // usa el formato de evolucion si el formato de HC lo tiene configurado.
-                var formatoEfectivo = a.FormatoHistoria;
-                if (nGlobal >= 2 && !string.IsNullOrWhiteSpace(a.FormatoHistoria)
-                    && evolucionPorFormato.TryGetValue(a.FormatoHistoria.Trim(), out var evoCod))
+                var formatoBase = FormatoBaseDe(a);
+                var formatoEfectivo = formatoBase;
+                if (nGlobal >= 2 && !string.IsNullOrWhiteSpace(formatoBase)
+                    && evolucionPorFormato.TryGetValue(formatoBase.Trim(), out var evoCod))
                 {
                     formatoEfectivo = evoCod;
                 }
+                // Nombre del formato que se serviria hoy (null si el codigo no resuelve
+                // a un formulario activo — la UI lo marca como "no cargara").
+                string? nombreFormatoEfectivo = !string.IsNullOrWhiteSpace(formatoEfectivo)
+                    && nombrePorFormato.TryGetValue(formatoEfectivo.Trim(), out var nfe) ? nfe : null;
 
                 result.Add(new MiServicioAsignadoDto(
                     t.Id, a.Id,
@@ -339,7 +402,8 @@ public sealed class AtencionProfesionalService(
                     a.Sucursal,
                     t.FechaInicio,
                     t.HoraInicio,
-                    t.LlegoEn != null));
+                    t.LlegoEn != null,
+                    nombreFormatoEfectivo));
             }
         }
         return result;

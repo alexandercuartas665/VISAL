@@ -94,7 +94,16 @@ public sealed record MiServicioAsignadoDto(
     TimeOnly? HoraProgramada = null,
     /// <summary>El paciente ya llego (Recepcion marco AsignacionTurno.LlegoEn). Atencion
     /// resalta la fila en verde para indicar que puede ser atendido.</summary>
-    bool Llego = false);
+    bool Llego = false,
+    /// <summary>
+    /// Nombre legible del FormDefinition que el sistema SERVIRIA hoy al abrir el
+    /// modal de HC para esta fila (resuelto desde <see cref="FormatoHistoria"/> —
+    /// el formato efectivo, ya considerando evolucion para sesion &gt;= 2 — contra
+    /// los formularios ACTIVOS, el mismo criterio que usa el modal). Null cuando
+    /// no hay formato configurado o cuando el codigo configurado NO resuelve a un
+    /// formulario activo (en ese caso la UI avisa que no cargara ningun formato).
+    /// </summary>
+    string? FormatoHistoriaNombre = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

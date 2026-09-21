@@ -609,11 +609,40 @@ public sealed class HistoriaClinicaService(
     {
         // Reanudar HC en curso: solo cuenta una abierta del mismo profesional
         // sobre el mismo formato. Si hay varias (raro), la mas reciente.
+        // OJO: este lookup NO distingue la sesion. Solo debe usarse cuando el
+        // modal se abre SIN contexto de sesion. Cuando viene desde /atencion
+        // (con AsignacionTurnoId + SessionNo) hay que usar
+        // BuscarAbiertaDeSesionAsync — de lo contrario, un paciente con varias
+        // sesiones del mismo formato (p.ej. notas de enfermeria) hace que el
+        // modal reanude/ cierre una sesion distinta a la que el usuario abrio.
         return await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId
                      && h.ProfesionalId == profesionalId
                      && h.FormDefinitionId == formDefinitionId
                      && h.Estado == HistoriaClinicaEstado.Abierta)
+            .OrderByDescending(h => h.FechaApertura)
+            .Select(h => (Guid?)h.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<Guid?> BuscarAbiertaDeSesionAsync(Guid asignacionTurnoId, int sessionNo, CancellationToken ct = default)
+    {
+        if (asignacionTurnoId == Guid.Empty || sessionNo < 1) { return null; }
+        // 1) Resolver la sesion concreta (AsignacionTurnoSesion) del turno+numero.
+        var sesionId = await db.AsignacionTurnoSesiones.AsNoTracking()
+            .Where(s => s.AsignacionTurnoId == asignacionTurnoId && s.SessionNo == sessionNo)
+            .Select(s => (Guid?)s.Id)
+            .FirstOrDefaultAsync(ct);
+        if (sesionId is not Guid sid) { return null; }
+        // 2) HC ABIERTA vinculada EXACTAMENTE a esa sesion via el pivote. Asi el
+        //    modal reanuda solo la HC de la sesion que el usuario abrio, no
+        //    cualquier otra abierta del mismo (paciente+profesional+formato).
+        //    Si hubiera varias abiertas para la misma sesion (raro), la mas reciente.
+        return await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.SesionId == sid)
+            .Join(db.HistoriasClinicas.AsNoTracking(),
+                  p => p.HistoriaClinicaId, h => h.Id, (p, h) => h)
+            .Where(h => h.Estado == HistoriaClinicaEstado.Abierta)
             .OrderByDescending(h => h.FechaApertura)
             .Select(h => (Guid?)h.Id)
             .FirstOrDefaultAsync(ct);

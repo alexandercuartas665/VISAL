@@ -269,11 +269,22 @@
             <div class="ase-form">
                 <div class="ase-f">
                     <label>Hora</label>
-                    <select class="form-select form-select-sm" @bind="_agSlot">
-                        <option value="">-- Selecciona hora --</option>
-                        @foreach (var s in _agSlots) { <option value="@s.ToString("HH\\:mm")">@s.ToString("HH\\:mm")</option> }
-                    </select>
-                    @if (_agSlots.Count == 0) { <div class="text-muted small mt-1">No quedan slots libres ese dia.</div> }
+                    @if (_slotsTodos.Count == 0)
+                    {
+                        <div class="text-muted small">Este dia no tiene horarios de agenda.</div>
+                    }
+                    else
+                    {
+                        <div class="aa-slots">
+                            @foreach (var s in _slotsTodos)
+                            {
+                                var hhmm = s.Hora.ToString("HH\\:mm");
+                                var cls = s.Ocupado ? "slot-rojo" : (_agSlot == hhmm ? "slot-sel" : "slot-verde");
+                                <div class="slot @cls" title="@(s.Ocupado ? "Ocupado" : "Libre")" @onclick="() => PickSlot(s)">@hhmm</div>
+                            }
+                        </div>
+                        @if (_agSlots.Count == 0) { <div class="text-muted small mt-1">No quedan slots libres ese dia.</div> }
+                    }
                 </div>
                 <div class="ase-f">
                     <label>Via de ingreso (RIPS)</label>
@@ -442,6 +453,12 @@
     .aa-citas { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; max-height: 200px; overflow: auto; }
     .aa-cita { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
     .aa-cita:last-child { border-bottom: none; }
+    .aa-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+    .slot { text-align: center; padding: 7px 4px; border-radius: 8px; font-size: 12px; font-weight: 700; border: 1px solid; cursor: pointer; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .slot-verde { background: #f0fdf4; border-color: #86efac; color: #166534; }
+    .slot-verde:hover { background: #dcfce7; }
+    .slot-rojo { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; cursor: not-allowed; }
+    .slot-sel { background: #2563eb; border-color: #2563eb; color: #fff; }
 </style>
 
 @code {
@@ -504,6 +521,8 @@
     private string _agViaCod = "";
     private string _agNota = "";
     private List<CitaDelDiaDto> _citasDia = new();
+    private List<SlotView> _slotsTodos = new();
+    private sealed record SlotView(TimeOnly Hora, bool Ocupado);
 
     protected override async Task OnInitializedAsync()
     {
@@ -681,6 +700,19 @@
     {
         _agSlots = (await Svc.SlotsDisponiblesAsync(_doctorId, _agFecha)).ToList();
         _citasDia = (await Svc.ListarCitasDelDiaAsync(_doctorId, _agFecha)).ToList();
+        var ocupadas = _citasDia.Where(c => c.HoraInicio != null).Select(c => c.HoraInicio!.Value).ToHashSet();
+        _slotsTodos = _agSlots.Select(h => new SlotView(h, false))
+            .Concat(ocupadas.Select(h => new SlotView(h, true)))
+            .OrderBy(s => s.Hora)
+            .ToList();
+        // Si el slot elegido ya no esta libre (lo ocuparon), lo limpiamos.
+        if (!_agSlots.Any(h => h.ToString("HH\\:mm") == _agSlot)) { _agSlot = ""; }
+    }
+
+    private void PickSlot(SlotView s)
+    {
+        if (s.Ocupado) { return; }
+        _agSlot = s.Hora.ToString("HH\\:mm");
     }
 
     private async Task CancelarCitaAsync(CitaDelDiaDto c)

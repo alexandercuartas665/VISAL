@@ -118,56 +118,76 @@
             </div>
         </div>
 
-        @if (_servicioSel is not null)
-        {
-            <div class="ase-card aa-pad">
-                <div class="ase-card-h">3. Doctor y sede</div>
-                <div class="ase-form">
-                    <div class="ase-f">
-                        <label>Doctor (con agenda que presta el servicio)</label>
-                        <select class="form-select form-select-sm" @bind="_doctorId" @bind:after="OnDoctorChanged" disabled="@(_doctores.Count == 0)">
-                            <option value="@Guid.Empty">-- Selecciona --</option>
-                            @foreach (var d in _doctores) { <option value="@d.ProfesionalId">@d.NombreCompleto</option> }
-                        </select>
-                        @if (_doctores.Count == 0) { <div class="text-muted small mt-1">Sin doctores con agenda para este servicio.</div> }
-                    </div>
-                    <div class="ase-f">
-                        <label>Sede (para dias inactivos)</label>
-                        <select class="form-select form-select-sm" @bind="_sucursalId" @bind:after="OnSedeChanged">
-                            @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
-                        </select>
-                    </div>
-                </div>
-            </div>
-        }
     </div>
 
     @* ===== Columna derecha: disponibilidad ===== *@
     <div class="ase-card aa-disp">
         <div class="aa-disp-head">
-            <div>
-                <span style="font-weight:700;">Disponibilidad</span>
-                @if (_doctorSel is not null) { <span class="text-muted"> &middot; @_doctorSel.NombreCompleto</span> }
+            <div><span style="font-weight:700;">Disponibilidad</span></div>
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span class="text-muted small">Sede:</span>
+                <select class="form-select form-select-sm" style="max-width:170px;" @bind="_sucursalId" @bind:after="OnSedeChanged">
+                    @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
+                </select>
             </div>
-            @if (_disp is not null)
-            {
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="MesAnterior">&larr;</button>
-                    <button class="btn btn-sm btn-link" @onclick="IrHoy">Hoy</button>
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="MesSiguiente">&rarr;</button>
-                </div>
-            }
         </div>
 
-        @if (_doctorId == Guid.Empty)
+        @if (_servicioSel is null)
         {
-            <div class="ase-empty" style="padding:40px;">Elige paciente, contrato, servicio y doctor para ver la disponibilidad.</div>
+            <div class="ase-empty" style="padding:40px;">Elige paciente, contrato y servicio para ver los doctores.</div>
         }
-        else if (_loadingDisp)
+        else
         {
-            <div class="ase-empty" style="padding:40px;">Calculando disponibilidad...</div>
+            <div class="aa-doc-h">Listado de doctores</div>
+            @if (_loadingDoctores)
+            {
+                <div class="ase-empty" style="padding:20px;">Cargando doctores...</div>
+            }
+            else if (_doctoresDisp.Count == 0)
+            {
+                <div class="ase-empty" style="padding:20px;">Sin doctores con agenda para este servicio.</div>
+            }
+            else
+            {
+                <div class="aa-doc-cards">
+                    @foreach (var d in _doctoresDisp)
+                    {
+                        var sel = d.ProfesionalId == _doctorId ? " docard-sel" : "";
+                        var col = d.Disponible ? "docard-verde" : "docard-rojo";
+                        var clase = $"docard {col}{sel}";
+                        <div class="@clase" @onclick="() => SeleccionarDoctorAsync(d)">
+                            <div class="docard-nom">@d.NombreCompleto</div>
+                            <div class="docard-sub">@(d.TipoProfesional ?? "—")</div>
+                            <div class="docard-badge">
+                                @if (d.Disponible) { <span>@d.DiasDisponibles dias · @d.CuposLibres cupos</span> }
+                                else { <span>A tope</span> }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
         }
-        else if (_disp is not null)
+
+        @if (_doctorId != Guid.Empty)
+        {
+            <div class="aa-disp-head" style="margin-top:16px;">
+                <div><span style="font-weight:700;">Calendario</span>@if (_doctorSel is not null) { <span class="text-muted"> &middot; @_doctorSel.NombreCompleto</span> }</div>
+                @if (_disp is not null)
+                {
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="MesAnterior">&larr;</button>
+                        <button class="btn btn-sm btn-link" @onclick="IrHoy">Hoy</button>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="MesSiguiente">&rarr;</button>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_loadingDisp)
+        {
+            <div class="ase-empty" style="padding:30px;">Calculando disponibilidad...</div>
+        }
+        else if (_doctorId != Guid.Empty && _disp is not null)
         {
             <div class="aa-months">
                 @foreach (var mes in _disp.Meses)
@@ -341,6 +361,18 @@
 
     .aa-disp { padding: 16px 18px; }
     .aa-disp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .aa-doc-h { font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 8px; }
+    .aa-doc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+    .docard { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; cursor: pointer; background: #fff; transition: box-shadow .1s, transform .05s; }
+    .docard:hover { box-shadow: 0 4px 12px rgba(15,23,42,.1); }
+    .docard-sel { outline: 2px solid #2563eb; outline-offset: -2px; }
+    .docard-verde { background: #f0fdf4; border-color: #86efac; }
+    .docard-rojo { background: #fef2f2; border-color: #fca5a5; }
+    .docard-nom { font-weight: 700; font-size: 13px; color: #0f172a; line-height: 1.2; }
+    .docard-sub { font-size: 11px; color: #64748b; margin: 2px 0 6px; }
+    .docard-badge { font-size: 11px; font-weight: 700; }
+    .docard-verde .docard-badge { color: #16a34a; }
+    .docard-rojo .docard-badge { color: #dc2626; }
     .aa-months { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @@media (max-width: 720px) { .aa-months { grid-template-columns: 1fr; } }
     .aa-month-title { font-weight: 700; text-align: center; margin-bottom: 8px; }
@@ -409,10 +441,11 @@
     private List<ServicioContratoAgendaDto> _serviciosContrato = new();
     private ServicioContratoAgendaDto? _servicioSel;
 
-    // Doctor
-    private List<DoctorConAgendaDto> _doctores = new();
+    // Doctores (tarjetas con disponibilidad)
+    private bool _loadingDoctores;
+    private List<DoctorDisponibilidadDto> _doctoresDisp = new();
     private Guid _doctorId = Guid.Empty;
-    private DoctorConAgendaDto? _doctorSel;
+    private DoctorDisponibilidadDto? _doctorSel;
 
     // Disponibilidad
     private bool _loadingDisp;
@@ -536,7 +569,7 @@
     private void ResetDesdeContrato()
     {
         _svcFiltro = ""; _serviciosContrato = new(); _servicioSel = null;
-        _doctores = new(); _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
+        _doctoresDisp = new(); _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
     }
 
     private async Task OnContratoChanged()
@@ -557,20 +590,38 @@
     private async Task SeleccionarServicioAsync(ServicioContratoAgendaDto s)
     {
         _servicioSel = s;
-        _doctores = new(); _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
-        try { _doctores = (await Svc.ListarDoctoresPorServicioContratoAsync(s.ServicioContratoId)).ToList(); }
-        catch (Exception ex) { _error = ex.Message; }
+        _doctorId = Guid.Empty; _doctorSel = null; _disp = null;
+        _anioInicio = _hoy.Year; _mesInicio = _hoy.Month;
+        await CargarDoctoresAsync();
     }
 
-    // ---------------- Doctor / disponibilidad ----------------
-    private async Task OnDoctorChanged()
+    // ---------------- Doctores (tarjetas) ----------------
+    private async Task CargarDoctoresAsync()
     {
-        _doctorSel = _doctores.FirstOrDefault(d => d.ProfesionalId == _doctorId);
+        if (_servicioSel is null) { _doctoresDisp = new(); return; }
+        _loadingDoctores = true; _error = null;
+        try
+        {
+            // Las tarjetas se calculan sobre la ventana desde HOY (2 meses).
+            _doctoresDisp = (await Svc.ListarDoctoresConDisponibilidadAsync(
+                _servicioSel.ServicioContratoId, _sucursalId, _hoy.Year, _hoy.Month, 2)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loadingDoctores = false; }
+    }
+
+    private async Task SeleccionarDoctorAsync(DoctorDisponibilidadDto d)
+    {
+        _doctorId = d.ProfesionalId; _doctorSel = d;
         _anioInicio = _hoy.Year; _mesInicio = _hoy.Month;
         await CargarDisponibilidadAsync();
     }
 
-    private async Task OnSedeChanged() { if (_doctorId != Guid.Empty) { await CargarDisponibilidadAsync(); } }
+    private async Task OnSedeChanged()
+    {
+        await CargarDoctoresAsync();
+        if (_doctorId != Guid.Empty) { await CargarDisponibilidadAsync(); }
+    }
 
     private async Task CargarDisponibilidadAsync()
     {
@@ -619,6 +670,7 @@
             _agOpen = false;
             _ok = $"Cita agendada: {_agFecha:dd/MM/yyyy} {_agSlot}.";
             await CargarDisponibilidadAsync();
+            await CargarDoctoresAsync();
         }
         catch (Exception ex) { _agError = ex.Message; }
         finally { _agBusy = false; }

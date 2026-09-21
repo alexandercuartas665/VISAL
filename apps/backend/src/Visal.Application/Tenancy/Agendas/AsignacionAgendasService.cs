@@ -238,6 +238,71 @@ public sealed class AsignacionAgendasService(
         }).ToList();
     }
 
+    public async Task<IReadOnlyList<DoctorDisponibilidadDto>> ListarDoctoresConDisponibilidadAsync(
+        Guid servicioContratoId, Guid sucursalId, int anioInicio, int mesInicio, int meses = 2, CancellationToken ct = default)
+    {
+        if (meses < 1) { meses = 1; }
+        var doctores = await ListarDoctoresPorServicioContratoAsync(servicioContratoId, ct);
+        if (doctores.Count == 0) { return Array.Empty<DoctorDisponibilidadDto>(); }
+        var ids = doctores.Select(d => d.ProfesionalId).ToList();
+
+        var primerDia = new DateOnly(anioInicio, mesInicio, 1);
+        var ultimoDia = primerDia.AddMonths(meses).AddDays(-1);
+
+        // Datos en bloque para todos los doctores.
+        var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
+            .Where(t => ids.Contains(t.ProfesionalId)).ToListAsync(ct);
+        var cuposPorProfDow = turnos.GroupBy(t => t.ProfesionalId)
+            .ToDictionary(g => g.Key, g => g.GroupBy(t => t.DiaSemana)
+                .ToDictionary(gg => gg.Key, gg => gg.Sum(t => PlantillaAgendaCalculos.Cupos(t.HoraInicio, t.HoraFin, t.IntervaloMinutos))));
+
+        var novedades = await db.NovedadesProfesional.AsNoTracking()
+            .Where(n => ids.Contains(n.ProfesionalId) && n.HoraDesde == null && n.HoraHasta == null
+                     && n.FechaDesde <= ultimoDia && n.FechaHasta >= primerDia)
+            .ToListAsync(ct);
+        var novPorProf = novedades.GroupBy(n => n.ProfesionalId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var asignados = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => ids.Contains(t.ProfesionalId) && t.FechaInicio != null
+                     && t.FechaInicio >= primerDia && t.FechaInicio <= ultimoDia)
+            .GroupBy(t => new { t.ProfesionalId, Fecha = t.FechaInicio!.Value })
+            .Select(g => new { g.Key.ProfesionalId, g.Key.Fecha, Ocupados = g.Sum(x => x.Cantidad) })
+            .ToListAsync(ct);
+        var ocupPorProfFecha = asignados.ToDictionary(x => (x.ProfesionalId, x.Fecha), x => x.Ocupados);
+
+        var festivosMapa = new Dictionary<DateOnly, string>();
+        for (var anio = primerDia.Year; anio <= ultimoDia.Year; anio++)
+        {
+            foreach (var kv in festivos.MapaDeAnio(anio)) { festivosMapa[kv.Key] = kv.Value; }
+        }
+        var inactivos = sucursalId == Guid.Empty
+            ? new HashSet<DateOnly>()
+            : (await db.DiasInactivosSede.AsNoTracking()
+                .Where(d => d.SucursalId == sucursalId && d.Fecha >= primerDia && d.Fecha <= ultimoDia)
+                .Select(d => d.Fecha).ToListAsync(ct)).ToHashSet();
+
+        var res = new List<DoctorDisponibilidadDto>();
+        foreach (var d in doctores)
+        {
+            var dow = cuposPorProfDow.TryGetValue(d.ProfesionalId, out var m) ? m : new();
+            var novs = novPorProf.TryGetValue(d.ProfesionalId, out var nl) ? nl : new List<NovedadProfesional>();
+            int diasDisp = 0, cuposLibres = 0;
+            for (var f = primerDia; f <= ultimoDia; f = f.AddDays(1))
+            {
+                if (festivosMapa.ContainsKey(f) || inactivos.Contains(f)) { continue; }
+                if (novs.Any(n => n.FechaDesde <= f && n.FechaHasta >= f)) { continue; }
+                var cupos = dow.TryGetValue(f.DayOfWeek, out var c) ? c : 0;
+                if (cupos <= 0) { continue; }
+                var ocup = ocupPorProfFecha.TryGetValue((d.ProfesionalId, f), out var o) ? o : 0;
+                var rest = cupos - ocup;
+                if (rest > 0) { diasDisp++; cuposLibres += rest; }
+            }
+            res.Add(new DoctorDisponibilidadDto(d.ProfesionalId, d.NombreCompleto, d.TipoProfesional,
+                diasDisp, cuposLibres, diasDisp > 0));
+        }
+        return res;
+    }
+
     public async Task<IReadOnlyList<TimeOnly>> SlotsDisponiblesAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default)
     {
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()

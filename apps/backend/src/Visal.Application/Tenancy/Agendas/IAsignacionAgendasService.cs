@@ -27,6 +27,12 @@ public sealed record DoctorConAgendaDto(Guid ProfesionalId, string NombreComplet
 public sealed record ServicioContratoAgendaDto(
     Guid ServicioContratoId, string? Codigo, string Descripcion, string? Modulo, string? Especialidad, int Doctores);
 
+/// <summary>Un doctor (que presta el servicio) con su disponibilidad resumida en la ventana
+/// de meses. <see cref="Disponible"/> = tiene al menos un dia con cupos libres.</summary>
+public sealed record DoctorDisponibilidadDto(
+    Guid ProfesionalId, string NombreCompleto, string? TipoProfesional,
+    int DiasDisponibles, int CuposLibres, bool Disponible);
+
 /// <summary>Disponibilidad de un dia concreto.</summary>
 public sealed record DiaDisponibilidadDto(DateOnly Fecha, EstadoDiaAgenda Estado, int Cupos, string? Detalle);
 
@@ -60,6 +66,12 @@ public interface IAsignacionAgendasService
 
     /// <summary>Doctores con agenda que prestan el servicio de contrato indicado (por su CUPS).</summary>
     Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresPorServicioContratoAsync(Guid servicioContratoId, CancellationToken ct = default);
+
+    /// <summary>Doctores que prestan el servicio, cada uno con su disponibilidad resumida en la
+    /// ventana [anioInicio/mesInicio, +meses] en la sede dada (dias disponibles + cupos libres +
+    /// flag disponible). Para pintar las tarjetas verde/rojo.</summary>
+    Task<IReadOnlyList<DoctorDisponibilidadDto>> ListarDoctoresConDisponibilidadAsync(
+        Guid servicioContratoId, Guid sucursalId, int anioInicio, int mesInicio, int meses = 2, CancellationToken ct = default);
 
     /// <summary>Disponibilidad del doctor en la sede, desde (anioInicio, mesInicio) por N meses.
     /// Descuenta del cupo de cada dia los turnos ya asignados a ese doctor en esa fecha.</summary>

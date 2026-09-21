@@ -177,6 +177,10 @@
                                     Especialista: <strong>@h.Especialista</strong>
                                 </div>
                                 <div class="hc-item-fecha">Fecha inicial: @h.Fecha.ToString("dd/MM/yyyy")</div>
+                                @if (h.AsignacionId is Guid _aid)
+                                {
+                                    <div class="hc-item-asig">Asignacion (CODINT): <span class="hc-item-asig-cod">@_aid.ToString()[..8].ToUpperInvariant()</span></div>
+                                }
                                 @if (h.SesionNumero.HasValue)
                                 {
                                     <div class="hc-item-sesion">Sesion #@h.SesionNumero.Value</div>
@@ -896,6 +900,8 @@
     .hc-item-h { display: flex; justify-content: space-between; align-items: flex-start; }
     .hc-item-prof { font-size: 12.5px; color: #0f172a; }
     .hc-item-fecha { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .hc-item-asig { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .hc-item-asig-cod { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; color: #334155; background: #f1f5f9; padding: 0 5px; border-radius: 4px; }
     .hc-item-sesion { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 1px 8px; border-radius: 999px; }
     /* Modo terapia: HC-evolucion (sesiones 2..N) se distingue con acento y badge morado. */
     .hc-item-evolucion { border-left: 3px solid #7c3aed; }
@@ -1710,7 +1716,8 @@
             Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : ""),
             ProfesionalId = r.ProfesionalId,
             SesionNumero = r.SesionNumero,
-            EsEvolucion = r.EsEvolucion
+            EsEvolucion = r.EsEvolucion,
+            AsignacionId = r.AsignacionId
         }).ToList();
     }
 
@@ -2902,5 +2909,9 @@
         /// <summary>True si el formato de esta HC es de EVOLUCION (sesiones 2..N de
         /// terapias en "modo terapia"). Se muestra con un badge distinto en la lista.</summary>
         public bool EsEvolucion { get; set; }
+        /// <summary>Id de la asignacion (atencion) a la que pertenece esta HC. Se muestra
+        /// su codigo corto (CODINT, primeros 8 chars) en la tarjeta para rastrear a que
+        /// asignacion corresponde. Null si la HC no nacio desde una sesion de /atencion.</summary>
+        public Guid? AsignacionId { get; set; }
     }
 }

@@ -19,7 +19,12 @@ public sealed record HistoriaClinicaResumenDto(
     // True si el formato de esta HC es un formato de EVOLUCION (su Codigo esta
     // apuntado por el FormatoEvolucionCodigo de algun formato de HC del tenant).
     // Se usa para etiquetar/distinguir las sesiones 2..N de terapias en la lista.
-    bool EsEvolucion = false);
+    bool EsEvolucion = false,
+    // Id de la asignacion (atencion) a la que pertenece esta HC, resuelto via el
+    // pivote sesion-HC -> turno -> asignacion. La UI muestra su codigo corto
+    // (CODINT = primeros 8 chars) en la tarjeta para rastrear a que asignacion
+    // pertenece cada historia. Null cuando la HC no nacio desde una sesion de /atencion.
+    Guid? AsignacionId = null);
 
 /// <summary>Detalle completo de una historia (incluye valores diligenciados).</summary>
 public sealed record HistoriaClinicaDetailDto(

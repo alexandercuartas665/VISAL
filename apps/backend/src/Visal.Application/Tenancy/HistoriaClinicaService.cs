@@ -78,7 +78,7 @@ public sealed class HistoriaClinicaService(
                 x.h.Id, x.f.Id, x.f.Codigo, x.f.Nombre,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
                 x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
-                (int?)null, evolucionCodes.Contains(x.f.Codigo)))
+                (int?)null, evolucionCodes.Contains(x.f.Codigo), (Guid?)null))
             .ToListAsync(ct);
 
         // Enriquecer con SesionNumero (nGlobal cronologico) via el pivote
@@ -128,10 +128,14 @@ public sealed class HistoriaClinicaService(
                 }
             }
             rows = rows
-                .Select(r => hcToTurno.TryGetValue(r.Id, out var turnoIdHc)
-                             && turnoOrden.TryGetValue(turnoIdHc, out var nGlobal)
-                    ? r with { SesionNumero = nGlobal }
-                    : r)
+                .Select(r =>
+                {
+                    if (!hcToTurno.TryGetValue(r.Id, out var turnoIdHc)) { return r; }
+                    var nuevo = r;
+                    if (turnoOrden.TryGetValue(turnoIdHc, out var nGlobal)) { nuevo = nuevo with { SesionNumero = nGlobal }; }
+                    if (turnoToAsig.TryGetValue(turnoIdHc, out var asigId)) { nuevo = nuevo with { AsignacionId = asigId }; }
+                    return nuevo;
+                })
                 .ToList();
         }
 

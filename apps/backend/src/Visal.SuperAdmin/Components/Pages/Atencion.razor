@@ -1090,6 +1090,8 @@ else
         new ColDef("hora_cierre",   "HoraCierre",      "Hora<br/>Cierre",                         21),
         // Capa 08 Ola 3 — chip del estado del ciclo de revision de la HC del paciente.
         new ColDef("revision_estado","Revision",        "Revision",                                22),
+        // Fecha + hora programada de la cita (turno creado desde asignacion por agendas).
+        new ColDef("fec_prog",      "FechaProgramada", "Fecha<br/>Programada",                   23),
     };
 
     private List<AtencionColumnaConfigDto> _configColumnas = new();
@@ -1275,6 +1277,14 @@ else
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.NombreProfesional);
+                __b.CloseElement();
+                break;
+            case "fec_prog":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                __b.AddContent(seq++, s.FechaProgramada is DateOnly fp
+                    ? fp.ToString("dd/MM/yyyy") + (s.HoraProgramada is TimeOnly hp ? " " + hp.ToString("HH\\:mm") : "")
+                    : "—");
                 __b.CloseElement();
                 break;
             case "fec_nota":

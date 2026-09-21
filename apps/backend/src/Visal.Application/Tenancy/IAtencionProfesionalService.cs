@@ -84,7 +84,14 @@ public sealed record MiServicioAsignadoDto(
     /// <summary>Sede/sucursal de la asignacion (Asignacion.Sucursal) — la sede donde
     /// se presta el servicio. Se muestra como columna "Sede" en la parrilla de
     /// Atencion. Null/vacio si la asignacion no tiene sede.</summary>
-    string? Sede = null);
+    string? Sede = null,
+    /// <summary>Fecha programada de la cita (AsignacionTurno.FechaInicio). Se llena cuando
+    /// el turno se creo desde el modulo de asignacion por agendas. Null en la coordinacion
+    /// clasica sin fecha.</summary>
+    DateOnly? FechaProgramada = null,
+    /// <summary>Hora programada de la cita (AsignacionTurno.HoraInicio). Junto con
+    /// <see cref="FechaProgramada"/> forma la "fecha de programacion de la cita".</summary>
+    TimeOnly? HoraProgramada = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

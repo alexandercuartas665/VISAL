@@ -339,27 +339,39 @@ public sealed class AsignacionAgendasService(
         if (string.IsNullOrWhiteSpace(req.ViaIngresoCodigo)) { throw new InvalidOperationException("Selecciona la via de ingreso RIPS."); }
         if (string.IsNullOrWhiteSpace(req.Sucursal)) { throw new InvalidOperationException("Selecciona la sede."); }
 
-        // 1) Crear la Asignacion (lote de 1 item), reusando el flujo estandar.
+        var cantidad = req.Cantidad <= 0 ? 1 : req.Cantidad;
+        var cantTurnos = req.CantidadTurnos <= 0 ? 1 : req.CantidadTurnos;
+        if (cantTurnos > cantidad) { cantTurnos = cantidad; }
+        var anio = req.AnioServicio ?? (short)req.Fecha.Year;
+        var mesVig = req.MesVigencia ?? (short)req.Fecha.Month;
+
+        // 1) Crear la Asignacion (lote de 1 item) con todas las piezas, reusando el flujo estandar.
         var item = new AsignacionItemRequest(
             req.ServicioContratoId, req.NombreServicio, req.TipoServicio, req.Modulo,
-            1, null,
-            (short)req.Fecha.Year, (short)req.Fecha.Month, null,
-            req.Fecha, null,
+            cantidad, string.IsNullOrWhiteSpace(req.CodigoAutorizacion) ? null : req.CodigoAutorizacion.Trim(),
+            anio, mesVig, req.MesFinal,
+            req.Fecha, req.FechaFinal,
             req.Observaciones, null,
             RipsViaIngresoCodigo: req.ViaIngresoCodigo, RipsViaIngresoNombre: req.ViaIngresoNombre);
         var lote = await asignaciones.CrearLoteAsync(
-            new CrearLoteRequest(req.PacienteId, req.ContratoCodigo, req.Sucursal, new[] { item }), actor, ct);
+            new CrearLoteRequest(req.PacienteId, req.ContratoCodigo, req.Sucursal, new[] { item },
+                PdfAutorizacionUrl: null,
+                TipoPago: string.IsNullOrWhiteSpace(req.TipoPago) ? null : req.TipoPago,
+                CategoriaCopago: string.IsNullOrWhiteSpace(req.CategoriaCopago) ? null : req.CategoriaCopago,
+                ValorPagoSugerido: req.ValorPagoSugerido, ValorPagoReal: req.ValorPagoReal,
+                AutorizacionPendiente: req.AutorizacionPendiente), actor, ct);
 
         // 2) Recuperar la Asignacion recien creada del lote.
         var asigId = await db.Asignaciones.AsNoTracking()
             .Where(a => a.LoteId == lote.LoteId)
             .Select(a => a.Id).FirstAsync(ct);
 
-        // 3) Asignar el doctor con la fecha y la hora del slot (queda Asignado).
+        // 3) Coordinar el/los turno(s) del doctor con la fecha y la hora del slot. Si los turnos
+        //    igualan la cantidad, la Asignacion queda Asignado (como en Coordinacion).
         await asignaciones.AsignarServicioAsync(
             new AsignarServicioRequest(asigId, new[]
             {
-                new TurnoCoordinadoRequest(req.ProfesionalId, 1, null, req.Fecha, (short)req.Fecha.Month, HoraInicio: req.HoraInicio)
+                new TurnoCoordinadoRequest(req.ProfesionalId, cantTurnos, null, req.Fecha, mesVig, HoraInicio: req.HoraInicio)
             }), actor, ct);
 
         return asigId;

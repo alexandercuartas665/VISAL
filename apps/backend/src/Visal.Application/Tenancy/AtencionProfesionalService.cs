@@ -336,7 +336,9 @@ public sealed class AtencionProfesionalService(
                     historiaClinicaIds,
                     t.ProfesionalId,
                     formatoEjecutado,
-                    a.Sucursal));
+                    a.Sucursal,
+                    t.FechaInicio,
+                    t.HoraInicio));
             }
         }
         return result;

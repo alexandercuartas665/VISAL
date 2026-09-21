@@ -100,7 +100,10 @@ public interface IAsignacionAgendasService
     Task<bool> CancelarCitaAsync(Guid asignacionTurnoId, Guid actor, CancellationToken ct = default);
 }
 
-/// <summary>Datos para agendar una cita desde un dia disponible del explorador.</summary>
+/// <summary>Datos para agendar una cita desde un dia disponible del explorador. Ademas de
+/// la fecha/hora del slot, trae las mismas piezas que el wizard de asignacion para que el
+/// registro quede completo (cantidad autorizada + turnos a coordinar, autorizacion, periodo,
+/// via de ingreso, pago/copago).</summary>
 public sealed record AgendarDesdeAgendaRequest(
     Guid ProfesionalId,
     Guid PacienteId,
@@ -114,4 +117,17 @@ public sealed record AgendarDesdeAgendaRequest(
     TimeOnly HoraInicio,
     string ViaIngresoCodigo,
     string ViaIngresoNombre,
-    string? Observaciones);
+    string? Observaciones,
+    // ----- piezas de la asignacion (fases) -----
+    int Cantidad = 1,
+    int CantidadTurnos = 1,
+    string? CodigoAutorizacion = null,
+    short? AnioServicio = null,
+    short? MesVigencia = null,
+    short? MesFinal = null,
+    DateOnly? FechaFinal = null,
+    string? TipoPago = null,
+    string? CategoriaCopago = null,
+    decimal? ValorPagoSugerido = null,
+    decimal? ValorPagoReal = null,
+    bool AutorizacionPendiente = false);

@@ -286,15 +286,46 @@
                         @if (_agSlots.Count == 0) { <div class="text-muted small mt-1">No quedan slots libres ese dia.</div> }
                     }
                 </div>
-                <div class="ase-f">
-                    <label>Via de ingreso (RIPS)</label>
-                    <select class="form-select form-select-sm" @bind="_agViaCod">
-                        <option value="">-- Selecciona --</option>
-                        @foreach (var v in _vias) { <option value="@v.Codigo">@v.Codigo - @v.Nombre</option> }
-                    </select>
+                <div class="asg-2col">
+                    <div class="ase-f"><label>Cantidad autorizada</label><input type="number" min="1" class="form-control form-control-sm" @bind="_agCantidad" /></div>
+                    <div class="ase-f"><label>Turnos a coordinar</label><input type="number" min="1" class="form-control form-control-sm" @bind="_agTurnos" /></div>
                 </div>
                 <div class="ase-f">
-                    <label>Nota <small class="text-muted">(opcional)</small></label>
+                    <label>N&deg; Autorizacion</label>
+                    <input class="form-control form-control-sm" @bind="_agAutoriz" placeholder="Numero de autorizacion" />
+                </div>
+                <div class="asg-3col">
+                    <div class="ase-f"><label>Ano</label><input type="number" class="form-control form-control-sm" @bind="_agAnio" /></div>
+                    <div class="ase-f"><label>Mes vigencia</label><input type="number" min="1" max="12" class="form-control form-control-sm" @bind="_agMesVig" /></div>
+                    <div class="ase-f"><label>Mes final</label><input type="number" min="1" max="12" class="form-control form-control-sm" @bind="_agMesFinal" /></div>
+                </div>
+                <div class="asg-2col">
+                    <div class="ase-f"><label>Fecha final <small class="text-muted">(opc.)</small></label><input type="date" class="form-control form-control-sm" @bind="_agFechaFinal" /></div>
+                    <div class="ase-f">
+                        <label>Via de ingreso (RIPS)</label>
+                        <select class="form-select form-select-sm" @bind="_agViaCod">
+                            <option value="">-- Selecciona --</option>
+                            @foreach (var v in _vias) { <option value="@v.Codigo">@v.Codigo - @v.Nombre</option> }
+                        </select>
+                    </div>
+                </div>
+                <div class="asg-3col">
+                    <div class="ase-f">
+                        <label>Tipo de pago</label>
+                        <select class="form-select form-select-sm" @bind="_agTipoPago">
+                            <option value="">(ninguno)</option>
+                            <option value="CUOTA">Cuota moderadora</option>
+                            <option value="COPAGO">Copago</option>
+                        </select>
+                    </div>
+                    <div class="ase-f"><label>Valor sugerido</label><input type="number" step="1" class="form-control form-control-sm" @bind="_agValorSug" disabled="@(_agTipoPago.Length == 0)" /></div>
+                    <div class="ase-f"><label>Valor real</label><input type="number" step="1" class="form-control form-control-sm" @bind="_agValorReal" disabled="@(_agTipoPago.Length == 0)" /></div>
+                </div>
+                <label class="ase-chk" style="display:flex;align-items:center;gap:6px;font-size:12px;">
+                    <input type="checkbox" @bind="_agAutPend" /> <span>Autorizacion pendiente (adjuntar PDF luego)</span>
+                </label>
+                <div class="ase-f">
+                    <label>Observaciones <small class="text-muted">(opcional)</small></label>
                     <input class="form-control form-control-sm" @bind="_agNota" placeholder="Observacion de la cita" />
                 </div>
             </div>
@@ -385,6 +416,7 @@
     .ase-form { display: flex; flex-direction: column; gap: 10px; }
     .ase-f label { display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 3px; }
     .asg-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .asg-3col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
     .asg-input-row { display: flex; gap: 6px; }
     .asg-ro { background: #f8fafc; }
     .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
@@ -523,6 +555,18 @@
     private List<CitaDelDiaDto> _citasDia = new();
     private List<SlotView> _slotsTodos = new();
     private sealed record SlotView(TimeOnly Hora, bool Ocupado);
+    // Piezas de la asignacion (fases)
+    private int _agCantidad = 1;
+    private int _agTurnos = 1;
+    private string _agAutoriz = "";
+    private int _agAnio = DateTime.Today.Year;
+    private int _agMesVig = DateTime.Today.Month;
+    private int? _agMesFinal;
+    private DateOnly? _agFechaFinal;
+    private string _agTipoPago = "";
+    private decimal? _agValorSug;
+    private decimal? _agValorReal;
+    private bool _agAutPend;
 
     protected override async Task OnInitializedAsync()
     {
@@ -692,6 +736,10 @@
         if (dia.Estado != EstadoDiaAgenda.Disponible && dia.Estado != EstadoDiaAgenda.Completo) { return; }
         _agFecha = dia.Fecha; _agError = null; _agSlot = ""; _agNota = "";
         _agViaCod = _vias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? _vias.FirstOrDefault()?.Codigo ?? "";
+        // Defaults de las piezas de asignacion.
+        _agCantidad = 1; _agTurnos = 1; _agAutoriz = "";
+        _agAnio = dia.Fecha.Year; _agMesVig = dia.Fecha.Month; _agMesFinal = null; _agFechaFinal = null;
+        _agTipoPago = ""; _agValorSug = null; _agValorReal = null; _agAutPend = false;
         await RefrescarDiaAsync();
         _agOpen = true;
     }
@@ -735,6 +783,10 @@
         if (_servicioSel is null || _pacSel is null || _contratoId == Guid.Empty) { _agError = "Falta paciente/contrato/servicio."; return; }
         if (string.IsNullOrWhiteSpace(_agSlot)) { _agError = "Selecciona la hora."; return; }
         if (string.IsNullOrWhiteSpace(_agViaCod)) { _agError = "Selecciona la via de ingreso."; return; }
+        if (_agCantidad < 1) { _agError = "La cantidad debe ser al menos 1."; return; }
+        if (_agTurnos < 1) { _agError = "Los turnos a coordinar deben ser al menos 1."; return; }
+        if (_agTurnos > _agCantidad) { _agError = "Los turnos a coordinar no pueden superar la cantidad."; return; }
+        if (_agMesVig < 1 || _agMesVig > 12) { _agError = "Mes de vigencia invalido (1-12)."; return; }
 
         var contrato = _contratos.First(c => c.ContratoId == _contratoId);
         var via = _vias.FirstOrDefault(v => v.Codigo == _agViaCod);
@@ -748,7 +800,16 @@
                 _servicioSel.ServicioContratoId.ToString(), _servicioSel.Descripcion,
                 _servicioSel.Modulo ?? "", _servicioSel.Modulo,
                 SedeNombre(), _agFecha, hora,
-                _agViaCod, via?.Nombre ?? _agViaCod, _agNota);
+                _agViaCod, via?.Nombre ?? _agViaCod, _agNota,
+                Cantidad: _agCantidad, CantidadTurnos: _agTurnos,
+                CodigoAutorizacion: _agAutoriz,
+                AnioServicio: (short)_agAnio, MesVigencia: (short)_agMesVig,
+                MesFinal: _agMesFinal is int mf ? (short)mf : null,
+                FechaFinal: _agFechaFinal,
+                TipoPago: _agTipoPago.Length == 0 ? null : _agTipoPago,
+                CategoriaCopago: null,
+                ValorPagoSugerido: _agValorSug, ValorPagoReal: _agValorReal,
+                AutorizacionPendiente: _agAutPend);
             await Svc.AgendarAsync(req, await ActorAsync());
             _ok = $"Cita agendada: {_agFecha:dd/MM/yyyy} {_agSlot}.";
             _agSlot = ""; _agNota = "";

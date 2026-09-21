@@ -496,6 +496,12 @@
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    // Candado para serializar las llamadas a BD: el DbContext de Blazor es scoped por
+    // circuito y dos operaciones solapadas (clics rapidos) chocan ("A second operation...").
+    private readonly System.Threading.SemaphoreSlim _gate = new(1, 1);
+    private async Task<T> Gate<T>(Func<Task<T>> op) { await _gate.WaitAsync(); try { return await op(); } finally { _gate.Release(); } }
+    private async Task Gate(Func<Task> op) { await _gate.WaitAsync(); try { await op(); } finally { _gate.Release(); } }
+
     private static readonly string[] Meses =
     { "Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre" };
 
@@ -593,7 +599,7 @@
     {
         var q = (_pacQuery ?? "").Trim();
         if (q.Length < 2) { _pacResultados = new(); return; }
-        try { _pacResultados = (await Asig.BuscarPacientesAsync(q, null)).ToList(); }
+        try { _pacResultados = (await Gate(() => Asig.BuscarPacientesAsync(q, null))).ToList(); }
         catch (Exception ex) { _error = ex.Message; }
     }
 
@@ -603,7 +609,7 @@
         _bqOpen = true;
         _bqDoc = _pacQuery ?? ""; _bqNombre = _bqTel = _bqCorreo = "";
         _bqContratoSel = new(); _bqGrid = new();
-        try { _bqContratos = (await Asig.ListContratosDisponiblesAsync()).ToList(); }
+        try { _bqContratos = (await Gate(() => Asig.ListContratosDisponiblesAsync())).ToList(); }
         catch (Exception ex) { _error = ex.Message; }
     }
 
@@ -631,7 +637,7 @@
                 string.IsNullOrWhiteSpace(_bqNombre) ? null : _bqNombre.Trim(),
                 string.IsNullOrWhiteSpace(_bqTel) ? null : _bqTel.Trim(),
                 string.IsNullOrWhiteSpace(_bqCorreo) ? null : _bqCorreo.Trim());
-            _bqGrid = (await Asig.BuscarPacientesAvanzadoAsync(f)).ToList();
+            _bqGrid = (await Gate(() => Asig.BuscarPacientesAvanzadoAsync(f))).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _bqBusy = false; }
@@ -639,7 +645,7 @@
 
     private async Task PickPacienteBqAsync(PacienteFiltroResultadoDto r)
     {
-        var p = await Asig.GetPacienteAsync(r.Id);
+        var p = await Gate(() => Asig.GetPacienteAsync(r.Id));
         if (p is not null)
         {
             _bqOpen = false;
@@ -650,7 +656,7 @@
     private async Task SeleccionarPacienteAsync(PacienteAsignacionDto p)
     {
         _error = null;
-        var full = p.Contratos.Count > 0 ? p : await Asig.GetPacienteAsync(p.Id);
+        var full = p.Contratos.Count > 0 ? p : await Gate(() => Asig.GetPacienteAsync(p.Id));
         _pacSel = full ?? p;
         _contratos = (full?.Contratos ?? p.Contratos ?? new List<ContratoMiniDto>()).ToList();
         _pacResultados = new();
@@ -676,7 +682,7 @@
     private async Task BuscarServiciosAsync()
     {
         if (_contratoId == Guid.Empty) { _serviciosContrato = new(); return; }
-        try { _serviciosContrato = (await Svc.ListarServiciosContratoConAgendaAsync(_contratoId, _svcFiltro)).ToList(); }
+        try { _serviciosContrato = (await Gate(() => Svc.ListarServiciosContratoConAgendaAsync(_contratoId, _svcFiltro))).ToList(); }
         catch (Exception ex) { _error = ex.Message; }
     }
 
@@ -696,8 +702,8 @@
         try
         {
             // Las tarjetas se calculan sobre la ventana desde HOY (2 meses).
-            _doctoresDisp = (await Svc.ListarDoctoresConDisponibilidadAsync(
-                _servicioSel.ServicioContratoId, _sucursalId, _hoy.Year, _hoy.Month, 2)).ToList();
+            _doctoresDisp = (await Gate(() => Svc.ListarDoctoresConDisponibilidadAsync(
+                _servicioSel.ServicioContratoId, _sucursalId, _hoy.Year, _hoy.Month, 2))).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _loadingDoctores = false; }
@@ -720,7 +726,7 @@
     {
         if (_doctorId == Guid.Empty) { _disp = null; return; }
         _loadingDisp = true; _error = null;
-        try { _disp = await Svc.ObtenerDisponibilidadAsync(_doctorId, _sucursalId, _anioInicio, _mesInicio, 2); }
+        try { _disp = await Gate(() => Svc.ObtenerDisponibilidadAsync(_doctorId, _sucursalId, _anioInicio, _mesInicio, 2)); }
         catch (Exception ex) { _error = ex.Message; }
         finally { _loadingDisp = false; }
     }
@@ -746,8 +752,8 @@
 
     private async Task RefrescarDiaAsync()
     {
-        _agSlots = (await Svc.SlotsDisponiblesAsync(_doctorId, _agFecha)).ToList();
-        _citasDia = (await Svc.ListarCitasDelDiaAsync(_doctorId, _agFecha)).ToList();
+        _agSlots = (await Gate(() => Svc.SlotsDisponiblesAsync(_doctorId, _agFecha))).ToList();
+        _citasDia = (await Gate(() => Svc.ListarCitasDelDiaAsync(_doctorId, _agFecha))).ToList();
         var ocupadas = _citasDia.Where(c => c.HoraInicio != null).Select(c => c.HoraInicio!.Value).ToHashSet();
         _slotsTodos = _agSlots.Select(h => new SlotView(h, false))
             .Concat(ocupadas.Select(h => new SlotView(h, true)))
@@ -768,7 +774,8 @@
         _agBusy = true; _agError = null;
         try
         {
-            await Svc.CancelarCitaAsync(c.AsignacionTurnoId, await ActorAsync());
+            var actorC = await ActorAsync();
+            await Gate(() => Svc.CancelarCitaAsync(c.AsignacionTurnoId, actorC));
             await RefrescarDiaAsync();
             await CargarDisponibilidadAsync();
             await CargarDoctoresAsync();
@@ -810,7 +817,8 @@
                 CategoriaCopago: null,
                 ValorPagoSugerido: _agValorSug, ValorPagoReal: _agValorReal,
                 AutorizacionPendiente: _agAutPend);
-            await Svc.AgendarAsync(req, await ActorAsync());
+            var actorA = await ActorAsync();
+            await Gate(() => Svc.AgendarAsync(req, actorA));
             _ok = $"Cita agendada: {_agFecha:dd/MM/yyyy} {_agSlot}.";
             _agSlot = ""; _agNota = "";
             await RefrescarDiaAsync();

@@ -95,6 +95,7 @@ public sealed class AsignacionAgendasService(
         if (meses < 1) { meses = 1; }
         var primerDia = new DateOnly(anioInicio, mesInicio, 1);
         var ultimoDia = primerDia.AddMonths(meses).AddDays(-1);
+        var hoy = DateOnly.FromDateTime(DateTime.Today);
 
         // Cupos por dia de la semana desde la agenda del profesional.
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
@@ -152,6 +153,8 @@ public sealed class AsignacionAgendasService(
             var dias = new List<DiaDisponibilidadDto>();
             for (var f = cursor; f <= finMes; f = f.AddDays(1))
             {
+                // Dias anteriores a hoy no se pueden agendar.
+                if (f < hoy) { dias.Add(new DiaDisponibilidadDto(f, EstadoDiaAgenda.SinTurno, 0, "Pasado")); continue; }
                 var cupos = cuposPorDow.TryGetValue(f.DayOfWeek, out var c) ? c : 0;
                 EstadoDiaAgenda estado; int cuposDia = 0; string? detalle = null;
                 if (festivosMapa.TryGetValue(f, out var fest)) { estado = EstadoDiaAgenda.Festivo; detalle = fest; }
@@ -198,11 +201,19 @@ public sealed class AsignacionAgendasService(
         {
             q = q.Where(s => s.CodigoServicio!.ToLower().Contains(f) || s.Descripcion.ToLower().Contains(f));
         }
-        var rows = await q.OrderBy(s => s.Descripcion).Take(200).ToListAsync(ct);
+        var rows = await q.ToListAsync(ct);
 
-        return rows.Select(s => new ServicioContratoAgendaDto(
-            s.Id, s.CodigoServicio, s.Descripcion, s.Modulo, s.Especialidad,
-            s.CodigoServicio != null && doctoresPorCodigo.TryGetValue(s.CodigoServicio, out var d) ? d : 0)).ToList();
+        // Deduplicar por CUPS: el contrato suele traer muchas filas con el mismo
+        // codigo_servicio; para el explorador basta una por codigo.
+        return rows
+            .GroupBy(s => s.CodigoServicio)
+            .Select(g => g.OrderBy(s => s.Descripcion).First())
+            .OrderBy(s => s.Descripcion)
+            .Take(200)
+            .Select(s => new ServicioContratoAgendaDto(
+                s.Id, s.CodigoServicio, s.Descripcion, s.Modulo, s.Especialidad,
+                s.CodigoServicio != null && doctoresPorCodigo.TryGetValue(s.CodigoServicio, out var d) ? d : 0))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresPorServicioContratoAsync(Guid servicioContratoId, CancellationToken ct = default)
@@ -249,6 +260,7 @@ public sealed class AsignacionAgendasService(
 
         var primerDia = new DateOnly(anioInicio, mesInicio, 1);
         var ultimoDia = primerDia.AddMonths(meses).AddDays(-1);
+        var hoyCard = DateOnly.FromDateTime(DateTime.Today);
 
         // Datos en bloque para todos los doctores.
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
@@ -290,6 +302,7 @@ public sealed class AsignacionAgendasService(
             int diasDisp = 0, cuposLibres = 0;
             for (var f = primerDia; f <= ultimoDia; f = f.AddDays(1))
             {
+                if (f < hoyCard) { continue; }
                 if (festivosMapa.ContainsKey(f) || inactivos.Contains(f)) { continue; }
                 if (novs.Any(n => n.FechaDesde <= f && n.FechaHasta >= f)) { continue; }
                 var cupos = dow.TryGetValue(f.DayOfWeek, out var c) ? c : 0;
@@ -338,6 +351,18 @@ public sealed class AsignacionAgendasService(
         if (string.IsNullOrWhiteSpace(req.ServicioContratoId)) { throw new InvalidOperationException("Selecciona el servicio del contrato."); }
         if (string.IsNullOrWhiteSpace(req.ViaIngresoCodigo)) { throw new InvalidOperationException("Selecciona la via de ingreso RIPS."); }
         if (string.IsNullOrWhiteSpace(req.Sucursal)) { throw new InvalidOperationException("Selecciona la sede."); }
+
+        // No se puede agendar en el pasado.
+        if (req.Fecha < DateOnly.FromDateTime(DateTime.Today))
+        { throw new InvalidOperationException("No se puede agendar en una fecha anterior a hoy."); }
+
+        // El paciente no puede tener otra cita a la misma fecha y hora (con cualquier doctor).
+        var choquePaciente = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.FechaInicio == req.Fecha && t.HoraInicio == req.HoraInicio)
+            .Join(db.Asignaciones.AsNoTracking(), t => t.AsignacionId, a => a.Id, (t, a) => a.PacienteId)
+            .AnyAsync(pid => pid == req.PacienteId, ct);
+        if (choquePaciente)
+        { throw new InvalidOperationException($"El paciente ya tiene una cita el {req.Fecha:dd/MM/yyyy} a las {req.HoraInicio:HH\\:mm}."); }
 
         var cantidad = req.Cantidad <= 0 ? 1 : req.Cantidad;
         var cantTurnos = req.CantidadTurnos <= 0 ? 1 : req.CantidadTurnos;

@@ -338,7 +338,8 @@ public sealed class AtencionProfesionalService(
                     formatoEjecutado,
                     a.Sucursal,
                     t.FechaInicio,
-                    t.HoraInicio));
+                    t.HoraInicio,
+                    t.LlegoEn != null));
             }
         }
         return result;

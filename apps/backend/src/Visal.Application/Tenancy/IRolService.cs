@@ -11,6 +11,7 @@ public static class ModuloCatalogo
         new("asignacion", "Asignacion de Servicios", "Operacion Clinica"),
         new("coordinacion", "Coordinacion", "Operacion Clinica"),
         new("asignacion-agendas", "Asignacion por agendas", "Operacion Clinica"),
+        new("recepcion", "Recepcion intramural", "Operacion Clinica"),
         new("profesionales", "Profesionales (atencion)", "Operacion Clinica"),
         new("turnos", "Turnos", "Operacion Clinica"),
         new("historias", "Historias Clinicas", "Operacion Clinica"),

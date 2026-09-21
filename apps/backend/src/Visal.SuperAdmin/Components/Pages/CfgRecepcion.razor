@@ -1,0 +1,264 @@
+@page "/recepcion"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.Agendas
+@inject IRecepcionService Svc
+@inject ISucursalService Sedes
+
+<PageTitle>Recepcion - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Recepcion intramural</h1>
+        <small class="text-muted">
+            Agenda del dia para marcar la llegada de los pacientes (se resalta en verde en Atencion)
+            y reprogramar citas.
+        </small>
+    </div>
+</div>
+
+@if (_error is not null) { <div class="ase-alert">@_error</div> }
+@if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+<div class="rc-tabs">
+    <button class="rc-tab @(_tab == "llegadas" ? "rc-tab-on" : "")" @onclick='() => _tab = "llegadas"'>Llegadas</button>
+    <button class="rc-tab @(_tab == "reprog" ? "rc-tab-on" : "")" @onclick='() => _tab = "reprog"'>Reprogramacion</button>
+</div>
+
+<div class="ase-card" style="padding:14px 16px;">
+    <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;margin-bottom:12px;">
+        <div class="ase-f"><label>Fecha</label><input type="date" class="form-control form-control-sm" @bind="_fecha" @bind:after="CargarAsync" /></div>
+        <div class="ase-f">
+            <label>Sede</label>
+            <select class="form-select form-select-sm" style="max-width:200px;" @bind="_sucursalId" @bind:after="CargarAsync">
+                <option value="@Guid.Empty">Todas</option>
+                @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
+            </select>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="IrHoy">Hoy</button>
+        <div class="text-muted small" style="margin-left:auto;align-self:center;">
+            @_citas.Count cita(s) &middot; @_citas.Count(c => c.Llego) llegada(s)
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_citas.Count == 0)
+    {
+        <div class="ase-empty" style="padding:24px;">No hay citas agendadas para este dia@(_sucursalId == Guid.Empty ? "" : " en esta sede").</div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:70px">Hora</th>
+                        <th>Paciente</th>
+                        <th>Doctor</th>
+                        <th>Servicio</th>
+                        <th style="width:110px" class="text-center">Estado</th>
+                        <th style="width:150px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in _citas)
+                    {
+                        <tr class="@(c.Llego ? "rc-llego" : "")">
+                            <td class="mono" style="font-weight:700;">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</td>
+                            <td><strong>@c.PacienteNombre</strong> <span class="text-muted">@c.PacienteDocumento</span></td>
+                            <td>@c.DoctorNombre</td>
+                            <td class="text-muted">@c.ServicioNombre</td>
+                            <td class="text-center">
+                                @if (c.Llego) { <span class="badge bg-success">Llego</span> }
+                                else { <span class="badge bg-secondary">Programado</span> }
+                            </td>
+                            <td class="text-end">
+                                @if (_tab == "llegadas")
+                                {
+                                    @if (c.Llego)
+                                    {
+                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false)" disabled="@_busy">Quitar llegada</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true)" disabled="@_busy">Marcar llegada</button>
+                                    }
+                                }
+                                else
+                                {
+                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@* ============= MODAL REPROGRAMAR ============= *@
+@if (_reprogOpen && _reprogCita is not null)
+{
+    <div class="cie-backdrop" @onclick="() => _reprogOpen = false"></div>
+    <div class="cie-modal" style="width:460px;max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>Reprogramar cita</h3>
+            <button class="cie-modal-close" @onclick="() => _reprogOpen = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="text-muted small" style="margin-bottom:10px;">
+                @_reprogCita.PacienteNombre &middot; @_reprogCita.DoctorNombre<br />
+                Actual: @_reprogCita.Fecha.ToString("dd/MM/yyyy") @_reprogCita.Hora?.ToString("HH\\:mm")
+            </div>
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Nueva fecha</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_reprogFecha" @bind:after="CargarSlotsReprogAsync" />
+                </div>
+                <div class="ase-f">
+                    <label>Nueva hora</label>
+                    @if (_reprogSlots.Count == 0)
+                    {
+                        <div class="text-muted small">Sin horarios libres ese dia para el doctor.</div>
+                    }
+                    else
+                    {
+                        <div class="rc-slots">
+                            @foreach (var s in _reprogSlots)
+                            {
+                                var hhmm = s.ToString("HH\\:mm");
+                                <div class="rc-slot @(_reprogHora == hhmm ? "rc-slot-sel" : "")" @onclick="() => _reprogHora = hhmm">@hhmm</div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            @if (_reprogError is not null) { <div class="text-danger small mt-2">@_reprogError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _reprogOpen = false">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="ConfirmarReprogAsync" disabled="@(_busy || string.IsNullOrEmpty(_reprogHora))">Reprogramar</button>
+        </div>
+    </div>
+}
+
+<style>
+    .rc-tabs { display: flex; gap: 4px; border-bottom: 2px solid #e2e8f0; margin-bottom: 14px; }
+    .rc-tab { background: none; border: none; padding: 8px 18px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .rc-tab-on { color: #2563eb; border-bottom-color: #2563eb; }
+    .rc-llego { background: #f0fdf4; }
+    .rc-llego td:first-child { box-shadow: inset 3px 0 0 #22c55e; }
+    .ase-f label { display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 3px; }
+    .rc-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+    .rc-slot { text-align: center; padding: 7px 4px; border-radius: 8px; font-size: 12px; font-weight: 700; border: 1px solid #86efac; background: #f0fdf4; color: #166534; cursor: pointer; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .rc-slot:hover { background: #dcfce7; }
+    .rc-slot-sel { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+    .ase-form { display: flex; flex-direction: column; gap: 12px; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _tab = "llegadas";
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+
+    private DateOnly _fecha = DateOnly.FromDateTime(DateTime.Today);
+    private Guid _sucursalId = Guid.Empty;
+    private List<SucursalDto> _sedes = new();
+    private List<CitaRecepcionDto> _citas = new();
+
+    // Reprogramar
+    private bool _reprogOpen;
+    private CitaRecepcionDto? _reprogCita;
+    private DateOnly _reprogFecha = DateOnly.FromDateTime(DateTime.Today);
+    private List<TimeOnly> _reprogSlots = new();
+    private string _reprogHora = "";
+    private string? _reprogError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        await CargarAsync();
+        _loading = false;
+    }
+
+    private async Task CargarAsync()
+    {
+        _error = _ok = null;
+        try { _citas = (await Svc.ListarCitasDelDiaAsync(_fecha, _sucursalId == Guid.Empty ? null : _sucursalId)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task IrHoy() { _fecha = DateOnly.FromDateTime(DateTime.Today); await CargarAsync(); }
+
+    private async Task MarcarAsync(CitaRecepcionDto c, bool llego)
+    {
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.MarcarLlegadaAsync(c.AsignacionTurnoId, llego, await ActorAsync());
+            _ok = llego ? $"Llegada marcada: {c.PacienteNombre}." : $"Llegada retirada: {c.PacienteNombre}.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ---- Reprogramar ----
+    private async Task AbrirReprogAsync(CitaRecepcionDto c)
+    {
+        _reprogCita = c; _reprogError = null; _reprogHora = "";
+        _reprogFecha = c.Fecha;
+        await CargarSlotsReprogAsync();
+        _reprogOpen = true;
+    }
+
+    private async Task CargarSlotsReprogAsync()
+    {
+        if (_reprogCita is null) { return; }
+        _reprogHora = "";
+        try { _reprogSlots = (await Svc.SlotsParaReprogramarAsync(_reprogCita.AsignacionTurnoId, _reprogFecha)).ToList(); }
+        catch (Exception ex) { _reprogError = ex.Message; }
+    }
+
+    private async Task ConfirmarReprogAsync()
+    {
+        if (_reprogCita is null || string.IsNullOrEmpty(_reprogHora)) { return; }
+        _busy = true; _reprogError = null;
+        try
+        {
+            var hora = TimeOnly.ParseExact(_reprogHora, "HH\\:mm");
+            await Svc.ReprogramarAsync(_reprogCita.AsignacionTurnoId, _reprogFecha, hora, await ActorAsync());
+            _reprogOpen = false;
+            _ok = $"Cita reprogramada a {_reprogFecha:dd/MM/yyyy} {_reprogHora}.";
+            await CargarAsync();
+        }
+        catch (Exception ex) { _reprogError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        var st = await AuthState;
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+}

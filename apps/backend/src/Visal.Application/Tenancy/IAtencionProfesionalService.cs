@@ -91,7 +91,10 @@ public sealed record MiServicioAsignadoDto(
     DateOnly? FechaProgramada = null,
     /// <summary>Hora programada de la cita (AsignacionTurno.HoraInicio). Junto con
     /// <see cref="FechaProgramada"/> forma la "fecha de programacion de la cita".</summary>
-    TimeOnly? HoraProgramada = null);
+    TimeOnly? HoraProgramada = null,
+    /// <summary>El paciente ya llego (Recepcion marco AsignacionTurno.LlegoEn). Atencion
+    /// resalta la fila en verde para indicar que puede ser atendido.</summary>
+    bool Llego = false);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

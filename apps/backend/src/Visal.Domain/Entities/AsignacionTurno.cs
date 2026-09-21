@@ -38,6 +38,11 @@ public class AsignacionTurno : TenantEntity
     /// clasica, que trabaja a granularidad de dia. Se persiste como time sin zona.</summary>
     public TimeOnly? HoraInicio { get; set; }
 
+    /// <summary>Momento en que Recepcion marco la llegada del paciente para esta cita.
+    /// Null = no ha llegado. Cuando esta seteado, Atencion resalta la fila en verde
+    /// para indicar que el paciente puede ser atendido.</summary>
+    public DateTimeOffset? LlegoEn { get; set; }
+
     /// <summary>Tarifa pactada para este turno. Se pre-llena con la del ServicioContrato
     /// al momento de coordinarlo, pero el coordinador puede ajustarla manualmente
     /// (por descuento, tarifa especial, etc.). Persiste el valor final.</summary>

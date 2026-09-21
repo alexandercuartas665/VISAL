@@ -144,6 +144,14 @@
             </NavLink>
         }
 
+        @if (Puede("recepcion"))
+        {
+            <NavLink class="visal-nav-link" href="recepcion">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="m9 12 3 2 3-2"/></svg>
+                <span>Recepcion</span>
+            </NavLink>
+        }
+
         @* Atencion visible para profesionales (ven sus turnos) y admin de agencia/operativo
            (ven todos los turnos del tenant — vista supervisora). El permiso
            "profesionales" gate el CRUD del catalogo de Profesionales, no este

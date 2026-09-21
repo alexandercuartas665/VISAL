@@ -3,6 +3,8 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using Visal.Application.Tenancy.Menu
 @using Visal.SuperAdmin.Menu
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Forms
 @inject INavMenuConfigService Svc
 
 <PageTitle>Menu lateral - Visal</PageTitle>
@@ -13,6 +15,18 @@
         <h1 class="ase-title">Menu lateral</h1>
     </div>
     <div class="ml-actions">
+        @* Exportar: descarga el menu actual como JSON (para llevarlo a otra agencia/entorno,
+           p.ej. de local a produccion). Es un enlace data: nativo, sin servidor. *@
+        <a class="btn btn-outline-secondary btn-sm @(_tree is null ? "disabled" : "")"
+           href="@ExportHref()" download="visal-menu-lateral.json"
+           title="Descargar este menu como archivo JSON">Exportar</a>
+        @* Importar: sube un JSON exportado y lo carga en el editor (no lo guarda hasta
+           pulsar "Guardar cambios"). *@
+        <label class="btn btn-outline-secondary btn-sm @(_busy ? "disabled" : "")"
+               title="Cargar un menu desde un archivo JSON exportado" style="margin:0;">
+            Importar
+            <InputFile OnChange="OnImportFile" accept=".json,application/json" style="display:none" disabled="@_busy" />
+        </label>
         <button class="btn btn-outline-secondary btn-sm" @onclick="Recargar" disabled="@_busy">Descartar cambios</button>
         <button class="btn btn-outline-danger btn-sm" @onclick="Restaurar" disabled="@_busy">Restaurar por defecto</button>
         <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">Guardar cambios</button>
@@ -214,6 +228,53 @@
     private string _nuevoLinkNombre = "";
     private string _nuevoLinkUrl = "";
     private string? _nuevoLinkGrupoId;
+
+    // Opciones de (de)serializacion para Exportar/Importar. camelCase + indentado para
+    // que el archivo sea legible; case-insensitive al leer para tolerar cualquier origen.
+    private static readonly JsonSerializerOptions _jsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
+    /// <summary>data: URL con el menu actual serializado, para el enlace de descarga
+    /// (Exportar). Sin JS ni round-trip al servidor. Se recalcula en cada render — el
+    /// arbol es pequeno (unos KB), asi que el costo es despreciable.</summary>
+    private string ExportHref()
+    {
+        if (_tree is null) { return "#"; }
+        var json = JsonSerializer.Serialize(_tree, _jsonOpts);
+        return "data:application/json;charset=utf-8," + Uri.EscapeDataString(json);
+    }
+
+    /// <summary>Importar: carga un JSON exportado en el editor. NO lo guarda — el usuario
+    /// revisa y pulsa "Guardar cambios". Asi un archivo de local se puede llevar a
+    /// produccion de forma segura.</summary>
+    private async Task OnImportFile(InputFileChangeEventArgs e)
+    {
+        _msg = _error = null;
+        try
+        {
+            var file = e.File;
+            const long max = 2L * 1024 * 1024;
+            if (file.Size <= 0 || file.Size > max) { _error = "El archivo debe pesar entre 1 byte y 2 MB."; return; }
+            using var reader = new StreamReader(file.OpenReadStream(max));
+            var json = await reader.ReadToEndAsync();
+            NavMenuTreeDto? tree;
+            try { tree = JsonSerializer.Deserialize<NavMenuTreeDto>(json, _jsonOpts); }
+            catch (Exception jex) { _error = "El archivo no es un JSON de menu valido: " + jex.Message; return; }
+            if (tree is null || tree.Groups is null || tree.Groups.Count == 0)
+            {
+                _error = "El archivo no contiene grupos de menu.";
+                return;
+            }
+            _tree = tree;
+            _nuevoLinkGrupoId = _tree.Groups.FirstOrDefault()?.Id;
+            _msg = $"Menu importado ({tree.Groups.Count} grupos). Revisa y pulsa \"Guardar cambios\" para aplicarlo a esta agencia.";
+        }
+        catch (Exception ex) { _error = "No se pudo importar el archivo: " + ex.Message; }
+    }
 
     protected override async Task OnInitializedAsync() => await CargarAsync();
 

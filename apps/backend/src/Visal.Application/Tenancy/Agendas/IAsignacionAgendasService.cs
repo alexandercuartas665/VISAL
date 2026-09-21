@@ -36,6 +36,10 @@ public sealed record DoctorDisponibilidadDto(
 /// <summary>Disponibilidad de un dia concreto.</summary>
 public sealed record DiaDisponibilidadDto(DateOnly Fecha, EstadoDiaAgenda Estado, int Cupos, string? Detalle);
 
+/// <summary>Una cita ya agendada en un dia (para ver/cancelar).</summary>
+public sealed record CitaDelDiaDto(
+    Guid AsignacionTurnoId, TimeOnly? HoraInicio, string? PacienteNombre, string ServicioNombre, string Estado);
+
 /// <summary>Un mes del explorador (dias en orden).</summary>
 public sealed record MesDisponibilidadDto(int Anio, int Mes, IReadOnlyList<DiaDisponibilidadDto> Dias);
 
@@ -87,6 +91,13 @@ public interface IAsignacionAgendasService
     /// crea la Asignacion (lote de 1) y su AsignacionTurno con el doctor, la fecha y la hora.
     /// Devuelve el Id de la Asignacion creada.</summary>
     Task<Guid> AgendarAsync(AgendarDesdeAgendaRequest req, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Citas ya agendadas de un doctor en una fecha (para ver/cancelar), ordenadas por hora.</summary>
+    Task<IReadOnlyList<CitaDelDiaDto>> ListarCitasDelDiaAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default);
+
+    /// <summary>Cancela una cita: borra su AsignacionTurno; si la Asignacion queda sin turnos la
+    /// elimina (y su lote si queda vacio), si no, la regresa a Pendiente. true si existia.</summary>
+    Task<bool> CancelarCitaAsync(Guid asignacionTurnoId, Guid actor, CancellationToken ct = default);
 }
 
 /// <summary>Datos para agendar una cita desde un dia disponible del explorador.</summary>

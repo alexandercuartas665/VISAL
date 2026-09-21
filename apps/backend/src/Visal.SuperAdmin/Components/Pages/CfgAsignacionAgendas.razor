@@ -203,9 +203,9 @@
                             @foreach (var dia in mes.Dias)
                             {
                                 var hoy = dia.Fecha == _hoy ? " cal-hoy" : "";
-                                var clic = dia.Estado == EstadoDiaAgenda.Disponible ? " cal-clic" : "";
+                                var clic = (dia.Estado == EstadoDiaAgenda.Disponible || dia.Estado == EstadoDiaAgenda.Completo) ? " cal-clic" : "";
                                 var clase = $"cal-cell {ClaseDia(dia.Estado)}{hoy}{clic}";
-                                <div class="@clase" title="@Tooltip(dia)" @onclick="() => AbrirAgendar(dia)">
+                                <div class="@clase" title="@Tooltip(dia)" @onclick="() => AbrirDiaAsync(dia)">
                                     <div class="cal-num">@dia.Fecha.Day</div>
                                     @if (dia.Estado == EstadoDiaAgenda.Disponible) { <div class="aa-cupos">@dia.Cupos</div> }
                                 </div>
@@ -232,7 +232,7 @@
     <div class="cie-backdrop" @onclick="() => _agOpen = false"></div>
     <div class="cie-modal" style="width:520px; max-width:96vw;">
         <div class="cie-modal-h">
-            <h3>Agendar cita &middot; @_agFecha.ToString("dd/MM/yyyy")</h3>
+            <h3>Citas del dia &middot; @_agFecha.ToString("dd/MM/yyyy")</h3>
             <button class="cie-modal-close" @onclick="() => _agOpen = false">&times;</button>
         </div>
         <div class="cie-modal-body">
@@ -240,6 +240,32 @@
                 @_pacSel?.NombreCompleto &middot; @_doctorSel?.NombreCompleto<br />
                 <span class="mono">@_servicioSel.Codigo</span> @_servicioSel.Descripcion &middot; @SedeNombre()
             </div>
+            @* ----- Citas ya agendadas ese dia ----- *@
+            <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Citas del dia (@_citasDia.Count)</div>
+            @if (_citasDia.Count == 0)
+            {
+                <div class="ase-empty" style="padding:10px;margin-bottom:12px;">Sin citas agendadas este dia.</div>
+            }
+            else
+            {
+                <div class="aa-citas">
+                    @foreach (var c in _citasDia)
+                    {
+                        <div class="aa-cita">
+                            <span class="mono" style="font-weight:700;">@(c.HoraInicio?.ToString("HH\\:mm") ?? "--:--")</span>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:600;">@(string.IsNullOrWhiteSpace(c.PacienteNombre) ? "(sin paciente)" : c.PacienteNombre)</div>
+                                <div class="text-muted" style="font-size:11px;">@c.ServicioNombre</div>
+                            </div>
+                            <span class="badge bg-secondary">@c.Estado</span>
+                            <button class="btn btn-sm btn-link text-danger" @onclick="() => CancelarCitaAsync(c)" disabled="@_agBusy">Cancelar</button>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* ----- Agendar (si quedan cupos) ----- *@
+            <div style="font-weight:700;font-size:13px;margin:6px 0;">Agendar nueva cita</div>
             <div class="ase-form">
                 <div class="ase-f">
                     <label>Hora</label>
@@ -264,8 +290,8 @@
             @if (_agError is not null) { <div class="text-danger small mt-2">@_agError</div> }
         </div>
         <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
-            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _agOpen = false">Cancelar</button>
-            <button class="btn btn-primary btn-sm" @onclick="GuardarAgendaAsync" disabled="@_agBusy">Agendar</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _agOpen = false">Cerrar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAgendaAsync" disabled="@(_agBusy || _agSlots.Count == 0)">Agendar</button>
         </div>
     </div>
 }
@@ -413,6 +439,9 @@
     .bq-crow { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400 !important; text-transform: none !important; color: #0f172a; padding: 2px 0; }
     .bq-campos { display: flex; flex-direction: column; gap: 8px; }
     .bq-results { max-height: 340px; overflow: auto; }
+    .aa-citas { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; max-height: 200px; overflow: auto; }
+    .aa-cita { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .aa-cita:last-child { border-bottom: none; }
 </style>
 
 @code {
@@ -474,6 +503,7 @@
     private string _agSlot = "";
     private string _agViaCod = "";
     private string _agNota = "";
+    private List<CitaDelDiaDto> _citasDia = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -636,14 +666,35 @@
     private async Task MesSiguiente() { if (++_mesInicio > 12) { _mesInicio = 1; _anioInicio++; } await CargarDisponibilidadAsync(); }
     private async Task IrHoy() { _anioInicio = _hoy.Year; _mesInicio = _hoy.Month; await CargarDisponibilidadAsync(); }
 
-    // ---------------- Agendar ----------------
-    private async Task AbrirAgendar(DiaDisponibilidadDto dia)
+    // ---------------- Ver / agendar / cancelar citas del dia ----------------
+    private async Task AbrirDiaAsync(DiaDisponibilidadDto dia)
     {
-        if (dia.Estado != EstadoDiaAgenda.Disponible || _servicioSel is null) { return; }
+        if (_servicioSel is null) { return; }
+        if (dia.Estado != EstadoDiaAgenda.Disponible && dia.Estado != EstadoDiaAgenda.Completo) { return; }
         _agFecha = dia.Fecha; _agError = null; _agSlot = ""; _agNota = "";
         _agViaCod = _vias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? _vias.FirstOrDefault()?.Codigo ?? "";
-        _agSlots = (await Svc.SlotsDisponiblesAsync(_doctorId, _agFecha)).ToList();
+        await RefrescarDiaAsync();
         _agOpen = true;
+    }
+
+    private async Task RefrescarDiaAsync()
+    {
+        _agSlots = (await Svc.SlotsDisponiblesAsync(_doctorId, _agFecha)).ToList();
+        _citasDia = (await Svc.ListarCitasDelDiaAsync(_doctorId, _agFecha)).ToList();
+    }
+
+    private async Task CancelarCitaAsync(CitaDelDiaDto c)
+    {
+        _agBusy = true; _agError = null;
+        try
+        {
+            await Svc.CancelarCitaAsync(c.AsignacionTurnoId, await ActorAsync());
+            await RefrescarDiaAsync();
+            await CargarDisponibilidadAsync();
+            await CargarDoctoresAsync();
+        }
+        catch (Exception ex) { _agError = ex.Message; }
+        finally { _agBusy = false; }
     }
 
     private async Task GuardarAgendaAsync()
@@ -667,8 +718,9 @@
                 SedeNombre(), _agFecha, hora,
                 _agViaCod, via?.Nombre ?? _agViaCod, _agNota);
             await Svc.AgendarAsync(req, await ActorAsync());
-            _agOpen = false;
             _ok = $"Cita agendada: {_agFecha:dd/MM/yyyy} {_agSlot}.";
+            _agSlot = ""; _agNota = "";
+            await RefrescarDiaAsync();
             await CargarDisponibilidadAsync();
             await CargarDoctoresAsync();
         }

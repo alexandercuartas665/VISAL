@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
+using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy.Agendas;
 
@@ -362,6 +363,73 @@ public sealed class AsignacionAgendasService(
             }), actor, ct);
 
         return asigId;
+    }
+
+    public async Task<IReadOnlyList<CitaDelDiaDto>> ListarCitasDelDiaAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default)
+    {
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.ProfesionalId == profesionalId && t.FechaInicio == fecha)
+            .ToListAsync(ct);
+        if (turnos.Count == 0) { return Array.Empty<CitaDelDiaDto>(); }
+
+        var asigIds = turnos.Select(t => t.AsignacionId).Distinct().ToList();
+        var asigs = await db.Asignaciones.AsNoTracking()
+            .Where(a => asigIds.Contains(a.Id))
+            .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.Estado })
+            .ToListAsync(ct);
+        var asigById = asigs.ToDictionary(a => a.Id);
+        var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
+        var pacNombre = await db.Pacientes.AsNoTracking()
+            .Where(p => pacIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+
+        return turnos
+            .OrderBy(t => t.HoraInicio ?? TimeOnly.MaxValue)
+            .Select(t =>
+            {
+                asigById.TryGetValue(t.AsignacionId, out var a);
+                var pac = a is not null && pacNombre.TryGetValue(a.PacienteId, out var n) ? n : null;
+                return new CitaDelDiaDto(t.Id, t.HoraInicio, pac,
+                    a?.NombreServicio ?? "", a?.Estado.ToString() ?? "");
+            }).ToList();
+    }
+
+    public async Task<bool> CancelarCitaAsync(Guid asignacionTurnoId, Guid actor, CancellationToken ct = default)
+    {
+        var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
+        if (turno is null) { return false; }
+        var asigId = turno.AsignacionId;
+        db.AsignacionTurnos.Remove(turno);
+        await db.SaveChangesAsync(ct);
+
+        var restantes = await db.AsignacionTurnos.CountAsync(t => t.AsignacionId == asigId, ct);
+        if (restantes == 0)
+        {
+            var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asigId, ct);
+            if (asig is not null)
+            {
+                var loteId = asig.LoteId;
+                db.Asignaciones.Remove(asig);
+                await db.SaveChangesAsync(ct);
+                var enLote = await db.Asignaciones.CountAsync(a => a.LoteId == loteId, ct);
+                if (enLote == 0)
+                {
+                    var lote = await db.AsignacionLotes.FirstOrDefaultAsync(l => l.Id == loteId, ct);
+                    if (lote is not null) { db.AsignacionLotes.Remove(lote); await db.SaveChangesAsync(ct); }
+                }
+            }
+        }
+        else
+        {
+            // Aun quedan turnos: la asignacion ya no esta completa -> vuelve a Pendiente.
+            var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asigId, ct);
+            if (asig is not null && asig.Estado == AsignacionEstado.Asignado)
+            {
+                asig.Estado = AsignacionEstado.Pendiente;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        return true;
     }
 
     /// <summary>Match tolerante plural/singular entre el nombre de un tipo de profesional

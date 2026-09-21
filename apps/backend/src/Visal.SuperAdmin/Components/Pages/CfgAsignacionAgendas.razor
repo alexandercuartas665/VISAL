@@ -35,6 +35,7 @@
                     <div class="asg-input-row">
                         <input class="form-control form-control-sm mono" placeholder="Busqueda por identificacion"
                                @bind="_pacQuery" @bind:event="oninput" @onkeyup="BuscarPacientesKey" />
+                        <button class="btn btn-outline-secondary btn-sm" title="Busqueda avanzada" @onclick="OpenBuscadorModal">&#128270;</button>
                         <button class="btn btn-primary btn-sm" title="Buscar" @onclick="BuscarPacientesAsync">&#128269;</button>
                     </div>
                     @if (_pacResultados.Count > 0)
@@ -248,6 +249,74 @@
         </div>
     </div>
 }
+@* ============= MODAL BUSCAR PACIENTES (avanzado) ============= *@
+@if (_bqOpen)
+{
+    <div class="cie-backdrop" @onclick="() => _bqOpen = false"></div>
+    <div class="cie-modal bq-modal">
+        <div class="cie-modal-h">
+            <h3>BUSCAR PACIENTES</h3>
+            <button class="cie-modal-close" @onclick="() => _bqOpen = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="bq-filtros">
+                <div class="bq-grid">
+                    <div class="bq-contratos">
+                        <label>Contrato</label>
+                        <div class="bq-contratos-list">
+                            @if (_bqContratos.Count == 0) { <div class="text-muted small">Sin contratos activos.</div> }
+                            @foreach (var c in _bqContratos)
+                            {
+                                <label class="bq-crow">
+                                    <input type="checkbox" checked="@_bqContratoSel.Contains(c.ContratoId)" @onchange="e => ToggleContratoBq(c.ContratoId, e)" />
+                                    <span>@c.CodigoContrato - @c.AseguradoraNombre</span>
+                                </label>
+                            }
+                        </div>
+                    </div>
+                    <div class="bq-campos">
+                        <div class="ase-f"><label>No Documento</label><input class="form-control form-control-sm" @bind="_bqDoc" @onkeyup="OnBqKey" /></div>
+                        <div class="ase-f"><label>Nombre</label><input class="form-control form-control-sm" @bind="_bqNombre" @onkeyup="OnBqKey" /></div>
+                        <div class="ase-f"><label>Telefono</label><input class="form-control form-control-sm" @bind="_bqTel" @onkeyup="OnBqKey" /></div>
+                        <div class="ase-f"><label>Correo</label><input class="form-control form-control-sm" @bind="_bqCorreo" @onkeyup="OnBqKey" /></div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button class="btn btn-primary btn-sm" @onclick="BuscarEnBqAsync" disabled="@_bqBusy">@(_bqBusy ? "..." : "Aplicar filtro")</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarBq">Limpiar filtro</button>
+                </div>
+            </div>
+            <div class="bq-results">
+                <table class="table table-sm asg-tbl">
+                    <thead>
+                        <tr><th style="width:44px"></th><th>Documento</th><th>Nombre</th><th>Contrato</th><th>Telefono</th><th>Correo</th></tr>
+                    </thead>
+                    <tbody>
+                        @if (_bqGrid.Count == 0)
+                        {
+                            <tr><td colspan="6" class="ase-empty" style="padding:14px;">@(_bqBusy ? "Buscando..." : "Aplica un filtro para ver pacientes.")</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var r in _bqGrid)
+                            {
+                                <tr>
+                                    <td><button class="btn btn-primary btn-sm" title="Seleccionar" @onclick="() => PickPacienteBqAsync(r)">&#10003;</button></td>
+                                    <td class="mono">@r.Documento</td>
+                                    <td>@r.NombreCompleto</td>
+                                    <td>@(r.Contrato ?? "-")</td>
+                                    <td>@(r.Telefono ?? "-")</td>
+                                    <td>@(r.Correo ?? "-")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
 @if (_ok is not null) { <div class="ase-ok" style="position:fixed;bottom:16px;right:16px;z-index:1200;">@_ok</div> }
 
 <style>
@@ -303,6 +372,15 @@
     .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
     .cie-modal-body { padding: 18px; overflow: auto; }
     .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+    .bq-modal { width: 860px; }
+    .bq-filtros { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+    .bq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @@media (max-width: 700px) { .bq-grid { grid-template-columns: 1fr; } }
+    .bq-contratos label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; }
+    .bq-contratos-list { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; max-height: 150px; overflow: auto; padding: 6px; margin-top: 3px; }
+    .bq-crow { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400 !important; text-transform: none !important; color: #0f172a; padding: 2px 0; }
+    .bq-campos { display: flex; flex-direction: column; gap: 8px; }
+    .bq-results { max-height: 340px; overflow: auto; }
 </style>
 
 @code {
@@ -346,6 +424,14 @@
     // Vias RIPS
     private List<CatalogoPacienteDto> _vias = new();
 
+    // Modal buscador avanzado
+    private bool _bqOpen;
+    private bool _bqBusy;
+    private List<ContratoMiniDto> _bqContratos = new();
+    private HashSet<Guid> _bqContratoSel = new();
+    private string _bqDoc = "", _bqNombre = "", _bqTel = "", _bqCorreo = "";
+    private List<PacienteFiltroResultadoDto> _bqGrid = new();
+
     // Modal agendar
     private bool _agOpen;
     private bool _agBusy;
@@ -385,10 +471,60 @@
         catch (Exception ex) { _error = ex.Message; }
     }
 
+    // ---------------- Buscador avanzado ----------------
+    private async Task OpenBuscadorModal()
+    {
+        _bqOpen = true;
+        _bqDoc = _pacQuery ?? ""; _bqNombre = _bqTel = _bqCorreo = "";
+        _bqContratoSel = new(); _bqGrid = new();
+        try { _bqContratos = (await Asig.ListContratosDisponiblesAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnBqKey(KeyboardEventArgs e) { if (e.Key == "Enter") { await BuscarEnBqAsync(); } }
+
+    private void ToggleContratoBq(Guid contratoId, ChangeEventArgs e)
+    {
+        if (e.Value is bool b && b) { _bqContratoSel.Add(contratoId); } else { _bqContratoSel.Remove(contratoId); }
+    }
+
+    private void LimpiarBq()
+    {
+        _bqDoc = _bqNombre = _bqTel = _bqCorreo = "";
+        _bqContratoSel = new(); _bqGrid = new();
+    }
+
+    private async Task BuscarEnBqAsync()
+    {
+        _bqBusy = true;
+        try
+        {
+            var f = new BusquedaPacienteFiltro(
+                _bqContratoSel.Count > 0 ? _bqContratoSel.ToList() : null,
+                string.IsNullOrWhiteSpace(_bqDoc) ? null : _bqDoc.Trim(),
+                string.IsNullOrWhiteSpace(_bqNombre) ? null : _bqNombre.Trim(),
+                string.IsNullOrWhiteSpace(_bqTel) ? null : _bqTel.Trim(),
+                string.IsNullOrWhiteSpace(_bqCorreo) ? null : _bqCorreo.Trim());
+            _bqGrid = (await Asig.BuscarPacientesAvanzadoAsync(f)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _bqBusy = false; }
+    }
+
+    private async Task PickPacienteBqAsync(PacienteFiltroResultadoDto r)
+    {
+        var p = await Asig.GetPacienteAsync(r.Id);
+        if (p is not null)
+        {
+            _bqOpen = false;
+            await SeleccionarPacienteAsync(p);
+        }
+    }
+
     private async Task SeleccionarPacienteAsync(PacienteAsignacionDto p)
     {
         _error = null;
-        var full = await Asig.GetPacienteAsync(p.Id);
+        var full = p.Contratos.Count > 0 ? p : await Asig.GetPacienteAsync(p.Id);
         _pacSel = full ?? p;
         _contratos = (full?.Contratos ?? p.Contratos ?? new List<ContratoMiniDto>()).ToList();
         _pacResultados = new();

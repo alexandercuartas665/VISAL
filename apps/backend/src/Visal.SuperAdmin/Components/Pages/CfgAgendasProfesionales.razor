@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy.Agendas
 @inject IAgendaProfesionalService Svc
 @inject IPlantillaAgendaService Plantillas
+@inject IProfesionalServicioService ProfSvc
 @inject IJSRuntime JS
 
 <PageTitle>Agendas de profesionales - Visal</PageTitle>
@@ -14,133 +15,181 @@
         <div class="ase-eyebrow">Configuracion del Sistema</div>
         <h1 class="ase-title">Agendas de profesionales</h1>
         <small class="text-muted">
-            Cada profesional tiene su propia agenda. Se arma importando una agenda base (se copia y
-            queda editable sin afectar la plantilla). Cupos = (fin - inicio) / bloque.
+            Cada profesional tiene su agenda (importada de una base) y los servicios que presta.
+            Abre "Gestionar" para editar su agenda y sus servicios.
         </small>
     </div>
-    @if (_sel is not null)
-    {
-        <button class="btn btn-outline-secondary" @onclick="Volver">&larr; Volver a la lista</button>
-    }
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
-@* ===================== VISTA LISTA ===================== *@
-@if (_sel is null)
-{
-    <div class="ase-card">
-        <div style="padding:12px 14px;border-bottom:1px solid #e2e8f0;">
-            <input class="form-control form-control-sm" style="max-width:340px;" placeholder="Buscar profesional..."
-                   @bind="_filtro" @bind:after="CargarAsync" />
-        </div>
-        @if (_loading)
-        {
-            <div class="ase-empty">Cargando...</div>
-        }
-        else if (_rows.Count == 0)
-        {
-            <div class="ase-empty" style="padding:30px;">No hay profesionales.</div>
-        }
-        else
-        {
-            <div class="med-tbl-wrap">
-                <table class="table table-sm med-tbl">
-                    <thead>
-                        <tr>
-                            <th>Profesional</th>
-                            <th>Tipo</th>
-                            <th style="width:110px" class="text-center">Turnos</th>
-                            <th style="width:110px" class="text-center">Cupos/sem</th>
-                            <th style="width:150px"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var r in _rows)
-                        {
-                            <tr>
-                                <td><strong>@r.NombreCompleto</strong></td>
-                                <td class="text-muted">@(string.IsNullOrWhiteSpace(r.TipoProfesional) ? "—" : r.TipoProfesional)</td>
-                                <td class="text-center">
-                                    @if (r.Turnos > 0) { <span class="badge bg-success">@r.Turnos</span> }
-                                    else { <span class="badge bg-secondary">Sin agenda</span> }
-                                </td>
-                                <td class="text-center">@r.Cupos</td>
-                                <td class="text-end">
-                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => AbrirDetalleAsync(r)">Gestionar agenda</button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
+<div class="ase-card">
+    <div style="padding:12px 14px;border-bottom:1px solid #e2e8f0;">
+        <input class="form-control form-control-sm" style="max-width:340px;" placeholder="Buscar profesional..."
+               @bind="_filtro" @bind:after="CargarAsync" />
     </div>
-}
-@* ===================== VISTA DETALLE ===================== *@
-else
-{
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
-        <div>
-            <h2 style="margin:0;font-size:1.15rem;">@_selNombre</h2>
-            <div class="text-muted" style="font-size:13px;">
-                @_sel.Turnos.Count turno(s) &middot; @_sel.Turnos.Sum(t => t.Cupos) cupos/semana
-            </div>
+    @if (_loading)
+    {
+        <div class="ase-empty">Cargando...</div>
+    }
+    else if (_rows.Count == 0)
+    {
+        <div class="ase-empty" style="padding:30px;">No hay profesionales.</div>
+    }
+    else
+    {
+        <div class="med-tbl-wrap">
+            <table class="table table-sm med-tbl">
+                <thead>
+                    <tr>
+                        <th>Profesional</th>
+                        <th>Tipo</th>
+                        <th style="width:100px" class="text-center">Turnos</th>
+                        <th style="width:100px" class="text-center">Cupos/sem</th>
+                        <th style="width:130px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        <tr>
+                            <td><strong>@r.NombreCompleto</strong></td>
+                            <td class="text-muted">@(string.IsNullOrWhiteSpace(r.TipoProfesional) ? "—" : r.TipoProfesional)</td>
+                            <td class="text-center">
+                                @if (r.Turnos > 0) { <span class="badge bg-success">@r.Turnos</span> }
+                                else { <span class="badge bg-secondary">Sin agenda</span> }
+                            </td>
+                            <td class="text-center">@r.Cupos</td>
+                            <td class="text-end">
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => AbrirDetalleAsync(r)">Gestionar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <select class="form-select form-select-sm" style="max-width:240px;" @bind="_importarPlantillaId">
-                <option value="">Importar agenda base...</option>
-                @foreach (var p in _plantillas)
-                {
-                    <option value="@p.Id">@p.Nombre</option>
-                }
-            </select>
-            <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:5px;">
-                <input type="checkbox" @bind="_reemplazar" /> reemplazar
-            </label>
-            <button class="btn btn-primary btn-sm" @onclick="ImportarAsync" disabled="@(_busy || string.IsNullOrEmpty(_importarPlantillaId))">Importar</button>
-            @if (_sel.Turnos.Count > 0)
+    }
+</div>
+
+@* ===================== MODAL DETALLE (tabs) ===================== *@
+@if (_sel is not null)
+{
+    <div class="cie-backdrop" @onclick="Cerrar"></div>
+    <div class="cie-modal aa-detmodal">
+        <div class="cie-modal-h">
+            <div>
+                <h3>@_selNombre</h3>
+                <div class="text-muted" style="font-size:12px;">@_sel.Turnos.Count turno(s) &middot; @_sel.Turnos.Sum(t => t.Cupos) cupos/sem &middot; @_servicios.Count servicio(s)</div>
+            </div>
+            <button class="cie-modal-close" @onclick="Cerrar">&times;</button>
+        </div>
+
+        <div class="aa-tabs">
+            <button class="aa-tab @(_tab == "agenda" ? "aa-tab-on" : "")" @onclick='() => _tab = "agenda"'>Agenda</button>
+            <button class="aa-tab @(_tab == "servicios" ? "aa-tab-on" : "")" @onclick='() => _tab = "servicios"'>Servicios</button>
+        </div>
+
+        <div class="cie-modal-body">
+            @if (_tab == "agenda")
             {
-                <button class="btn btn-outline-danger btn-sm" @onclick="LimpiarAsync" disabled="@_busy">Vaciar</button>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+                    <select class="form-select form-select-sm" style="max-width:240px;" @bind="_importarPlantillaId">
+                        <option value="">Importar agenda base...</option>
+                        @foreach (var p in _plantillas) { <option value="@p.Id">@p.Nombre</option> }
+                    </select>
+                    <label class="text-muted" style="font-size:13px;display:flex;align-items:center;gap:5px;">
+                        <input type="checkbox" @bind="_reemplazar" /> reemplazar
+                    </label>
+                    <button class="btn btn-primary btn-sm" @onclick="ImportarAsync" disabled="@(_busy || string.IsNullOrEmpty(_importarPlantillaId))">Importar</button>
+                    @if (_sel.Turnos.Count > 0)
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick="LimpiarAsync" disabled="@_busy">Vaciar</button>
+                    }
+                </div>
+
+                <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+                    @foreach (var (day, label) in Week)
+                    {
+                        var dayTurnos = _sel.Turnos.Where(t => t.DiaSemana == day).OrderBy(t => t.HoraInicio).ToList();
+                        var total = dayTurnos.Sum(t => t.Cupos);
+                        <div style="padding:12px 16px;border-bottom:1px solid #eef2f7;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:@(dayTurnos.Count > 0 ? "8px" : "0")">
+                                <div>
+                                    <span style="font-weight:700;">@label</span>
+                                    @if (total > 0) { <span class="badge bg-secondary" style="margin-left:8px;">@total cupos</span> }
+                                    else { <span class="text-muted" style="margin-left:8px;font-size:13px;font-style:italic;">Dia no operativo</span> }
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => NuevoTurno(day)" disabled="@_busy">+ Anadir</button>
+                            </div>
+                            @foreach (var t in dayTurnos)
+                            {
+                                <div style="display:flex;align-items:center;gap:12px;background:#f8fafc;padding:8px 12px;border-radius:8px;margin-bottom:6px;">
+                                    <span style="font-weight:700;">@t.HoraInicio.ToString("HH:mm") &ndash; @t.HoraFin.ToString("HH:mm")</span>
+                                    <span class="text-muted" style="font-size:12px;">bloque @t.IntervaloMinutos min</span>
+                                    <span class="badge bg-success" style="margin-left:auto;">@t.Cupos cupos</span>
+                                    <button class="btn btn-sm btn-link" @onclick="() => EditarTurno(t)">Editar</button>
+                                    <button class="btn btn-sm btn-link text-danger" @onclick="() => EliminarTurnoAsync(t)" disabled="@_busy">Quitar</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="text-muted" style="font-size:13px;margin-bottom:10px;">
+                    Servicios que presta este profesional. El modulo de asignacion por agendas solo ofrece
+                    servicios del contrato del paciente que algun doctor con agenda preste.
+                </div>
+                <div style="display:flex;gap:6px;margin-bottom:10px;">
+                    <input class="form-control form-control-sm" placeholder="Buscar servicio del catalogo (codigo o nombre)..."
+                           @bind="_svcQuery" @bind:event="oninput" @onkeyup="BuscarServiciosKey" />
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="BuscarServiciosAsync">Buscar</button>
+                </div>
+                @if (_svcResultados.Count > 0)
+                {
+                    <div class="aa-srvlist" style="margin-bottom:12px;">
+                        @foreach (var c in _svcResultados)
+                        {
+                            <div class="aa-srvrow">
+                                <div><span class="mono">@c.Codigo</span> — @c.Nombre <span class="text-muted" style="font-size:11px;">(@c.Tipo)</span></div>
+                                <button class="btn btn-sm btn-primary" @onclick="() => AgregarServicioAsync(c)" disabled="@_busy">Agregar</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Servicios asignados (@_servicios.Count)</div>
+                @if (_servicios.Count == 0)
+                {
+                    <div class="ase-empty" style="padding:16px;">Aun no tiene servicios. Busca arriba y agrega.</div>
+                }
+                else
+                {
+                    <div class="aa-srvlist">
+                        @foreach (var s in _servicios)
+                        {
+                            <div class="aa-srvrow">
+                                <div><span class="mono">@s.Codigo</span> — @s.Nombre</div>
+                                <button class="btn btn-sm btn-link text-danger" @onclick="() => QuitarServicioAsync(s)" disabled="@_busy">Quitar</button>
+                            </div>
+                        }
+                    </div>
+                }
             }
         </div>
-    </div>
-
-    <div class="ase-card" style="padding:0;overflow:hidden;max-width:900px;">
-        @foreach (var (day, label) in Week)
-        {
-            var dayTurnos = _sel.Turnos.Where(t => t.DiaSemana == day).OrderBy(t => t.HoraInicio).ToList();
-            var total = dayTurnos.Sum(t => t.Cupos);
-            <div style="padding:16px 20px;border-bottom:1px solid var(--bs-border-color,#e2e8f0);">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:@(dayTurnos.Count > 0 ? "10px" : "0")">
-                    <div>
-                        <span style="font-weight:700;">@label</span>
-                        @if (total > 0) { <span class="badge bg-secondary" style="margin-left:8px;">@total cupos</span> }
-                        else { <span class="text-muted" style="margin-left:8px;font-size:13px;font-style:italic;">Dia no operativo</span> }
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => NuevoTurno(day)" disabled="@_busy">+ Anadir turno</button>
-                </div>
-                @foreach (var t in dayTurnos)
-                {
-                    <div style="display:flex;align-items:center;gap:14px;background:#f8fafc;padding:9px 14px;border-radius:10px;margin-bottom:8px;">
-                        <span style="font-weight:700;">@t.HoraInicio.ToString("HH:mm") &ndash; @t.HoraFin.ToString("HH:mm")</span>
-                        <span class="text-muted" style="font-size:13px;">bloque @t.IntervaloMinutos min</span>
-                        <span class="badge bg-success" style="margin-left:auto;">@t.Cupos cupos</span>
-                        <button class="btn btn-sm btn-link" @onclick="() => EditarTurno(t)">Editar</button>
-                        <button class="btn btn-sm btn-link text-danger" @onclick="() => EliminarTurnoAsync(t)" disabled="@_busy">Quitar</button>
-                    </div>
-                }
-            </div>
-        }
+        <div class="cie-modal-foot" style="justify-content:flex-end;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Cerrar">Cerrar</button>
+        </div>
     </div>
 }
 
-@* ============= MODAL TURNO (crear/editar) ============= *@
+@* ============= MODAL TURNO (crear/editar) — encima del detalle ============= *@
 @if (_modalTurno)
 {
-    <div class="cie-backdrop" @onclick="() => _modalTurno = false"></div>
-    <div class="cie-modal" style="width:460px; max-width:95vw;">
+    <div class="cie-backdrop" style="z-index:1060;" @onclick="() => _modalTurno = false"></div>
+    <div class="cie-modal" style="width:460px; max-width:95vw; z-index:1061;">
         <div class="cie-modal-h">
             <h3>@(_turnoId is null ? "Nuevo turno" : "Editar turno") &middot; @DayLabel(_fDia)</h3>
             <button class="cie-modal-close" @onclick="() => _modalTurno = false">&times;</button>
@@ -174,17 +223,20 @@ else
 
 <style>
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
-    .cie-modal {
-        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
-        max-width: 95vw; max-height: 90vh; background: #fff;
-        border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25);
-        z-index: 1051; display: flex; flex-direction: column;
-    }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 95vw; max-height: 92vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .aa-detmodal { width: 720px; }
     .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
     .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
     .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
     .cie-modal-body { padding: 18px; overflow: auto; }
     .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+    .ase-form { display: flex; flex-direction: column; gap: 12px; }
+    .aa-tabs { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid #e2e8f0; }
+    .aa-tab { background: none; border: none; padding: 10px 16px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .aa-tab-on { color: #2563eb; border-bottom-color: #2563eb; }
+    .aa-srvlist { border: 1px solid #e2e8f0; border-radius: 8px; max-height: 240px; overflow: auto; }
+    .aa-srvrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
 </style>
 
 @code {
@@ -212,8 +264,14 @@ else
 
     private AgendaProfesionalDto? _sel;
     private string _selNombre = "";
+    private string _tab = "agenda";
     private string _importarPlantillaId = "";
     private bool _reemplazar = true;
+
+    // Servicios del profesional
+    private List<ProfesionalServicioDto> _servicios = new();
+    private string _svcQuery = "";
+    private List<CatalogoServicioBusquedaDto> _svcResultados = new();
 
     // Modal turno
     private bool _modalTurno;
@@ -227,7 +285,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         await CargarAsync();
-        _plantillas = (await Plantillas.ListarAsync()).ToList(); // solo activas
+        _plantillas = (await Plantillas.ListarAsync()).ToList();
         _loading = false;
     }
 
@@ -239,9 +297,14 @@ else
 
     private async Task AbrirDetalleAsync(ProfesionalAgendaResumenDto r)
     {
-        _error = _ok = null; _importarPlantillaId = ""; _reemplazar = true;
+        _error = _ok = null; _importarPlantillaId = ""; _reemplazar = true; _tab = "agenda";
+        _svcQuery = ""; _svcResultados = new();
         _selNombre = r.NombreCompleto;
-        try { _sel = await Svc.ObtenerAsync(r.ProfesionalId); }
+        try
+        {
+            _sel = await Svc.ObtenerAsync(r.ProfesionalId);
+            _servicios = (await ProfSvc.ListarPorProfesionalAsync(r.ProfesionalId)).ToList();
+        }
         catch (Exception ex) { _error = ex.Message; }
     }
 
@@ -251,8 +314,9 @@ else
         _sel = await Svc.ObtenerAsync(_sel.ProfesionalId);
     }
 
-    private void Volver() { _sel = null; _error = _ok = null; }
+    private void Cerrar() { _sel = null; }
 
+    // ---------------- Agenda ----------------
     private async Task ImportarAsync()
     {
         if (_sel is null || !Guid.TryParse(_importarPlantillaId, out var plantillaId)) { return; }
@@ -329,6 +393,48 @@ else
         {
             await Svc.EliminarTurnoAsync(t.Id, await ActorAsync());
             await RecargarDetalleAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ---------------- Servicios ----------------
+    private async Task BuscarServiciosKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await BuscarServiciosAsync(); }
+    }
+
+    private async Task BuscarServiciosAsync()
+    {
+        if (_sel is null) { return; }
+        var q = (_svcQuery ?? "").Trim();
+        if (q.Length < 2) { _svcResultados = new(); return; }
+        try { _svcResultados = (await ProfSvc.BuscarCatalogoAsync(_sel.ProfesionalId, q)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task AgregarServicioAsync(CatalogoServicioBusquedaDto c)
+    {
+        if (_sel is null) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await ProfSvc.AgregarAsync(_sel.ProfesionalId, c.Id, await ActorAsync());
+            _servicios = (await ProfSvc.ListarPorProfesionalAsync(_sel.ProfesionalId)).ToList();
+            _svcResultados = _svcResultados.Where(x => x.Id != c.Id).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task QuitarServicioAsync(ProfesionalServicioDto s)
+    {
+        if (_sel is null) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await ProfSvc.QuitarAsync(s.Id, await ActorAsync());
+            _servicios = (await ProfSvc.ListarPorProfesionalAsync(_sel.ProfesionalId)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }

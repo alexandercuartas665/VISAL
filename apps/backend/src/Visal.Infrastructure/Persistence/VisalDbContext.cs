@@ -110,6 +110,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<AgendaProfesionalTurno> AgendaProfesionalTurnos => Set<AgendaProfesionalTurno>();
     public DbSet<DiaInactivoSede> DiasInactivosSede => Set<DiaInactivoSede>();
     public DbSet<NovedadProfesional> NovedadesProfesional => Set<NovedadProfesional>();
+    public DbSet<ProfesionalServicio> ProfesionalServicios => Set<ProfesionalServicio>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -1044,6 +1045,18 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Nota).HasMaxLength(300);
             b.HasIndex(x => new { x.TenantId, x.ProfesionalId, x.FechaDesde });
+        });
+
+        modelBuilder.Entity<ProfesionalServicio>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(60).IsRequired();
+            b.Property(x => x.Nombre).HasMaxLength(300).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.ProfesionalId, x.Codigo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Codigo });
+            b.HasOne(x => x.CatalogoServicioReferencia)
+                .WithMany()
+                .HasForeignKey(x => x.CatalogoServicioReferenciaId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<CatalogoTipoServicio>(b =>

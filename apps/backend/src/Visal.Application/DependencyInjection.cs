@@ -154,6 +154,8 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.Agendas.ICalendarioService, Tenancy.Agendas.CalendarioService>();
         // Agendas (Ola 4): novedades por profesional (vacaciones/incapacidad/permiso).
         services.AddScoped<Tenancy.Agendas.INovedadProfesionalService, Tenancy.Agendas.NovedadProfesionalService>();
+        // Agendas: servicios que presta cada profesional (vinculo explicito al catalogo).
+        services.AddScoped<Tenancy.Agendas.IProfesionalServicioService, Tenancy.Agendas.ProfesionalServicioService>();
         // Agendas (asignacion): explorador de disponibilidad por agenda (solo lectura).
         services.AddScoped<Tenancy.Agendas.IAsignacionAgendasService, Tenancy.Agendas.AsignacionAgendasService>();
         services.AddScoped<Tenancy.ITenantBrandingPublicoService, Tenancy.TenantBrandingPublicoService>();

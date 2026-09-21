@@ -8,6 +8,8 @@
 @inject ISucursalService Sedes
 @inject IAsignacionService Asig
 @inject ICatalogoPacienteService CatPac
+@inject ICuotaCopagoService CuotaSvc
+@inject IWebHostEnvironment Env
 
 <PageTitle>Asignacion por agendas - Visal</PageTitle>
 
@@ -309,18 +311,37 @@
                         </select>
                     </div>
                 </div>
-                <div class="asg-3col">
-                    <div class="ase-f">
-                        <label>Tipo de pago</label>
-                        <select class="form-select form-select-sm" @bind="_agTipoPago">
-                            <option value="">(ninguno)</option>
-                            <option value="CUOTA">Cuota moderadora</option>
-                            <option value="COPAGO">Copago</option>
-                        </select>
+                <div class="ase-f">
+                    <label>Cuota moderadora / Copago</label>
+                    <div class="asg-pago-head">
+                        @if (string.IsNullOrEmpty(_agTipoPago)) { <span>Sin cargo</span> }
+                        else { <span class="asg-pago-badge">@(_agTipoPago == "CUOTA" ? "Cuota" : "Copago")@(_agValorReal is decimal r ? $" · ${r:N0}" : "")</span> }
+                        <button class="btn btn-outline-secondary btn-sm" type="button" style="margin-left:auto;" @onclick="AbrirPago">
+                            @(string.IsNullOrEmpty(_agTipoPago) ? "Registrar pago" : "Editar pago")
+                        </button>
+                        @if (!string.IsNullOrEmpty(_agTipoPago))
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" type="button" @onclick="LimpiarPago" title="Quitar informacion de pago">&times;</button>
+                        }
                     </div>
-                    <div class="ase-f"><label>Valor sugerido</label><input type="number" step="1" class="form-control form-control-sm" @bind="_agValorSug" disabled="@(_agTipoPago.Length == 0)" /></div>
-                    <div class="ase-f"><label>Valor real</label><input type="number" step="1" class="form-control form-control-sm" @bind="_agValorReal" disabled="@(_agTipoPago.Length == 0)" /></div>
                 </div>
+
+                @if (_contratoRequierePdf && !_agAutPend)
+                {
+                    <div class="ase-f">
+                        <label>PDF de autorizacion</label>
+                        <div class="asg-input-row">
+                            <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
+                            @if (!string.IsNullOrWhiteSpace(_agPdfUrl))
+                            {
+                                <a class="btn btn-outline-secondary btn-sm" href="@_agPdfUrl" target="_blank" title="Ver PDF">Ver</a>
+                            }
+                        </div>
+                        @if (_agPdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
+                        else if (!string.IsNullOrWhiteSpace(_agPdfNombre)) { <div class="asg-hint asg-hint-ok">@_agPdfNombre cargado.</div> }
+                    </div>
+                }
+
                 <label class="ase-chk" style="display:flex;align-items:center;gap:6px;font-size:12px;">
                     <input type="checkbox" @bind="_agAutPend" /> <span>Autorizacion pendiente (adjuntar PDF luego)</span>
                 </label>
@@ -337,6 +358,64 @@
         </div>
     </div>
 }
+@* ============= MODAL PAGO (cuota/copago) ============= *@
+@if (_pagoModal)
+{
+    <div class="cie-backdrop" style="z-index:1060;" @onclick="CerrarPago"></div>
+    <div class="cie-modal asg-pago-modal" style="z-index:1061;">
+        <div class="cie-modal-h">
+            <h3>Cuota moderadora / Copago</h3>
+            <button class="cie-modal-close" @onclick="CerrarPago">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="asg-pago-step-label">1. Tipo de pago</div>
+            <div class="asg-pago-tipo-grid">
+                <button type="button" class="asg-pago-tile asg-tile-neutral @(string.IsNullOrEmpty(_modalPagoTipo) ? "sel" : "")" @onclick='() => SetPagoTipo("")'>
+                    <div class="asg-tile-ico">&times;</div><div class="asg-tile-title">Sin cargo</div><div class="asg-tile-sub">El paciente no paga</div>
+                </button>
+                <button type="button" class="asg-pago-tile asg-tile-cuota @(_modalPagoTipo == "CUOTA" ? "sel" : "")" @onclick='() => SetPagoTipo("CUOTA")'>
+                    <div class="asg-tile-ico">$</div><div class="asg-tile-title">Cuota moderadora</div><div class="asg-tile-sub">Regimen contributivo</div>
+                </button>
+                <button type="button" class="asg-pago-tile asg-tile-copago @(_modalPagoTipo == "COPAGO" ? "sel" : "")" @onclick='() => SetPagoTipo("COPAGO")'>
+                    <div class="asg-tile-ico">&#128176;</div><div class="asg-tile-title">Copago</div><div class="asg-tile-sub">Regimen subsidiado</div>
+                </button>
+            </div>
+            @if (!string.IsNullOrEmpty(_modalPagoTipo))
+            {
+                <div class="asg-pago-step-label">2. Rango salarial</div>
+                <div class="asg-pago-rango-grid">
+                    @foreach (var c in _catalogoPago.Where(x => x.Tipo == _modalPagoTipo))
+                    {
+                        var isSel = _modalPagoCategoria == c.Categoria;
+                        <button type="button" class="asg-pago-rango @(isSel ? "sel" : "")" @onclick="() => SetPagoCategoria(c)">
+                            <div class="asg-rango-cat">@c.Categoria</div>
+                            <div class="asg-rango-val">$ @c.ValorSugerido.ToString("N0")</div>
+                            @if (!string.IsNullOrWhiteSpace(c.Descripcion)) { <div class="asg-rango-desc">@c.Descripcion</div> }
+                        </button>
+                    }
+                    @if (!_catalogoPago.Any(x => x.Tipo == _modalPagoTipo))
+                    {
+                        <div class="text-muted small">No hay rangos configurados para este tipo. Configuralos en "Cuotas / Copagos".</div>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_modalPagoCategoria))
+                {
+                    <div class="asg-pago-step-label">3. Valor a pagar</div>
+                    <div class="asg-pago-valores">
+                        <div class="asg-pago-val-box"><label>Valor sugerido</label><input type="number" class="form-control asg-pago-input" @bind="_modalPagoSugerido" step="100" min="0" /></div>
+                        <div class="asg-pago-val-box asg-pago-val-real"><label>Valor real pagado</label><input type="number" class="form-control asg-pago-input" @bind="_modalPagoReal" step="100" min="0" /></div>
+                    </div>
+                }
+            }
+        </div>
+        <div class="asg-pago-footer">
+            <button class="btn btn-outline-secondary btn-lg" @onclick="CerrarPago">Cancelar</button>
+            <button class="btn btn-primary btn-lg asg-pago-confirmar" @onclick="ConfirmarPago"
+                    disabled="@(!string.IsNullOrEmpty(_modalPagoTipo) && string.IsNullOrEmpty(_modalPagoCategoria))">Confirmar</button>
+        </div>
+    </div>
+}
+
 @* ============= MODAL BUSCAR PACIENTES (avanzado) ============= *@
 @if (_bqOpen)
 {
@@ -485,6 +564,38 @@
     .aa-citas { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; max-height: 200px; overflow: auto; }
     .aa-cita { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
     .aa-cita:last-child { border-bottom: none; }
+    .asg-pago-head { display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; font-size:12px; font-weight:600; color:#334155; }
+    .asg-pago-badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#dbeafe; color:#1e40af; font-size:11px; font-weight:600; }
+    .asg-pago-modal { width: 720px; max-width: 96vw; }
+    .asg-pago-step-label { font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#64748b; margin:14px 4px 8px; }
+    .asg-pago-step-label:first-child { margin-top: 4px; }
+    .asg-pago-tipo-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+    .asg-pago-tile { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height: 120px; padding:16px 12px; gap:6px; border-radius:14px; border:2px solid #e2e8f0; background:#fff; cursor:pointer; transition:all .15s ease; text-align:center; }
+    .asg-pago-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,.10); }
+    .asg-pago-tile.sel { border-width:3px; box-shadow: 0 8px 24px rgba(21,101,192,.20); transform: translateY(-2px); }
+    .asg-tile-ico { font-size:32px; line-height:1; }
+    .asg-tile-title { font-size:15px; font-weight:700; color:#0f172a; }
+    .asg-tile-sub { font-size:11px; color:#64748b; }
+    .asg-tile-neutral .asg-tile-ico { color:#94a3b8; } .asg-tile-neutral.sel { border-color:#94a3b8; background:#f8fafc; }
+    .asg-tile-cuota .asg-tile-ico { color:#1565c0; } .asg-tile-cuota.sel { border-color:#1565c0; background:#eff6ff; } .asg-tile-cuota.sel .asg-tile-title { color:#1565c0; }
+    .asg-tile-copago .asg-tile-ico { color:#059669; } .asg-tile-copago.sel { border-color:#059669; background:#ecfdf5; } .asg-tile-copago.sel .asg-tile-title { color:#059669; }
+    .asg-pago-rango-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+    .asg-pago-rango { display:flex; flex-direction:column; gap:4px; padding:14px; border-radius:12px; border:2px solid #e2e8f0; background:#fff; cursor:pointer; transition:all .15s ease; text-align:center; }
+    .asg-pago-rango:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(15,23,42,.08); border-color:#cbd5e1; }
+    .asg-pago-rango.sel { border-color:#1565c0; background:#eff6ff; box-shadow: 0 6px 20px rgba(21,101,192,.18); }
+    .asg-rango-cat { font-size:12px; font-weight:700; color:#475569; }
+    .asg-rango-val { font-size:20px; font-weight:800; color:#1565c0; }
+    .asg-rango-desc { font-size:11px; color:#64748b; }
+    .asg-pago-valores { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .asg-pago-val-box { display:flex; flex-direction:column; gap:6px; padding:12px 14px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; }
+    .asg-pago-val-box label { font-size:11px; font-weight:700; text-transform:uppercase; color:#64748b; margin:0; }
+    .asg-pago-val-real { background:#eff6ff; border-color:#bfdbfe; }
+    .asg-pago-input { font-size:20px; font-weight:700; text-align:right; padding:8px 12px; height:auto; }
+    .asg-pago-footer { display:flex; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #e2e8f0; }
+    .asg-pago-confirmar { min-width: 150px; }
+    .asg-hint { font-size:11px; color:#64748b; margin-top:4px; }
+    .asg-hint-ok { color:#059669; }
+    .asg-input-row { display:flex; gap:6px; }
     .aa-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
     .slot { text-align: center; padding: 7px 4px; border-radius: 8px; font-size: 12px; font-weight: 700; border: 1px solid; cursor: pointer; font-family: ui-monospace, Menlo, Consolas, monospace; }
     .slot-verde { background: #f0fdf4; border-color: #86efac; color: #166534; }
@@ -570,9 +681,22 @@
     private int? _agMesFinal;
     private DateOnly? _agFechaFinal;
     private string _agTipoPago = "";
+    private string? _agCatCopago;
     private decimal? _agValorSug;
     private decimal? _agValorReal;
     private bool _agAutPend;
+    // PDF de autorizacion
+    private string? _agPdfUrl;
+    private string? _agPdfNombre;
+    private bool _agPdfBusy;
+    private bool _contratoRequierePdf => _contratos.FirstOrDefault(c => c.ContratoId == _contratoId)?.RequierePdfAutorizacion ?? false;
+    // Modal pago (cuota/copago)
+    private List<CuotaCopagoDto> _catalogoPago = new();
+    private bool _pagoModal;
+    private string _modalPagoTipo = "";
+    private string _modalPagoCategoria = "";
+    private decimal? _modalPagoSugerido;
+    private decimal? _modalPagoReal;
 
     protected override async Task OnInitializedAsync()
     {
@@ -588,6 +712,8 @@
                     .Where(v => v.Activo).OrderBy(v => v.Codigo, StringComparer.Ordinal).ToList();
             }
             catch { _vias = new(); }
+            try { _catalogoPago = (await CuotaSvc.ListarAsync(soloActivos: true)).ToList(); }
+            catch { _catalogoPago = new(); }
         }
         catch (Exception ex) { _error = ex.Message; }
     }
@@ -745,7 +871,8 @@
         // Defaults de las piezas de asignacion.
         _agCantidad = 1; _agTurnos = 1; _agAutoriz = "";
         _agAnio = dia.Fecha.Year; _agMesVig = dia.Fecha.Month; _agMesFinal = null; _agFechaFinal = null;
-        _agTipoPago = ""; _agValorSug = null; _agValorReal = null; _agAutPend = false;
+        _agTipoPago = ""; _agCatCopago = null; _agValorSug = null; _agValorReal = null; _agAutPend = false;
+        _agPdfUrl = null; _agPdfNombre = null;
         await RefrescarDiaAsync();
         _agOpen = true;
     }
@@ -784,6 +911,77 @@
         finally { _agBusy = false; }
     }
 
+    // ---------------- Pago (cuota/copago) ----------------
+    private void AbrirPago()
+    {
+        _modalPagoTipo = _agTipoPago ?? "";
+        _modalPagoCategoria = _agCatCopago ?? "";
+        _modalPagoSugerido = _agValorSug;
+        _modalPagoReal = _agValorReal;
+        _pagoModal = true;
+    }
+
+    private void CerrarPago() => _pagoModal = false;
+
+    private void SetPagoTipo(string tipo)
+    {
+        _modalPagoTipo = tipo;
+        _modalPagoCategoria = ""; _modalPagoSugerido = null; _modalPagoReal = null;
+    }
+
+    private void SetPagoCategoria(CuotaCopagoDto c)
+    {
+        _modalPagoCategoria = c.Categoria;
+        _modalPagoSugerido = c.ValorSugerido;
+        _modalPagoReal = c.ValorSugerido;
+    }
+
+    private void ConfirmarPago()
+    {
+        if (string.IsNullOrEmpty(_modalPagoTipo))
+        {
+            _agTipoPago = ""; _agCatCopago = null; _agValorSug = null; _agValorReal = null;
+        }
+        else
+        {
+            _agTipoPago = _modalPagoTipo;
+            _agCatCopago = string.IsNullOrEmpty(_modalPagoCategoria) ? null : _modalPagoCategoria;
+            _agValorSug = _modalPagoSugerido;
+            _agValorReal = _modalPagoReal;
+        }
+        _pagoModal = false;
+    }
+
+    private void LimpiarPago()
+    {
+        _agTipoPago = ""; _agCatCopago = null; _agValorSug = null; _agValorReal = null;
+    }
+
+    // ---------------- PDF de autorizacion ----------------
+    private async Task OnPdfUploaded(InputFileChangeEventArgs e)
+    {
+        _agError = null; _agPdfBusy = true;
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10L * 1024 * 1024) { _agError = "El PDF supera 10 MB."; return; }
+            var dir = System.IO.Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
+            if (!System.IO.Directory.Exists(dir)) { System.IO.Directory.CreateDirectory(dir); }
+            var safe = System.IO.Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
+            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
+            var full = System.IO.Path.Combine(dir, nombre);
+            await using (var fs = System.IO.File.Create(full))
+            await using (var src = file.OpenReadStream(10L * 1024 * 1024))
+            {
+                await src.CopyToAsync(fs);
+            }
+            _agPdfUrl = $"/uploads/autorizaciones/{nombre}";
+            _agPdfNombre = file.Name;
+        }
+        catch (Exception ex) { _agError = "No se pudo subir el PDF: " + ex.Message; }
+        finally { _agPdfBusy = false; }
+    }
+
     private async Task GuardarAgendaAsync()
     {
         _agError = null;
@@ -794,6 +992,8 @@
         if (_agTurnos < 1) { _agError = "Los turnos a coordinar deben ser al menos 1."; return; }
         if (_agTurnos > _agCantidad) { _agError = "Los turnos a coordinar no pueden superar la cantidad."; return; }
         if (_agMesVig < 1 || _agMesVig > 12) { _agError = "Mes de vigencia invalido (1-12)."; return; }
+        if (_contratoRequierePdf && !_agAutPend && string.IsNullOrWhiteSpace(_agPdfUrl))
+        { _agError = "Este contrato exige el PDF de autorizacion. Adjuntalo o marca 'Autorizacion pendiente'."; return; }
 
         var contrato = _contratos.First(c => c.ContratoId == _contratoId);
         var via = _vias.FirstOrDefault(v => v.Codigo == _agViaCod);
@@ -814,9 +1014,10 @@
                 MesFinal: _agMesFinal is int mf ? (short)mf : null,
                 FechaFinal: _agFechaFinal,
                 TipoPago: _agTipoPago.Length == 0 ? null : _agTipoPago,
-                CategoriaCopago: null,
+                CategoriaCopago: _agCatCopago,
                 ValorPagoSugerido: _agValorSug, ValorPagoReal: _agValorReal,
-                AutorizacionPendiente: _agAutPend);
+                AutorizacionPendiente: _agAutPend,
+                PdfAutorizacionUrl: _agPdfUrl);
             var actorA = await ActorAsync();
             await Gate(() => Svc.AgendarAsync(req, actorA));
             _ok = $"Cita agendada: {_agFecha:dd/MM/yyyy} {_agSlot}.";

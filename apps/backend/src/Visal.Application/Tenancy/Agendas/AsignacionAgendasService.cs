@@ -380,7 +380,7 @@ public sealed class AsignacionAgendasService(
             RipsViaIngresoCodigo: req.ViaIngresoCodigo, RipsViaIngresoNombre: req.ViaIngresoNombre);
         var lote = await asignaciones.CrearLoteAsync(
             new CrearLoteRequest(req.PacienteId, req.ContratoCodigo, req.Sucursal, new[] { item },
-                PdfAutorizacionUrl: null,
+                PdfAutorizacionUrl: string.IsNullOrWhiteSpace(req.PdfAutorizacionUrl) ? null : req.PdfAutorizacionUrl,
                 TipoPago: string.IsNullOrWhiteSpace(req.TipoPago) ? null : req.TipoPago,
                 CategoriaCopago: string.IsNullOrWhiteSpace(req.CategoriaCopago) ? null : req.CategoriaCopago,
                 ValorPagoSugerido: req.ValorPagoSugerido, ValorPagoReal: req.ValorPagoReal,

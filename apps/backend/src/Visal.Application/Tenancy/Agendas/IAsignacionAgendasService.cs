@@ -130,4 +130,5 @@ public sealed record AgendarDesdeAgendaRequest(
     string? CategoriaCopago = null,
     decimal? ValorPagoSugerido = null,
     decimal? ValorPagoReal = null,
-    bool AutorizacionPendiente = false);
+    bool AutorizacionPendiente = false,
+    string? PdfAutorizacionUrl = null);

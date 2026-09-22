@@ -1599,6 +1599,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? noOrden = null, string? documentoPaciente = null,
         string? aseguradoraNombre = null,
         DateOnly? fechaAsignacion = null,
+        bool incluirConAtencion = false,
         CancellationToken ct = default)
     {
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
@@ -1628,9 +1629,14 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Where(a => (a.Modulo != null && permisos.Contains(a.Modulo.ToUpper()))
                      || permisos.Contains(a.TipoServicio.ToUpper()))
             .Where(a => a.Estado != AsignacionEstado.Pendiente)
-            .Where(a => db.AsignacionTurnos.Any(t => t.AsignacionId == a.Id))
-            .Where(a => !asigsConHc.Contains(a.Id))
-            .Where(a => !asigsConNota.Contains(a.Id));
+            .Where(a => db.AsignacionTurnos.Any(t => t.AsignacionId == a.Id));
+        // Por defecto solo las SIN atencion (borrado seguro). Si el usuario pide incluir
+        // las que ya tienen sesiones/atencion, se levantan las exclusiones.
+        if (!incluirConAtencion)
+        {
+            q = q.Where(a => !asigsConHc.Contains(a.Id))
+                 .Where(a => !asigsConNota.Contains(a.Id));
+        }
 
         if (!string.IsNullOrWhiteSpace(sucursalNombre))
         {
@@ -1689,7 +1695,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var turnoIds = turnos.Select(t => t.Id).ToList();
         var sesionesInfo = await db.AsignacionTurnoSesiones.AsNoTracking()
             .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
-            .Select(s => new { s.AsignacionTurnoId, s.FechaAtencion })
+            .Select(s => new { s.AsignacionTurnoId, s.FechaAtencion, s.Completado })
             .ToListAsync(ct);
 
         // Agrupar turnos por asignacion y sesiones por asignacion
@@ -1699,6 +1705,17 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var sesionesPorAsig = sesionesInfo
             .GroupBy(s => turnoToAsig[s.AsignacionTurnoId])
             .ToDictionary(g => g.Key, g => g.Select(x => x.FechaAtencion).ToList());
+        // Sesiones marcadas Completado (HC cerrada) por asignacion.
+        var completadasPorAsig = sesionesInfo
+            .Where(s => s.Completado)
+            .GroupBy(s => turnoToAsig[s.AsignacionTurnoId])
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Set de asignaciones (dentro del lote) que ya tienen HC o nota downstream,
+        // para marcar la tarjeta como "con atencion" (borrado forzado + doble confirmacion).
+        var atencionAsigs = new HashSet<Guid>();
+        foreach (var id in await asigsConHc.Where(x => asigIds.Contains(x)).ToListAsync(ct)) { atencionAsigs.Add(id); }
+        foreach (var id in await asigsConNota.Where(x => asigIds.Contains(x)).ToListAsync(ct)) { atencionAsigs.Add(id); }
 
         var result = new List<CoordinacionEliminableDto>(asigs.Count);
         foreach (var a in asigs)
@@ -1727,12 +1744,14 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 PrimeraFecha: sesList.Count > 0 ? sesList.Min() : null,
                 UltimaFecha: sesList.Count > 0 ? sesList.Max() : null,
                 CreadoEn: a.CreatedAt,
-                FechaAsignacion: a.FechaInicio));
+                FechaAsignacion: a.FechaInicio,
+                SesionesCompletadas: completadasPorAsig.TryGetValue(a.Id, out var cc) ? cc : 0,
+                TieneAtencion: atencionAsigs.Contains(a.Id)));
         }
         return result;
     }
 
-    public async Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default)
+    public async Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, bool forzar = false, CancellationToken ct = default)
     {
         // Helper local: chequea si la asignacion tiene HC o nota downstream.
         // Se usa dos veces: al entrar (rechazo temprano) y justo antes del
@@ -1754,28 +1773,88 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
 
         // PASO 1 - Validacion previa (feedback rapido antes de cargar todo).
-        var err1 = await ValidarAsync();
-        if (err1 is not null) { throw new InvalidOperationException(err1); }
+        // En modo forzar se OMITE: el usuario pidio explicitamente eliminar una
+        // coordinacion que ya tiene atencion (HC/notas), asumiendo la cascada.
+        if (!forzar)
+        {
+            var err1 = await ValidarAsync();
+            if (err1 is not null) { throw new InvalidOperationException(err1); }
+        }
 
         var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
         if (asig is null) { return false; }
 
         // PASO 2 - Re-validacion justo antes del delete: entre listar y borrar
         // pudo haberse creado una HC/nota; sin re-check quedaria un delete
-        // parcial huerfano de la HC.
-        var err2 = await ValidarAsync();
-        if (err2 is not null)
+        // parcial huerfano de la HC. Tambien se omite en modo forzar.
+        if (!forzar)
         {
-            throw new InvalidOperationException(
-                "No se puede eliminar: durante el proceso aparecio actividad clinica en esta coordinacion. Recarga la lista e intenta de nuevo.");
+            var err2 = await ValidarAsync();
+            if (err2 is not null)
+            {
+                throw new InvalidOperationException(
+                    "No se puede eliminar: durante el proceso aparecio actividad clinica en esta coordinacion. Recarga la lista e intenta de nuevo.");
+            }
         }
 
-        // Cascada explicita: sesiones -> turnos -> asignacion. Todo va en un
-        // solo SaveChangesAsync (transaccion implicita de EF Core).
         var turnoIds = await db.AsignacionTurnos
             .Where(t => t.AsignacionId == asignacionId)
             .Select(t => t.Id)
             .ToListAsync(ct);
+
+        // Modo forzar: hay que barrer los artefactos clinicos downstream ANTES de
+        // borrar sesiones/turnos/asignacion, respetando las FK RESTRICT que cuelgan
+        // de historias_clinicas (revisiones_clinica, rda_eventos,
+        // ordenes_medicamentos_publicas). Orden: hijos RESTRICT -> HC -> notas.
+        if (forzar && turnoIds.Count > 0)
+        {
+            // HCs ligadas a las sesiones de estos turnos (via pivote).
+            var hcIds = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .Where(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId))
+                .Select(pv => pv.HistoriaClinicaId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            if (hcIds.Count > 0)
+            {
+                // Hijos RESTRICT de la HC (eliminar primero).
+                var revIds = await db.RevisionesClinica.AsNoTracking()
+                    .Where(r => hcIds.Contains(r.HistoriaClinicaId))
+                    .Select(r => r.Id)
+                    .ToListAsync(ct);
+                if (revIds.Count > 0)
+                {
+                    await db.RevisionClinicaEventos
+                        .Where(e => revIds.Contains(e.RevisionClinicaId))
+                        .ExecuteDeleteAsync(ct);
+                    await db.RevisionesClinica
+                        .Where(r => revIds.Contains(r.Id))
+                        .ExecuteDeleteAsync(ct);
+                }
+                await db.RdaEventos
+                    .Where(e => hcIds.Contains(e.HistoriaClinicaId))
+                    .ExecuteDeleteAsync(ct);
+                await db.OrdenesMedicamentosPublicas
+                    .Where(o => hcIds.Contains(o.HistoriaClinicaId))
+                    .ExecuteDeleteAsync(ct);
+
+                // Pivotes sesion-HC y luego las HC.
+                await db.AsignacionTurnoSesionHcs
+                    .Where(pv => hcIds.Contains(pv.HistoriaClinicaId))
+                    .ExecuteDeleteAsync(ct);
+                await db.HistoriasClinicas
+                    .Where(h => hcIds.Contains(h.Id))
+                    .ExecuteDeleteAsync(ct);
+            }
+
+            // Notas medicas ligadas a los turnos.
+            await db.NotasMedicas
+                .Where(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId!.Value))
+                .ExecuteDeleteAsync(ct);
+        }
+
+        // Cascada base: sesiones -> turnos -> asignacion. Todo va en un
+        // solo SaveChangesAsync (transaccion implicita de EF Core).
         if (turnoIds.Count > 0)
         {
             var sesiones = await db.AsignacionTurnoSesiones

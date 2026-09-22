@@ -6,6 +6,8 @@
 @using Visal.Application.Tenancy.Agendas
 @inject IRecepcionService Svc
 @inject ISucursalService Sedes
+@inject INovedadProfesionalService Novedades
+@inject IJSRuntime JS
 
 <PageTitle>Recepcion - Visal</PageTitle>
 
@@ -24,23 +26,34 @@
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
 
 <div class="rc-tabs">
-    <button class="rc-tab @(_tab == "llegadas" ? "rc-tab-on" : "")" @onclick='() => _tab = "llegadas"'>Llegadas</button>
-    <button class="rc-tab @(_tab == "reprog" ? "rc-tab-on" : "")" @onclick='() => _tab = "reprog"'>Reprogramacion</button>
+    <button class="rc-tab @(_tab == "llegadas" ? "rc-tab-on" : "")" @onclick='() => CambiarTab("llegadas")'>Llegadas</button>
+    <button class="rc-tab @(_tab == "reprog" ? "rc-tab-on" : "")" @onclick='() => CambiarTab("reprog")'>Reprogramacion</button>
 </div>
 
+@if (_tab == "llegadas")
+{
 <div class="ase-card" style="padding:14px 16px;">
-    <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;margin-bottom:12px;">
-        <div class="ase-f"><label>Fecha</label><input type="date" class="form-control form-control-sm" @bind="_fecha" @bind:after="CargarAsync" /></div>
+    <div class="rc-toolbar">
+        <div class="rc-nav">
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Prev" title="Anterior">&#9664;</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="IrHoy">Hoy</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Next" title="Siguiente">&#9654;</button>
+            <span class="rc-periodo">@PeriodoLabel()</span>
+        </div>
         <div class="ase-f">
             <label>Sede</label>
-            <select class="form-select form-select-sm" style="max-width:200px;" @bind="_sucursalId" @bind:after="CargarAsync">
+            <select class="form-select form-select-sm" style="max-width:180px;" @bind="_sucursalId" @bind:after="CargarAsync">
                 <option value="@Guid.Empty">Todas</option>
                 @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
             </select>
         </div>
-        <button class="btn btn-sm btn-outline-secondary" @onclick="IrHoy">Hoy</button>
-        <div class="text-muted small" style="margin-left:auto;align-self:center;">
-            @_citas.Count cita(s) &middot; @_citas.Count(c => c.Llego) llegada(s)
+        <div class="rc-viewtoggle">
+            <button class="rc-vt @(_vista == "dia" ? "on" : "")" @onclick='() => CambiarVista("dia")'>Dia</button>
+            <button class="rc-vt @(_vista == "semana" ? "on" : "")" @onclick='() => CambiarVista("semana")'>Semana</button>
+            <button class="rc-vt @(_vista == "lista" ? "on" : "")" @onclick='() => CambiarVista("lista")'>Lista</button>
+        </div>
+        <div class="text-muted small rc-count">
+            @CitasVisibles.Count cita(s) &middot; @CitasVisibles.Count(c => c.Llego) llegada(s)
         </div>
     </div>
 
@@ -48,60 +61,265 @@
     {
         <div class="ase-empty">Cargando...</div>
     }
-    else if (_citas.Count == 0)
+    else if (_vista == "semana")
     {
-        <div class="ase-empty" style="padding:24px;">No hay citas agendadas para este dia@(_sucursalId == Guid.Empty ? "" : " en esta sede").</div>
+        @* ===== VISTA SEMANA: 7 columnas (Lun..Dom) ===== *@
+        <div class="rc-week">
+            @foreach (var d in SemanaDias())
+            {
+                var citasD = _citasSemana.Where(c => c.Fecha == d).OrderBy(c => c.Hora).ToList();
+                var esHoy = d == DateOnly.FromDateTime(DateTime.Today);
+                var finde = d.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+                <div class="rc-daycol @(finde ? "rc-finde" : "") @(esHoy ? "rc-hoy" : "")">
+                    <div class="rc-daycol-h" @onclick="() => IrADia(d)" title="Ver este dia">
+                        <span class="rc-dow">@DiaCorto(d.DayOfWeek)</span>
+                        <span class="rc-dnum">@d.Day/@d.Month.ToString("00")</span>
+                    </div>
+                    <div class="rc-daycol-body">
+                        @if (citasD.Count == 0)
+                        {
+                            <div class="rc-empty-mini">-</div>
+                        }
+                        @foreach (var c in citasD)
+                        {
+                            <div class="rc-mini @(c.Llego ? "rc-mini-llego" : "")" @onclick="() => IrADia(d)"
+                                 title="@c.PacienteNombre - @c.DoctorNombre - @c.ServicioNombre">
+                                <div class="rc-mini-h">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</div>
+                                <div class="rc-mini-pac">@c.PacienteNombre</div>
+                                <div class="rc-mini-doc">@c.DoctorNombre</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else if (_vista == "dia")
+    {
+        @* ===== VISTA DIA: linea de tiempo por horas ===== *@
+        @if (_citas.Count == 0)
+        {
+            <div class="ase-empty" style="padding:24px;">No hay citas agendadas para este dia@(_sucursalId == Guid.Empty ? "" : " en esta sede").</div>
+        }
+        else
+        {
+            <div class="rc-day">
+                @foreach (var h in HorasDia())
+                {
+                    var citasH = _citas.Where(c => c.Hora is TimeOnly t && t.Hour == h).OrderBy(c => c.Hora).ToList();
+                    <div class="rc-hourrow">
+                        <div class="rc-hourlbl">@($"{h:00}:00")</div>
+                        <div class="rc-hourcell">
+                            @foreach (var c in citasH)
+                            {
+                                <div class="rc-cita @(c.Llego ? "rc-cita-llego" : "")">
+                                    <div class="rc-cita-top">
+                                        <span class="rc-cita-hora">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</span>
+                                        <strong class="rc-cita-pac">@c.PacienteNombre</strong>
+                                        <span class="text-muted rc-cita-doc-inline">@c.PacienteDocumento</span>
+                                        @if (c.Llego) { <span class="badge bg-success">Llego</span> } else { <span class="badge bg-secondary">Programado</span> }
+                                    </div>
+                                    <div class="rc-cita-sub">@c.DoctorNombre &middot; <span class="text-muted">@c.ServicioNombre</span></div>
+                                    <div class="rc-cita-actions">
+                                        @if (_tab == "llegadas")
+                                        {
+                                            @if (c.Llego)
+                                            {
+                                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false)" disabled="@_busy">Quitar llegada</button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true)" disabled="@_busy">Marcar llegada</button>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
     }
     else
     {
-        <div class="med-tbl-wrap">
-            <table class="table table-sm med-tbl">
-                <thead>
-                    <tr>
-                        <th style="width:70px">Hora</th>
-                        <th>Paciente</th>
-                        <th>Doctor</th>
-                        <th>Servicio</th>
-                        <th style="width:110px" class="text-center">Estado</th>
-                        <th style="width:150px"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var c in _citas)
-                    {
-                        <tr class="@(c.Llego ? "rc-llego" : "")">
-                            <td class="mono" style="font-weight:700;">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</td>
-                            <td><strong>@c.PacienteNombre</strong> <span class="text-muted">@c.PacienteDocumento</span></td>
-                            <td>@c.DoctorNombre</td>
-                            <td class="text-muted">@c.ServicioNombre</td>
-                            <td class="text-center">
-                                @if (c.Llego) { <span class="badge bg-success">Llego</span> }
-                                else { <span class="badge bg-secondary">Programado</span> }
-                            </td>
-                            <td class="text-end">
-                                @if (_tab == "llegadas")
-                                {
-                                    @if (c.Llego)
+        @* ===== VISTA LISTA (tabla) ===== *@
+        @if (_citas.Count == 0)
+        {
+            <div class="ase-empty" style="padding:24px;">No hay citas agendadas para este dia@(_sucursalId == Guid.Empty ? "" : " en esta sede").</div>
+        }
+        else
+        {
+            <div class="med-tbl-wrap">
+                <table class="table table-sm med-tbl">
+                    <thead>
+                        <tr>
+                            <th style="width:70px">Hora</th>
+                            <th>Paciente</th>
+                            <th>Doctor</th>
+                            <th>Servicio</th>
+                            <th style="width:110px" class="text-center">Estado</th>
+                            <th style="width:150px"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in _citas)
+                        {
+                            <tr class="@(c.Llego ? "rc-llego" : "")">
+                                <td class="mono" style="font-weight:700;">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</td>
+                                <td><strong>@c.PacienteNombre</strong> <span class="text-muted">@c.PacienteDocumento</span></td>
+                                <td>@c.DoctorNombre</td>
+                                <td class="text-muted">@c.ServicioNombre</td>
+                                <td class="text-center">
+                                    @if (c.Llego) { <span class="badge bg-success">Llego</span> }
+                                    else { <span class="badge bg-secondary">Programado</span> }
+                                </td>
+                                <td class="text-end">
+                                    @if (_tab == "llegadas")
                                     {
-                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false)" disabled="@_busy">Quitar llegada</button>
+                                        @if (c.Llego)
+                                        {
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false)" disabled="@_busy">Quitar llegada</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true)" disabled="@_busy">Marcar llegada</button>
+                                        }
                                     }
                                     else
                                     {
-                                        <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true)" disabled="@_busy">Marcar llegada</button>
+                                        <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
                                     }
-                                }
-                                else
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+}
+
+@if (_tab == "reprog")
+{
+<div class="ase-card" style="padding:16px;">
+    <h3 class="rc-h">Novedad del profesional (inasistencia)</h3>
+    <p class="text-muted small" style="margin-bottom:12px;">
+        Registra que un profesional no asistira en una fecha (opcionalmente en una franja horaria).
+        El sistema listara las citas afectadas para reprogramarlas una por una.
+    </p>
+    <div class="rc-nov-form">
+        <div class="ase-f">
+            <label>Profesional</label>
+            <select class="form-select form-select-sm" @bind="_novDoctorId">
+                <option value="@Guid.Empty">Selecciona...</option>
+                @foreach (var d in _doctores) { <option value="@d.Id">@d.Nombre</option> }
+            </select>
+        </div>
+        <div class="ase-f"><label>Fecha</label><input type="date" class="form-control form-control-sm" @bind="_novFecha" /></div>
+        <div class="ase-f"><label>Hora desde</label><input type="time" class="form-control form-control-sm" @bind="_novHoraDesde" /></div>
+        <div class="ase-f"><label>Hora hasta</label><input type="time" class="form-control form-control-sm" @bind="_novHoraHasta" /></div>
+        <div class="ase-f">
+            <label>Tipo</label>
+            <select class="form-select form-select-sm" @bind="_novTipo">
+                <option value="Permiso">Permiso</option>
+                <option value="Incapacidad">Incapacidad</option>
+                <option value="Vacaciones">Vacaciones</option>
+                <option value="Otro">Otro</option>
+            </select>
+        </div>
+        <div class="ase-f" style="flex:1;min-width:160px;"><label>Nota</label><input class="form-control form-control-sm" @bind="_novNota" placeholder="Motivo (opcional)" /></div>
+        <button class="btn btn-primary btn-sm" style="align-self:end;" @onclick="RegistrarNovedadAsync" disabled="@(_busy || _novDoctorId == Guid.Empty)">Registrar y ver afectados</button>
+    </div>
+
+    @if (_novedades.Count > 0)
+    {
+        <div style="margin-top:16px;">
+            <h4 class="rc-h" style="font-size:14px;">Novedades registradas</h4>
+            <div class="rc-nov-list">
+                @foreach (var n in _novedades)
+                {
+                    <div class="rc-nov-item">
+                        <div class="rc-nov-item-info">
+                            <strong>@n.DoctorNombre</strong>
+                            <span class="text-muted">@n.Tipo</span>
+                            <span class="rc-nov-fecha">@n.FechaDesde.ToString("dd/MM/yyyy")@(n.HoraDesde is TimeOnly hd ? $" {hd:HH\\:mm}" : "")@(n.HoraHasta is TimeOnly hh ? $"-{hh:HH\\:mm}" : "")</span>
+                        </div>
+                        <div class="rc-nov-item-r">
+                            <span class="badge @(n.Afectados > 0 ? "bg-warning text-dark" : "bg-success")">@n.Afectados afectada(s)</span>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => VerNovedadAsync(n)" disabled="@_busy">Ver afectados</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (_afectadosCargados)
+    {
+        <div style="margin-top:16px;">
+            <h4 class="rc-h" style="font-size:14px;">Pacientes afectados (@_afectados.Count)</h4>
+            @if (_afectados.Count == 0)
+            {
+                <div class="ase-empty" style="padding:16px;">No hay citas de ese profesional en esa fecha/franja. (La novedad quedo registrada.)</div>
+            }
+            else
+            {
+                <div class="rc-cards">
+                    @foreach (var c in _afectados)
+                    {
+                        <div class="rc-pcard">
+                            <div class="rc-pcard-top">
+                                <span class="rc-pcard-hora">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</span>
+                                <div class="rc-pcard-name">
+                                    <strong>@c.PacienteNombre</strong>
+                                    <span class="text-muted">@c.PacienteDocumento</span>
+                                </div>
+                            </div>
+                            <div class="rc-pcard-serv">@c.ServicioNombre</div>
+
+                            <div class="rc-pcard-contact">
+                                <div class="rc-pcard-tel">
+                                    <span class="rc-lbl">Tel:</span>
+                                    @if (!string.IsNullOrWhiteSpace(c.Telefono)) { <a href="tel:@c.Telefono">@c.Telefono</a> } else { <span class="text-muted">-</span> }
+                                    @if (!string.IsNullOrWhiteSpace(c.TelefonoEmergencia))
+                                    {
+                                        <span class="rc-lbl" style="margin-left:8px;">Emerg:</span> <a href="tel:@c.TelefonoEmergencia">@c.TelefonoEmergencia</a>
+                                    }
+                                </div>
+                                @if (c.Contactos.Count > 0)
                                 {
-                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
+                                    <div class="rc-pcard-conts">
+                                        <span class="rc-lbl">Contactos:</span>
+                                        @foreach (var ct in c.Contactos)
+                                        {
+                                            <div class="rc-cont">
+                                                <span class="rc-cont-nom">@ct.Nombre</span>
+                                                @if (!string.IsNullOrWhiteSpace(ct.Parentesco)) { <span class="text-muted"> (@ct.Parentesco)</span> }
+                                                @if (!string.IsNullOrWhiteSpace(ct.Telefono)) { <span> - </span><a href="tel:@ct.Telefono">@ct.Telefono</a> }
+                                            </div>
+                                        }
+                                    </div>
                                 }
-                            </td>
-                        </tr>
+                            </div>
+
+                            <div class="rc-pcard-actions">
+                                <button class="btn btn-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => CancelarAfectadoAsync(c)" disabled="@_busy">Cancelar cita</button>
+                            </div>
+                        </div>
                     }
-                </tbody>
-            </table>
+                </div>
+            }
         </div>
     }
 </div>
+}
 
 @* ============= MODAL REPROGRAMAR ============= *@
 @if (_reprogOpen && _reprogCita is not null)
@@ -118,6 +336,16 @@
                 Actual: @_reprogCita.Fecha.ToString("dd/MM/yyyy") @_reprogCita.Hora?.ToString("HH\\:mm")
             </div>
             <div class="ase-form">
+                <div class="ase-f">
+                    <label>Doctor destino</label>
+                    <select class="form-select form-select-sm" @bind="_reprogDoctorId" @bind:after="CargarSlotsReprogAsync">
+                        <option value="@(_reprogCita.ProfesionalId)">@_reprogCita.DoctorNombre (mismo)</option>
+                        @foreach (var d in _doctores.Where(x => x.Id != _reprogCita.ProfesionalId))
+                        {
+                            <option value="@d.Id">@d.Nombre</option>
+                        }
+                    </select>
+                </div>
                 <div class="ase-f">
                     <label>Nueva fecha</label>
                     <input type="date" class="form-control form-control-sm" @bind="_reprogFecha" @bind:after="CargarSlotsReprogAsync" />
@@ -168,6 +396,80 @@
     .cie-modal-body { padding: 18px; overflow: auto; }
     .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
     .ase-form { display: flex; flex-direction: column; gap: 12px; }
+
+    /* ===== Toolbar calendario ===== */
+    .rc-toolbar { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
+    .rc-nav { display: flex; gap: 6px; align-items: center; }
+    .rc-periodo { font-size: 13px; font-weight: 700; color: #0f172a; margin-left: 6px; text-transform: capitalize; }
+    .rc-viewtoggle { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
+    .rc-vt { background: #fff; border: none; padding: 6px 14px; font-size: 12.5px; font-weight: 600; color: #475569; cursor: pointer; border-right: 1px solid #e2e8f0; }
+    .rc-vt:last-child { border-right: none; }
+    .rc-vt.on { background: #2563eb; color: #fff; }
+    .rc-count { margin-left: auto; align-self: center; }
+
+    /* ===== Vista DIA (linea de tiempo) ===== */
+    .rc-day { display: flex; flex-direction: column; }
+    .rc-hourrow { display: grid; grid-template-columns: 62px 1fr; border-top: 1px solid #eef2f7; min-height: 40px; }
+    .rc-hourlbl { font-size: 11px; font-weight: 700; color: #94a3b8; padding: 6px 8px 0 0; text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .rc-hourcell { padding: 5px 0; display: flex; flex-direction: column; gap: 6px; }
+    .rc-cita { border: 1px solid #bfdbfe; background: #eff6ff; border-left: 4px solid #2563eb; border-radius: 8px; padding: 7px 10px; }
+    .rc-cita-llego { border-color: #86efac; background: #f0fdf4; border-left-color: #22c55e; }
+    .rc-cita-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .rc-cita-hora { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; color: #1d4ed8; font-size: 12px; }
+    .rc-cita-llego .rc-cita-hora { color: #15803d; }
+    .rc-cita-pac { font-size: 13px; color: #0f172a; }
+    .rc-cita-doc-inline { font-size: 11px; }
+    .rc-cita-sub { font-size: 12px; color: #334155; margin-top: 2px; }
+    .rc-cita-actions { margin-top: 7px; }
+
+    /* ===== Vista SEMANA (7 columnas) ===== */
+    .rc-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .rc-daycol { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #fff; min-height: 220px; display: flex; flex-direction: column; }
+    .rc-daycol.rc-finde { background: #f8fafc; }
+    .rc-daycol.rc-hoy { border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset; }
+    .rc-daycol-h { padding: 6px 8px; text-align: center; border-bottom: 1px solid #eef2f7; cursor: pointer; }
+    .rc-daycol-h:hover { background: #eff6ff; }
+    .rc-daycol.rc-hoy .rc-daycol-h { background: #2563eb; color: #fff; }
+    .rc-dow { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; color: inherit; }
+    .rc-dnum { display: block; font-size: 12px; color: inherit; opacity: .85; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .rc-daycol-body { padding: 6px; display: flex; flex-direction: column; gap: 5px; flex: 1; }
+    .rc-empty-mini { text-align: center; color: #cbd5e1; font-size: 16px; padding-top: 8px; }
+    .rc-mini { border: 1px solid #bfdbfe; background: #eff6ff; border-left: 3px solid #2563eb; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
+    .rc-mini:hover { filter: brightness(.97); }
+    .rc-mini-llego { border-color: #86efac; background: #f0fdf4; border-left-color: #22c55e; }
+    .rc-mini-h { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; font-size: 11px; color: #1d4ed8; }
+    .rc-mini-llego .rc-mini-h { color: #15803d; }
+    .rc-mini-pac { font-size: 11.5px; color: #0f172a; line-height: 1.15; }
+    .rc-mini-doc { font-size: 10.5px; color: #64748b; line-height: 1.1; }
+
+    /* ===== Reprogramacion: novedad ===== */
+    .rc-h { font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+    .rc-nov-form { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+    .rc-nov-form .ase-f input, .rc-nov-form .ase-f select { min-width: 120px; }
+
+    /* ===== Tarjetas de pacientes afectados ===== */
+    .rc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+    .rc-pcard { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+    .rc-pcard-top { display: flex; align-items: baseline; gap: 10px; }
+    .rc-pcard-hora { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; color: #1d4ed8; font-size: 14px; }
+    .rc-pcard-name strong { font-size: 14px; color: #0f172a; }
+    .rc-pcard-name .text-muted { font-size: 11.5px; }
+    .rc-pcard-serv { font-size: 12px; color: #475569; margin: 3px 0 8px; }
+    .rc-pcard-contact { border-top: 1px dashed #e2e8f0; padding-top: 8px; font-size: 12px; }
+    .rc-lbl { font-weight: 700; color: #64748b; font-size: 10.5px; text-transform: uppercase; margin-right: 4px; }
+    .rc-pcard-tel a { color: #2563eb; text-decoration: none; font-weight: 600; }
+    .rc-pcard-conts { margin-top: 6px; }
+    .rc-cont { font-size: 12px; color: #334155; line-height: 1.5; }
+    .rc-cont-nom { font-weight: 600; }
+    .rc-cont a { color: #2563eb; text-decoration: none; }
+    .rc-pcard-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+    /* ===== Listado de novedades registradas ===== */
+    .rc-nov-list { display: flex; flex-direction: column; gap: 6px; }
+    .rc-nov-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; background: #fff; flex-wrap: wrap; }
+    .rc-nov-item-info { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+    .rc-nov-fecha { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: #334155; }
+    .rc-nov-item-r { display: flex; align-items: center; gap: 8px; }
 </style>
 
 @code {
@@ -182,7 +484,9 @@
     private DateOnly _fecha = DateOnly.FromDateTime(DateTime.Today);
     private Guid _sucursalId = Guid.Empty;
     private List<SucursalDto> _sedes = new();
-    private List<CitaRecepcionDto> _citas = new();
+    private List<CitaRecepcionDto> _citas = new();       // dia / lista
+    private List<CitaRecepcionDto> _citasSemana = new(); // vista semana
+    private string _vista = "dia";                        // dia | semana | lista
 
     // Reprogramar
     private bool _reprogOpen;
@@ -191,23 +495,108 @@
     private List<TimeOnly> _reprogSlots = new();
     private string _reprogHora = "";
     private string? _reprogError;
+    private Guid _reprogDoctorId;                         // doctor destino (mismo u otro)
+
+    // Doctores con agenda (para novedad + doctor destino)
+    private List<DoctorSimpleDto> _doctores = new();
+
+    // Novedad del profesional (tab Reprogramacion)
+    private Guid _novDoctorId = Guid.Empty;
+    private DateOnly _novFecha = DateOnly.FromDateTime(DateTime.Today);
+    private TimeOnly? _novHoraDesde;
+    private TimeOnly? _novHoraHasta;
+    private string _novTipo = "Permiso";
+    private string _novNota = "";
+    private List<AfectadoRecepcionDto> _afectados = new();
+    private bool _afectadosCargados;
+    private List<NovedadResumenDto> _novedades = new();
 
     protected override async Task OnInitializedAsync()
     {
-        try { _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList(); }
+        try
+        {
+            _sedes = (await Sedes.ListAsync(soloActivas: true)).ToList();
+            _doctores = (await Svc.ListarDoctoresConAgendaAsync()).ToList();
+            _novedades = (await Svc.ListarNovedadesConAfectadosAsync()).ToList();
+        }
         catch (Exception ex) { _error = ex.Message; }
         await CargarAsync();
         _loading = false;
     }
 
+    private void CambiarTab(string tab) { _tab = tab; }
+
+    private Guid? Sede => _sucursalId == Guid.Empty ? null : _sucursalId;
+
     private async Task CargarAsync()
     {
         _error = _ok = null;
-        try { _citas = (await Svc.ListarCitasDelDiaAsync(_fecha, _sucursalId == Guid.Empty ? null : _sucursalId)).ToList(); }
+        try
+        {
+            if (_vista == "semana")
+            {
+                var ini = SemanaInicio();
+                _citasSemana = (await Svc.ListarCitasRangoAsync(ini, ini.AddDays(6), Sede)).ToList();
+            }
+            else
+            {
+                _citas = (await Svc.ListarCitasDelDiaAsync(_fecha, Sede)).ToList();
+            }
+        }
         catch (Exception ex) { _error = ex.Message; }
     }
 
+    private async Task CambiarVista(string v) { _vista = v; await CargarAsync(); }
+
     private async Task IrHoy() { _fecha = DateOnly.FromDateTime(DateTime.Today); await CargarAsync(); }
+
+    private async Task Prev() { _fecha = _fecha.AddDays(_vista == "semana" ? -7 : -1); await CargarAsync(); }
+    private async Task Next() { _fecha = _fecha.AddDays(_vista == "semana" ? 7 : 1); await CargarAsync(); }
+
+    private async Task IrADia(DateOnly d) { _fecha = d; _vista = "dia"; await CargarAsync(); }
+
+    /// <summary>Lunes de la semana que contiene _fecha (semana Lun..Dom).</summary>
+    private DateOnly SemanaInicio() => _fecha.AddDays(-(((int)_fecha.DayOfWeek + 6) % 7));
+    private IEnumerable<DateOnly> SemanaDias()
+    {
+        var ini = SemanaInicio();
+        for (int i = 0; i < 7; i++) { yield return ini.AddDays(i); }
+    }
+
+    /// <summary>Rango de horas a mostrar en la vista dia: 6..20 ampliado si hay citas fuera.</summary>
+    private IEnumerable<int> HorasDia()
+    {
+        int min = 6, max = 20;
+        foreach (var c in _citas)
+        {
+            if (c.Hora is TimeOnly t)
+            {
+                if (t.Hour < min) { min = t.Hour; }
+                if (t.Hour > max) { max = t.Hour; }
+            }
+        }
+        for (int h = min; h <= max; h++) { yield return h; }
+    }
+
+    private List<CitaRecepcionDto> CitasVisibles => _vista == "semana" ? _citasSemana : _citas;
+
+    private string PeriodoLabel()
+    {
+        if (_vista == "semana")
+        {
+            var ini = SemanaInicio();
+            var fin = ini.AddDays(6);
+            return $"{ini.Day:00}/{ini.Month:00} - {fin.Day:00}/{fin.Month:00}/{fin.Year}";
+        }
+        return $"{DiaCorto(_fecha.DayOfWeek)} {_fecha:dd/MM/yyyy}";
+    }
+
+    private static string DiaCorto(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday => "Lun", DayOfWeek.Tuesday => "Mar", DayOfWeek.Wednesday => "Mie",
+        DayOfWeek.Thursday => "Jue", DayOfWeek.Friday => "Vie", DayOfWeek.Saturday => "Sab",
+        _ => "Dom"
+    };
 
     private async Task MarcarAsync(CitaRecepcionDto c, bool llego)
     {
@@ -222,20 +611,94 @@
         finally { _busy = false; }
     }
 
+    // ---- Novedad del profesional (inasistencia) ----
+    private async Task RegistrarNovedadAsync()
+    {
+        if (_novDoctorId == Guid.Empty) { _error = "Selecciona un profesional."; return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            var tipo = Enum.TryParse<Visal.Domain.Enums.TipoNovedadProfesional>(_novTipo, out var t) ? t : Visal.Domain.Enums.TipoNovedadProfesional.Otro;
+            // Persistir la novedad (cierra la agenda del doctor ese dia/franja).
+            var cmd = new GuardarNovedadProfesionalCmd(null, tipo, _novFecha, _novFecha, _novHoraDesde, _novHoraHasta,
+                string.IsNullOrWhiteSpace(_novNota) ? null : _novNota.Trim());
+            await Novedades.GuardarAsync(_novDoctorId, cmd, await ActorAsync());
+            // Cargar los pacientes afectados (citas de ese doctor ese dia/franja).
+            _afectados = (await Svc.ListarAfectadosAsync(_novDoctorId, _novFecha, _novHoraDesde, _novHoraHasta)).ToList();
+            _afectadosCargados = true;
+            _novedades = (await Svc.ListarNovedadesConAfectadosAsync()).ToList();
+            _ok = $"Novedad registrada. {_afectados.Count} cita(s) afectada(s).";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
     // ---- Reprogramar ----
     private async Task AbrirReprogAsync(CitaRecepcionDto c)
     {
         _reprogCita = c; _reprogError = null; _reprogHora = "";
-        _reprogFecha = c.Fecha;
+        _reprogFecha = c.Fecha < DateOnly.FromDateTime(DateTime.Today) ? DateOnly.FromDateTime(DateTime.Today) : c.Fecha;
+        _reprogDoctorId = c.ProfesionalId; // por defecto, mismo doctor
         await CargarSlotsReprogAsync();
         _reprogOpen = true;
+    }
+
+    // Overload para las tarjetas de afectados: mapea a CitaRecepcionDto y reusa el modal.
+    private Task AbrirReprogAsync(AfectadoRecepcionDto a)
+        => AbrirReprogAsync(new CitaRecepcionDto(
+            a.AsignacionTurnoId, a.ProfesionalId, a.Fecha, a.Hora,
+            a.PacienteNombre, a.PacienteDocumento, a.DoctorNombre, a.ServicioNombre,
+            "", a.Llego, null));
+
+    private async Task CancelarAfectadoAsync(AfectadoRecepcionDto a)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Cancelar la cita de {a.PacienteNombre} ({a.Hora?.ToString("HH\\:mm")})?\nEsta accion elimina la cita.");
+        if (!ok) { return; }
+        _busy = true; _error = _ok = null;
+        try
+        {
+            await Svc.CancelarCitaAsync(a.AsignacionTurnoId, await ActorAsync());
+            _ok = $"Cita cancelada: {a.PacienteNombre}.";
+            await RefrescarAfectadosAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task VerNovedadAsync(NovedadResumenDto n)
+    {
+        _novDoctorId = n.ProfesionalId;
+        _novFecha = n.FechaDesde;
+        _novHoraDesde = n.HoraDesde;
+        _novHoraHasta = n.HoraHasta;
+        _novTipo = n.Tipo;
+        _error = _ok = null; _busy = true;
+        try
+        {
+            _afectados = (await Svc.ListarAfectadosAsync(_novDoctorId, _novFecha, _novHoraDesde, _novHoraHasta)).ToList();
+            _afectadosCargados = true;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RefrescarAfectadosAsync()
+    {
+        if (_novDoctorId != Guid.Empty)
+        {
+            _afectados = (await Svc.ListarAfectadosAsync(_novDoctorId, _novFecha, _novHoraDesde, _novHoraHasta)).ToList();
+        }
+        // Recargar el listado de novedades para actualizar los conteos de afectados.
+        try { _novedades = (await Svc.ListarNovedadesConAfectadosAsync()).ToList(); } catch { /* no critico */ }
     }
 
     private async Task CargarSlotsReprogAsync()
     {
         if (_reprogCita is null) { return; }
         _reprogHora = "";
-        try { _reprogSlots = (await Svc.SlotsParaReprogramarAsync(_reprogCita.AsignacionTurnoId, _reprogFecha)).ToList(); }
+        var doctor = _reprogDoctorId == Guid.Empty ? _reprogCita.ProfesionalId : _reprogDoctorId;
+        try { _reprogSlots = (await Svc.SlotsDoctorAsync(doctor, _reprogFecha)).ToList(); }
         catch (Exception ex) { _reprogError = ex.Message; }
     }
 
@@ -246,10 +709,14 @@
         try
         {
             var hora = TimeOnly.ParseExact(_reprogHora, "HH\\:mm");
-            await Svc.ReprogramarAsync(_reprogCita.AsignacionTurnoId, _reprogFecha, hora, await ActorAsync());
+            await Svc.ReprogramarConDoctorAsync(_reprogCita.AsignacionTurnoId, _reprogDoctorId, _reprogFecha, hora, await ActorAsync());
             _reprogOpen = false;
-            _ok = $"Cita reprogramada a {_reprogFecha:dd/MM/yyyy} {_reprogHora}.";
-            await CargarAsync();
+            var docTxt = _reprogDoctorId != _reprogCita.ProfesionalId
+                ? $" con {_doctores.FirstOrDefault(d => d.Id == _reprogDoctorId)?.Nombre ?? "otro doctor"}" : "";
+            _ok = $"Cita reprogramada a {_reprogFecha:dd/MM/yyyy} {_reprogHora}{docTxt}.";
+            // Refrescar segun el contexto: en Reprogramacion quitamos la cita ya movida de los afectados.
+            if (_tab == "reprog" && _afectadosCargados) { await RefrescarAfectadosAsync(); }
+            else { await CargarAsync(); }
         }
         catch (Exception ex) { _reprogError = ex.Message; }
         finally { _busy = false; }

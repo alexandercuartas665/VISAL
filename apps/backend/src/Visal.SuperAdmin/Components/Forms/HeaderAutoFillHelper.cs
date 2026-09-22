@@ -32,8 +32,10 @@ public static class HeaderAutoFillHelper
         var bloqueadas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (header is null) { return bloqueadas; }
 
-        // Consecutivo legible del HC: ultimos 8 chars del Guid (estable, unico).
-        var consecutivo = hcId.ToString("N")[^8..].ToUpperInvariant();
+        // Consecutivo legible del HC: PRIMEROS 8 hex del Guid, para que coincida con
+        // el "HC N°" que muestra/busca la lista de Ordenes Clinicas (antes usaba los
+        // ultimos 8 -> el numero del encabezado no coincidia con el buscable).
+        var consecutivo = hcId.ToString("N")[..8].ToUpperInvariant();
         var local = fechaApertura.ToLocalTime();
         // La fecha ahora incluye la hora (dd/MM/yyyy HH:mm) para que el documento
         // muestre ambas y el medico pueda editarlas mientras la HC este abierta.

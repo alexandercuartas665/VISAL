@@ -1267,7 +1267,11 @@ else
     /// en la HC y en todas las ordenes derivadas para que coincida con lo que el
     /// usuario ve en pantalla.
     /// </summary>
-    private string ConsecutivoHc() => _hc is null ? "" : _hc.Id.ToString("N")[^8..].ToUpperInvariant();
+    // El "HC N°" impreso DEBE coincidir con el de la lista/busqueda de Ordenes
+    // Clinicas, que es el PREFIJO (primeros 8 hex) del GUID. Antes usaba los
+    // ULTIMOS 8 ([^8..]) -> imprimia un numero distinto al buscable, y al filtrar
+    // por el numero impreso la lista salia vacia.
+    private string ConsecutivoHc() => _hc is null ? "" : _hc.Id.ToString("N")[..8].ToUpperInvariant();
 
     /// <summary>
     /// Fecha/hora canonica de la HC para impresion: la que el medico dejo en el

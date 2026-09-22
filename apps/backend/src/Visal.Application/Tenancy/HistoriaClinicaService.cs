@@ -201,6 +201,11 @@ public sealed class HistoriaClinicaService(
             where t.AsignacionId == asigId
                   && f.Codigo == evoCod
                   && h.Estado == HistoriaClinicaEstado.Cerrada
+                  // Defensa: una HC nunca es su propia evolucion. Sin esto, un
+                  // formato mal configurado que se declare a si mismo como
+                  // FormatoEvolucionCodigo se auto-anexa y la logica anti-duplicados
+                  // del listado impreso lo elimina (imprime "nada").
+                  && h.Id != primeraSesionHcId
             select new HistoriaClinicaDetailDto(
                 h.Id, h.PacienteId, f.Id, f.Codigo, f.Nombre, f.Version,
                 f.SchemaJson, f.PrefillRoutesJson, h.ValoresJson,

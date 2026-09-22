@@ -406,6 +406,16 @@ else if (_tabSel == "Coordinaciones")
                     <label>Numero Documento</label>
                     <input class="form-control form-control-sm mono" @bind="_coDoc" placeholder="BUSQUEDA DE PACIENTE" />
                 </div>
+                <div class="ase-f">
+                    <label>Con sesiones/atencion</label>
+                    <div class="form-check" style="padding-top:4px;">
+                        <input class="form-check-input" type="checkbox" id="coIncAtencion"
+                               @bind="_coIncluirConAtencion" />
+                        <label class="form-check-label small" for="coIncAtencion">
+                            Incluir las que ya tienen sesiones completadas
+                        </label>
+                    </div>
+                </div>
                 <div class="ase-f ase-f-wide cd-actions">
                     <button class="btn btn-primary btn-sm" @onclick="CargarCoordinaciones" disabled="@_busy">
                         @(_busy ? "Cargando..." : "Cargar coordinaciones")
@@ -436,7 +446,7 @@ else if (_tabSel == "Coordinaciones")
             }
             else
             {
-                <div class="cd-coord-count">@_coordList.Count coordinacion(es) sin actividad clinica.</div>
+                <div class="cd-coord-count">@_coordList.Count coordinacion(es)@(_coIncluirConAtencion ? " (incluye las que ya tienen atencion clinica)." : " sin actividad clinica.")</div>
                 <div class="table-responsive">
                     <table class="table table-sm cd-coord-tbl">
                         <thead>
@@ -449,6 +459,7 @@ else if (_tabSel == "Coordinaciones")
                                 <th class="text-end">Cant.</th>
                                 <th class="text-end">Turnos</th>
                                 <th class="text-end">Sesiones</th>
+                                <th class="text-end">Completadas</th>
                                 <th>Especialistas</th>
                                 <th>Ventana</th>
                                 <th class="text-center">Acciones</th>
@@ -461,6 +472,10 @@ else if (_tabSel == "Coordinaciones")
                                 <td>
                                     <div class="fw-600">@c.PacienteNombre</div>
                                     <div class="small text-muted">@c.PacienteDoc</div>
+                                    @if (c.TieneAtencion)
+                                    {
+                                        <span class="badge bg-warning text-dark" style="font-size:.65rem;">Con atencion clinica</span>
+                                    }
                                 </td>
                                 <td class="small mono">@(c.FechaAsignacion?.ToString("dd/MM/yyyy") ?? "-")</td>
                                 <td>@c.ContratoCodigo</td>
@@ -472,6 +487,13 @@ else if (_tabSel == "Coordinaciones")
                                 <td class="text-end">@c.Cantidad</td>
                                 <td class="text-end">@c.TurnosCoordinados</td>
                                 <td class="text-end">@c.SesionesProgramadas</td>
+                                <td class="text-end">
+                                    @if (c.SesionesCompletadas > 0)
+                                    {
+                                        <span class="fw-600 text-danger">@c.SesionesCompletadas</span>
+                                    }
+                                    else { <span class="text-muted">0</span> }
+                                </td>
                                 <td class="small">@(string.IsNullOrWhiteSpace(c.EspecialistasNombres) ? "-" : c.EspecialistasNombres)</td>
                                 <td class="small">
                                     @if (c.PrimeraFecha is DateOnly pf && c.UltimaFecha is DateOnly uf)
@@ -501,19 +523,43 @@ else if (_tabSel == "Coordinaciones")
                 <div class="cd-coord-modal" @onclick:stopPropagation>
                     <div class="cd-coord-modal-h">Confirmar eliminacion de coordinacion</div>
                     <div class="cd-coord-modal-b">
-                        <div class="alert alert-warning small mb-2">
-                            Esta operacion elimina la asignacion y todos sus turnos/sesiones. No es reversible.
-                            El sistema verifica antes de eliminar que no haya historias clinicas ni notas medicas asociadas.
-                        </div>
+                        @if (_coordEliminar.TieneAtencion)
+                        {
+                            <div class="alert alert-danger small mb-2">
+                                <strong>Atencion:</strong> esta coordinacion YA tiene actividad clinica
+                                (@_coordEliminar.SesionesCompletadas sesion(es) completada(s)). Al eliminarla se
+                                borraran tambien las <strong>historias clinicas</strong>, revisiones, ordenes y notas
+                                medicas asociadas. Esta accion es <strong>irreversible</strong> y se pierden datos clinicos.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-warning small mb-2">
+                                Esta operacion elimina la asignacion y todos sus turnos/sesiones. No es reversible.
+                                El sistema verifica antes de eliminar que no haya historias clinicas ni notas medicas asociadas.
+                            </div>
+                        }
                         <div class="small mb-2">
                             <strong>Paciente:</strong> @_coordEliminar.PacienteNombre (@_coordEliminar.PacienteDoc)<br />
                             <strong>Servicio:</strong> @_coordEliminar.NombreServicio (@_coordEliminar.Cantidad) &middot;
                             <strong>Turnos:</strong> @_coordEliminar.TurnosCoordinados &middot;
-                            <strong>Sesiones:</strong> @_coordEliminar.SesionesProgramadas<br />
+                            <strong>Sesiones:</strong> @_coordEliminar.SesionesProgramadas &middot;
+                            <strong>Completadas:</strong> @_coordEliminar.SesionesCompletadas<br />
                             <strong>Especialistas:</strong> @(string.IsNullOrWhiteSpace(_coordEliminar.EspecialistasNombres) ? "-" : _coordEliminar.EspecialistasNombres)
                         </div>
                         <label class="small fw-600">Para confirmar, escribe <code>ELIMINAR</code>:</label>
                         <input class="form-control form-control-sm" @bind="_coordConfirmText" @bind:event="oninput" />
+                        @if (_coordEliminar.TieneAtencion)
+                        {
+                            @* Segunda confirmacion explicita cuando hay datos clinicos en juego. *@
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="coordForzarChk"
+                                       @bind="_coordForzarConfirm" />
+                                <label class="form-check-label small text-danger fw-600" for="coordForzarChk">
+                                    Entiendo que se eliminaran historias clinicas y notas medicas de forma permanente.
+                                </label>
+                            </div>
+                        }
                         @if (_coordEliminarErr is not null)
                         {
                             <div class="alert alert-danger small mt-2 mb-0">@_coordEliminarErr</div>
@@ -522,8 +568,8 @@ else if (_tabSel == "Coordinaciones")
                     <div class="cd-coord-modal-f">
                         <button class="btn btn-secondary btn-sm" @onclick="CerrarModalEliminarCoord" disabled="@_coordEliminarBusy">Cancelar</button>
                         <button class="btn btn-danger btn-sm" @onclick="ConfirmarEliminarCoord"
-                                disabled="@(_coordEliminarBusy || _coordConfirmText != "ELIMINAR")">
-                            @(_coordEliminarBusy ? "Eliminando..." : "Confirmar eliminacion")
+                                disabled="@(_coordEliminarBusy || _coordConfirmText != "ELIMINAR" || (_coordEliminar.TieneAtencion && !_coordForzarConfirm))">
+                            @(_coordEliminarBusy ? "Eliminando..." : (_coordEliminar.TieneAtencion ? "Eliminar con datos clinicos" : "Confirmar eliminacion"))
                         </button>
                     </div>
                 </div>
@@ -1613,6 +1659,8 @@ else if (_tabSel == "Calendario")
     private string _coordConfirmText = "";
     private bool _coordEliminarBusy;
     private string? _coordEliminarErr;
+    private bool _coIncluirConAtencion;
+    private bool _coordForzarConfirm;
 
     private async Task CargarCoordinaciones()
     {
@@ -1634,7 +1682,8 @@ else if (_tabSel == "Calendario")
                 string.IsNullOrWhiteSpace(_coNoOrden) ? null : _coNoOrden,
                 string.IsNullOrWhiteSpace(_coDoc) ? null : _coDoc,
                 string.IsNullOrWhiteSpace(_coEpsSel) ? null : _coEpsSel,
-                _coFecha);
+                _coFecha,
+                _coIncluirConAtencion);
             _coordList = raw.ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -1644,13 +1693,14 @@ else if (_tabSel == "Calendario")
     private void LimpiarFiltrosCoord()
     {
         _coTipoSel = ""; _coNoOrden = ""; _coDoc = ""; _coSedeSel = ""; _coEpsSel = "";
-        _coAnio = DateTime.Now.Year; _coMes = 0; _coFecha = null;
+        _coAnio = DateTime.Now.Year; _coMes = 0; _coFecha = null; _coIncluirConAtencion = false;
     }
 
     private void AbrirModalEliminarCoord(CoordinacionEliminableDto c)
     {
         _coordEliminar = c;
         _coordConfirmText = "";
+        _coordForzarConfirm = false;
         _coordEliminarErr = null;
     }
 
@@ -1659,16 +1709,20 @@ else if (_tabSel == "Calendario")
         if (_coordEliminarBusy) { return; }
         _coordEliminar = null;
         _coordConfirmText = "";
+        _coordForzarConfirm = false;
         _coordEliminarErr = null;
     }
 
     private async Task ConfirmarEliminarCoord()
     {
         if (_coordEliminar is null || _coordConfirmText != "ELIMINAR") { return; }
+        // Con actividad clinica se exige ademas el check de reconocimiento (forzar).
+        if (_coordEliminar.TieneAtencion && !_coordForzarConfirm) { return; }
         _coordEliminarBusy = true; _coordEliminarErr = null;
         try
         {
-            await Svc.EliminarCoordinacionAsync(_coordEliminar.AsignacionId, Guid.Empty);
+            await Svc.EliminarCoordinacionAsync(
+                _coordEliminar.AsignacionId, Guid.Empty, _coordEliminar.TieneAtencion);
             var eliminadoId = _coordEliminar.AsignacionId;
             _coordEliminar = null;
             _coordConfirmText = "";

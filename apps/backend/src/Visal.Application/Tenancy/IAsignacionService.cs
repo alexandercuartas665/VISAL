@@ -232,7 +232,12 @@ public sealed record CoordinacionEliminableDto(
     DateOnly? PrimeraFecha,
     DateOnly? UltimaFecha,
     DateTimeOffset CreadoEn,
-    DateOnly? FechaAsignacion);
+    DateOnly? FechaAsignacion,
+    // Sesiones ya COMPLETADAS (con HC cerrada) y si la coordinacion tiene alguna
+    // actividad clinica (HC). Cuando TieneAtencion es true, borrar la coordinacion
+    // elimina historias clinicas -> la UI exige doble confirmacion.
+    int SesionesCompletadas = 0,
+    bool TieneAtencion = false);
 
 /// <summary>Filtro de estado para el grid de Coordinacion. Equivale al cmbEstado del legacy.</summary>
 public enum AsignacionEstadoFiltro
@@ -521,6 +526,10 @@ public interface IAsignacionService
         string? noOrden = null, string? documentoPaciente = null,
         string? aseguradoraNombre = null,
         DateOnly? fechaAsignacion = null,
+        // Cuando es true, incluye tambien coordinaciones que YA tienen atencion
+        // (HC/notas) — el DTO marca TieneAtencion y SesionesCompletadas para que
+        // la UI las distinga y pida doble confirmacion al borrarlas.
+        bool incluirConAtencion = false,
         CancellationToken ct = default);
 
     /// <summary>
@@ -533,7 +542,11 @@ public interface IAsignacionService
     /// La asignacion vuelve al estado "no coordinado": se puede volver a coordinar
     /// (o eliminar del lote desde /asignacion).
     /// </summary>
-    Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default);
+    /// <param name="forzar">Si es true, borra tambien la actividad clinica downstream
+    /// (historias clinicas + sus hijos + notas de turno) para poder eliminar una
+    /// coordinacion que YA tiene sesiones/atencion. Destructivo: la UI lo usa solo
+    /// tras doble confirmacion.</param>
+    Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, bool forzar = false, CancellationToken ct = default);
 
     /// <summary>
     /// Lista los turnos de una asignacion coordinada para el flujo "Reasignar doctor",

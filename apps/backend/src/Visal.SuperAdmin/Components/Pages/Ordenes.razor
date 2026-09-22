@@ -1720,6 +1720,10 @@ else
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro)) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(_codigoAsignacionFiltro.Trim())}"); }
+        // FIX: el filtro por HC N° (codigoHc) faltaba aqui, asi que "Imprimir listado"
+        // ignoraba ese filtro e imprimia TODAS las HC del paciente/asignacion en vez de
+        // la(s) filtrada(s). Lo pasamos para que el paquete impreso respete el HC N°.
+        if (!string.IsNullOrWhiteSpace(_codigoHcFiltro)) { qs.Add($"codigoHc={Uri.EscapeDataString(_codigoHcFiltro.Trim())}"); }
         // FAT-4 — el orden del listado impreso respeta el criterio elegido en el toolbar.
         qs.Add($"ordenarPor={Uri.EscapeDataString(_ordenarPor)}");
         return qs.Count == 0

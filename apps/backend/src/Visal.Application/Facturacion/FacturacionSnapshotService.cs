@@ -448,6 +448,60 @@ public sealed class FacturacionSnapshotService(
         return null;
     }
 
+    public async Task<IReadOnlyList<PacienteSnapshotDto>> ListarPacientesSnapshotAsync(
+        Guid snapshotId, CancellationToken ct = default)
+    {
+        var jsons = await db.FacturacionSnapshotFilas.AsNoTracking()
+            .Where(x => x.SnapshotId == snapshotId)
+            .OrderBy(x => x.NumeroFila)
+            .Select(x => x.DatosJson)
+            .ToListAsync(ct);
+        if (jsons.Count == 0) { return Array.Empty<PacienteSnapshotDto>(); }
+
+        // Agrupa por documento (Identificación). Cada fila es un servicio; se
+        // acumulan servicios y autorizaciones distintas por paciente.
+        var acc = new Dictionary<string, PacAcc>(StringComparer.OrdinalIgnoreCase);
+        var orden = new List<string>();
+        foreach (var json in jsons)
+        {
+            var d = Deserializar(json);
+            string S(string k) => d.TryGetValue(k, out var v) ? (v?.ToString() ?? "").Trim() : "";
+            var doc = S("Identificación");
+            if (string.IsNullOrWhiteSpace(doc)) { doc = "(sin documento)"; }
+            var nombre = string.Join(" ", new[]
+            {
+                S("Primer Nombre"), S("Segundo Nombre"),
+                S("Primer Apellido"), S("Segundo Apellido"),
+            }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+            if (!acc.TryGetValue(doc, out var cur))
+            {
+                cur = new PacAcc { Tipo = S("Tipo_Id"), Nombre = nombre };
+                acc[doc] = cur;
+                orden.Add(doc);
+            }
+            cur.Servicios++;
+            if (string.IsNullOrWhiteSpace(cur.Nombre) && !string.IsNullOrWhiteSpace(nombre)) { cur.Nombre = nombre; }
+            var aut = S("Autorizacion");
+            if (!string.IsNullOrWhiteSpace(aut)) { cur.Auts.Add(aut); }
+        }
+
+        return orden.Select(doc =>
+        {
+            var c = acc[doc];
+            return new PacienteSnapshotDto(doc, c.Tipo, c.Nombre,
+                c.Auts.OrderBy(x => x).ToList(), c.Servicios);
+        }).ToList();
+    }
+
+    private sealed class PacAcc
+    {
+        public string Tipo = "";
+        public string Nombre = "";
+        public HashSet<string> Auts = new(StringComparer.OrdinalIgnoreCase);
+        public int Servicios;
+    }
+
     private static IReadOnlyDictionary<string, object?> Deserializar(string json)
     {
         // Al deserializar de jsonb los valores llegan como JsonElement. Los

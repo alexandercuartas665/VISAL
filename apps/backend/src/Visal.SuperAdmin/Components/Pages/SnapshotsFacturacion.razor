@@ -10,6 +10,7 @@
 @inject ISnapshotColumnaConfigService ColSvc
 @inject IEnumerable<ISnapshotBuilder> Builders
 @inject IAseguradoraService AseSvc
+@inject ICuentaMedicaConfigService CuentaSvc
 @inject ISucursalService SucSvc
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
@@ -344,6 +345,16 @@
                 </div>
                 <button class="sn-modal-x" @onclick="CerrarVer">&times;</button>
             </div>
+            <div class="sn-tabs sn-tabs-modal">
+                <button class="sn-tab @(_verTab == VerTab.Datos ? "sel" : "")" @onclick="() => CambiarVerTab(VerTab.Datos)">
+                    Datos <span class="sn-tab-count">(@_verDetalle.Metadata.TotalFilas)</span>
+                </button>
+                <button class="sn-tab @(_verTab == VerTab.Tipologias ? "sel" : "")" @onclick="() => CambiarVerTab(VerTab.Tipologias)">
+                    Tipologias / Archivos
+                </button>
+            </div>
+            @if (_verTab == VerTab.Datos)
+            {
             <div class="sn-modal-controls">
                 <div class="sn-modal-controls-l">
                     <label>Buscar</label>
@@ -457,6 +468,126 @@
                     </div>
                 }
             </div>
+            }
+            else
+            {
+                @* ============ Tab Tipologias / Archivos ============ *@
+                <div class="sn-modal-b sn-tip-body">
+                    @if (_tipCargando)
+                    {
+                        <div class="sn-empty">Cargando resumen de tipologias...</div>
+                    }
+                    else
+                    {
+                        <div class="sn-tip-head">
+                            <div>
+                                <strong>Aseguradora:</strong>
+                                @(_verDetalle.Metadata.AseguradoraNombre ?? "(sin aseguradora en el snapshot)")
+                            </div>
+                            <div class="sn-tip-kpis">
+                                <span class="sn-tip-kpi">@_tipArchivos.Count archivo(s)</span>
+                                <span class="sn-tip-kpi">@_tipPacientes.Count paciente(s)</span>
+                            </div>
+                        </div>
+
+                        @if (_verDetalle.Metadata.AseguradoraId is null)
+                        {
+                            <div class="sn-empty">
+                                Este snapshot no esta asociado a una aseguradora, no se pueden resolver las
+                                tipologias de archivo.
+                            </div>
+                        }
+                        else if (_tipArchivos.Count == 0)
+                        {
+                            <div class="sn-empty">
+                                La aseguradora <b>@_verDetalle.Metadata.AseguradoraNombre</b> aun no tiene archivos
+                                (tipologias) configurados. Configuralos en <b>Aseguradoras &rarr; Cuenta medica</b>.
+                            </div>
+                        }
+                        else
+                        {
+                            @* Configuracion aplicable: los archivos que se generaran por paciente. *@
+                            <div class="sn-tip-section-t">Archivos configurados (se generan por paciente)</div>
+                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Haz click en un archivo para ver su contenido.</div>
+                            <div class="sn-tip-archivos">
+                                @foreach (var a in _tipArchivos)
+                                {
+                                    var abierto = _tipArchExpandido.Contains(a.Id);
+                                    <div class="sn-tip-arch @(abierto ? "abierto" : "")">
+                                        <button type="button" class="sn-tip-arch-h" @onclick="() => ToggleArchivo(a.Id)">
+                                            <span class="sn-tip-arch-caret">@(abierto ? "▾" : "▸")</span>
+                                            <span class="sn-tip-arch-name">@(string.IsNullOrWhiteSpace(a.Descripcion) ? a.Alias : a.Descripcion)</span>
+                                            <span class="sn-tip-arch-code mono">@a.Alias</span>
+                                            @if (a.Obligatorio) { <span class="sn-tip-badge">OBL</span> }
+                                            <span class="sn-tip-arch-count">@a.Contenidos.Count</span>
+                                        </button>
+                                        @if (abierto)
+                                        {
+                                            <div class="sn-tip-arch-body">
+                                                <div class="sn-tip-arch-cont">
+                                                    @foreach (var c in a.Contenidos)
+                                                    {
+                                                        <span class="sn-tip-chip">@LabelOrigenTip(c.Origen)@(string.IsNullOrEmpty(c.TipologiaNombre) ? "" : $" · {c.TipologiaNombre}")@(c.SoloUltimo ? " (1x)" : "")</span>
+                                                    }
+                                                </div>
+                                                <div class="sn-tip-arch-pat mono">&#128193; @PatronDe(a)</div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            @* Resumen por paciente: nombres de archivo que se generarian. *@
+                            <div class="sn-tip-section-t">Resumen por paciente (@_tipPacientes.Count)</div>
+                            <div class="sn-tip-scope">
+                                &#9432; Solo los <b>@_tipPacientes.Count paciente(s)</b> contenidos en este snapshot
+                                (<b>@_verDetalle.Metadata.Nombre</b>, @_verDetalle.Metadata.TotalFilas filas).
+                            </div>
+                            @if (_tipPacientes.Count == 0)
+                            {
+                                <div class="sn-empty">El snapshot no tiene filas para resumir.</div>
+                            }
+                            else
+                            {
+                                <div class="sn-tip-pacwrap">
+                                    <table class="sn-tip-pactbl">
+                                        <thead>
+                                            <tr>
+                                                <th>Paciente</th>
+                                                <th>Documento</th>
+                                                <th class="text-end">Servicios</th>
+                                                <th>Archivos que se generarian</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var p in _tipPacientes)
+                                            {
+                                                <tr>
+                                                    <td>@(string.IsNullOrWhiteSpace(p.Nombre) ? "-" : p.Nombre)</td>
+                                                    <td class="mono">@p.TipoDocumento @p.Documento</td>
+                                                    <td class="text-end">@p.Servicios</td>
+                                                    <td>
+                                                        <div class="sn-tip-files">
+                                                            @foreach (var a in _tipArchivos)
+                                                            {
+                                                                <span class="sn-tip-file mono" title="@a.Alias">@ResolverNombre(a, p)</span>
+                                                            }
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="sn-tip-note">
+                                    Vista previa: los nombres se arman con el patron de cada archivo y los datos del
+                                    paciente. La generacion del ZIP con el contenido real es una fase posterior.
+                                </div>
+                            }
+                        }
+                    }
+                </div>
+            }
             <div class="sn-modal-f">
                 <div class="d-flex gap-2">
                     <a class="btn btn-success btn-sm"
@@ -755,6 +886,36 @@
     .sn-modal-x { background:transparent; border:0; font-size:24px; color:var(--muted); cursor:pointer; padding:0 4px; }
     .sn-modal-b { padding:18px 20px; overflow:auto; flex:1; }
     .sn-modal-b-tabla { padding:0; }
+    /* Sub-tabs dentro del modal de detalle */
+    .sn-tabs-modal { padding:0 20px; border-bottom:1px solid var(--border); background:#fff; }
+    .sn-tip-body { display:flex; flex-direction:column; gap:12px; }
+    .sn-tip-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; background:#f8fafc; border:1px solid var(--border); border-radius:8px; font-size:13px; }
+    .sn-tip-kpis { display:flex; gap:6px; }
+    .sn-tip-kpi { background:#eef2ff; color:#4338ca; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+    .sn-tip-section-t { font-weight:700; color:#0f172a; font-size:13px; margin-top:4px; }
+    .sn-tip-archivos { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; }
+    .sn-tip-arch { border:1px solid var(--border); border-left:3px solid #6366f1; border-radius:8px; background:#fff; overflow:hidden; }
+    .sn-tip-arch.abierto { box-shadow:0 2px 8px rgba(99,102,241,.12); }
+    .sn-tip-arch-h { display:flex; align-items:center; gap:6px; flex-wrap:wrap; width:100%; text-align:left; background:none; border:none; padding:10px; cursor:pointer; font:inherit; }
+    .sn-tip-arch-h:hover { background:#f8fafc; }
+    .sn-tip-arch-caret { color:#6366f1; font-size:11px; width:12px; flex:0 0 auto; }
+    .sn-tip-arch-count { margin-left:auto; background:#eef2ff; color:#4338ca; border-radius:999px; padding:0 8px; font-size:11px; font-weight:700; }
+    .sn-tip-arch-body { padding:0 10px 10px 28px; display:flex; flex-direction:column; gap:6px; }
+    .sn-tip-arch-name { font-weight:700; color:#0f172a; font-size:13px; }
+    .sn-tip-arch-code { background:#f1f5f9; color:#475569; border-radius:4px; padding:1px 6px; font-size:11px; }
+    .sn-tip-badge { background:#dbeafe; color:#1e40af; border-radius:4px; padding:1px 6px; font-size:10px; font-weight:700; }
+    .sn-tip-arch-cont { display:flex; flex-wrap:wrap; gap:4px; }
+    .sn-tip-chip { background:#eef2ff; color:#4338ca; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; }
+    .sn-tip-arch-pat { font-size:11px; color:#64748b; background:#f8fafc; border-radius:4px; padding:3px 6px; word-break:break-all; }
+    .sn-tip-pacwrap { border:1px solid var(--border); border-radius:8px; overflow:auto; }
+    .sn-tip-pactbl { width:100%; border-collapse:collapse; font-size:12.5px; }
+    .sn-tip-pactbl th { text-align:left; background:#f8fafc; padding:8px 10px; border-bottom:1px solid var(--border); position:sticky; top:0; }
+    .sn-tip-pactbl td { padding:8px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+    .sn-tip-files { display:flex; flex-direction:column; gap:3px; }
+    .sn-tip-file { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:4px; padding:2px 6px; font-size:11px; width:fit-content; }
+    .sn-tip-note { font-size:11.5px; color:#64748b; font-style:italic; }
+    .sn-tip-scope { font-size:12px; color:#1e3a8a; background:#eff6ff; border-left:3px solid #2563eb; border-radius:4px; padding:6px 10px; margin-top:-2px; }
+    .sn-tip-body .mono, .sn-tip-arch .mono, .sn-tip-file.mono, .sn-tip-arch-code.mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; }
     .sn-modal-f { padding:12px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; align-items:center; gap:8px; }
     .sn-modal-controls { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); background:#f8fafc; flex-wrap:wrap; }
     .sn-modal-controls-l, .sn-modal-controls-r { display:flex; align-items:center; gap:8px; }
@@ -889,6 +1050,21 @@
     private string? _verOrden;
     private bool _verOrdenDesc;
     private CancellationTokenSource? _verBuscarCts;
+
+    // Sub-tabs del detalle: Datos (la tabla) y Tipologias/Archivos (resumen).
+    private enum VerTab { Datos, Tipologias }
+    private VerTab _verTab = VerTab.Datos;
+    private bool _tipCargado;
+    private bool _tipCargando;
+    private CuentaMedicaConfigDto? _tipConfig;
+    private List<InformeItemDto> _tipArchivos = new();
+    private List<PacienteSnapshotDto> _tipPacientes = new();
+    private HashSet<Guid> _tipArchExpandido = new();
+
+    private void ToggleArchivo(Guid id)
+    {
+        if (!_tipArchExpandido.Remove(id)) { _tipArchExpandido.Add(id); }
+    }
 
     // Bulk-fill de "Consecutivo Factura" para el lote entero.
     private string _bulkFactura = "";
@@ -1159,6 +1335,12 @@
         _verOrden = null;
         _verOrdenDesc = false;
         _verFijar = 0;
+        _verTab = VerTab.Datos;
+        _tipCargado = false;
+        _tipArchivos = new();
+        _tipPacientes = new();
+        _tipArchExpandido = new();
+        _tipConfig = null;
         _showVer = true;
         _verCargando = true;
         try
@@ -1169,6 +1351,79 @@
         catch (Exception ex) { _error = "Error al abrir snapshot: " + ex.Message; _showVer = false; }
         finally { _verCargando = false; }
     }
+
+    private async Task CambiarVerTab(VerTab t)
+    {
+        _verTab = t;
+        if (t == VerTab.Tipologias && !_tipCargado) { await CargarTipologiasAsync(); }
+    }
+
+    private async Task CargarTipologiasAsync()
+    {
+        if (_verDetalle is null) { return; }
+        _tipCargando = true;
+        try
+        {
+            if (_verDetalle.Metadata.AseguradoraId is Guid aid)
+            {
+                _tipConfig = await CuentaSvc.GetOrCreateAsync(aid);
+                _tipArchivos = (await CuentaSvc.ListarItemsAsync(aid)).ToList();
+            }
+            else
+            {
+                _tipConfig = null;
+                _tipArchivos = new();
+            }
+            _tipPacientes = (await Svc.ListarPacientesSnapshotAsync(_verSnapshotId)).ToList();
+            _tipCargado = true;
+        }
+        catch (Exception ex) { _error = "Error al cargar tipologias: " + ex.Message; }
+        finally { _tipCargando = false; }
+    }
+
+    // ---- Helpers del tab Tipologias ----
+    private string PatronDe(InformeItemDto a) =>
+        !string.IsNullOrWhiteSpace(a.PatronNombre) ? a.PatronNombre!
+        : !string.IsNullOrWhiteSpace(_tipConfig?.PatronNombreDefault) ? _tipConfig!.PatronNombreDefault!
+        : "{sigla}_{cedula}";
+
+    private string ResolverNombre(InformeItemDto a, PacienteSnapshotDto p)
+    {
+        var patron = PatronDe(a);
+        var hoy = DateTimeOffset.Now.ToLocalTime();
+        var aut = p.Autorizaciones.Count > 0 ? p.Autorizaciones[0] : "";
+        var nombre = (p.Nombre ?? "").Replace(' ', '_');
+        var res = patron
+            .Replace("{sigla}", a.Alias ?? "")
+            .Replace("{cedula}", p.Documento ?? "")
+            .Replace("{autorizacion}", aut)
+            .Replace("{nombre}", nombre)
+            .Replace("{consecutivo}", "")
+            .Replace("{codigo_hc}", "")
+            .Replace("{tipo_servicio}", "")
+            .Replace("{mes}", hoy.ToString("MM"));
+        // Token de fecha con formato: {fecha:yyyyMMdd}
+        res = System.Text.RegularExpressions.Regex.Replace(res, @"\{fecha:([^}]+)\}", m =>
+        {
+            try { return hoy.ToString(m.Groups[1].Value); } catch { return ""; }
+        });
+        res = res.Replace("{fecha}", hoy.ToString("yyyyMMdd"));
+        return res + ".pdf";
+    }
+
+    private static string LabelOrigenTip(OrigenInformeItem o) => o switch
+    {
+        OrigenInformeItem.HistoriaClinicaPdf => "Historia clinica (PDF)",
+        OrigenInformeItem.DocumentoHc => "Documento de HC",
+        OrigenInformeItem.DocumentoPacienteLibre => "Documento libre",
+        OrigenInformeItem.DocumentoNota => "Adjunto de nota",
+        OrigenInformeItem.FirmaPaciente => "Firma del paciente",
+        OrigenInformeItem.AutorizacionAsignacion => "Autorizacion",
+        OrigenInformeItem.Consentimiento => "Consentimiento",
+        OrigenInformeItem.Evolucion => "Evolucion",
+        OrigenInformeItem.Escala => "Escala",
+        _ => o.ToString(),
+    };
 
     private async Task CargarPaginaVer()
     {

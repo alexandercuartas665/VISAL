@@ -42,6 +42,18 @@ public sealed record FacturacionSnapshotDetalleDto(
     IReadOnlyList<string> Columnas,
     string FiltrosJson);
 
+/// <summary>
+/// Paciente distinto dentro de un snapshot (agrupado por documento), con su
+/// nombre, tipo de documento, autorizaciones y numero de servicios/filas. Base
+/// del resumen de tipologias/archivos que se generarian por paciente.
+/// </summary>
+public sealed record PacienteSnapshotDto(
+    string Documento,
+    string TipoDocumento,
+    string Nombre,
+    IReadOnlyList<string> Autorizaciones,
+    int Servicios);
+
 /// <summary>Resultado paginado de un ListarFilas.</summary>
 public sealed record PagedResult<T>(
     IReadOnlyList<T> Items,
@@ -163,6 +175,14 @@ public interface IFacturacionSnapshotService
 
     /// <summary>Historial completo de cambios manuales sobre un snapshot, mas reciente primero.</summary>
     Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Pacientes distintos del snapshot (agrupados por documento/Identificación),
+    /// con nombre armado, autorizaciones y numero de servicios. Usado por el
+    /// resumen de tipologias/archivos del detalle del snapshot.
+    /// </summary>
+    Task<IReadOnlyList<PacienteSnapshotDto>> ListarPacientesSnapshotAsync(
+        Guid snapshotId, CancellationToken ct = default);
 }
 
 /// <summary>

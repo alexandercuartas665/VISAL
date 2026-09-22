@@ -521,45 +521,37 @@ else if (_tabSel == "Coordinaciones")
                backend re-valida ausencia de HC/nota. *@
             <div class="cd-coord-overlay" @onclick="CerrarModalEliminarCoord">
                 <div class="cd-coord-modal" @onclick:stopPropagation>
-                    <div class="cd-coord-modal-h">Confirmar eliminacion de coordinacion</div>
+                    <div class="cd-coord-modal-h">
+                        @(_coordProfesionales.Count > 1 ? "Eliminar profesionales de la coordinacion" : "Confirmar eliminacion de coordinacion")
+                    </div>
                     <div class="cd-coord-modal-b">
-                        @if (_coordEliminar.TieneAtencion)
-                        {
-                            <div class="alert alert-danger small mb-2">
-                                <strong>Atencion:</strong> esta coordinacion YA tiene actividad clinica
-                                (@_coordEliminar.SesionesCompletadas sesion(es) completada(s)). Al eliminarla se
-                                borraran tambien las <strong>historias clinicas</strong>, revisiones, ordenes y notas
-                                medicas asociadas. Esta accion es <strong>irreversible</strong> y se pierden datos clinicos.
-                            </div>
-                        }
-                        else
-                        {
-                            <div class="alert alert-warning small mb-2">
-                                Esta operacion elimina la asignacion y todos sus turnos/sesiones. No es reversible.
-                                El sistema verifica antes de eliminar que no haya historias clinicas ni notas medicas asociadas.
-                            </div>
-                        }
                         <div class="small mb-2">
                             <strong>Paciente:</strong> @_coordEliminar.PacienteNombre (@_coordEliminar.PacienteDoc)<br />
                             <strong>Servicio:</strong> @_coordEliminar.NombreServicio (@_coordEliminar.Cantidad) &middot;
                             <strong>Turnos:</strong> @_coordEliminar.TurnosCoordinados &middot;
                             <strong>Sesiones:</strong> @_coordEliminar.SesionesProgramadas &middot;
-                            <strong>Completadas:</strong> @_coordEliminar.SesionesCompletadas<br />
-                            <strong>Especialistas:</strong> @(string.IsNullOrWhiteSpace(_coordEliminar.EspecialistasNombres) ? "-" : _coordEliminar.EspecialistasNombres)
+                            <strong>Completadas:</strong> @_coordEliminar.SesionesCompletadas
                         </div>
 
-                        @* ===== Eliminar un solo profesional (cuando hay varios) ===== *@
                         @if (_coordProfesionales.Count > 1)
                         {
+                            @* ===== MULTI-SELECT: elegir cuales profesionales eliminar ===== *@
+                            <div class="alert alert-info small mb-2 py-1">
+                                Esta coordinacion tiene <strong>@_coordProfesionales.Count profesionales</strong>. Marca cuales
+                                quieres eliminar: se borraran <strong>solo esos</strong> (sus turnos y sesiones). Si los marcas
+                                todos, se elimina la coordinacion completa.
+                            </div>
+                            <label class="cd-prof-selrow cd-prof-todos">
+                                <input type="checkbox" checked="@TodosProfSeleccionados" @onchange="ToggleTodosProf" />
+                                <span class="fw-600">Seleccionar todos</span>
+                            </label>
                             <div class="cd-prof-sec">
-                                <div class="fw-600 small">Eliminar solo un profesional</div>
-                                <div class="text-muted small mb-2">
-                                    Esta coordinacion tiene @_coordProfesionales.Count profesionales. Puedes quitar uno a la
-                                    vez (sus turnos y sesiones) sin borrar toda la coordinacion.
-                                </div>
                                 @foreach (var p in _coordProfesionales)
                                 {
-                                    <div class="cd-prof-row">
+                                    <label class="cd-prof-selrow">
+                                        <input type="checkbox"
+                                               checked="@_profSeleccionados.Contains(p.ProfesionalId)"
+                                               @onchange="() => ToggleProf(p.ProfesionalId)" />
                                         <div class="cd-prof-info">
                                             <div class="fw-600">@p.ProfesionalNombre</div>
                                             <div class="small text-muted">
@@ -574,71 +566,78 @@ else if (_tabSel == "Coordinaciones")
                                                 }
                                             </div>
                                         </div>
-                                        @if (_profSelId != p.ProfesionalId)
-                                        {
-                                            <button class="btn btn-outline-danger btn-sm" disabled="@_profBusy"
-                                                    @onclick="() => SeleccionarProfEliminar(p)">Eliminar</button>
-                                        }
-                                    </div>
-                                    @if (_profSelId == p.ProfesionalId)
-                                    {
-                                        <div class="cd-prof-confirm">
-                                            @if (p.TieneAtencion)
-                                            {
-                                                <div class="alert alert-danger small mb-2 py-1">
-                                                    Este profesional tiene atencion clinica: se borraran sus HC y notas. Irreversible.
-                                                </div>
-                                                <div class="form-check mb-2">
-                                                    <input class="form-check-input" type="checkbox" id="profForzarChk"
-                                                           @bind="_profForzarConfirm" />
-                                                    <label class="form-check-label small text-danger fw-600" for="profForzarChk">
-                                                        Entiendo que se eliminaran sus datos clinicos de forma permanente.
-                                                    </label>
-                                                </div>
-                                            }
-                                            else
-                                            {
-                                                <div class="small mb-2">Confirmas quitar a <strong>@p.ProfesionalNombre</strong> de esta coordinacion?</div>
-                                            }
-                                            <div class="d-flex gap-2">
-                                                <button class="btn btn-danger btn-sm" disabled="@(_profBusy || (p.TieneAtencion && !_profForzarConfirm))"
-                                                        @onclick="() => ConfirmarEliminarProfAsync(p)">
-                                                    @(_profBusy ? "Eliminando..." : "Confirmar")
-                                                </button>
-                                                <button class="btn btn-secondary btn-sm" disabled="@_profBusy" @onclick="CancelarProfEliminar">Cancelar</button>
-                                            </div>
-                                        </div>
-                                    }
+                                    </label>
                                 }
                             </div>
-                            <hr class="my-2" />
-                            <div class="fw-600 small mb-1">O eliminar toda la coordinacion</div>
+                            @if (AlgunoSelConAtencion)
+                            {
+                                <div class="alert alert-danger small mt-2 mb-2 py-1">
+                                    Alguno de los seleccionados tiene <strong>atencion clinica</strong>: se borraran sus HC,
+                                    revisiones, ordenes y notas. Irreversible.
+                                </div>
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="checkbox" id="profForzarChk" @bind="_profForzarConfirm" />
+                                    <label class="form-check-label small text-danger fw-600" for="profForzarChk">
+                                        Entiendo que se eliminaran datos clinicos de forma permanente.
+                                    </label>
+                                </div>
+                            }
+                            @if (_coordEliminarErr is not null)
+                            {
+                                <div class="alert alert-danger small mt-2 mb-0">@_coordEliminarErr</div>
+                            }
                         }
-
-                        <label class="small fw-600">Para confirmar, escribe <code>ELIMINAR</code>:</label>
-                        <input class="form-control form-control-sm" @bind="_coordConfirmText" @bind:event="oninput" />
-                        @if (_coordEliminar.TieneAtencion)
+                        else
                         {
-                            @* Segunda confirmacion explicita cuando hay datos clinicos en juego. *@
-                            <div class="form-check mt-2">
-                                <input class="form-check-input" type="checkbox" id="coordForzarChk"
-                                       @bind="_coordForzarConfirm" />
-                                <label class="form-check-label small text-danger fw-600" for="coordForzarChk">
-                                    Entiendo que se eliminaran historias clinicas y notas medicas de forma permanente.
-                                </label>
-                            </div>
-                        }
-                        @if (_coordEliminarErr is not null)
-                        {
-                            <div class="alert alert-danger small mt-2 mb-0">@_coordEliminarErr</div>
+                            @* ===== UN SOLO PROFESIONAL: eliminar toda la coordinacion ===== *@
+                            @if (_coordEliminar.TieneAtencion)
+                            {
+                                <div class="alert alert-danger small mb-2">
+                                    <strong>Atencion:</strong> esta coordinacion YA tiene actividad clinica
+                                    (@_coordEliminar.SesionesCompletadas sesion(es) completada(s)). Al eliminarla se
+                                    borraran tambien las <strong>historias clinicas</strong>, revisiones, ordenes y notas
+                                    medicas asociadas. Esta accion es <strong>irreversible</strong>.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="alert alert-warning small mb-2">
+                                    Esta operacion elimina la asignacion y todos sus turnos/sesiones. No es reversible.
+                                </div>
+                            }
+                            <label class="small fw-600">Para confirmar, escribe <code>ELIMINAR</code>:</label>
+                            <input class="form-control form-control-sm" @bind="_coordConfirmText" @bind:event="oninput" />
+                            @if (_coordEliminar.TieneAtencion)
+                            {
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="coordForzarChk" @bind="_coordForzarConfirm" />
+                                    <label class="form-check-label small text-danger fw-600" for="coordForzarChk">
+                                        Entiendo que se eliminaran historias clinicas y notas medicas de forma permanente.
+                                    </label>
+                                </div>
+                            }
+                            @if (_coordEliminarErr is not null)
+                            {
+                                <div class="alert alert-danger small mt-2 mb-0">@_coordEliminarErr</div>
+                            }
                         }
                     </div>
                     <div class="cd-coord-modal-f">
-                        <button class="btn btn-secondary btn-sm" @onclick="CerrarModalEliminarCoord" disabled="@_coordEliminarBusy">Cancelar</button>
-                        <button class="btn btn-danger btn-sm" @onclick="ConfirmarEliminarCoord"
-                                disabled="@(_coordEliminarBusy || _coordConfirmText != "ELIMINAR" || (_coordEliminar.TieneAtencion && !_coordForzarConfirm))">
-                            @(_coordEliminarBusy ? "Eliminando..." : (_coordEliminar.TieneAtencion ? "Eliminar con datos clinicos" : "Confirmar eliminacion"))
-                        </button>
+                        <button class="btn btn-secondary btn-sm" @onclick="CerrarModalEliminarCoord" disabled="@(_coordEliminarBusy || _profBusy)">Cancelar</button>
+                        @if (_coordProfesionales.Count > 1)
+                        {
+                            <button class="btn btn-danger btn-sm" @onclick="EliminarSeleccionadosAsync"
+                                    disabled="@(_profBusy || _profSeleccionados.Count == 0 || (AlgunoSelConAtencion && !_profForzarConfirm))">
+                                @(_profBusy ? "Eliminando..." : $"Eliminar seleccionados ({_profSeleccionados.Count})")
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-danger btn-sm" @onclick="ConfirmarEliminarCoord"
+                                    disabled="@(_coordEliminarBusy || _coordConfirmText != "ELIMINAR" || (_coordEliminar.TieneAtencion && !_coordForzarConfirm))">
+                                @(_coordEliminarBusy ? "Eliminando..." : (_coordEliminar.TieneAtencion ? "Eliminar con datos clinicos" : "Confirmar eliminacion"))
+                            </button>
+                        }
                     </div>
                 </div>
             </div>
@@ -913,6 +912,10 @@ else if (_tabSel == "Calendario")
     .cd-prof-row:first-of-type { border-top: none; }
     .cd-prof-info { min-width: 0; }
     .cd-prof-confirm { padding: 8px 10px; margin: 4px 0 8px; background: #fff; border: 1px solid #fecaca; border-radius: 6px; }
+    .cd-prof-selrow { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-top: 1px solid #eef2f7; margin: 0; cursor: pointer; }
+    .cd-prof-selrow:first-of-type { border-top: none; }
+    .cd-prof-selrow input[type=checkbox] { margin-top: 3px; flex: 0 0 auto; }
+    .cd-prof-todos { padding: 6px 0 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 2px; }
     .cd-coord-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px; background: #f8fafc; }
     .cd-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 14px; }
     .cd-tab { padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -1736,9 +1739,15 @@ else if (_tabSel == "Calendario")
     private bool _coordForzarConfirm;
     // Borrado por profesional (cuando la coordinacion tiene varios).
     private List<ProfesionalCoordinacionDto> _coordProfesionales = new();
-    private Guid? _profSelId;
+    private HashSet<Guid> _profSeleccionados = new();
     private bool _profForzarConfirm;
     private bool _profBusy;
+
+    private bool TodosProfSeleccionados =>
+        _coordProfesionales.Count > 0 && _profSeleccionados.Count == _coordProfesionales.Count;
+
+    private bool AlgunoSelConAtencion =>
+        _coordProfesionales.Any(p => _profSeleccionados.Contains(p.ProfesionalId) && p.TieneAtencion);
 
     private async Task CargarCoordinaciones()
     {
@@ -1781,7 +1790,7 @@ else if (_tabSel == "Calendario")
         _coordForzarConfirm = false;
         _coordEliminarErr = null;
         _coordProfesionales = new();
-        _profSelId = null;
+        _profSeleccionados = new();
         _profForzarConfirm = false;
         // Carga los profesionales de la coordinacion para permitir el borrado
         // selectivo cuando hay mas de uno.
@@ -1800,49 +1809,54 @@ else if (_tabSel == "Calendario")
         _coordForzarConfirm = false;
         _coordEliminarErr = null;
         _coordProfesionales = new();
-        _profSelId = null;
+        _profSeleccionados = new();
         _profForzarConfirm = false;
     }
 
-    private void SeleccionarProfEliminar(ProfesionalCoordinacionDto p)
+    private void ToggleProf(Guid profId)
     {
-        _profSelId = p.ProfesionalId;
-        _profForzarConfirm = false;
-        _coordEliminarErr = null;
+        if (!_profSeleccionados.Remove(profId)) { _profSeleccionados.Add(profId); }
+        // Si al deseleccionar quedan solo seleccionados sin atencion, resetea el check.
+        if (!AlgunoSelConAtencion) { _profForzarConfirm = false; }
     }
 
-    private void CancelarProfEliminar()
+    private void ToggleTodosProf()
     {
-        _profSelId = null;
-        _profForzarConfirm = false;
+        if (TodosProfSeleccionados) { _profSeleccionados.Clear(); }
+        else { _profSeleccionados = _coordProfesionales.Select(p => p.ProfesionalId).ToHashSet(); }
+        if (!AlgunoSelConAtencion) { _profForzarConfirm = false; }
     }
 
-    private async Task ConfirmarEliminarProfAsync(ProfesionalCoordinacionDto p)
+    private async Task EliminarSeleccionadosAsync()
     {
-        if (_coordEliminar is null) { return; }
-        if (p.TieneAtencion && !_profForzarConfirm) { return; }
+        if (_coordEliminar is null || _profSeleccionados.Count == 0) { return; }
+        if (AlgunoSelConAtencion && !_profForzarConfirm) { return; }
         _profBusy = true; _coordEliminarErr = null;
         try
         {
             var asigId = _coordEliminar.AsignacionId;
-            await Svc.EliminarProfesionalDeCoordinacionAsync(
-                asigId, p.ProfesionalId, Guid.Empty, p.TieneAtencion);
-            // Refresca la lista de profesionales de la coordinacion.
-            _profSelId = null;
-            _profForzarConfirm = false;
-            _coordProfesionales = (await Svc.ListarProfesionalesDeCoordinacionAsync(asigId)).ToList();
-            if (_coordProfesionales.Count == 0)
+            var seleccionados = _profSeleccionados.ToList();
+            var todos = seleccionados.Count == _coordProfesionales.Count;
+            await Svc.EliminarProfesionalesDeCoordinacionAsync(
+                asigId, seleccionados, Guid.Empty, AlgunoSelConAtencion);
+
+            if (todos)
             {
-                // Era el ultimo: la coordinacion se elimino completa.
+                // Se eliminaron todos: la coordinacion desaparece.
                 _coordEliminar = null;
                 _coordList?.RemoveAll(x => x.AsignacionId == asigId);
-                _ok = "Profesional eliminado; la coordinacion quedo vacia y se elimino.";
+                _ok = "Coordinacion eliminada (todos los profesionales seleccionados).";
             }
             else
             {
-                _ok = $"Profesional '{p.ProfesionalNombre}' eliminado de la coordinacion.";
-                // La coordinacion pudo cambiar sus contadores; recarga la lista.
+                // Refresca los profesionales restantes y la lista.
+                _profSeleccionados = new();
+                _profForzarConfirm = false;
+                _coordProfesionales = (await Svc.ListarProfesionalesDeCoordinacionAsync(asigId)).ToList();
+                _ok = $"{seleccionados.Count} profesional(es) eliminado(s) de la coordinacion.";
                 await CargarCoordinaciones();
+                // Si tras recargar la coordinacion ya no aplica, cierra el modal.
+                if (_coordProfesionales.Count <= 1) { _coordEliminar = null; }
             }
         }
         catch (InvalidOperationException ex) { _coordEliminarErr = ex.Message; }

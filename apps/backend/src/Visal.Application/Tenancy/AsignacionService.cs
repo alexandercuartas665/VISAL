@@ -1976,6 +1976,45 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return true;
     }
 
+    public async Task<bool> EliminarProfesionalesDeCoordinacionAsync(
+        Guid asignacionId, IReadOnlyList<Guid> profesionalIds, Guid actor, bool forzar = false,
+        CancellationToken ct = default)
+    {
+        if (profesionalIds is null || profesionalIds.Count == 0) { return false; }
+
+        var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
+        if (asig is null) { return false; }
+
+        // Turnos de los profesionales SELECCIONADOS dentro de esta asignacion.
+        var idsSel = profesionalIds.Distinct().ToList();
+        var turnoIds = await db.AsignacionTurnos
+            .Where(t => t.AsignacionId == asignacionId && idsSel.Contains(t.ProfesionalId))
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (turnoIds.Count == 0) { return false; }
+
+        if (!forzar)
+        {
+            var tieneHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .AnyAsync(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId), ct);
+            if (tieneHc) { throw new InvalidOperationException("No se puede eliminar: alguno de los profesionales seleccionados ya tiene historias clinicas en la coordinacion."); }
+            var tieneNota = await db.NotasMedicas.AsNoTracking()
+                .AnyAsync(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId!.Value), ct);
+            if (tieneNota) { throw new InvalidOperationException("No se puede eliminar: alguno de los profesionales seleccionados ya tiene notas medicas en la coordinacion."); }
+        }
+
+        await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
+
+        // Si se eliminaron TODOS los profesionales (no quedan turnos), se borra
+        // tambien la asignacion para no dejar una coordinacion vacia.
+        var quedanTurnos = await db.AsignacionTurnos
+            .AnyAsync(t => t.AsignacionId == asignacionId && !turnoIds.Contains(t.Id), ct);
+        if (!quedanTurnos) { db.Asignaciones.Remove(asig); }
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<IReadOnlyList<TurnoReasignableDto>> ListarTurnosReasignablesAsync(
         Guid asignacionId, CancellationToken ct = default)
     {

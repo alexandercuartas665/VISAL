@@ -576,6 +576,16 @@ public interface IAsignacionService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Elimina de una coordinacion los turnos (y su cascada) de VARIOS profesionales
+    /// seleccionados a la vez, en una sola transaccion. Con
+    /// <paramref name="forzar"/>=false rechaza si alguno tiene HC/notas. Si se
+    /// seleccionan todos los profesionales, elimina tambien la asignacion.
+    /// </summary>
+    Task<bool> EliminarProfesionalesDeCoordinacionAsync(
+        Guid asignacionId, IReadOnlyList<Guid> profesionalIds, Guid actor,
+        bool forzar = false, CancellationToken ct = default);
+
+    /// <summary>
     /// Lista los turnos de una asignacion coordinada para el flujo "Reasignar doctor",
     /// con banderas de HC cerrada/abierta por turno. Ordenados cronologicamente.
     /// </summary>

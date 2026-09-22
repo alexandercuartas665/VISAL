@@ -42,6 +42,7 @@ public interface IApplicationDbContext
     DbSet<ContratoSucursal> ContratoSucursales { get; }
     DbSet<AseguradoraCuentaMedicaConfig> AseguradoraCuentaMedicaConfigs { get; }
     DbSet<AseguradoraInformeItem> AseguradoraInformeItems { get; }
+    DbSet<AseguradoraInformeContenido> AseguradoraInformeContenidos { get; }
     DbSet<ServicioContrato> ServiciosContrato { get; }
     DbSet<ServicioBulkUpdate> ServicioBulkUpdates { get; }
     DbSet<ServicioBulkUpdateItem> ServicioBulkUpdateItems { get; }

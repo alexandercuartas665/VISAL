@@ -120,6 +120,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<ContratoSucursal> ContratoSucursales => Set<ContratoSucursal>();
     public DbSet<AseguradoraCuentaMedicaConfig> AseguradoraCuentaMedicaConfigs => Set<AseguradoraCuentaMedicaConfig>();
     public DbSet<AseguradoraInformeItem> AseguradoraInformeItems => Set<AseguradoraInformeItem>();
+    public DbSet<AseguradoraInformeContenido> AseguradoraInformeContenidos => Set<AseguradoraInformeContenido>();
     public DbSet<ServicioContrato> ServiciosContrato => Set<ServicioContrato>();
     public DbSet<ServicioBulkUpdate> ServicioBulkUpdates => Set<ServicioBulkUpdate>();
     public DbSet<ServicioBulkUpdateItem> ServicioBulkUpdateItems => Set<ServicioBulkUpdateItem>();
@@ -1183,6 +1184,16 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.PatronNombre).HasMaxLength(200);
             b.Property(x => x.Origen).HasConversion<int>();
             b.HasIndex(x => new { x.TenantId, x.ConfigId, x.Orden });
+        });
+
+        // Contenidos de cada archivo/tipologia (N por item). Cascade al borrar el item.
+        modelBuilder.Entity<AseguradoraInformeContenido>(b =>
+        {
+            b.ToTable("aseguradora_informe_contenidos");
+            b.Property(x => x.Origen).HasConversion<int>();
+            b.HasOne(x => x.Item).WithMany(x => x.Contenidos)
+                .HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.ItemId, x.Orden });
         });
 
         modelBuilder.Entity<TipoProfesional>(b =>

@@ -47,7 +47,7 @@ else
                 &#128203; Copiar de otra aseguradora
             </button>
             <button class="btn btn-primary btn-sm" @onclick="AbrirNuevoItem" disabled="@_busy">
-                + Agregar item
+                + Agregar archivo
             </button>
         </div>
     </div>
@@ -56,8 +56,8 @@ else
     @if (_items.Count == 0)
     {
         <div class="ase-empty" style="margin-top:16px;">
-            Aun no hay items configurados. Cada item define un documento a incluir en el informe
-            (HC, firma, autorizacion, etc.), con su alias y patron de nombre.
+            Aun no hay archivos configurados. Cada archivo tiene un nombre y un patron, y agrupa
+            uno o varios contenidos (firmas, evoluciones, HC, autorizaciones...) que se fusionan en un PDF.
         </div>
     }
     else
@@ -73,19 +73,23 @@ else
                     </div>
                     <div class="cm-card-body">
                         <div class="cm-card-alias-row">
-                            <span class="cm-card-alias mono">@it.Alias</span>
+                            <span class="cm-card-alias">@(string.IsNullOrWhiteSpace(it.Descripcion) ? it.Alias : it.Descripcion)</span>
+                            <span class="cm-card-badge cm-card-badge-code mono" title="Codigo">@it.Alias</span>
                             @if (it.Obligatorio) { <span class="cm-card-badge cm-card-badge-req" title="Obligatorio">OBL</span> }
-                            @if (it.SoloUltimo) { <span class="cm-card-badge cm-card-badge-last" title="Solo el mas reciente">1x</span> }
                         </div>
-                        @if (!string.IsNullOrEmpty(it.Descripcion))
-                        {
-                            <div class="cm-card-desc" title="@it.Descripcion">@it.Descripcion</div>
-                        }
                         <div class="cm-card-meta">
-                            <span class="cm-card-origen">@LabelOrigen(it.Origen)</span>
-                            @if (!string.IsNullOrEmpty(it.TipologiaNombre))
+                            @if (it.Contenidos.Count == 0)
                             {
-                                <span class="cm-card-tip">@it.TipologiaNombre</span>
+                                <span class="cm-card-origen cm-card-origen-empty">Sin contenidos</span>
+                            }
+                            else
+                            {
+                                @foreach (var c in it.Contenidos)
+                                {
+                                    <span class="cm-card-origen" title="@(c.SoloUltimo ? "Solo el mas reciente" : "Todos")">
+                                        @LabelOrigen(c.Origen)@(string.IsNullOrEmpty(c.TipologiaNombre) ? "" : $" · {c.TipologiaNombre}")@(c.SoloUltimo ? " (1x)" : "")
+                                    </span>
+                                }
                             }
                         </div>
                         @if (!string.IsNullOrEmpty(it.Seccion))
@@ -196,60 +200,94 @@ else
             <div class="cm-modal-h">
                 <div>
                     <div class="cm-modal-eyebrow">Cuenta medica</div>
-                    <div class="cm-modal-title">@(_itemEdit.Id is null ? "Nuevo item" : "Editar item")</div>
+                    <div class="cm-modal-title">@(_itemEdit.Id is null ? "Nuevo archivo" : "Editar archivo")</div>
                 </div>
                 <button class="cm-modal-x" @onclick="CerrarItemModal">&times;</button>
             </div>
             <div class="cm-modal-body">
                 <div class="cm-form">
                     <div class="cm-f">
-                        <label>Origen *</label>
-                        <select class="form-select form-select-sm" @bind="_itemEdit.Origen">
-                            @foreach (var o in Enum.GetValues<OrigenInformeItem>())
-                            {
-                                <option value="@o">@LabelOrigen(o)</option>
-                            }
-                        </select>
-                    </div>
-                    @if (PideTipologia(_itemEdit.Origen))
-                    {
-                        <div class="cm-f">
-                            <label>Tipologia (opcional; deja vacio para "cualquiera")</label>
-                            <select class="form-select form-select-sm" @bind="_itemEdit.TipologiaArchivoId">
-                                <option value="">(cualquier tipologia)</option>
-                                @foreach (var t in _tipologias)
-                                {
-                                    <option value="@t.Id">@t.Nombre</option>
-                                }
-                            </select>
-                        </div>
-                    }
-                    <div class="cm-f">
-                        <label>Alias / sigla * (max 20)</label>
-                        <input class="form-control form-control-sm mono" maxlength="20" @bind="_itemEdit.Alias" placeholder="HC, FIR, AUT, EVO..." />
+                        <label>Nombre del archivo *</label>
+                        <input class="form-control form-control-sm" @bind="_itemEdit.Descripcion" placeholder="Ej: Firmas, Evoluciones, Soportes de auditoria" />
                     </div>
                     <div class="cm-f">
-                        <label>Descripcion (aparece en el indice)</label>
-                        <input class="form-control form-control-sm" @bind="_itemEdit.Descripcion" placeholder="Historia clinica completa" />
+                        <label>Codigo / sigla * (max 20)</label>
+                        <input class="form-control form-control-sm mono" maxlength="20" @bind="_itemEdit.Alias" placeholder="FIR, EVO, SOP..." />
+                        <small class="text-muted">Se usa como token <code>{sigla}</code> del nombre de archivo.</small>
+                    </div>
+                    <div class="cm-f">
+                        <label>Patron de nombre del archivo (opcional; usa el default si vacio)</label>
+                        <input class="form-control form-control-sm mono" @bind="_itemEdit.PatronNombre" placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
+                        <small class="text-muted">
+                            Tokens: <code>{sigla}</code> <code>{cedula}</code> <code>{autorizacion}</code>
+                            <code>{nombre}</code> <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
+                        </small>
                     </div>
                     <div class="cm-f">
                         <label>Seccion (agrupador opcional)</label>
                         <input class="form-control form-control-sm" @bind="_itemEdit.Seccion" placeholder="Historia / Documentos / Autorizaciones" />
                     </div>
-                    <div class="cm-f">
-                        <label>Patron de nombre (opcional; usa el default si vacio)</label>
-                        <input class="form-control form-control-sm mono" @bind="_itemEdit.PatronNombre" placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
+                    <label class="cm-flag" style="margin-top:2px;">
+                        <input type="checkbox" class="form-check-input" @bind="_itemEdit.Obligatorio" />
+                        <span>Obligatorio (el generador reportara si falta)</span>
+                    </label>
+
+                    @* ===== Contenidos del archivo ===== *@
+                    <div class="cm-cont-head">
+                        <div>
+                            <div class="cm-cont-title">Contenido del archivo</div>
+                            <div class="cm-cont-sub">Un archivo puede fusionar varios documentos en un solo PDF, en orden.</div>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="AgregarContenido" type="button">+ Agregar contenido</button>
                     </div>
-                    <div class="cm-flags">
-                        <label class="cm-flag">
-                            <input type="checkbox" class="form-check-input" @bind="_itemEdit.Obligatorio" />
-                            <span>Obligatorio (el generador reportara si falta)</span>
-                        </label>
-                        <label class="cm-flag">
-                            <input type="checkbox" class="form-check-input" @bind="_itemEdit.SoloUltimo" />
-                            <span>Solo el mas reciente (aplica a HC, notas, consentimientos, etc.)</span>
-                        </label>
-                    </div>
+                    @if (_itemEdit.Contenidos.Count == 0)
+                    {
+                        <div class="cm-cont-empty">Aun no hay contenidos. Agrega al menos uno (firmas, evoluciones, HC, etc.).</div>
+                    }
+                    else
+                    {
+                        <div class="cm-cont-list">
+                            @foreach (var (c, ci) in _itemEdit.Contenidos.Select((v, i) => (v, i)))
+                            {
+                                <div class="cm-cont-row">
+                                    <div class="cm-cont-idx">@(ci + 1)</div>
+                                    <div class="cm-cont-fields">
+                                        <div class="cm-f">
+                                            <label>Origen *</label>
+                                            <select class="form-select form-select-sm" @bind="c.Origen">
+                                                @foreach (var o in Enum.GetValues<OrigenInformeItem>())
+                                                {
+                                                    <option value="@o">@LabelOrigen(o)</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        @if (PideTipologia(c.Origen))
+                                        {
+                                            <div class="cm-f">
+                                                <label>Tipologia (opcional)</label>
+                                                <select class="form-select form-select-sm" @bind="c.TipologiaArchivoId">
+                                                    <option value="">(cualquier tipologia)</option>
+                                                    @foreach (var t in _tipologias)
+                                                    {
+                                                        <option value="@t.Id">@t.Nombre</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                        }
+                                        <label class="cm-flag cm-cont-flag">
+                                            <input type="checkbox" class="form-check-input" @bind="c.SoloUltimo" />
+                                            <span>Solo el mas reciente</span>
+                                        </label>
+                                    </div>
+                                    <div class="cm-cont-acts">
+                                        <button class="cm-card-arrow" type="button" @onclick="() => MoverContenido(ci, ci - 1)" disabled="@(ci == 0)" title="Subir">&#9650;</button>
+                                        <button class="cm-card-arrow" type="button" @onclick="() => MoverContenido(ci, ci + 1)" disabled="@(ci == _itemEdit.Contenidos.Count - 1)" title="Bajar">&#9660;</button>
+                                        <button class="btn btn-outline-danger btn-sm cm-cont-del" type="button" @onclick="() => QuitarContenido(ci)" title="Quitar">&times;</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
             </div>
             <div class="cm-modal-f">
@@ -416,6 +454,22 @@ else
     .cm-flag { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#0f172a; margin:0; }
     .cm-flag input { margin:0; }
     .mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; font-size:12px; }
+
+    /* Editor de contenidos (dentro del modal de archivo) */
+    .cm-cont-head { display:flex; justify-content:space-between; align-items:flex-end; gap:10px; margin-top:10px; padding-top:12px; border-top:1px solid #e2e8f0; }
+    .cm-cont-title { font-weight:700; color:#0f172a; font-size:13.5px; }
+    .cm-cont-sub { font-size:11.5px; color:#64748b; }
+    .cm-cont-empty { padding:12px; text-align:center; color:#94a3b8; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; font-size:12px; font-style:italic; }
+    .cm-cont-list { display:flex; flex-direction:column; gap:8px; }
+    .cm-cont-row { display:flex; gap:8px; align-items:flex-start; padding:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+    .cm-cont-idx { flex:0 0 auto; width:22px; height:22px; display:flex; align-items:center; justify-content:center; background:#e2e8f0; color:#475569; border-radius:6px; font-weight:700; font-size:11px; margin-top:2px; }
+    .cm-cont-fields { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:8px; }
+    .cm-cont-flag { margin-top:2px; }
+    .cm-cont-acts { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:3px; }
+    .cm-cont-del { padding:0 8px; font-size:14px; line-height:1.4; }
+
+    .cm-card-badge-code { background:#f1f5f9; color:#475569; }
+    .cm-card-origen-empty { background:#fef2f2; color:#b91c1c; }
 </style>
 
 @code {
@@ -546,10 +600,12 @@ else
     {
         _itemEdit = new ItemEditModel
         {
-            Origen = OrigenInformeItem.HistoriaClinicaPdf,
             Alias = "",
             Obligatorio = true,
-            SoloUltimo = false,
+            Contenidos = new()
+            {
+                new ContenidoEditModel { Origen = OrigenInformeItem.HistoriaClinicaPdf },
+            },
         };
         _itemModalOpen = true;
     }
@@ -559,16 +615,41 @@ else
         _itemEdit = new ItemEditModel
         {
             Id = it.Id,
-            Origen = it.Origen,
-            TipologiaArchivoId = it.TipologiaArchivoId,
             Alias = it.Alias,
             Descripcion = it.Descripcion,
             Seccion = it.Seccion,
             PatronNombre = it.PatronNombre,
             Obligatorio = it.Obligatorio,
-            SoloUltimo = it.SoloUltimo,
+            Contenidos = it.Contenidos
+                .OrderBy(c => c.Orden)
+                .Select(c => new ContenidoEditModel
+                {
+                    Origen = c.Origen,
+                    TipologiaArchivoId = c.TipologiaArchivoId,
+                    SoloUltimo = c.SoloUltimo,
+                })
+                .ToList(),
         };
         _itemModalOpen = true;
+    }
+
+    private void AgregarContenido()
+    {
+        _itemEdit?.Contenidos.Add(new ContenidoEditModel { Origen = OrigenInformeItem.HistoriaClinicaPdf });
+    }
+
+    private void QuitarContenido(int idx)
+    {
+        if (_itemEdit is null || idx < 0 || idx >= _itemEdit.Contenidos.Count) { return; }
+        _itemEdit.Contenidos.RemoveAt(idx);
+    }
+
+    private void MoverContenido(int desde, int hacia)
+    {
+        if (_itemEdit is null || hacia < 0 || hacia >= _itemEdit.Contenidos.Count || desde == hacia) { return; }
+        var c = _itemEdit.Contenidos[desde];
+        _itemEdit.Contenidos.RemoveAt(desde);
+        _itemEdit.Contenidos.Insert(hacia, c);
     }
 
     private void CerrarItemModal()
@@ -580,17 +661,25 @@ else
     private async Task GuardarItemAsync()
     {
         if (_itemEdit is null || AseguradoraId is not Guid aid) { return; }
+        if (_itemEdit.Contenidos.Count == 0)
+        {
+            _error = "El archivo debe tener al menos un contenido.";
+            return;
+        }
         _busy = true; _error = null;
         try
         {
+            var contenidos = _itemEdit.Contenidos
+                .Select(c => new GuardarContenidoDto(c.Origen, c.TipologiaArchivoId, c.SoloUltimo))
+                .ToList();
             await Svc.GuardarItemAsync(new GuardarItemRequest(
-                _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Origen,
-                _itemEdit.TipologiaArchivoId, _itemEdit.Alias, _itemEdit.Descripcion,
-                _itemEdit.PatronNombre, _itemEdit.Obligatorio, _itemEdit.SoloUltimo),
+                _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
+                _itemEdit.Descripcion, _itemEdit.PatronNombre, _itemEdit.Obligatorio,
+                contenidos),
                 Guid.Empty);
             CerrarItemModal();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
-            _msg = "Item guardado.";
+            _msg = "Archivo guardado.";
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
@@ -598,7 +687,8 @@ else
 
     private async Task EliminarItemAsync(InformeItemDto it)
     {
-        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar el item '{it.Alias}'?");
+        var nombre = string.IsNullOrWhiteSpace(it.Descripcion) ? it.Alias : it.Descripcion;
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar el archivo '{nombre}'?");
         if (!ok) { return; }
         _busy = true; _error = null;
         try
@@ -690,12 +780,17 @@ else
     {
         public Guid? Id { get; set; }
         public string? Seccion { get; set; }
-        public OrigenInformeItem Origen { get; set; }
-        public Guid? TipologiaArchivoId { get; set; }
         public string Alias { get; set; } = "";
         public string? Descripcion { get; set; }
         public string? PatronNombre { get; set; }
         public bool Obligatorio { get; set; }
+        public List<ContenidoEditModel> Contenidos { get; set; } = new();
+    }
+
+    private sealed class ContenidoEditModel
+    {
+        public OrigenInformeItem Origen { get; set; }
+        public Guid? TipologiaArchivoId { get; set; }
         public bool SoloUltimo { get; set; }
     }
 }

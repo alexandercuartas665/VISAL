@@ -4,13 +4,23 @@ using Visal.Domain.Enums;
 namespace Visal.Domain.Entities;
 
 /// <summary>
-/// Item individual dentro de la <see cref="AseguradoraCuentaMedicaConfig"/>.
-/// Describe QUE documento entra al informe, con QUE alias, en QUE posicion,
-/// bajo QUE patron de nombre. El generador (fase 2) los recorre en orden.
+/// Un ARCHIVO (tipologia de salida) dentro de la
+/// <see cref="AseguradoraCuentaMedicaConfig"/>. Tiene un nombre (Descripcion) y
+/// un patron de nombre de archivo, y agrupa VARIOS contenidos
+/// (<see cref="AseguradoraInformeContenido"/>) que el generador (fase 2) fusiona
+/// en un solo PDF. El generador recorre los archivos en orden.
+///
+/// Compatibilidad: los campos <see cref="Origen"/>, <see cref="TipologiaArchivoId"/>
+/// y <see cref="SoloUltimo"/> son LEGACY (modelo anterior "1 item = 1 origen").
+/// Se conservan pero la fuente de verdad del contenido es la coleccion
+/// <see cref="Contenidos"/>.
 /// </summary>
 public class AseguradoraInformeItem : TenantEntity
 {
     public Guid ConfigId { get; set; }
+
+    /// <summary>Contenidos que componen este archivo (N origenes fusionados).</summary>
+    public List<AseguradoraInformeContenido> Contenidos { get; set; } = new();
 
     /// <summary>Posicion (0..N). Usado por el drag&amp;drop del grid.</summary>
     public int Orden { get; set; }

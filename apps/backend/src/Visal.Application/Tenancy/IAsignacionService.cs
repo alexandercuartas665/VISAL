@@ -239,6 +239,15 @@ public sealed record CoordinacionEliminableDto(
     int SesionesCompletadas = 0,
     bool TieneAtencion = false);
 
+/// <summary>Un profesional dentro de una coordinacion, para el borrado selectivo.</summary>
+public sealed record ProfesionalCoordinacionDto(
+    Guid ProfesionalId,
+    string ProfesionalNombre,
+    int TurnosCount,
+    int SesionesProgramadas,
+    int SesionesCompletadas,
+    bool TieneAtencion);
+
 /// <summary>Filtro de estado para el grid de Coordinacion. Equivale al cmbEstado del legacy.</summary>
 public enum AsignacionEstadoFiltro
 {
@@ -547,6 +556,24 @@ public interface IAsignacionService
     /// coordinacion que YA tiene sesiones/atencion. Destructivo: la UI lo usa solo
     /// tras doble confirmacion.</param>
     Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, bool forzar = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Profesionales asignados dentro de una coordinacion, con sus contadores de
+    /// turnos/sesiones y si ya tienen atencion clinica. Usado para el borrado
+    /// selectivo "eliminar solo un doctor" cuando la coordinacion tiene varios.
+    /// </summary>
+    Task<IReadOnlyList<ProfesionalCoordinacionDto>> ListarProfesionalesDeCoordinacionAsync(
+        Guid asignacionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Elimina de una coordinacion SOLO los turnos (y su cascada) de un
+    /// profesional. Con <paramref name="forzar"/>=false se rechaza si ese
+    /// profesional ya tiene HC/notas; con true arrastra los artefactos clinicos.
+    /// Si era el ultimo profesional, elimina tambien la asignacion vacia.
+    /// </summary>
+    Task<bool> EliminarProfesionalDeCoordinacionAsync(
+        Guid asignacionId, Guid profesionalId, Guid actor, bool forzar = false,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Lista los turnos de una asignacion coordinada para el flujo "Reasignar doctor",

@@ -547,6 +547,74 @@ else if (_tabSel == "Coordinaciones")
                             <strong>Completadas:</strong> @_coordEliminar.SesionesCompletadas<br />
                             <strong>Especialistas:</strong> @(string.IsNullOrWhiteSpace(_coordEliminar.EspecialistasNombres) ? "-" : _coordEliminar.EspecialistasNombres)
                         </div>
+
+                        @* ===== Eliminar un solo profesional (cuando hay varios) ===== *@
+                        @if (_coordProfesionales.Count > 1)
+                        {
+                            <div class="cd-prof-sec">
+                                <div class="fw-600 small">Eliminar solo un profesional</div>
+                                <div class="text-muted small mb-2">
+                                    Esta coordinacion tiene @_coordProfesionales.Count profesionales. Puedes quitar uno a la
+                                    vez (sus turnos y sesiones) sin borrar toda la coordinacion.
+                                </div>
+                                @foreach (var p in _coordProfesionales)
+                                {
+                                    <div class="cd-prof-row">
+                                        <div class="cd-prof-info">
+                                            <div class="fw-600">@p.ProfesionalNombre</div>
+                                            <div class="small text-muted">
+                                                @p.TurnosCount turno(s) &middot; @p.SesionesProgramadas sesion(es)
+                                                @if (p.SesionesCompletadas > 0)
+                                                {
+                                                    <text> &middot; </text><span class="text-danger fw-600">@p.SesionesCompletadas completada(s)</span>
+                                                }
+                                                @if (p.TieneAtencion)
+                                                {
+                                                    <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem;">Con atencion</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        @if (_profSelId != p.ProfesionalId)
+                                        {
+                                            <button class="btn btn-outline-danger btn-sm" disabled="@_profBusy"
+                                                    @onclick="() => SeleccionarProfEliminar(p)">Eliminar</button>
+                                        }
+                                    </div>
+                                    @if (_profSelId == p.ProfesionalId)
+                                    {
+                                        <div class="cd-prof-confirm">
+                                            @if (p.TieneAtencion)
+                                            {
+                                                <div class="alert alert-danger small mb-2 py-1">
+                                                    Este profesional tiene atencion clinica: se borraran sus HC y notas. Irreversible.
+                                                </div>
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="checkbox" id="profForzarChk"
+                                                           @bind="_profForzarConfirm" />
+                                                    <label class="form-check-label small text-danger fw-600" for="profForzarChk">
+                                                        Entiendo que se eliminaran sus datos clinicos de forma permanente.
+                                                    </label>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div class="small mb-2">Confirmas quitar a <strong>@p.ProfesionalNombre</strong> de esta coordinacion?</div>
+                                            }
+                                            <div class="d-flex gap-2">
+                                                <button class="btn btn-danger btn-sm" disabled="@(_profBusy || (p.TieneAtencion && !_profForzarConfirm))"
+                                                        @onclick="() => ConfirmarEliminarProfAsync(p)">
+                                                    @(_profBusy ? "Eliminando..." : "Confirmar")
+                                                </button>
+                                                <button class="btn btn-secondary btn-sm" disabled="@_profBusy" @onclick="CancelarProfEliminar">Cancelar</button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                            <hr class="my-2" />
+                            <div class="fw-600 small mb-1">O eliminar toda la coordinacion</div>
+                        }
+
                         <label class="small fw-600">Para confirmar, escribe <code>ELIMINAR</code>:</label>
                         <input class="form-control form-control-sm" @bind="_coordConfirmText" @bind:event="oninput" />
                         @if (_coordEliminar.TieneAtencion)
@@ -839,7 +907,12 @@ else if (_tabSel == "Calendario")
     .cd-coord-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; z-index: 1050; padding: 20px; }
     .cd-coord-modal { background: #fff; border-radius: 10px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.25); overflow: hidden; }
     .cd-coord-modal-h { padding: 14px 18px; border-bottom: 1px solid #e2e8f0; font-weight: 700; font-size: 15px; color: #0f172a; }
-    .cd-coord-modal-b { padding: 16px 18px; }
+    .cd-coord-modal-b { padding: 16px 18px; max-height: 70vh; overflow-y: auto; }
+    .cd-prof-sec { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; background: #f8fafc; margin-bottom: 4px; }
+    .cd-prof-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid #eef2f7; }
+    .cd-prof-row:first-of-type { border-top: none; }
+    .cd-prof-info { min-width: 0; }
+    .cd-prof-confirm { padding: 8px 10px; margin: 4px 0 8px; background: #fff; border: 1px solid #fecaca; border-radius: 6px; }
     .cd-coord-modal-f { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px; background: #f8fafc; }
     .cd-tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 14px; }
     .cd-tab { padding: 10px 18px; background: none; border: none; border-bottom: 2px solid transparent; color: #475569; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -1661,6 +1734,11 @@ else if (_tabSel == "Calendario")
     private string? _coordEliminarErr;
     private bool _coIncluirConAtencion;
     private bool _coordForzarConfirm;
+    // Borrado por profesional (cuando la coordinacion tiene varios).
+    private List<ProfesionalCoordinacionDto> _coordProfesionales = new();
+    private Guid? _profSelId;
+    private bool _profForzarConfirm;
+    private bool _profBusy;
 
     private async Task CargarCoordinaciones()
     {
@@ -1696,21 +1774,80 @@ else if (_tabSel == "Calendario")
         _coAnio = DateTime.Now.Year; _coMes = 0; _coFecha = null; _coIncluirConAtencion = false;
     }
 
-    private void AbrirModalEliminarCoord(CoordinacionEliminableDto c)
+    private async Task AbrirModalEliminarCoord(CoordinacionEliminableDto c)
     {
         _coordEliminar = c;
         _coordConfirmText = "";
         _coordForzarConfirm = false;
         _coordEliminarErr = null;
+        _coordProfesionales = new();
+        _profSelId = null;
+        _profForzarConfirm = false;
+        // Carga los profesionales de la coordinacion para permitir el borrado
+        // selectivo cuando hay mas de uno.
+        try
+        {
+            _coordProfesionales = (await Svc.ListarProfesionalesDeCoordinacionAsync(c.AsignacionId)).ToList();
+        }
+        catch { _coordProfesionales = new(); }
     }
 
     private void CerrarModalEliminarCoord()
     {
-        if (_coordEliminarBusy) { return; }
+        if (_coordEliminarBusy || _profBusy) { return; }
         _coordEliminar = null;
         _coordConfirmText = "";
         _coordForzarConfirm = false;
         _coordEliminarErr = null;
+        _coordProfesionales = new();
+        _profSelId = null;
+        _profForzarConfirm = false;
+    }
+
+    private void SeleccionarProfEliminar(ProfesionalCoordinacionDto p)
+    {
+        _profSelId = p.ProfesionalId;
+        _profForzarConfirm = false;
+        _coordEliminarErr = null;
+    }
+
+    private void CancelarProfEliminar()
+    {
+        _profSelId = null;
+        _profForzarConfirm = false;
+    }
+
+    private async Task ConfirmarEliminarProfAsync(ProfesionalCoordinacionDto p)
+    {
+        if (_coordEliminar is null) { return; }
+        if (p.TieneAtencion && !_profForzarConfirm) { return; }
+        _profBusy = true; _coordEliminarErr = null;
+        try
+        {
+            var asigId = _coordEliminar.AsignacionId;
+            await Svc.EliminarProfesionalDeCoordinacionAsync(
+                asigId, p.ProfesionalId, Guid.Empty, p.TieneAtencion);
+            // Refresca la lista de profesionales de la coordinacion.
+            _profSelId = null;
+            _profForzarConfirm = false;
+            _coordProfesionales = (await Svc.ListarProfesionalesDeCoordinacionAsync(asigId)).ToList();
+            if (_coordProfesionales.Count == 0)
+            {
+                // Era el ultimo: la coordinacion se elimino completa.
+                _coordEliminar = null;
+                _coordList?.RemoveAll(x => x.AsignacionId == asigId);
+                _ok = "Profesional eliminado; la coordinacion quedo vacia y se elimino.";
+            }
+            else
+            {
+                _ok = $"Profesional '{p.ProfesionalNombre}' eliminado de la coordinacion.";
+                // La coordinacion pudo cambiar sus contadores; recarga la lista.
+                await CargarCoordinaciones();
+            }
+        }
+        catch (InvalidOperationException ex) { _coordEliminarErr = ex.Message; }
+        catch (Exception ex) { _coordEliminarErr = "Error inesperado: " + ex.Message; }
+        finally { _profBusy = false; }
     }
 
     private async Task ConfirmarEliminarCoord()

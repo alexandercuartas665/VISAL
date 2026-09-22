@@ -27,30 +27,42 @@ public sealed record GuardarPortadaRequest(
     bool IndiceHabilitado,
     string? PatronNombreDefault);
 
+/// <summary>Un archivo/tipologia de salida = nombre + patron + N contenidos.</summary>
 public sealed record InformeItemDto(
     Guid Id,
     Guid ConfigId,
     int Orden,
     string? Seccion,
-    OrigenInformeItem Origen,
-    Guid? TipologiaArchivoId,
-    string? TipologiaNombre,     // enriquecido en lectura para pintar la tabla
     string Alias,
     string? Descripcion,
     string? PatronNombre,
     bool Obligatorio,
+    IReadOnlyList<InformeContenidoDto> Contenidos);
+
+/// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
+public sealed record InformeContenidoDto(
+    Guid Id,
+    int Orden,
+    OrigenInformeItem Origen,
+    Guid? TipologiaArchivoId,
+    string? TipologiaNombre,     // enriquecido en lectura para pintar la UI
     bool SoloUltimo);
 
 public sealed record GuardarItemRequest(
     Guid? Id,                    // null = crear
     Guid AseguradoraId,          // el service resuelve/crea la config
     string? Seccion,
-    OrigenInformeItem Origen,
-    Guid? TipologiaArchivoId,
     string Alias,
     string? Descripcion,
     string? PatronNombre,
     bool Obligatorio,
+    IReadOnlyList<GuardarContenidoDto> Contenidos);
+
+/// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
+/// todos en cada guardado).</summary>
+public sealed record GuardarContenidoDto(
+    OrigenInformeItem Origen,
+    Guid? TipologiaArchivoId,
     bool SoloUltimo);
 
 /// <summary>Fila del selector "Copiar de ..." — solo aseguradoras que ya tienen

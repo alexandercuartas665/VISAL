@@ -77,32 +77,55 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         Guid aseguradoraId, CancellationToken ct = default)
     {
         var cfg = await GetOrCreateEntityAsync(aseguradoraId, ct);
-        // LEFT JOIN con tipologia para pintar el nombre en el grid sin round-trip extra.
-        var q = from i in _db.AseguradoraInformeItems.AsNoTracking()
-                where i.ConfigId == cfg.Id
-                join t in _db.TipologiaArchivos.AsNoTracking()
-                    on i.TipologiaArchivoId equals t.Id into ts
-                from t in ts.DefaultIfEmpty()
-                orderby i.Orden, i.Alias
-                select new InformeItemDto(
-                    i.Id, i.ConfigId, i.Orden, i.Seccion, i.Origen,
-                    i.TipologiaArchivoId, t != null ? t.Nombre : null,
-                    i.Alias, i.Descripcion, i.PatronNombre, i.Obligatorio, i.SoloUltimo);
-        return await q.ToListAsync(ct);
+
+        var items = await _db.AseguradoraInformeItems.AsNoTracking()
+            .Where(i => i.ConfigId == cfg.Id)
+            .OrderBy(i => i.Orden).ThenBy(i => i.Alias)
+            .ToListAsync(ct);
+        if (items.Count == 0) { return Array.Empty<InformeItemDto>(); }
+
+        var itemIds = items.Select(i => i.Id).ToList();
+        var contenidos = await _db.AseguradoraInformeContenidos.AsNoTracking()
+            .Where(c => itemIds.Contains(c.ItemId))
+            .OrderBy(c => c.Orden)
+            .ToListAsync(ct);
+
+        // Nombres de tipologia para pintar los chips sin round-trips por fila.
+        var tipIds = contenidos.Where(c => c.TipologiaArchivoId != null)
+            .Select(c => c.TipologiaArchivoId!.Value).Distinct().ToList();
+        var tipNombres = tipIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.TipologiaArchivos.AsNoTracking()
+                .Where(t => tipIds.Contains(t.Id))
+                .ToDictionaryAsync(t => t.Id, t => t.Nombre, ct);
+
+        var contPorItem = contenidos.GroupBy(c => c.ItemId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        return items.Select(i => new InformeItemDto(
+            i.Id, i.ConfigId, i.Orden, i.Seccion, i.Alias, i.Descripcion,
+            i.PatronNombre, i.Obligatorio,
+            (contPorItem.TryGetValue(i.Id, out var cs) ? cs : new())
+                .Select(c => new InformeContenidoDto(
+                    c.Id, c.Orden, c.Origen, c.TipologiaArchivoId,
+                    c.TipologiaArchivoId is Guid tg && tipNombres.TryGetValue(tg, out var nm) ? nm : null,
+                    c.SoloUltimo))
+                .ToList()))
+            .ToList();
     }
 
     public async Task<InformeItemDto> GuardarItemAsync(
         GuardarItemRequest req, Guid actorUserId, CancellationToken ct = default)
     {
         var alias = (req.Alias ?? string.Empty).Trim().ToUpperInvariant();
-        if (string.IsNullOrWhiteSpace(alias)) { throw new InvalidOperationException("El alias es obligatorio."); }
-        if (alias.Length > 20) { throw new InvalidOperationException("Alias muy largo (max 20)."); }
+        if (string.IsNullOrWhiteSpace(alias)) { throw new InvalidOperationException("El codigo/alias es obligatorio."); }
+        if (alias.Length > 20) { throw new InvalidOperationException("Codigo muy largo (max 20)."); }
 
-        // Tipologia solo aplica a origenes que filtran por catalogo.
-        var pideTipologia = req.Origen is OrigenInformeItem.DocumentoHc
-                                          or OrigenInformeItem.DocumentoPacienteLibre
-                                          or OrigenInformeItem.DocumentoNota;
-        var tipId = pideTipologia ? req.TipologiaArchivoId : null;
+        var contenidos = req.Contenidos ?? Array.Empty<GuardarContenidoDto>();
+        if (contenidos.Count == 0)
+        {
+            throw new InvalidOperationException("El archivo debe tener al menos un contenido.");
+        }
 
         var cfg = await GetOrCreateEntityAsync(req.AseguradoraId, ct);
         var tid = RequireTenant();
@@ -112,8 +135,13 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         {
             var existente = await _db.AseguradoraInformeItems
                 .FirstOrDefaultAsync(x => x.Id == iid && x.ConfigId == cfg.Id, ct);
-            if (existente is null) { throw new InvalidOperationException("Item no encontrado."); }
+            if (existente is null) { throw new InvalidOperationException("Archivo no encontrado."); }
             item = existente;
+
+            // Reemplaza los contenidos existentes (borrar + insertar).
+            var viejos = await _db.AseguradoraInformeContenidos
+                .Where(c => c.ItemId == item.Id).ToListAsync(ct);
+            if (viejos.Count > 0) { _db.AseguradoraInformeContenidos.RemoveRange(viejos); }
         }
         else
         {
@@ -131,26 +159,45 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         }
 
         item.Seccion = NullIfBlank(req.Seccion);
-        item.Origen = req.Origen;
-        item.TipologiaArchivoId = tipId;
         item.Alias = alias;
         item.Descripcion = NullIfBlank(req.Descripcion);
         item.PatronNombre = NullIfBlank(req.PatronNombre);
         item.Obligatorio = req.Obligatorio;
-        item.SoloUltimo = req.SoloUltimo;
+        // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
+        // compatibilidad; la fuente de verdad es la tabla de contenidos.
+        var primero = contenidos[0];
+        item.Origen = primero.Origen;
+        item.TipologiaArchivoId = PideTipologia(primero.Origen) ? primero.TipologiaArchivoId : null;
+        item.SoloUltimo = primero.SoloUltimo;
+
+        var orden = 0;
+        foreach (var c in contenidos)
+        {
+            _db.AseguradoraInformeContenidos.Add(new AseguradoraInformeContenido
+            {
+                Item = item,
+                TenantId = tid,
+                Orden = orden++,
+                Origen = c.Origen,
+                TipologiaArchivoId = PideTipologia(c.Origen) ? c.TipologiaArchivoId : null,
+                SoloUltimo = c.SoloUltimo,
+            });
+        }
 
         await _db.SaveChangesAsync(ct);
 
-        string? tipNombre = null;
-        if (tipId is Guid tid2)
-        {
-            tipNombre = await _db.TipologiaArchivos.AsNoTracking()
-                .Where(t => t.Id == tid2).Select(t => t.Nombre).FirstOrDefaultAsync(ct);
-        }
-        return new InformeItemDto(item.Id, item.ConfigId, item.Orden, item.Seccion,
-            item.Origen, item.TipologiaArchivoId, tipNombre, item.Alias, item.Descripcion,
-            item.PatronNombre, item.Obligatorio, item.SoloUltimo);
+        // Relee para devolver el DTO enriquecido con nombres de tipologia.
+        var recargado = (await ListarItemsAsync(req.AseguradoraId, ct))
+            .FirstOrDefault(x => x.Id == item.Id);
+        return recargado ?? new InformeItemDto(item.Id, item.ConfigId, item.Orden,
+            item.Seccion, item.Alias, item.Descripcion, item.PatronNombre,
+            item.Obligatorio, Array.Empty<InformeContenidoDto>());
     }
+
+    private static bool PideTipologia(OrigenInformeItem o) => o
+        is OrigenInformeItem.DocumentoHc
+        or OrigenInformeItem.DocumentoPacienteLibre
+        or OrigenInformeItem.DocumentoNota;
 
     public async Task<bool> EliminarItemAsync(
         Guid itemId, Guid actorUserId, CancellationToken ct = default)
@@ -218,16 +265,26 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         destino.IndiceHabilitado = origen.IndiceHabilitado;
         destino.PatronNombreDefault = origen.PatronNombreDefault;
 
-        // Items: borra los del destino, clona los del origen preservando orden.
+        // Items: borra los del destino (cascade borra sus contenidos), clona los
+        // del origen con sus contenidos preservando orden.
         var destinoItems = await _db.AseguradoraInformeItems
             .Where(x => x.ConfigId == destino.Id).ToListAsync(ct);
         if (destinoItems.Count > 0) { _db.AseguradoraInformeItems.RemoveRange(destinoItems); }
 
         var origenItems = await _db.AseguradoraInformeItems.AsNoTracking()
             .Where(x => x.ConfigId == origen.Id).OrderBy(x => x.Orden).ToListAsync(ct);
+        var origenItemIds = origenItems.Select(x => x.Id).ToList();
+        var origenContenidos = origenItemIds.Count == 0
+            ? new List<AseguradoraInformeContenido>()
+            : await _db.AseguradoraInformeContenidos.AsNoTracking()
+                .Where(c => origenItemIds.Contains(c.ItemId))
+                .OrderBy(c => c.Orden).ToListAsync(ct);
+        var contPorItem = origenContenidos.GroupBy(c => c.ItemId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         foreach (var src in origenItems)
         {
-            _db.AseguradoraInformeItems.Add(new AseguradoraInformeItem
+            var nuevo = new AseguradoraInformeItem
             {
                 ConfigId = destino.Id,
                 TenantId = tid,
@@ -240,7 +297,23 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 PatronNombre = src.PatronNombre,
                 Obligatorio = src.Obligatorio,
                 SoloUltimo = src.SoloUltimo,
-            });
+            };
+            if (contPorItem.TryGetValue(src.Id, out var cs))
+            {
+                foreach (var c in cs)
+                {
+                    nuevo.Contenidos.Add(new AseguradoraInformeContenido
+                    {
+                        Item = nuevo,
+                        TenantId = tid,
+                        Orden = c.Orden,
+                        Origen = c.Origen,
+                        TipologiaArchivoId = c.TipologiaArchivoId,
+                        SoloUltimo = c.SoloUltimo,
+                    });
+                }
+            }
+            _db.AseguradoraInformeItems.Add(nuevo);
         }
         await _db.SaveChangesAsync(ct);
         return MapConfig(destino);

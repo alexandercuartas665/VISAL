@@ -41,6 +41,16 @@ public class RdaEvento : TenantEntity
 
     // ---- Estado y trazabilidad de envio
     public EstadoRdaEvento Estado { get; set; } = EstadoRdaEvento.Borrador;
+
+    /// <summary>
+    /// True cuando el evento fue generado automaticamente (p. ej. al aprobar la
+    /// revision clinica de la HC) y debe enviarse al IHCE sin intervencion manual.
+    /// El worker de reintentos hace el envio inicial de los Borrador con esta marca
+    /// (Intentos == 0). Los eventos generados a mano desde la consola quedan en false
+    /// y se envian con el boton "Enviar al IHCE".
+    /// </summary>
+    public bool EnvioAutomatico { get; set; }
+
     public int Intentos { get; set; }
     public DateTimeOffset? UltimoIntento { get; set; }
     public DateTimeOffset FechaGeneracion { get; set; }

@@ -474,6 +474,30 @@ else
         catch (TaskCanceledException) { }
     }
 
+    // Campos de imagen en curso de compresion (para el hint "Procesando…").
+    private readonly HashSet<string> _imgCargando = new();
+
+    /// <summary>Lee el archivo del input file, lo comprime en el cliente (canvas ->
+    /// JPEG) y guarda el data URL resultante como valor del campo. La compresion
+    /// ocurre ANTES de viajar al servidor, asi solo se transfiere la imagen ya
+    /// reducida. Best-effort: si el usuario cancela o el archivo no es imagen, no
+    /// pasa nada.</summary>
+    private async Task CargarImagenAsync(string key, string inputId)
+    {
+        _imgCargando.Add(key);
+        StateHasChanged();
+        try
+        {
+            // maxDim=1600px, calidad=0.72: buen balance nitidez/peso para fotos
+            // clinicas de seguimiento. El JS devuelve un data URL JPEG o null.
+            var dataUrl = await JS.InvokeAsync<string?>("visalImage.compress", inputId, 1600, 0.72);
+            if (!string.IsNullOrWhiteSpace(dataUrl)) { await SetValue(key, dataUrl); }
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+        finally { _imgCargando.Remove(key); StateHasChanged(); }
+    }
+
     protected override void OnParametersSet()
     {
         // Calcular valores iniciales al abrir/cambiar de schema.
@@ -1135,6 +1159,37 @@ else
                        value="@val"
                        placeholder="(automatico: @node.Formula)"
                        title="@($"Calculado por formula: {node.Formula}")" />
+                break;
+            case "image":
+                // Campo de imagen: el valor es un data URL JPEG ya comprimido en el
+                // cliente al cargar (canvas). Si hay imagen se muestra la miniatura;
+                // en captura, un boton permite reemplazarla. Sin imagen y editable,
+                // un input file dispara la compresion + guardado.
+                if (IsImageUrlLike(val))
+                {
+                    <div class="fv-img-prev">
+                        <img src="@val" alt="imagen" class="fv-img-thumb"
+                             style="max-width:100%;max-height:320px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:4px;display:block;margin-bottom:6px;" />
+                        @if (!ro)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetValue(key, string.Empty)">Cambiar imagen</button>
+                        }
+                    </div>
+                }
+                else if (!ro)
+                {
+                    var imgInputId = $"fv-img-{node.Id}";
+                    <div class="fv-img-upload">
+                        <input type="file" accept="image/*" id="@imgInputId" class="form-control form-control-sm"
+                               @onchange="() => CargarImagenAsync(key, imgInputId)" />
+                        <small class="text-muted">La imagen se comprime automaticamente al cargar (max 1600px, JPEG).</small>
+                        @if (_imgCargando.Contains(key)) { <small class="text-muted"> · Procesando imagen…</small> }
+                    </div>
+                }
+                else
+                {
+                    <span class="text-muted">Sin imagen</span>
+                }
                 break;
             default:
                 <input type="text" class="form-control form-control-sm" placeholder="@node.Placeholder"

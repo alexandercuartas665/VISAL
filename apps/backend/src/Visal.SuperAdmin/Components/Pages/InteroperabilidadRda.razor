@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Domain.Enums
 @inject IRdaConsoleService Svc
+@inject ISucursalService SucSvc
 @inject IRdaBuilderService Builder
 @inject IRdaConsultaBuilderService BuilderConsulta
 @inject IIhceSenderService Sender
@@ -169,11 +170,26 @@
 </details>
 
 @* ===================== Filtros ===================== *@
-<div class="ase-card" style="margin-bottom:14px;">
-    <div class="ase-form" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 80px;gap:10px;align-items:end;">
+<div class="ase-card rda-filtros" style="margin-bottom:14px;">
+    <div class="ase-form rda-filtros-grid">
         <div class="ase-f">
-            <label>Documento paciente</label>
-            <input class="form-control form-control-sm mono" @bind="_filtroDoc" placeholder="ej. 1010101010" />
+            <label>Paciente</label>
+            <input class="form-control form-control-sm" @bind="_filtroPaciente" placeholder="nombre o documento" />
+        </div>
+        <div class="ase-f">
+            <label>Sede</label>
+            <select class="form-select form-select-sm" @bind="_filtroSucursalId">
+                <option value="">(Todas)</option>
+                @foreach (var su in _sucursales) { <option value="@su.Id">@su.Nombre</option> }
+            </select>
+        </div>
+        <div class="ase-f">
+            <label>Doctor</label>
+            <input class="form-control form-control-sm" @bind="_filtroProfesional" placeholder="contiene..." />
+        </div>
+        <div class="ase-f">
+            <label>Servicio</label>
+            <input class="form-control form-control-sm" @bind="_filtroServicio" placeholder="contiene..." />
         </div>
         <div class="ase-f">
             <label>Estado</label>
@@ -194,6 +210,10 @@
             </select>
         </div>
         <div class="ase-f">
+            <label title="Intentos de sincronizacion minimos">Intentos &ge;</label>
+            <input type="number" min="0" class="form-control form-control-sm" @bind="_filtroIntentosMin" placeholder="0" />
+        </div>
+        <div class="ase-f">
             <label>Desde</label>
             <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" />
         </div>
@@ -201,7 +221,15 @@
             <label>Hasta</label>
             <input type="date" class="form-control form-control-sm" @bind="_filtroHasta" />
         </div>
-        <button class="btn btn-primary btn-sm" @onclick="CargarLista">Aplicar</button>
+        <div class="ase-f rda-filtros-actions">
+            <label class="rda-check" title="Mostrar solo eventos rechazados por MinSalud">
+                <input type="checkbox" @bind="_soloRechazados" /> Solo rechazados
+            </label>
+            <div style="display:flex;gap:6px;">
+                <button class="btn btn-primary btn-sm" @onclick="CargarLista">Aplicar</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltros" title="Limpiar filtros">Limpiar</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -209,10 +237,10 @@
 <div class="ase-card">
     <div class="ase-card-h">Eventos RDA <small style="color:var(--muted)">@_rows.Count fila(s)</small></div>
     <div class="table-responsive">
-        <table class="table table-sm align-middle">
+        <table class="rda-table align-middle">
             <thead>
                 <tr>
-                    <th>Fecha</th>
+                    <th title="Fecha en que se genero (cayo) el registro RDA">Fecha</th>
                     <th>Tipo</th>
                     <th>Paciente</th>
                     <th>Profesional</th>
@@ -220,6 +248,7 @@
                     <th>Modalidad</th>
                     <th>Ambiente</th>
                     <th>Estado</th>
+                    <th title="Intentos de sincronizacion con el IHCE y fecha del ultimo intento">Sinc.</th>
                     <th>Hash</th>
                     <th></th>
                 </tr>
@@ -246,6 +275,10 @@
                         <td><small>@r.ProfesionalNombre</small></td>
                         <td>
                             <small>@r.SucursalNombre</small>
+                            @if (!string.IsNullOrWhiteSpace(r.Servicio))
+                            {
+                                <div><small class="rda-serv" title="@r.Servicio">@r.Servicio</small></div>
+                            }
                             @if (!r.TieneCredencialSede)
                             {
                                 <div>
@@ -268,28 +301,60 @@
                             }
                         </td>
                         <td>@RenderEstado(r.Estado)</td>
-                        <td class="mono"><small>@r.BundleHash.Substring(0, 12)…</small></td>
-                        <td class="ase-row-actions" style="text-align:right;white-space:nowrap;">
-                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerJson(r.Id)">Ver JSON</button>
-                            @if (r.Estado is EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+                        <td>
+                            @if (r.Intentos > 0)
                             {
-                                <button class="btn btn-outline-danger btn-sm" @onclick="() => DescargarZip(r.Id)" title="ZIP con envio + error">Descargar ZIP</button>
+                                var sincCls = r.Estado == EstadoRdaEvento.Aceptado ? "bg-success"
+                                    : (r.Estado is EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado ? "bg-danger" : "bg-secondary");
+                                <span class="badge @sincCls" title="Intentos de sincronizacion con el IHCE">@r.Intentos intento@(r.Intentos == 1 ? "" : "s")</span>
+                                @if (r.UltimoIntento is DateTimeOffset ui)
+                                {
+                                    <div><small class="mono" style="color:var(--muted)" title="Fecha del ultimo intento">@ui.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></div>
+                                }
                             }
                             else
                             {
-                                <button class="btn btn-outline-primary btn-sm" @onclick="() => DescargarJson(r.Id)">Descargar</button>
+                                <small style="color:var(--muted)" title="Sin intentos de envio todavia">—</small>
                             }
-                            @if (r.Estado is EstadoRdaEvento.Borrador or EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+                        </td>
+                        <td class="mono"><small>@r.BundleHash.Substring(0, 12)…</small></td>
+                        <td class="rda-actions-cell" style="text-align:right;">
+                            <button class="rda-kebab @(_menuOpenId == r.Id ? "open" : "")" title="Acciones"
+                                    @onclick="() => ToggleMenu(r.Id)">&#8942;</button>
+                            @if (_menuOpenId == r.Id)
                             {
-                                <button class="btn btn-success btn-sm" @onclick="() => EnviarAlIhce(r.Id)"
-                                        disabled="@(_enviandoId == r.Id || !r.TieneCredencialSede)"
-                                        title="@(r.TieneCredencialSede ? null : r.MotivoBloqueoEnvio)">
-                                    @if (_enviandoId == r.Id) { <span>Enviando…</span> } else { <span>Enviar al IHCE</span> }
-                                </button>
-                            }
-                            @if (r.Estado == EstadoRdaEvento.Borrador)
-                            {
-                                <button class="btn btn-outline-danger btn-sm" @onclick="() => Eliminar(r.Id)">Eliminar</button>
+                                <div class="rda-menu" @onclick:stopPropagation="true">
+                                    <button class="rda-menu-item" @onclick="() => VerJson(r.Id)">
+                                        <span class="rda-mi-ic">🔎</span> Ver JSON
+                                    </button>
+                                    @if (r.Estado is EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+                                    {
+                                        <button class="rda-menu-item" @onclick="() => DescargarZip(r.Id)">
+                                            <span class="rda-mi-ic">⬇</span> Descargar ZIP
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="rda-menu-item" @onclick="() => DescargarJson(r.Id)">
+                                            <span class="rda-mi-ic">⬇</span> Descargar bundle
+                                        </button>
+                                    }
+                                    @if (r.Estado is EstadoRdaEvento.Borrador or EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
+                                    {
+                                        <button class="rda-menu-item ok" disabled="@(_enviandoId == r.Id || !r.TieneCredencialSede)"
+                                                title="@(r.TieneCredencialSede ? null : r.MotivoBloqueoEnvio)"
+                                                @onclick="() => EnviarAlIhce(r.Id)">
+                                            <span class="rda-mi-ic">📤</span> @(_enviandoId == r.Id ? "Enviando…" : "Enviar al IHCE")
+                                        </button>
+                                    }
+                                    @if (r.Estado == EstadoRdaEvento.Borrador)
+                                    {
+                                        <div class="rda-menu-sep"></div>
+                                        <button class="rda-menu-item danger" @onclick="() => Eliminar(r.Id)">
+                                            <span class="rda-mi-ic">🗑</span> Eliminar
+                                        </button>
+                                    }
+                                </div>
                             }
                         </td>
                     </tr>
@@ -305,6 +370,12 @@
         }
     </div>
 </div>
+
+@* Backdrop transparente: cierra el menu flotante de acciones al hacer click afuera. *@
+@if (_menuOpenId is not null)
+{
+    <div class="rda-menu-backdrop" @onclick="CloseMenu"></div>
+}
 
 @* ===================== Modal Generar RDA ===================== *@
 @if (_modalGenerar)
@@ -628,6 +699,42 @@
     .ase-modal-h { padding:14px 18px;font-weight:600;border-bottom:1px solid #eee;font-size:15px; }
     .ase-modal-f { padding:12px 18px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* ---- Filtros ---- */
+    .rda-filtros-grid { display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:10px 12px; align-items:end; }
+    .rda-filtros-actions { grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .rda-check { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#334155; cursor:pointer; margin:0; }
+    .rda-check input { margin:0; }
+    @@media (max-width: 1100px) { .rda-filtros-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+    @@media (max-width: 700px)  { .rda-filtros-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+
+    /* ---- Tabla ---- */
+    .rda-table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
+    .rda-table thead th { position:sticky; top:0; z-index:2; background:#f8fafc; color:#475569; font-weight:600;
+        text-transform:uppercase; font-size:11px; letter-spacing:.03em; padding:9px 12px; border-bottom:1px solid #e2e8f0; text-align:left; }
+    .rda-table tbody td { padding:9px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .rda-table tbody tr:hover { background:#f8fbff; }
+    .rda-table tbody tr:last-child td { border-bottom:none; }
+    .rda-serv { color:#64748b; font-size:11px; display:inline-block; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    /* ---- Menu flotante de acciones ---- */
+    .rda-actions-cell { position:relative; white-space:nowrap; }
+    .rda-kebab { border:1px solid transparent; background:transparent; border-radius:8px; width:30px; height:30px; line-height:1;
+        font-size:18px; color:#475569; cursor:pointer; transition:background .12s, border-color .12s; }
+    .rda-kebab:hover { background:#eef2f7; }
+    .rda-kebab.open { background:#e6efff; border-color:#bcd4ff; color:#1d4ed8; }
+    .rda-menu-backdrop { position:fixed; inset:0; z-index:40; background:transparent; }
+    .rda-menu { position:absolute; right:6px; top:calc(100% - 2px); z-index:50; min-width:190px; background:#fff;
+        border:1px solid #e5e7eb; border-radius:10px; box-shadow:0 12px 30px rgba(15,23,42,.16); padding:6px; }
+    .rda-menu-item { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:transparent; border:none;
+        border-radius:7px; padding:8px 10px; font-size:13px; color:#1f2937; cursor:pointer; }
+    .rda-menu-item:hover { background:#f1f5f9; }
+    .rda-menu-item:disabled { color:#9ca3af; cursor:not-allowed; background:transparent; }
+    .rda-menu-item.ok:hover { background:#ecfdf5; color:#047857; }
+    .rda-menu-item.danger { color:#b91c1c; }
+    .rda-menu-item.danger:hover { background:#fef2f2; }
+    .rda-mi-ic { width:16px; text-align:center; }
+    .rda-menu-sep { height:1px; background:#f1f5f9; margin:4px 2px; }
 </style>
 
 @code {
@@ -638,11 +745,22 @@
     private List<RdaEventoRowDto> _rows = new();
 
     // ----- Filtros -----
-    private string? _filtroDoc;
+    private string? _filtroPaciente;
+    private string _filtroSucursalId = "";
+    private string? _filtroProfesional;
+    private string? _filtroServicio;
     private string? _filtroEstado;
     private string? _filtroAmb;
+    private int? _filtroIntentosMin;
+    private bool _soloRechazados;
     private DateTime? _filtroDesde;
     private DateTime? _filtroHasta;
+    private List<SucursalDto> _sucursales = new();
+
+    // ----- Menu flotante de acciones por fila -----
+    private Guid? _menuOpenId;
+    private void ToggleMenu(Guid id) => _menuOpenId = _menuOpenId == id ? null : id;
+    private void CloseMenu() => _menuOpenId = null;
 
     // ----- Modal Generar -----
     private bool _modalGenerar;
@@ -691,25 +809,45 @@
     private bool _probadorBusy;
     private IhceCallResult? _probadorResult;
 
-    protected override async Task OnInitializedAsync() => await CargarLista();
+    protected override async Task OnInitializedAsync()
+    {
+        try { _sucursales = (await SucSvc.ListAsync(soloActivas: true)).ToList(); }
+        catch { _sucursales = new(); }
+        await CargarLista();
+    }
 
     private async Task CargarLista()
     {
         _error = null;
         _cargando = true;
+        _menuOpenId = null;
         await _dbLock.WaitAsync();
         try
         {
             var filtro = new RdaConsoleFiltro(
-                _filtroDoc,
-                Enum.TryParse<EstadoRdaEvento>(_filtroEstado, out var e) ? e : null,
-                Enum.TryParse<AmbienteIhce>(_filtroAmb, out var a) ? a : null,
-                _filtroDesde is DateTime fd ? DateOnly.FromDateTime(fd) : null,
-                _filtroHasta is DateTime fh ? DateOnly.FromDateTime(fh) : null);
+                Documento: null,
+                Estado: Enum.TryParse<EstadoRdaEvento>(_filtroEstado, out var e) ? e : null,
+                Ambiente: Enum.TryParse<AmbienteIhce>(_filtroAmb, out var a) ? a : null,
+                Desde: _filtroDesde is DateTime fd ? DateOnly.FromDateTime(fd) : null,
+                Hasta: _filtroHasta is DateTime fh ? DateOnly.FromDateTime(fh) : null,
+                Paciente: string.IsNullOrWhiteSpace(_filtroPaciente) ? null : _filtroPaciente,
+                SucursalId: Guid.TryParse(_filtroSucursalId, out var sid) ? sid : null,
+                Profesional: string.IsNullOrWhiteSpace(_filtroProfesional) ? null : _filtroProfesional,
+                Servicio: string.IsNullOrWhiteSpace(_filtroServicio) ? null : _filtroServicio,
+                IntentosMin: _filtroIntentosMin,
+                SoloRechazados: _soloRechazados);
             _rows = (await Svc.ListarAsync(filtro)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _cargando = false; _dbLock.Release(); }
+    }
+
+    private async Task LimpiarFiltros()
+    {
+        _filtroPaciente = null; _filtroSucursalId = ""; _filtroProfesional = null; _filtroServicio = null;
+        _filtroEstado = null; _filtroAmb = null; _filtroIntentosMin = null; _soloRechazados = false;
+        _filtroDesde = null; _filtroHasta = null;
+        await CargarLista();
     }
 
     private async Task AbrirGenerar()
@@ -763,6 +901,7 @@
 
     private async Task VerJson(Guid id)
     {
+        _menuOpenId = null;
         _detailTab = "bundle";
         _reveladas.Clear();
         _cred = null;
@@ -920,16 +1059,19 @@
     // Ambas usan el endpoint /interoperabilidad/rda/{id}/download.
     private void DescargarJson(Guid id)
     {
+        _menuOpenId = null;
         Nav.NavigateTo($"/interoperabilidad/rda/{id}/download?format=json", forceLoad: true);
     }
 
     private void DescargarZip(Guid id)
     {
+        _menuOpenId = null;
         Nav.NavigateTo($"/interoperabilidad/rda/{id}/download?format=zip", forceLoad: true);
     }
 
     private async Task EnviarAlIhce(Guid id)
     {
+        _menuOpenId = null;
         _error = null; _ok = null; _envioResult = null;
         _enviandoId = id;
         await _dbLock.WaitAsync();
@@ -980,6 +1122,7 @@
 
     private async Task Eliminar(Guid id)
     {
+        _menuOpenId = null;
         if (!await JS.InvokeAsync<bool>("confirm", "Eliminar este Borrador? La accion no se puede deshacer.")) { return; }
         await _dbLock.WaitAsync();
         try

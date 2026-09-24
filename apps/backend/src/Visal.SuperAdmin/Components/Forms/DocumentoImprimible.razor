@@ -342,7 +342,16 @@
             <div class="pack-label">@n.Label</div>
             @if (IsImageUrl(val))
             {
-                <img class="pack-firma-img" src="@val" alt="firma" />
+                @if (n.FieldType == "image")
+                {
+                    @* Campo de imagen (foto): se imprime a mayor tamano que una firma. *@
+                    <img src="@val" alt="imagen"
+                         style="max-width:100%;max-height:340px;display:block;margin:4px 0;object-fit:contain;background:#fff;" />
+                }
+                else
+                {
+                    <img class="pack-firma-img" src="@val" alt="firma" />
+                }
             }
             else
             {

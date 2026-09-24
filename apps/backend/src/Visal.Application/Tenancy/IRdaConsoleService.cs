@@ -10,10 +10,12 @@ public sealed record RdaEventoRowDto(
     string PacienteDocumento,
     string ProfesionalNombre,
     string SucursalNombre,
+    string? Servicio,
     ModalidadRdaIhce Modalidad,
     AmbienteIhce Ambiente,
     EstadoRdaEvento Estado,
     int Intentos,
+    DateTimeOffset? UltimoIntento,
     DateTimeOffset? FechaEnvio,
     string? ReferenciaMinsalud,
     string BundleHash,
@@ -40,7 +42,14 @@ public sealed record RdaConsoleFiltro(
     EstadoRdaEvento? Estado = null,
     AmbienteIhce? Ambiente = null,
     DateOnly? Desde = null,
-    DateOnly? Hasta = null);
+    DateOnly? Hasta = null,
+    // Filtros adicionales de la consola.
+    string? Paciente = null,       // nombre o documento (contiene)
+    Guid? SucursalId = null,       // sede
+    string? Profesional = null,    // doctor (contiene)
+    string? Servicio = null,       // servicio de la asignacion (contiene)
+    int? IntentosMin = null,       // intentos de sincronizacion >= N
+    bool SoloRechazados = false);  // atajo: solo eventos Rechazado
 
 /// <summary>HC candidata a generar RDA (combo del modal Generar).</summary>
 public sealed record HcCandidataRdaDto(

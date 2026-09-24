@@ -1164,7 +1164,8 @@
         ["autocomplete"] = "Autocompletar",
         ["calculated"] = "Calculado",
         ["table"] = "Tabla",
-        ["qr"] = "Codigo QR"
+        ["qr"] = "Codigo QR",
+        ["image"] = "Imagen"
     };
 
     private static readonly Dictionary<string, string> Catalogs = new()
@@ -1891,7 +1892,7 @@
                     FieldType = subtype,
                     Label = subtype == "table" ? "Nueva tabla" : "Nuevo campo",
                     Name = "",
-                    WidthColumns = subtype is "textarea" or "table" ? 12 : 6,
+                    WidthColumns = subtype is "textarea" or "table" or "image" ? 12 : 6,
                     Catalog = subtype is "select" or "autocomplete" ? "estatico" : null,
                     Columns = subtype == "table"
                         ? new List<FormColumn>
@@ -1922,7 +1923,7 @@
             FieldType = fieldType,
             Label = fieldType == "table" ? "Nueva tabla" : "Nuevo campo",
             Name = "",
-            WidthColumns = fieldType is "textarea" or "table" ? 12 : 6,
+            WidthColumns = fieldType is "textarea" or "table" or "image" ? 12 : 6,
             Catalog = fieldType is "select" or "autocomplete" ? "estatico" : null,
             Columns = fieldType == "table"
                 ? new List<FormColumn>
@@ -2632,6 +2633,14 @@
             else if (f.FieldType == "calculated")
             {
                 <input class="fb-prev fb-mono" value="@($"= {f.Formula}")" disabled />
+            }
+            else if (f.FieldType == "image")
+            {
+                <div title="Campo de imagen (carga con compresion automatica)"
+                     style="display:flex;align-items:center;gap:6px;padding:10px;border:1px dashed #cbd5e1;border-radius:6px;color:#64748b;font-size:.8rem;background:#f8fafc;">
+                    <span style="font-size:1.1rem;">&#128247;</span>
+                    <span>Cargar imagen</span>
+                </div>
             }
             else
             {

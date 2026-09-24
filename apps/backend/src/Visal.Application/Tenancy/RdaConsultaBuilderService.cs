@@ -38,7 +38,7 @@ public sealed class RdaConsultaBuilderService(
     private const string LoincSystem = "http://loinc.org";
     private const string V2Terminology = "http://terminology.hl7.org/CodeSystem/v2-0203";
 
-    public async Task<RdaBuildResult> ConstruirAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default)
+    public async Task<RdaBuildResult> ConstruirAsync(Guid historiaClinicaId, Guid actor, bool envioAutomatico = false, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid)
         {
@@ -259,6 +259,7 @@ public sealed class RdaConsultaBuilderService(
             BundleJson = bundleJson,
             BundleHash = hash,
             Estado = EstadoRdaEvento.Borrador,
+            EnvioAutomatico = envioAutomatico,
             Intentos = 0,
             FechaGeneracion = DateTimeOffset.UtcNow
         };

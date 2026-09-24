@@ -36,11 +36,21 @@ public sealed class RdaConsoleService(
                     PacienteNombre = p.NombreCompleto,
                     PacienteDocumento = p.NumeroDocumento,
                     ProfesionalNombre = pr != null ? pr.NombreCompleto : "(sin firmante)",
+                    e.SucursalId,
                     SucursalNombre = s.Nombre,
+                    // Servicio de la asignacion asociada a la HC (via pivote). Subconsulta
+                    // correlacionada: EF la traduce a un scalar subquery por fila.
+                    Servicio = (from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                                join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
+                                join tu in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals tu.Id
+                                join asig in db.Asignaciones.AsNoTracking() on tu.AsignacionId equals asig.Id
+                                where pv.HistoriaClinicaId == e.HistoriaClinicaId
+                                select asig.NombreServicio).FirstOrDefault(),
                     e.Modalidad,
                     e.Ambiente,
                     e.Estado,
                     e.Intentos,
+                    e.UltimoIntento,
                     e.FechaEnvio,
                     e.ReferenciaMinsalud,
                     e.BundleHash,
@@ -54,6 +64,33 @@ public sealed class RdaConsoleService(
         {
             var doc = filtro.Documento.Trim();
             q = q.Where(x => x.PacienteDocumento.Contains(doc));
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Paciente))
+        {
+            var pac = filtro.Paciente.Trim();
+            q = q.Where(x => x.PacienteNombre.Contains(pac) || x.PacienteDocumento.Contains(pac));
+        }
+        if (filtro.SucursalId is Guid sedeId && sedeId != Guid.Empty)
+        {
+            q = q.Where(x => x.SucursalId == sedeId);
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Profesional))
+        {
+            var prof = filtro.Profesional.Trim();
+            q = q.Where(x => x.ProfesionalNombre.Contains(prof));
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.Servicio))
+        {
+            var serv = filtro.Servicio.Trim();
+            q = q.Where(x => x.Servicio != null && x.Servicio.Contains(serv));
+        }
+        if (filtro.IntentosMin is int minInt && minInt > 0)
+        {
+            q = q.Where(x => x.Intentos >= minInt);
+        }
+        if (filtro.SoloRechazados)
+        {
+            q = q.Where(x => x.Estado == EstadoRdaEvento.Rechazado);
         }
         if (filtro.Estado is EstadoRdaEvento est) { q = q.Where(x => x.Estado == est); }
         if (filtro.Ambiente is AmbienteIhce amb) { q = q.Where(x => x.Ambiente == amb); }
@@ -71,8 +108,8 @@ public sealed class RdaConsoleService(
         var rows = await q.OrderByDescending(x => x.FechaGeneracion).Take(500).ToListAsync(ct);
         return rows.Select(r => new RdaEventoRowDto(
             r.Id, r.FechaGeneracion, r.PacienteNombre, r.PacienteDocumento,
-            r.ProfesionalNombre, r.SucursalNombre, r.Modalidad, r.Ambiente,
-            r.Estado, r.Intentos, r.FechaEnvio, r.ReferenciaMinsalud, r.BundleHash,
+            r.ProfesionalNombre, r.SucursalNombre, r.Servicio, r.Modalidad, r.Ambiente,
+            r.Estado, r.Intentos, r.UltimoIntento, r.FechaEnvio, r.ReferenciaMinsalud, r.BundleHash,
             r.TipoRda,
             r.TieneCredencialSede,
             r.TieneCredencialSede

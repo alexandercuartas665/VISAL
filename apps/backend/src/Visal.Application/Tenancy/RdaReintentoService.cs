@@ -51,6 +51,35 @@ public sealed class RdaReintentoService(
                 log.LogWarning(ex, "Reintento RDA {Id} fallo (ignorado).", e.Id);
             }
         }
+
+        // Envio INICIAL de RDAs generados automaticamente (p. ej. al aprobar la revision
+        // clinica de la HC): Borrador marcados EnvioAutomatico que nunca se intentaron.
+        // Se envian una vez; si fallan caen a Error/Rechazado y entran al flujo de
+        // reintento de arriba en los siguientes ciclos. Los Borrador generados a mano
+        // desde la consola (EnvioAutomatico == false) NO se tocan: se envian con el boton.
+        var autoPendientes = await db.RdaEventos
+            .Where(e => e.Estado == EstadoRdaEvento.Borrador && e.EnvioAutomatico && e.Intentos == 0)
+            .OrderBy(e => e.FechaGeneracion)
+            .Take(50)
+            .ToListAsync(ct);
+        foreach (var e in autoPendientes)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var r = await sender.EnviarRdaAsync(e.Id, Guid.Empty, automatico: true, ct: ct);
+                reintentados++;
+                if (r.NuevoEstado == EstadoRdaEvento.Aceptado)
+                {
+                    log.LogInformation("Envio automatico RDA {Id}: ACEPTADO.", e.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Envio automatico RDA {Id} fallo (ignorado).", e.Id);
+            }
+        }
+
         return reintentados;
     }
 

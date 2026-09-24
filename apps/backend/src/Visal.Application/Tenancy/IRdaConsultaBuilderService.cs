@@ -21,5 +21,10 @@ public interface IRdaConsultaBuilderService
     /// Construye el Bundle RDA Consulta para la HC indicada y lo persiste como RdaEvento.
     /// Si ya existe un evento con el mismo hash, devuelve el existente (idempotencia).
     /// </summary>
-    Task<RdaBuildResult> ConstruirAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default);
+    /// <param name="envioAutomatico">
+    /// Si es true, el evento generado se marca para envio automatico al IHCE (lo hace
+    /// el worker de reintentos). Se usa cuando la generacion la dispara la aprobacion
+    /// de la revision clinica, no un click manual en la consola.
+    /// </param>
+    Task<RdaBuildResult> ConstruirAsync(Guid historiaClinicaId, Guid actor, bool envioAutomatico = false, CancellationToken ct = default);
 }

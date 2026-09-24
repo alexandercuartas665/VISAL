@@ -1524,7 +1524,7 @@ if (app.Environment.IsDevelopment())
         using var _ = Visal.Application.Common.TenantAmbient.Scope(tenantId, actor, null);
         try
         {
-            var build = await builder.ConstruirAsync(hcId, actor, ct);
+            var build = await builder.ConstruirAsync(hcId, actor, ct: ct);
             var envio = await sender.EnviarRdaAsync(build.RdaEventoId, actor, ct: ct);
             return Results.Json(new
             {

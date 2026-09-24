@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
@@ -19,6 +20,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
     private readonly ITenantContext _tenant;
     private readonly TimeProvider _clock;
     private readonly IAuditWriter? _audit;
+    private readonly IRdaConsultaBuilderService? _rdaBuilder;
 
     public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock)
     {
@@ -37,6 +39,19 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         : this(db, tenant, clock)
     {
         _audit = audit;
+    }
+
+    /// <summary>
+    /// Overload con el builder de RDA Consulta. Cuando esta presente, al APROBAR una
+    /// revision (humano o sistema) se genera automaticamente el RDA de la HC y se marca
+    /// para envio automatico al IHCE (el worker de reintentos hace el envio). Es
+    /// best-effort: un fallo generando el RDA nunca revierte la aprobacion.
+    /// </summary>
+    public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock,
+        IAuditWriter audit, IRdaConsultaBuilderService rdaBuilder)
+        : this(db, tenant, clock, audit)
+    {
+        _rdaBuilder = rdaBuilder;
     }
 
     public async Task<RevisionClinicaDto> SolicitarAsync(SolicitarRevisionCmd cmd, CancellationToken ct = default)
@@ -188,6 +203,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.UltimaAccionEn = now;
 
         await _db.SaveChangesAsync(ct);
+        await GenerarRdaConsultaBestEffortAsync(revision.HistoriaClinicaId, cmd.RevisorUsuarioId, ct);
         return ToDto(revision);
     }
 
@@ -239,7 +255,29 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             actorType: AuditActorType.System);
 
         await _db.SaveChangesAsync(ct);
+        await GenerarRdaConsultaBestEffortAsync(revision.HistoriaClinicaId, Guid.Empty, ct);
         return ToDto(revision);
+    }
+
+    /// <summary>
+    /// Genera el RDA Consulta de la HC recien aprobada y lo marca para envio automatico
+    /// al IHCE. Best-effort: cualquier fallo (sin builder inyectado, HC sin datos,
+    /// credenciales faltantes) se traga para no afectar la aprobacion, que ya persistio.
+    /// La generacion es idempotente por hash, asi que reaprobar no duplica.
+    /// </summary>
+    private async Task GenerarRdaConsultaBestEffortAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct)
+    {
+        if (_rdaBuilder is null) { return; }
+        try
+        {
+            await _rdaBuilder.ConstruirAsync(historiaClinicaId, actor, envioAutomatico: true, ct);
+        }
+        catch
+        {
+            // Best-effort: la aprobacion no depende de que el RDA se genere. Si falla
+            // (HC incompleta, sede sin credencial, etc.) el operador puede generarlo a
+            // mano desde la Consola RDA.
+        }
     }
 
     public async Task<RevisionClinicaDto> RechazarAsync(RechazarCmd cmd, CancellationToken ct = default)

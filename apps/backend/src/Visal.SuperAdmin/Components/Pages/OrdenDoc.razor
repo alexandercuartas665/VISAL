@@ -18,6 +18,7 @@
 @inject ISuministroMedicamentoService SumMedSvc
 @inject IOrdenMedicamentoPublicaService PubSvc
 @inject IFirmaResolverService FirmaResolverSvc
+@inject Microsoft.Extensions.Logging.ILogger<OrdenDoc> Log
 @inject IJSRuntime JS
 
 @*
@@ -674,13 +675,38 @@ else
                 || actual.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
                 || actual.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
         if (yaTieneImagen) { return; }
-        if (_hc?.ProfesionalId is not Guid pid || pid == Guid.Empty) { return; }
+
+        // Resolver el profesional firmante: primero el tratante de la HC; si no hay
+        // (o no cargo _hc), el profesional del usuario que imprime. Mismo criterio
+        // que ConstruirBagOrdenAsync.
+        Guid? profId = (_hc?.ProfesionalId is Guid hp && hp != Guid.Empty) ? hp : null;
+        Guid? platformUid = null, tenantId = null;
+        if (profId is null && AuthState is not null)
+        {
+            var st = await AuthState;
+            if (Guid.TryParse(st.User.FindFirst("profesional_id")?.Value, out var p) && p != Guid.Empty) { profId = p; }
+            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var pu)) { platformUid = pu; }
+            if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var t)) { tenantId = t; }
+        }
+
+        string? firma = null;
         try
         {
-            var firma = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
-            if (!string.IsNullOrWhiteSpace(firma)) { _emisionBag["firma_profesional"] = firma; }
+            if (profId is Guid pid && pid != Guid.Empty)
+            {
+                firma = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+            }
+            else if (platformUid is Guid puid && tenantId is Guid tid)
+            {
+                firma = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(puid, tid);
+            }
         }
-        catch { }
+        catch (Exception ex) { Log.LogWarning(ex, "FIRMA-EMISION: fallo resolviendo firma"); }
+
+        Log.LogWarning("FIRMA-EMISION dbg: hcNull={HcNull} profId={ProfId} platformUid={Puid} firmaResuelta={Firma} bagCount={Count}",
+            _hc is null, profId, platformUid, string.IsNullOrWhiteSpace(firma) ? "(vacia)" : firma, _emisionBag.Count);
+
+        if (!string.IsNullOrWhiteSpace(firma)) { _emisionBag["firma_profesional"] = firma; }
     }
 
     private async Task<(Dictionary<string, string?> Bag, string? ProfNombre, string? ProfRegistro)> ConstruirBagOrdenAsync()

@@ -475,6 +475,13 @@ else
                 // QR por orden: la emision activa se busca para (HC, MED, numero de orden).
                 _emision = await PubSvc.ObtenerEmisionActivaAsync(HcId, "MED", NumeroOrden ?? 1);
                 _emisionBag = _emision is null ? new() : DeserializarBag(_emision.BagJson);
+                // Fallback de firma: si el snapshot emitido congelo el pie SIN firma
+                // (p.ej. se emitio antes de que el profesional registrara su firma),
+                // resolvemos en vivo la firma actual del profesional tratante y la
+                // inyectamos SOLO para la imagen del pie. Los medicamentos y el QR
+                // siguen congelados/inmutables; solo se completa la rubrica del
+                // firmante, que es estable. Best-effort, no toca la BD.
+                await CompletarFirmaEmisionSiFaltaAsync();
                 // Auto-regenerar si el snapshot emitido quedo desactualizado respecto
                 // a los datos actuales de la orden (p.ej. una correccion de cantidad
                 // hecha despues de haber llegado a la vista de impresion, que emite el
@@ -647,6 +654,33 @@ else
     {
         var f = _emision?.EmitidoAt ?? DateTimeOffset.Now;
         return "Fecha: " + f.LocalDateTime.ToString("dd/MM/yyyy");
+    }
+
+    /// <summary>
+    /// Si el snapshot emitido de la formula NO trae una firma-imagen valida en
+    /// <c>firma_profesional</c> (porque se emitio antes de que el profesional
+    /// registrara su firma), resuelve en vivo la firma actual del profesional
+    /// tratante de la HC y la inyecta en el bag de impresion. Solo afecta la
+    /// imagen del pie; el contenido clinico y el QR del snapshot no se tocan.
+    /// Best-effort: cualquier fallo se ignora y el pie simplemente sale sin firma.
+    /// </summary>
+    private async Task CompletarFirmaEmisionSiFaltaAsync()
+    {
+        if (_emision is null || _emisionBag.Count == 0) { return; }
+        var actual = _emisionBag.TryGetValue("firma_profesional", out var f) ? f : null;
+        var yaTieneImagen = !string.IsNullOrWhiteSpace(actual)
+            && (actual!.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        if (yaTieneImagen) { return; }
+        if (_hc?.ProfesionalId is not Guid pid || pid == Guid.Empty) { return; }
+        try
+        {
+            var firma = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(pid);
+            if (!string.IsNullOrWhiteSpace(firma)) { _emisionBag["firma_profesional"] = firma; }
+        }
+        catch { }
     }
 
     private async Task<(Dictionary<string, string?> Bag, string? ProfNombre, string? ProfRegistro)> ConstruirBagOrdenAsync()

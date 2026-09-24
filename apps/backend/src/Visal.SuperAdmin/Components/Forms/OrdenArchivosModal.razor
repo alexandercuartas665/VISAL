@@ -1,0 +1,458 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject INotaMedicaService NotaSvc
+@inject ITipologiaArchivoService TipSvc
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+
+@*
+   Modal de archivos del paciente lanzado desde el menu de acciones de /ordenes.
+   - Sube archivos por DRAG & DROP (o click) y los tipifica con el catalogo
+     Tipologia Archivos. Cada archivo queda ligado a la HC actual + al paciente
+     (via NotaSvc.AdjuntarDocumentoHcAsync), asi tambien se ven en Admision.
+   - Vista GALERIA o TABLA de "Archivos de esta HC" y "Documentos del paciente".
+   - Visor embebido de imagenes (<img>) y PDF (<iframe>) sin salir del sistema.
+   Editar tipologia / eliminar solo con HC Abierta (el backend lo protege igual).
+*@
+
+<div class="oa-back" @onclick="Cerrar"></div>
+<div class="oa-modal" @onclick:stopPropagation="true">
+    <div class="oa-head">
+        <div class="oa-head-t">
+            <div class="oa-eyebrow">Archivos del paciente</div>
+            <h3 class="oa-title">@PacienteNombre</h3>
+            <div class="oa-sub">Se adjuntan a esta historia clinica y se ven tambien en Admision.</div>
+        </div>
+        <button type="button" class="oa-close" @onclick="Cerrar" title="Cerrar">&times;</button>
+    </div>
+
+    <div class="oa-body">
+        <div class="oa-uprow">
+            <div class="oa-drop @(_dragOver ? "over" : "") @(_subiendo ? "busy" : "")"
+                 @ondragenter="() => _dragOver = true"
+                 @ondragleave="() => _dragOver = false"
+                 @ondragover:preventDefault="true"
+                 @ondrop:preventDefault="true"
+                 @ondrop="() => _dragOver = false">
+                <InputFile OnChange="OnFilesSelected" multiple class="oa-drop-input"
+                           accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.docx,.xlsx,.pptx" />
+                <div class="oa-drop-inner">
+                    <span class="oa-drop-ic">&#128228;</span>
+                    <div class="oa-drop-txt"><b>Arrastra archivos aqui</b> o haz click para elegir</div>
+                    <small class="oa-drop-hint">Imagenes, PDF y Office &middot; hasta 20 MB c/u &middot; varios a la vez</small>
+                    @if (_subiendo) { <div class="oa-drop-busy">Subiendo @(_subiendoN)&hellip;</div> }
+                </div>
+            </div>
+            <div class="oa-upmeta">
+                <label class="oa-lbl">Tipologia</label>
+                <select class="form-select form-select-sm" @bind="_categoria" title="Se aplica a los archivos que subas ahora">
+                    <option value="">&mdash; Sin tipologia &mdash;</option>
+                    @foreach (var t in _tipologias) { <option value="@t.Nombre">@t.Nombre</option> }
+                </select>
+                @if (_tipologias.Count == 0)
+                {
+                    <small class="text-muted">Configura tipologias en <em>Tipologia Archivos</em>.</small>
+                }
+                <label class="oa-lbl">Anotaciones</label>
+                <input type="text" class="form-control form-control-sm" placeholder="opcional"
+                       @bind="_anotaciones" @bind:event="oninput" />
+                <small class="text-muted">Aplican a los archivos que sueltes ahora.</small>
+            </div>
+        </div>
+
+        @if (_msg is not null) { <div class="oa-msg">@_msg</div> }
+        @if (_error is not null) { <div class="oa-err">@_error</div> }
+
+        <div class="oa-toolbar">
+            <div class="oa-tabs">
+                <button type="button" class="oa-tab @(_grupo == "hc" ? "sel" : "")" @onclick='() => _grupo = "hc"'>
+                    Archivos de esta HC <span class="oa-badge">@_docsHc.Count</span>
+                </button>
+                <button type="button" class="oa-tab @(_grupo == "pac" ? "sel" : "")" @onclick='() => _grupo = "pac"'>
+                    Documentos del paciente <span class="oa-badge">@_docsPaciente.Count</span>
+                </button>
+            </div>
+            <div class="oa-vtoggle">
+                <button type="button" class="oa-vbtn @(_vista == "galeria" ? "sel" : "")" title="Galeria" @onclick='() => _vista = "galeria"'>&#9638;</button>
+                <button type="button" class="oa-vbtn @(_vista == "tabla" ? "sel" : "")" title="Tabla" @onclick='() => _vista = "tabla"'>&#8803;</button>
+            </div>
+        </div>
+
+        @{
+            var esHcGrupo = _grupo == "hc";
+            var lista = esHcGrupo ? _docsHc : _docsPaciente.Select(Proxy).ToList();
+        }
+        @if (lista.Count == 0)
+        {
+            <div class="oa-empty">
+                @(esHcGrupo ? "Aun no hay archivos en esta HC. Arrastra el primero en la zona de arriba." : "El paciente no tiene documentos previos.")
+            </div>
+        }
+        else if (_vista == "galeria")
+        {
+            <div class="oa-grid">
+                @foreach (var d in lista) { @RenderCard(d, esHcGrupo) }
+            </div>
+        }
+        else
+        {
+            <div class="oa-tblwrap">
+                <table class="oa-table">
+                    <thead>
+                        <tr><th></th><th>Nombre</th><th>Tipologia</th><th>Tamano</th><th>Fecha</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in lista)
+                        {
+                            <tr>
+                                <td class="oa-tcell-ic">
+                                    @if (EsImagen(d.TipoMime, d.NombreOriginal))
+                                    {
+                                        <img class="oa-tthumb" src="@d.RutaArchivo" alt="@d.NombreOriginal" @onclick="() => AbrirVisor(d)" />
+                                    }
+                                    else
+                                    {
+                                        <span class="oa-ticon" @onclick="() => AbrirVisor(d)">@IconoPara(d.NombreOriginal)</span>
+                                    }
+                                </td>
+                                <td><span class="oa-tname" title="@d.NombreOriginal" @onclick="() => AbrirVisor(d)">@d.NombreOriginal</span></td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="oa-cat">@d.Categoria</span> }
+                                    else { <span class="oa-cat oa-cat-empty">(sin tipologia)</span> }
+                                </td>
+                                <td class="oa-tmono">@FormatoTamano(d.Tamano)</td>
+                                <td class="oa-tmono">@d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                <td class="oa-tacts">
+                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisor(d)">Ver</button>
+                                    @if (esHcGrupo && HcAbierta)
+                                    {
+                                        <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)">&#128465;</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@* ===== Visor embebido de imagen / PDF ===== *@
+@if (_visorDoc is NotaDocumentoDto vd)
+{
+    <div class="oa-vis-back" @onclick="CerrarVisor"></div>
+    <div class="oa-vis" @onclick:stopPropagation="true">
+        <div class="oa-vis-head">
+            <span class="oa-vis-name" title="@vd.NombreOriginal">@vd.NombreOriginal</span>
+            <div class="oa-vis-acts">
+                <a class="btn btn-sm btn-outline-secondary" href="@vd.RutaArchivo" target="_blank" rel="noopener">Descargar</a>
+                <button type="button" class="oa-close" @onclick="CerrarVisor" title="Cerrar">&times;</button>
+            </div>
+        </div>
+        <div class="oa-vis-body">
+            @if (EsImagen(vd.TipoMime, vd.NombreOriginal))
+            {
+                <img class="oa-vis-img" src="@vd.RutaArchivo" alt="@vd.NombreOriginal" />
+            }
+            else if (EsPdf(vd.TipoMime, vd.NombreOriginal))
+            {
+                <iframe class="oa-vis-frame" src="@vd.RutaArchivo" title="@vd.NombreOriginal"></iframe>
+            }
+            else
+            {
+                <div class="oa-vis-otro">
+                    <span class="oa-vis-otro-ic">@IconoPara(vd.NombreOriginal)</span>
+                    <div>Este tipo de archivo no se previsualiza en el sistema.</div>
+                    <a class="btn btn-primary btn-sm" href="@vd.RutaArchivo" target="_blank" rel="noopener">Abrir en pestana nueva</a>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .oa-back { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1500; }
+    .oa-modal { position: fixed; top: 4%; left: 50%; transform: translateX(-50%); width: min(1040px, 96vw); max-height: 92vh;
+        background: #fff; border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,.3); z-index: 1501; display: flex; flex-direction: column; overflow: hidden; }
+    .oa-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #e5e7eb; }
+    .oa-eyebrow { color: #64748b; font-size: .74rem; text-transform: uppercase; letter-spacing: .06em; }
+    .oa-title { margin: 2px 0 0; font-size: 1.2rem; color: #0f172a; }
+    .oa-sub { color: #64748b; font-size: .82rem; margin-top: 2px; }
+    .oa-close { background: transparent; border: none; font-size: 1.7rem; line-height: 1; color: #64748b; cursor: pointer; }
+    .oa-close:hover { color: #0f172a; }
+    .oa-body { padding: 16px 20px; overflow: auto; }
+
+    .oa-uprow { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: stretch; }
+    .oa-drop { position: relative; border: 2px dashed #cbd5e1; border-radius: 12px; background: #f8fafc; min-height: 140px;
+        display: flex; align-items: center; justify-content: center; text-align: center; transition: border-color .15s, background .15s; }
+    .oa-drop.over { border-color: #2563eb; background: #eff6ff; }
+    .oa-drop.busy { opacity: .8; }
+    .oa-drop-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .oa-drop-inner { padding: 16px; color: #475569; pointer-events: none; }
+    .oa-drop-ic { font-size: 30px; display: block; margin-bottom: 6px; }
+    .oa-drop-txt { font-size: .92rem; color: #334155; }
+    .oa-drop-hint { color: #94a3b8; }
+    .oa-drop-busy { margin-top: 8px; color: #2563eb; font-weight: 600; font-size: .85rem; }
+    .oa-upmeta { display: flex; flex-direction: column; gap: 4px; }
+    .oa-lbl { font-size: .78rem; font-weight: 600; color: #334155; margin: 4px 0 0; }
+
+    .oa-msg { margin-top: 12px; padding: 8px 12px; background: #ecfdf5; color: #047857; border-radius: 8px; font-size: .85rem; }
+    .oa-err { margin-top: 12px; padding: 8px 12px; background: #fef2f2; color: #b91c1c; border-radius: 8px; font-size: .85rem; }
+
+    .oa-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 18px 0 12px; flex-wrap: wrap; }
+    .oa-tabs { display: flex; gap: 4px; }
+    .oa-tab { background: transparent; border: none; border-bottom: 2px solid transparent; padding: 6px 10px; font-size: .88rem; color: #64748b; cursor: pointer; }
+    .oa-tab:hover { color: #0f172a; }
+    .oa-tab.sel { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+    .oa-badge { background: #e2e8f0; color: #475569; border-radius: 999px; padding: 1px 8px; font-size: .72rem; font-weight: 700; margin-left: 4px; }
+    .oa-vtoggle { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
+    .oa-vbtn { background: #fff; border: none; padding: 5px 12px; font-size: 1rem; color: #64748b; cursor: pointer; }
+    .oa-vbtn.sel { background: #2563eb; color: #fff; }
+
+    .oa-empty { padding: 26px; text-align: center; color: #64748b; font-style: italic; background: #f8fafc; border-radius: 10px; }
+    .oa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .oa-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .oa-card:hover { box-shadow: 0 4px 14px rgba(15,23,42,.08); }
+    .oa-thumb { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; cursor: pointer; background: #f8fafc; }
+    .oa-thumb-icon { width: 100%; height: 120px; display: flex; align-items: center; justify-content: center; font-size: 44px; border-radius: 8px; border: 1px solid #e2e8f0; background: #f8fafc; cursor: pointer; }
+    .oa-nombre { font-weight: 700; color: #0f172a; font-size: .82rem; word-break: break-word; }
+    .oa-meta { font-size: .72rem; color: #64748b; }
+    .oa-cat { font-size: .64rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #eef2ff; color: #4338ca; text-transform: uppercase; letter-spacing: .03em; }
+    .oa-cat-empty { background: #f1f5f9; color: #94a3b8; font-style: italic; text-transform: none; }
+    .oa-tip-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .oa-tip-edit { display: flex; gap: 4px; align-items: center; }
+    .oa-tip-edit select { flex: 1 1 auto; min-width: 0; }
+    .oa-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
+
+    .oa-tblwrap { border: 1px solid #e5e7eb; border-radius: 10px; overflow: auto; }
+    .oa-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    .oa-table thead th { position: sticky; top: 0; background: #f8fafc; padding: 8px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; color: #475569; font-size: .74rem; text-transform: uppercase; letter-spacing: .03em; }
+    .oa-table tbody td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .oa-table tbody tr:hover { background: #f8fbff; }
+    .oa-tcell-ic { width: 54px; }
+    .oa-tthumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0; cursor: pointer; }
+    .oa-ticon { font-size: 26px; cursor: pointer; }
+    .oa-tname { color: #0f172a; cursor: pointer; text-decoration: underline dotted; }
+    .oa-tmono { font-variant-numeric: tabular-nums; color: #475569; white-space: nowrap; }
+    .oa-tacts { text-align: right; white-space: nowrap; }
+
+    .oa-vis-back { position: fixed; inset: 0; background: rgba(15,23,42,.72); z-index: 1600; }
+    .oa-vis { position: fixed; top: 3%; left: 50%; transform: translateX(-50%); width: min(1100px, 96vw); height: 92vh;
+        background: #fff; border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.4); z-index: 1601; display: flex; flex-direction: column; overflow: hidden; }
+    .oa-vis-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #e5e7eb; }
+    .oa-vis-name { font-weight: 600; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .oa-vis-acts { display: flex; align-items: center; gap: 8px; }
+    .oa-vis-body { flex: 1; overflow: auto; background: #0f172a; display: flex; align-items: center; justify-content: center; }
+    .oa-vis-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .oa-vis-frame { width: 100%; height: 100%; border: none; background: #fff; }
+    .oa-vis-otro { color: #e2e8f0; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+    .oa-vis-otro-ic { font-size: 60px; }
+
+    @@media (max-width: 720px) {
+        .oa-uprow { grid-template-columns: 1fr; }
+    }
+</style>
+
+@code {
+    [Parameter] public Guid HistoriaClinicaId { get; set; }
+    [Parameter] public Guid PacienteId { get; set; }
+    [Parameter] public string PacienteNombre { get; set; } = "";
+    /// <summary>HC Abierta: habilita editar tipologia / eliminar de los archivos de
+    /// la HC. Con HC cerrada el backend igual protege esas mutaciones; subir SI se
+    /// permite siempre.</summary>
+    [Parameter] public bool HcAbierta { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<NotaDocumentoDto> _docsHc = new();
+    private List<DocumentoPacienteDto> _docsPaciente = new();
+    private List<TipologiaArchivoDto> _tipologias = new();
+
+    private bool _subiendo;
+    private string? _subiendoN;
+    private bool _dragOver;
+    private string? _msg;
+    private string? _error;
+    private string? _categoria;
+    private string? _anotaciones;
+
+    private string _grupo = "hc";       // hc | pac
+    private string _vista = "galeria";  // galeria | tabla
+
+    private Guid? _editDocId;
+    private string? _editTip;
+    private NotaDocumentoDto? _visorDoc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList(); }
+        catch { _tipologias = new(); }
+        await RecargarAsync();
+    }
+
+    private async Task RecargarAsync()
+    {
+        try
+        {
+            _docsHc = (await NotaSvc.ListarDocumentosPorHistoriaAsync(HistoriaClinicaId)).ToList();
+            _docsPaciente = (await NotaSvc.ListarDocumentosPorPacienteAsync(PacienteId)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        _dragOver = false;
+        _subiendo = true; _msg = _error = null;
+        int ok = 0;
+        try
+        {
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "notas");
+            Directory.CreateDirectory(dir);
+            foreach (var f in e.GetMultipleFiles(50))
+            {
+                _subiendoN = f.Name; StateHasChanged();
+                try
+                {
+                    var ext = Path.GetExtension(f.Name);
+                    var nombreEnDisco = $"{Guid.NewGuid()}{ext}";
+                    var rutaDisco = Path.Combine(dir, nombreEnDisco);
+                    await using (var fs = File.Create(rutaDisco))
+                    await using (var rs = f.OpenReadStream(20L * 1024 * 1024))
+                    {
+                        await rs.CopyToAsync(fs);
+                    }
+                    await NotaSvc.AdjuntarDocumentoHcAsync(new AdjuntarDocumentoHcRequest(
+                        HistoriaClinicaId, PacienteId, f.Name, $"/uploads/notas/{nombreEnDisco}",
+                        f.ContentType, f.Size,
+                        string.IsNullOrWhiteSpace(_categoria) ? null : _categoria,
+                        string.IsNullOrWhiteSpace(_anotaciones) ? null : _anotaciones), Guid.Empty);
+                    ok++;
+                }
+                catch (Exception exf) { _error = $"'{f.Name}': {exf.Message}"; }
+            }
+            if (ok > 0) { _msg = $"{ok} archivo(s) subido(s)."; _anotaciones = ""; }
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = "No se pudo subir: " + ex.Message; }
+        finally { _subiendo = false; _subiendoN = null; }
+    }
+
+    private void AbrirVisor(NotaDocumentoDto d) => _visorDoc = d;
+    private void CerrarVisor() => _visorDoc = null;
+
+    private void AbrirEditTipInline(Guid docId, string? actual) { _editDocId = docId; _editTip = actual ?? ""; }
+    private void CancelarEditTipInline() { _editDocId = null; _editTip = null; }
+
+    private async Task GuardarTipInlineAsync(Guid docId)
+    {
+        try
+        {
+            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _editTip, Guid.Empty);
+            _msg = "Tipologia actualizada."; _editDocId = null; _editTip = null;
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task EliminarAsync(Guid docId, string nombre)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar '{nombre}'? No se puede deshacer.");
+        if (!ok) { return; }
+        try
+        {
+            await NotaSvc.EliminarDocumentoAsync(docId, Guid.Empty);
+            _msg = "Archivo eliminado.";
+            if (_visorDoc?.Id == docId) { _visorDoc = null; }
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task Cerrar()
+    {
+        if (OnClose.HasDelegate) { await OnClose.InvokeAsync(); }
+    }
+
+    private static NotaDocumentoDto Proxy(DocumentoPacienteDto d) => new(
+        d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo, d.TipoMime, d.Tamano,
+        d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt);
+
+    private RenderFragment RenderCard(NotaDocumentoDto d, bool esHc) => __builder =>
+    {
+        <div class="oa-card">
+            @if (EsImagen(d.TipoMime, d.NombreOriginal))
+            {
+                <img class="oa-thumb" src="@d.RutaArchivo" alt="@d.NombreOriginal" @onclick="() => AbrirVisor(d)" />
+            }
+            else
+            {
+                <div class="oa-thumb-icon" @onclick="() => AbrirVisor(d)">@IconoPara(d.NombreOriginal)</div>
+            }
+            <div class="oa-nombre" title="@d.NombreOriginal">@d.NombreOriginal</div>
+            <div class="oa-meta">@FormatoTamano(d.Tamano) &middot; @d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+            @if (_editDocId == d.Id)
+            {
+                <div class="oa-tip-edit">
+                    <select class="form-select form-select-sm" @bind="_editTip">
+                        <option value="">(sin tipologia)</option>
+                        @foreach (var t in _tipologias) { <option value="@t.Nombre">@t.Nombre</option> }
+                    </select>
+                    <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => GuardarTipInlineAsync(d.Id)">&#10003;</button>
+                    <button class="btn btn-outline-secondary btn-sm" title="Cancelar" @onclick="CancelarEditTipInline">&#10005;</button>
+                </div>
+            }
+            else
+            {
+                <div class="oa-tip-row">
+                    @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="oa-cat">@d.Categoria</span> }
+                    else { <span class="oa-cat oa-cat-empty">(sin tipologia)</span> }
+                    @if (esHc && HcAbierta)
+                    {
+                        <button class="btn btn-link btn-sm p-0" title="Editar tipologia" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria)">&#9998;</button>
+                    }
+                </div>
+            }
+            <div class="oa-acts">
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisor(d)">Ver</button>
+                @if (esHc && HcAbierta)
+                {
+                    <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)">&#128465;</button>
+                }
+            </div>
+        </div>
+    };
+
+    private static bool EsImagen(string? mime, string nombre)
+    {
+        if (!string.IsNullOrEmpty(mime) && mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) { return true; }
+        var ext = Path.GetExtension(nombre).ToLowerInvariant();
+        return ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp";
+    }
+
+    private static bool EsPdf(string? mime, string nombre)
+    {
+        if (!string.IsNullOrEmpty(mime) && mime.Contains("pdf", StringComparison.OrdinalIgnoreCase)) { return true; }
+        return Path.GetExtension(nombre).ToLowerInvariant() == ".pdf";
+    }
+
+    private static string IconoPara(string nombre) => Path.GetExtension(nombre).ToLowerInvariant() switch
+    {
+        ".pdf" => "\U0001F4D5",
+        ".doc" or ".docx" => "\U0001F4D8",
+        ".xls" or ".xlsx" => "\U0001F4D7",
+        ".ppt" or ".pptx" => "\U0001F4D9",
+        ".zip" or ".rar" => "\U0001F5DC",
+        ".txt" or ".log" => "\U0001F4C4",
+        _ => "\U0001F4CE"
+    };
+
+    private static string FormatoTamano(long bytes)
+    {
+        if (bytes < 1024) { return bytes + " B"; }
+        double kb = bytes / 1024.0;
+        if (kb < 1024) { return kb.ToString("F1") + " KB"; }
+        double mb = kb / 1024.0;
+        return mb.ToString("F1") + " MB";
+    }
+}

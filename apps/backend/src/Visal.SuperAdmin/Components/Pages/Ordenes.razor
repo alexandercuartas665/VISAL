@@ -753,6 +753,11 @@ else
                                     @if (esteAbierto)
                                     {
                                         <div class="oc-kebab-menu" @onclick:stopPropagation>
+                                            <button class="oc-kebab-item" @onclick="() => KebabRun(() => AbrirArchivos(r))"
+                                                    title="Cargar y ver archivos del paciente (imagenes, PDF) ligados a esta HC">
+                                                <span class="oc-kebab-ico">&#128206;</span> Archivos
+                                            </button>
+                                            <div class="oc-kebab-sep"></div>
                                             @if (cerrada)
                                             {
                                                 <button class="oc-kebab-item" @onclick="() => KebabRun(() => Consultar(r))">
@@ -927,6 +932,20 @@ else
         </div>
     }
 </div>
+}
+
+@* =========================================================================
+   Modal "Archivos": carga (drag&drop) + tipificacion + galeria/tabla + visor
+   de imagenes/PDF, ligado a la HC y al paciente. Se abre desde el kebab.
+   ========================================================================= *@
+@if (_archivosRow is not null)
+{
+    <Visal.SuperAdmin.Components.Forms.OrdenArchivosModal
+                        HistoriaClinicaId="_archivosRow.HistoriaClinicaId"
+                        PacienteId="_archivosRow.PacienteId"
+                        PacienteNombre="@_archivosRow.PacienteNombre"
+                        HcAbierta="_archivosHcAbierta"
+                        OnClose="() => _archivosRow = null" />
 }
 
 @* =========================================================================
@@ -1589,6 +1608,17 @@ else
     // Kebab de acciones en cada fila: guarda el id de la HC cuyo menu esta abierto
     // (o null si ninguno). Solo un menu abierto a la vez para simplificar.
     private Guid? _kebabRowId;
+
+    // Modal de archivos del paciente (carga + galeria/tabla + visor). _archivosRow
+    // != null significa modal abierto para esa HC. _archivosHcAbierta habilita
+    // editar tipologia / eliminar (solo con HC Abierta).
+    private OrdenClinicaItemDto? _archivosRow;
+    private bool _archivosHcAbierta;
+    private void AbrirArchivos(OrdenClinicaItemDto r)
+    {
+        _archivosRow = r;
+        _archivosHcAbierta = string.Equals(r.Estado, "Abierta", StringComparison.OrdinalIgnoreCase);
+    }
 
     // Modal grande "Ver revision": iframe con la impresion de la HC a la izquierda
     // y HcRevisionPanel a la derecha (bitacora + aprobar/rechazar).

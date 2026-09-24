@@ -508,7 +508,7 @@
                         {
                             @* Configuracion aplicable: los archivos que se generaran por paciente. *@
                             <div class="sn-tip-section-t">Archivos configurados (se generan por paciente)</div>
-                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Click en un archivo para ver su contenido. Descarga el ZIP (un PDF por paciente).</div>
+                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Click en un archivo para ver su contenido y el detalle por paciente. El numero indica cuantos registros (pacientes) reciben ese archivo.</div>
                             <div class="sn-tip-archivos">
                                 @foreach (var a in _tipArchivos)
                                 {
@@ -517,7 +517,7 @@
                                             <span class="sn-tip-arch-name">@(string.IsNullOrWhiteSpace(a.Descripcion) ? a.Alias : a.Descripcion)</span>
                                             <span class="sn-tip-arch-code mono">@a.Alias</span>
                                             @if (a.Obligatorio) { <span class="sn-tip-badge">OBL</span> }
-                                            <span class="sn-tip-arch-count" title="Contenidos">@a.Contenidos.Count</span>
+                                            <span class="sn-tip-arch-count" title="Pacientes/registros que reciben este archivo en el snapshot">@_tipPacientes.Count reg.</span>
                                         </button>
                                         <div class="sn-tip-arch-foot">
                                             <a class="btn btn-outline-success btn-sm sn-tip-dl"
@@ -531,55 +531,11 @@
                                 }
                             </div>
 
-                            @* Resumen por paciente: nombres de archivo que se generarian. *@
-                            <div class="sn-tip-section-t">Resumen por paciente (@_tipPacientes.Count)</div>
                             <div class="sn-tip-scope">
-                                &#9432; Solo los <b>@_tipPacientes.Count paciente(s)</b> contenidos en este snapshot
-                                (<b>@_verDetalle.Metadata.Nombre</b>, @_verDetalle.Metadata.TotalFilas filas).
+                                &#9432; Cada archivo se genera para los <b>@_tipPacientes.Count paciente(s)</b> contenidos en
+                                este snapshot (<b>@_verDetalle.Metadata.Nombre</b>, @_verDetalle.Metadata.TotalFilas filas).
+                                Click en un archivo para ver el detalle por paciente.
                             </div>
-                            @if (_tipPacientes.Count == 0)
-                            {
-                                <div class="sn-empty">El snapshot no tiene filas para resumir.</div>
-                            }
-                            else
-                            {
-                                <div class="sn-tip-pacwrap">
-                                    <table class="sn-tip-pactbl">
-                                        <thead>
-                                            <tr>
-                                                <th>Paciente</th>
-                                                <th>Documento</th>
-                                                <th class="text-end">Servicios</th>
-                                                <th>Archivos que se generarian</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach (var p in _tipPacientes)
-                                            {
-                                                <tr>
-                                                    <td>@(string.IsNullOrWhiteSpace(p.Nombre) ? "-" : p.Nombre)</td>
-                                                    <td class="mono">@p.TipoDocumento @p.Documento</td>
-                                                    <td class="text-end">@p.Servicios</td>
-                                                    <td>
-                                                        <div class="sn-tip-files">
-                                                            @foreach (var a in _tipArchivos)
-                                                            {
-                                                                <span class="sn-tip-file mono" title="@a.Alias">@ResolverNombre(a, p)</span>
-                                                            }
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            }
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div class="sn-tip-note">
-                                    Los nombres se arman con el patron de cada archivo y los datos del paciente.
-                                    Descarga el ZIP desde cada archivo para obtener un PDF por paciente. Ola 1: se
-                                    genera el contenido real de autorizaciones y firmas; los formularios de HC
-                                    (evolucion, escala, consentimiento) llegan en una ola posterior.
-                                </div>
-                            }
                         }
                     }
                 </div>
@@ -634,6 +590,51 @@
                                     (ola 2). En el ZIP esos pacientes reciben una pagina-nota para esos origenes.
                                 </div>
                             }
+
+                            @* Detalle por paciente: un registro por paciente del snapshot, con el
+                               nombre de archivo que se generara para ESTE archivo. Vive dentro del
+                               modal (antes se derramaba en la pestana). *@
+                            <div class="sn-arch-field">
+                                <div class="sn-arch-label">Registros por paciente (@_tipPacientes.Count)</div>
+                                @if (_tipPacientes.Count == 0)
+                                {
+                                    <div class="text-muted small">El snapshot no tiene filas para resumir.</div>
+                                }
+                                else
+                                {
+                                    <div class="sn-tip-pacwrap sn-arch-pacwrap">
+                                        <table class="sn-tip-pactbl">
+                                            <thead>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Paciente</th>
+                                                    <th>Documento</th>
+                                                    <th class="text-end">Servicios</th>
+                                                    <th>Archivo que se generara</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @{ var _n = 0; }
+                                                @foreach (var p in _tipPacientes)
+                                                {
+                                                    _n++;
+                                                    <tr>
+                                                        <td class="mono">@_n</td>
+                                                        <td>@(string.IsNullOrWhiteSpace(p.Nombre) ? "-" : p.Nombre)</td>
+                                                        <td class="mono">@p.TipoDocumento @p.Documento</td>
+                                                        <td class="text-end">@p.Servicios</td>
+                                                        <td><span class="sn-tip-file mono" title="@_archModal.Alias">@ResolverNombre(_archModal, p)</span></td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="sn-tip-note">
+                                        Los nombres se arman con el patron del archivo y los datos de cada paciente.
+                                        El ZIP entrega un PDF por paciente con ese nombre.
+                                    </div>
+                                }
+                            </div>
                         </div>
                         <div class="sn-arch-modal-f">
                             <a class="btn btn-success btn-sm"
@@ -978,7 +979,8 @@
     .sn-tip-dl { width:100%; }
     /* Modal de contenido del archivo (por encima del modal Ver) */
     .sn-arch-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1200; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .sn-arch-modal { background:#fff; border-radius:10px; max-width:560px; width:100%; box-shadow:0 24px 64px rgba(0,0,0,.35); display:flex; flex-direction:column; max-height:88vh; overflow:hidden; }
+    .sn-arch-modal { background:#fff; border-radius:10px; max-width:780px; width:100%; box-shadow:0 24px 64px rgba(0,0,0,.35); display:flex; flex-direction:column; max-height:88vh; overflow:hidden; }
+    .sn-arch-pacwrap { max-height:42vh; }
     .sn-arch-modal-h { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:14px 18px; border-bottom:1px solid var(--border); }
     .sn-arch-modal-h h3 { font-size:16px; }
     .sn-arch-modal-b { padding:16px 18px; overflow:auto; display:flex; flex-direction:column; gap:14px; }

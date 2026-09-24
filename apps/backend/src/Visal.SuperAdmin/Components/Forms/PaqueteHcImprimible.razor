@@ -55,7 +55,7 @@ else
                        modo agrupado (EVO N° propio, HC N° = base, subtitulo, fecha de
                        apertura de la evolucion). *@
                     @RenderHeader(HdrHc, _hc.FormatoNombre, "EVO", ConsecutivoPropio(),
-                        $"Fecha: {_hc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}",
+                        FechaAtencionLinea(_hcSchema, _valores, _hc.FechaApertura),
                         $"Evolucion - Sesion {_evolucionInfo.SesionNumero}")
                 }
                 else
@@ -90,7 +90,7 @@ else
                 <div class="pack-doc">
                     @RenderHeader(hdrEvo, evo.FormatoNombre, "EVO",
                         evo.Id.ToString().Substring(0, 8).ToUpperInvariant(),
-                        $"Fecha: {evo.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}",
+                        FechaAtencionLinea(schEvo, valEvo, evo.FechaApertura),
                         $"Evolucion - Sesion {_evoN}")
                     @if (schEvo is not null)
                     {
@@ -1330,7 +1330,29 @@ else
         return _hc is null ? "" : _hc.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
     }
 
-    private string FechaLineaHc() => "Fecha: " + FechaCanonicaHc();
+    // Fecha impresa del documento principal (HC/evolucion) y sus ordenes: se PREFIERE
+    // la "fecha de atencion" (campos marcados IsFechaAtencion en el schema), que es la
+    // fecha clinica real; si el formato no la tiene, cae al campo "Fecha" del encabezado
+    // (FechaCanonicaHc). Antes imprimia solo el campo del encabezado / la apertura.
+    private string FechaLineaHc()
+    {
+        var fa = FechaAtencionHelper.Calcular(_hcSchema, _valores);
+        if (fa is DateTimeOffset f) { return "Fecha: " + FmtFecha(f); }
+        return "Fecha: " + FechaCanonicaHc();
+    }
+
+    /// <summary>Linea de fecha para un documento (schema+valores): fecha de atencion
+    /// (IsFechaAtencion) si existe, si no la apertura dada. Usada por las evoluciones.</summary>
+    private static string FechaAtencionLinea(FormSchema? schema, IReadOnlyDictionary<string, string?> valores, DateTimeOffset apertura)
+        => "Fecha: " + FmtFecha(FechaAtencionHelper.Calcular(schema, valores) ?? apertura);
+
+    /// <summary>Formatea a hora local; omite la hora cuando es medianoche (campos de
+    /// fecha sin hora), para no imprimir "00:00".</summary>
+    private static string FmtFecha(DateTimeOffset dt)
+    {
+        var l = dt.ToLocalTime();
+        return l.TimeOfDay == TimeSpan.Zero ? l.ToString("dd/MM/yyyy") : l.ToString("dd/MM/yyyy HH:mm");
+    }
 
     private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea, string? subtitulo = null) => __builder =>
     {

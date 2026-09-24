@@ -42,8 +42,12 @@ public static class FechaAtencionHelper
                 if (!n.IsFechaAtencion) { continue; }
                 if (string.IsNullOrWhiteSpace(n.Name)) { continue; }
 
-                var esFechaODateTime = n.FieldType == "date" || n.FieldType == "datetime";
-                if (!esFechaODateTime) { continue; }
+                // Aceptamos date/datetime y tambien text: algunos formatos (p.ej.
+                // PP-FO-85_F) guardan la fecha de atencion en un campo text con un
+                // valor de fecha. Como el campo esta marcado IsFechaAtencion, la
+                // intencion es que sea una fecha; si el valor no parsea, se ignora.
+                var tipoOk = n.FieldType is "date" or "datetime" or "text";
+                if (!tipoOk) { continue; }
 
                 if (!valores.TryGetValue(n.Name, out var raw)) { continue; }
                 if (string.IsNullOrWhiteSpace(raw)) { continue; }

@@ -231,6 +231,49 @@ public sealed class HistoriaClinicaService(
         return result;
     }
 
+    public async Task<EvolucionBaseDto?> GetBaseDeEvolucionAsync(Guid hcId, CancellationToken ct = default)
+    {
+        // 1) Formato de la HC impresa. Si es una evolucion, su Codigo es el
+        //    FormatoEvolucionCodigo que declara el formato completo (1ra sesion).
+        var formatoCod = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == hcId)
+            .Join(db.FormDefinitions.AsNoTracking(),
+                  h => h.FormDefinitionId, f => f.Id, (h, f) => f.Codigo)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(formatoCod)) { return null; }
+
+        // 2) Asignacion de la HC (via pivote sesion -> turno -> asignacion).
+        var asigId = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.HistoriaClinicaId == hcId)
+            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                  p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
+            .Join(db.AsignacionTurnos.AsNoTracking(),
+                  turnoId => turnoId, t => t.Id, (turnoId, t) => t.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        if (asigId == Guid.Empty) { return null; }
+
+        // 3) HC BASE = la de la misma asignacion cuyo formato declara
+        //    FormatoEvolucionCodigo == formatoCod (es la "completa" que apunta a este
+        //    formato de evolucion). Si no existe, la HC no es una evolucion.
+        var baseHcId = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            join f in db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals f.Id
+            where t.AsignacionId == asigId
+                  && f.FormatoEvolucionCodigo == formatoCod
+                  && h.Id != hcId
+            select h.Id).FirstOrDefaultAsync(ct);
+        if (baseHcId == Guid.Empty) { return null; }
+
+        // 4) Numero de sesion: se reusa el mismo criterio/orden que el modo agrupado
+        //    para que coincida exactamente con lo que imprime bajo la base.
+        var evos = await GetEvolucionesLigadasAsync(baseHcId, ct);
+        var sesion = evos.FirstOrDefault(e => e.Historia.Id == hcId)?.SesionNumero ?? 2;
+        return new EvolucionBaseDto(baseHcId, sesion);
+    }
+
     public async Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
         Guid pacienteId, CancellationToken ct = default)
     {

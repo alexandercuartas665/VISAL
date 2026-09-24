@@ -49,8 +49,20 @@ else
         @if (_incluirHc && _hcSchema is not null)
         {
             <div class="pack-doc">
-                @RenderHeader(HdrHc, _hc.FormatoNombre, "HC", ConsecutivoHc(),
-                    FechaLineaHc())
+                @if (_evolucionInfo is not null)
+                {
+                    @* La HC impresa ES una evolucion suelta: mismo encabezado que el
+                       modo agrupado (EVO N° propio, HC N° = base, subtitulo, fecha de
+                       apertura de la evolucion). *@
+                    @RenderHeader(HdrHc, _hc.FormatoNombre, "EVO", ConsecutivoPropio(),
+                        $"Fecha: {_hc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}",
+                        $"Evolucion - Sesion {_evolucionInfo.SesionNumero}")
+                }
+                else
+                {
+                    @RenderHeader(HdrHc, _hc.FormatoNombre, "HC", ConsecutivoHc(),
+                        FechaLineaHc())
+                }
 
                 @foreach (var node in _hcSchema.Children)
                 {
@@ -617,6 +629,12 @@ else
     // Se cargan solo cuando la HC impresa es la primera sesion de una terapia.
     private List<HistoriaEvolucionLigadaDto> _evolucionesTerapia = new();
 
+    // Cuando la HC IMPRESA es en si misma una evolucion (se imprime suelta, sin su
+    // base en el paquete), aqui viene su base + numero de sesion para armar el
+    // encabezado igual que en el modo agrupado (EVO N° propio, HC N° = base,
+    // subtitulo "Evolucion - Sesion N"). Null = HC normal o base.
+    private EvolucionBaseDto? _evolucionInfo;
+
     // Evoluciones UNIFICADAS: mezcla de las evoluciones de terapia ligadas (HC) y
     // los documentos de evolucion (EVOLUCION), ordenadas por fecha y numeradas
     // consecutivamente al renderizar. Evita numeracion/orden inconsistente cuando la
@@ -804,6 +822,11 @@ else
             // vacio en cualquier otro caso (HC normal, no-primera-sesion, sin evos).
             try { _evolucionesTerapia = (await HcSvc.GetEvolucionesLigadasAsync(HcId)).ToList(); }
             catch { _evolucionesTerapia = new(); }
+
+            // Inverso: si la HC impresa ES una evolucion (se imprime suelta), resolver
+            // su base + numero de sesion para el encabezado (EVO N° / HC base / Sesion N).
+            try { _evolucionInfo = await HcSvc.GetBaseDeEvolucionAsync(HcId); }
+            catch { _evolucionInfo = null; }
         }
 
         // Cada orden clasica se ubica en form_definitions por su "Codigo formulario"
@@ -1271,7 +1294,18 @@ else
     // Clinicas, que es el PREFIJO (primeros 8 hex) del GUID. Antes usaba los
     // ULTIMOS 8 ([^8..]) -> imprimia un numero distinto al buscable, y al filtrar
     // por el numero impreso la lista salia vacia.
-    private string ConsecutivoHc() => _hc is null ? "" : _hc.Id.ToString("N")[..8].ToUpperInvariant();
+    // "HC N°" del paquete: normalmente el id de la HC impresa. PERO si la HC impresa
+    // es en si misma una EVOLUCION, el "HC N°" debe ser el de su HC BASE (la primera
+    // sesion), igual que cuando la evolucion se imprime agrupada bajo su base. Asi la
+    // linea "HC:" del encabezado y las ordenes derivadas coinciden con la base.
+    private string ConsecutivoHc() => _evolucionInfo is not null
+        ? _evolucionInfo.BaseHcId.ToString("N")[..8].ToUpperInvariant()
+        : (_hc is null ? "" : _hc.Id.ToString("N")[..8].ToUpperInvariant());
+
+    /// <summary>Consecutivo del PROPIO documento impreso (primeros 8 hex de su id),
+    /// sin redirigir a la base. Se usa como "EVO N°" cuando la HC impresa es una
+    /// evolucion suelta.</summary>
+    private string ConsecutivoPropio() => _hc is null ? "" : _hc.Id.ToString("N")[..8].ToUpperInvariant();
 
     /// <summary>
     /// Fecha/hora canonica de la HC para impresion: la que el medico dejo en el

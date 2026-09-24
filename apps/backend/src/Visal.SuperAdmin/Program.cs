@@ -86,6 +86,7 @@ builder.Services.AddScoped<ITenantContext, CookieUserContext>();
 // Chat en tiempo real (SignalR): reemplaza el broadcaster no-op por el real.
 builder.Services.AddSignalR();
 builder.Services.AddScoped<Visal.Application.Tenancy.IChatBroadcaster, Visal.SuperAdmin.RealTime.SignalRChatBroadcaster>();
+builder.Services.AddScoped<Visal.SuperAdmin.Facturacion.ITipologiaZipService, Visal.SuperAdmin.Facturacion.TipologiaZipService>();
 // Tunel de desarrollo real (cloudflared); reemplaza el no-op de Application.
 builder.Services.AddSingleton<Visal.Application.Tenancy.IDevTunnel, Visal.SuperAdmin.RealTime.CloudflaredTunnel>();
 // Storage de archivos servibles (wwwroot/uploads) para que servicios de Application
@@ -1338,6 +1339,19 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
         "csv"  => await svc.ExportarCsvAsync(id, ct),
         _ => null
     };
+    if (archivo is null) { return Results.NotFound(); }
+    return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
+// Descarga del ZIP de una tipologia/archivo de la cuenta medica para TODOS los
+// pacientes del snapshot (un PDF por paciente, nombrado con el patron configurado).
+app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/zip", async (
+    Guid id,
+    Guid itemId,
+    Visal.SuperAdmin.Facturacion.ITipologiaZipService zipSvc,
+    CancellationToken ct) =>
+{
+    var archivo = await zipSvc.GenerarZipArchivoAsync(id, itemId, ct);
     if (archivo is null) { return Results.NotFound(); }
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();

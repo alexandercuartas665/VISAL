@@ -508,31 +508,25 @@
                         {
                             @* Configuracion aplicable: los archivos que se generaran por paciente. *@
                             <div class="sn-tip-section-t">Archivos configurados (se generan por paciente)</div>
-                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Haz click en un archivo para ver su contenido.</div>
+                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Click en un archivo para ver su contenido. Descarga el ZIP (un PDF por paciente).</div>
                             <div class="sn-tip-archivos">
                                 @foreach (var a in _tipArchivos)
                                 {
-                                    var abierto = _tipArchExpandido.Contains(a.Id);
-                                    <div class="sn-tip-arch @(abierto ? "abierto" : "")">
-                                        <button type="button" class="sn-tip-arch-h" @onclick="() => ToggleArchivo(a.Id)">
-                                            <span class="sn-tip-arch-caret">@(abierto ? "▾" : "▸")</span>
+                                    <div class="sn-tip-arch">
+                                        <button type="button" class="sn-tip-arch-h" @onclick="() => AbrirArchivoModal(a)">
                                             <span class="sn-tip-arch-name">@(string.IsNullOrWhiteSpace(a.Descripcion) ? a.Alias : a.Descripcion)</span>
                                             <span class="sn-tip-arch-code mono">@a.Alias</span>
                                             @if (a.Obligatorio) { <span class="sn-tip-badge">OBL</span> }
-                                            <span class="sn-tip-arch-count">@a.Contenidos.Count</span>
+                                            <span class="sn-tip-arch-count" title="Contenidos">@a.Contenidos.Count</span>
                                         </button>
-                                        @if (abierto)
-                                        {
-                                            <div class="sn-tip-arch-body">
-                                                <div class="sn-tip-arch-cont">
-                                                    @foreach (var c in a.Contenidos)
-                                                    {
-                                                        <span class="sn-tip-chip">@LabelOrigenTip(c.Origen)@(string.IsNullOrEmpty(c.TipologiaNombre) ? "" : $" · {c.TipologiaNombre}")@(c.SoloUltimo ? " (1x)" : "")</span>
-                                                    }
-                                                </div>
-                                                <div class="sn-tip-arch-pat mono">&#128193; @PatronDe(a)</div>
-                                            </div>
-                                        }
+                                        <div class="sn-tip-arch-foot">
+                                            <a class="btn btn-outline-success btn-sm sn-tip-dl"
+                                               href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/tipologia/{a.Id}/zip")"
+                                               target="_blank" rel="noopener"
+                                               title="Descargar ZIP: un PDF por paciente, nombrado con el patron">
+                                                &#11015; Descargar ZIP
+                                            </a>
+                                        </div>
                                     </div>
                                 }
                             </div>
@@ -580,12 +574,76 @@
                                     </table>
                                 </div>
                                 <div class="sn-tip-note">
-                                    Vista previa: los nombres se arman con el patron de cada archivo y los datos del
-                                    paciente. La generacion del ZIP con el contenido real es una fase posterior.
+                                    Los nombres se arman con el patron de cada archivo y los datos del paciente.
+                                    Descarga el ZIP desde cada archivo para obtener un PDF por paciente. Ola 1: se
+                                    genera el contenido real de autorizaciones y firmas; los formularios de HC
+                                    (evolucion, escala, consentimiento) llegan en una ola posterior.
                                 </div>
                             }
                         }
                     }
+                </div>
+            }
+
+            @* ===== Modal de contenido de un archivo (tipologia) ===== *@
+            @if (_archModal is not null)
+            {
+                <div class="sn-arch-modal-back" @onclick="CerrarArchivoModal">
+                    <div class="sn-arch-modal" @onclick:stopPropagation>
+                        <div class="sn-arch-modal-h">
+                            <div>
+                                <div class="sn-modal-eyebrow">Archivo / tipologia</div>
+                                <h3 class="mb-0">
+                                    @(string.IsNullOrWhiteSpace(_archModal.Descripcion) ? _archModal.Alias : _archModal.Descripcion)
+                                    <span class="sn-tip-arch-code mono">@_archModal.Alias</span>
+                                    @if (_archModal.Obligatorio) { <span class="sn-tip-badge">OBL</span> }
+                                </h3>
+                            </div>
+                            <button class="sn-modal-x" @onclick="CerrarArchivoModal">&times;</button>
+                        </div>
+                        <div class="sn-arch-modal-b">
+                            <div class="sn-arch-field">
+                                <div class="sn-arch-label">Contenido (se fusiona en un PDF, en orden)</div>
+                                @if (_archModal.Contenidos.Count == 0)
+                                {
+                                    <div class="text-muted small">Sin contenidos configurados.</div>
+                                }
+                                else
+                                {
+                                    <ol class="sn-arch-cont-list">
+                                        @foreach (var c in _archModal.Contenidos)
+                                        {
+                                            <li>
+                                                @LabelOrigenTip(c.Origen)
+                                                @if (!string.IsNullOrEmpty(c.TipologiaNombre)) { <span class="text-muted">· @c.TipologiaNombre</span> }
+                                                @if (c.SoloUltimo) { <span class="sn-tip-chip">solo el mas reciente</span> }
+                                                @if (!OrigenSoportado(c.Origen)) { <span class="sn-arch-pend">pendiente (ola 2)</span> }
+                                            </li>
+                                        }
+                                    </ol>
+                                }
+                            </div>
+                            <div class="sn-arch-field">
+                                <div class="sn-arch-label">Patron de nombre</div>
+                                <div class="sn-tip-arch-pat mono">&#128193; @PatronDe(_archModal)</div>
+                            </div>
+                            @if (_archModal.Contenidos.Any(c => !OrigenSoportado(c.Origen)))
+                            {
+                                <div class="sn-arch-warn">
+                                    Este archivo incluye contenidos de formularios de HC que aun no se generan
+                                    (ola 2). En el ZIP esos pacientes reciben una pagina-nota para esos origenes.
+                                </div>
+                            }
+                        </div>
+                        <div class="sn-arch-modal-f">
+                            <a class="btn btn-success btn-sm"
+                               href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/tipologia/{_archModal.Id}/zip")"
+                               target="_blank" rel="noopener">
+                                &#11015; Descargar ZIP (@_tipPacientes.Count pacientes)
+                            </a>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivoModal">Cerrar</button>
+                        </div>
+                    </div>
                 </div>
             }
             <div class="sn-modal-f">
@@ -915,7 +973,21 @@
     .sn-tip-file { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:4px; padding:2px 6px; font-size:11px; width:fit-content; }
     .sn-tip-note { font-size:11.5px; color:#64748b; font-style:italic; }
     .sn-tip-scope { font-size:12px; color:#1e3a8a; background:#eff6ff; border-left:3px solid #2563eb; border-radius:4px; padding:6px 10px; margin-top:-2px; }
-    .sn-tip-body .mono, .sn-tip-arch .mono, .sn-tip-file.mono, .sn-tip-arch-code.mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; }
+    .sn-tip-body .mono, .sn-tip-arch .mono, .sn-tip-file.mono, .sn-tip-arch-code.mono, .sn-arch-modal .mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; }
+    .sn-tip-arch-foot { padding:8px 10px; border-top:1px solid #eef2f7; background:#fafcff; }
+    .sn-tip-dl { width:100%; }
+    /* Modal de contenido del archivo (por encima del modal Ver) */
+    .sn-arch-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1200; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .sn-arch-modal { background:#fff; border-radius:10px; max-width:560px; width:100%; box-shadow:0 24px 64px rgba(0,0,0,.35); display:flex; flex-direction:column; max-height:88vh; overflow:hidden; }
+    .sn-arch-modal-h { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:14px 18px; border-bottom:1px solid var(--border); }
+    .sn-arch-modal-h h3 { font-size:16px; }
+    .sn-arch-modal-b { padding:16px 18px; overflow:auto; display:flex; flex-direction:column; gap:14px; }
+    .sn-arch-modal-f { padding:12px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; background:#f8fafc; }
+    .sn-arch-field { display:flex; flex-direction:column; gap:6px; }
+    .sn-arch-label { font-size:12px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.03em; }
+    .sn-arch-cont-list { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:6px; font-size:13px; color:#0f172a; }
+    .sn-arch-pend { margin-left:6px; background:#fef3c7; color:#92400e; border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600; }
+    .sn-arch-warn { font-size:12px; color:#8a6d3b; background:#fff8e1; border:1px solid #f0d47a; border-radius:6px; padding:8px 10px; }
     .sn-modal-f { padding:12px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; align-items:center; gap:8px; }
     .sn-modal-controls { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); background:#f8fafc; flex-wrap:wrap; }
     .sn-modal-controls-l, .sn-modal-controls-r { display:flex; align-items:center; gap:8px; }
@@ -1059,12 +1131,16 @@
     private CuentaMedicaConfigDto? _tipConfig;
     private List<InformeItemDto> _tipArchivos = new();
     private List<PacienteSnapshotDto> _tipPacientes = new();
-    private HashSet<Guid> _tipArchExpandido = new();
+    private InformeItemDto? _archModal;
 
-    private void ToggleArchivo(Guid id)
-    {
-        if (!_tipArchExpandido.Remove(id)) { _tipArchExpandido.Add(id); }
-    }
+    private void AbrirArchivoModal(InformeItemDto a) => _archModal = a;
+    private void CerrarArchivoModal() => _archModal = null;
+
+    // Origenes cuyo contenido real ya genera el ZIP (ola 1). El resto (formularios
+    // de HC) queda pendiente y en el PDF sale una pagina-nota.
+    private static bool OrigenSoportado(OrigenInformeItem o) => o
+        is OrigenInformeItem.AutorizacionAsignacion
+        or OrigenInformeItem.FirmaPaciente;
 
     // Bulk-fill de "Consecutivo Factura" para el lote entero.
     private string _bulkFactura = "";
@@ -1339,7 +1415,7 @@
         _tipCargado = false;
         _tipArchivos = new();
         _tipPacientes = new();
-        _tipArchExpandido = new();
+        _archModal = null;
         _tipConfig = null;
         _showVer = true;
         _verCargando = true;

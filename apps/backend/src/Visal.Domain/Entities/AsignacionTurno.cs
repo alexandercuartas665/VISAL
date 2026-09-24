@@ -43,6 +43,12 @@ public class AsignacionTurno : TenantEntity
     /// para indicar que el paciente puede ser atendido.</summary>
     public DateTimeOffset? LlegoEn { get; set; }
 
+    /// <summary>True cuando la llegada se marco como TARDE (fuera de la hora de la cita).
+    /// Solo aplica cuando <see cref="LlegoEn"/> esta seteado; se limpia al quitar la
+    /// llegada o reprogramar. Permite a Recepcion distinguir llegadas a tiempo de las
+    /// tardias (que suelen implicar mover la cita a otra hora).</summary>
+    public bool LlegadaTarde { get; set; }
+
     /// <summary>Tarifa pactada para este turno. Se pre-llena con la del ServicioContrato
     /// al momento de coordinarlo, pero el coordinador puede ajustarla manualmente
     /// (por descuento, tarifa especial, etc.). Persiste el valor final.</summary>

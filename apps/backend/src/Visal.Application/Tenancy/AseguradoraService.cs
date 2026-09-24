@@ -211,6 +211,23 @@ public sealed class AseguradoraService : IAseguradoraService
         if (codigo.Length == 0) { throw new InvalidOperationException("El codigo del contrato es obligatorio."); }
         if (req.TipoContrato is null) { throw new InvalidOperationException("El tipo de contrato es obligatorio (Subsidiado o Contributivo)."); }
 
+        // Unicidad del codigo de contrato POR TENANT. Dos contratos con el mismo
+        // codigo (aunque sean de aseguradoras distintas) rompen la resolucion por
+        // codigo: la asignacion congela el codigo como texto y el match por string
+        // se vuelve ambiguo (se puede congelar la EPS equivocada). Case-insensitive,
+        // excluyendo el propio contrato al editar. El filtro global ya acota al tenant.
+        var idActual = req.Id ?? Guid.Empty;
+        var codigoUpper = codigo.ToUpperInvariant();
+        var duplicado = await _db.ContratosAseguradora.AsNoTracking()
+            .AnyAsync(c => c.Id != idActual
+                        && c.CodigoContrato != null
+                        && c.CodigoContrato.ToUpper() == codigoUpper, ct);
+        if (duplicado)
+        {
+            throw new InvalidOperationException(
+                $"Ya existe un contrato con el codigo '{codigo}'. El codigo de contrato debe ser unico.");
+        }
+
         ContratoAseguradora entity;
         if (req.Id is Guid id)
         {

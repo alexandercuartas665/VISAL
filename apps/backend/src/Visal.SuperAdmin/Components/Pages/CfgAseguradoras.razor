@@ -144,8 +144,8 @@
                                 @foreach (var c in _contratos)
                                 {
                                     <tr class="@(c.Id == _contratoId ? "sel" : "")">
-                                        <td><input class="form-control form-control-sm mono" @bind="c.CodigoContrato" /></td>
-                                        <td><input class="form-control form-control-sm mono" @bind="c.Cucon" placeholder="CUCON" /></td>
+                                        <td><input class="form-control form-control-sm mono" style="min-width:240px" @bind="c.CodigoContrato" placeholder="Codigo de contrato" /></td>
+                                        <td><input class="form-control form-control-sm mono" style="min-width:120px" @bind="c.Cucon" placeholder="CUCON" /></td>
                                         <td>
                                             <select class="form-select form-select-sm" @bind="c.TipoContratoStr">
                                                 <option value="">(elegir)</option>

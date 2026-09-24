@@ -64,6 +64,15 @@ public sealed record AsignacionHistoriaOpcionDto(Guid AsignacionId, string Etiqu
 /// </summary>
 public sealed record HistoriaEvolucionLigadaDto(int SesionNumero, HistoriaClinicaDetailDto Historia);
 
+/// <summary>
+/// Cuando una HC es en si misma una EVOLUCION (sesion 2..N), identifica su HC BASE
+/// (la de la primera sesion) y su numero de sesion global. Es el inverso de
+/// <see cref="IHistoriaClinicaService.GetEvolucionesLigadasAsync"/> y sirve para
+/// imprimir una evolucion SUELTA con el encabezado correcto (EVO N° propio,
+/// HC N° = base, subtitulo "Evolucion - Sesion N").
+/// </summary>
+public sealed record EvolucionBaseDto(Guid BaseHcId, int SesionNumero);
+
 public sealed record CrearHistoriaRequest(
     Guid PacienteId,
     Guid FormDefinitionId,
@@ -121,6 +130,14 @@ public interface IHistoriaClinicaService
     /// </summary>
     Task<IReadOnlyList<HistoriaEvolucionLigadaDto>> GetEvolucionesLigadasAsync(
         Guid primeraSesionHcId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Inverso de <see cref="GetEvolucionesLigadasAsync"/>: si <paramref name="hcId"/>
+    /// es en si misma una HC de EVOLUCION (su formato es el FormatoEvolucionCodigo de
+    /// la terapia), devuelve su HC BASE (primera sesion) y su numero de sesion global.
+    /// Devuelve null si la HC no es una evolucion (HC normal o la propia base).
+    /// </summary>
+    Task<EvolucionBaseDto?> GetBaseDeEvolucionAsync(Guid hcId, CancellationToken ct = default);
 
     /// <summary>Crea una historia con estado Abierta y los valores iniciales (prefill).</summary>
     Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default);

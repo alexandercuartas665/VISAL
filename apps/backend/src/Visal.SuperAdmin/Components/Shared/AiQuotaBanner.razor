@@ -1,5 +1,9 @@
 @using Visal.Application.Tenancy
-@inject IAiUsageService UsageSvc
+@using Visal.Application.Common
+@using Microsoft.Extensions.DependencyInjection
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IServiceScopeFactory ScopeFactory
+@inject AuthenticationStateProvider AuthProvider
 @inject NavigationManager Nav
 
 @* Ola 8 RC8b - banner global que aparece cuando el cupo mensual de tokens IA
@@ -40,19 +44,31 @@
 
     private bool _cargado;
 
-    // Cargamos DESPUES del primer render (no en OnInitializedAsync) a proposito:
-    // este banner vive en el layout y comparte el DbContext scoped del circuito
-    // con la pagina. Si consultara durante OnInitializedAsync correria en paralelo
-    // con el OnInitializedAsync de la pagina y reventaria el DbContext con
-    // "A second operation was started on this context instance". Al diferir a
-    // OnAfterRender, la pagina ya termino su carga inicial y no hay concurrencia.
+    // Cargamos DESPUES del primer render y, sobre todo, en un SCOPE PROPIO (con su
+    // propio DbContext). Este banner vive en el layout: si consultara sobre el
+    // DbContext scoped del circuito —que comparte con la pagina y demas widgets—
+    // correria en paralelo con la carga de la pagina y reventaria con
+    // "A second operation was started on this context instance". Con scope propio
+    // el banner nunca toca el contexto del circuito. El tenant se propaga por
+    // TenantAmbient (en el circuito interactivo no hay HttpContext, asi que el
+    // CookieUserContext del scope nuevo recae en el ambient). Mismo patron que NavMenu.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || _cargado) { return; }
         _cargado = true;
+
+        // Tenant del usuario autenticado. Operadores de plataforma no tienen tenant
+        // (el cupo IA se factura por tenant) -> no se muestra el banner.
+        if (AuthProvider is null) { return; }
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        if (!Guid.TryParse(authState.User.FindFirst("tenant_id")?.Value, out var tenantId)) { return; }
+
         try
         {
-            _quota = await UsageSvc.GetQuotaAsync();
+            using var scope = ScopeFactory.CreateScope();
+            using var _ = TenantAmbient.Scope(tenantId);
+            var usage = scope.ServiceProvider.GetRequiredService<IAiUsageService>();
+            _quota = await usage.GetQuotaAsync();
         }
         catch
         {

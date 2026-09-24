@@ -112,30 +112,28 @@
                         <div class="rc-hourcell">
                             @foreach (var c in citasH)
                             {
-                                <div class="rc-cita @(c.Llego ? "rc-cita-llego" : "")">
+                                <div class="rc-cita @(c.Llego ? (c.LlegoTarde ? "rc-cita-tarde" : "rc-cita-llego") : "")">
                                     <div class="rc-cita-top">
                                         <span class="rc-cita-hora">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</span>
                                         <strong class="rc-cita-pac">@c.PacienteNombre</strong>
                                         <span class="text-muted rc-cita-doc-inline">@c.PacienteDocumento</span>
-                                        @if (c.Llego) { <span class="badge bg-success">Llego</span> } else { <span class="badge bg-secondary">Programado</span> }
+                                        @if (c.Llego && c.LlegoTarde) { <span class="badge bg-warning text-dark">Llego tarde</span> }
+                                        else if (c.Llego) { <span class="badge bg-success">Llego</span> }
+                                        else { <span class="badge bg-secondary">Programado</span> }
                                     </div>
                                     <div class="rc-cita-sub">@c.DoctorNombre &middot; <span class="text-muted">@c.ServicioNombre</span></div>
                                     <div class="rc-cita-actions">
-                                        @if (_tab == "llegadas")
+                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerContactosAsync(c)" disabled="@_busy" title="Ver telefonos y contactos del paciente">Ver contactos</button>
+                                        @if (c.Llego)
                                         {
-                                            @if (c.Llego)
-                                            {
-                                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false)" disabled="@_busy">Quitar llegada</button>
-                                            }
-                                            else
-                                            {
-                                                <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true)" disabled="@_busy">Marcar llegada</button>
-                                            }
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false, false)" disabled="@_busy">Quitar llegada</button>
                                         }
                                         else
                                         {
-                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
+                                            <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true, false)" disabled="@_busy">A tiempo</button>
+                                            <button class="btn btn-warning btn-sm" @onclick="() => MarcarAsync(c, true, true)" disabled="@_busy">Tarde</button>
                                         }
+                                        <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
                                     </div>
                                 </div>
                             }
@@ -169,31 +167,28 @@
                     <tbody>
                         @foreach (var c in _citas)
                         {
-                            <tr class="@(c.Llego ? "rc-llego" : "")">
+                            <tr class="@(c.Llego ? (c.LlegoTarde ? "rc-tarde" : "rc-llego") : "")">
                                 <td class="mono" style="font-weight:700;">@(c.Hora?.ToString("HH\\:mm") ?? "--:--")</td>
                                 <td><strong>@c.PacienteNombre</strong> <span class="text-muted">@c.PacienteDocumento</span></td>
                                 <td>@c.DoctorNombre</td>
                                 <td class="text-muted">@c.ServicioNombre</td>
                                 <td class="text-center">
-                                    @if (c.Llego) { <span class="badge bg-success">Llego</span> }
+                                    @if (c.Llego && c.LlegoTarde) { <span class="badge bg-warning text-dark">Llego tarde</span> }
+                                    else if (c.Llego) { <span class="badge bg-success">Llego</span> }
                                     else { <span class="badge bg-secondary">Programado</span> }
                                 </td>
                                 <td class="text-end">
-                                    @if (_tab == "llegadas")
+                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerContactosAsync(c)" disabled="@_busy" title="Ver telefonos y contactos del paciente">Contactos</button>
+                                    @if (c.Llego)
                                     {
-                                        @if (c.Llego)
-                                        {
-                                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false)" disabled="@_busy">Quitar llegada</button>
-                                        }
-                                        else
-                                        {
-                                            <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true)" disabled="@_busy">Marcar llegada</button>
-                                        }
+                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => MarcarAsync(c, false, false)" disabled="@_busy">Quitar</button>
                                     }
                                     else
                                     {
-                                        <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
+                                        <button class="btn btn-success btn-sm" @onclick="() => MarcarAsync(c, true, false)" disabled="@_busy">A tiempo</button>
+                                        <button class="btn btn-warning btn-sm" @onclick="() => MarcarAsync(c, true, true)" disabled="@_busy">Tarde</button>
                                     }
+                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirReprogAsync(c)" disabled="@_busy">Reprogramar</button>
                                 </td>
                             </tr>
                         }
@@ -322,6 +317,58 @@
 }
 
 @* ============= MODAL REPROGRAMAR ============= *@
+@if (_contactos is not null && _contactosCita is not null)
+{
+    <div class="cie-backdrop" @onclick="CerrarContactos"></div>
+    <div class="cie-modal" style="width:440px;max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>Contactos del paciente</h3>
+            <button class="cie-modal-close" @onclick="CerrarContactos">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div style="margin-bottom:8px;">
+                <strong>@_contactos.PacienteNombre</strong>
+                <span class="text-muted">@_contactos.PacienteDocumento</span><br />
+                <span class="text-muted small">
+                    Cita: @_contactosCita.Fecha.ToString("dd/MM/yyyy") @_contactosCita.Hora?.ToString("HH\\:mm")
+                    &middot; @_contactosCita.DoctorNombre
+                </span>
+            </div>
+            <div class="rc-contact-grid">
+                <div class="rc-contact-row">
+                    <span class="rc-lbl">Telefono</span>
+                    <span>@(string.IsNullOrWhiteSpace(_contactos.Telefono) ? "-" : _contactos.Telefono)</span>
+                </div>
+                <div class="rc-contact-row">
+                    <span class="rc-lbl">Tel. emergencia</span>
+                    <span>@(string.IsNullOrWhiteSpace(_contactos.TelefonoEmergencia) ? "-" : _contactos.TelefonoEmergencia)</span>
+                </div>
+            </div>
+            <div class="rc-contact-sub">Contactos de emergencia</div>
+            @if (_contactos.Contactos.Count == 0)
+            {
+                <div class="text-muted small">Sin contactos de emergencia registrados.</div>
+            }
+            else
+            {
+                <ul class="rc-contact-list">
+                    @foreach (var ct in _contactos.Contactos)
+                    {
+                        <li>
+                            <strong>@ct.Nombre</strong>
+                            @if (!string.IsNullOrWhiteSpace(ct.Parentesco)) { <span class="text-muted"> (@ct.Parentesco)</span> }
+                            <span class="rc-contact-tel">@(string.IsNullOrWhiteSpace(ct.Telefono) ? "sin telefono" : ct.Telefono)</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+        <div class="cie-modal-f" style="display:flex;justify-content:flex-end;padding:10px 14px;">
+            <button class="btn btn-secondary btn-sm" @onclick="CerrarContactos">Cerrar</button>
+        </div>
+    </div>
+}
+
 @if (_reprogOpen && _reprogCita is not null)
 {
     <div class="cie-backdrop" @onclick="() => _reprogOpen = false"></div>
@@ -420,7 +467,20 @@
     .rc-cita-pac { font-size: 13px; color: #0f172a; }
     .rc-cita-doc-inline { font-size: 11px; }
     .rc-cita-sub { font-size: 12px; color: #334155; margin-top: 2px; }
-    .rc-cita-actions { margin-top: 7px; }
+    .rc-cita-actions { margin-top: 7px; display: flex; gap: 6px; flex-wrap: wrap; }
+    /* Llegada tarde: naranja */
+    .rc-cita-tarde { border-color: #fcd34d; background: #fffbeb; border-left-color: #f59e0b; }
+    .rc-cita-tarde .rc-cita-hora { color: #b45309; }
+    .rc-tarde { background: #fffbeb; }
+    .rc-tarde td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+    /* Modal Ver contactos */
+    .rc-contact-grid { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .rc-contact-row { display: flex; gap: 8px; font-size: 13px; }
+    .rc-contact-row .rc-lbl { min-width: 110px; }
+    .rc-contact-sub { font-weight: 700; color: #334155; font-size: 12px; margin: 6px 0 4px; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+    .rc-contact-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .rc-contact-list li { font-size: 13px; }
+    .rc-contact-tel { display: block; color: #2563eb; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 
     /* ===== Vista SEMANA (7 columnas) ===== */
     .rc-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
@@ -598,18 +658,39 @@
         _ => "Dom"
     };
 
-    private async Task MarcarAsync(CitaRecepcionDto c, bool llego)
+    private async Task MarcarAsync(CitaRecepcionDto c, bool llego, bool tarde)
     {
         _busy = true; _error = _ok = null;
         try
         {
-            await Svc.MarcarLlegadaAsync(c.AsignacionTurnoId, llego, await ActorAsync());
-            _ok = llego ? $"Llegada marcada: {c.PacienteNombre}." : $"Llegada retirada: {c.PacienteNombre}.";
+            await Svc.MarcarLlegadaAsync(c.AsignacionTurnoId, llego, tarde, await ActorAsync());
+            _ok = llego
+                ? (tarde ? $"Llegada TARDE marcada: {c.PacienteNombre}." : $"Llegada a tiempo marcada: {c.PacienteNombre}.")
+                : $"Llegada retirada: {c.PacienteNombre}.";
             await CargarAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
     }
+
+    // ---- Ver contactos del paciente (desde la agenda) ----
+    private ContactosCitaDto? _contactos;
+    private CitaRecepcionDto? _contactosCita;
+
+    private async Task VerContactosAsync(CitaRecepcionDto c)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            _contactos = await Svc.ObtenerContactosCitaAsync(c.AsignacionTurnoId);
+            _contactosCita = c;
+            if (_contactos is null) { _error = "No se encontraron datos de contacto del paciente."; }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void CerrarContactos() { _contactos = null; _contactosCita = null; }
 
     // ---- Novedad del profesional (inasistencia) ----
     private async Task RegistrarNovedadAsync()
@@ -648,7 +729,7 @@
         => AbrirReprogAsync(new CitaRecepcionDto(
             a.AsignacionTurnoId, a.ProfesionalId, a.Fecha, a.Hora,
             a.PacienteNombre, a.PacienteDocumento, a.DoctorNombre, a.ServicioNombre,
-            "", a.Llego, null));
+            "", a.Llego, null, false));
 
     private async Task CancelarAfectadoAsync(AfectadoRecepcionDto a)
     {

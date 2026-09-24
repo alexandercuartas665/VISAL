@@ -51,18 +51,50 @@ public sealed class RecepcionService(
                 pac?.NombreCompleto ?? "(sin paciente)", pac?.NumeroDocumento ?? "",
                 profNombre.TryGetValue(t.ProfesionalId, out var pn) ? pn : "",
                 a.NombreServicio, a.Estado.ToString(),
-                t.LlegoEn != null, t.LlegoEn));
+                t.LlegoEn != null, t.LlegoEn, t.LlegadaTarde));
         }
         return result;
     }
 
-    public async Task<bool> MarcarLlegadaAsync(Guid asignacionTurnoId, bool llego, Guid actor, CancellationToken ct = default)
+    public async Task<bool> MarcarLlegadaAsync(Guid asignacionTurnoId, bool llego, bool tarde, Guid actor, CancellationToken ct = default)
     {
         var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
         if (turno is null) { return false; }
         turno.LlegoEn = llego ? DateTimeOffset.UtcNow : null;
+        turno.LlegadaTarde = llego && tarde; // solo marca tarde si efectivamente llego
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<ContactosCitaDto?> ObtenerContactosCitaAsync(Guid asignacionTurnoId, CancellationToken ct = default)
+    {
+        var turno = await db.AsignacionTurnos.AsNoTracking()
+            .Where(t => t.Id == asignacionTurnoId)
+            .Select(t => new { t.AsignacionId })
+            .FirstOrDefaultAsync(ct);
+        if (turno is null) { return null; }
+
+        var pacienteId = await db.Asignaciones.AsNoTracking()
+            .Where(a => a.Id == turno.AsignacionId).Select(a => a.PacienteId).FirstOrDefaultAsync(ct);
+        if (pacienteId == Guid.Empty) { return null; }
+
+        var pac = await db.Pacientes.AsNoTracking().Where(p => p.Id == pacienteId)
+            .Select(p => new { p.NombreCompleto, p.NumeroDocumento, p.Telefono, p.TelefonoEmergencia })
+            .FirstOrDefaultAsync(ct);
+        if (pac is null) { return null; }
+
+        var contactos = (await db.PacienteContactosEmergencia.AsNoTracking()
+            .Where(c => c.PacienteId == pacienteId)
+            .Select(c => new { c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden })
+            .ToListAsync(ct))
+            .OrderBy(x => x.Orden)
+            .Take(5)
+            .Select(x => new ContactoAfectadoDto(x.Nombre, x.Parentesco,
+                string.IsNullOrWhiteSpace(x.Telefono) ? null : $"{x.CodigoPais} {x.Telefono}".Trim()))
+            .ToList();
+
+        return new ContactosCitaDto(pac.NombreCompleto, pac.NumeroDocumento,
+            pac.Telefono, pac.TelefonoEmergencia, contactos);
     }
 
     public async Task<IReadOnlyList<TimeOnly>> SlotsParaReprogramarAsync(Guid asignacionTurnoId, DateOnly nuevaFecha, CancellationToken ct = default)
@@ -105,6 +137,7 @@ public sealed class RecepcionService(
         turno.HoraInicio = nuevaHora;
         turno.MesAsignar = (short)nuevaFecha.Month;
         turno.LlegoEn = null; // reprogramada -> no ha llegado
+        turno.LlegadaTarde = false;
         await db.SaveChangesAsync(ct);
     }
 

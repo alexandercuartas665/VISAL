@@ -12,7 +12,8 @@ public sealed record CitaRecepcionDto(
     string ServicioNombre,
     string Estado,
     bool Llego,
-    DateTimeOffset? LlegoEn);
+    DateTimeOffset? LlegoEn,
+    bool LlegoTarde);
 
 /// <summary>
 /// Recepcion intramural: vista dia de las citas agendadas para marcar la llegada de
@@ -27,8 +28,13 @@ public interface IRecepcionService
     /// opcionalmente de una sede, ordenadas por fecha y hora.</summary>
     Task<IReadOnlyList<CitaRecepcionDto>> ListarCitasRangoAsync(DateOnly desde, DateOnly hasta, Guid? sucursalId, CancellationToken ct = default);
 
-    /// <summary>Marca (o desmarca) la llegada del paciente de una cita.</summary>
-    Task<bool> MarcarLlegadaAsync(Guid asignacionTurnoId, bool llego, Guid actor, CancellationToken ct = default);
+    /// <summary>Marca (o desmarca) la llegada del paciente de una cita. <paramref name="tarde"/>
+    /// distingue una llegada tardia de una a tiempo (solo aplica cuando llego=true).</summary>
+    Task<bool> MarcarLlegadaAsync(Guid asignacionTurnoId, bool llego, bool tarde, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Datos de contacto del paciente de una cita (telefonos + contactos de emergencia)
+    /// para ubicarlo rapido desde la agenda (p.ej. avisar tardanza o reprogramacion).</summary>
+    Task<ContactosCitaDto?> ObtenerContactosCitaAsync(Guid asignacionTurnoId, CancellationToken ct = default);
 
     /// <summary>Horas libres del doctor de la cita en una nueva fecha, para reprogramar.</summary>
     Task<IReadOnlyList<TimeOnly>> SlotsParaReprogramarAsync(Guid asignacionTurnoId, DateOnly nuevaFecha, CancellationToken ct = default);
@@ -72,6 +78,14 @@ public sealed record DoctorSimpleDto(Guid Id, string Nombre);
 
 /// <summary>Contacto de emergencia del paciente (para ubicarlo).</summary>
 public sealed record ContactoAfectadoDto(string Nombre, string? Parentesco, string? Telefono);
+
+/// <summary>Contactos del paciente de una cita, para el modal "Ver contactos" de la agenda.</summary>
+public sealed record ContactosCitaDto(
+    string PacienteNombre,
+    string PacienteDocumento,
+    string? Telefono,
+    string? TelefonoEmergencia,
+    IReadOnlyList<ContactoAfectadoDto> Contactos);
 
 /// <summary>Cita afectada por una novedad + datos de contacto del paciente (tarjeta de reprogramacion).</summary>
 public sealed record AfectadoRecepcionDto(

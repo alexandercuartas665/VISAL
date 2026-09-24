@@ -32,7 +32,11 @@ public sealed record SeguimientoEncuestaDto(
     string? Sede = null,
     string? Servicio = null,
     string? Profesional = null,
-    DateOnly? FechaAtencion = null);
+    DateOnly? FechaAtencion = null,
+    // Trazabilidad de la tarjeta en la bandeja: cuando cayo (CreatedAt) y desde
+    // cuando esta en su estado/columna actual (para "cuanto lleva aqui").
+    DateTimeOffset? FechaIngreso = null,
+    DateTimeOffset? EstadoDesde = null);
 
 public sealed record GuardarEncuestaRequest(
     DateTime? FechaLlamada,

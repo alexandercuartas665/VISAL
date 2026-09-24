@@ -19,6 +19,14 @@ public class SeguimientoEncuesta : TenantEntity
     /// <summary>Pendiente | Realizada | NoContactado</summary>
     public string Estado { get; set; } = "Pendiente";
 
+    /// <summary>
+    /// Momento en que la tarjeta entro a su Estado actual. Se setea al crear la
+    /// tarjeta y cada vez que cambia de Estado (columna del kanban). Sirve para
+    /// mostrar "cuanto lleva en la columna". Null en filas antiguas: la UI cae a
+    /// CreatedAt.
+    /// </summary>
+    public DateTimeOffset? EstadoDesde { get; set; }
+
     public DateTime? FechaLlamada { get; set; }
     public Guid? ResponsableLlamadaId { get; set; }
     public string? ResponsableLlamadaNombre { get; set; }

@@ -19,24 +19,12 @@
             <div class="seg-eyebrow">Encuestas de satisfaccion (SIAU)</div>
             <h1 class="seg-title">Seguimiento <span>mensual</span></h1>
         </div>
-        <div class="seg-filters">
-            <label>Desde</label>
-            <input type="date" @bind="_desde" />
-            <label>Hasta</label>
-            <input type="date" @bind="_hasta" />
-            <label>Sede</label>
-            <select @bind="_traerSucursalId">
-                <option value="">(Todas)</option>
-                @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
-            </select>
-            <label>Servicio</label>
-            <input type="text" placeholder="contiene..." @bind="_traerServicio" style="width:130px" />
-            <label>Profesional</label>
-            <input type="text" placeholder="contiene..." @bind="_traerProfesional" style="width:130px" />
-            <button class="btn-primary" @onclick="TraerAsync" disabled="@_traerBusy" title="Trae a la bandeja los pacientes con historia CERRADA en el rango (aplica los filtros)">
-                @(_traerBusy ? "Trayendo..." : "Traer pacientes")
-            </button>
-            <button class="btn-outline" @onclick="RecargarAsync">Recargar</button>
+        <div class="seg-toolbar">
+            <span class="seg-range-chip" title="Rango de meses cargado en la bandeja">
+                &#128197; @_desde.ToString("dd/MM/yyyy") &ndash; @_hasta.ToString("dd/MM/yyyy")
+            </span>
+            <button class="btn-primary" @onclick="AbrirTraer" title="Trae a la bandeja los pacientes con historia CERRADA en el rango (con filtros)">&#43; Traer pacientes</button>
+            <button class="btn-outline" @onclick="RecargarAsync">&#8635; Recargar</button>
         </div>
     </div>
 
@@ -44,8 +32,6 @@
         <button class="seg-tab @(_tab == "kanban" ? "sel" : "")" @onclick='() => _tab = "kanban"'>Kanban</button>
         <button class="seg-tab @(_tab == "historial" ? "sel" : "")" @onclick='() => _tab = "historial"'>Historial</button>
     </div>
-
-    @if (_traerMsg is not null) { <div class="seg-msg" style="margin:.4rem 0;">@_traerMsg</div> }
 
     @if (_loading)
     {
@@ -268,15 +254,72 @@
     </div>
 }
 
+@if (_traerModalOpen)
+{
+    <div class="seg-modal-back" @onclick="CerrarTraer"></div>
+    <div class="seg-modal seg-modal-sm">
+        <div class="seg-modal-head">
+            <div class="seg-modal-title-wrap" style="text-align:left;">
+                <div class="seg-modal-eyebrow">Traer a la bandeja</div>
+                <h3 class="seg-modal-title">Pacientes con historia cerrada</h3>
+                <div class="seg-modal-sub">Crea tarjetas Pendientes para los pacientes atendidos en el rango que apliquen los filtros.</div>
+            </div>
+            <button class="seg-modal-close" @onclick="CerrarTraer">&times;</button>
+        </div>
+        <div class="seg-modal-body">
+            <div class="seg-traer-grid">
+                <div class="seg-tf">
+                    <label>Desde</label>
+                    <input type="date" @bind="_desde" />
+                </div>
+                <div class="seg-tf">
+                    <label>Hasta</label>
+                    <input type="date" @bind="_hasta" />
+                </div>
+                <div class="seg-tf">
+                    <label>Sede</label>
+                    <select @bind="_traerSucursalId">
+                        <option value="">(Todas)</option>
+                        @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
+                    </select>
+                </div>
+                <div class="seg-tf">
+                    <label>Servicio</label>
+                    <input type="text" placeholder="contiene..." @bind="_traerServicio" />
+                </div>
+                <div class="seg-tf seg-tf-wide">
+                    <label>Profesional</label>
+                    <input type="text" placeholder="contiene..." @bind="_traerProfesional" />
+                </div>
+            </div>
+            @if (_traerMsg is not null) { <div class="seg-msg" style="margin-top:.75rem;">@_traerMsg</div> }
+        </div>
+        <div class="seg-modal-foot">
+            <button class="btn-outline" @onclick="CerrarTraer">Cerrar</button>
+            <button class="btn-primary" @onclick="TraerAsync" disabled="@_traerBusy">
+                @(_traerBusy ? "Trayendo..." : "Traer pacientes")
+            </button>
+        </div>
+    </div>
+}
+
 <style>
 .seg-page { padding: 1rem 1.25rem; }
 .seg-head { display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom: 1rem; }
 .seg-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
 .seg-title { margin:.15rem 0 0 0; font-size:1.55rem; color:#0f172a; }
 .seg-title span { color:#2563eb; }
-.seg-filters { display:flex; gap:.5rem; align-items:center; }
-.seg-filters label { font-size:.8rem; color:#334155; }
-.seg-filters input[type="month"] { padding:.35rem .5rem; border:1px solid #cbd5e1; border-radius:6px; }
+.seg-toolbar { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+.seg-range-chip { display:inline-flex; align-items:center; gap:.35rem; font-size:.8rem; color:#334155;
+                  background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:.35rem .75rem; }
+
+/* Modal Traer */
+.seg-modal-sm { width:min(560px, 96vw); }
+.seg-traer-grid { display:grid; grid-template-columns: 1fr 1fr; gap:.75rem; }
+.seg-tf { display:flex; flex-direction:column; gap:.25rem; }
+.seg-tf.seg-tf-wide { grid-column: 1 / -1; }
+.seg-tf label { font-size:.78rem; color:#334155; font-weight:600; }
+.seg-tf input, .seg-tf select { padding:.45rem .6rem; border:1px solid #cbd5e1; border-radius:6px; font: inherit; }
 
 .seg-voz-tools { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:0 0 1rem; padding:.6rem .85rem; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; }
 .seg-voz-lbl { font-size:.85rem; font-weight:600; color:#334155; }
@@ -301,7 +344,7 @@
 
 .seg-loading { text-align:center; color:#64748b; padding:2.5rem 0; }
 
-.seg-kanban { display:grid; grid-template-columns: repeat(3, 1fr); gap:.75rem; }
+.seg-kanban { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:1rem; }
 .seg-col { background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; min-height:220px; }
 .seg-col-head { padding:.65rem .85rem; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; }
 .seg-col-head b { color:#0f172a; }
@@ -310,7 +353,8 @@
 .seg-col-noc  { border-top: 4px solid #b45309; }
 .seg-col-ok   { border-top: 4px solid #16a34a; }
 
-.seg-card { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .75rem; cursor:grab; transition:box-shadow .15s ease, transform .1s; }
+.seg-card { background:#fff; border:1px solid #e8edf3; border-radius:10px; padding:.65rem .8rem; cursor:grab;
+            box-shadow:0 1px 2px rgba(15,23,42,.04); transition:box-shadow .15s ease, transform .1s, border-color .15s; }
 .seg-card:active { cursor:grabbing; }
 .seg-col-drag { background: rgba(59,130,246,.08) !important; border-color:#93c5fd !important; box-shadow: inset 0 0 0 2px #3b82f6; }
 .seg-col-filter { display:flex; align-items:center; gap:.4rem; padding: .35rem .55rem; border-bottom: 1px dashed #e5e7eb; }
@@ -337,14 +381,19 @@
 .seg-hist-vacio { text-align:center; color:#94a3b8; padding:1.5rem 0; }
 .btn-mini { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.2rem .55rem; border-radius:5px; cursor:pointer; font-size:.75rem; }
 .btn-mini:hover { background:#f8fafc; }
-.seg-card:hover { box-shadow:0 4px 12px rgba(15,23,42,.08); }
-.seg-card b { color:#0f172a; }
-.seg-card small { display:block; color:#64748b; font-size:.72rem; margin-top:.15rem; }
-.seg-card-origen { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.3rem; }
-.seg-card-sede { background:#eef2ff; color:#4338ca; border-radius:4px; padding:1px 6px; font-size:.7rem; font-weight:600; }
-.seg-card-serv { background:#f1f5f9; color:#475569; border-radius:4px; padding:1px 6px; font-size:.7rem; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.seg-card-fa { background:#ecfdf5; color:#047857; border-radius:4px; padding:1px 6px; font-size:.7rem; }
-.seg-card-meta { display:flex; gap:.5rem; margin-top:.35rem; font-size:.72rem; color:#334155; }
+.seg-card:hover { box-shadow:0 6px 16px rgba(15,23,42,.10); border-color:#cbd5e1; transform:translateY(-1px); }
+.seg-card b { color:#0f172a; font-size:.9rem; line-height:1.2; }
+.seg-card small { display:block; color:#94a3b8; font-size:.72rem; margin-top:.1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.seg-card-origen { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.4rem; }
+.seg-card-sede { background:#eef2ff; color:#4338ca; border-radius:5px; padding:1px 7px; font-size:.7rem; font-weight:600; }
+.seg-card-serv { background:#f1f5f9; color:#475569; border-radius:5px; padding:1px 7px; font-size:.7rem; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.seg-card-fa { background:#ecfdf5; color:#047857; border-radius:5px; padding:1px 7px; font-size:.7rem; }
+.seg-card-track { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.45rem; }
+.seg-pill { display:inline-flex; align-items:center; gap:.2rem; font-size:.68rem; border-radius:999px; padding:1px 8px; border:1px solid transparent; }
+.seg-pill-in { background:#f8fafc; color:#64748b; border-color:#e2e8f0; }
+.seg-pill-age { background:#fff7ed; color:#c2410c; border-color:#fed7aa; }
+.seg-card-meta { display:flex; gap:.4rem; margin-top:.45rem; padding-top:.4rem; border-top:1px dashed #eef2f6; font-size:.72rem; color:#475569; }
+.seg-meta-none { color:#94a3b8; }
 
 .seg-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
 .seg-modal { position:fixed; top:5%; left:50%; transform:translateX(-50%); width:min(720px, 96vw); max-height:90vh;
@@ -388,9 +437,12 @@
 .btn-danger  { background:#fff; color:#b45309; border:1px solid #fbbf24; padding:.45rem .85rem; border-radius:6px; cursor:pointer; }
 .btn-danger:hover { background:#fef3c7; }
 
+.seg-col-count { background:#e2e8f0; color:#475569; border-radius:999px; padding:1px 9px; font-size:.75rem; font-weight:600; }
+
 @@media (max-width: 900px) {
-  .seg-kanban { grid-template-columns: 1fr; }
+  .seg-kanban { grid-template-columns: minmax(0, 460px); justify-content:center; }
   .seg-kpis   { grid-template-columns: repeat(2, 1fr); }
+  .seg-traer-grid { grid-template-columns: 1fr; }
 }
 </style>
 
@@ -422,6 +474,7 @@
     private int _hastaMes => _hasta.Year * 100 + _hasta.Month;
     private bool _traerBusy;
     private string? _traerMsg;
+    private bool _traerModalOpen;
     private bool _loading = true;
     private List<SeguimientoEncuestaDto> _items = new();
 
@@ -498,6 +551,9 @@
             StateHasChanged();
         }
     }
+
+    private void AbrirTraer() { _traerMsg = null; _traerModalOpen = true; }
+    private void CerrarTraer() { _traerModalOpen = false; }
 
     private async Task TraerAsync()
     {
@@ -622,9 +678,24 @@
                 var faTxt = it.FechaAtencion is DateOnly fa2 ? $"<span class=\"seg-card-fa\">Atendido: {fa2:dd/MM/yyyy}</span>" : "";
                 __b.AddMarkupContent(30, $"<div class=\"seg-card-origen\">{sedeTxt}{servTxt}{faTxt}</div>");
             }
-            var metaFecha = it.FechaLlamada?.ToString("dd/MM/yyyy HH:mm") ?? "sin llamar";
-            var metaResp = string.IsNullOrWhiteSpace(it.ResponsableLlamadaNombre) ? "" : $" · {System.Net.WebUtility.HtmlEncode(it.ResponsableLlamadaNombre)}";
-            __b.AddMarkupContent(29, $"<div class=\"seg-card-meta\">{metaFecha}{metaResp}</div>");
+            // Trazabilidad: fecha en que cayo a la bandeja + cuanto lleva en la columna actual.
+            var ingresoTxt = it.FechaIngreso is DateTimeOffset ci
+                ? ci.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy") : null;
+            var edadTxt = TiempoDesde(it.EstadoDesde ?? it.FechaIngreso);
+            var track = "";
+            if (ingresoTxt is not null) { track += $"<span class=\"seg-pill seg-pill-in\" title=\"Fecha en que entro a la bandeja\">&#128197; {ingresoTxt}</span>"; }
+            if (edadTxt is not null) { track += $"<span class=\"seg-pill seg-pill-age\" title=\"Tiempo en la columna actual\">&#9201; {edadTxt}</span>"; }
+            if (track.Length > 0) { __b.AddMarkupContent(31, $"<div class=\"seg-card-track\">{track}</div>"); }
+
+            if (it.FechaLlamada is DateTime fll)
+            {
+                var metaResp = string.IsNullOrWhiteSpace(it.ResponsableLlamadaNombre) ? "" : $" &middot; {System.Net.WebUtility.HtmlEncode(it.ResponsableLlamadaNombre)}";
+                __b.AddMarkupContent(29, $"<div class=\"seg-card-meta\">&#128222; {fll:dd/MM/yyyy HH:mm}{metaResp}</div>");
+            }
+            else
+            {
+                __b.AddMarkupContent(29, "<div class=\"seg-card-meta seg-meta-none\">&#9679; sin llamar</div>");
+            }
             __b.CloseElement();
         }
         if (filas.Count == 0)
@@ -740,6 +811,20 @@
             await RecargarAsync();
         }
         catch (Exception ex) { _msg = "Error: " + ex.Message; }
+    }
+
+    /// <summary>Humaniza cuanto tiempo lleva la tarjeta desde un instante (en la columna
+    /// actual). Devuelve null si no hay dato. Ej: "hoy", "3 dias", "2 sem", "1 mes".</summary>
+    private static string? TiempoDesde(DateTimeOffset? desde)
+    {
+        if (desde is not DateTimeOffset d) { return null; }
+        var dias = (int)Math.Floor((DateTimeOffset.UtcNow - d).TotalDays);
+        if (dias <= 0) { return "hoy"; }
+        if (dias == 1) { return "1 dia"; }
+        if (dias < 7) { return $"{dias} dias"; }
+        if (dias < 30) { var s = dias / 7; return s == 1 ? "1 sem" : $"{s} sem"; }
+        if (dias < 365) { var m = dias / 30; return m == 1 ? "1 mes" : $"{m} meses"; }
+        var a = dias / 365; return a == 1 ? "1 ano" : $"{a} anos";
     }
 
     private static string FormatoMes(int mes)

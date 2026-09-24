@@ -39,7 +39,8 @@ public sealed class SeguimientoService(
                     TenantId = tid,
                     PacienteId = pid,
                     Mes = mes,
-                    Estado = "Pendiente"
+                    Estado = "Pendiente",
+                    EstadoDesde = DateTimeOffset.UtcNow
                 });
             }
             if (faltantes.Count > 0) { await db.SaveChangesAsync(ct); }
@@ -60,7 +61,8 @@ public sealed class SeguimientoService(
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
                     s.PersonaAtiende, s.Observaciones,
-                    (string?)null, (string?)null, (string?)null, (DateOnly?)null))
+                    (string?)null, (string?)null, (string?)null, (DateOnly?)null,
+                    s.CreatedAt, s.EstadoDesde))
             .ToListAsync(ct);
 
         var ordenadas = filas
@@ -89,7 +91,8 @@ public sealed class SeguimientoService(
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
                     s.PersonaAtiende, s.Observaciones,
-                    (string?)null, (string?)null, (string?)null, (DateOnly?)null))
+                    (string?)null, (string?)null, (string?)null, (DateOnly?)null,
+                    s.CreatedAt, s.EstadoDesde))
             .ToListAsync(ct);
 
         var ordenadas = filas
@@ -154,7 +157,8 @@ public sealed class SeguimientoService(
                 TenantId = tid,
                 PacienteId = d.PacienteId,
                 Mes = d.Mes,
-                Estado = "Pendiente"
+                Estado = "Pendiente",
+                EstadoDesde = DateTimeOffset.UtcNow
             });
             creados++;
         }
@@ -207,7 +211,11 @@ public sealed class SeguimientoService(
             entity.Pregunta1.HasValue || entity.Pregunta2.HasValue ||
             entity.Pregunta3.HasValue || entity.Pregunta4.HasValue ||
             entity.Pregunta5.HasValue || !string.IsNullOrWhiteSpace(entity.Observaciones);
-        if (tieneRespuestas) { entity.Estado = "Realizada"; }
+        if (tieneRespuestas && entity.Estado != "Realizada")
+        {
+            entity.Estado = "Realizada";
+            entity.EstadoDesde = DateTimeOffset.UtcNow;
+        }
 
         await db.SaveChangesAsync(ct);
         return true;
@@ -230,7 +238,8 @@ public sealed class SeguimientoService(
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
                     s.PersonaAtiende, s.Observaciones,
-                    (string?)null, (string?)null, (string?)null, (DateOnly?)null))
+                    (string?)null, (string?)null, (string?)null, (DateOnly?)null,
+                    s.CreatedAt, s.EstadoDesde))
             .ToListAsync(ct);
         return filas
             .OrderByDescending(x => x.FechaLlamada ?? DateTime.MinValue)
@@ -242,6 +251,7 @@ public sealed class SeguimientoService(
         if (!EstadosValidos.Contains(estado)) { throw new InvalidOperationException($"Estado invalido: {estado}"); }
         var entity = await db.SeguimientoEncuestas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null) { return false; }
+        if (entity.Estado != estado) { entity.EstadoDesde = DateTimeOffset.UtcNow; }
         entity.Estado = estado;
         await db.SaveChangesAsync(ct);
         return true;

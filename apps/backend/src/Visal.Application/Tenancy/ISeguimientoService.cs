@@ -25,7 +25,14 @@ public sealed record SeguimientoEncuestaDto(
     int? Pregunta4,
     int? Pregunta5,
     string? PersonaAtiende,
-    string? Observaciones);
+    string? Observaciones,
+    // Enriquecidos (derivados de las HC cerradas del paciente en el mes + su
+    // asignacion): sede(s), servicio(s) y profesional(es), y la fecha de atencion
+    // mas reciente. Para pintar la tarjeta y filtrar la bandeja. Null sin enriquecer.
+    string? Sede = null,
+    string? Servicio = null,
+    string? Profesional = null,
+    DateOnly? FechaAtencion = null);
 
 public sealed record GuardarEncuestaRequest(
     DateTime? FechaLlamada,
@@ -57,7 +64,10 @@ public interface ISeguimientoService
     /// por (paciente, mes de cierre) si aun no existe. Devuelve cuantas creo y
     /// cuantas ya existian.
     /// </summary>
-    Task<(int Creados, int Existentes)> TraerPacientesAsync(DateOnly desde, DateOnly hasta, Guid actor, CancellationToken ct = default);
+    Task<(int Creados, int Existentes)> TraerPacientesAsync(
+        DateOnly desde, DateOnly hasta, Guid actor,
+        Guid? sucursalId = null, string? servicio = null, string? profesional = null,
+        CancellationToken ct = default);
 
     /// <summary>Guarda la encuesta -> estado Realizada.</summary>
     Task<bool> GuardarEncuestaAsync(Guid id, GuardarEncuestaRequest req, Guid actor, CancellationToken ct = default);

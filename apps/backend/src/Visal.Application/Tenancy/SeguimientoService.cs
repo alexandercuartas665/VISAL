@@ -59,13 +59,15 @@ public sealed class SeguimientoService(
                     s.Mes, s.Estado, s.FechaLlamada,
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
-                    s.PersonaAtiende, s.Observaciones))
+                    s.PersonaAtiende, s.Observaciones,
+                    (string?)null, (string?)null, (string?)null, (DateOnly?)null))
             .ToListAsync(ct);
 
-        return filas
+        var ordenadas = filas
             .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
             .ThenBy(x => x.PacienteNombre)
             .ToList();
+        return await EnriquecerAsync(tid, ordenadas, ct);
     }
 
     public async Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarPorRangoAsync(int desdeMes, int hastaMes, CancellationToken ct = default)
@@ -86,16 +88,21 @@ public sealed class SeguimientoService(
                     s.Mes, s.Estado, s.FechaLlamada,
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
-                    s.PersonaAtiende, s.Observaciones))
+                    s.PersonaAtiende, s.Observaciones,
+                    (string?)null, (string?)null, (string?)null, (DateOnly?)null))
             .ToListAsync(ct);
 
-        return filas
+        var ordenadas = filas
             .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
             .ThenBy(x => x.PacienteNombre)
             .ToList();
+        return await EnriquecerAsync(tid, ordenadas, ct);
     }
 
-    public async Task<(int Creados, int Existentes)> TraerPacientesAsync(DateOnly desde, DateOnly hasta, Guid actor, CancellationToken ct = default)
+    public async Task<(int Creados, int Existentes)> TraerPacientesAsync(
+        DateOnly desde, DateOnly hasta, Guid actor,
+        Guid? sucursalId = null, string? servicio = null, string? profesional = null,
+        CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return (0, 0); }
         if (hasta < desde) { (desde, hasta) = (hasta, desde); }
@@ -104,21 +111,31 @@ public sealed class SeguimientoService(
         var desdeDt = new DateTimeOffset(desde.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
         var hastaDt = new DateTimeOffset(hasta.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
 
-        // Pacientes con HC CERRADA cuyo cierre cae en el rango.
-        var cerradas = await db.HistoriasClinicas.AsNoTracking()
-            .Where(h => h.TenantId == tid
-                && h.Estado == HistoriaClinicaEstado.Cerrada
-                && h.FechaCierre != null
-                && h.FechaCierre >= desdeDt && h.FechaCierre < hastaDt)
-            .Select(h => new { h.PacienteId, h.FechaCierre })
-            .ToListAsync(ct);
-        if (cerradas.Count == 0) { return (0, 0); }
+        // Actividad de HC cerradas en el rango (con sede/servicio/profesional).
+        var actividad = await CargarActividadAsync(tid, desdeDt, hastaDt, ct);
+        if (actividad.Count == 0) { return (0, 0); }
+
+        // Filtros opcionales: sede (por nombre de la sucursal), servicio (contiene),
+        // profesional (por id). Solo pasan los que coinciden.
+        string? sedeNombre = null;
+        if (sucursalId is Guid sid && sid != Guid.Empty)
+        {
+            sedeNombre = await db.Sucursales.AsNoTracking()
+                .Where(s => s.Id == sid).Select(s => s.Nombre).FirstOrDefaultAsync(ct);
+        }
+        var servFiltro = string.IsNullOrWhiteSpace(servicio) ? null : servicio.Trim();
+        var profFiltro = string.IsNullOrWhiteSpace(profesional) ? null : profesional.Trim();
+        var filtrada = actividad.Where(a =>
+            (sedeNombre is null || string.Equals(a.Sede, sedeNombre, StringComparison.OrdinalIgnoreCase))
+            && (servFiltro is null || (a.Servicio ?? "").Contains(servFiltro, StringComparison.OrdinalIgnoreCase))
+            && (profFiltro is null || (a.Profesional ?? "").Contains(profFiltro, StringComparison.OrdinalIgnoreCase)));
 
         // Deseados: (paciente, mes de cierre) distintos.
-        var deseados = cerradas
-            .Select(h => (h.PacienteId, Mes: MesDe(h.FechaCierre!.Value)))
+        var deseados = filtrada
+            .Select(a => (a.PacienteId, Mes: a.Mes))
             .Distinct()
             .ToList();
+        if (deseados.Count == 0) { return (0, 0); }
 
         var meses = deseados.Select(d => d.Mes).Distinct().ToList();
         var yaExistentes = (await db.SeguimientoEncuestas.AsNoTracking()
@@ -212,7 +229,8 @@ public sealed class SeguimientoService(
                     s.Mes, s.Estado, s.FechaLlamada,
                     s.ResponsableLlamadaId, s.ResponsableLlamadaNombre,
                     s.Pregunta1, s.Pregunta2, s.Pregunta3, s.Pregunta4, s.Pregunta5,
-                    s.PersonaAtiende, s.Observaciones))
+                    s.PersonaAtiende, s.Observaciones,
+                    (string?)null, (string?)null, (string?)null, (DateOnly?)null))
             .ToListAsync(ct);
         return filas
             .OrderByDescending(x => x.FechaLlamada ?? DateTime.MinValue)
@@ -236,6 +254,84 @@ public sealed class SeguimientoService(
         var desde = new DateTime(y, m, 1, 0, 0, 0, DateTimeKind.Utc);
         var hasta = desde.AddMonths(1);
         return (desde, hasta);
+    }
+
+    // ===== Enriquecimiento sede/servicio/profesional/fecha de atencion =====
+    private sealed record ActividadHc(
+        Guid PacienteId, int Mes, string? Sede, string? Servicio,
+        string? Profesional, Guid? ProfesionalId, DateOnly? FechaAtencion);
+
+    /// <summary>HC cerradas del tenant cuyo cierre cae en [desdeDt, hastaDt), con la
+    /// sede/servicio de su asignacion (via pivote), el profesional y la fecha de
+    /// atencion. Una fila por HC. Base para filtrar (traer) y enriquecer (listar).</summary>
+    private async Task<List<ActividadHc>> CargarActividadAsync(
+        Guid tid, DateTimeOffset desdeDt, DateTimeOffset hastaDt, CancellationToken ct)
+    {
+        var hcs = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.TenantId == tid
+                && h.Estado == HistoriaClinicaEstado.Cerrada
+                && h.FechaCierre != null && h.FechaCierre >= desdeDt && h.FechaCierre < hastaDt)
+            .Select(h => new { h.Id, h.PacienteId, h.FechaCierre, h.EspecialistaNombre, h.ProfesionalId, h.FechaAtencion })
+            .ToListAsync(ct);
+        if (hcs.Count == 0) { return new(); }
+
+        var hcIds = hcs.Select(h => h.Id).ToList();
+        // Sede + servicio desde la asignacion (HC -> pivote -> sesion -> turno -> asignacion).
+        var asig = await (from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                          where hcIds.Contains(pv.HistoriaClinicaId)
+                          join s in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals s.Id
+                          join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                          join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                          select new { pv.HistoriaClinicaId, a.Sucursal, a.NombreServicio })
+                         .ToListAsync(ct);
+        var asigByHc = asig.GroupBy(x => x.HistoriaClinicaId).ToDictionary(g => g.Key, g => g.First());
+
+        return hcs.Select(h =>
+        {
+            asigByHc.TryGetValue(h.Id, out var a);
+            DateOnly? fa = h.FechaAtencion is DateTimeOffset dt
+                ? DateOnly.FromDateTime(dt.ToOffset(TimeSpan.FromHours(-5)).DateTime) : null;
+            return new ActividadHc(h.PacienteId, MesDe(h.FechaCierre!.Value),
+                a?.Sucursal, a?.NombreServicio,
+                string.IsNullOrWhiteSpace(h.EspecialistaNombre) ? null : h.EspecialistaNombre,
+                h.ProfesionalId, fa);
+        }).ToList();
+    }
+
+    /// <summary>Rellena Sede/Servicio/Profesional/FechaAtencion de cada tarjeta con la
+    /// actividad clinica del paciente en ese mes (distintos, unidos por coma; fecha de
+    /// atencion = la mas reciente).</summary>
+    private async Task<IReadOnlyList<SeguimientoEncuestaDto>> EnriquecerAsync(
+        Guid tid, List<SeguimientoEncuestaDto> dtos, CancellationToken ct)
+    {
+        if (dtos.Count == 0) { return dtos; }
+        var meses = dtos.Select(d => d.Mes).ToList();
+        var (desdeDt, _) = MesToRango(meses.Min());
+        var (_, hastaDt) = MesToRango(meses.Max());
+        var act = await CargarActividadAsync(tid,
+            new DateTimeOffset(desdeDt, TimeSpan.Zero), new DateTimeOffset(hastaDt, TimeSpan.Zero), ct);
+        if (act.Count == 0) { return dtos; }
+
+        var porClave = act.GroupBy(a => (a.PacienteId, a.Mes)).ToDictionary(g => g.Key, g =>
+        {
+            var fechas = g.Where(x => x.FechaAtencion.HasValue).Select(x => x.FechaAtencion!.Value).ToList();
+            return (
+                Sede: Unir(g.Select(x => x.Sede)),
+                Servicio: Unir(g.Select(x => x.Servicio)),
+                Profesional: Unir(g.Select(x => x.Profesional)),
+                FechaAtencion: fechas.Count > 0 ? fechas.Max() : (DateOnly?)null);
+        });
+
+        return dtos.Select(d => porClave.TryGetValue((d.PacienteId, d.Mes), out var e)
+            ? d with { Sede = e.Sede, Servicio = e.Servicio, Profesional = e.Profesional, FechaAtencion = e.FechaAtencion }
+            : d).ToList();
+    }
+
+    private static string? Unir(IEnumerable<string?> vals)
+    {
+        var d = vals.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return d.Count == 0 ? null : string.Join(", ", d);
     }
 
     private static int? ClampScore(int? v) => v is null ? null : Math.Clamp(v.Value, 1, 5);

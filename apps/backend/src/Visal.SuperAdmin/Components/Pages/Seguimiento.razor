@@ -7,6 +7,7 @@
 @using Visal.Application.Voz
 @inject ISeguimientoService SegSvc
 @inject Visal.Application.Voz.IVozLlamadaService VozSvc
+@inject ISucursalService SucSvc
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
 
@@ -23,7 +24,16 @@
             <input type="date" @bind="_desde" />
             <label>Hasta</label>
             <input type="date" @bind="_hasta" />
-            <button class="btn-primary" @onclick="TraerAsync" disabled="@_traerBusy" title="Trae a la bandeja los pacientes con historia CERRADA en el rango">
+            <label>Sede</label>
+            <select @bind="_traerSucursalId">
+                <option value="">(Todas)</option>
+                @foreach (var s in _sucursales) { <option value="@s.Id">@s.Nombre</option> }
+            </select>
+            <label>Servicio</label>
+            <input type="text" placeholder="contiene..." @bind="_traerServicio" style="width:130px" />
+            <label>Profesional</label>
+            <input type="text" placeholder="contiene..." @bind="_traerProfesional" style="width:130px" />
+            <button class="btn-primary" @onclick="TraerAsync" disabled="@_traerBusy" title="Trae a la bandeja los pacientes con historia CERRADA en el rango (aplica los filtros)">
                 @(_traerBusy ? "Trayendo..." : "Traer pacientes")
             </button>
             <button class="btn-outline" @onclick="RecargarAsync">Recargar</button>
@@ -59,6 +69,19 @@
             <span style="flex:1"></span>
             <input class="seg-pac-filter" type="search" placeholder="Filtrar paciente (nombre o documento)..." @bind="_filtroPac" @bind:event="oninput" />
             @if (_vozMsg is not null) { <span class="seg-voz-msg">@_vozMsg</span> }
+        </div>
+
+        <div class="seg-voz-tools" style="flex-wrap:wrap;gap:.4rem;">
+            <span class="seg-voz-lbl">&#128269; Filtrar bandeja:</span>
+            <select @bind="_bandSede" title="Filtrar por sede">
+                <option value="">Sede (todas)</option>
+                @foreach (var s in _sedesEnBandeja) { <option value="@s">@s</option> }
+            </select>
+            <input type="text" placeholder="Profesional contiene..." @bind="_bandProfesional" @bind:event="oninput" style="width:150px" />
+            <label style="font-size:.8rem;color:#475569;">Atención</label>
+            <input type="date" @bind="_bandFaDesde" title="Fecha de atencion desde" />
+            <input type="date" @bind="_bandFaHasta" title="Fecha de atencion hasta" />
+            @if (HayFiltroBandeja) { <button class="btn-outline" @onclick="LimpiarFiltrosBandeja">Limpiar</button> }
         </div>
 
         <div class="seg-kanban">
@@ -317,6 +340,10 @@
 .seg-card:hover { box-shadow:0 4px 12px rgba(15,23,42,.08); }
 .seg-card b { color:#0f172a; }
 .seg-card small { display:block; color:#64748b; font-size:.72rem; margin-top:.15rem; }
+.seg-card-origen { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.3rem; }
+.seg-card-sede { background:#eef2ff; color:#4338ca; border-radius:4px; padding:1px 6px; font-size:.7rem; font-weight:600; }
+.seg-card-serv { background:#f1f5f9; color:#475569; border-radius:4px; padding:1px 6px; font-size:.7rem; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.seg-card-fa { background:#ecfdf5; color:#047857; border-radius:4px; padding:1px 6px; font-size:.7rem; }
 .seg-card-meta { display:flex; gap:.5rem; margin-top:.35rem; font-size:.72rem; color:#334155; }
 
 .seg-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:1400; }
@@ -397,6 +424,28 @@
     private string? _traerMsg;
     private bool _loading = true;
     private List<SeguimientoEncuestaDto> _items = new();
+
+    // Filtros al TRAER (definen que entra a la bandeja).
+    private List<SucursalDto> _sucursales = new();
+    private string _traerSucursalId = "";
+    private string _traerServicio = "";
+    private string _traerProfesional = "";
+
+    // Filtros de la BANDEJA cargada (client-side sobre campos enriquecidos).
+    private string _bandSede = "";
+    private string _bandProfesional = "";
+    private DateOnly? _bandFaDesde;
+    private DateOnly? _bandFaHasta;
+    private IEnumerable<string> _sedesEnBandeja => _items
+        .Select(x => x.Sede).Where(s => !string.IsNullOrWhiteSpace(s))
+        .SelectMany(s => s!.Split(',')).Select(s => s.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s);
+    private bool HayFiltroBandeja => !string.IsNullOrWhiteSpace(_bandSede)
+        || !string.IsNullOrWhiteSpace(_bandProfesional) || _bandFaDesde is not null || _bandFaHasta is not null;
+    private void LimpiarFiltrosBandeja()
+    {
+        _bandSede = ""; _bandProfesional = ""; _bandFaDesde = null; _bandFaHasta = null;
+    }
     private Guid? _openId;
     private EditForm _edit = new();
     private string _msg = string.Empty;
@@ -429,6 +478,8 @@
     {
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
         _actorNombre = auth.User?.Identity?.Name ?? string.Empty;
+        try { _sucursales = (await SucSvc.ListAsync(soloActivas: true)).ToList(); }
+        catch { _sucursales = new(); }
         await RecargarAsync();
     }
 
@@ -453,7 +504,11 @@
         _traerBusy = true; _traerMsg = null; StateHasChanged();
         try
         {
-            var (creados, existentes) = await SegSvc.TraerPacientesAsync(_desde, _hasta, await Actor());
+            Guid? sucId = Guid.TryParse(_traerSucursalId, out var sg) ? sg : null;
+            var (creados, existentes) = await SegSvc.TraerPacientesAsync(
+                _desde, _hasta, await Actor(), sucId,
+                string.IsNullOrWhiteSpace(_traerServicio) ? null : _traerServicio,
+                string.IsNullOrWhiteSpace(_traerProfesional) ? null : _traerProfesional);
             _traerMsg = $"Traidos: {creados} nuevo(s) a la bandeja, {existentes} ya estaban.";
             await RecargarAsync();
         }
@@ -505,6 +560,21 @@
                 (x.PacienteNombre ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
                 || (x.PacienteDocumento ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
         }
+        // Filtros de bandeja: sede, profesional, rango de fecha de atencion (sobre los
+        // campos enriquecidos). Aplican a todas las columnas.
+        if (!string.IsNullOrWhiteSpace(_bandSede))
+        {
+            filas = filas.Where(x => string.Equals(x.Sede, _bandSede, StringComparison.OrdinalIgnoreCase)
+                || (x.Sede ?? "").Contains(_bandSede, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        var qp = (_bandProfesional ?? "").Trim();
+        if (qp.Length > 0)
+        {
+            filas = filas.Where(x => (x.Profesional ?? "").Contains(qp, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        if (_bandFaDesde is DateOnly fd) { filas = filas.Where(x => x.FechaAtencion is DateOnly fa && fa >= fd).ToList(); }
+        if (_bandFaHasta is DateOnly fh) { filas = filas.Where(x => x.FechaAtencion is DateOnly fa && fa <= fh).ToList(); }
+
         // Filtro adicional para columna "Realizada": limitar a los ultimos N dias
         // por FechaLlamada. _diasRealizada = 0 significa "todos".
         if (estado == "Realizada" && _diasRealizada > 0)
@@ -544,6 +614,14 @@
             __b.AddAttribute(26, "ondragend", EventCallback.Factory.Create(this, OnDragEnd));
             __b.AddAttribute(27, "onclick", EventCallback.Factory.Create(this, () => Abrir(it.Id)));
             __b.AddMarkupContent(28, $"<b>{System.Net.WebUtility.HtmlEncode(it.PacienteNombre)}</b><small>{it.PacienteTipoDoc} {it.PacienteDocumento}</small>");
+            // Sede + servicio + fecha de atencion (enriquecidos) para ubicar de donde viene el paciente.
+            if (!string.IsNullOrWhiteSpace(it.Sede) || !string.IsNullOrWhiteSpace(it.Servicio))
+            {
+                var sedeTxt = string.IsNullOrWhiteSpace(it.Sede) ? "" : $"<span class=\"seg-card-sede\">&#127973; {System.Net.WebUtility.HtmlEncode(it.Sede)}</span>";
+                var servTxt = string.IsNullOrWhiteSpace(it.Servicio) ? "" : $"<span class=\"seg-card-serv\" title=\"{System.Net.WebUtility.HtmlEncode(it.Servicio)}\">{System.Net.WebUtility.HtmlEncode(it.Servicio)}</span>";
+                var faTxt = it.FechaAtencion is DateOnly fa2 ? $"<span class=\"seg-card-fa\">Atendido: {fa2:dd/MM/yyyy}</span>" : "";
+                __b.AddMarkupContent(30, $"<div class=\"seg-card-origen\">{sedeTxt}{servTxt}{faTxt}</div>");
+            }
             var metaFecha = it.FechaLlamada?.ToString("dd/MM/yyyy HH:mm") ?? "sin llamar";
             var metaResp = string.IsNullOrWhiteSpace(it.ResponsableLlamadaNombre) ? "" : $" · {System.Net.WebUtility.HtmlEncode(it.ResponsableLlamadaNombre)}";
             __b.AddMarkupContent(29, $"<div class=\"seg-card-meta\">{metaFecha}{metaResp}</div>");

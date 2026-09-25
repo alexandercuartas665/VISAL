@@ -130,11 +130,11 @@
                     <div style="display:flex;gap:12px;">
                         <div class="ase-f" style="flex:1;">
                             <label>Hora desde</label>
-                            <input class="form-control form-control-sm" type="time" @bind="_fHoraDesde" />
+                            <Hora24 Value="@Hora24.ToText(_fHoraDesde)" ValueChanged="v => _fHoraDesde = Hora24.ToTime(v) ?? default" />
                         </div>
                         <div class="ase-f" style="flex:1;">
                             <label>Hora hasta</label>
-                            <input class="form-control form-control-sm" type="time" @bind="_fHoraHasta" />
+                            <Hora24 Value="@Hora24.ToText(_fHoraHasta)" ValueChanged="v => _fHoraHasta = Hora24.ToTime(v) ?? default" />
                         </div>
                     </div>
                 }

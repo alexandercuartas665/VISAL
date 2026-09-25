@@ -1,0 +1,105 @@
+@* ============================================================================
+   FechaHora24 — captura fecha + hora con la HORA en formato militar 24h.
+   Reemplaza a <input type="datetime-local">, cuyo picker mostraba a.m./p.m.
+   segun el navegador. La fecha usa el <input type="date"> nativo (no tiene el
+   problema de a.m./p.m.); la hora usa Hora24 (HH:mm 24h).
+
+   Value / ValueChanged: string en el formato indicado por Formato:
+     - "dmy" (default): "dd/MM/yyyy HH:mm"  (o "dd/MM/yyyy" si no hay hora)
+     - "iso":           "yyyy-MM-ddTHH:mm"  (o "yyyy-MM-dd" si no hay hora)
+   Se conserva EXACTAMENTE el formato previo de cada campo para no alterar datos.
+   ============================================================================ *@
+@using System.Globalization
+<span class="d-inline-flex" style="gap:6px;align-items:center;">
+    <input type="date" class="@Class" style="max-width:170px" disabled="@Disabled"
+           value="@_fecha" @onchange="OnFecha" />
+    <Hora24 Value="@_hora" ValueChanged="OnHora" Disabled="@Disabled" Class="@Class"
+            Extra="@(new Dictionary<string,object>{ ["style"] = "max-width:90px" })" />
+</span>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Class { get; set; } = "form-control form-control-sm";
+    /// <summary>"dmy" -> "dd/MM/yyyy HH:mm"; "iso" -> "yyyy-MM-ddTHH:mm".</summary>
+    [Parameter] public string Formato { get; set; } = "dmy";
+
+    private string _fecha = ""; // yyyy-MM-dd (formato del <input type=date>)
+    private string _hora = "";  // HH:mm
+    private string? _ultimoValue;
+
+    private static readonly string[] FormatosEntrada =
+    {
+        "yyyy-MM-ddTHH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-dd",
+        "dd/MM/yyyy HH:mm", "dd/MM/yyyy", "d/M/yyyy H:mm", "d/M/yyyy"
+    };
+
+    protected override void OnParametersSet()
+    {
+        // Solo re-descomponer cuando el Value externo cambia (evita pisar lo que el
+        // usuario esta escribiendo en cada render).
+        if (!string.Equals(Value, _ultimoValue, StringComparison.Ordinal))
+        {
+            _ultimoValue = Value;
+            Descomponer(Value);
+        }
+    }
+
+    private void Descomponer(string? v)
+    {
+        _fecha = ""; _hora = "";
+        if (string.IsNullOrWhiteSpace(v)) { return; }
+        var s = v.Trim();
+        // prefijo de ciudad opcional ("Pasto, 04/09/2026 10:00")
+        var coma = s.LastIndexOf(',');
+        if (coma >= 0 && coma < s.Length - 1) { s = s[(coma + 1)..].Trim(); }
+        if (DateTime.TryParseExact(s, FormatosEntrada, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces, out var dt))
+        {
+            _fecha = dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            _hora = dt.TimeOfDay == TimeSpan.Zero && !TieneHora(s) ? "" : dt.ToString("HH:mm", CultureInfo.InvariantCulture);
+        }
+    }
+
+    private static bool TieneHora(string s) => s.Contains(':');
+
+    private async Task OnFecha(ChangeEventArgs e)
+    {
+        _fecha = e.Value?.ToString() ?? "";
+        await Emit();
+    }
+
+    private async Task OnHora(string? h)
+    {
+        _hora = h ?? "";
+        await Emit();
+    }
+
+    private async Task Emit()
+    {
+        var combinado = Combinar();
+        _ultimoValue = combinado;
+        Value = combinado;
+        await ValueChanged.InvokeAsync(combinado);
+    }
+
+    private string Combinar()
+    {
+        if (string.IsNullOrWhiteSpace(_fecha)) { return ""; }
+        if (!DateTime.TryParseExact(_fecha, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var d)) { return ""; }
+        var conHora = !string.IsNullOrWhiteSpace(_hora)
+            && TimeSpan.TryParseExact(_hora, "hh\\:mm", CultureInfo.InvariantCulture, out var t);
+        var dt = d;
+        if (conHora) { TimeSpan.TryParseExact(_hora, "hh\\:mm", CultureInfo.InvariantCulture, out var tt); dt = d + tt; }
+
+        if (Formato == "iso")
+        {
+            return conHora ? dt.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture)
+                           : dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+        return conHora ? dt.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)
+                       : dt.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+    }
+}

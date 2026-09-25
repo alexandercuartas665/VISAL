@@ -84,18 +84,15 @@ else
                             }
                             else if (EsCampoFecha(cabF.Label))
                             {
-                                @* Campo fecha/hora del encabezado: control nativo datetime-local.
-                                   El valor se guarda como texto "dd/MM/yyyy HH:mm" (para imprimir),
-                                   pero el input trabaja en ISO (yyyy-MM-ddTHH:mm). *@
-                                <input type="datetime-local" class="form-control form-control-sm"
-                                       value="@HdrFechaAIso(GetValue(hdrKey))"
-                                       @onchange="e => SetValue(hdrKey, HdrFechaDesdeIso(e.Value?.ToString()))" />
+                                @* Fecha/hora del encabezado: selector 24h propio (independiente
+                                   del locale del navegador). Se guarda "dd/MM/yyyy HH:mm". *@
+                                <FechaHora24 Value="@GetValue(hdrKey)"
+                                             ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" />
                             }
                             else if (EsCampoHora(cabF.Label))
                             {
-                                <input type="time" class="form-control form-control-sm"
-                                       value="@GetValue(hdrKey)"
-                                       @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                                <Hora24 Value="@GetValue(hdrKey)"
+                                        ValueChanged="v => SetValue(hdrKey, v)" />
                             }
                             else
                             {
@@ -1093,9 +1090,7 @@ else
                 }
                 break;
             case "datetime":
-                <input type="datetime-local" class="form-control form-control-sm"
-                       disabled="@ro" value="@val"
-                       @onchange="e => SetValue(key, e.Value?.ToString())" />
+                <FechaHora24 Value="@val" ValueChanged="v => SetValue(key, v)" Formato="iso" Disabled="@ro" />
                 break;
             case "number":
                 <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"
@@ -1325,9 +1320,7 @@ else
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "datetime":
-                <input type="datetime-local" class="form-control form-control-sm" disabled="@ro" value="@val"
-                       placeholder="@ph"
-                       @onchange="e => setCell(e.Value?.ToString())" />
+                <FechaHora24 Value="@val" ValueChanged="v => setCell(v)" Formato="iso" Disabled="@ro" />
                 break;
             case "select":
                 // Tolerar diferencias de caso/tildes valor guardado vs opciones.

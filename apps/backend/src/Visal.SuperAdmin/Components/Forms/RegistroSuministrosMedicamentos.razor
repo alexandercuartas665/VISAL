@@ -36,9 +36,8 @@ else
         <div class="sm-row">
             <div class="sm-f sm-c-3">
                 <label>Fecha y hora</label>
-                <input class="form-control form-control-sm"
-                       type="datetime-local"
-                       @bind="_borrador.FechaHoraLocal" />
+                <FechaHora24 Value="@(_borrador.FechaHoraLocal?.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture))"
+                             ValueChanged="v => _borrador.FechaHoraLocal = ParseFechaHora24(v)" Formato="iso" />
             </div>
             <div class="sm-f sm-c-5">
                 <label>Presentacion (nombre)</label>
@@ -151,6 +150,12 @@ else
 </style>
 
 @code {
+    // Puente string<->DateTime? para el selector 24h FechaHora24 (emite "yyyy-MM-ddTHH:mm").
+    private static DateTime? ParseFechaHora24(string? v)
+        => DateTime.TryParseExact(v, new[] { "yyyy-MM-ddTHH:mm", "yyyy-MM-dd" },
+               System.Globalization.CultureInfo.InvariantCulture,
+               System.Globalization.DateTimeStyles.None, out var d) ? d : null;
+
     [Parameter] public Guid? HistoriaClinicaId { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
     /// <summary>Notifica al padre despues de Add/Remove para que refresque el

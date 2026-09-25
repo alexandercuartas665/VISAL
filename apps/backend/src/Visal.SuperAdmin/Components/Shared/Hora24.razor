@@ -1,0 +1,57 @@
+@* ============================================================================
+   Hora24 — selector de hora en formato militar 24h (HH:mm), independiente del
+   locale del navegador. Reemplaza a <input type="time">, que en navegadores en
+   espanol pinta a.m./p.m. y causaba confusion (ej. 7pm digitado como 7am).
+
+   Value / ValueChanged: string "HH:mm" (o "" cuando vacio/invalido).
+   Acepta al escribir "1900", "19:00", "19.00", "7", "700"... y normaliza a "HH:mm".
+   ============================================================================ *@
+@using System.Globalization
+<input type="text" class="@Class" inputmode="numeric" maxlength="5"
+       placeholder="HH:mm" title="Hora en formato 24h (00:00 a 23:59)"
+       disabled="@Disabled" value="@Value" @onchange="OnChange" @attributes="Extra" />
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Class { get; set; } = "form-control form-control-sm";
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? Extra { get; set; }
+
+    private async Task OnChange(ChangeEventArgs e)
+    {
+        var norm = Normalizar(e.Value?.ToString());
+        Value = norm;
+        await ValueChanged.InvokeAsync(norm);
+        StateHasChanged(); // refleja el valor normalizado aunque el string no cambie
+    }
+
+    /// <summary>Normaliza una entrada libre a "HH:mm" 24h. Toma los digitos: 1-2 =
+    /// hora (minutos 00); 3-4 = los ultimos 2 son minutos y el resto la hora.
+    /// Devuelve "" si esta vacio o fuera de rango (h>23 o m>59).</summary>
+    public static string Normalizar(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return ""; }
+        var digits = new string(raw.Where(char.IsDigit).ToArray());
+        if (digits.Length == 0) { return ""; }
+        int h, m;
+        if (digits.Length <= 2) { h = int.Parse(digits); m = 0; }
+        else
+        {
+            var min = digits[^2..];
+            var hor = digits[..^2];
+            m = int.Parse(min);
+            h = int.Parse(hor);
+        }
+        if (h > 23 || m > 59) { return ""; }
+        return $"{h:D2}:{m:D2}";
+    }
+
+    // ---- Puentes TimeOnly <-> string "HH:mm" para inputs que bindean TimeOnly. ----
+    public static string ToText(TimeOnly? t)
+        => t?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "";
+
+    public static TimeOnly? ToTime(string? v)
+        => TimeOnly.TryParseExact(Normalizar(v), "HH:mm", CultureInfo.InvariantCulture,
+               DateTimeStyles.None, out var t) ? t : null;
+}

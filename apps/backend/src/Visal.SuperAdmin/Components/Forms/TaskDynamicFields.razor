@@ -100,16 +100,16 @@
                                value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
                         break;
                     case TaskFieldType.Time:
-                        <input class="tdf-input" type="time" disabled="@ReadOnly"
-                               value="@Get(f.FieldKey)" @onchange="e => Set(f.FieldKey, e.Value?.ToString())" />
+                        <Hora24 Class="tdf-input" Disabled="@ReadOnly"
+                                Value="@Get(f.FieldKey)" ValueChanged="v => Set(f.FieldKey, v)" />
                         break;
                     case TaskFieldType.TimeRange:
                         <div class="tdf-timerange">
-                            <input class="tdf-input" type="time" title="Salida" disabled="@ReadOnly"
-                                   value="@TimeRangePart(Get(f.FieldKey), 0)" @onchange="e => Set(f.FieldKey, SetTimeRange(Get(f.FieldKey), 0, e.Value?.ToString()))" />
+                            <Hora24 Class="tdf-input" Disabled="@ReadOnly"
+                                    Value="@TimeRangePart(Get(f.FieldKey), 0)" ValueChanged="v => Set(f.FieldKey, SetTimeRange(Get(f.FieldKey), 0, v))" />
                             <span class="tdf-muted">a</span>
-                            <input class="tdf-input" type="time" title="Llegada" disabled="@ReadOnly"
-                                   value="@TimeRangePart(Get(f.FieldKey), 1)" @onchange="e => Set(f.FieldKey, SetTimeRange(Get(f.FieldKey), 1, e.Value?.ToString()))" />
+                            <Hora24 Class="tdf-input" Disabled="@ReadOnly"
+                                    Value="@TimeRangePart(Get(f.FieldKey), 1)" ValueChanged="v => Set(f.FieldKey, SetTimeRange(Get(f.FieldKey), 1, v))" />
                         </div>
                         break;
                     case TaskFieldType.Select:

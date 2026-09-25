@@ -1110,7 +1110,7 @@ else
     private static string PieFechaImpresion()
     {
         var n = DateTime.Now;
-        return n.ToString("dd/MM/yyyy - h:mm") + " " + (n.Hour < 12 ? "a.m." : "p.m.");
+        return n.ToString("dd/MM/yyyy - HH:mm");
     }
 
     // Estampa el QR de verificacion en las ordenes no-medicamento incluidas. Para cada

@@ -199,7 +199,8 @@
 
             <div class="seg-form-row">
                 <label>Fecha y hora de llamada</label>
-                <input type="datetime-local" @bind="_edit.FechaLlamada" />
+                <FechaHora24 Value="@(_edit.FechaLlamada?.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture))"
+                             ValueChanged="v => _edit.FechaLlamada = ParseFechaHora24(v)" Formato="iso" />
             </div>
 
             <div class="seg-form-row">
@@ -447,6 +448,12 @@
 </style>
 
 @code {
+    // Puente string<->DateTime? para el selector 24h FechaHora24 (emite "yyyy-MM-ddTHH:mm").
+    private static DateTime? ParseFechaHora24(string? v)
+        => DateTime.TryParseExact(v, new[] { "yyyy-MM-ddTHH:mm", "yyyy-MM-dd" },
+               System.Globalization.CultureInfo.InvariantCulture,
+               System.Globalization.DateTimeStyles.None, out var d) ? d : null;
+
     private static readonly (int idx, string texto)[] Preguntas = new[]
     {
         (1, "El profesional se presento oportunamente"),

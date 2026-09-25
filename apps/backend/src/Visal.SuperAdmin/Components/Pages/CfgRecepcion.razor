@@ -217,8 +217,8 @@
             </select>
         </div>
         <div class="ase-f"><label>Fecha</label><input type="date" class="form-control form-control-sm" @bind="_novFecha" /></div>
-        <div class="ase-f"><label>Hora desde</label><input type="time" class="form-control form-control-sm" @bind="_novHoraDesde" /></div>
-        <div class="ase-f"><label>Hora hasta</label><input type="time" class="form-control form-control-sm" @bind="_novHoraHasta" /></div>
+        <div class="ase-f"><label>Hora desde</label><Hora24 Value="@Hora24.ToText(_novHoraDesde)" ValueChanged="v => _novHoraDesde = Hora24.ToTime(v)" /></div>
+        <div class="ase-f"><label>Hora hasta</label><Hora24 Value="@Hora24.ToText(_novHoraHasta)" ValueChanged="v => _novHoraHasta = Hora24.ToTime(v)" /></div>
         <div class="ase-f">
             <label>Tipo</label>
             <select class="form-select form-select-sm" @bind="_novTipo">

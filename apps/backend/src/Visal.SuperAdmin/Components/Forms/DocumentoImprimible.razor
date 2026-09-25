@@ -375,11 +375,11 @@
         return string.IsNullOrWhiteSpace(cfg) ? "https://axon.ipsvisalrt.com/" : cfg;
     }
 
-    /// <summary>Fecha/hora de impresion en formato "dd/MM/yyyy - h:mm:ss a.m./p.m.".</summary>
+    /// <summary>Fecha/hora de impresion en formato 24h "dd/MM/yyyy - HH:mm:ss".</summary>
     private static string FechaImpresion()
     {
         var n = DateTime.Now;
-        return n.ToString("dd/MM/yyyy - h:mm:ss") + " " + (n.Hour < 12 ? "a.m." : "p.m.");
+        return n.ToString("dd/MM/yyyy - HH:mm:ss");
     }
 
     /// <summary>True si la seccion es un fallback de firma/verificacion/pie que

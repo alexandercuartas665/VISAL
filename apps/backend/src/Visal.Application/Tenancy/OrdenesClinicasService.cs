@@ -88,7 +88,10 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         // snapshot quedo sin firma y cuyo profesional hoy SI tiene firma (reparables).
         if (filtro.SoloSinFirma)
         {
-            var setFiltro = await SetSinFirmaAsync(null, ct);
+            // Filtro "sin firma": todas las formulas MEDICAS emitidas sin firma en el
+            // snapshot, reparables o no (no ocultar las que aun no tienen firma del
+            // profesional). Solo MED — ver SetSinFirmaAsync.
+            var setFiltro = await SetSinFirmaAsync(null, soloReparables: false, ct);
             q = setFiltro.Count == 0
                 ? q.Where(h => false)
                 : q.Where(h => setFiltro.Contains(h.Id));
@@ -352,9 +355,10 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(s => new { s.Id, s.Nombre })
                 .ToDictionaryAsync(x => x.Id, x => x.Nombre, ct);
 
-        // Anotacion "sin firma" para las HCs de esta pagina (habilita el badge y la
-        // accion "Reparar firma" por fila).
-        var sinFirmaSet = await SetSinFirmaAsync(hcIds, ct);
+        // Anotacion TieneFirmaFaltante para las HCs de esta pagina: habilita la accion
+        // "Reparar firma". Solo REPARABLES (MED sin firma + profesional con firma hoy),
+        // que es lo unico que la reparacion puede corregir.
+        var sinFirmaSet = await SetSinFirmaAsync(hcIds, soloReparables: true, ct);
 
         return rows.Select(r =>
         {
@@ -425,23 +429,50 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     // ===== Firmas faltantes en formulas emitidas (deteccion + reparacion) =====
 
-    /// <summary>HCs con >=1 formula ORD-MEDI emitida ACTIVA cuyo snapshot quedo sin
-    /// firma-imagen y cuyo profesional tratante hoy SI tiene firma (reparable). Si
-    /// <paramref name="hcIds"/> es null revisa todo el tenant; si no, solo esas HCs.</summary>
-    private async Task<HashSet<Guid>> SetSinFirmaAsync(IReadOnlyCollection<Guid>? hcIds, CancellationToken ct)
+    /// <summary>
+    /// HCs con >=1 formula MEDICA (TipoOrden="MED") emitida ACTIVA cuyo snapshot quedo
+    /// SIN firma-imagen en Bag.firma_profesional.
+    ///
+    /// IMPORTANTE — solo MED: la fórmula médica es el UNICO documento emitido que imprime
+    /// la firma desde el snapshot congelado (Bag.firma_profesional). Los demas tipos
+    /// (SRV/REM/INS/INC/LABEXT/RXEXT) imprimen la firma desde el pie clinico resuelto EN
+    /// VIVO (PaqueteHcImprimible._pieFirmaUrl), asi que un firma_profesional nulo en su
+    /// snapshot es inofensivo. Incluirlos generaba falsos positivos (HCs firmadas listadas
+    /// como "sin firma").
+    ///
+    /// <paramref name="soloReparables"/>: si true, ademas exige que el profesional tratante
+    /// HOY tenga firma registrada (los que la accion "Reparar firma" puede corregir). Si
+    /// false, devuelve todas las MED sin firma (para el filtro "sin firma", sin ocultar las
+    /// que aun no son reparables porque el profesional no tiene firma).
+    /// Si <paramref name="hcIds"/> es null revisa todo el tenant; si no, solo esas HCs.</summary>
+    private async Task<HashSet<Guid>> SetSinFirmaAsync(
+        IReadOnlyCollection<Guid>? hcIds, bool soloReparables, CancellationToken ct)
     {
-        var baseQ = db.OrdenesMedicamentosPublicas.AsNoTracking().Where(o => o.RevocadaAt == null);
+        var baseQ = db.OrdenesMedicamentosPublicas.AsNoTracking()
+            .Where(o => o.RevocadaAt == null && o.TipoOrden == "MED");
         if (hcIds is not null)
         {
             if (hcIds.Count == 0) { return new(); }
             baseQ = baseQ.Where(o => hcIds.Contains(o.HistoriaClinicaId));
         }
-        var rows = await (from o in baseQ
+
+        List<SinFirmaRow> rows;
+        if (soloReparables)
+        {
+            rows = await (from o in baseQ
                           join h in db.HistoriasClinicas.AsNoTracking() on o.HistoriaClinicaId equals h.Id
                           where h.ProfesionalId != null
                           join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id
                           where pr.FirmaUrl != null && pr.FirmaUrl != ""
-                          select new { o.HistoriaClinicaId, o.SnapshotJson }).ToListAsync(ct);
+                          select new SinFirmaRow(o.HistoriaClinicaId, o.SnapshotJson)).ToListAsync(ct);
+        }
+        else
+        {
+            rows = await baseQ
+                .Select(o => new SinFirmaRow(o.HistoriaClinicaId, o.SnapshotJson))
+                .ToListAsync(ct);
+        }
+
         var set = new HashSet<Guid>();
         foreach (var r in rows)
         {
@@ -449,6 +480,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         }
         return set;
     }
+
+    private sealed record SinFirmaRow(Guid HistoriaClinicaId, string? SnapshotJson);
 
     /// <summary>True si el snapshot de una emision NO trae una firma-imagen valida en
     /// Bag.firma_profesional (ausente, vacia o texto no-imagen).</summary>
@@ -481,8 +514,11 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                               join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id
                               select pr.FirmaUrl).FirstOrDefaultAsync(ct);
         if (string.IsNullOrWhiteSpace(firmaUrl)) { return 0; }
+        // Solo MED: la firma del pie se congela en el snapshot unicamente para la formula
+        // medica; los demas tipos la resuelven en vivo (no se debe inyectar ahi).
         var ems = await db.OrdenesMedicamentosPublicas
-            .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.RevocadaAt == null).ToListAsync(ct);
+            .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.RevocadaAt == null && o.TipoOrden == "MED")
+            .ToListAsync(ct);
         int n = 0;
         foreach (var e in ems) { if (InyectarFirma(e, firmaUrl!)) { n++; } }
         if (n > 0) { await db.SaveChangesAsync(ct); }
@@ -492,7 +528,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
     public async Task<int> RepararFirmasFaltantesAsync(Guid actor, CancellationToken ct = default)
     {
         var candidatos = await (from o in db.OrdenesMedicamentosPublicas
-                                where o.RevocadaAt == null
+                                where o.RevocadaAt == null && o.TipoOrden == "MED"
                                 join h in db.HistoriasClinicas.AsNoTracking() on o.HistoriaClinicaId equals h.Id
                                 where h.ProfesionalId != null
                                 join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id

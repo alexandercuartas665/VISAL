@@ -57,7 +57,10 @@ public sealed record InteroperabilidadCredencialSedeDto(
     string? ClientId,
     bool TieneClientSecret,
     DateTimeOffset? FechaExpiracion,
-    int NumeroSede);
+    int NumeroSede,
+    /// <summary>Si true, las HC aprobadas de esta sede se envian automaticamente a RDA
+    /// en este ambiente. Si false, la sede esta apagada para el envio automatico.</summary>
+    bool EnvioActivo = true);
 
 /// <summary>
 /// Payload para crear/actualizar una credencial de sede. El <c>ClientSecretNuevo</c>
@@ -71,7 +74,8 @@ public sealed record InteroperabilidadCredencialSedeSaveRequest(
     string? ClientId,
     string? ClientSecretNuevo,
     DateTimeOffset? FechaExpiracion,
-    int NumeroSede);
+    int NumeroSede,
+    bool EnvioActivo = true);
 
 /// <summary>
 /// Resultado de la prueba de conexion OAuth2 contra Azure AD para una credencial de sede.

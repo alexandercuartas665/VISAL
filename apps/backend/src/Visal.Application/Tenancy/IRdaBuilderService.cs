@@ -12,7 +12,10 @@ public sealed record RdaBuildResult(
     EstadoRdaEvento Estado,
     int RecursosCount,
     bool YaExistia,
-    IReadOnlyList<string> Advertencias);
+    IReadOnlyList<string> Advertencias,
+    /// <summary>True cuando la construccion se OMITIO a proposito (ej. envio automatico
+    /// desactivado para la sede). No se creo ningun RdaEvento; RdaEventoId es Guid.Empty.</summary>
+    bool Omitido = false);
 
 /// <summary>
 /// Construye Bundles FHIR R4 (perfil minsalud.fhir.co.rda v1.0.0) a partir de

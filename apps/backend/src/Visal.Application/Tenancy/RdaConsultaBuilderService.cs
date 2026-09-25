@@ -65,6 +65,22 @@ public sealed class RdaConsultaBuilderService(
         var ambiente = cfg?.AmbienteActivo ?? AmbienteIhce.Sandbox;
         var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
             .FirstOrDefaultAsync(c => c.SucursalId == sucursalId && c.Ambiente == ambiente, ct);
+
+        // Envio automatico gateado por sede: si la sede no esta activa para RDA en el
+        // ambiente vigente (o no tiene credencial ahi), NO generamos evento — asi la HC
+        // aprobada NO cae a la consola ni se envia. La generacion manual desde la consola
+        // (envioAutomatico=false) siempre procede, para permitir reprocesos puntuales.
+        if (envioAutomatico && (credencial is null || !credencial.EnvioActivo))
+        {
+            log.LogInformation(
+                "RDA Consulta omitido (envio auto): sede {Sede} inactiva para RDA en {Amb} (HC {HcId}).",
+                sucursal.Nombre, ambiente, hc.Id);
+            return new RdaBuildResult(Guid.Empty, "", "", EstadoRdaEvento.Borrador, 0,
+                YaExistia: false,
+                new List<string> { $"Envio automatico a RDA desactivado para la sede '{sucursal.Nombre}'." },
+                Omitido: true);
+        }
+
         if (credencial is null || string.IsNullOrWhiteSpace(credencial.CodigoHabilitacion))
         {
             advertencias.Add($"Sede '{sucursal.Nombre}' sin CodigoHabilitacion REPS para {ambiente}. MinSalud rechazara.");

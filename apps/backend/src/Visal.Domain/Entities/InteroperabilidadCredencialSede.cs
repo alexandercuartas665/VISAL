@@ -32,4 +32,13 @@ public class InteroperabilidadCredencialSede : TenantEntity
     public string? ClientSecretCifrado { get; set; }
 
     public DateTimeOffset? FechaExpiracion { get; set; }
+
+    /// <summary>
+    /// Si true, las HC aprobadas de esta sede se generan y envian AUTOMATICAMENTE a la
+    /// Consola RDA en este ambiente. Si false, la sede queda "apagada": al aprobar una HC
+    /// suya NO se crea evento RDA (no cae a la consola ni se envia). La generacion manual
+    /// desde la consola no se ve afectada. Default true para no cambiar el comportamiento
+    /// de las sedes ya configuradas.
+    /// </summary>
+    public bool EnvioActivo { get; set; } = true;
 }

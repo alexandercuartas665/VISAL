@@ -160,6 +160,7 @@
                 <tr>
                     <th>Sede</th>
                     <th>Ambiente</th>
+                    <th title="Si esta activo, las HC aprobadas de esta sede se envian automaticamente a la Consola RDA en este ambiente. Si se apaga, la sede deja de enviar (la HC no cae a la consola).">Envio auto</th>
                     <th>Cod. Habilitacion</th>
                     <th title="Numero de sede fisica dentro del REPS (default 01). Se usa en Location.id del RDA Consulta.">N° Sede</th>
                     <th>Nombre llave</th>
@@ -183,6 +184,14 @@
                             {
                                 <span class="badge bg-success">Produccion</span>
                             }
+                        </td>
+                        <td style="text-align:center">
+                            <input type="checkbox" checked="@c.EnvioActivo"
+                                   @onchange="@(e => ToggleEnvio(c, e.Value is bool b && b))"
+                                   disabled="@(_toggleId == c.Id)"
+                                   title="@(c.EnvioActivo
+                                       ? "Activa: las HC aprobadas de esta sede se envian automaticamente a RDA. Clic para apagar."
+                                       : "Apagada: las HC aprobadas de esta sede NO se envian ni caen a la consola. Clic para activar.")" />
                         </td>
                         <td class="mono">@c.CodigoHabilitacion</td>
                         <td class="mono">@c.NumeroSede.ToString("D2")</td>
@@ -332,7 +341,13 @@
                     <label>Fecha de expiracion</label>
                     <input type="date" class="form-control form-control-sm" @bind="_modal.FechaExpiracion" />
                 </div>
-                <div></div>
+                <div class="ase-f" style="grid-column:1 / 3;">
+                    <label class="asg-chk small" style="margin:0;display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" @bind="_modal.EnvioActivo" />
+                        <span>Envio automatico activo — las HC aprobadas de esta sede se envian a la Consola RDA en este ambiente.
+                              Si se desactiva, la sede queda apagada (la HC no cae a la consola ni se envia).</span>
+                    </label>
+                </div>
             </div>
             <div class="ase-modal-f" style="align-items:center;gap:12px;">
                 @if (!string.IsNullOrEmpty(_guardadoOk))
@@ -401,6 +416,9 @@
     private Guid? _probandoId;
     private ProbarConexionResultado? _resultadoPrueba;
 
+    // ----- Toggle envio automatico inline -----
+    private Guid? _toggleId;
+
     protected override async Task OnInitializedAsync()
     {
         await CargarTodo();
@@ -458,7 +476,8 @@
         {
             Id = Guid.Empty,
             SucursalId = Guid.Empty,
-            Ambiente = AmbienteIhce.Sandbox
+            Ambiente = AmbienteIhce.Sandbox,
+            EnvioActivo = true
         };
     }
 
@@ -474,7 +493,8 @@
             ClientId = c.ClientId,
             TieneClientSecret = c.TieneClientSecret,
             FechaExpiracion = c.FechaExpiracion?.LocalDateTime.Date,
-            NumeroSede = c.NumeroSede
+            NumeroSede = c.NumeroSede,
+            EnvioActivo = c.EnvioActivo
         };
     }
 
@@ -510,7 +530,7 @@
                 _modal.SucursalId, _modal.Ambiente,
                 _modal.CodigoHabilitacion, _modal.NombreLlave,
                 _modal.ClientId, _modal.ClientSecretNuevo, fe,
-                _modal.NumeroSede);
+                _modal.NumeroSede, _modal.EnvioActivo);
             await InterSvc.GuardarCredencialAsync(req, actor);
 
             // Mostrar confirmacion DENTRO del modal para que el usuario vea que si paso algo
@@ -568,6 +588,31 @@
 
     private void CerrarResultado() => _resultadoPrueba = null;
 
+    // Toggle inline del "chulito" de envio automatico por sede. Reenvia todos los
+    // campos actuales de la credencial con el flag invertido; ClientSecretNuevo=null
+    // para NO tocar el secret cifrado (el service lo conserva si viene vacio).
+    private async Task ToggleEnvio(InteroperabilidadCredencialSedeDto c, bool activo)
+    {
+        _error = null; _ok = null;
+        _toggleId = c.Id;
+        try
+        {
+            var actor = await ActorAsync();
+            var req = new InteroperabilidadCredencialSedeSaveRequest(
+                c.SucursalId, c.Ambiente,
+                c.CodigoHabilitacion, c.NombreLlave,
+                c.ClientId, ClientSecretNuevo: null, c.FechaExpiracion,
+                c.NumeroSede, activo);
+            await InterSvc.GuardarCredencialAsync(req, actor);
+            _credenciales = (await InterSvc.ListarCredencialesAsync()).ToList();
+            _ok = activo
+                ? $"Sede '{c.SucursalNombre}' ({c.Ambiente}) ACTIVADA para envio automatico a RDA."
+                : $"Sede '{c.SucursalNombre}' ({c.Ambiente}) APAGADA. Sus HC aprobadas ya no se enviaran ni caeran a la consola.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _toggleId = null; }
+    }
+
     private async Task<bool> ConfirmarAsync(string msg)
     {
         // En este host no esta cableado un IConfirmService; nos apoyamos en JS confirm.
@@ -595,5 +640,6 @@
         public bool TieneClientSecret { get; set; }
         public DateTime? FechaExpiracion { get; set; }
         public int NumeroSede { get; set; } = 1;
+        public bool EnvioActivo { get; set; } = true;
     }
 }

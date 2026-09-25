@@ -10,6 +10,12 @@ public static class ModuloCatalogo
         new("pacientes", "Pacientes / Admision", "Operacion Clinica"),
         new("asignacion", "Asignacion de Servicios", "Operacion Clinica"),
         new("coordinacion", "Coordinacion", "Operacion Clinica"),
+        // Permiso destructivo: eliminar una coordinacion (o los turnos de un
+        // profesional dentro de ella). Sin este permiso el usuario ve la
+        // coordinacion pero NO el boton Eliminar. Owner/Admin del tenant y el
+        // SuperAdmin de plataforma lo tienen implicito. Cada eliminacion queda
+        // auditada (quien, cuando, que) en super_admin_audit_logs.
+        new("coordinacion.eliminar", "Coordinacion - Eliminar coordinacion", "Operacion Clinica"),
         new("asignacion-agendas", "Asignacion por agendas", "Operacion Clinica"),
         new("recepcion", "Recepcion intramural", "Operacion Clinica"),
         new("profesionales", "Profesionales (atencion)", "Operacion Clinica"),

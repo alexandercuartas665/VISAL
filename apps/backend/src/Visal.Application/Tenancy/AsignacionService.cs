@@ -5,8 +5,37 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class AsignacionService(IApplicationDbContext db, ITenantContext tenant) : IAsignacionService
+public sealed class AsignacionService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IAsignacionService
 {
+    /// <summary>Arma el snapshot JSON (previousValue) de una coordinacion para la
+    /// auditoria de eliminacion: identifica paciente/servicio/sede/turnos sin
+    /// depender de joins posteriores (el registro debe ser legible aunque la
+    /// asignacion ya no exista).</summary>
+    private async Task<object> SnapshotCoordinacionAsync(Asignacion asig, int turnos, bool forzar,
+        IReadOnlyList<Guid>? profesionalIds, CancellationToken ct)
+    {
+        var pac = await db.Pacientes.AsNoTracking()
+            .Where(p => p.Id == asig.PacienteId)
+            .Select(p => new { p.NombreCompleto, p.NumeroDocumento })
+            .FirstOrDefaultAsync(ct);
+        return new
+        {
+            asignacionId = asig.Id,
+            loteId = asig.LoteId,
+            pacienteId = asig.PacienteId,
+            pacienteNombre = pac?.NombreCompleto,
+            pacienteDoc = pac?.NumeroDocumento,
+            servicioId = asig.ServicioId,
+            nombreServicio = asig.NombreServicio,
+            tipoServicio = asig.TipoServicio,
+            cantidad = asig.Cantidad,
+            sede = asig.Sucursal,
+            contratoCodigo = asig.ContratoCodigo,
+            turnosEliminados = turnos,
+            conDatosClinicos = forzar,
+            profesionalIds
+        };
+    }
     public async Task<PacienteAsignacionDto?> GetPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
         var p = await db.Pacientes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
@@ -1802,6 +1831,12 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Select(t => t.Id)
             .ToListAsync(ct);
 
+        // Auditoria de accion destructiva (quien/cuando/que) — se agrega al mismo
+        // contexto para persistir dentro de la transaccion del delete.
+        var snapshot = await SnapshotCoordinacionAsync(asig, turnoIds.Count, forzar, null, ct);
+        audit.Write(actor, "coordinacion.delete", nameof(Asignacion), asignacionId,
+            previousValue: snapshot, newValue: null, tenantId: tenant.TenantId);
+
         // Barre artefactos clinicos (si forzar) + sesiones + turnos, y luego la
         // asignacion. Todo en el mismo SaveChangesAsync (transaccion implicita).
         await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
@@ -1964,6 +1999,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             if (tieneNota) { throw new InvalidOperationException("No se puede eliminar: este profesional ya tiene notas medicas en la coordinacion."); }
         }
 
+        var snapshot = await SnapshotCoordinacionAsync(asig, turnoIds.Count, forzar, new[] { profesionalId }, ct);
+        audit.Write(actor, "coordinacion.delete-profesional", nameof(Asignacion), asignacionId,
+            previousValue: snapshot, newValue: null, tenantId: tenant.TenantId);
+
         await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
 
         // Si el profesional era el ultimo (la coordinacion se queda sin turnos),
@@ -2003,6 +2042,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             if (tieneNota) { throw new InvalidOperationException("No se puede eliminar: alguno de los profesionales seleccionados ya tiene notas medicas en la coordinacion."); }
         }
 
+        var snapshot = await SnapshotCoordinacionAsync(asig, turnoIds.Count, forzar, idsSel, ct);
+        audit.Write(actor, "coordinacion.delete-profesional", nameof(Asignacion), asignacionId,
+            previousValue: snapshot, newValue: null, tenantId: tenant.TenantId);
+
         await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
 
         // Si se eliminaron TODOS los profesionales (no quedan turnos), se borra
@@ -2013,6 +2056,64 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<IReadOnlyList<EliminacionCoordinacionLogDto>> ListarEliminacionesCoordinacionAsync(
+        int limite = 100, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return new List<EliminacionCoordinacionLogDto>(); }
+        if (limite <= 0 || limite > 500) { limite = 100; }
+
+        var rows = await db.SuperAdminAuditLogs.AsNoTracking()
+            .Where(a => a.TenantId == tid
+                && (a.ActionName == "coordinacion.delete" || a.ActionName == "coordinacion.delete-profesional"))
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(limite)
+            .Select(a => new { a.CreatedAt, a.ActorUserId, a.ActionName, a.PreviousValue })
+            .ToListAsync(ct);
+        if (rows.Count == 0) { return new List<EliminacionCoordinacionLogDto>(); }
+
+        // Resolver nombres de los actores en un solo round-trip.
+        var actorIds = rows.Select(r => r.ActorUserId).Distinct().ToList();
+        var actores = await db.PlatformUsers.AsNoTracking()
+            .Where(u => actorIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.DisplayName, u.Email })
+            .ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.DisplayName) ? u.Email : u.DisplayName!, ct);
+
+        var lista = new List<EliminacionCoordinacionLogDto>(rows.Count);
+        foreach (var r in rows)
+        {
+            string? pacNombre = null, pacDoc = null, servicio = null, sede = null;
+            int turnos = 0; bool clinicos = false;
+            if (!string.IsNullOrWhiteSpace(r.PreviousValue))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(r.PreviousValue!);
+                    var root = doc.RootElement;
+                    pacNombre = GetStr(root, "pacienteNombre");
+                    pacDoc = GetStr(root, "pacienteDoc");
+                    servicio = GetStr(root, "nombreServicio");
+                    sede = GetStr(root, "sede");
+                    if (root.TryGetProperty("turnosEliminados", out var t) && t.TryGetInt32(out var ti)) { turnos = ti; }
+                    if (root.TryGetProperty("conDatosClinicos", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.True) { clinicos = true; }
+                }
+                catch { /* snapshot ilegible: se muestra la fila con lo que haya */ }
+            }
+            var tipo = r.ActionName == "coordinacion.delete-profesional"
+                ? "Profesional(es) de la coordinacion"
+                : "Coordinacion completa";
+            var actorNombre = actores.TryGetValue(r.ActorUserId, out var n) && !string.IsNullOrWhiteSpace(n)
+                ? n
+                : (r.ActorUserId == Guid.Empty ? "(desconocido)" : r.ActorUserId.ToString()[..8]);
+            lista.Add(new EliminacionCoordinacionLogDto(
+                r.CreatedAt, actorNombre, tipo, pacNombre, pacDoc, servicio, sede, turnos, clinicos));
+        }
+        return lista;
+
+        static string? GetStr(System.Text.Json.JsonElement root, string prop)
+            => root.TryGetProperty(prop, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String
+                ? v.GetString() : null;
     }
 
     public async Task<IReadOnlyList<TurnoReasignableDto>> ListarTurnosReasignablesAsync(

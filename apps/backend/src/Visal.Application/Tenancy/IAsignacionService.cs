@@ -239,6 +239,20 @@ public sealed record CoordinacionEliminableDto(
     int SesionesCompletadas = 0,
     bool TieneAtencion = false);
 
+/// <summary>Fila del historial de eliminaciones de coordinaciones (auditoria).
+/// Reconstruida desde super_admin_audit_logs + el snapshot JSON guardado.</summary>
+public sealed record EliminacionCoordinacionLogDto(
+    DateTimeOffset Fecha,
+    string ActorNombre,
+    /// <summary>"Coordinacion completa" o "Profesional(es) de la coordinacion".</summary>
+    string Tipo,
+    string? PacienteNombre,
+    string? PacienteDoc,
+    string? NombreServicio,
+    string? Sede,
+    int Turnos,
+    bool ConDatosClinicos);
+
 /// <summary>Un profesional dentro de una coordinacion, para el borrado selectivo.</summary>
 public sealed record ProfesionalCoordinacionDto(
     Guid ProfesionalId,
@@ -556,6 +570,15 @@ public interface IAsignacionService
     /// coordinacion que YA tiene sesiones/atencion. Destructivo: la UI lo usa solo
     /// tras doble confirmacion.</param>
     Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, bool forzar = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Historial de eliminaciones de coordinaciones del tenant (auditoria), mas
+    /// recientes primero. Resuelve el nombre del actor y extrae del snapshot el
+    /// paciente / servicio / sede / turnos borrados para mostrarlo en el panel de
+    /// Coordinaciones. <paramref name="limite"/> topa el numero de filas.
+    /// </summary>
+    Task<IReadOnlyList<EliminacionCoordinacionLogDto>> ListarEliminacionesCoordinacionAsync(
+        int limite = 100, CancellationToken ct = default);
 
     /// <summary>
     /// Profesionales asignados dentro de una coordinacion, con sus contadores de

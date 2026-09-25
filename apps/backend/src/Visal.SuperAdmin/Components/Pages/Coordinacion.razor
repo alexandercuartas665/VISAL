@@ -431,10 +431,74 @@ else if (_tabSel == "Coordinaciones")
                     <div class="ase-card-h" style="margin-bottom:2px;">Coordinaciones eliminables</div>
                     <div class="small text-muted">Asignaciones ya coordinadas (con turnos programados) pero sin ninguna atencion iniciada. Se pueden eliminar completas mientras no exista ninguna historia clinica ni nota — abierta, cerrada o descartada. El sistema re-valida al momento de eliminar para evitar carreras.</div>
                 </div>
-                <button class="btn btn-primary btn-sm" @onclick="CargarCoordinaciones" disabled="@_busy">
-                    @(_busy ? "Cargando..." : "Refrescar")
-                </button>
+                <div style="display:flex;gap:8px;align-items:flex-start;">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="ToggleHistorial" disabled="@_cargandoHistorial"
+                            title="Ver quien elimino coordinaciones (auditoria)">
+                        @(_cargandoHistorial ? "Cargando..." : (_mostrarHistorial ? "Ocultar historial" : "🕘 Historial de eliminaciones"))
+                    </button>
+                    <button class="btn btn-primary btn-sm" @onclick="CargarCoordinaciones" disabled="@_busy">
+                        @(_busy ? "Cargando..." : "Refrescar")
+                    </button>
+                </div>
             </div>
+
+            @* Panel de auditoria: quien elimino coordinaciones, cuando y que. Se
+               llena on-demand desde super_admin_audit_logs (acciones coordinacion.delete*). *@
+            @if (_mostrarHistorial)
+            {
+                <div class="cd-hist-wrap" style="margin-top:10px;padding-top:10px;border-top:1px dashed #d1d5db;">
+                    @if (_eliminaciones is null)
+                    {
+                        <div class="ase-empty">Cargando historial...</div>
+                    }
+                    else if (_eliminaciones.Count == 0)
+                    {
+                        <div class="ase-empty">Aun no hay eliminaciones registradas.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm cd-coord-tbl">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th>Elimino</th>
+                                        <th>Tipo</th>
+                                        <th>Paciente</th>
+                                        <th>Servicio</th>
+                                        <th>Sede</th>
+                                        <th class="text-end">Turnos</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var e in _eliminaciones)
+                                    {
+                                        <tr>
+                                            <td class="small mono">@e.Fecha.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td class="fw-600">@e.ActorNombre</td>
+                                            <td class="small">@e.Tipo</td>
+                                            <td>
+                                                <div>@(string.IsNullOrWhiteSpace(e.PacienteNombre) ? "-" : e.PacienteNombre)</div>
+                                                @if (!string.IsNullOrWhiteSpace(e.PacienteDoc)) { <div class="small text-muted">@e.PacienteDoc</div> }
+                                            </td>
+                                            <td class="small">@(string.IsNullOrWhiteSpace(e.NombreServicio) ? "-" : e.NombreServicio)</td>
+                                            <td class="small">@(string.IsNullOrWhiteSpace(e.Sede) ? "-" : e.Sede)</td>
+                                            <td class="text-end">@e.Turnos</td>
+                                            <td>
+                                                @if (e.ConDatosClinicos)
+                                                {
+                                                    <span class="badge bg-danger" style="font-size:.65rem;" title="Se eliminaron tambien historias clinicas/notas">Con datos clinicos</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            }
 
             @if (_coordList is null)
             {
@@ -503,9 +567,16 @@ else if (_tabSel == "Coordinaciones")
                                     else { <span class="text-muted">-</span> }
                                 </td>
                                 <td class="text-center">
-                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => AbrirModalEliminarCoord(c)" title="Eliminar coordinacion">
-                                        Eliminar
-                                    </button>
+                                    @if (_puedeEliminar)
+                                    {
+                                        <button class="btn btn-outline-danger btn-sm" @onclick="() => AbrirModalEliminarCoord(c)" title="Eliminar coordinacion">
+                                            Eliminar
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small" title="No tienes el permiso 'Eliminar coordinacion'. Pidelo a un administrador.">Sin permiso</span>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -1344,6 +1415,18 @@ else if (_tabSel == "Calendario")
                 _error = "No se pudo identificar al usuario.";
                 return;
             }
+            _actorId = puId;
+
+            // Permiso para eliminar coordinaciones. Mismo patron que el resto de la app:
+            // se lee del claim "perms" (CSV de modulos con Ver=true) con bypass para
+            // Super Admin de plataforma y Owner/Admin del tenant (ven/pueden todo).
+            var esAdmin = st.User.FindFirst("platform_role") is not null
+                || string.Equals(st.User.FindFirst("tenant_role")?.Value, "Owner", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(st.User.FindFirst("tenant_role")?.Value, "Admin", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(st.User.FindFirst("rol_nombre")?.Value, "Administrador", StringComparison.OrdinalIgnoreCase);
+            var perms = (st.User.FindFirst("perms")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            _puedeEliminar = esAdmin || perms.Contains("coordinacion.eliminar");
             _modulos = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
                 () => UsuSvc.GetModulosCoordinacionAsync(puId))).ToList();
 
@@ -1730,6 +1813,13 @@ else if (_tabSel == "Calendario")
     }
 
     // ============ Tab Coordinaciones (asignaciones eliminables) ============
+    // Actor logueado (para auditar quien elimina) + permiso de eliminacion.
+    private Guid _actorId;
+    private bool _puedeEliminar;
+    // Historial de eliminaciones (auditoria) mostrado en panel colapsable.
+    private List<EliminacionCoordinacionLogDto>? _eliminaciones;
+    private bool _mostrarHistorial;
+    private bool _cargandoHistorial;
     private List<CoordinacionEliminableDto>? _coordList;
     private CoordinacionEliminableDto? _coordEliminar;
     private string _coordConfirmText = "";
@@ -1827,6 +1917,25 @@ else if (_tabSel == "Calendario")
         if (!AlgunoSelConAtencion) { _profForzarConfirm = false; }
     }
 
+    // Abre/cierra el panel de historial; al abrir (o si ya estaba abierto) recarga.
+    private async Task ToggleHistorial()
+    {
+        _mostrarHistorial = !_mostrarHistorial;
+        if (_mostrarHistorial) { await CargarHistorial(); }
+    }
+
+    private async Task CargarHistorial()
+    {
+        _cargandoHistorial = true;
+        try
+        {
+            _eliminaciones = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
+                () => Svc.ListarEliminacionesCoordinacionAsync())).ToList();
+        }
+        catch (Exception ex) { _error = "No se pudo cargar el historial: " + ex.Message; }
+        finally { _cargandoHistorial = false; }
+    }
+
     private async Task EliminarSeleccionadosAsync()
     {
         if (_coordEliminar is null || _profSeleccionados.Count == 0) { return; }
@@ -1838,7 +1947,7 @@ else if (_tabSel == "Calendario")
             var seleccionados = _profSeleccionados.ToList();
             var todos = seleccionados.Count == _coordProfesionales.Count;
             await Svc.EliminarProfesionalesDeCoordinacionAsync(
-                asigId, seleccionados, Guid.Empty, AlgunoSelConAtencion);
+                asigId, seleccionados, _actorId, AlgunoSelConAtencion);
 
             if (todos)
             {
@@ -1858,6 +1967,7 @@ else if (_tabSel == "Calendario")
                 // Si tras recargar la coordinacion ya no aplica, cierra el modal.
                 if (_coordProfesionales.Count <= 1) { _coordEliminar = null; }
             }
+            if (_mostrarHistorial) { await CargarHistorial(); }
         }
         catch (InvalidOperationException ex) { _coordEliminarErr = ex.Message; }
         catch (Exception ex) { _coordEliminarErr = "Error inesperado: " + ex.Message; }
@@ -1873,12 +1983,13 @@ else if (_tabSel == "Calendario")
         try
         {
             await Svc.EliminarCoordinacionAsync(
-                _coordEliminar.AsignacionId, Guid.Empty, _coordEliminar.TieneAtencion);
+                _coordEliminar.AsignacionId, _actorId, _coordEliminar.TieneAtencion);
             var eliminadoId = _coordEliminar.AsignacionId;
             _coordEliminar = null;
             _coordConfirmText = "";
             _coordList?.RemoveAll(x => x.AsignacionId == eliminadoId);
             _ok = "Coordinacion eliminada correctamente.";
+            if (_mostrarHistorial) { await CargarHistorial(); }
         }
         catch (InvalidOperationException ex) { _coordEliminarErr = ex.Message; }
         catch (Exception ex) { _coordEliminarErr = "Error inesperado: " + ex.Message; }

@@ -384,7 +384,8 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 deptoNombre, munNombre, nacNombre,
                 codHabResuelto, tipoArchivoRips, codigoAutorizacion,
                 nombreServicio, valorUnitario, valorTotal, cuotaModeradora, copago,
-                modalidadFacturacion, grupoServicioFacturacion, servicioFacturacion));
+                modalidadFacturacion, grupoServicioFacturacion, servicioFacturacion,
+                asigRelevante?.LoteId));
         }
         return hechos;
     }

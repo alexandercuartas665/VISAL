@@ -66,7 +66,12 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         "Municipio",                                  // 39
         "Dirección",                                  // 40
         "Telefono",                                   // 41
-        "Correo electrónico"                          // 42
+        "Correo electrónico",                         // 42
+        // Columnas internas de trazabilidad (fuera del template EPS de 42), al FINAL
+        // para no alterar el orden validado por la EPS. Muestran los codigos cortos
+        // (primeros 8 hex) para conciliar contra el modulo Ordenes.
+        "HC N°",                                      // 43  Id de la Historia Clinica (8 hex)
+        "Cód. Asignación"                             // 44  LoteId de la asignacion (8 hex)
     };
 
     /// <summary>
@@ -105,6 +110,8 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Dirección"]                               = "Direccion de la sede que atendio (Configuracion de Empresa -> sede -> Direccion)",
         ["Telefono"]                                = "Telefono de la sede que atendio (Configuracion de Empresa -> sede -> Telefono)",
         ["Correo electrónico"]                      = "Correo de la sede que atendio (Configuracion de Empresa -> sede -> Correo)",
+        ["HC N°"]                                   = "Codigo interno de la Historia Clinica (primeros 8 hex del Id). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
+        ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -174,8 +181,16 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Dirección"] = h.Sucursal?.Direccion,                             // 40 — direccion de la sede que atendio (Sucursal.Direccion)
             ["Telefono"] = h.Sucursal?.Telefono,                               // 41 — telefono de la sede que atendio (Sucursal.Telefono)
             ["Correo electrónico"] = h.Sucursal?.Email,                        // 42 — correo de la sede que atendio (Sucursal.Email)
+            // Trazabilidad interna (fuera del template EPS): codigos cortos 8-hex.
+            ["HC N°"] = Corto8(h.Hc.Id),                                       // 43 — Id de la HC (primeros 8 hex)
+            ["Cód. Asignación"] = Corto8(h.AsignacionLoteId),                  // 44 — LoteId de la asignacion (primeros 8 hex)
         };
     }
+
+    /// <summary>Codigo corto: primeros 8 hex del GUID en mayuscula (igual que "HC N°"
+    /// y el "codigo de asignacion" del modulo Ordenes). Null/Empty -> null.</summary>
+    private static string? Corto8(Guid? id)
+        => id is Guid g && g != Guid.Empty ? g.ToString()[..8].ToUpperInvariant() : null;
 
     // Autorizacion viene de Asignacion.CodigoAutorizacion. Legacy tiene "." como
     // placeholder de "sin autorizacion" — la EPS lo quiere en blanco/null. Lo

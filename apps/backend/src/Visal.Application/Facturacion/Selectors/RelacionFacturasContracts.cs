@@ -75,4 +75,8 @@ public sealed record RelacionFacturasHecho(
     string? GrupoServicioFacturacion,
     /// <summary>Codigo/categoria de servicio para facturacion (col 36),
     /// configurado en el servicio del contrato (ServicioContrato.ServicioFacturacion).</summary>
-    string? ServicioFacturacion);
+    string? ServicioFacturacion,
+    /// <summary>LoteId de la asignacion relevante (el "codigo de asignacion" que agrupa
+    /// todos los servicios del paciente en una operacion). Se muestra en la columna
+    /// "Cod. Asignacion" (primeros 8 hex). Null si no se resolvio asignacion.</summary>
+    Guid? AsignacionLoteId = null);

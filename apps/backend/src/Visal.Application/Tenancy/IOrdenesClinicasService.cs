@@ -72,7 +72,11 @@ public sealed record OrdenClinicaItemDto(
     /// HC -> AsignacionTurnoSesionHc -> Sesion -> Turno -> Asignacion.LoteId.
     /// Null cuando la HC no vino de /atencion o quedo huerfana. En la UI se
     /// muestra como los primeros 8 hex del GUID (igual que el "HC N°").</summary>
-    Guid? AsignacionLoteId = null);
+    Guid? AsignacionLoteId = null,
+    /// <summary>True si la HC tiene >=1 formula de medicamentos EMITIDA y ACTIVA cuyo
+    /// snapshot quedo SIN firma del profesional, pero el profesional tratante hoy SI
+    /// tiene firma registrada (es reparable). Habilita la accion "Reparar firma".</summary>
+    bool TieneFirmaFaltante = false);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,
@@ -97,7 +101,10 @@ public sealed record OrdenesClinicasFiltro(
     /// servicios del paciente: los primeros hasta 8 hex del GUID del
     /// <c>AsignacionLote</c>. Case-insensitive y por prefijo. Trae todas las HCs
     /// cuyos servicios cuelgan de ese lote. Vacio = sin filtro.</summary>
-    string? CodigoAsignacion = null);
+    string? CodigoAsignacion = null,
+    /// <summary>Si true, solo trae HCs con formulas emitidas activas SIN firma en el
+    /// snapshot y con profesional que hoy si tiene firma (reparables).</summary>
+    bool SoloSinFirma = false);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);
@@ -128,6 +135,16 @@ public interface IOrdenesClinicasService
     /// filtros que <see cref="BuscarAsync"/> — el archivo refleja exactamente
     /// lo que el usuario ve en la tabla.</summary>
     Task<OrdenesArchivoExportado> ExportarExcelAsync(OrdenesClinicasFiltro filtro, CancellationToken ct = default);
+
+    /// <summary>Repara las firmas faltantes de las formulas EMITIDAS y ACTIVAS de una
+    /// HC: inyecta en el snapshot congelado la firma vigente del profesional tratante
+    /// cuando el pie quedo sin firma (se emitio antes de que la registrara). No toca
+    /// medicamentos ni el codigo/QR. Devuelve cuantas emisiones se repararon.</summary>
+    Task<int> RepararFirmasPorHistoriaAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Repara TODAS las firmas faltantes de formulas emitidas activas del
+    /// tenant (bulk). Devuelve cuantas emisiones se repararon.</summary>
+    Task<int> RepararFirmasFaltantesAsync(Guid actor, CancellationToken ct = default);
 }
 
 /// <summary>Archivo binario listo para servir por HTTP.</summary>

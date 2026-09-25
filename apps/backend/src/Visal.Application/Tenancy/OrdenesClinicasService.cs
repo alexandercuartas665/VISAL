@@ -84,6 +84,16 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             q = q.Where(h => hcIdsDeLote.Contains(h.Id));
         }
 
+        // Filtro "solo sin firma": restringe a HCs con formulas emitidas activas cuyo
+        // snapshot quedo sin firma y cuyo profesional hoy SI tiene firma (reparables).
+        if (filtro.SoloSinFirma)
+        {
+            var setFiltro = await SetSinFirmaAsync(null, ct);
+            q = setFiltro.Count == 0
+                ? q.Where(h => false)
+                : q.Where(h => setFiltro.Contains(h.Id));
+        }
+
         // LEFT JOIN a `revisiones_clinica` para traer el estado agregado + veredicto
         // agente sin romper filas de HCs que aun no entraron al ciclo (Capa 08 Ola 2).
         // La EPS del paciente se resuelve DESPUES via lookup en memoria (los
@@ -342,6 +352,10 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(s => new { s.Id, s.Nombre })
                 .ToDictionaryAsync(x => x.Id, x => x.Nombre, ct);
 
+        // Anotacion "sin firma" para las HCs de esta pagina (habilita el badge y la
+        // accion "Reparar firma" por fila).
+        var sinFirmaSet = await SetSinFirmaAsync(hcIds, ct);
+
         return rows.Select(r =>
         {
             Guid? aseId = null;
@@ -403,9 +417,112 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 sesionNumero,
                 srvExt.GetValueOrDefault(r.Hc.Id, 0),
                 r.Hc.FechaAtencion,
-                asigLoteId
+                asigLoteId,
+                sinFirmaSet.Contains(r.Hc.Id)
             );
         }).ToList();
+    }
+
+    // ===== Firmas faltantes en formulas emitidas (deteccion + reparacion) =====
+
+    /// <summary>HCs con >=1 formula ORD-MEDI emitida ACTIVA cuyo snapshot quedo sin
+    /// firma-imagen y cuyo profesional tratante hoy SI tiene firma (reparable). Si
+    /// <paramref name="hcIds"/> es null revisa todo el tenant; si no, solo esas HCs.</summary>
+    private async Task<HashSet<Guid>> SetSinFirmaAsync(IReadOnlyCollection<Guid>? hcIds, CancellationToken ct)
+    {
+        var baseQ = db.OrdenesMedicamentosPublicas.AsNoTracking().Where(o => o.RevocadaAt == null);
+        if (hcIds is not null)
+        {
+            if (hcIds.Count == 0) { return new(); }
+            baseQ = baseQ.Where(o => hcIds.Contains(o.HistoriaClinicaId));
+        }
+        var rows = await (from o in baseQ
+                          join h in db.HistoriasClinicas.AsNoTracking() on o.HistoriaClinicaId equals h.Id
+                          where h.ProfesionalId != null
+                          join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id
+                          where pr.FirmaUrl != null && pr.FirmaUrl != ""
+                          select new { o.HistoriaClinicaId, o.SnapshotJson }).ToListAsync(ct);
+        var set = new HashSet<Guid>();
+        foreach (var r in rows)
+        {
+            if (SnapshotSinFirma(r.SnapshotJson)) { set.Add(r.HistoriaClinicaId); }
+        }
+        return set;
+    }
+
+    /// <summary>True si el snapshot de una emision NO trae una firma-imagen valida en
+    /// Bag.firma_profesional (ausente, vacia o texto no-imagen).</summary>
+    private static bool SnapshotSinFirma(string? snapshotJson)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotJson)) { return true; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(snapshotJson);
+            if (doc.RootElement.TryGetProperty("Bag", out var bag)
+                && bag.ValueKind == System.Text.Json.JsonValueKind.Object
+                && bag.TryGetProperty("firma_profesional", out var f)
+                && f.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var v = f.GetString() ?? "";
+                return !(v.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)
+                         || v.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)
+                         || v.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                         || v.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+            }
+            return true; // sin Bag.firma_profesional => sin firma
+        }
+        catch { return false; }
+    }
+
+    public async Task<int> RepararFirmasPorHistoriaAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default)
+    {
+        var firmaUrl = await (from h in db.HistoriasClinicas.AsNoTracking()
+                              where h.Id == historiaClinicaId && h.ProfesionalId != null
+                              join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id
+                              select pr.FirmaUrl).FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(firmaUrl)) { return 0; }
+        var ems = await db.OrdenesMedicamentosPublicas
+            .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.RevocadaAt == null).ToListAsync(ct);
+        int n = 0;
+        foreach (var e in ems) { if (InyectarFirma(e, firmaUrl!)) { n++; } }
+        if (n > 0) { await db.SaveChangesAsync(ct); }
+        return n;
+    }
+
+    public async Task<int> RepararFirmasFaltantesAsync(Guid actor, CancellationToken ct = default)
+    {
+        var candidatos = await (from o in db.OrdenesMedicamentosPublicas
+                                where o.RevocadaAt == null
+                                join h in db.HistoriasClinicas.AsNoTracking() on o.HistoriaClinicaId equals h.Id
+                                where h.ProfesionalId != null
+                                join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id
+                                where pr.FirmaUrl != null && pr.FirmaUrl != ""
+                                select new { Emision = o, Firma = pr.FirmaUrl }).ToListAsync(ct);
+        int n = 0;
+        foreach (var x in candidatos) { if (InyectarFirma(x.Emision, x.Firma!)) { n++; } }
+        if (n > 0) { await db.SaveChangesAsync(ct); }
+        return n;
+    }
+
+    /// <summary>Inyecta la firma en Bag.firma_profesional del snapshot si aun no tiene
+    /// una firma-imagen valida. Devuelve true si modifico el snapshot. No toca meds/QR.</summary>
+    private static bool InyectarFirma(OrdenMedicamentoPublica e, string firmaUrl)
+    {
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(e.SnapshotJson) is not System.Text.Json.Nodes.JsonObject root) { return false; }
+            if (root["Bag"] is not System.Text.Json.Nodes.JsonObject bag) { return false; }
+            var actual = bag["firma_profesional"] is System.Text.Json.Nodes.JsonValue jv
+                && jv.TryGetValue<string>(out var sv) ? sv : "";
+            if (actual.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) { return false; }
+            bag["firma_profesional"] = firmaUrl;
+            e.SnapshotJson = root.ToJsonString();
+            return true;
+        }
+        catch { return false; }
     }
 
     public async Task<IReadOnlyList<string>> ListarEspecialistasAsync(CancellationToken ct = default)

@@ -660,6 +660,9 @@ else
 
     // Items
     private List<OrdenMedicamentoItemDto> _meds = new();
+    // Firma vigente del profesional tratante (resuelta en vivo al cargar). Se usa para
+    // completar el pie de formulas emitidas cuyo snapshot se congelo sin firma.
+    private string? _firmaProfActual;
     private OrdenPublicaResumenDto? _emisionMed;   // emision publica activa (QR) de la primera orden (compat FechaFormulaMed)
     private Dictionary<string, string?> _bagMed = new();  // bag de la primera orden (compat)
 
@@ -804,14 +807,20 @@ else
             // archivo valido. La identidad firmante (nombre/registro) sigue congelada.
             try
             {
-                if (_fdHc is not null && !string.IsNullOrWhiteSpace(_fdHc.PrefillRoutesJson)
-                    && _hc.ProfesionalId is Guid profFirmaId && profFirmaId != Guid.Empty)
+                if (_hc.ProfesionalId is Guid profFirmaId && profFirmaId != Guid.Empty)
                 {
-                    var firmaProfActual = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(profFirmaId);
-                    if (!string.IsNullOrWhiteSpace(firmaProfActual))
+                    // Firma vigente del tratante: se usa tanto para el documento HC
+                    // (via rutas de prefill) como para el pie de las formulas emitidas
+                    // (ConstruirBagMed -> AplicarFirmaEnVivo), asi un snapshot que se
+                    // congelo SIN firma (se emitio antes de que el profesional la
+                    // registrara) igual imprime la firma actual. La identidad firmante
+                    // (nombre/registro) sigue congelada.
+                    _firmaProfActual = await FirmaResolverSvc.ResolverFirmaPorProfesionalAsync(profFirmaId);
+                    if (!string.IsNullOrWhiteSpace(_firmaProfActual)
+                        && _fdHc is not null && !string.IsNullOrWhiteSpace(_fdHc.PrefillRoutesJson))
                     {
                         var rutasHc = PrefillRouteSet.FromJson(_fdHc.PrefillRoutesJson);
-                        FirmasPrefillHelper.Aplicar(_valores, firmaPacienteUrl: null, firmaProfActual, rutasHc);
+                        FirmasPrefillHelper.Aplicar(_valores, firmaPacienteUrl: null, _firmaProfActual, rutasHc);
                     }
                 }
             }
@@ -1756,6 +1765,25 @@ else
         return "Fecha: " + f.ToLocalTime().ToString("dd/MM/yyyy");
     }
 
+    /// <summary>
+    /// Completa la firma del pie de una formula si el bag (congelado o borrador) no
+    /// trae una firma-imagen valida, usando la firma vigente del profesional tratante
+    /// (<see cref="_firmaProfActual"/>). Previene el caso de formulas emitidas antes de
+    /// que el profesional registrara su firma. No toca medicamentos ni QR.
+    /// </summary>
+    private void AplicarFirmaEnVivo(Dictionary<string, string?> bag)
+    {
+        if (string.IsNullOrWhiteSpace(_firmaProfActual)) { return; }
+        var actual = bag.TryGetValue("firma_profesional", out var f) ? f : null;
+        var yaImg = !string.IsNullOrWhiteSpace(actual)
+            && (actual!.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || actual.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        if (yaImg) { return; }
+        bag["firma_profesional"] = _firmaProfActual;
+    }
+
     private Dictionary<string, string?> ConstruirBagMed(List<OrdenMedicamentoItemDto> meds, OrdenPublicaResumenDto? emision)
     {
         // Orden emitida: snapshot inmutable (paciente + meds + firma + prof + codigo).
@@ -1771,6 +1799,7 @@ else
                     // olvido) despues de emitir. Se toma siempre en vivo para que la
                     // formula lo refleje sin alterar los medicamentos/firma firmados.
                     AplicarDiagnosticoEnVivo(frozen);
+                    AplicarFirmaEnVivo(frozen);
                     return frozen;
                 }
             }

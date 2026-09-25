@@ -504,6 +504,22 @@ else
                 <option value="Abierta">Solo Abiertas</option>
             </select>
         </div>
+        @* FIRMA — Trae solo HCs con formulas emitidas activas SIN firma en el
+           snapshot congelado, pero cuyo profesional hoy SI tiene firma registrada
+           (reparables). Habilita la accion "Reparar firma" por fila y el boton
+           masivo del toolbar. Viaja al servidor (OrdenesClinicasFiltro.SoloSinFirma). *@
+        <div class="oc-f oc-f-wide">
+            <label>Firma</label>
+            <div class="form-check" style="padding-top:4px;">
+                <input class="form-check-input" type="checkbox" id="ocSoloSinFirma"
+                       @bind="_soloSinFirma" />
+                <label class="form-check-label" for="ocSoloSinFirma"
+                       style="font-size:12px;cursor:pointer;"
+                       title="Solo formulas emitidas sin firma que hoy se pueden reparar">
+                    Solo ordenes sin firma
+                </label>
+            </div>
+        </div>
         @* REV-14 — Filtro combinado del ciclo de revision + veredicto del agente IA.
            Se aplica en cliente sobre _rows: sencillo y suficiente para el tope de 500
            HCs que ya trae el servidor. Cuando el usuario quiera cubrir mas alla,
@@ -615,6 +631,24 @@ else
                     @onclick="EjecutarRevisionMasivaAsync">
                 🤖 Revisar con agente (@cerradasEnListado)
             </button>
+            @* FIRMA — Reparacion masiva: inyecta la firma vigente del profesional en
+               TODAS las formulas emitidas activas del tenant que quedaron sin firma
+               y hoy son reparables. No consume tokens ni toca medicamentos/QR.
+               Aparece solo cuando el filtro "Solo ordenes sin firma" esta activo. *@
+            @{
+                var sinFirmaEnListado = _rows.Count(r => r.TieneFirmaFaltante);
+            }
+            @if (_soloSinFirma)
+            {
+                <button class="btn btn-outline-warning btn-sm"
+                        disabled="@(_buscando || _reparandoFirmas || sinFirmaEnListado == 0)"
+                        title="@(sinFirmaEnListado == 0
+                            ? "No hay ordenes reparables en el listado"
+                            : $"Reparar la firma de las {sinFirmaEnListado} HC(s) sin firma del listado (inyecta la firma vigente del profesional)")"
+                        @onclick="RepararFirmasFaltantesAsync">
+                    @(_reparandoFirmas ? "Reparando..." : $"🖊 Reparar firmas faltantes ({sinFirmaEnListado})")
+                </button>
+            }
         </div>
     </div>
 
@@ -766,6 +800,13 @@ else
                                                 <button class="oc-kebab-item" @onclick="() => KebabRun(() => AbrirModalImprimir(r))">
                                                     <span class="oc-kebab-ico">🖨</span> Imprimir
                                                 </button>
+                                                @if (r.TieneFirmaFaltante)
+                                                {
+                                                    <button class="oc-kebab-item oc-kebab-ok" @onclick="() => KebabRunAsync(() => RepararFirmaAsync(r))"
+                                                            title="Inyecta la firma vigente del profesional en las formulas emitidas que quedaron sin firma">
+                                                        <span class="oc-kebab-ico">🖊</span> Reparar firma
+                                                    </button>
+                                                }
                                                 <button class="oc-kebab-item" @onclick="() => KebabRun(() => AbrirRevision(r))">
                                                     <span class="oc-kebab-ico">🔍</span> Ver revision
                                                 </button>
@@ -1559,6 +1600,15 @@ else
     private string _especialista = "";
     private string _estadoFiltro = ""; // "", "Cerrada", "Abierta"
 
+    /// <summary>FIRMA — Cuando true, el listado solo trae HCs con formulas emitidas
+    /// activas cuyo snapshot quedo SIN firma pero el profesional hoy si tiene firma
+    /// registrada (reparables). Viaja al servidor via OrdenesClinicasFiltro.SoloSinFirma.</summary>
+    private bool _soloSinFirma = false;
+
+    /// <summary>FIRMA — true mientras corre la reparacion masiva de firmas; bloquea
+    /// el boton para evitar dobles disparos.</summary>
+    private bool _reparandoFirmas = false;
+
     /// <summary>REV-14 — Filtro combinado del ciclo de revision + veredicto del
     /// agente IA. Se aplica en cliente sobre <see cref="_rows"/>. Formato:
     /// "" (todas), "rev:{EstadoAgregado}" o "ia:{Aprobado|Rechazado|Neutral|SinCorrer}".
@@ -1709,7 +1759,8 @@ else
                 SucursalId: Guid.TryParse(_sucursalFiltro, out var sedeId) ? sedeId : (Guid?)null,
                 FormatoCodigo: string.IsNullOrWhiteSpace(_formatoFiltro) ? null : _formatoFiltro,
                 CodigoHc: string.IsNullOrWhiteSpace(_codigoHcFiltro) ? null : _codigoHcFiltro.Trim(),
-                CodigoAsignacion: string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? null : _codigoAsignacionFiltro.Trim());
+                CodigoAsignacion: string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? null : _codigoAsignacionFiltro.Trim(),
+                SoloSinFirma: _soloSinFirma);
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -1727,7 +1778,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = "";
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false;
         await Buscar();
     }
 
@@ -1826,6 +1877,53 @@ else
         {
             await JS.InvokeVoidAsync("alert", "No se pudo activar: " + ex.Message);
         }
+    }
+
+    /// <summary>FIRMA — Repara las firmas faltantes de UNA HC: inyecta la firma
+    /// vigente del profesional tratante en las formulas emitidas activas cuyo
+    /// snapshot congelado quedo sin firma (se emitieron antes de que la
+    /// registrara). No toca medicamentos ni el codigo/QR. Refresca el listado.</summary>
+    private async Task RepararFirmaAsync(OrdenClinicaItemDto r)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Reparar la firma de las ordenes emitidas de {r.PacienteNombre}?\n\nSe inyectara la firma vigente del profesional en las formulas que quedaron sin firma. No cambia medicamentos ni el codigo de verificacion.");
+        if (!ok) { return; }
+        try
+        {
+            var n = await OcSvc.RepararFirmasPorHistoriaAsync(r.HistoriaClinicaId, _actorId);
+            await Buscar();
+            await JS.InvokeVoidAsync("alert", n > 0
+                ? $"Firma reparada en {n} orden(es) emitida(s)."
+                : "No habia ordenes reparables (o el profesional no tiene firma registrada).");
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", "No se pudo reparar la firma: " + ex.Message);
+        }
+    }
+
+    /// <summary>FIRMA — Reparacion masiva de todas las formulas emitidas activas
+    /// del tenant que quedaron sin firma y hoy son reparables. Pide confirmacion,
+    /// llama al service y refresca el listado con el conteo reparado.</summary>
+    private async Task RepararFirmasFaltantesAsync()
+    {
+        var sinFirmaEnListado = _rows.Count(r => r.TieneFirmaFaltante);
+        if (sinFirmaEnListado == 0) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Reparar la firma de TODAS las ordenes emitidas sin firma del tenant?\n\nSe inyectara la firma vigente del profesional en cada formula que quedo sin firma. No cambia medicamentos ni codigos de verificacion.");
+        if (!ok) { return; }
+        _reparandoFirmas = true;
+        try
+        {
+            var n = await OcSvc.RepararFirmasFaltantesAsync(_actorId);
+            await Buscar();
+            await JS.InvokeVoidAsync("alert", $"Firma reparada en {n} orden(es) emitida(s).");
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", "No se pudieron reparar las firmas: " + ex.Message);
+        }
+        finally { _reparandoFirmas = false; }
     }
 
     /// <summary>Abre el modal para que el usuario elija que documentos imprimir.</summary>

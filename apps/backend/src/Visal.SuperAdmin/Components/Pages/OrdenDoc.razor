@@ -701,10 +701,7 @@ else
                 firma = await FirmaResolverSvc.ResolverFirmaProfesionalPorPlatformUserAsync(puid, tid);
             }
         }
-        catch (Exception ex) { Log.LogWarning(ex, "FIRMA-EMISION: fallo resolviendo firma"); }
-
-        Log.LogWarning("FIRMA-EMISION dbg: hcNull={HcNull} profId={ProfId} platformUid={Puid} firmaResuelta={Firma} bagCount={Count}",
-            _hc is null, profId, platformUid, string.IsNullOrWhiteSpace(firma) ? "(vacia)" : firma, _emisionBag.Count);
+        catch (Exception ex) { Log.LogWarning(ex, "OrdenDoc: fallo resolviendo firma del profesional para la formula emitida"); }
 
         if (!string.IsNullOrWhiteSpace(firma)) { _emisionBag["firma_profesional"] = firma; }
     }

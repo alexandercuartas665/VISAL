@@ -96,12 +96,20 @@ public static class FechaAtencionHelper
         "yyyy-MM-ddTHH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"
     };
 
+    // Colombia usa UTC-5 fijo (sin horario de verano). La hora que el usuario digita en
+    // "Ciudad y Fecha" es hora de pared local de Bogota.
+    private static readonly TimeSpan BogotaOffset = TimeSpan.FromHours(-5);
+
     /// <summary>
     /// Parsea el valor del campo de cabecera "Ciudad y Fecha". Acepta un prefijo de
     /// ciudad opcional ("Pasto, 04/09/2026 10:00") tomando lo que sigue a la ultima
-    /// coma, y formatos dd/MM/yyyy [HH:mm] (Colombia) e ISO. Los componentes se tratan
-    /// como hora UTC (offset 0) para preservar el dia/hora tal cual se digito y evitar
-    /// corrimientos de zona horaria.
+    /// coma, y formatos dd/MM/yyyy [HH:mm] (Colombia) e ISO.
+    ///
+    /// La hora digitada es hora LOCAL de Bogota (UTC-5), asi que se interpreta con ese
+    /// offset y se guarda el instante en UTC (offset 0, que Npgsql exige para
+    /// timestamp with time zone). Antes se usaba AssumeUniversal (tratar la hora como
+    /// UTC), lo que corria -5h al localizar en impresion: 07:00 digitado se imprimia
+    /// 02:00 (y una hora de madrugada podia caer al dia anterior).
     /// </summary>
     private static bool TryParseHeaderFecha(string raw, out DateTimeOffset value)
     {
@@ -110,8 +118,14 @@ public static class FechaAtencionHelper
         if (s.Length == 0) { return false; }
         var coma = s.LastIndexOf(',');
         if (coma >= 0 && coma < s.Length - 1) { s = s[(coma + 1)..].Trim(); }
-        return DateTimeOffset.TryParseExact(s, HeaderFechaFormatos, CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out value);
+        if (!DateTime.TryParseExact(s, HeaderFechaFormatos, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces, out var naive))
+        {
+            return false;
+        }
+        value = new DateTimeOffset(DateTime.SpecifyKind(naive, DateTimeKind.Unspecified), BogotaOffset)
+            .ToUniversalTime();
+        return true;
     }
 
     private static bool TryParse(string raw, out DateTimeOffset value)

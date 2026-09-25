@@ -76,7 +76,11 @@ public sealed record OrdenClinicaItemDto(
     /// <summary>True si la HC tiene >=1 formula de medicamentos EMITIDA y ACTIVA cuyo
     /// snapshot quedo SIN firma del profesional, pero el profesional tratante hoy SI
     /// tiene firma registrada (es reparable). Habilita la accion "Reparar firma".</summary>
-    bool TieneFirmaFaltante = false);
+    bool TieneFirmaFaltante = false,
+    /// <summary>True si la HC imprime SIN firma porque su profesional tratante no tiene
+    /// firma registrada (o no hay profesional asignado). No es reparable por inyeccion:
+    /// se resuelve registrando la firma del profesional (luego re-resuelve en vivo).</summary>
+    bool ProfesionalSinFirma = false);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

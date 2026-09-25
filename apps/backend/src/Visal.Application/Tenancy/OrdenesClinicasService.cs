@@ -88,13 +88,17 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         // snapshot quedo sin firma y cuyo profesional hoy SI tiene firma (reparables).
         if (filtro.SoloSinFirma)
         {
-            // Filtro "sin firma": todas las formulas MEDICAS emitidas sin firma en el
-            // snapshot, reparables o no (no ocultar las que aun no tienen firma del
-            // profesional). Solo MED — ver SetSinFirmaAsync.
-            var setFiltro = await SetSinFirmaAsync(null, soloReparables: false, ct);
-            q = setFiltro.Count == 0
+            // Filtro "sin firma" = union de:
+            //  (a) HCs cuyo profesional no tiene firma registrada (imprimen sin firma),
+            //  (b) formulas MEDICAS reparables (snapshot MED sin firma + profesional con
+            //      firma hoy -> inyectables con "Reparar firma").
+            var profSet = await SetProfSinFirmaAsync(null, ct);
+            var medSet = await SetSinFirmaAsync(null, soloReparables: true, ct);
+            var union = new HashSet<Guid>(profSet);
+            union.UnionWith(medSet);
+            q = union.Count == 0
                 ? q.Where(h => false)
-                : q.Where(h => setFiltro.Contains(h.Id));
+                : q.Where(h => union.Contains(h.Id));
         }
 
         // LEFT JOIN a `revisiones_clinica` para traer el estado agregado + veredicto
@@ -355,10 +359,13 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(s => new { s.Id, s.Nombre })
                 .ToDictionaryAsync(x => x.Id, x => x.Nombre, ct);
 
-        // Anotacion TieneFirmaFaltante para las HCs de esta pagina: habilita la accion
-        // "Reparar firma". Solo REPARABLES (MED sin firma + profesional con firma hoy),
-        // que es lo unico que la reparacion puede corregir.
+        // Anotaciones de firma para las HCs de esta pagina:
+        //  - sinFirmaSet (reparable): MED sin firma + profesional con firma hoy -> habilita
+        //    la accion "Reparar firma".
+        //  - profSinFirmaSet: la HC imprime sin firma porque el profesional no tiene firma
+        //    (o no hay profesional) -> se marca, pero NO se repara por inyeccion.
         var sinFirmaSet = await SetSinFirmaAsync(hcIds, soloReparables: true, ct);
+        var profSinFirmaSet = await SetProfSinFirmaAsync(hcIds, ct);
 
         return rows.Select(r =>
         {
@@ -422,7 +429,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 srvExt.GetValueOrDefault(r.Hc.Id, 0),
                 r.Hc.FechaAtencion,
                 asigLoteId,
-                sinFirmaSet.Contains(r.Hc.Id)
+                sinFirmaSet.Contains(r.Hc.Id),
+                profSinFirmaSet.Contains(r.Hc.Id)
             );
         }).ToList();
     }
@@ -482,6 +490,31 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
     }
 
     private sealed record SinFirmaRow(Guid HistoriaClinicaId, string? SnapshotJson);
+
+    /// <summary>
+    /// HCs (del universo dado) que IMPRIMEN SIN FIRMA porque su profesional tratante no
+    /// tiene firma registrada (o la HC no tiene profesional asignado). Al imprimir, tanto
+    /// el documento HC como las ordenes re-resuelven la firma EN VIVO desde
+    /// profesionales.firma_url; si esa firma no existe, nada imprime firmado. No es
+    /// reparable por inyeccion: se corrige registrando la firma del profesional.
+    /// Si <paramref name="hcIds"/> es null revisa todo el tenant; si no, solo esas HCs.</summary>
+    private async Task<HashSet<Guid>> SetProfSinFirmaAsync(IReadOnlyCollection<Guid>? hcIds, CancellationToken ct)
+    {
+        var q = db.HistoriasClinicas.AsNoTracking().AsQueryable();
+        if (hcIds is not null)
+        {
+            if (hcIds.Count == 0) { return new(); }
+            q = q.Where(h => hcIds.Contains(h.Id));
+        }
+        // "Sin firma" si NO existe un profesional con ese id que tenga firma_url no vacio
+        // (cubre profesional_id null y profesional sin firma).
+        var ids = await q
+            .Where(h => !db.Profesionales.Any(pr =>
+                pr.Id == h.ProfesionalId && pr.FirmaUrl != null && pr.FirmaUrl != ""))
+            .Select(h => h.Id)
+            .ToListAsync(ct);
+        return ids.ToHashSet();
+    }
 
     /// <summary>True si el snapshot de una emision NO trae una firma-imagen valida en
     /// Bag.firma_profesional (ausente, vacia o texto no-imagen).</summary>

@@ -807,6 +807,13 @@ else
                                                         <span class="oc-kebab-ico">🖊</span> Reparar firma
                                                     </button>
                                                 }
+                                                @if (r.ProfesionalSinFirma)
+                                                {
+                                                    <button class="oc-kebab-item" disabled
+                                                            title="El profesional tratante no tiene firma registrada (o la HC no tiene profesional). Para que imprima firmada, registra la firma del profesional en su perfil; luego se resuelve sola.">
+                                                        <span class="oc-kebab-ico">⚠</span> Profesional sin firma
+                                                    </button>
+                                                }
                                                 <button class="oc-kebab-item" @onclick="() => KebabRun(() => AbrirRevision(r))">
                                                     <span class="oc-kebab-ico">🔍</span> Ver revision
                                                 </button>
@@ -875,6 +882,20 @@ else
                                     else if (abierta) { <text>HC abierta el @(r.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
                                     else { <text>HC @r.Estado.ToLower() el @(fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
                                 </div>
+                                @if (r.ProfesionalSinFirma)
+                                {
+                                    <span class="badge bg-danger" style="font-size:.62rem;margin-top:2px;"
+                                          title="El profesional tratante no tiene firma registrada (o la HC no tiene profesional). Imprime sin firma. Se resuelve registrando la firma del profesional.">
+                                        Sin firma (profesional)
+                                    </span>
+                                }
+                                else if (r.TieneFirmaFaltante)
+                                {
+                                    <span class="badge bg-warning text-dark" style="font-size:.62rem;margin-top:2px;"
+                                          title="La formula medica emitida quedo sin firma en el snapshot, pero el profesional hoy si tiene firma. Reparable con 'Reparar firma'.">
+                                        Formula sin firma (reparable)
+                                    </span>
+                                }
                             </td>
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
                             <td class="mono" title="HC N°">@r.HistoriaClinicaId.ToString()[..8].ToUpperInvariant()</td>

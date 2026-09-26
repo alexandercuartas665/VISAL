@@ -10,6 +10,10 @@ public sealed class AtencionProfesionalService(
     ITenantContext tenant,
     IConfiguracionClinicaService clinica) : IAtencionProfesionalService
 {
+    /// <summary>Proyeccion liviana de HistoriaClinica para elegir la mas reciente por
+    /// paciente sin transferir el jsonb ValoresJson (que aqui no se usa).</summary>
+    private sealed record HcLite(Guid Id, Guid PacienteId, DateTimeOffset? FechaCierre, DateTimeOffset? FechaApertura);
+
     public async Task<IReadOnlyList<MiServicioAsignadoDto>> GetMisServiciosAsync(Guid platformUserId, bool incluirCompletados = true, CancellationToken ct = default)
     {
         // Datos del usuario logueado: nivel de tenant (Owner/Advisor) + Rol con permisos.
@@ -186,11 +190,16 @@ public sealed class AtencionProfesionalService(
         // aprobadas/rechazadas por el revisor. Terminales (ArchivadaOk/Inactivada)
         // se dejan pasar tambien para que el rojo/verde/negro se refleje incluso
         // despues de archivar.
+        // Proyeccion liviana: solo Id/Paciente/fechas. NO traer la entidad completa —
+        // HistoriaClinica.ValoresJson es un jsonb grande que aqui nunca se usa (solo se
+        // elige la HC mas reciente por paciente y se cruza con su revision). Transferir
+        // ValoresJson de todas las HCs era el costo dominante en la carga de Atencion.
         var hcsPacientes = pacIds.Count == 0
-            ? new List<HistoriaClinica>()
+            ? new List<HcLite>()
             : await db.HistoriasClinicas.AsNoTracking()
                 .Where(h => pacIds.Contains(h.PacienteId)
                             && h.Estado != HistoriaClinicaEstado.Inactiva)
+                .Select(h => new HcLite(h.Id, h.PacienteId, h.FechaCierre, h.FechaApertura))
                 .ToListAsync(ct);
         // Escogemos la HC mas reciente por paciente (por FechaCierre o FechaApertura como fallback).
         var hcMasRecientePorPaciente = hcsPacientes

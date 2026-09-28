@@ -175,6 +175,15 @@
                                        target="_blank" rel="noopener"
                                        title="Descargar CSV">csv</a>
                                 }
+                                @if (_tab == Tab.Vigentes && s.Estado == EstadoSnapshot.Vigente)
+                                {
+                                    <button class="btn btn-outline-info btn-sm ms-1"
+                                            disabled="@(_completandoId == s.Id)"
+                                            @onclick="() => CompletarCodigos(s.Id)"
+                                            title="Completa las columnas HC N° y Cod. Asignacion en snapshots generados antes de que existieran (reconstruye con los mismos filtros y verifica fila por fila).">
+                                        @(_completandoId == s.Id ? "Completando..." : "Completar códigos")
+                                    </button>
+                                }
                                 @if (_tab == Tab.Vigentes && s.Estado == EstadoSnapshot.Vigente && _puedeArchivar)
                                 {
                                     <button class="btn btn-outline-danger btn-sm ms-1"
@@ -1170,6 +1179,24 @@
     // Usuario / permisos.
     private Guid _actorId;
     private bool _esAdminAgencia;
+    private Guid? _completandoId;
+
+    /// <summary>Completa HC N° / Cod. Asignacion en un snapshot viejo, de forma segura
+    /// (reconstruye con los mismos filtros y verifica fila por fila). Si no alinea, no
+    /// toca nada y muestra el motivo.</summary>
+    private async Task CompletarCodigos(Guid snapshotId)
+    {
+        _error = null; _ok = null;
+        _completandoId = snapshotId;
+        try
+        {
+            var r = await Svc.CompletarCodigosSnapshotAsync(snapshotId, _actorId);
+            if (r.Ok) { _ok = r.Mensaje; await CargarLista(); }
+            else { _error = r.Mensaje; }
+        }
+        catch (Exception ex) { _error = "Error al completar códigos: " + ex.Message; }
+        finally { _completandoId = null; }
+    }
 
     protected override async Task OnInitializedAsync()
     {

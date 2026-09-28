@@ -130,6 +130,91 @@ public sealed class FacturacionSnapshotService(
         return snap.Id;
     }
 
+    public async Task<CompletarCodigosResultado> CompletarCodigosSnapshotAsync(Guid snapshotId, Guid actor, CancellationToken ct = default)
+    {
+        const string ColHc = "HC N°";
+        const string ColAsig = "Cód. Asignación";
+        const string ColDoc = "Identificación";
+        const string ColFecha = "Fecha suministro de tecnologia";
+
+        var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(s => s.Id == snapshotId, ct);
+        if (snap is null) { return new(false, "Snapshot no encontrado.", 0, 0); }
+
+        var builder = builders.FirstOrDefault(b => b.TipoAplicable == snap.Tipo);
+        if (builder is null) { return new(false, $"No hay builder para el tipo {snap.Tipo}.", 0, snap.TotalFilas); }
+        if (!builder.Columnas.Contains(ColHc) || !builder.Columnas.Contains(ColAsig))
+        {
+            return new(false, "Este tipo de snapshot no maneja los codigos HC N° / Cod. Asignacion.", 0, snap.TotalFilas);
+        }
+
+        // Reconstruye con los MISMOS filtros -> mismos dicts en el mismo orden que al generar.
+        var dicts = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var d in builder.ConstruirAsync(snap.FiltrosJson, ct).WithCancellation(ct))
+        {
+            dicts.Add(d);
+        }
+
+        var filas = await db.FacturacionSnapshotFilas
+            .Where(f => f.SnapshotId == snapshotId)
+            .OrderBy(f => f.NumeroFila)
+            .ToListAsync(ct);
+
+        if (dicts.Count != filas.Count)
+        {
+            return new(false,
+                $"No se puede reparar con seguridad: la reconstruccion da {dicts.Count} filas y el snapshot tiene {filas.Count}. Los datos cambiaron desde que se genero — hay que regenerarlo.",
+                0, filas.Count);
+        }
+
+        // Verificacion de alineacion fila por fila: mismo documento y misma fecha de
+        // suministro. Cualquier desalineacion aborta sin tocar nada (seguridad).
+        for (int i = 0; i < filas.Count; i++)
+        {
+            using var doc = JsonDocument.Parse(filas[i].DatosJson);
+            var docSnap = LeerString(doc.RootElement, ColDoc);
+            var fechaSnap = LeerString(doc.RootElement, ColFecha);
+            var docNuevo = ValorString(dicts[i], ColDoc);
+            var fechaNuevo = ValorString(dicts[i], ColFecha);
+            if (!string.Equals(docSnap, docNuevo, StringComparison.Ordinal)
+                || !string.Equals(fechaSnap, fechaNuevo, StringComparison.Ordinal))
+            {
+                return new(false,
+                    $"No se puede reparar con seguridad: la fila {filas[i].NumeroFila} no alinea (doc/fecha del snapshot no coincide con la reconstruccion). Los datos cambiaron — hay que regenerar el snapshot.",
+                    0, filas.Count);
+            }
+        }
+
+        // Alineado: escribe los codigos que falten en cada fila (no sobrescribe existentes).
+        int reparadas = 0;
+        for (int i = 0; i < filas.Count; i++)
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(filas[i].DatosJson) is not System.Text.Json.Nodes.JsonObject node) { continue; }
+            var tieneHc = node[ColHc] is System.Text.Json.Nodes.JsonValue vh && vh.TryGetValue<string>(out var sh) && !string.IsNullOrWhiteSpace(sh);
+            var tieneAsig = node[ColAsig] is System.Text.Json.Nodes.JsonValue va && va.TryGetValue<string>(out var sa) && !string.IsNullOrWhiteSpace(sa);
+            if (tieneHc && tieneAsig) { continue; }
+
+            node[ColHc] = ValorString(dicts[i], ColHc);
+            node[ColAsig] = ValorString(dicts[i], ColAsig);
+            filas[i].DatosJson = node.ToJsonString(JsonOpts);
+            reparadas++;
+        }
+
+        if (reparadas > 0)
+        {
+            snap.UpdatedBy = actor;
+            await db.SaveChangesAsync(ct);
+        }
+        return new(true,
+            reparadas > 0 ? $"Listo: {reparadas} de {filas.Count} filas completadas con HC N° y Cod. Asignacion."
+                          : "El snapshot ya tenia los codigos en todas sus filas.",
+            reparadas, filas.Count);
+
+        static string? LeerString(JsonElement root, string key)
+            => root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        static string? ValorString(IReadOnlyDictionary<string, object?> d, string key)
+            => d.TryGetValue(key, out var v) ? v?.ToString() : null;
+    }
+
     public async Task<IReadOnlyList<FacturacionSnapshotDto>> ListarAsync(
         EstadoSnapshot estado,
         TipoSnapshot? tipo = null,

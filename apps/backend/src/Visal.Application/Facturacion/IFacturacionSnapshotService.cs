@@ -54,6 +54,13 @@ public sealed record PacienteSnapshotDto(
     IReadOnlyList<string> Autorizaciones,
     int Servicios);
 
+/// <summary>Resultado de completar los codigos de trazabilidad de un snapshot.</summary>
+public sealed record CompletarCodigosResultado(
+    bool Ok,
+    string Mensaje,
+    int FilasReparadas,
+    int TotalFilas);
+
 /// <summary>Resultado paginado de un ListarFilas.</summary>
 public sealed record PagedResult<T>(
     IReadOnlyList<T> Items,
@@ -175,6 +182,17 @@ public interface IFacturacionSnapshotService
 
     /// <summary>Historial completo de cambios manuales sobre un snapshot, mas reciente primero.</summary>
     Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Completa las columnas de trazabilidad ("HC N°" y "Cód. Asignación") en un snapshot
+    /// que se genero antes de que existieran. SEGURO: re-ejecuta el MISMO builder con los
+    /// filtros guardados del snapshot y solo escribe los codigos si la reconstruccion
+    /// alinea 1:1 con las filas congeladas (mismo conteo + mismo documento y fecha de
+    /// suministro por fila). Si algo no alinea (los datos cambiaron desde que se genero),
+    /// NO toca nada y devuelve el motivo — en ese caso hay que regenerar el snapshot.
+    /// No sobrescribe codigos ya presentes.
+    /// </summary>
+    Task<CompletarCodigosResultado> CompletarCodigosSnapshotAsync(Guid snapshotId, Guid actor, CancellationToken ct = default);
 
     /// <summary>
     /// Pacientes distintos del snapshot (agrupados por documento/Identificación),

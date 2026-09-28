@@ -82,23 +82,33 @@ else
                                 <input class="form-control form-control-sm fv-auto"
                                        value="@GetValue(hdrKey)" readonly tabindex="-1" />
                             }
-                            else if (EsCampoFecha(cabF.Label))
-                            {
-                                @* Fecha/hora del encabezado: selector 24h propio (independiente
-                                   del locale del navegador). Se guarda "dd/MM/yyyy HH:mm". *@
-                                <FechaHora24 Value="@GetValue(hdrKey)"
-                                             ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" />
-                            }
-                            else if (EsCampoHora(cabF.Label))
-                            {
-                                <Hora24 Value="@GetValue(hdrKey)"
-                                        ValueChanged="v => SetValue(hdrKey, v)" />
-                            }
                             else
                             {
-                                <input class="form-control form-control-sm"
-                                       value="@GetValue(hdrKey)"
-                                       @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                                var tipoHdr = TipoCampoHeader(cabF);
+                                @* El tipo se toma del campo (configurable en el disenador). Si no
+                                   esta definido, se infiere por el label (retrocompat). Los controles
+                                   de fecha/hora son selectores 24h propios (no dependen del navegador). *@
+                                @if (tipoHdr == "fechaHora")
+                                {
+                                    <FechaHora24 Value="@GetValue(hdrKey)"
+                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" />
+                                }
+                                else if (tipoHdr == "fecha")
+                                {
+                                    <FechaHora24 Value="@GetValue(hdrKey)"
+                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" SoloFecha="true" />
+                                }
+                                else if (tipoHdr == "hora")
+                                {
+                                    <Hora24 Value="@GetValue(hdrKey)"
+                                            ValueChanged="v => SetValue(hdrKey, v)" />
+                                }
+                                else
+                                {
+                                    <input class="form-control form-control-sm"
+                                           value="@GetValue(hdrKey)"
+                                           @onchange="e => SetValue(hdrKey, e.Value?.ToString())" />
+                                }
                             }
                         </div>
                     }
@@ -360,6 +370,26 @@ else
     {
         var l = (label ?? "").ToLowerInvariant();
         return l.Contains("hora") && !l.Contains("fecha");
+    }
+
+    /// <summary>Tipo efectivo del campo de cabecera: "texto" | "fecha" | "fechaHora" | "hora".
+    /// Usa el Tipo configurado en el disenador si esta definido; si no, lo infiere por el
+    /// label (retrocompat): con "fecha" -> fechaHora; con "hora" (sin "fecha") -> hora; else texto.</summary>
+    private static string TipoCampoHeader(Visal.Application.Tenancy.Forms.FormHeaderField c)
+    {
+        if (!string.IsNullOrWhiteSpace(c.Tipo))
+        {
+            return c.Tipo.Trim() switch
+            {
+                "fecha" => "fecha",
+                "fechaHora" => "fechaHora",
+                "hora" => "hora",
+                _ => "texto"
+            };
+        }
+        if (EsCampoFecha(c.Label)) { return "fechaHora"; }
+        if (EsCampoHora(c.Label)) { return "hora"; }
+        return "texto";
     }
 
     /// <summary>Convierte el valor guardado ("dd/MM/yyyy HH:mm" o "dd/MM/yyyy") al

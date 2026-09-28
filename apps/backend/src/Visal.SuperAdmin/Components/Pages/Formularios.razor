@@ -270,6 +270,14 @@
                 {
                     <div class="fb-col-row">
                         <input class="fb-input" placeholder="Etiqueta" @bind="c.Label" @bind:event="oninput" />
+                        <select class="fb-input" style="max-width:130px" @bind="c.Tipo"
+                                title="Tipo del campo. (Auto) lo deduce del nombre: con 'fecha' = fecha y hora; con 'hora' = hora; si no, texto.">
+                            <option value="">(Auto)</option>
+                            <option value="texto">Texto</option>
+                            <option value="fecha">Fecha</option>
+                            <option value="fechaHora">Fecha y hora</option>
+                            <option value="hora">Hora</option>
+                        </select>
                         <button class="fb-mini fb-mini-danger" title="Quitar" @onclick="() => RemoveHeaderField(c)">&times;</button>
                     </div>
                 }

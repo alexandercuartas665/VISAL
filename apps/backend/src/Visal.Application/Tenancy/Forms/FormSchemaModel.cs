@@ -374,7 +374,7 @@ public sealed class FormHeader
     };
 }
 
-/// <summary>Campo de cabecera (solo etiqueta; el valor se diligencia al usar el formato).</summary>
+/// <summary>Campo de cabecera (etiqueta + tipo; el valor se diligencia al usar el formato).</summary>
 public sealed class FormHeaderField
 {
     [JsonPropertyName("id")]
@@ -382,6 +382,15 @@ public sealed class FormHeaderField
 
     [JsonPropertyName("label")]
     public string Label { get; set; } = "Campo";
+
+    /// <summary>
+    /// Tipo del control de captura: "texto" | "fecha" (solo fecha) | "fechaHora"
+    /// (fecha + hora 24h) | "hora". Null/vacio = INFERIR por el label (retrocompat):
+    /// label con "fecha" -> fechaHora; con "hora" (sin "fecha") -> hora; else texto.
+    /// Se configura en el disenador de formularios.
+    /// </summary>
+    [JsonPropertyName("tipo")]
+    public string? Tipo { get; set; }
 }
 
 /// <summary>Columna de una tabla repetible.</summary>

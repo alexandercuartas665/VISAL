@@ -13,8 +13,11 @@
 <span class="d-inline-flex" style="gap:6px;align-items:center;">
     <input type="date" class="@Class" style="max-width:170px" disabled="@Disabled"
            value="@_fecha" @onchange="OnFecha" />
-    <Hora24 Value="@_hora" ValueChanged="OnHora" Disabled="@Disabled" Class="@Class"
-            Extra="@(new Dictionary<string,object>{ ["style"] = "max-width:90px" })" />
+    @if (!SoloFecha)
+    {
+        <Hora24 Value="@_hora" ValueChanged="OnHora" Disabled="@Disabled" Class="@Class"
+                Extra="@(new Dictionary<string,object>{ ["style"] = "max-width:90px" })" />
+    }
 </span>
 
 @code {
@@ -24,6 +27,10 @@
     [Parameter] public string Class { get; set; } = "form-control form-control-sm";
     /// <summary>"dmy" -> "dd/MM/yyyy HH:mm"; "iso" -> "yyyy-MM-ddTHH:mm".</summary>
     [Parameter] public string Formato { get; set; } = "dmy";
+
+    /// <summary>Si true, oculta el control de hora y guarda solo la fecha
+    /// ("dd/MM/yyyy" o "yyyy-MM-dd").</summary>
+    [Parameter] public bool SoloFecha { get; set; }
 
     private string _fecha = ""; // yyyy-MM-dd (formato del <input type=date>)
     private string _hora = "";  // HH:mm
@@ -89,7 +96,8 @@
         if (string.IsNullOrWhiteSpace(_fecha)) { return ""; }
         if (!DateTime.TryParseExact(_fecha, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out var d)) { return ""; }
-        var conHora = !string.IsNullOrWhiteSpace(_hora)
+        var conHora = !SoloFecha
+            && !string.IsNullOrWhiteSpace(_hora)
             && TimeSpan.TryParseExact(_hora, "hh\\:mm", CultureInfo.InvariantCulture, out var t);
         var dt = d;
         if (conHora) { TimeSpan.TryParseExact(_hora, "hh\\:mm", CultureInfo.InvariantCulture, out var tt); dt = d + tt; }

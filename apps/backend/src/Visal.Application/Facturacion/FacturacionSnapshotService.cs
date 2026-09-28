@@ -270,13 +270,45 @@ public sealed class FacturacionSnapshotService(
         string? ordenColumna = null,
         bool ordenDesc = false,
         string? buscar = null,
+        IReadOnlyList<FiltroColumna>? filtros = null,
         CancellationToken ct = default)
     {
         if (pagina < 1) { pagina = 1; }
         if (tamanoPagina < 1) { tamanoPagina = 50; }
         if (tamanoPagina > 500) { tamanoPagina = 500; }
 
-        var q = db.FacturacionSnapshotFilas.AsNoTracking().Where(x => x.SnapshotId == snapshotId);
+        // Filtros por columna (cascada, AND). Se resuelven server-side con extraccion
+        // jsonb (datos_json->>columna ILIKE %valor%). La columna se valida contra el
+        // catalogo del builder (whitelist) para poder interpolarla sin riesgo de inyeccion;
+        // los valores van parametrizados.
+        var filtrosValidos = filtros?
+            .Where(f => f is not null && !string.IsNullOrWhiteSpace(f.Columna) && !string.IsNullOrWhiteSpace(f.Valor))
+            .ToList() ?? new List<FiltroColumna>();
+
+        IQueryable<FacturacionSnapshotFila> q;
+        if (filtrosValidos.Count > 0)
+        {
+            var tipo = await db.FacturacionSnapshots.AsNoTracking()
+                .Where(s => s.Id == snapshotId).Select(s => (TipoSnapshot?)s.Tipo).FirstOrDefaultAsync(ct);
+            var builder = tipo is null ? null : builders.FirstOrDefault(b => b.TipoAplicable == tipo.Value);
+            var colsValidas = builder?.Columnas.ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>();
+
+            var sql = new StringBuilder("SELECT * FROM facturacion_snapshot_filas WHERE snapshot_id = {0}");
+            var vals = new List<object> { snapshotId };
+            foreach (var f in filtrosValidos)
+            {
+                if (!colsValidas.Contains(f.Columna)) { continue; } // ignora columnas desconocidas
+                var col = f.Columna.Replace("'", "''");
+                sql.Append($" AND datos_json->>'{col}' ILIKE {{{vals.Count}}}");
+                vals.Add("%" + f.Valor.Trim() + "%");
+            }
+            q = db.FacturacionSnapshotFilas.FromSqlRaw(sql.ToString(), vals.ToArray()).AsNoTracking();
+        }
+        else
+        {
+            q = db.FacturacionSnapshotFilas.AsNoTracking().Where(x => x.SnapshotId == snapshotId);
+        }
+
         if (!string.IsNullOrWhiteSpace(buscar))
         {
             var b = buscar.Trim().ToLower();

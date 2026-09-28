@@ -61,6 +61,10 @@ public sealed record CompletarCodigosResultado(
     int FilasReparadas,
     int TotalFilas);
 
+/// <summary>Filtro por columna del detalle de un snapshot (contains, case-insensitive).
+/// Varios se combinan con AND (cascada). La columna debe existir en el catalogo del builder.</summary>
+public sealed record FiltroColumna(string Columna, string Valor);
+
 /// <summary>Resultado paginado de un ListarFilas.</summary>
 public sealed record PagedResult<T>(
     IReadOnlyList<T> Items,
@@ -107,7 +111,10 @@ public interface IFacturacionSnapshotService
 
     /// <summary>
     /// Devuelve una pagina de filas del snapshot. <c>ordenColumna</c> es opcional; si es
-    /// null se ordena por <c>NumeroFila</c>. <c>buscar</c> hace ILIKE sobre <c>DatosJson::text</c>.
+    /// null se ordena por <c>NumeroFila</c>. <c>buscar</c> hace ILIKE sobre <c>DatosJson::text</c>
+    /// (texto libre global). <c>filtros</c> son filtros POR COLUMNA apilables (se combinan con
+    /// AND): cada uno hace <c>datos_json-&gt;&gt;columna ILIKE %valor%</c>. La columna se valida
+    /// contra el catalogo del builder (whitelist) para evitar inyeccion.
     /// Cada fila del resultado es un diccionario columna -&gt; valor.
     /// </summary>
     Task<PagedResult<IReadOnlyDictionary<string, object?>>> ListarFilasAsync(
@@ -117,6 +124,7 @@ public interface IFacturacionSnapshotService
         string? ordenColumna = null,
         bool ordenDesc = false,
         string? buscar = null,
+        IReadOnlyList<FiltroColumna>? filtros = null,
         CancellationToken ct = default);
 
     /// <summary>

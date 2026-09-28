@@ -385,6 +385,44 @@
                     <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina + 1)" disabled="@(_verPagina >= _verTotalPaginas)">&gt;</button>
                 </div>
             </div>
+
+            @* Filtros por columna apilables (cascada). Se combinan con AND entre si y con
+               el "Buscar" de texto libre. Cada chip se puede quitar; "Limpiar" los borra todos. *@
+            <div style="display:flex;flex-direction:column;gap:6px;margin:4px 0 8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <label style="font-size:11px;font-weight:600;color:#334155;margin:0;">Filtrar por columna</label>
+                    <select class="form-select form-select-sm" style="width:210px;" @bind="_nfCol">
+                        <option value="">(elige columna)</option>
+                        @foreach (var c in _verDetalle.Columnas)
+                        {
+                            <option value="@c">@c</option>
+                        }
+                    </select>
+                    <input class="form-control form-control-sm" style="width:180px;" placeholder="contiene..."
+                           @bind="_nfVal" @bind:event="oninput" @onkeyup="OnNuevoFiltroKey" />
+                    <button class="btn btn-outline-primary btn-sm" @onclick="AgregarFiltro"
+                            disabled="@(string.IsNullOrWhiteSpace(_nfCol) || string.IsNullOrWhiteSpace(_nfVal))">+ Agregar filtro</button>
+                    @if (_verFiltros.Count > 0)
+                    {
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltros">Limpiar filtros (@_verFiltros.Count)</button>
+                    }
+                </div>
+                @if (_verFiltros.Count > 0)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        @for (int i = 0; i < _verFiltros.Count; i++)
+                        {
+                            var idx = i;
+                            var f = _verFiltros[i];
+                            <span style="display:inline-flex;align-items:center;gap:6px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;border-radius:12px;padding:2px 8px;font-size:12px;">
+                                <span><b>@f.Columna</b>: @f.Valor</span>
+                                <button type="button" title="Quitar filtro" @onclick="() => QuitarFiltro(idx)"
+                                        style="border:none;background:transparent;color:#0369a1;cursor:pointer;font-size:14px;line-height:1;padding:0;">&times;</button>
+                            </span>
+                        }
+                    </div>
+                }
+            </div>
             @* Toolbar bulk-fill: aplicar el mismo valor de "Consecutivo Factura" a
                TODAS las filas del snapshot. Pensado para cuando la EPS asigna un
                unico numero de factura al lote. Solo se muestra en snapshots Vigentes. *@
@@ -1134,6 +1172,40 @@
     private bool _verOrdenDesc;
     private CancellationTokenSource? _verBuscarCts;
 
+    // Filtros por columna apilables (cascada, AND). El operador siempre es "contiene".
+    private readonly List<FiltroColumna> _verFiltros = new();
+    private string _nfCol = "";   // columna elegida para el nuevo filtro
+    private string _nfVal = "";   // valor del nuevo filtro
+
+    private async Task AgregarFiltro()
+    {
+        if (string.IsNullOrWhiteSpace(_nfCol) || string.IsNullOrWhiteSpace(_nfVal)) { return; }
+        _verFiltros.Add(new FiltroColumna(_nfCol, _nfVal.Trim()));
+        _nfVal = "";
+        _verPagina = 1;
+        await CargarPaginaVer();
+    }
+
+    private async Task QuitarFiltro(int idx)
+    {
+        if (idx < 0 || idx >= _verFiltros.Count) { return; }
+        _verFiltros.RemoveAt(idx);
+        _verPagina = 1;
+        await CargarPaginaVer();
+    }
+
+    private async Task LimpiarFiltros()
+    {
+        _verFiltros.Clear();
+        _verPagina = 1;
+        await CargarPaginaVer();
+    }
+
+    private async Task OnNuevoFiltroKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await AgregarFiltro(); }
+    }
+
     // Sub-tabs del detalle: Datos (la tabla) y Tipologias/Archivos (resumen).
     private enum VerTab { Datos, Tipologias }
     private VerTab _verTab = VerTab.Datos;
@@ -1437,6 +1509,9 @@
         _verSnapshotId = id;
         _verPagina = 1;
         _verBuscar = "";
+        _verFiltros.Clear();
+        _nfCol = "";
+        _nfVal = "";
         _verOrden = null;
         _verOrdenDesc = false;
         _verFijar = 0;
@@ -1538,7 +1613,8 @@
         {
             var buscar = string.IsNullOrWhiteSpace(_verBuscar) ? null : _verBuscar.Trim();
             var page = await Svc.ListarFilasAsync(_verSnapshotId, _verPagina, VerTamano,
-                _verOrden, _verOrdenDesc, buscar);
+                _verOrden, _verOrdenDesc, buscar,
+                _verFiltros.Count > 0 ? _verFiltros : null);
             _verFilas = page.Items.ToList();
             _verTotal = page.Total;
             _verTotalPaginas = Math.Max(1, (int)Math.Ceiling(_verTotal / (double)VerTamano));

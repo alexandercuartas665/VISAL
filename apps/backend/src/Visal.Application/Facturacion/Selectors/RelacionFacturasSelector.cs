@@ -202,6 +202,27 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 .GroupBy(a => a.PacienteId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
+        // 6.b.2) Asignacion REAL por HC via la cadena de sesiones (mapeo EXACTO, igual
+        //        que el modulo Ordenes): HC -> pivote -> sesion -> turno -> asignacion.
+        //        Es la FUENTE DE VERDAD para lote/servicio/autorizacion/valor; la
+        //        heuristica por fecha de abajo queda solo como fallback para las pocas
+        //        HCs sin cadena. Antes se usaba solo la heuristica, que elegia mal
+        //        cuando el paciente tenia varias asignaciones (bug: tomaba el lote mas
+        //        cercano en fecha, no el que realmente ejecuto la HC).
+        var hcIdsPrefil = hechosPrefiltrados.Select(x => x.Hc.Id).Distinct().ToList();
+        var asignacionPorHc = hcIdsPrefil.Count == 0
+            ? new Dictionary<Guid, Asignacion>()
+            : (await (
+                from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                where hcIdsPrefil.Contains(pv.HistoriaClinicaId)
+                join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
+                join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
+                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                select new { pv.HistoriaClinicaId, Asig = a })
+                .ToListAsync(ct))
+                .GroupBy(x => x.HistoriaClinicaId)
+                .ToDictionary(g => g.Key, g => g.First().Asig);
+
         // 6.c) TipoArchivoRips desde el catalogo de tipos de servicio — mapeamos
         //      por codigo del modulo de la asignacion (CONSULTA/TERAPIA/...).
         var catalogoTipos = await db.CatalogosTipoServicio.AsNoTracking()
@@ -289,8 +310,10 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             // codigo, y de esas priorizamos las que tengan TipoPago poblado
             // (para no perder cuota/copago), luego la mas cercana en fecha al
             // cierre de la HC.
-            Asignacion? asigRelevante = null;
-            if (asignacionesPorPac.TryGetValue(paciente.Id, out var listaAsig))
+            // Fuente de verdad: la asignacion REAL de la HC por la cadena de sesiones
+            // (igual que Ordenes). Solo si la HC no tiene cadena caemos a la heuristica.
+            Asignacion? asigRelevante = asignacionPorHc.GetValueOrDefault(hc.Id);
+            if (asigRelevante is null && asignacionesPorPac.TryGetValue(paciente.Id, out var listaAsig))
             {
                 var fechaCierre = hc.FechaCierre?.LocalDateTime ?? hc.UpdatedAt?.LocalDateTime ?? hc.CreatedAt.LocalDateTime;
                 asigRelevante = listaAsig

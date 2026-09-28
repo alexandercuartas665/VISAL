@@ -10,13 +10,15 @@
    Se conserva EXACTAMENTE el formato previo de cada campo para no alterar datos.
    ============================================================================ *@
 @using System.Globalization
-<span class="d-inline-flex" style="gap:6px;align-items:center;">
-    <input type="date" class="@Class" style="max-width:170px" disabled="@Disabled"
+@* flex-wrap: cuando el contenedor es angosto (p.ej. la cabecera del documento) la
+   hora baja debajo de la fecha en vez de cortarse; en campos anchos van lado a lado. *@
+<span class="d-inline-flex" style="gap:4px;align-items:center;flex-wrap:wrap;max-width:100%;">
+    <input type="date" class="@Class" style="max-width:150px;min-width:0;" disabled="@Disabled"
            value="@_fecha" @onchange="OnFecha" />
     @if (!SoloFecha)
     {
         <Hora24 Value="@_hora" ValueChanged="OnHora" Disabled="@Disabled" Class="@Class"
-                Extra="@(new Dictionary<string,object>{ ["style"] = "max-width:90px" })" />
+                Extra="@(new Dictionary<string,object>{ ["style"] = "max-width:80px;min-width:0;" })" />
     }
 </span>
 

@@ -435,6 +435,22 @@ public sealed class AsignacionAgendasService(
     {
         var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
         if (turno is null) { return false; }
+
+        // BLINDAJE: no cancelar una cita cuyo turno ya tiene una historia clinica
+        // registrada. Borrar el turno cascada la sesion y el pivote HC<->sesion, lo que
+        // dejaba la HC HUERFANA (sin asignacion, sin codigo de servicio) — la atencion
+        // ya ocurrio y no se puede desligar sin corromper la trazabilidad de facturacion.
+        // Mismo criterio que el borrado de coordinacion (EliminarProfesionalDeCoordinacion).
+        var tieneHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .AnyAsync(pv => pv.Sesion!.AsignacionTurnoId == asignacionTurnoId
+                         && pv.HistoriaClinica!.Estado != HistoriaClinicaEstado.Inactiva, ct);
+        if (tieneHc)
+        {
+            throw new InvalidOperationException(
+                "No se puede cancelar la cita: ya tiene una historia clinica registrada (atendida). " +
+                "Si la atencion fue un error, descarta/inactiva la historia clinica primero.");
+        }
+
         var asigId = turno.AsignacionId;
         db.AsignacionTurnos.Remove(turno);
         await db.SaveChangesAsync(ct);

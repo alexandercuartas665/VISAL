@@ -326,19 +326,30 @@ public sealed class HistoriaClinicaService(
         // la Via del request para no romper ese flujo.
         string? viaCodigoResuelto = req.RipsViaIngresoCodigo;
         string? viaNombreResuelto = req.RipsViaIngresoNombre;
+        // Profesional de la HC: si el request no lo trae (algunos flujos de /atencion
+        // no lo enviaban -> HCs con profesional NULL, incobrables/sin firma), lo
+        // derivamos del turno como fuente de verdad. El turno SIEMPRE tiene profesional.
+        Guid? profesionalResuelto = req.ProfesionalId;
         if (req.AsignacionTurnoId is Guid turnoId0)
         {
-            var viaAsig = await (
+            var infoTurno = await (
                 from t in db.AsignacionTurnos.AsNoTracking()
                 join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
                 where t.Id == turnoId0
-                select new { a.RipsViaIngresoCodigo, a.RipsViaIngresoNombre })
+                select new { a.RipsViaIngresoCodigo, a.RipsViaIngresoNombre, t.ProfesionalId })
                 .FirstOrDefaultAsync(ct);
-            if (viaAsig is not null
-                && !string.IsNullOrWhiteSpace(viaAsig.RipsViaIngresoCodigo))
+            if (infoTurno is not null)
             {
-                viaCodigoResuelto = viaAsig.RipsViaIngresoCodigo;
-                viaNombreResuelto = viaAsig.RipsViaIngresoNombre;
+                if (!string.IsNullOrWhiteSpace(infoTurno.RipsViaIngresoCodigo))
+                {
+                    viaCodigoResuelto = infoTurno.RipsViaIngresoCodigo;
+                    viaNombreResuelto = infoTurno.RipsViaIngresoNombre;
+                }
+                if ((profesionalResuelto is null || profesionalResuelto == Guid.Empty)
+                    && infoTurno.ProfesionalId != Guid.Empty)
+                {
+                    profesionalResuelto = infoTurno.ProfesionalId;
+                }
             }
         }
 
@@ -420,7 +431,7 @@ public sealed class HistoriaClinicaService(
             Estado = HistoriaClinicaEstado.Abierta,
             FechaApertura = DateTimeOffset.UtcNow,
             EspecialistaNombre = req.EspecialistaNombre,
-            ProfesionalId = req.ProfesionalId,
+            ProfesionalId = profesionalResuelto,
             RipsViaIngresoCodigo = viaCodigoResuelto,
             RipsViaIngresoNombre = viaNombreResuelto,
             RipsFinalidadCodigo = req.RipsFinalidadCodigo,

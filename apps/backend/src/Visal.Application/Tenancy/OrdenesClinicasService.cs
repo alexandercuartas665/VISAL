@@ -319,14 +319,29 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(t => new { t.Id, t.AsignacionId })
                 .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
         var asigIds = turnoToAsig.Values.Distinct().ToList();
-        // Codigo de asignacion (lote) por HC: Asignacion.Id -> Asignacion.LoteId.
+        // Codigo de asignacion (lote) + ServicioId por HC: Asignacion.Id -> LoteId / ServicioId.
         // Todas las HCs cuyos servicios cuelgan del mismo lote comparten codigo.
-        var asigToLote = asigIds.Count == 0
-            ? new Dictionary<Guid, Guid>()
-            : await db.Asignaciones.AsNoTracking()
+        var asigInfo = asigIds.Count == 0
+            ? new List<AsigServInfo>()
+            : (await db.Asignaciones.AsNoTracking()
                 .Where(a => asigIds.Contains(a.Id))
-                .Select(a => new { a.Id, a.LoteId })
-                .ToDictionaryAsync(x => x.Id, x => x.LoteId, ct);
+                .Select(a => new { a.Id, a.LoteId, a.ServicioId })
+                .ToListAsync(ct))
+                .Select(x => new AsigServInfo(x.Id, x.LoteId, x.ServicioId))
+                .ToList();
+        var asigToLote = asigInfo.ToDictionary(x => x.Id, x => x.LoteId);
+        // ServicioContrato (Guid) por asignacion, para resolver el codigo del servicio
+        // del contrato con el que se cargo el servicio en /asignacion.
+        var asigToServicioId = asigInfo
+            .Where(x => Guid.TryParse(x.ServicioId, out _))
+            .ToDictionary(x => x.Id, x => Guid.Parse(x.ServicioId!));
+        var servIds = asigToServicioId.Values.Distinct().ToList();
+        var servToCodigo = servIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await db.ServiciosContrato.AsNoTracking()
+                .Where(s => servIds.Contains(s.Id))
+                .Select(s => new { s.Id, s.CodigoServicio })
+                .ToDictionaryAsync(x => x.Id, x => x.CodigoServicio, ct);
         var turnoOrden = new Dictionary<Guid, int>();
         if (asigIds.Count > 0)
         {
@@ -387,11 +402,18 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 sesionNumero = nGlobal;
             }
             Guid? asigLoteId = null;
+            string? codigoServicio = null;
             if (hcToTurno.TryGetValue(r.Hc.Id, out var turnoForLote)
-                && turnoToAsig.TryGetValue(turnoForLote, out var asigForLote)
-                && asigToLote.TryGetValue(asigForLote, out var loteForHc))
+                && turnoToAsig.TryGetValue(turnoForLote, out var asigForLote))
             {
-                asigLoteId = loteForHc;
+                if (asigToLote.TryGetValue(asigForLote, out var loteForHc)) { asigLoteId = loteForHc; }
+                // Codigo del servicio del contrato (ServicioContrato.CodigoServicio) con el
+                // que se cargo el servicio en /asignacion.
+                if (asigToServicioId.TryGetValue(asigForLote, out var servGuid)
+                    && servToCodigo.TryGetValue(servGuid, out var cod))
+                {
+                    codigoServicio = cod;
+                }
             }
             return new OrdenClinicaItemDto(
                 r.Hc.Id,
@@ -430,7 +452,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 r.Hc.FechaAtencion,
                 asigLoteId,
                 sinFirmaSet.Contains(r.Hc.Id),
-                profSinFirmaSet.Contains(r.Hc.Id)
+                profSinFirmaSet.Contains(r.Hc.Id),
+                codigoServicio
             );
         }).ToList();
     }
@@ -490,6 +513,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
     }
 
     private sealed record SinFirmaRow(Guid HistoriaClinicaId, string? SnapshotJson);
+
+    private sealed record AsigServInfo(Guid Id, Guid LoteId, string? ServicioId);
 
     /// <summary>
     /// HCs (del universo dado) que IMPRIMEN SIN FIRMA porque su profesional tratante no

@@ -80,7 +80,11 @@ public sealed record OrdenClinicaItemDto(
     /// <summary>True si la HC imprime SIN firma porque su profesional tratante no tiene
     /// firma registrada (o no hay profesional asignado). No es reparable por inyeccion:
     /// se resuelve registrando la firma del profesional (luego re-resuelve en vivo).</summary>
-    bool ProfesionalSinFirma = false);
+    bool ProfesionalSinFirma = false,
+    /// <summary>Codigo del servicio del contrato (ServicioContrato.CodigoServicio) con el
+    /// que se cargo el servicio en /asignacion. Se resuelve via la cadena HC -> sesion ->
+    /// turno -> asignacion -> ServicioId -> ServicioContrato. Null si la HC no tiene cadena.</summary>
+    string? CodigoServicio = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

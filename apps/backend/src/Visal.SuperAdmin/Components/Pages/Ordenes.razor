@@ -728,6 +728,7 @@ else
                         <th class="oc-th-sort" style="width:160px" title="Ordenar por documento" @onclick='() => Ordenar("documento")'>Documento @Caret("documento")</th>
                         <th class="oc-th-sort" style="width:96px" title="Numero corto de la HC (primeros 8 del identificador). Click para ordenar." @onclick='() => Ordenar("hc")'>HC N° @Caret("hc")</th>
                         <th class="oc-th-sort" style="width:110px" title="Codigo del lote de asignacion que ata todos los servicios del paciente. Click para ordenar." @onclick='() => Ordenar("asignacion")'>Cód. asignación @Caret("asignacion")</th>
+                        <th style="width:110px" title="Codigo del servicio del contrato con el que se cargo el servicio en Asignacion (ServicioContrato.CodigoServicio).">Cód. servicio</th>
                         <th class="oc-th-sort" title="Ordenar por formato" @onclick='() => Ordenar("formato")'>Formato HC @Caret("formato")</th>
                         <th class="text-center oc-th-sort" style="width:70px" title="Numero global de sesion dentro de la asignacion. Click para ordenar." @onclick='() => Ordenar("sesion")'>Sesion @Caret("sesion")</th>
                         <th class="oc-th-sort" style="width:180px" title="Ordenar por especialista" @onclick='() => Ordenar("especialista")'>Especialista @Caret("especialista")</th>
@@ -901,6 +902,9 @@ else
                             <td class="mono" title="HC N°">@r.HistoriaClinicaId.ToString()[..8].ToUpperInvariant()</td>
                             <td class="mono" title="Codigo de asignacion (lote que ata todos los servicios)">
                                 @(r.AsignacionLoteId is Guid lid ? lid.ToString()[..8].ToUpperInvariant() : "-")
+                            </td>
+                            <td class="mono" title="Codigo del servicio del contrato con el que se cargo en Asignacion">
+                                @(string.IsNullOrWhiteSpace(r.CodigoServicio) ? "-" : r.CodigoServicio)
                             </td>
                             <td>@r.FormatoNombre</td>
                             <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>

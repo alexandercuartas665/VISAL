@@ -134,8 +134,12 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         // servicio ya no aplican (prod no genera esos registros). Los dejamos
         // en null explicito para que la EPS reciba filas consistentes aunque
         // incompletas — el flujo de facturacion posterior debera completarlos.
-        var fechaCierre = h.Hc.FechaCierre ?? h.Hc.UpdatedAt ?? h.Hc.CreatedAt;
-        var fechaLocal = fechaCierre.ToLocalTime();
+        // Fecha/hora de la fila = la de ATENCION (lo que muestra Ordenes Clinicas y lo
+        // que se imprime), NO la de cierre de la HC. Pueden diferir varios dias: una HC
+        // atendida el 26-sep puede cerrarse el 29-sep, y la EPS necesita la fecha real de
+        // atencion. Fallback a cierre/updated/created cuando la HC no tiene fecha_atencion.
+        var fechaBase = h.Hc.FechaAtencion ?? h.Hc.FechaCierre ?? h.Hc.UpdatedAt ?? h.Hc.CreatedAt;
+        var fechaLocal = fechaBase.ToLocalTime();
 
         return new Dictionary<string, object?>
         {
@@ -155,8 +159,8 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Segundo Nombre"] = h.Paciente.SegundoNombre,                     // 14
             ["Fecha de Nacimiento"] = h.Paciente.FechaNacimiento?.ToString("yyyy-MM-dd"), // 15
             ["Sexo"] = NormalizarSexo(h.Paciente.Sexo),                        // 16 — RIPS pide 1 letra (F/M)
-            ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 17 — fecha de cierre de la HC
-            ["Hora"] = fechaLocal.ToString("HH:mm"),                           // 18 — RIPS pide HH:mm (sin segundos)
+            ["Fecha suministro de tecnologia"] = fechaLocal.ToString("yyyy-MM-dd"), // 17 — fecha de ATENCION de la HC (no la de cierre)
+            ["Hora"] = fechaLocal.ToString("HH:mm"),                           // 18 — hora de atencion; RIPS pide HH:mm (sin segundos)
             ["CUPS"] = h.CupsCodigo,                                           // 19
             ["Codigo Externo (Factura)"] = h.CupsCodigo,                       // 20 — misma clave que CUPS (spec EPS)
             ["Cantidad"] = 1,                                                  // 21 — 1 HC = 1 fila

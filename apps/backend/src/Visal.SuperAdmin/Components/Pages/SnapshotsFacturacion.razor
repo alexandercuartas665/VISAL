@@ -366,18 +366,7 @@
             {
             <div class="sn-modal-controls">
                 <div class="sn-modal-controls-l">
-                    <label>Buscar</label>
-                    <input class="form-control form-control-sm" style="width:220px;"
-                           placeholder="texto libre..." @bind="_verBuscar" @bind:event="oninput" @onkeyup="OnBuscarKey" />
-                    <label>Fijar hasta col</label>
-                    <select class="form-select form-select-sm" style="width:70px;" @bind="_verFijar" @bind:after="StateHasChanged">
-                        <option value="0">0</option>
-                        <option value="1">1</option>
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                        <option value="4">4</option>
-                        <option value="5">5</option>
-                    </select>
+                    <span class="sn-modal-hint">Usa el <b>pin</b> del encabezado de una columna para fijarla (y las anteriores) al hacer scroll horizontal. Para filtrar, usa <b>Filtrar por columna</b> abajo.</span>
                 </div>
                 <div class="sn-modal-controls-r">
                     <span class="sn-page-info">Pagina @_verPagina / @_verTotalPaginas &middot; @_verTotal filas</span>
@@ -422,6 +411,20 @@
                         }
                     </div>
                 }
+                @* Filtro por color de resaltado de la fila. *@
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <label style="font-size:11px;font-weight:600;color:#334155;margin:0;">Filtrar por color</label>
+                    <button type="button" class="sn-cf-btn @(_verColorFiltro is null ? "on" : "")"
+                            @onclick="() => SetColorFiltroAsync(null)">Todos</button>
+                    @foreach (var c in _coloresFila)
+                    {
+                        <button type="button" class="sn-cf-swatch @(_verColorFiltro == c ? "on" : "")"
+                                style="@($"background:{c};")" title="Solo filas con este color"
+                                @onclick="() => SetColorFiltroAsync(c)"></button>
+                    }
+                    <button type="button" class="sn-cf-btn @(_verColorFiltro == "__sin__" ? "on" : "")"
+                            @onclick="@(() => SetColorFiltroAsync("__sin__"))">Sin color</button>
+                </div>
             </div>
             @* Toolbar bulk-fill: aplicar el mismo valor de "Consecutivo Factura" a
                TODAS las filas del snapshot. Pensado para cuando la EPS asigna un
@@ -464,11 +467,20 @@
                                     {
                                         var col = _verDetalle.Columnas[i];
                                         var idx = i;
-                                        <th class="@(idx < _verFijar ? "sn-vt-freeze" : "")"
-                                            style="@(idx < _verFijar ? $"left:{idx * 160}px;" : "")"
+                                        <th class="@(idx < _verFijar ? (idx == _verFijar - 1 ? "sn-vt-freeze sn-vt-freeze-last" : "sn-vt-freeze") : "")"
+                                            style="@(idx < _verFijar ? $"left:{idx * FreezeColW}px;min-width:{FreezeColW}px;max-width:{FreezeColW}px;width:{FreezeColW}px;" : "")"
                                             @onclick="() => Ordenar(col)">
-                                            @col
-                                            @if (_verOrden == col) { <span>@(_verOrdenDesc ? " v" : " ^")</span> }
+                                            <span class="sn-th-inner">
+                                                <button type="button"
+                                                        class="sn-pin @(idx < _verFijar ? "on" : "")"
+                                                        title="@(idx < _verFijar ? "Quitar fijado" : "Fijar hasta esta columna")"
+                                                        @onclick:stopPropagation="true"
+                                                        @onclick="() => ToggleFijar(idx)">
+                                                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.9 5.9 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707s.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.9 5.9 0 0 1 1.013.16l3.134-3.133a3 3 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146"/></svg>
+                                                </button>
+                                                <span>@col</span>
+                                                @if (_verOrden == col) { <span>@(_verOrdenDesc ? " v" : " ^")</span> }
+                                            </span>
                                         </th>
                                     }
                                 </tr>
@@ -478,7 +490,10 @@
                                 {
                                     var filaIdObj = fila.TryGetValue("__filaId", out var fv) ? fv : null;
                                     var filaIdParsed = filaIdObj is Guid g ? g : (Guid.TryParse(filaIdObj?.ToString(), out var gg) ? gg : Guid.Empty);
-                                    <tr>
+                                    var rowColor = fila.TryGetValue("__color", out var cvv) ? cvv?.ToString() : null;
+                                    var bgStyle = string.IsNullOrWhiteSpace(rowColor) ? "" : $"background:{rowColor} !important;";
+                                    <tr @oncontextmenu:preventDefault="true"
+                                        @oncontextmenu="@((MouseEventArgs e) => AbrirMenuFila(e, filaIdParsed))">
                                         @for (var i = 0; i < _verDetalle.Columnas.Count; i++)
                                         {
                                             var col = _verDetalle.Columnas[i];
@@ -486,9 +501,9 @@
                                             var val = fila.TryGetValue(col, out var v) ? v?.ToString() ?? "" : "";
                                             var editable = _esColumnaEditable(col);
                                             var esVigente = _verDetalle.Metadata.Estado == EstadoSnapshot.Vigente;
-                                            var cellClass = (idx < _verFijar ? "sn-vt-freeze" : "") + (editable && esVigente ? " sn-cell-editable" : "");
+                                            var cellClass = (idx < _verFijar ? (idx == _verFijar - 1 ? "sn-vt-freeze sn-vt-freeze-last" : "sn-vt-freeze") : "") + (editable && esVigente ? " sn-cell-editable" : "");
                                             <td class="@cellClass"
-                                                style="@(idx < _verFijar ? $"left:{idx * 160}px;" : "")"
+                                                style="@((idx < _verFijar ? $"left:{idx * FreezeColW}px;min-width:{FreezeColW}px;max-width:{FreezeColW}px;width:{FreezeColW}px;" : "") + bgStyle)"
                                                 title="@val">
                                                 @if (editable && esVigente && filaIdParsed != Guid.Empty)
                                                 {
@@ -514,6 +529,25 @@
                         </table>
                     </div>
                 }
+
+                @* ===== Menu contextual de fila (click derecho): copiar / color ===== *@
+                @if (_menuFilaVisible)
+                {
+                    <div class="sn-rowmenu-back" @onclick="CerrarMenuFila"
+                         @oncontextmenu:preventDefault="true" @oncontextmenu="CerrarMenuFila"></div>
+                    <div class="sn-rowmenu" style="@($"top:{_menuFilaY}px;left:{_menuFilaX}px;")">
+                        <button type="button" class="sn-rowmenu-item" @onclick="CopiarFilaAsync">Copiar fila</button>
+                        <div class="sn-rowmenu-sep"></div>
+                        <div class="sn-rowmenu-colors">
+                            @foreach (var c in _coloresFila)
+                            {
+                                <button type="button" class="sn-rowmenu-swatch" style="@($"background:{c};")"
+                                        title="Poner este color a toda la fila" @onclick="() => SetColorFilaUiAsync(c)"></button>
+                            }
+                        </div>
+                        <button type="button" class="sn-rowmenu-item" @onclick="() => SetColorFilaUiAsync(null)">Quitar color</button>
+                    </div>
+                }
             </div>
             }
             else
@@ -534,6 +568,11 @@
                             <div class="sn-tip-kpis">
                                 <span class="sn-tip-kpi">@_tipArchivos.Count archivo(s)</span>
                                 <span class="sn-tip-kpi">@_tipPacientes.Count paciente(s)</span>
+                                <button type="button" class="btn btn-outline-primary btn-sm sn-tip-relanzar"
+                                        @onclick="RelanzarArchivosAsync" disabled="@_tipCargando"
+                                        title="Vuelve a consultar los archivos configurados y los pacientes contenidos en este snapshot">
+                                    &#8635; Relanzar archivos
+                                </button>
                             </div>
                         </div>
 
@@ -996,7 +1035,8 @@
     .sn-tabs-modal { padding:0 20px; border-bottom:1px solid var(--border); background:#fff; }
     .sn-tip-body { display:flex; flex-direction:column; gap:12px; }
     .sn-tip-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; background:#f8fafc; border:1px solid var(--border); border-radius:8px; font-size:13px; }
-    .sn-tip-kpis { display:flex; gap:6px; }
+    .sn-tip-kpis { display:flex; gap:6px; align-items:center; }
+    .sn-tip-relanzar { margin-left:6px; }
     .sn-tip-kpi { background:#eef2ff; color:#4338ca; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
     .sn-tip-section-t { font-weight:700; color:#0f172a; font-size:13px; margin-top:4px; }
     .sn-tip-archivos { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; }
@@ -1055,10 +1095,36 @@
     .sn-vertabla th, .sn-vertabla td { padding:6px 10px; border-right:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; min-width:140px; max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .sn-vertabla th { position:sticky; top:0; z-index:2; background:#eff6ff; font-weight:600; color:#1e3a8a; text-transform:none; letter-spacing:0; cursor:pointer; user-select:none; }
     .sn-vertabla th:hover { background:#dbeafe; }
-    .sn-vt-freeze { position:sticky; background:white; z-index:1; }
+    .sn-vt-freeze { position:sticky; background:white; z-index:1; box-sizing:border-box; }
     .sn-vertabla thead .sn-vt-freeze { z-index:3; background:#eff6ff; }
+    /* Ultima columna fijada: divisor claro para separar del area que se desplaza. */
+    .sn-vt-freeze.sn-vt-freeze-last { border-right:2px solid #93c5fd; }
+    /* Menu contextual de fila (click derecho). */
+    .sn-rowmenu-back { position:fixed; inset:0; z-index:3000; }
+    .sn-rowmenu { position:fixed; z-index:3001; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,.20); padding:6px; min-width:180px; display:flex; flex-direction:column; gap:2px; }
+    .sn-rowmenu-item { width:100%; text-align:left; border:none; background:transparent; padding:8px 10px; border-radius:6px; font-size:13px; color:#0f172a; cursor:pointer; }
+    .sn-rowmenu-item:hover { background:#eff6ff; }
+    .sn-rowmenu-sep { height:1px; background:var(--border); margin:4px 2px; }
+    .sn-rowmenu-colors { display:flex; gap:6px; padding:4px 8px 6px; }
+    .sn-rowmenu-swatch { width:22px; height:22px; border-radius:50%; border:1px solid rgba(0,0,0,.15); cursor:pointer; padding:0; transition:transform .08s; }
+    .sn-rowmenu-swatch:hover { transform:scale(1.15); box-shadow:0 0 0 2px #dbeafe; }
+    /* Filtro por color. */
+    .sn-cf-btn { border:1px solid #cbd5e1; background:#fff; color:#334155; border-radius:6px; padding:2px 10px; font-size:12px; cursor:pointer; }
+    .sn-cf-btn:hover { background:#f1f5f9; }
+    .sn-cf-btn.on { border-color:#2563eb; background:#dbeafe; color:#1e3a8a; font-weight:600; }
+    .sn-cf-swatch { width:20px; height:20px; border-radius:50%; border:1px solid rgba(0,0,0,.15); cursor:pointer; padding:0; }
+    .sn-cf-swatch:hover { transform:scale(1.12); }
+    .sn-cf-swatch.on { outline:2px solid #2563eb; outline-offset:1px; }
     .sn-vertabla tbody tr:nth-child(even) td:not(.sn-vt-freeze) { background:#fafbfc; }
     .sn-vertabla tbody tr:nth-child(even) td.sn-vt-freeze { background:#fafbfc; }
+    /* Encabezado: contenido en fila (pin + titulo + indicador de orden). */
+    .sn-th-inner { display:inline-flex; align-items:center; gap:5px; }
+    /* Chincheta de fijado por columna. Tenue por defecto; resaltada cuando la columna esta fijada. */
+    .sn-pin { border:none; background:transparent; padding:2px; margin:0; line-height:0; cursor:pointer; border-radius:4px; color:#94a3b8; display:inline-flex; }
+    .sn-pin:hover { background:#dbeafe; color:#1d4ed8; }
+    .sn-pin.on { color:#1d4ed8; }
+    .sn-pin.on svg { transform:rotate(-2deg); }
+    .sn-modal-hint { font-size:11.5px; color:#64748b; }
 
     /* F4b: multi-check de sucursales en el modal Nuevo. */
     .sn-multi { display:flex; flex-wrap:wrap; gap:6px; padding:8px; border:1px solid var(--border); border-radius:6px; background:#fafbfc; max-height:120px; overflow-y:auto; }
@@ -1166,11 +1232,15 @@
     private const int VerTamano = 50;
     private int _verTotal;
     private int _verTotalPaginas = 1;
-    private string _verBuscar = "";
     private int _verFijar = 0;
+    // Ancho fijo (px) de las columnas fijadas con la chincheta. Debe ser el MISMO
+    // valor para el offset 'left' y para el ancho de la celda, si no el sticky se
+    // desalinea y se ven pasar datos de otras columnas por las rendijas.
+    private const int FreezeColW = 170;
     private string? _verOrden;
     private bool _verOrdenDesc;
-    private CancellationTokenSource? _verBuscarCts;
+    // Filtro por color de fila: null=todos, "__sin__"=sin color, o un hex de la paleta.
+    private string? _verColorFiltro;
 
     // Filtros por columna apilables (cascada, AND). El operador siempre es "contiene".
     private readonly List<FiltroColumna> _verFiltros = new();
@@ -1197,6 +1267,13 @@
     private async Task LimpiarFiltros()
     {
         _verFiltros.Clear();
+        _verPagina = 1;
+        await CargarPaginaVer();
+    }
+
+    private async Task SetColorFiltroAsync(string? color)
+    {
+        _verColorFiltro = color;
         _verPagina = 1;
         await CargarPaginaVer();
     }
@@ -1508,7 +1585,7 @@
     {
         _verSnapshotId = id;
         _verPagina = 1;
-        _verBuscar = "";
+        _verColorFiltro = null;
         _verFiltros.Clear();
         _nfCol = "";
         _nfVal = "";
@@ -1561,6 +1638,16 @@
         finally { _tipCargando = false; }
     }
 
+    // Vuelve a consultar archivos configurados + pacientes del snapshot. Util cuando
+    // la primera carga quedo vacia (circuito recien reconectado) o cambio la config
+    // de la cuenta medica en otra pestana. Solo trae los pacientes de ESTE snapshot.
+    private async Task RelanzarArchivosAsync()
+    {
+        _error = null;
+        _tipCargado = false;
+        await CargarTipologiasAsync();
+    }
+
     // ---- Helpers del tab Tipologias ----
     private string PatronDe(InformeItemDto a) =>
         !string.IsNullOrWhiteSpace(a.PatronNombre) ? a.PatronNombre!
@@ -1611,10 +1698,10 @@
         _verCargando = true;
         try
         {
-            var buscar = string.IsNullOrWhiteSpace(_verBuscar) ? null : _verBuscar.Trim();
             var page = await Svc.ListarFilasAsync(_verSnapshotId, _verPagina, VerTamano,
-                _verOrden, _verOrdenDesc, buscar,
-                _verFiltros.Count > 0 ? _verFiltros : null);
+                _verOrden, _verOrdenDesc, buscar: null,
+                _verFiltros.Count > 0 ? _verFiltros : null,
+                colorFiltro: string.IsNullOrEmpty(_verColorFiltro) ? null : _verColorFiltro);
             _verFilas = page.Items.ToList();
             _verTotal = page.Total;
             _verTotalPaginas = Math.Max(1, (int)Math.Ceiling(_verTotal / (double)VerTamano));
@@ -1691,21 +1778,71 @@
         await CargarPaginaVer();
     }
 
-    private async Task OnBuscarKey(KeyboardEventArgs e)
+    // Chincheta de fijado por columna: fija las columnas 0..idx (izquierda) para que
+    // no se muevan con el scroll horizontal. Click en la columna que ya es el limite
+    // derecho del fijado lo quita del todo.
+    private void ToggleFijar(int idx)
     {
-        // Debounce simple para no consultar en cada tecla.
-        _verBuscarCts?.Cancel();
-        _verBuscarCts = new CancellationTokenSource();
-        var ct = _verBuscarCts.Token;
+        var nuevo = idx + 1;
+        _verFijar = (_verFijar == nuevo) ? 0 : nuevo;
+    }
+
+    // ---- Menu contextual de fila (click derecho): copiar / poner-quitar color ----
+    private bool _menuFilaVisible;
+    private double _menuFilaX, _menuFilaY;
+    private Guid _menuFilaId;
+    // Paleta de resaltado. Colores suaves; el hex se persiste tal cual en la fila.
+    private static readonly string[] _coloresFila =
+        { "#fde68a", "#bbf7d0", "#bfdbfe", "#fbcfe8", "#fecaca", "#e9d5ff" };
+
+    private void AbrirMenuFila(MouseEventArgs e, Guid filaId)
+    {
+        if (filaId == Guid.Empty) { return; }
+        _menuFilaId = filaId;
+        _menuFilaX = e.ClientX;
+        _menuFilaY = e.ClientY;
+        _menuFilaVisible = true;
+    }
+
+    private void CerrarMenuFila() => _menuFilaVisible = false;
+
+    private async Task CopiarFilaAsync()
+    {
+        _menuFilaVisible = false;
+        if (_verDetalle is null) { return; }
+        var fila = _verFilas.FirstOrDefault(f =>
+            f.TryGetValue("__filaId", out var idv) && idv is Guid gg && gg == _menuFilaId);
+        if (fila is null) { return; }
+        // Copia tab-separada en el orden de las columnas visibles (pegable en Excel).
+        var texto = string.Join("\t", _verDetalle.Columnas.Select(c =>
+            fila.TryGetValue(c, out var v) ? v?.ToString() ?? "" : ""));
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", texto); _ok = "Fila copiada al portapapeles."; }
+        catch { _error = "No se pudo copiar la fila (portapapeles no disponible)."; }
+    }
+
+    private async Task SetColorFilaUiAsync(string? color)
+    {
+        var filaId = _menuFilaId;
+        _menuFilaVisible = false;
+        if (filaId == Guid.Empty) { return; }
         try
         {
-            await Task.Delay(300, ct);
-            if (ct.IsCancellationRequested) { return; }
-            _verPagina = 1;
-            await CargarPaginaVer();
-            StateHasChanged();
+            await Svc.SetColorFilaAsync(_verSnapshotId, filaId, color, _actorId);
+            // Refleja el color en memoria sin repaginar toda la tabla.
+            for (var i = 0; i < _verFilas.Count; i++)
+            {
+                if (_verFilas[i].TryGetValue("__filaId", out var idv) && idv is Guid gg && gg == filaId)
+                {
+                    var d = new Dictionary<string, object?>(_verFilas[i], StringComparer.Ordinal)
+                    {
+                        ["__color"] = color
+                    };
+                    _verFilas[i] = d;
+                    break;
+                }
+            }
         }
-        catch (TaskCanceledException) { }
+        catch (Exception ex) { _error = "No se pudo cambiar el color: " + ex.Message; }
     }
 
     // ---- Modal Archivar ----

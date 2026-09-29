@@ -271,6 +271,7 @@ public sealed class FacturacionSnapshotService(
         bool ordenDesc = false,
         string? buscar = null,
         IReadOnlyList<FiltroColumna>? filtros = null,
+        string? colorFiltro = null,
         CancellationToken ct = default)
     {
         if (pagina < 1) { pagina = 1; }
@@ -309,6 +310,21 @@ public sealed class FacturacionSnapshotService(
             q = db.FacturacionSnapshotFilas.AsNoTracking().Where(x => x.SnapshotId == snapshotId);
         }
 
+        // Filtro por color de resaltado (componible sobre cualquiera de las dos ramas):
+        //   "__sin__" -> filas sin color; un hex -> filas con ese color exacto.
+        if (!string.IsNullOrWhiteSpace(colorFiltro))
+        {
+            if (string.Equals(colorFiltro, "__sin__", StringComparison.Ordinal))
+            {
+                q = q.Where(x => x.Color == null);
+            }
+            else
+            {
+                var cf = colorFiltro.Trim().ToLower();
+                q = q.Where(x => x.Color != null && x.Color.ToLower() == cf);
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(buscar))
         {
             var b = buscar.Trim().ToLower();
@@ -321,16 +337,17 @@ public sealed class FacturacionSnapshotService(
         var filas = await q.OrderBy(x => x.NumeroFila)
             .Skip((pagina - 1) * tamanoPagina)
             .Take(tamanoPagina)
-            .Select(x => new { x.Id, x.DatosJson })
+            .Select(x => new { x.Id, x.DatosJson, x.Color })
             .ToListAsync(ct);
 
-        // Enriquecemos cada dict con __filaId para que la UI pueda ubicar la
-        // fila al editar celdas. Clave con doble underscore para no chocar con
-        // columnas del builder (que nunca empiezan asi).
+        // Enriquecemos cada dict con __filaId (para ubicar la fila al editar celdas) y
+        // __color (marca de resaltado persistente de la fila). Claves con doble
+        // underscore para no chocar con columnas del builder (que nunca empiezan asi).
         var items = filas.Select(f =>
         {
             var dict = new Dictionary<string, object?>(Deserializar(f.DatosJson), StringComparer.Ordinal);
             dict["__filaId"] = f.Id;
+            dict["__color"] = f.Color;
             return (IReadOnlyDictionary<string, object?>)dict;
         }).ToList();
 
@@ -449,6 +466,34 @@ public sealed class FacturacionSnapshotService(
 
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task SetColorFilaAsync(
+        Guid snapshotId,
+        Guid filaId,
+        string? color,
+        Guid actor,
+        CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        var fila = await db.FacturacionSnapshotFilas.FirstOrDefaultAsync(
+            x => x.Id == filaId && x.SnapshotId == snapshotId, ct)
+            ?? throw new InvalidOperationException("Fila no encontrada en el snapshot.");
+
+        // Normalizamos: solo aceptamos un hex corto (#rgb / #rrggbb); cualquier otra
+        // cosa (o vacio) borra el color. Es una marca visual, no toca los datos ni la
+        // auditoria de celdas. Se permite en cualquier estado del snapshot.
+        var limpio = string.IsNullOrWhiteSpace(color) ? null : color.Trim();
+        if (limpio is not null && !System.Text.RegularExpressions.Regex.IsMatch(limpio, "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"))
+        {
+            limpio = null;
+        }
+        if (string.Equals(fila.Color, limpio, StringComparison.OrdinalIgnoreCase)) { return; }
+
+        fila.Color = limpio;
+        fila.UpdatedBy = actor;
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<int> ActualizarColumnaEnLoteAsync(

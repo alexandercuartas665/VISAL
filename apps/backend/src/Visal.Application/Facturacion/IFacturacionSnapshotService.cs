@@ -125,6 +125,7 @@ public interface IFacturacionSnapshotService
         bool ordenDesc = false,
         string? buscar = null,
         IReadOnlyList<FiltroColumna>? filtros = null,
+        string? colorFiltro = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -190,6 +191,19 @@ public interface IFacturacionSnapshotService
 
     /// <summary>Historial completo de cambios manuales sobre un snapshot, mas reciente primero.</summary>
     Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Marca (o desmarca) el color de resaltado persistente de una fila del snapshot.
+    /// <paramref name="color"/> es un hex corto (#rgb / #rrggbb); null o invalido quita
+    /// el color. Es una marca visual del usuario — no toca los datos ni la auditoria de
+    /// celdas — y se permite en cualquier estado del snapshot.
+    /// </summary>
+    Task SetColorFilaAsync(
+        Guid snapshotId,
+        Guid filaId,
+        string? color,
+        Guid actor,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Completa las columnas de trazabilidad ("HC N°" y "Cód. Asignación") en un snapshot

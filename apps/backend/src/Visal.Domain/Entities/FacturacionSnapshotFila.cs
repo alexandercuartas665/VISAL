@@ -31,4 +31,11 @@ public class FacturacionSnapshotFila : TenantEntity
 
     /// <summary>Datos de la fila serializados como JSON. Se persiste como <c>jsonb</c>.</summary>
     public string DatosJson { get; set; } = "{}";
+
+    /// <summary>
+    /// Color de resaltado de la fila (hex, ej. "#fde68a") o null si no tiene. Es una
+    /// marca manual persistente que el usuario pone en el detalle del snapshot para
+    /// destacar filas; no afecta la facturacion ni los exports de datos.
+    /// </summary>
+    public string? Color { get; set; }
 }

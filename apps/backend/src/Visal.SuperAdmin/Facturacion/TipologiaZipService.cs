@@ -148,10 +148,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 }
             }
         }
-        // Firma: se guarda como data URL en la BD, asi que su presencia basta.
-        var conFirma = idSet.Count == 0 ? new HashSet<Guid>() : (await _db.NotasMedicas.AsNoTracking()
-            .Where(n => idSet.Contains(n.PacienteId) && n.FirmaPacienteDataUrl != null)
-            .Select(n => n.PacienteId).Distinct().ToListAsync(ct)).ToHashSet();
+        // Firma: data URL en BD (dos fuentes: notas y solicitudes de firma remota).
+        var conFirma = new HashSet<Guid>();
+        if (idSet.Count > 0)
+        {
+            foreach (var pid in await _db.NotasMedicas.AsNoTracking()
+                .Where(n => idSet.Contains(n.PacienteId) && n.FirmaPacienteDataUrl != null)
+                .Select(n => n.PacienteId).Distinct().ToListAsync(ct)) { conFirma.Add(pid); }
+            foreach (var pid in await _db.FirmaPacienteRequests.AsNoTracking()
+                .Where(r => idSet.Contains(r.PacienteId) && r.ImageDataUrl != null)
+                .Select(r => r.PacienteId).Distinct().ToListAsync(ct)) { conFirma.Add(pid); }
+        }
 
         var res = new Dictionary<Guid, int>();
         foreach (var a in archivos)
@@ -234,16 +241,28 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     private async Task<List<byte[]>> CargarFirmasAsync(Guid pacienteId, bool soloUltimo, CancellationToken ct)
     {
-        var q = _db.NotasMedicas.AsNoTracking()
-            .Where(n => n.PacienteId == pacienteId && n.FirmaPacienteDataUrl != null);
-        var firmas = soloUltimo
-            ? await q.OrderByDescending(n => n.CreatedAt).Select(n => n.FirmaPacienteDataUrl!).Take(1).ToListAsync(ct)
-            : await q.OrderBy(n => n.CreatedAt).Select(n => n.FirmaPacienteDataUrl!).ToListAsync(ct);
+        // La firma del paciente puede estar en dos lugares:
+        //  1) NotaMedica.FirmaPacienteDataUrl (cuando la firma se pidio ligada a una nota).
+        //  2) FirmaPacienteRequest.ImageDataUrl (firmas "libres" pedidas desde HC/paciente/
+        //     WhatsApp; NO actualizan la nota). La mayoria de firmas del paciente viven aqui.
+        // Unimos ambas fuentes, ordenadas por fecha, y aplicamos SoloUltimo sobre el total.
+        var deNotas = await _db.NotasMedicas.AsNoTracking()
+            .Where(n => n.PacienteId == pacienteId && n.FirmaPacienteDataUrl != null)
+            .Select(n => new { Fecha = n.CreatedAt, Url = n.FirmaPacienteDataUrl! })
+            .ToListAsync(ct);
+        var deRequests = await _db.FirmaPacienteRequests.AsNoTracking()
+            .Where(r => r.PacienteId == pacienteId && r.ImageDataUrl != null)
+            .Select(r => new { Fecha = r.CompletedAt ?? r.CreatedAt, Url = r.ImageDataUrl! })
+            .ToListAsync(ct);
+
+        var todas = deNotas.Concat(deRequests).OrderByDescending(x => x.Fecha).ToList();
+        if (todas.Count == 0) { return new List<byte[]>(); }
+        var seleccion = soloUltimo ? todas.Take(1) : todas.AsEnumerable().Reverse();
 
         var res = new List<byte[]>();
-        foreach (var dataUrl in firmas)
+        foreach (var f in seleccion)
         {
-            var img = DecodeDataUrl(dataUrl);
+            var img = DecodeDataUrl(f.Url);
             if (img is not null) { res.Add(PaginaImagen(img, "Firma del paciente")); }
         }
         return res;

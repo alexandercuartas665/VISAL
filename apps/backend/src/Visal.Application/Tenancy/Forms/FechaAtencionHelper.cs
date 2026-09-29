@@ -52,6 +52,21 @@ public static class FechaAtencionHelper
             }
         }
 
+        // Enriquecer con la HORA: varios formatos capturan la fecha en un campo y la
+        // hora en OTRO campo aparte ("hora_atencion" = "15:30"). El escaneo de arriba
+        // solo ve la fecha, asi que la atencion queda a medianoche. Si la fecha resuelta
+        // quedo a las 00:00 (hora Bogota) y hay un campo de hora de atencion con un
+        // valor HH:mm, combinamos ambos para tener la hora real de la atencion.
+        if (mayor is DateTimeOffset m)
+        {
+            var bog = m.ToOffset(BogotaOffset);
+            if (bog.TimeOfDay == TimeSpan.Zero && TryGetHoraAtencion(valores, out var hora))
+            {
+                mayor = new DateTimeOffset(bog.Year, bog.Month, bog.Day,
+                    hora.Hours, hora.Minutes, 0, BogotaOffset).ToUniversalTime();
+            }
+        }
+
         return mayor;
 
         void Recurse(IEnumerable<FormNode> nodes)
@@ -126,6 +141,47 @@ public static class FechaAtencionHelper
         value = new DateTimeOffset(DateTime.SpecifyKind(naive, DateTimeKind.Unspecified), BogotaOffset)
             .ToUniversalTime();
         return true;
+    }
+
+    /// <summary>
+    /// Busca en los valores un campo de HORA de atencion (clave "hora_atencion", o
+    /// cualquier clave que contenga "hora" y "atenc") con un valor HH:mm. Prioriza la
+    /// clave exacta. No confunde con campos clinicos como "hora_hambre"/"horas_sueno".
+    /// </summary>
+    private static bool TryGetHoraAtencion(IReadOnlyDictionary<string, string?> valores, out TimeSpan hora)
+    {
+        hora = default;
+        // 1) clave exacta (cuerpo o header).
+        if ((valores.TryGetValue("hora_atencion", out var exact) && TryParseHora(exact, out hora))
+            || (valores.TryGetValue("hdr:hora_atencion", out var exactH) && TryParseHora(exactH, out hora)))
+        {
+            return true;
+        }
+        // 2) fallback: cualquier clave con "hora" + "atenc".
+        foreach (var kv in valores)
+        {
+            var k = kv.Key;
+            if (k is null) { continue; }
+            if (k.IndexOf("hora", StringComparison.OrdinalIgnoreCase) < 0
+                || k.IndexOf("atenc", StringComparison.OrdinalIgnoreCase) < 0) { continue; }
+            if (TryParseHora(kv.Value, out hora)) { return true; }
+        }
+        return false;
+    }
+
+    private static readonly string[] HoraFormatos = { "HH:mm", "H:mm", "HH:mm:ss", "H:mm:ss" };
+
+    private static bool TryParseHora(string? raw, out TimeSpan hora)
+    {
+        hora = default;
+        if (string.IsNullOrWhiteSpace(raw)) { return false; }
+        if (DateTime.TryParseExact(raw.Trim(), HoraFormatos, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var dt))
+        {
+            hora = dt.TimeOfDay;
+            return true;
+        }
+        return false;
     }
 
     private static bool TryParse(string raw, out DateTimeOffset value)

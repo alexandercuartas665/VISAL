@@ -782,12 +782,16 @@ public sealed class FacturacionSnapshotService(
             case SnapshotColumnaFormato.FechaHora:
             case SnapshotColumnaFormato.FechaIso:
             case SnapshotColumnaFormato.FechaHoraIso:
-                if (SnapshotColumnaFormatter.TryFecha(val, out var fecha)) { cell.Value = fecha; }
+                // Guarda: ClosedXML tira OverflowException "Not a legal OleAut date" si la
+                // fecha cae fuera del rango Excel (< 1900). Un valor que TryFecha parsea a
+                // una fecha rara (p. ej. un documento o una hora suelta) reventaba TODO el
+                // export; si no es fecha valida de Excel, se escribe como texto.
+                if (SnapshotColumnaFormatter.TryFecha(val, out var fecha) && EsFechaExcel(fecha)) { cell.Value = fecha; }
                 else { cell.Value = val.ToString(); patronExcel = null; }
                 break;
             case SnapshotColumnaFormato.Personalizado:
                 if (SnapshotColumnaFormatter.TryNumero(val, out var pn)) { cell.Value = pn; }
-                else if (SnapshotColumnaFormatter.TryFecha(val, out var pf)) { cell.Value = pf; }
+                else if (SnapshotColumnaFormatter.TryFecha(val, out var pf) && EsFechaExcel(pf)) { cell.Value = pf; }
                 else { cell.Value = val.ToString(); }
                 break;
             default:
@@ -799,6 +803,9 @@ public sealed class FacturacionSnapshotService(
             cell.Style.NumberFormat.Format = patronExcel;
         }
     }
+
+    /// <summary>Rango de fecha que Excel/OADate acepta (evita OverflowException al escribir la celda).</summary>
+    private static bool EsFechaExcel(DateTime d) => d.Year is >= 1900 and <= 9999;
 
     public async Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, bool ignorarValidacion = false, CancellationToken ct = default)
     {

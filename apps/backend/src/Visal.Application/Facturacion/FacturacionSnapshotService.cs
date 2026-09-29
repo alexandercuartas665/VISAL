@@ -260,7 +260,13 @@ public sealed class FacturacionSnapshotService(
             asegNombre = await db.Aseguradoras.AsNoTracking()
                 .Where(a => a.Id == aid).Select(a => a.Nombre).FirstOrDefaultAsync(ct);
         }
-        return new FacturacionSnapshotDetalleDto(Map(snap, asegNombre), columnas, snap.FiltrosJson);
+        string? creadoPorNombre = null;
+        if (snap.CreatedBy is Guid cb)
+        {
+            creadoPorNombre = await db.TenantUsers.AsNoTracking()
+                .Where(u => u.PlatformUserId == cb).Select(u => u.Email).FirstOrDefaultAsync(ct);
+        }
+        return new FacturacionSnapshotDetalleDto(Map(snap, asegNombre), columnas, snap.FiltrosJson, creadoPorNombre);
     }
 
     public async Task<PagedResult<IReadOnlyDictionary<string, object?>>> ListarFilasAsync(

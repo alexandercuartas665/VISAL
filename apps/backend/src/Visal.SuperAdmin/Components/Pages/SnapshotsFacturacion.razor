@@ -11,6 +11,7 @@
 @inject IEnumerable<ISnapshotBuilder> Builders
 @inject IAseguradoraService AseSvc
 @inject ICuentaMedicaConfigService CuentaSvc
+@inject Visal.SuperAdmin.Facturacion.ITipologiaZipService ZipSvc
 @inject ISucursalService SucSvc
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
@@ -562,8 +563,14 @@
                     {
                         <div class="sn-tip-head">
                             <div>
-                                <strong>Aseguradora:</strong>
-                                @(_verDetalle.Metadata.AseguradoraNombre ?? "(sin aseguradora en el snapshot)")
+                                <div><strong>Aseguradora:</strong> @(_verDetalle.Metadata.AseguradoraNombre ?? "(sin aseguradora en el snapshot)")</div>
+                                <div class="sn-tip-gen">
+                                    Generado @_verDetalle.Metadata.FechaEjecucionInicio.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                                    @if (!string.IsNullOrWhiteSpace(_verDetalle.CreadoPorNombre))
+                                    {
+                                        <text>&middot; por <b>@_verDetalle.CreadoPorNombre</b></text>
+                                    }
+                                </div>
                             </div>
                             <div class="sn-tip-kpis">
                                 <span class="sn-tip-kpi">@_tipArchivos.Count archivo(s)</span>
@@ -593,24 +600,38 @@
                         else
                         {
                             @* Configuracion aplicable: los archivos que se generaran por paciente. *@
-                            <div class="sn-tip-section-t">Archivos configurados (se generan por paciente)</div>
-                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Click en un archivo para ver su contenido y el detalle por paciente. El numero indica cuantos registros (pacientes) reciben ese archivo.</div>
+                            <div class="sn-tip-section-t">Archivos configurados</div>
+                            <div class="text-muted" style="font-size:11.5px;margin-top:-4px;">Se genera un PDF <b>solo</b> para los pacientes que tienen el contenido del archivo. El numero indica cuantos, de los @_tipPacientes.Count del snapshot.</div>
                             <div class="sn-tip-archivos">
                                 @foreach (var a in _tipArchivos)
                                 {
-                                    <div class="sn-tip-arch">
-                                        <button type="button" class="sn-tip-arch-h" @onclick="() => AbrirArchivoModal(a)">
-                                            <span class="sn-tip-arch-name">@(string.IsNullOrWhiteSpace(a.Descripcion) ? a.Alias : a.Descripcion)</span>
-                                            <span class="sn-tip-arch-code mono">@a.Alias</span>
-                                            @if (a.Obligatorio) { <span class="sn-tip-badge">OBL</span> }
-                                            <span class="sn-tip-arch-count" title="Pacientes/registros que reciben este archivo en el snapshot">@_tipPacientes.Count reg.</span>
+                                    var con = _tipConteos.TryGetValue(a.Id, out var cc) ? cc : 0;
+                                    var total = _tipPacientes.Count;
+                                    var nombre = string.IsNullOrWhiteSpace(a.Descripcion) ? a.Alias : a.Descripcion;
+                                    <div class="sn-tip-arch @(con == 0 ? "vacio" : "")">
+                                        <button type="button" class="sn-tip-arch-h" @onclick="() => AbrirArchivoModal(a)" title="Ver el detalle por paciente">
+                                            <span class="sn-tip-arch-ico">
+                                                <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zM9 1v3a1 1 0 0 0 1 1h3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM5 8h6v1H5zm0 3h6v1H5z"/></svg>
+                                            </span>
+                                            <span class="sn-tip-arch-main">
+                                                <span class="sn-tip-arch-name">@nombre</span>
+                                                <span class="sn-tip-arch-sub">
+                                                    <span class="sn-tip-arch-code mono">@a.Alias</span>
+                                                    @if (a.Obligatorio) { <span class="sn-tip-badge">OBL</span> }
+                                                </span>
+                                            </span>
+                                            <span class="sn-tip-arch-count @(con == 0 ? "cero" : "")"
+                                                  title="Pacientes con contenido para este archivo, de los del snapshot">
+                                                <b>@con</b><span class="den">/@total</span>
+                                                <span class="lbl">con contenido</span>
+                                            </span>
                                         </button>
                                         <div class="sn-tip-arch-foot">
-                                            <a class="btn btn-outline-success btn-sm sn-tip-dl"
+                                            <a class="btn btn-sm sn-tip-dl @(con == 0 ? "off" : "")"
                                                href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/tipologia/{a.Id}/zip")"
                                                target="_blank" rel="noopener"
-                                               title="Descargar ZIP: un PDF por paciente, nombrado con el patron">
-                                                &#11015; Descargar ZIP
+                                               title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : "Descargar ZIP: un PDF por paciente con contenido, nombrado con el patron")">
+                                                &#11015; Descargar ZIP@(con > 0 ? $" ({con})" : "")
                                             </a>
                                         </div>
                                     </div>
@@ -618,9 +639,9 @@
                             </div>
 
                             <div class="sn-tip-scope">
-                                &#9432; Cada archivo se genera para los <b>@_tipPacientes.Count paciente(s)</b> contenidos en
-                                este snapshot (<b>@_verDetalle.Metadata.Nombre</b>, @_verDetalle.Metadata.TotalFilas filas).
-                                Click en un archivo para ver el detalle por paciente.
+                                &#9432; Cada archivo se genera <b>solo</b> para los pacientes de este snapshot
+                                (<b>@_verDetalle.Metadata.Nombre</b>, @_tipPacientes.Count paciente(s)) que tienen su contenido.
+                                Los pacientes sin contenido se omiten. Click en un archivo para ver el detalle por paciente.
                             </div>
                         }
                     }
@@ -726,7 +747,7 @@
                             <a class="btn btn-success btn-sm"
                                href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/tipologia/{_archModal.Id}/zip")"
                                target="_blank" rel="noopener">
-                                &#11015; Descargar ZIP (@_tipPacientes.Count pacientes)
+                                &#11015; Descargar ZIP (@(_tipConteos.TryGetValue(_archModal.Id, out var cm) ? cm : 0) con contenido)
                             </a>
                             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivoModal">Cerrar</button>
                         </div>
@@ -1039,15 +1060,27 @@
     .sn-tip-relanzar { margin-left:6px; }
     .sn-tip-kpi { background:#eef2ff; color:#4338ca; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
     .sn-tip-section-t { font-weight:700; color:#0f172a; font-size:13px; margin-top:4px; }
-    .sn-tip-archivos { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; }
-    .sn-tip-arch { border:1px solid var(--border); border-left:3px solid #6366f1; border-radius:8px; background:#fff; overflow:hidden; }
-    .sn-tip-arch.abierto { box-shadow:0 2px 8px rgba(99,102,241,.12); }
-    .sn-tip-arch-h { display:flex; align-items:center; gap:6px; flex-wrap:wrap; width:100%; text-align:left; background:none; border:none; padding:10px; cursor:pointer; font:inherit; }
+    .sn-tip-gen { font-size:11.5px; color:#64748b; margin-top:3px; }
+    .sn-tip-archivos { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+    .sn-tip-arch { border:1px solid var(--border); border-radius:10px; background:#fff; overflow:hidden; box-shadow:0 1px 2px rgba(15,23,42,.04); transition:box-shadow .12s, border-color .12s; }
+    .sn-tip-arch:hover { box-shadow:0 6px 18px rgba(99,102,241,.14); border-color:#c7d2fe; }
+    .sn-tip-arch.abierto { box-shadow:0 6px 18px rgba(99,102,241,.16); border-color:#a5b4fc; }
+    .sn-tip-arch.vacio { background:#fcfcfd; }
+    .sn-tip-arch-h { display:flex; align-items:center; gap:12px; width:100%; min-height:78px; text-align:left; background:none; border:none; padding:16px 14px; cursor:pointer; font:inherit; }
     .sn-tip-arch-h:hover { background:#f8fafc; }
+    .sn-tip-arch-ico { flex:0 0 auto; width:42px; height:42px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; background:#eef2ff; color:#4f46e5; }
+    .sn-tip-arch.vacio .sn-tip-arch-ico { background:#f1f5f9; color:#94a3b8; }
+    .sn-tip-arch-main { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1 1 auto; }
+    .sn-tip-arch-sub { display:flex; align-items:center; gap:6px; }
     .sn-tip-arch-caret { color:#6366f1; font-size:11px; width:12px; flex:0 0 auto; }
-    .sn-tip-arch-count { margin-left:auto; background:#eef2ff; color:#4338ca; border-radius:999px; padding:0 8px; font-size:11px; font-weight:700; }
+    .sn-tip-arch-count { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; line-height:1.05; background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; border-radius:8px; padding:4px 9px; min-width:56px; }
+    .sn-tip-arch-count b { font-size:15px; }
+    .sn-tip-arch-count .den { font-size:10px; color:#059669; opacity:.85; }
+    .sn-tip-arch-count .lbl { font-size:8.5px; text-transform:uppercase; letter-spacing:.02em; margin-top:1px; }
+    .sn-tip-arch-count.cero { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+    .sn-tip-arch-count.cero .den { color:#dc2626; }
     .sn-tip-arch-body { padding:0 10px 10px 28px; display:flex; flex-direction:column; gap:6px; }
-    .sn-tip-arch-name { font-weight:700; color:#0f172a; font-size:13px; }
+    .sn-tip-arch-name { font-weight:700; color:#0f172a; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .sn-tip-arch-code { background:#f1f5f9; color:#475569; border-radius:4px; padding:1px 6px; font-size:11px; }
     .sn-tip-badge { background:#dbeafe; color:#1e40af; border-radius:4px; padding:1px 6px; font-size:10px; font-weight:700; }
     .sn-tip-arch-cont { display:flex; flex-wrap:wrap; gap:4px; }
@@ -1063,6 +1096,10 @@
     .sn-tip-scope { font-size:12px; color:#1e3a8a; background:#eff6ff; border-left:3px solid #2563eb; border-radius:4px; padding:6px 10px; margin-top:-2px; }
     .sn-tip-body .mono, .sn-tip-arch .mono, .sn-tip-file.mono, .sn-tip-arch-code.mono, .sn-arch-modal .mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; }
     .sn-tip-arch-foot { padding:8px 10px; border-top:1px solid #eef2f7; background:#fafcff; }
+    .sn-tip-dl { width:100%; display:inline-flex; align-items:center; justify-content:center; gap:6px; background:#059669; border:1px solid #059669; color:#fff; font-weight:600; }
+    .sn-tip-dl:hover { background:#047857; border-color:#047857; color:#fff; }
+    .sn-tip-dl.off { background:#f1f5f9; border-color:#e2e8f0; color:#94a3b8; }
+    .sn-tip-dl.off:hover { background:#e2e8f0; color:#64748b; }
     .sn-tip-dl { width:100%; }
     /* Modal de contenido del archivo (por encima del modal Ver) */
     .sn-arch-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1200; display:flex; align-items:center; justify-content:center; padding:20px; }
@@ -1291,6 +1328,8 @@
     private CuentaMedicaConfigDto? _tipConfig;
     private List<InformeItemDto> _tipArchivos = new();
     private List<PacienteSnapshotDto> _tipPacientes = new();
+    // archivoItemId -> nro de pacientes del snapshot que SI tienen contenido para ese archivo.
+    private IReadOnlyDictionary<Guid, int> _tipConteos = new Dictionary<Guid, int>();
     private InformeItemDto? _archModal;
 
     private void AbrirArchivoModal(InformeItemDto a) => _archModal = a;
@@ -1596,6 +1635,7 @@
         _tipCargado = false;
         _tipArchivos = new();
         _tipPacientes = new();
+        _tipConteos = new Dictionary<Guid, int>();
         _archModal = null;
         _tipConfig = null;
         _showVer = true;
@@ -1632,6 +1672,9 @@
                 _tipArchivos = new();
             }
             _tipPacientes = (await Svc.ListarPacientesSnapshotAsync(_verSnapshotId)).ToList();
+            _tipConteos = _tipArchivos.Count > 0
+                ? await ZipSvc.ContarConContenidoAsync(_verSnapshotId)
+                : new Dictionary<Guid, int>();
             _tipCargado = true;
         }
         catch (Exception ex) { _error = "Error al cargar tipologias: " + ex.Message; }

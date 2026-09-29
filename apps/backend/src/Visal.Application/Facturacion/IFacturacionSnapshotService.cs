@@ -40,7 +40,8 @@ public sealed record FacturacionSnapshotDto(
 public sealed record FacturacionSnapshotDetalleDto(
     FacturacionSnapshotDto Metadata,
     IReadOnlyList<string> Columnas,
-    string FiltrosJson);
+    string FiltrosJson,
+    string? CreadoPorNombre = null);
 
 /// <summary>
 /// Paciente distinto dentro de un snapshot (agrupado por documento), con su

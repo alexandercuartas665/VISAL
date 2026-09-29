@@ -22,4 +22,13 @@ public interface ITipologiaZipService
     /// </summary>
     Task<ArchivoExportado?> GenerarZipArchivoAsync(
         Guid snapshotId, Guid archivoItemId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Para cada archivo (tipologia) configurado en la aseguradora del snapshot,
+    /// cuenta cuantos pacientes del snapshot tienen REALMENTE contenido para ese
+    /// archivo (p. ej. cuantos tienen firma para un archivo de firmas). Es el numero
+    /// de PDFs que produciria el ZIP. Devuelve un mapa archivoItemId -&gt; cantidad.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, int>> ContarConContenidoAsync(
+        Guid snapshotId, CancellationToken ct = default);
 }

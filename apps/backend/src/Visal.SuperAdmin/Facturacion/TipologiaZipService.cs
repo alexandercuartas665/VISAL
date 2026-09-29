@@ -63,13 +63,19 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
         using var zipMs = new MemoryStream();
+        var incluidos = 0;
         using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
         {
             var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var pac in pacientes)
             {
                 ct.ThrowIfCancellationRequested();
+                // Solo se incluye el paciente si REALMENTE tiene contenido para este
+                // archivo (firma, autorizacion, etc.). Los que no lo tienen se omiten
+                // — no se genera un PDF-nota vacio. Aplica a cualquier tipo de archivo.
                 var pdf = await ArmarPdfPacienteAsync(archivo, pac, ct);
+                if (pdf is null) { continue; }
+
                 var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac));
                 var name = baseName + ".pdf";
                 // Evita colisiones de nombre (dos pacientes con mismo patron).
@@ -79,6 +85,20 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
                 await using var es = entry.Open();
                 await es.WriteAsync(pdf, ct);
+                incluidos++;
+            }
+
+            // Si ningun paciente tenia contenido, dejamos una unica nota resumen para
+            // que el ZIP no baje totalmente vacio y quede claro el porque.
+            if (incluidos == 0)
+            {
+                var nota = PaginaNota(
+                    $"Archivo: {(string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion)}\n\n" +
+                    $"Ninguno de los {pacientes.Count} paciente(s) de este snapshot tiene contenido " +
+                    "disponible para este archivo, por lo que no se genero ningun PDF.");
+                var entry = zip.CreateEntry("_SIN_CONTENIDO.pdf", CompressionLevel.Optimal);
+                await using var es = entry.Open();
+                await es.WriteAsync(nota, ct);
             }
         }
 
@@ -86,11 +106,76 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return new ArchivoExportado(zipMs.ToArray(), "application/zip", nombreZip);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, int>> ContarConContenidoAsync(
+        Guid snapshotId, CancellationToken ct = default)
+    {
+        var vacio = new Dictionary<Guid, int>();
+        var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
+        if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return vacio; }
+
+        var archivos = await _cuenta.ListarItemsAsync(aseguradoraId, ct);
+        if (archivos.Count == 0) { return vacio; }
+
+        var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
+        var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
+
+        // doc -> pacienteId (los del snapshot que existen en el sistema).
+        var pacs = await _db.Pacientes.AsNoTracking()
+            .Where(p => docs.Contains(p.NumeroDocumento))
+            .Select(p => new { p.Id, p.NumeroDocumento })
+            .ToListAsync(ct);
+        var docToId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in pacs) { docToId[p.NumeroDocumento] = p.Id; }
+        var idSet = docToId.Values.ToHashSet();
+
+        // Precarga: pacientes (del snapshot) con autorizacion y con firma.
+        // Autorizacion: el ZIP lee el PDF fisico de wwwroot, asi que aqui contamos solo
+        // los que TIENEN el archivo en disco — de lo contrario el conteo diria "18" pero
+        // el ZIP saldria vacio (p. ej. en local, donde no estan los archivos de prod).
+        var conAut = new HashSet<Guid>();
+        if (idSet.Count > 0)
+        {
+            var autRows = await _db.Asignaciones.AsNoTracking()
+                .Where(a => idSet.Contains(a.PacienteId) && a.PdfAutorizacionUrl != null)
+                .Select(a => new { a.PacienteId, a.PdfAutorizacionUrl })
+                .ToListAsync(ct);
+            foreach (var r in autRows)
+            {
+                if (!conAut.Contains(r.PacienteId) && ArchivoExisteEnDisco(r.PdfAutorizacionUrl!))
+                {
+                    conAut.Add(r.PacienteId);
+                }
+            }
+        }
+        // Firma: se guarda como data URL en la BD, asi que su presencia basta.
+        var conFirma = idSet.Count == 0 ? new HashSet<Guid>() : (await _db.NotasMedicas.AsNoTracking()
+            .Where(n => idSet.Contains(n.PacienteId) && n.FirmaPacienteDataUrl != null)
+            .Select(n => n.PacienteId).Distinct().ToListAsync(ct)).ToHashSet();
+
+        var res = new Dictionary<Guid, int>();
+        foreach (var a in archivos)
+        {
+            var n = 0;
+            foreach (var pac in pacientes)
+            {
+                if (!docToId.TryGetValue(pac.Documento, out var pid)) { continue; }
+                // El paciente cuenta si ALGUN contenido del archivo tiene material para el.
+                var tiene = a.Contenidos.Any(c =>
+                    (c.Origen == OrigenInformeItem.AutorizacionAsignacion && conAut.Contains(pid)) ||
+                    (c.Origen == OrigenInformeItem.FirmaPaciente && conFirma.Contains(pid)));
+                if (tiene) { n++; }
+            }
+            res[a.Id] = n;
+        }
+        return res;
+    }
+
     /// <summary>
     /// Arma el PDF de un archivo para un paciente: recorre los contenidos, recupera
     /// el contenido real de los origenes soportados y fusiona todo en un solo PDF.
     /// </summary>
-    private async Task<byte[]> ArmarPdfPacienteAsync(
+    private async Task<byte[]?> ArmarPdfPacienteAsync(
         InformeItemDto archivo, PacienteSnapshotDto pac, CancellationToken ct)
     {
         var pid = await _db.Pacientes.AsNoTracking()
@@ -100,7 +185,6 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         // Lista de PDFs (bytes) a fusionar, en el orden de los contenidos.
         var partes = new List<byte[]>();
-        var notas = new List<string>();
 
         if (pid is Guid pacienteId)
         {
@@ -116,28 +200,16 @@ public sealed class TipologiaZipService : ITipologiaZipService
                         partes.AddRange(await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct));
                         break;
                     default:
-                        // Origenes de formularios de HC: ola posterior.
-                        notas.Add($"- {c.Origen} (pendiente de generacion)");
+                        // Origenes de formularios de HC (DocumentoHc, Evolucion, Escala,
+                        // etc.): pendientes de una ola posterior. No producen contenido.
                         break;
                 }
             }
         }
-        else
-        {
-            notas.Add("No se encontro el paciente en el sistema para recuperar sus documentos.");
-        }
 
-        if (partes.Count == 0)
-        {
-            // Sin contenido real: pagina-nota para que el ZIP no quede con archivos vacios.
-            var msg = new StringBuilder();
-            msg.AppendLine($"Archivo: {(string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion)}");
-            msg.AppendLine($"Paciente: {pac.Nombre} ({pac.TipoDocumento} {pac.Documento})");
-            msg.AppendLine();
-            msg.AppendLine("Sin documentos disponibles para este archivo todavia.");
-            if (notas.Count > 0) { msg.AppendLine(); msg.AppendLine(string.Join(Environment.NewLine, notas)); }
-            return PaginaNota(msg.ToString());
-        }
+        // Sin contenido real para este paciente: se OMITE del ZIP (no se genera un
+        // PDF-nota vacio). El caller cuenta cuantos se incluyeron.
+        if (partes.Count == 0) { return null; }
 
         var fusion = FusionarPdfs(partes);
         return fusion;
@@ -182,6 +254,20 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <summary>Lee un archivo servido desde wwwroot (ruta relativa como
     /// "/uploads/...") y lo devuelve como PDF: si ya es PDF lo pasa tal cual; si es
     /// imagen la envuelve en un PDF. Devuelve null si no existe o no se pudo leer.</summary>
+    /// <summary>True si el archivo servido desde wwwroot (ruta relativa) existe en disco.
+    /// Mismo calculo de ruta que <see cref="LeerArchivoComoPdf"/>, para que el conteo
+    /// cuadre con lo que el ZIP realmente puede incluir.</summary>
+    private bool ArchivoExisteEnDisco(string urlRelativa)
+    {
+        try
+        {
+            var rel = urlRelativa.TrimStart('/', '\\').Replace('/', Path.DirectorySeparatorChar);
+            var full = Path.Combine(_env.WebRootPath ?? "", rel);
+            return File.Exists(full);
+        }
+        catch { return false; }
+    }
+
     private byte[]? LeerArchivoComoPdf(string urlRelativa)
     {
         try

@@ -1,5 +1,6 @@
 using Visal.Application.Common;
 using Visal.Domain.Common;
+using Visal.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -29,11 +30,44 @@ public sealed class AuditableTenantInterceptor : SaveChangesInterceptor
         return base.SavingChanges(eventData, result);
     }
 
-    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
     {
         Apply(eventData.Context);
-        return base.SavingChangesAsync(eventData, result, cancellationToken);
+        await AsignarNumeroSesionAsync(eventData.Context, cancellationToken);
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Estampa <see cref="AsignacionTurno.NumeroSesion"/> (persistido) a los turnos recien
+    /// agregados que aun no lo tengan: MAX(NumeroSesion de la asignacion) + 1, en orden de
+    /// Id (mismo desempate historico cuando el CreatedAt del lote colisiona). Asi el numero
+    /// de sesion deja de recomputarse en cada carga y no se cruza.
+    /// </summary>
+    private static async Task AsignarNumeroSesionAsync(DbContext? context, CancellationToken ct)
+    {
+        if (context is null) { return; }
+
+        var nuevos = context.ChangeTracker.Entries<AsignacionTurno>()
+            .Where(e => e.State == EntityState.Added && e.Entity.NumeroSesion is null)
+            .Select(e => e.Entity)
+            .ToList();
+        if (nuevos.Count == 0) { return; }
+
+        foreach (var grupo in nuevos.GroupBy(t => t.AsignacionId))
+        {
+            var asigId = grupo.Key;
+            var maxActual = await context.Set<AsignacionTurno>().AsNoTracking()
+                .Where(t => t.AsignacionId == asigId && t.NumeroSesion != null)
+                .Select(t => t.NumeroSesion!.Value)
+                .OrderByDescending(v => v)
+                .FirstOrDefaultAsync(ct);
+            var siguiente = maxActual;
+            foreach (var turno in grupo.OrderBy(t => t.Id))
+            {
+                turno.NumeroSesion = ++siguiente;
+            }
+        }
     }
 
     private void Apply(DbContext? context)

@@ -322,10 +322,11 @@ public sealed class AtencionProfesionalService(
                 // (sesion nunca atendida), el flag es false por definicion.
                 var completado = sesion?.Completado ?? false;
 
-                // Numero de sesion GLOBAL por asignacion. Se calcula ANTES del filtro
-                // Pendiente para que sea estable: la sesion 2 debe verse siempre como
-                // "Sesion 2" aunque la 1 este completada y oculta por el filtro.
-                var nGlobal = contadorPorAsignacion.TryGetValue(t.AsignacionId, out var c) ? c + 1 : 1;
+                // Numero de sesion GLOBAL por asignacion. Ahora PERSISTIDO en el turno
+                // (NumeroSesion): estable y sin recomputarse. Si un turno viejo quedara
+                // sin el, se cae al contador por CreatedAt como fallback.
+                var nGlobal = t.NumeroSesion
+                    ?? (contadorPorAsignacion.TryGetValue(t.AsignacionId, out var c) ? c + 1 : 1);
                 contadorPorAsignacion[t.AsignacionId] = nGlobal;
 
                 if (!incluirCompletados && completado) { continue; }

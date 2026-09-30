@@ -80,4 +80,15 @@ public class AsignacionTurno : TenantEntity
     /// lo lleva (la que corresponde a la Asignacion que fue "primera con Cantidad>0"
     /// al aplicar el paquete). El resto queda null.</summary>
     public decimal? PaqueteValorPactado { get; set; }
+
+    /// <summary>
+    /// Numero de sesion GLOBAL dentro de la asignacion (1..N), PERSISTIDO. Antes se
+    /// calculaba al vuelo por el orden de creacion de los turnos, lo que lo hacia
+    /// fragil (se recomputaba en cada carga y se cruzaba cuando los turnos se creaban
+    /// en lote con el mismo CreatedAt). Ahora se estampa una sola vez: al crear el turno
+    /// se le asigna MAX(NumeroSesion de la asignacion)+1. Es el numero que muestran
+    /// Ordenes Clinicas y Atencion. (La cronologia real por fecha de atencion es un
+    /// ajuste posterior; por ahora refleja el orden de creacion, como antes.)
+    /// </summary>
+    public int? NumeroSesion { get; set; }
 }

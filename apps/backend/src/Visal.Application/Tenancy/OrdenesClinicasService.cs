@@ -347,16 +347,17 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         {
             var todosTurnos = await db.AsignacionTurnos.AsNoTracking()
                 .Where(t => asigIds.Contains(t.AsignacionId))
-                .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt })
+                .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt, t.NumeroSesion })
                 .ToListAsync(ct);
             foreach (var grp in todosTurnos.GroupBy(x => x.AsignacionId))
             {
-                // Tiebreaker por Id: mismo criterio que /atencion y el validador
-                // de orden. UUID v7 preserva orden real cuando CreatedAt colisiona.
+                // El NumeroSesion PERSISTIDO manda. Si algun turno viejo quedara sin el
+                // (no backfilleado), se calcula al vuelo por CreatedAt/Id como fallback
+                // (mismo criterio que /atencion; UUID v7 preserva orden cuando CreatedAt colisiona).
                 var lista = grp.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
                 for (int i = 0; i < lista.Count; i++)
                 {
-                    turnoOrden[lista[i].Id] = i + 1;
+                    turnoOrden[lista[i].Id] = lista[i].NumeroSesion ?? (i + 1);
                 }
             }
         }

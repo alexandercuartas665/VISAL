@@ -353,6 +353,17 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             string? modalidadFacturacion = null;
             string? grupoServicioFacturacion = null;
             string? servicioFacturacion = null;
+
+            // CUPS: el snapshot CodigoRips vive en la ASIGNACION (se estampa al crearla),
+            // asi que SOBREVIVE aunque el servicio del contrato se borre despues. Lo
+            // tomamos primero — fuera del bloque del servicio — para que el CUPS no se
+            // pierda cuando el servicio ya no existe. Solo si la asignacion no lo trae
+            // (legacy), lo derivamos del servicio vivo mas abajo.
+            if (!string.IsNullOrWhiteSpace(asigRelevante?.CodigoRips))
+            {
+                cupsCodigo = asigRelevante!.CodigoRips;
+            }
+
             if (asigRelevante is not null
                 && Guid.TryParse(asigRelevante.ServicioId, out var sid)
                 && serviciosContrato.TryGetValue(sid, out var sc))
@@ -366,12 +377,9 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 modalidadFacturacion = sc.ModalidadFacturacion;
                 grupoServicioFacturacion = sc.GrupoServicioFacturacion;
                 servicioFacturacion = sc.ServicioFacturacion;
-                // CUPS sin el sufijo de modalidad d/f (RIPS no lo maneja). Preferimos
-                // el snapshot CodigoRips de la asignacion; si es legacy/null, lo
-                // derivamos del CodigoServicio del contrato al vuelo.
-                cupsCodigo = !string.IsNullOrWhiteSpace(asigRelevante.CodigoRips)
-                    ? asigRelevante.CodigoRips
-                    : ServicioCodigo.Base(sc.CodigoServicio);
+                // Si la asignacion no traia CodigoRips, lo derivamos del servicio vivo
+                // (sin el sufijo de modalidad d/f, que RIPS no maneja).
+                cupsCodigo ??= ServicioCodigo.Base(sc.CodigoServicio);
                 cupsDescripcion = sc.Descripcion;
                 // Tipo Archivo RIPS (col 7 "Archivo json"): override por
                 // servicio del contrato. Si no esta configurado, mantenemos el

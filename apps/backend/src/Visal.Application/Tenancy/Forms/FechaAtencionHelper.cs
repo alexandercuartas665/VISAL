@@ -9,8 +9,10 @@ namespace Visal.Application.Tenancy.Forms;
 /// Reglas:
 /// - Solo se consideran nodos de tipo "field" con FieldType date | datetime y
 ///   IsFechaAtencion = true.
-/// - Si varios campos estan marcados, se toma la MAYOR fecha entre los que
-///   tengan valor no vacio.
+/// - Si varios campos estan marcados, se toma la fecha/hora MAS TEMPRANA (minima)
+///   entre los que tengan valor no vacio: la atencion es cuando INICIA, no cuando
+///   termina. Antes se tomaba la MAYOR, lo que en formatos de turno (p. ej. PP-FO-84)
+///   agarraba la hora de ENTREGA (fin) en vez de la de RECEPCION (inicio).
 /// - Si ninguno esta marcado o ninguno tiene valor valido, devuelve null y el
 ///   servicio deja intacto el <c>HistoriaClinica.FechaAtencion</c> previo (o
 ///   null si nunca se seteo).
@@ -47,7 +49,8 @@ public static class FechaAtencionHelper
                 if (!valores.TryGetValue("hdr:" + c.Id, out var raw) || string.IsNullOrWhiteSpace(raw)) { continue; }
                 if (TryParseHeaderFecha(raw!, out var dt))
                 {
-                    if (mayor is null || dt > mayor) { mayor = dt; }
+                    // Mas temprana = inicio de la atencion (ver doc del tipo).
+                    if (mayor is null || dt < mayor) { mayor = dt; }
                 }
             }
         }
@@ -95,7 +98,9 @@ public static class FechaAtencionHelper
                     // y quedaria con offset -05:00 (Bogota), lo que hace que
                     // SaveChangesAsync tire InvalidCastException. Normalizamos.
                     if (dt.Offset != TimeSpan.Zero) { dt = dt.ToUniversalTime(); }
-                    if (mayor is null || dt > mayor) { mayor = dt; }
+                    // Mas temprana = inicio de la atencion: en formatos de turno evita
+                    // agarrar la entrega (fin) en vez de la recepcion (inicio).
+                    if (mayor is null || dt < mayor) { mayor = dt; }
                 }
             }
         }

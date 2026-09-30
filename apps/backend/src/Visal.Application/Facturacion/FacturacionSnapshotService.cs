@@ -343,17 +343,18 @@ public sealed class FacturacionSnapshotService(
         var filas = await q.OrderBy(x => x.NumeroFila)
             .Skip((pagina - 1) * tamanoPagina)
             .Take(tamanoPagina)
-            .Select(x => new { x.Id, x.DatosJson, x.Color })
+            .Select(x => new { x.Id, x.DatosJson, x.Color, x.NumeroFila })
             .ToListAsync(ct);
 
-        // Enriquecemos cada dict con __filaId (para ubicar la fila al editar celdas) y
-        // __color (marca de resaltado persistente de la fila). Claves con doble
-        // underscore para no chocar con columnas del builder (que nunca empiezan asi).
+        // Enriquecemos cada dict con __filaId (para ubicar la fila al editar celdas),
+        // __color (marca de resaltado persistente) y __numeroFila (contador de fila
+        // 1..N). Claves con doble underscore para no chocar con columnas del builder.
         var items = filas.Select(f =>
         {
             var dict = new Dictionary<string, object?>(Deserializar(f.DatosJson), StringComparer.Ordinal);
             dict["__filaId"] = f.Id;
             dict["__color"] = f.Color;
+            dict["__numeroFila"] = f.NumeroFila;
             return (IReadOnlyDictionary<string, object?>)dict;
         }).ToList();
 
@@ -708,11 +709,17 @@ public sealed class FacturacionSnapshotService(
         // Nombre de hoja: limpiar chars invalidos + tope 31 chars (limite Excel).
         var hoja = wb.Worksheets.Add(SanitizarNombreHoja(ctx.Snapshot.Nombre));
 
+        // Columna 1 = contador de fila (Nº). El resto de columnas se corre +1.
+        var hdrN = hoja.Cell(1, 1);
+        hdrN.Value = "Nº";
+        hdrN.Style.Font.Bold = true;
+        hdrN.Style.Fill.BackgroundColor = XLColor.FromHtml("#dbeafe");
+
         // Headers: usa alias del tenant si esta configurado, sino el header canonico
         // del builder. La clave interna (ColumnaOriginal) es la que busca el dict de la fila.
         for (var c = 0; c < ctx.Columnas.Count; c++)
         {
-            var cell = hoja.Cell(1, c + 1);
+            var cell = hoja.Cell(1, c + 2);
             cell.Value = ctx.Columnas[c].HeaderExport;
             cell.Style.Font.Bold = true;
             cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#dbeafe");
@@ -721,16 +728,19 @@ public sealed class FacturacionSnapshotService(
 
         // Filas. Iteramos por lotes para no cargar todo en memoria de golpe.
         var row = 2;
+        var contador = 1;
         await foreach (var fila in IterarFilasAsync(id, ct))
         {
+            hoja.Cell(row, 1).Value = contador;
             for (var c = 0; c < ctx.Columnas.Count; c++)
             {
                 var colInfo = ctx.Columnas[c];
                 if (!fila.TryGetValue(colInfo.ColumnaOriginal, out var val) || val is null) { continue; }
-                var cell = hoja.Cell(row, c + 1);
+                var cell = hoja.Cell(row, c + 2);
                 AplicarValorFormato(cell, val, colInfo.FormatoTipo, colInfo.FormatoPatron);
             }
             row++;
+            contador++;
         }
 
         // Ajuste automatico de ancho — comodo para el usuario que abre el .xlsx.
@@ -906,9 +916,10 @@ public sealed class FacturacionSnapshotService(
         if (ctx is null) { return null; }
 
         var sb = new StringBuilder();
-        // Cabecera: alias del tenant si esta configurado, sino header canonico del builder.
-        sb.AppendLine(string.Join(';', ctx.Columnas.Select(c => EscaparCsv(c.HeaderExport))));
+        // Cabecera: contador "Nº" + alias del tenant (o header canonico del builder).
+        sb.AppendLine("Nº;" + string.Join(';', ctx.Columnas.Select(c => EscaparCsv(c.HeaderExport))));
 
+        var contador = 1;
         await foreach (var fila in IterarFilasAsync(id, ct))
         {
             var partes = new string[ctx.Columnas.Count];
@@ -919,7 +930,8 @@ public sealed class FacturacionSnapshotService(
                 var val = SnapshotColumnaFormatter.FormatoCsv(raw, colInfo.FormatoTipo, colInfo.FormatoPatron);
                 partes[c] = EscaparCsv(val);
             }
-            sb.AppendLine(string.Join(';', partes));
+            sb.AppendLine(contador + ";" + string.Join(';', partes));
+            contador++;
         }
 
         // UTF-8 con BOM para que Excel Colombia lo abra bien de un doble-click.

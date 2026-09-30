@@ -464,12 +464,13 @@
                         <table class="sn-vertabla">
                             <thead>
                                 <tr>
+                                    <th class="sn-vt-freeze sn-vt-counter" style="left:0;min-width:@(CounterW)px;max-width:@(CounterW)px;width:@(CounterW)px;">Nº</th>
                                     @for (var i = 0; i < _verDetalle.Columnas.Count; i++)
                                     {
                                         var col = _verDetalle.Columnas[i];
                                         var idx = i;
                                         <th class="@(idx < _verFijar ? (idx == _verFijar - 1 ? "sn-vt-freeze sn-vt-freeze-last" : "sn-vt-freeze") : "")"
-                                            style="@(idx < _verFijar ? $"left:{idx * FreezeColW}px;min-width:{FreezeColW}px;max-width:{FreezeColW}px;width:{FreezeColW}px;" : "")"
+                                            style="@(idx < _verFijar ? $"left:{CounterW + idx * FreezeColW}px;min-width:{FreezeColW}px;max-width:{FreezeColW}px;width:{FreezeColW}px;" : "")"
                                             @onclick="() => Ordenar(col)">
                                             <span class="sn-th-inner">
                                                 <button type="button"
@@ -493,8 +494,10 @@
                                     var filaIdParsed = filaIdObj is Guid g ? g : (Guid.TryParse(filaIdObj?.ToString(), out var gg) ? gg : Guid.Empty);
                                     var rowColor = fila.TryGetValue("__color", out var cvv) ? cvv?.ToString() : null;
                                     var bgStyle = string.IsNullOrWhiteSpace(rowColor) ? "" : $"background:{rowColor} !important;";
+                                    var numFila = fila.TryGetValue("__numeroFila", out var nfv) ? nfv?.ToString() ?? "" : "";
                                     <tr @oncontextmenu:preventDefault="true"
                                         @oncontextmenu="@((MouseEventArgs e) => AbrirMenuFila(e, filaIdParsed))">
+                                        <td class="sn-vt-freeze sn-vt-counter" style="@($"left:0;min-width:{CounterW}px;max-width:{CounterW}px;width:{CounterW}px;" + bgStyle)">@numFila</td>
                                         @for (var i = 0; i < _verDetalle.Columnas.Count; i++)
                                         {
                                             var col = _verDetalle.Columnas[i];
@@ -504,7 +507,7 @@
                                             var esVigente = _verDetalle.Metadata.Estado == EstadoSnapshot.Vigente;
                                             var cellClass = (idx < _verFijar ? (idx == _verFijar - 1 ? "sn-vt-freeze sn-vt-freeze-last" : "sn-vt-freeze") : "") + (editable && esVigente ? " sn-cell-editable" : "");
                                             <td class="@cellClass"
-                                                style="@((idx < _verFijar ? $"left:{idx * FreezeColW}px;min-width:{FreezeColW}px;max-width:{FreezeColW}px;width:{FreezeColW}px;" : "") + bgStyle)"
+                                                style="@((idx < _verFijar ? $"left:{CounterW + idx * FreezeColW}px;min-width:{FreezeColW}px;max-width:{FreezeColW}px;width:{FreezeColW}px;" : "") + bgStyle)"
                                                 title="@val">
                                                 @if (editable && esVigente && filaIdParsed != Guid.Empty)
                                                 {
@@ -1133,6 +1136,9 @@
     .sn-vertabla th { position:sticky; top:0; z-index:2; background:#eff6ff; font-weight:600; color:#1e3a8a; text-transform:none; letter-spacing:0; cursor:pointer; user-select:none; }
     .sn-vertabla th:hover { background:#dbeafe; }
     .sn-vt-freeze { position:sticky; background:white; z-index:1; box-sizing:border-box; }
+    /* Columna contador "Nº": fija a la izquierda, centrada, tenue. */
+    .sn-vt-counter { text-align:center; color:#64748b; font-variant-numeric:tabular-nums; background:#f8fafc; box-sizing:border-box; border-right:2px solid #e2e8f0; }
+    .sn-vertabla thead .sn-vt-counter { z-index:3; background:#eff6ff; color:#1e3a8a; }
     .sn-vertabla thead .sn-vt-freeze { z-index:3; background:#eff6ff; }
     /* Ultima columna fijada: divisor claro para separar del area que se desplaza. */
     .sn-vt-freeze.sn-vt-freeze-last { border-right:2px solid #93c5fd; }
@@ -1274,6 +1280,8 @@
     // valor para el offset 'left' y para el ancho de la celda, si no el sticky se
     // desalinea y se ven pasar datos de otras columnas por las rendijas.
     private const int FreezeColW = 170;
+    // Ancho (px) de la columna contador "Nº" (siempre fija a la izquierda).
+    private const int CounterW = 56;
     private string? _verOrden;
     private bool _verOrdenDesc;
     // Filtro por color de fila: null=todos, "__sin__"=sin color, o un hex de la paleta.

@@ -84,7 +84,13 @@ public sealed record OrdenClinicaItemDto(
     /// <summary>Codigo del servicio del contrato (ServicioContrato.CodigoServicio) con el
     /// que se cargo el servicio en /asignacion. Se resuelve via la cadena HC -> sesion ->
     /// turno -> asignacion -> ServicioId -> ServicioContrato. Null si la HC no tiene cadena.</summary>
-    string? CodigoServicio = null);
+    string? CodigoServicio = null,
+    /// <summary>Id de la Asignacion (servicio concreto, a.id) que origino esta HC —
+    /// el nivel al que pertenece el N° de sesion. A diferencia de AsignacionLoteId
+    /// (el lote que agrupa VARIOS servicios), este es UNICO por servicio. Se usa
+    /// para navegar/filtrar/marcar por servicio aunque el codigo corto de 8 hex
+    /// coincida entre servicios del mismo lote. Null si la HC no tiene cadena.</summary>
+    Guid? AsignacionId = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

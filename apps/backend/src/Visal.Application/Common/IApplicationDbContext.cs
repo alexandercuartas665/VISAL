@@ -85,6 +85,7 @@ public interface IApplicationDbContext
     DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas { get; }
     DbSet<NotaMedica> NotasMedicas { get; }
     DbSet<NotaMedicaDocumento> NotaMedicaDocumentos { get; }
+    DbSet<HcMarcaError> HcMarcasError { get; }
     DbSet<HcMenuConfig> HcMenuConfigs { get; }
     DbSet<HcPestanaAlias> HcPestanaAliases { get; }
     DbSet<AlertaRegla> AlertaReglas { get; }

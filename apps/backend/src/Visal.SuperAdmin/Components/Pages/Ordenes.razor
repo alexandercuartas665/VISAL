@@ -6,6 +6,7 @@
 @using Visal.Application.Revision
 @using Visal.Domain.Entities
 @inject IOrdenesClinicasService OcSvc
+@inject IHcMarcaErrorService MarcasSvc
 @inject IHistoriaClinicaService HcSvc
 @inject IRevisionKanbanService KanbanSvc
 @inject Visal.Application.Revision.Ia.IPreRevisionIaService PreIaSvc
@@ -50,6 +51,8 @@
             @onclick='() => SeleccionarTab("archivo")'>Archivo</button>
     <button type="button" class="oc-tab @(_tabActivo == "dashboard" ? "activo" : "")"
             @onclick='() => SeleccionarTab("dashboard")'>Dashboard</button>
+    <button type="button" class="oc-tab @(_tabActivo == "marcadas" ? "activo" : "")"
+            @onclick='() => SeleccionarTab("marcadas")'>Marcadas@(_pendientesCount > 0 ? $" ({_pendientesCount})" : "")</button>
 </div>
 
 @if (_tabActivo == "kanban")
@@ -422,6 +425,93 @@ else if (_tabActivo == "dashboard")
         }
     </div>
 }
+else if (_tabActivo == "marcadas")
+{
+    @* Tab de triage: asignaciones marcadas con error desde el navegador de la
+       Lista. Se ve la observacion y se cierra como Reparado. *@
+    <div class="ase-card">
+        <div class="oc-grid-h" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span>Asignaciones marcadas (@_marcas.Count)</span>
+            <select class="form-select form-select-sm" style="width:auto;" @bind="_marcasFiltroEstado" @bind:after="RefrescarMarcas">
+                <option value="pendiente">Pendientes</option>
+                <option value="reparado">Reparadas</option>
+                <option value="todas">Todas</option>
+            </select>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="RefrescarMarcas" disabled="@_cargandoMarcas">
+                @(_cargandoMarcas ? "Cargando..." : "🔄 Refrescar")
+            </button>
+        </div>
+
+        @if (_cargandoMarcas && _marcas.Count == 0)
+        {
+            <div class="ase-empty">Cargando...</div>
+        }
+        else if (_marcas.Count == 0)
+        {
+            <div class="ase-empty" style="padding:30px;">No hay asignaciones marcadas con este filtro.</div>
+        }
+        else
+        {
+            <div class="oc-wrap">
+                <table class="oc-tbl">
+                    <thead>
+                        <tr>
+                            <th style="width:120px">Cód. asignación</th>
+                            <th style="min-width:200px">Paciente</th>
+                            <th>Observación</th>
+                            <th style="width:150px">Marcó</th>
+                            <th class="text-center" style="width:110px">Estado</th>
+                            <th style="min-width:200px">Reparación</th>
+                            <th class="text-center" style="width:120px">Acc.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in _marcas)
+                        {
+                            <tr>
+                                <td class="mono">
+                                    @m.CodigoAsignacion
+                                    <button type="button" class="btn btn-link btn-sm" style="padding:0 4px;"
+                                            title="Ver esta asignación en la Lista"
+                                            @onclick="() => IrAListaConAsignacion(m)">🔎</button>
+                                </td>
+                                <td>@(string.IsNullOrWhiteSpace(m.PacienteNombre) ? "-" : m.PacienteNombre)
+                                    @if (!string.IsNullOrWhiteSpace(m.PacienteDoc)) { <div class="mono" style="font-size:11px;color:#64748b;">@m.PacienteDoc</div> }
+                                </td>
+                                <td style="white-space:pre-wrap;">@m.Observacion</td>
+                                <td>@(m.MarcadoPorNombre ?? "-")<div style="font-size:11px;color:#64748b;">@m.MarcadoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div></td>
+                                <td class="text-center">
+                                    @if (m.Estado == HcMarcaErrorEstado.Reparado)
+                                    {
+                                        <span class="oc-badge-ok">✓ Reparado</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="oc-badge-pend">Pendiente</span>
+                                    }
+                                </td>
+                                <td style="white-space:pre-wrap;">
+                                    @if (m.Estado == HcMarcaErrorEstado.Reparado)
+                                    {
+                                        @(string.IsNullOrWhiteSpace(m.ObservacionReparacion) ? "(sin nota)" : m.ObservacionReparacion)
+                                        <div style="font-size:11px;color:#64748b;">@(m.ReparadoPorNombre ?? "-") · @(m.ReparadoEn?.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</div>
+                                    }
+                                    else { <span style="color:#94a3b8;">-</span> }
+                                </td>
+                                <td class="text-center">
+                                    @if (m.Estado == HcMarcaErrorEstado.Pendiente)
+                                    {
+                                        <button class="btn btn-outline-success btn-sm" @onclick="() => AbrirRepararModal(m)">✓ Reparado</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
 else
 {
 <div class="ase-card">
@@ -535,6 +625,19 @@ else
                 </label>
             </div>
         </div>
+        @* Filtro client-side: oculta las HC en estado Inactiva (descartadas). *@
+        <div class="oc-f oc-f-wide">
+            <label>Inactivas</label>
+            <div class="form-check" style="padding-top:4px;">
+                <input class="form-check-input" type="checkbox" id="ocNoInactivas"
+                       @bind="_noMostrarInactivas" />
+                <label class="form-check-label" for="ocNoInactivas"
+                       style="font-size:12px;cursor:pointer;"
+                       title="Oculta del listado las historias en estado Inactiva (descartadas)">
+                    No mostrar inactivas
+                </label>
+            </div>
+        </div>
         @* REV-14 — Filtro combinado del ciclo de revision + veredicto del agente IA.
            Se aplica en cliente sobre _rows: sencillo y suficiente para el tope de 500
            HCs que ya trae el servidor. Cuando el usuario quiera cubrir mas alla,
@@ -614,6 +717,12 @@ else
                         title="Copiar el codigo de la asignacion que se esta presentando"
                         @onclick="CopiarAsignacionAsync">
                     @(_asigCopiado ? "✓ Copiado" : "📋 Copiar")
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm oc-asig-mark"
+                        disabled="@(_asigNavFiltro is null)"
+                        title="Marcar esta asignacion con error (pide observacion) y enviarla al tab Marcadas"
+                        @onclick="AbrirMarcarModal">
+                    ⚠ Marcar error
                 </button>
                 @if (_asigNavFiltro is not null)
                 {
@@ -1651,7 +1760,70 @@ else
     .oc-kebab-item.oc-kebab-danger:hover:not(:disabled) { background:#fee2e2; }
     .oc-kebab-ico { display:inline-block; width:18px; text-align:center; font-size:14px; }
     .oc-kebab-sep { height:1px; background:#e2e8f0; margin:4px 0; }
+    /* Tab Marcadas */
+    .oc-badge-ok { display:inline-block; font-size:11px; font-weight:700; color:#166534; background:#dcfce7; padding:2px 8px; border-radius:999px; }
+    .oc-badge-pend { display:inline-block; font-size:11px; font-weight:700; color:#b45309; background:#fef3c7; padding:2px 8px; border-radius:999px; }
+    .oc-asig-mark { flex:0 0 auto; }
+    /* Modal simple (marcar / reparar) */
+    .oc-modal-ov { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:1200; display:flex; align-items:center; justify-content:center; }
+    .oc-modal { background:#fff; border-radius:12px; box-shadow:0 24px 60px rgba(15,23,42,.35); width:520px; max-width:94vw; max-height:90vh; overflow:auto; }
+    .oc-modal-h { padding:14px 18px; border-bottom:1px solid #e2e8f0; font-size:15px; font-weight:700; display:flex; justify-content:space-between; align-items:center; }
+    .oc-modal-b { padding:18px; }
+    .oc-modal-f { padding:12px 18px; border-top:1px solid #e2e8f0; display:flex; gap:8px; justify-content:flex-end; }
+    .oc-modal textarea { width:100%; min-height:90px; font-size:13px; }
 </style>
+
+@* Modal: marcar asignacion con error (pide observacion obligatoria) *@
+@if (_marcarModalAbierto)
+{
+    <div class="oc-modal-ov" @onclick="CerrarMarcarModal">
+        <div class="oc-modal" @onclick:stopPropagation="true">
+            <div class="oc-modal-h">
+                <span>⚠ Marcar asignación con error</span>
+                <button class="btn btn-link btn-sm" @onclick="CerrarMarcarModal">&times;</button>
+            </div>
+            <div class="oc-modal-b">
+                <p style="font-size:13px;color:#475569;margin-bottom:8px;">
+                    Asignación <b class="mono">@(_asigNavFiltro is Guid _mg ? _mg.ToString()[..8].ToUpperInvariant() : "")</b>.
+                    Escribe qué está mal (obligatorio); quedará en el tab <b>Marcadas</b> para repararla luego.
+                </p>
+                <textarea @bind="_marcarObs" placeholder="Ej. la sesión #3 quedó antes que la #2; revisar numeración."></textarea>
+            </div>
+            <div class="oc-modal-f">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarMarcarModal">Cancelar</button>
+                <button class="btn btn-danger btn-sm" disabled="@(string.IsNullOrWhiteSpace(_marcarObs) || _guardandoMarca)" @onclick="GuardarMarcaAsync">
+                    @(_guardandoMarca ? "Guardando..." : "Marcar con error")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* Modal: marcar una marca como reparada (nota opcional) *@
+@if (_repararMarca is not null)
+{
+    <div class="oc-modal-ov" @onclick="CerrarRepararModal">
+        <div class="oc-modal" @onclick:stopPropagation="true">
+            <div class="oc-modal-h">
+                <span>✓ Marcar como reparado</span>
+                <button class="btn btn-link btn-sm" @onclick="CerrarRepararModal">&times;</button>
+            </div>
+            <div class="oc-modal-b">
+                <p style="font-size:13px;color:#475569;margin-bottom:8px;">
+                    Asignación <b class="mono">@_repararMarca.CodigoAsignacion</b>.
+                    <br/><span style="color:#64748b;">Marcada: @_repararMarca.Observacion</span>
+                </p>
+                <textarea @bind="_repararObs" placeholder="Nota de reparación (opcional): qué se corrigió."></textarea>
+            </div>
+            <div class="oc-modal-f">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarRepararModal">Cancelar</button>
+                <button class="btn btn-success btn-sm" disabled="@_guardandoReparacion" @onclick="ConfirmarRepararAsync">
+                    @(_guardandoReparacion ? "Guardando..." : "Confirmar reparado")
+                </button>
+            </div>
+        </div>
+    </div>
+}
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
@@ -1803,6 +1975,7 @@ else
             string.Equals(a.Name, Visal.Application.Revision.Ia.IPreRevisionIaService.AgenteNombre, StringComparison.OrdinalIgnoreCase));
         _agenteRevisorId = canonico?.Id ?? _agentesRevisores.FirstOrDefault()?.Id;
         await ResolverPermisosAsync();
+        try { _pendientesCount = await MarcasSvc.ContarPendientesAsync(); } catch { _pendientesCount = 0; }
         await Buscar();
     }
 
@@ -1835,6 +2008,8 @@ else
             var uidStr = state.User.FindFirst("user_id")?.Value
                         ?? state.User.FindFirst("sub")?.Value;
             _actorId = Guid.TryParse(uidStr, out var uid) ? uid : Guid.Empty;
+            _miNombre = state.User.Identity?.Name
+                        ?? state.User.FindFirst("name")?.Value;
         }
         catch
         {
@@ -1881,6 +2056,7 @@ else
     private async Task Limpiar()
     {
         _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false;
+        _soloMultiSesion = false; _noMostrarInactivas = false; _asigNavFiltro = null;
         await Buscar();
     }
 
@@ -1896,9 +2072,18 @@ else
     /// SOLO esa (su codigo de 8 chars, que el backend resuelve por prefijo del
     /// lote). Si no, usa lo escrito en el filtro "Cod. asignacion".</summary>
     private string? CodigoAsignacionEfectivo()
-        => _asigNavFiltro is Guid g
-            ? g.ToString()[..8].ToUpperInvariant()
-            : (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? _codigoAsignacionFiltro.Trim() : null);
+    {
+        if (_asigNavFiltro is Guid g)
+        {
+            // El navegador enfoca un SERVICIO (a.id). Para acotar la query del
+            // servidor usamos el prefijo de su LOTE (el backend resuelve por lote);
+            // el servicio exacto se aisla luego con el param asignacionId.
+            var fila = _rows.FirstOrDefault(r => r.AsignacionId == g);
+            var loteId = fila?.AsignacionLoteId ?? g;
+            return loteId.ToString()[..8].ToUpperInvariant();
+        }
+        return !string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? _codigoAsignacionFiltro.Trim() : null;
+    }
 
     private string ConstruirImprimirListadoUrl()
     {
@@ -1912,7 +2097,11 @@ else
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
         // El navegador < > manda: si hay asignacion enfocada, se imprime solo esa.
+        // codigoAsignacion (8 hex = prefijo del lote) acota la query en el servidor;
+        // asignacionId (a.id completo) filtra al SERVICIO exacto en la pagina de
+        // impresion, para imprimir justo lo que se ve (no todo el lote).
         if (CodigoAsignacionEfectivo() is string codAsig) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(codAsig)}"); }
+        if (_asigNavFiltro is Guid navAsig) { qs.Add($"asignacionId={navAsig}"); }
         // FIX: el filtro por HC N° (codigoHc) faltaba aqui, asi que "Imprimir listado"
         // ignoraba ese filtro e imprimia TODAS las HC del paciente/asignacion en vez de
         // la(s) filtrada(s). Lo pasamos para que el paquete impreso respete el HC N°.
@@ -2108,6 +2297,10 @@ else
         else if (tab == "dashboard" && _dashboard is null)
         {
             await RefrescarDashboard();
+        }
+        else if (tab == "marcadas")
+        {
+            await RefrescarMarcas();
         }
     }
 
@@ -2665,6 +2858,9 @@ else
     // cargado (_rows), filtrando la tabla a una sola a la vez. Es puramente
     // client-side: no re-consulta. Pensado para recorrer con < > y verificar
     // que el N° de sesion rigido quedo 1,2,3... por servicio.
+    // Oculta HC en estado Inactiva (descartadas) del listado. Client-side.
+    private bool _noMostrarInactivas;
+
     // Tope de HC para habilitar "Imprimir listado" sin una asignacion enfocada.
     // Imprimir arma un PDF con cada HC renderizada completa (schema+valores+ordenes),
     // asi que un listado masivo cuelga el navegador. Con una asignacion enfocada el
@@ -2688,24 +2884,28 @@ else
     // sesion/HC en el resultado cargado. Pensado para aislar terapias y multi-sesion.
     private bool _soloMultiSesion;
 
-    /// <summary>Claves (lote, servicio) que tienen 2+ filas en _rows = servicios
-    /// con mas de una sesion. Se recalcula barato sobre el set en memoria.</summary>
-    private HashSet<(Guid, string)> ServiciosMultiSesion()
-        => _rows.Where(r => r.AsignacionLoteId.HasValue)
-                .GroupBy(r => (r.AsignacionLoteId!.Value, r.CodigoServicio ?? ""))
+    /// <summary>Asignaciones (a.id del SERVICIO) con 2+ filas en _rows = servicios
+    /// con mas de una sesion. El N° de sesion vive por servicio, no por lote, asi
+    /// que agrupamos por AsignacionId.</summary>
+    private HashSet<Guid> ServiciosMultiSesion()
+        => _rows.Where(r => r.AsignacionId.HasValue)
+                .GroupBy(r => r.AsignacionId!.Value)
                 .Where(g => g.Count() > 1)
                 .Select(g => g.Key)
                 .ToHashSet();
 
+    // El navegador recorre por SERVICIO (a.id), no por lote: asi cada paso muestra
+    // una sola secuencia 1..N limpia. El codigo corto de 8 hex puede verse igual
+    // entre servicios del mismo lote, pero internamente se filtra por el id completo.
     private List<Guid> AsigNavCodigos()
     {
-        IEnumerable<OrdenClinicaItemDto> set = _rows.Where(r => r.AsignacionLoteId.HasValue);
+        IEnumerable<OrdenClinicaItemDto> set = _rows.Where(r => r.AsignacionId.HasValue);
         if (_soloMultiSesion)
         {
             var multi = ServiciosMultiSesion();
-            set = set.Where(r => multi.Contains((r.AsignacionLoteId!.Value, r.CodigoServicio ?? "")));
+            set = set.Where(r => multi.Contains(r.AsignacionId!.Value));
         }
-        return set.Select(r => r.AsignacionLoteId!.Value)
+        return set.Select(r => r.AsignacionId!.Value)
                   .Distinct()
                   .OrderBy(id => id.ToString(), StringComparer.Ordinal)
                   .ToList();
@@ -2736,9 +2936,106 @@ else
         _kebabRowId = null;
     }
 
+    // ── Tab "Marcadas" — triage de calidad por asignacion ─────────────────────
+    private List<HcMarcaErrorDto> _marcas = new();
+    private string _marcasFiltroEstado = "pendiente"; // pendiente | reparado | todas
+    private int _pendientesCount;
+    private bool _cargandoMarcas;
+    private string? _miNombre;
+
+    private bool _marcarModalAbierto;
+    private string _marcarObs = "";
+    private bool _guardandoMarca;
+
+    private HcMarcaErrorDto? _repararMarca;
+    private string _repararObs = "";
+    private bool _guardandoReparacion;
+
+    private void AbrirMarcarModal()
+    {
+        if (_asigNavFiltro is null) { return; }
+        _marcarObs = "";
+        _marcarModalAbierto = true;
+    }
+
+    private void CerrarMarcarModal() => _marcarModalAbierto = false;
+
+    private async Task GuardarMarcaAsync()
+    {
+        if (_asigNavFiltro is not Guid g || string.IsNullOrWhiteSpace(_marcarObs)) { return; }
+        _guardandoMarca = true;
+        try
+        {
+            var fila = _rows.FirstOrDefault(r => r.AsignacionId == g);
+            var code = g.ToString()[..8].ToUpperInvariant();
+            var pacNombre = fila?.PacienteNombre;
+            var pacDoc = fila is null ? null : $"{fila.PacienteTipoDoc} {fila.PacienteDoc}".Trim();
+            await MarcasSvc.MarcarAsync(g, code, pacNombre, pacDoc, _marcarObs, _miNombre);
+            _marcarModalAbierto = false;
+            _pendientesCount = await MarcasSvc.ContarPendientesAsync();
+            await SeleccionarTab("marcadas");
+        }
+        finally { _guardandoMarca = false; }
+    }
+
+    private async Task RefrescarMarcas()
+    {
+        _cargandoMarcas = true;
+        try
+        {
+            HcMarcaErrorEstado? estado = _marcasFiltroEstado switch
+            {
+                "pendiente" => HcMarcaErrorEstado.Pendiente,
+                "reparado" => HcMarcaErrorEstado.Reparado,
+                _ => (HcMarcaErrorEstado?)null
+            };
+            _marcas = (await MarcasSvc.ListarAsync(estado)).ToList();
+            _pendientesCount = await MarcasSvc.ContarPendientesAsync();
+        }
+        finally { _cargandoMarcas = false; }
+    }
+
+    private void AbrirRepararModal(HcMarcaErrorDto m) { _repararMarca = m; _repararObs = ""; }
+    private void CerrarRepararModal() => _repararMarca = null;
+
+    private async Task ConfirmarRepararAsync()
+    {
+        if (_repararMarca is null) { return; }
+        _guardandoReparacion = true;
+        try
+        {
+            await MarcasSvc.RepararAsync(_repararMarca.Id, _repararObs, _miNombre);
+            _repararMarca = null;
+            await RefrescarMarcas();
+        }
+        finally { _guardandoReparacion = false; }
+    }
+
+    /// <summary>Lleva a la Lista enfocando esa asignacion (para revisarla/imprimirla).</summary>
+    private async Task IrAListaConAsignacion(HcMarcaErrorDto m)
+    {
+        _tabActivo = "lista";
+        if (_rows.Count == 0) { await Buscar(); }
+        if (_rows.Any(r => r.AsignacionId == m.AsignacionId))
+        {
+            _asigNavFiltro = m.AsignacionId;
+            _sortCol = "sesion"; _sortDesc = false;
+        }
+        else
+        {
+            // No esta en el resultado cargado: usa el filtro por codigo (lote) y busca.
+            _codigoAsignacionFiltro = m.CodigoAsignacion;
+            await Buscar();
+        }
+    }
+
     private IEnumerable<OrdenClinicaItemDto> FilasFiltradas()
     {
         IEnumerable<OrdenClinicaItemDto> baseSet = _rows;
+        if (_noMostrarInactivas)
+        {
+            baseSet = baseSet.Where(r => !string.Equals(r.Estado, "Inactiva", StringComparison.OrdinalIgnoreCase));
+        }
         if (!string.IsNullOrEmpty(_filtroRevision))
         {
             if (_filtroRevision.StartsWith("rev:", StringComparison.Ordinal))
@@ -2766,20 +3063,18 @@ else
         if (_soloMultiSesion)
         {
             var multi = ServiciosMultiSesion();
-            baseSet = baseSet.Where(r => r.AsignacionLoteId.HasValue
-                && multi.Contains((r.AsignacionLoteId.Value, r.CodigoServicio ?? "")));
+            baseSet = baseSet.Where(r => r.AsignacionId.HasValue && multi.Contains(r.AsignacionId.Value));
         }
-        // Foco de validacion por asignacion: filtra a un lote y, salvo que el
-        // usuario haya pedido otra columna, ordena por servicio + N° de sesion
-        // rigido para ver la secuencia 1,2,3... de cada servicio del lote.
+        // Foco de validacion por SERVICIO (a.id): filtra a un unico servicio y,
+        // salvo que el usuario haya pedido otra columna, ordena por N° de sesion
+        // rigido para ver la secuencia 1,2,3... limpia de ese servicio.
         if (_asigNavFiltro is Guid navId)
         {
-            baseSet = baseSet.Where(r => r.AsignacionLoteId == navId);
+            baseSet = baseSet.Where(r => r.AsignacionId == navId);
             if (string.IsNullOrEmpty(_sortCol) || _sortCol == "sesion")
             {
                 return baseSet
-                    .OrderBy(r => r.CodigoServicio, StringComparer.Ordinal)
-                    .ThenBy(r => r.SesionNumero ?? int.MaxValue)
+                    .OrderBy(r => r.SesionNumero ?? int.MaxValue)
                     .ThenBy(r => r.HistoriaClinicaId);
             }
         }

@@ -93,6 +93,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<CatalogoServicioReferencia> CatalogosServicioReferencia => Set<CatalogoServicioReferencia>();
     public DbSet<HistoriaClinicaOrdenExterna> HistoriaClinicaOrdenesExternas => Set<HistoriaClinicaOrdenExterna>();
     public DbSet<NotaMedica> NotasMedicas => Set<NotaMedica>();
+    public DbSet<HcMarcaError> HcMarcasError => Set<HcMarcaError>();
     public DbSet<NotaMedicaDocumento> NotaMedicaDocumentos => Set<NotaMedicaDocumento>();
     public DbSet<HcMenuConfig> HcMenuConfigs => Set<HcMenuConfig>();
     public DbSet<AlertaRegla> AlertaReglas => Set<AlertaRegla>();
@@ -928,6 +929,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.PacienteId, x.FechaNota });
             b.HasIndex(x => new { x.TenantId, x.Estado });
             b.HasIndex(x => new { x.TenantId, x.Criticidad });
+        });
+
+        modelBuilder.Entity<HcMarcaError>(b =>
+        {
+            b.Property(x => x.CodigoAsignacion).HasMaxLength(32).IsRequired();
+            b.Property(x => x.PacienteNombre).HasMaxLength(200);
+            b.Property(x => x.PacienteDoc).HasMaxLength(40);
+            b.Property(x => x.Observacion).HasColumnType("text").IsRequired();
+            b.Property(x => x.MarcadoPorNombre).HasMaxLength(200);
+            b.Property(x => x.ReparadoPorNombre).HasMaxLength(200);
+            b.Property(x => x.ObservacionReparacion).HasColumnType("text");
+            b.HasIndex(x => new { x.TenantId, x.Estado });
+            b.HasIndex(x => new { x.TenantId, x.AsignacionId });
         });
 
         modelBuilder.Entity<NotaMedicaDocumento>(b =>

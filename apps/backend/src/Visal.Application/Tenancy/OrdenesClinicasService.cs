@@ -403,10 +403,12 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 sesionNumero = nGlobal;
             }
             Guid? asigLoteId = null;
+            Guid? asignacionId = null;
             string? codigoServicio = null;
             if (hcToTurno.TryGetValue(r.Hc.Id, out var turnoForLote)
                 && turnoToAsig.TryGetValue(turnoForLote, out var asigForLote))
             {
+                asignacionId = asigForLote;   // a.id del servicio concreto (nivel del N° de sesion)
                 if (asigToLote.TryGetValue(asigForLote, out var loteForHc)) { asigLoteId = loteForHc; }
                 // Codigo del servicio del contrato (ServicioContrato.CodigoServicio) con el
                 // que se cargo el servicio en /asignacion.
@@ -454,7 +456,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 asigLoteId,
                 sinFirmaSet.Contains(r.Hc.Id),
                 profSinFirmaSet.Contains(r.Hc.Id),
-                codigoServicio
+                codigoServicio,
+                asignacionId
             );
         }).ToList();
     }

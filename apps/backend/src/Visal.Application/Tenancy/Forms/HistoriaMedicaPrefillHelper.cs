@@ -349,8 +349,7 @@ public static class HistoriaMedicaPrefillHelper
             {
                 if (targetNode is { IsTable: true }) { continue; }
                 var v = ListaCompleta(fuentes, m.IncludeCategories);
-                valores[m.Target] = v;
-                readOnly.Add(m.Target);
+                EscribirTextoPrefill(valores, readOnly, targetNode, m.Target, v);
                 continue;
             }
 
@@ -362,12 +361,47 @@ public static class HistoriaMedicaPrefillHelper
             {
                 if (stringFuente.TryGetValue(m.Source, out var v))
                 {
-                    valores[m.Target] = v;
-                    readOnly.Add(m.Target);
+                    EscribirTextoPrefill(valores, readOnly, targetNode, m.Target, v);
                 }
             }
         }
         return readOnly;
+    }
+
+    /// <summary>Escribe un valor de prefill de texto en el destino. Si el campo es
+    /// <c>EditableConPrefill</c> y el usuario ya lo edito a mano (valor actual no
+    /// vacio y distinto al ultimo prefill guardado en el espejo <c>__hm:{target}</c>),
+    /// NO lo pisa — respeta la edicion manual. Mientras no se haya tocado, se
+    /// refresca con el valor derivado (orden actual). Los campos NO editables se
+    /// pisan siempre (son "auto", readonly). En ambos casos marca el destino en
+    /// <paramref name="readOnly"/> para que el FormViewer muestre el origen prefill
+    /// (bloqueado si no es editable; badge "prellenado - editable" si lo es).</summary>
+    private static void EscribirTextoPrefill(
+        Dictionary<string, string?> valores,
+        HashSet<string> readOnly,
+        FormNode? targetNode,
+        string target,
+        string? valor)
+    {
+        readOnly.Add(target);
+
+        if (targetNode?.EditableConPrefill == true)
+        {
+            var mirrorKey = $"__hm:{target}";
+            var actual = valores.TryGetValue(target, out var a) ? a : null;
+            var espejo = valores.TryGetValue(mirrorKey, out var e) ? e : null;
+            // Edicion manual del usuario: valor presente y distinto al ultimo
+            // prefill. Respetar y no re-prellenar hasta que borre el campo.
+            if (!string.IsNullOrEmpty(actual) && !string.Equals(actual, espejo, StringComparison.Ordinal))
+            {
+                return;
+            }
+            valores[target] = valor;
+            valores[mirrorKey] = valor;
+            return;
+        }
+
+        valores[target] = valor;
     }
 
     private static void AplicarTabla(

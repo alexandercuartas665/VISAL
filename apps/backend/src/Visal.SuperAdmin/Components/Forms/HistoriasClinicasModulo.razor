@@ -141,14 +141,26 @@
                 @if (_asignacionesDelPaciente.Count > 0)
                 {
                     <div class="ase-f ase-f-wide">
-                        <label>Asignacion / atencion <small class="text-muted">(opcional - filtro)</small></label>
-                        <select class="form-select form-select-sm" @bind="_filAsignacion">
-                            <option value="">Todas las atenciones</option>
-                            @foreach (var a in _asignacionesDelPaciente)
-                            {
-                                <option value="@a.AsignacionId">@a.Etiqueta</option>
-                            }
-                        </select>
+                        <label>Asignacion / atencion <small class="text-muted">(filtro + navegacion &lt; &gt;)</small></label>
+                        <div class="hc-asig-nav">
+                            <button type="button" class="btn btn-outline-secondary btn-sm hc-asig-btn" title="Atencion anterior"
+                                    disabled="@(IndiceAsignacion() == 0)"
+                                    @onclick="() => IrAsignacion(-1)">&lt;</button>
+                            <select class="form-select form-select-sm" @bind="_filAsignacion" @bind:after="MostrarHistorias">
+                                <option value="">Todas las atenciones</option>
+                                @foreach (var a in _asignacionesDelPaciente)
+                                {
+                                    <option value="@a.AsignacionId">@a.Etiqueta</option>
+                                }
+                            </select>
+                            <button type="button" class="btn btn-outline-secondary btn-sm hc-asig-btn" title="Atencion siguiente"
+                                    disabled="@(IndiceAsignacion() == _asignacionesDelPaciente.Count - 1)"
+                                    @onclick="() => IrAsignacion(1)">&gt;</button>
+                        </div>
+                        @if (IndiceAsignacion() is int _ix && _ix >= 0)
+                        {
+                            <small class="hc-asig-pos">Atencion @(_ix + 1) de @_asignacionesDelPaciente.Count — ordenadas por N° de sesion rigido</small>
+                        }
                     </div>
                 }
                 <div class="ase-f ase-f-wide">
@@ -903,6 +915,13 @@
     .hc-item-asig { font-size: 11px; color: #64748b; margin-top: 2px; }
     .hc-item-asig-cod { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; color: #334155; background: #f1f5f9; padding: 0 5px; border-radius: 4px; }
     .hc-item-sesion { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 1px 8px; border-radius: 999px; }
+    /* Navegador de asignaciones (boton, select, boton) para recorrer atencion por atencion. */
+    .hc-asig-nav { display: flex; align-items: center; gap: 6px; width: 100%; flex-wrap: nowrap; }
+    /* min-width:0 es CLAVE: sin el, el select no se encoge por sus opciones largas,
+       la fila desborda la celda del grid y el boton ">" queda recortado a la derecha. */
+    .hc-asig-nav .form-select { flex: 1 1 auto; min-width: 0; }
+    .hc-asig-btn { flex: 0 0 auto; font-weight: 700; min-width: 36px; line-height: 1; }
+    .hc-asig-pos { display: block; margin-top: 4px; font-size: 10.5px; color: #64748b; }
     /* Modo terapia: HC-evolucion (sesiones 2..N) se distingue con acento y badge morado. */
     .hc-item-evolucion { border-left: 3px solid #7c3aed; }
     .hc-item-evol-badge { display: inline-block; margin-right: 6px; font-size: 10px; font-weight: 700; color: #6d28d9; background: #ede9fe; padding: 1px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
@@ -1718,7 +1737,36 @@
             SesionNumero = r.SesionNumero,
             EsEvolucion = r.EsEvolucion,
             AsignacionId = r.AsignacionId
-        }).ToList();
+        })
+        // Orden por defecto por el N° de sesion RIGIDO (asignacion_turnos.numero_sesion,
+        // expuesto como SesionNumero): dentro de cada asignacion las HC salen en orden
+        // de sesion 1,2,3... Las asignaciones se mantienen agrupadas; las HC sin sesion
+        // (p.ej. admision libre) van al final. Con el navegador < > filtrando una sola
+        // atencion, la lista queda exactamente en el orden de sesion para validar.
+        .OrderBy(x => x.AsignacionId.HasValue ? 0 : 1)
+        .ThenBy(x => x.AsignacionId)
+        .ThenBy(x => x.SesionNumero ?? int.MaxValue)
+        .ThenByDescending(x => x.Fecha)
+        .ToList();
+    }
+
+    /// <summary>Indice de la asignacion actualmente filtrada dentro de
+    /// _asignacionesDelPaciente, o -1 si esta en "Todas las atenciones".</summary>
+    private int IndiceAsignacion()
+        => _asignacionesDelPaciente.FindIndex(a => a.AsignacionId.ToString() == _filAsignacion);
+
+    /// <summary>Desplaza el filtro de asignacion al anterior (offset -1) o siguiente
+    /// (offset +1) y refresca el listado. Desde "Todas" entra por el extremo que
+    /// corresponda. No hace nada si se sale de rango.</summary>
+    private async Task IrAsignacion(int offset)
+    {
+        if (_asignacionesDelPaciente.Count == 0) { return; }
+        var idx = IndiceAsignacion();
+        if (idx < 0) { idx = offset > 0 ? -1 : _asignacionesDelPaciente.Count; }
+        var nuevo = idx + offset;
+        if (nuevo < 0 || nuevo >= _asignacionesDelPaciente.Count) { return; }
+        _filAsignacion = _asignacionesDelPaciente[nuevo].AsignacionId.ToString();
+        await MostrarHistorias();
     }
 
     /// <summary>Carga los formatos DISTINTOS en los que el paciente tiene historias,

@@ -520,6 +520,21 @@ else
                 </label>
             </div>
         </div>
+        @* Filtro client-side sobre el resultado cargado: deja solo los servicios
+           (lote + Cod. servicio) que tienen mas de una sesion/HC — las terapias y
+           multi-sesion donde el N° de sesion importa. Util para validar el backfill. *@
+        <div class="oc-f oc-f-wide">
+            <label>Sesiones</label>
+            <div class="form-check" style="padding-top:4px;">
+                <input class="form-check-input" type="checkbox" id="ocSoloMultiSesion"
+                       @bind="_soloMultiSesion" />
+                <label class="form-check-label" for="ocSoloMultiSesion"
+                       style="font-size:12px;cursor:pointer;"
+                       title="Solo servicios con mas de un turno/sesion en el resultado (multi-sesion / terapias)">
+                    Solo servicios con mas de una sesion
+                </label>
+            </div>
+        </div>
         @* REV-14 — Filtro combinado del ciclo de revision + veredicto del agente IA.
            Se aplica en cliente sobre _rows: sencillo y suficiente para el tope de 500
            HCs que ya trae el servidor. Cuando el usuario quiera cubrir mas alla,
@@ -579,20 +594,59 @@ else
                 <option value="cierre">Fecha de cierre</option>
             </select>
         </div>
-        <div class="oc-f oc-f-acts">
+    </div>@* fin .oc-filtros (grid). El navegador y las acciones van en barras full-width debajo. *@
+
+    @{ var _navCods = AsigNavCodigos(); var _navIdx = AsigNavIndice(); }
+    <div class="oc-toolbar">
+        @if (_navCods.Count > 0)
+        {
+            <div class="oc-nav-bar" title="Recorre una por una las asignaciones del resultado y ordena por N° de sesion rigido para validar">
+                <span class="oc-nav-lbl">Navegar asignación:</span>
+                <button type="button" class="btn btn-outline-secondary btn-sm oc-asig-btn" title="Asignacion anterior"
+                        disabled="@(_navIdx <= 0)" @onclick="() => AsigNavIr(-1)">&lt;</button>
+                <span class="oc-asig-cod mono" title="Codigo de la asignacion enfocada">
+                    @(_asigNavFiltro is Guid _g ? _g.ToString()[..8].ToUpperInvariant() : "Todas")
+                </span>
+                <button type="button" class="btn btn-outline-secondary btn-sm oc-asig-btn" title="Asignacion siguiente"
+                        disabled="@(_navIdx >= _navCods.Count - 1)" @onclick="() => AsigNavIr(1)">&gt;</button>
+                <button type="button" class="btn btn-outline-primary btn-sm oc-asig-copy"
+                        disabled="@(_asigNavFiltro is null)"
+                        title="Copiar el codigo de la asignacion que se esta presentando"
+                        @onclick="CopiarAsignacionAsync">
+                    @(_asigCopiado ? "✓ Copiado" : "📋 Copiar")
+                </button>
+                @if (_asigNavFiltro is not null)
+                {
+                    <button type="button" class="btn btn-link btn-sm oc-asig-clear" title="Quitar el foco y ver todas" @onclick="AsigNavLimpiar">Todas</button>
+                }
+                <small class="oc-asig-pos">@(_navIdx >= 0 ? $"Asignacion {_navIdx + 1} de {_navCods.Count}" : $"{_navCods.Count} asignaciones en el resultado")</small>
+            </div>
+        }
+        <div class="oc-acts-bar">
             <button class="btn btn-primary btn-sm" @onclick="Buscar" disabled="@_buscando">
                 @(_buscando ? "Buscando..." : "🔍 Buscar")
             </button>
             <button class="btn btn-outline-secondary btn-sm" @onclick="Limpiar" disabled="@_buscando">
                 Limpiar
             </button>
+            @* _vis = HC(s) visibles tras los filtros en pantalla (navegador de
+               asignacion, multi-sesion, revision). Excel/Imprimir y sus estados se
+               basan en esto para no ofrecer un paquete que no corresponde a lo visible. *@
+            @{
+                var _vis = FilasFiltradas().Count();
+                // Imprimir solo cuando el alcance esta ACOTADO: una asignacion enfocada
+                // (imprime ese lote) o pocas HC visibles. Sin esto, imprimir "Todas"
+                // (miles de HC) cuelga el navegador al renderizar cada paquete completo.
+                var _printAcotado = _asigNavFiltro is not null || _vis <= PrintCap;
+                var _printHabilitado = !_buscando && _vis > 0 && _printAcotado;
+            }
             @* Export XLSX del listado actual: mismo endpoint que /ordenes/export.xlsx,
                los filtros van en query string. Deshabilitado durante el _buscando y
                si no hay filas para no ofrecer un archivo vacio. *@
-            <a class="btn btn-outline-success btn-sm @(_buscando || _rows.Count == 0 ? "disabled" : "")"
+            <a class="btn btn-outline-success btn-sm @(_buscando || _vis == 0 ? "disabled" : "")"
                href="@ConstruirExportUrl()"
                target="_blank" rel="noopener"
-               title="Descargar el listado filtrado a Excel">
+               title="@(_asigNavFiltro is not null ? "Descargar a Excel la asignacion enfocada" : "Descargar el listado filtrado a Excel")">
                 📊 Excel
             </a>
             @* HCs-Print (listado): imprime TODAS las HCs del listado filtrado
@@ -603,12 +657,16 @@ else
                que avisa al usuario si excede. Usa <a target="_blank"> con href
                construido en getter — patron del boton Excel para no perder el
                user-gesture (Blazor Server + JS.open sufre popup blocker). *@
-            <a class="btn btn-outline-primary btn-sm @(_buscando || _rows.Count == 0 ? "disabled" : "")"
-               href="@ConstruirImprimirListadoUrl()"
+            <a class="btn btn-outline-primary btn-sm @(_printHabilitado ? "" : "disabled")"
+               href="@(_printHabilitado ? ConstruirImprimirListadoUrl() : "javascript:void(0)")"
                target="_blank" rel="noopener"
-               title="@(_rows.Count == 0
+               title="@(_vis == 0
                    ? "Ajusta los filtros y presiona Buscar; luego imprime el listado."
-                   : $"Imprimir las {_rows.Count} HC(s) del listado filtrado (todos los pacientes que aparecen)")">
+                   : !_printAcotado
+                       ? $"Demasiadas HC para imprimir ({_vis}). Enfoca una asignacion con el navegador < > o afina los filtros (max {PrintCap})."
+                       : _asigNavFiltro is Guid _gp
+                           ? $"Imprimir SOLO la asignacion {_gp.ToString()[..8].ToUpperInvariant()} que esta en pantalla"
+                           : $"Imprimir las {_vis} HC(s) del listado en pantalla (todos los pacientes que aparecen)")">
                 🖨 Imprimir listado
             </a>
             @* Revisar TODO el listado con el agente IA seleccionado en el toolbar.
@@ -692,11 +750,18 @@ else
         </div>
     }
 
+    @{ var _visibles = FilasFiltradas().Count(); }
     <div class="oc-grid-h">
-        Historias clinicas (@_rows.Count)
+        Historias clinicas (@_visibles)
+        @* El conteo refleja los filtros en pantalla (navegador de asignacion,
+           multi-sesion y revision). Entre parentesis el total cargado si difiere. *@
+        @if (_visibles != _rows.Count)
+        {
+            <span class="oc-warn">- de @_rows.Count cargadas (filtro en pantalla)</span>
+        }
         @* REV-18 — Tope de listado ampliado a 5000 (antes 500). Alinear el
            aviso con el nuevo tope del backend en OrdenesClinicasService.BuscarAsync. *@
-        @if (_rows.Count >= 5000)
+        else if (_rows.Count >= 5000)
         {
             <span class="oc-warn">- mostrando primeros 5000. Refina los filtros para ver mas.</span>
         }
@@ -1379,6 +1444,18 @@ else
     .oc-f { min-width:0; }  /* permite que el select shrink dentro del track */
     .oc-f-wide { min-width:0; }
     .oc-f-acts { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
+    /* Barra inferior full-width: navegador de asignaciones (arriba) + acciones
+       (abajo), ambas como filas flex que envuelven de forma ordenada. */
+    .oc-toolbar { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+    .oc-nav-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+                  background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; }
+    .oc-nav-lbl { font-size:12px; font-weight:700; color:#334155; }
+    .oc-acts-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .oc-asig-btn { flex:0 0 auto; font-weight:700; min-width:36px; line-height:1; }
+    .oc-asig-cod { flex:0 0 auto; min-width:72px; text-align:center; font-weight:700; color:#1e40af; background:#eff6ff; border:1px solid #dbeafe; border-radius:6px; padding:3px 10px; white-space:nowrap; }
+    .oc-asig-copy { flex:0 0 auto; }
+    .oc-asig-clear { flex:0 0 auto; padding:0 4px; }
+    .oc-asig-pos { font-size:11px; color:#64748b; margin-left:4px; }
     .oc-grid-h { padding:10px 6px; font-size:13px; font-weight:700; color:#0f172a; }
     .oc-warn { color:#b45309; font-weight:500; font-size:12px; margin-left:6px; }
     /* Wrap con max-height y overflow: crea el viewport de scroll dentro del
@@ -1814,6 +1891,15 @@ else
     /// href del ancla "Imprimir listado" — target=_blank abre en nueva pestana
     /// con user-gesture directo (evita el bloqueo de popup que sufre
     /// JS.InvokeVoidAsync("open") en Blazor Server).</summary>
+    /// <summary>Codigo de asignacion (lote) que debe viajar a impresion/Excel.
+    /// El navegador < > tiene prioridad: si hay una asignacion enfocada, imprime
+    /// SOLO esa (su codigo de 8 chars, que el backend resuelve por prefijo del
+    /// lote). Si no, usa lo escrito en el filtro "Cod. asignacion".</summary>
+    private string? CodigoAsignacionEfectivo()
+        => _asigNavFiltro is Guid g
+            ? g.ToString()[..8].ToUpperInvariant()
+            : (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? _codigoAsignacionFiltro.Trim() : null);
+
     private string ConstruirImprimirListadoUrl()
     {
         var qs = new List<string>();
@@ -1825,7 +1911,8 @@ else
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
-        if (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro)) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(_codigoAsignacionFiltro.Trim())}"); }
+        // El navegador < > manda: si hay asignacion enfocada, se imprime solo esa.
+        if (CodigoAsignacionEfectivo() is string codAsig) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(codAsig)}"); }
         // FIX: el filtro por HC N° (codigoHc) faltaba aqui, asi que "Imprimir listado"
         // ignoraba ese filtro e imprimia TODAS las HC del paciente/asignacion en vez de
         // la(s) filtrada(s). Lo pasamos para que el paquete impreso respete el HC N°.
@@ -1858,7 +1945,7 @@ else
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
-        if (!string.IsNullOrWhiteSpace(_codigoAsignacionFiltro)) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(_codigoAsignacionFiltro.Trim())}"); }
+        if (CodigoAsignacionEfectivo() is string codAsig) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(codAsig)}"); }
         return qs.Count == 0 ? "/ordenes/export.xlsx" : $"/ordenes/export.xlsx?{string.Join("&", qs)}";
     }
 
@@ -2573,6 +2660,82 @@ else
     /// prefijo "ia:" filtra por <see cref="OrdenClinicaItemDto.RevisionAgente"/>
     /// con la convencion adicional "ia:SinCorrer" para HCs donde el agente
     /// nunca corrio (campo null).</summary>
+    // ── Navegador por codigo de asignacion (validacion del N° de sesion) ──────
+    // Recorre las asignaciones (lotes) DISTINTAS presentes en el resultado ya
+    // cargado (_rows), filtrando la tabla a una sola a la vez. Es puramente
+    // client-side: no re-consulta. Pensado para recorrer con < > y verificar
+    // que el N° de sesion rigido quedo 1,2,3... por servicio.
+    // Tope de HC para habilitar "Imprimir listado" sin una asignacion enfocada.
+    // Imprimir arma un PDF con cada HC renderizada completa (schema+valores+ordenes),
+    // asi que un listado masivo cuelga el navegador. Con una asignacion enfocada el
+    // alcance ya esta acotado al lote y se permite sin importar este tope.
+    private const int PrintCap = 100;
+
+    private Guid? _asigNavFiltro;
+    private bool _asigCopiado;
+
+    /// <summary>Copia al portapapeles el codigo (8 chars) de la asignacion enfocada
+    /// por el navegador, para pegarlo en el filtro o en una consulta de validacion.</summary>
+    private async Task CopiarAsignacionAsync()
+    {
+        if (_asigNavFiltro is not Guid g) { return; }
+        var code = g.ToString()[..8].ToUpperInvariant();
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", code); _asigCopiado = true; }
+        catch { _asigCopiado = false; }
+    }
+
+    // Filtro client-side: solo servicios (lote + Cod. servicio) con mas de una
+    // sesion/HC en el resultado cargado. Pensado para aislar terapias y multi-sesion.
+    private bool _soloMultiSesion;
+
+    /// <summary>Claves (lote, servicio) que tienen 2+ filas en _rows = servicios
+    /// con mas de una sesion. Se recalcula barato sobre el set en memoria.</summary>
+    private HashSet<(Guid, string)> ServiciosMultiSesion()
+        => _rows.Where(r => r.AsignacionLoteId.HasValue)
+                .GroupBy(r => (r.AsignacionLoteId!.Value, r.CodigoServicio ?? ""))
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToHashSet();
+
+    private List<Guid> AsigNavCodigos()
+    {
+        IEnumerable<OrdenClinicaItemDto> set = _rows.Where(r => r.AsignacionLoteId.HasValue);
+        if (_soloMultiSesion)
+        {
+            var multi = ServiciosMultiSesion();
+            set = set.Where(r => multi.Contains((r.AsignacionLoteId!.Value, r.CodigoServicio ?? "")));
+        }
+        return set.Select(r => r.AsignacionLoteId!.Value)
+                  .Distinct()
+                  .OrderBy(id => id.ToString(), StringComparer.Ordinal)
+                  .ToList();
+    }
+
+    private int AsigNavIndice()
+        => _asigNavFiltro is Guid g ? AsigNavCodigos().IndexOf(g) : -1;
+
+    private void AsigNavIr(int offset)
+    {
+        var codigos = AsigNavCodigos();
+        if (codigos.Count == 0) { return; }
+        var idx = _asigNavFiltro is Guid g ? codigos.IndexOf(g) : -1;
+        if (idx < 0) { idx = offset > 0 ? -1 : codigos.Count; }
+        var nuevo = idx + offset;
+        if (nuevo < 0 || nuevo >= codigos.Count) { return; }
+        _asigNavFiltro = codigos[nuevo];
+        _asigCopiado = false;
+        // Al enfocar una asignacion, ordena por N° de sesion para leer 1,2,3...
+        _sortCol = "sesion"; _sortDesc = false;
+        _kebabRowId = null;
+    }
+
+    private void AsigNavLimpiar()
+    {
+        _asigNavFiltro = null;
+        _asigCopiado = false;
+        _kebabRowId = null;
+    }
+
     private IEnumerable<OrdenClinicaItemDto> FilasFiltradas()
     {
         IEnumerable<OrdenClinicaItemDto> baseSet = _rows;
@@ -2597,6 +2760,27 @@ else
                 {
                     baseSet = _rows.Where(r => r.RevisionAgente == v);
                 }
+            }
+        }
+        // Solo servicios con mas de una sesion (multi-sesion / terapias).
+        if (_soloMultiSesion)
+        {
+            var multi = ServiciosMultiSesion();
+            baseSet = baseSet.Where(r => r.AsignacionLoteId.HasValue
+                && multi.Contains((r.AsignacionLoteId.Value, r.CodigoServicio ?? "")));
+        }
+        // Foco de validacion por asignacion: filtra a un lote y, salvo que el
+        // usuario haya pedido otra columna, ordena por servicio + N° de sesion
+        // rigido para ver la secuencia 1,2,3... de cada servicio del lote.
+        if (_asigNavFiltro is Guid navId)
+        {
+            baseSet = baseSet.Where(r => r.AsignacionLoteId == navId);
+            if (string.IsNullOrEmpty(_sortCol) || _sortCol == "sesion")
+            {
+                return baseSet
+                    .OrderBy(r => r.CodigoServicio, StringComparer.Ordinal)
+                    .ThenBy(r => r.SesionNumero ?? int.MaxValue)
+                    .ThenBy(r => r.HistoriaClinicaId);
             }
         }
         return AplicarOrden(baseSet);

@@ -113,17 +113,18 @@ public sealed class HistoriaClinicaService(
             {
                 var todosTurnos = await db.AsignacionTurnos.AsNoTracking()
                     .Where(t => asigIds.Contains(t.AsignacionId))
-                    .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt })
+                    .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt, t.NumeroSesion })
                     .ToListAsync(ct);
                 foreach (var grp in todosTurnos.GroupBy(x => x.AsignacionId))
                 {
-                    // Tiebreaker por Id cuando CreatedAt colisiona (seeds masivos):
-                    // asegura que el badge muestre el mismo nGlobal que la grilla
-                    // /atencion y que el validador de orden secuencial.
+                    // El NumeroSesion PERSISTIDO manda (nace en Coordinacion y no se
+                    // recomputa). Solo si un turno viejo quedara sin backfillear se
+                    // cae al calculo por CreatedAt/Id como fallback — mismo criterio
+                    // que la grilla /atencion y Ordenes, para que el badge coincida.
                     var lista = grp.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToList();
                     for (int i = 0; i < lista.Count; i++)
                     {
-                        turnoOrden[lista[i].Id] = i + 1;
+                        turnoOrden[lista[i].Id] = lista[i].NumeroSesion ?? (i + 1);
                     }
                 }
             }

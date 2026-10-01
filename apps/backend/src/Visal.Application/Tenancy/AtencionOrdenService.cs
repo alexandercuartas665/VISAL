@@ -36,18 +36,28 @@ public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOr
         if (turnoActual is null) { return null; }
 
         // Traer todos los turnos de la misma asignacion (con su profesional) y
-        // calcular la posicion cronologica GLOBAL (base 1) = lo que la UI muestra
-        // como "Sesion N". Costo bajo: rara vez una asignacion pasa de ~20 turnos.
-        // Tiebreaker Id: seeds masivos generan turnos con CreatedAt identico
-        // al microsegundo. Sin ThenBy(Id) el orden es no-determinista y no
-        // coincide con el que calcula AtencionProfesionalService en la grilla.
-        var turnos = await db.AsignacionTurnos.AsNoTracking()
+        // ordenarlos por el NumeroSesion PERSISTIDO (nace en Coordinacion, no se
+        // recomputa) = lo que la UI muestra como "Sesion N". Si algun turno viejo
+        // quedara sin backfillear, se cae a la posicion cronologica por CreatedAt/Id
+        // como fallback — mismo criterio que la grilla /atencion y Ordenes.
+        var turnosRaw = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.AsignacionId == turnoActual.AsignacionId)
-            .Select(t => new { t.Id, t.CreatedAt, t.ProfesionalId })
+            .Select(t => new { t.Id, t.CreatedAt, t.ProfesionalId, t.NumeroSesion })
             .OrderBy(t => t.CreatedAt).ThenBy(t => t.Id)
             .ToListAsync(ct);
+        // Numero efectivo por turno: persistido si existe, si no la posicion por
+        // CreatedAt/Id (base 1). Reordenamos por ese numero para que la secuencia
+        // y los mensajes usen la numeracion que ve el usuario.
+        var numEfectivo = new Dictionary<Guid, int>();
+        for (int i = 0; i < turnosRaw.Count; i++)
+        {
+            numEfectivo[turnosRaw[i].Id] = turnosRaw[i].NumeroSesion ?? (i + 1);
+        }
+        var turnos = turnosRaw
+            .OrderBy(t => numEfectivo[t.Id]).ThenBy(t => t.CreatedAt).ThenBy(t => t.Id)
+            .ToList();
 
-        int posGlobalActual = turnos.FindIndex(t => t.Id == turnoActual.Id) + 1;
+        int posGlobalActual = numEfectivo[turnoActual.Id];
         if (posGlobalActual <= 1) { return null; }
 
         // El candado es POR PROFESIONAL: cada profesional lleva su propia secuencia
@@ -57,7 +67,7 @@ public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOr
         // 10, pero NO puede saltar a la 15 sin llevar 11..14. Los numeros del mensaje
         // son los GLOBALES (los que ve el usuario), aunque el control sea por prof.
         var anterioresMismoProf = turnos
-            .Take(posGlobalActual - 1)   // turnos antes del actual (orden global asc)
+            .Where(t => numEfectivo[t.Id] < posGlobalActual)   // turnos antes del actual (numero global asc)
             .Where(t => t.ProfesionalId == turnoActual.ProfesionalId)
             .ToList();
         if (anterioresMismoProf.Count == 0) { return null; }
@@ -80,8 +90,8 @@ public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOr
             bool completado = completadoLookup.TryGetValue(t.Id, out var c) && c;
             if (!completado)
             {
-                // Posicion GLOBAL de la sesion pendiente (la que ve el usuario).
-                int posPendienteGlobal = turnos.FindIndex(x => x.Id == t.Id) + 1;
+                // Numero GLOBAL de la sesion pendiente (la que ve el usuario).
+                int posPendienteGlobal = numEfectivo[t.Id];
                 // Buscar el pivote existente para incluir su Id en el bloqueo
                 // (si aun no existe, dejamos Guid.Empty — el caller usa el mensaje).
                 var pivotePendiente = await db.AsignacionTurnoSesiones.AsNoTracking()

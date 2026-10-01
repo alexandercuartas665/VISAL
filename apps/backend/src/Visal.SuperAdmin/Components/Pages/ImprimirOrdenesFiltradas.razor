@@ -170,13 +170,15 @@ else
 }
 
 @code {
-    // REV-18 — Tope duro para no colgar el navegador. Subido a 2000: el usuario
-    // reporto que 100 dejaba fuera muchas HCs del filtro (170+ en pruebas). Con
-    // 2000 se cubren la mayoria de casos operativos (auditoria mensual completa
-    // por sede/formato). Con schema real cada HC pesa ~150-300KB de DOM asi
-    // que 2000 = ~300-600MB — pesado pero manejable en un equipo moderno con
-    // la advertencia visible. Si el usuario necesita mas, que refine filtros.
-    private const int MaxHcs = 2000;
+    // REV-18 — Tope duro para no colgar el navegador. Historia: 100 (dejaba fuera
+    // HCs, 170+ en pruebas) -> 2000 (colgaba el navegador al renderizar miles de
+    // paquetes completos). Lo fijamos en 500: cubre la auditoria mensual por
+    // sede/formato (170+) con margen, y a ~150-300KB de DOM por HC son ~75-150MB,
+    // manejable. Ademas Ordenes.razor ya acota el boton (una asignacion enfocada o
+    // <= PrintCap HC visibles), asi que esta pagina casi nunca recibe sets grandes;
+    // este tope es la red de seguridad para accesos por URL directa. Si se necesita
+    // mas, refinar filtros (rango de fechas, paciente, formato).
+    private const int MaxHcs = 500;
 
     private bool _loading = true;
     // Gate para que los componentes PaqueteHcImprimible carguen de a uno (comparten

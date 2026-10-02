@@ -468,7 +468,13 @@ public sealed class HistoriaClinicaService(
         // hidratacion al abrir. Idempotente y sin sobrescribir vaciados
         // deliberados del doctor. Ver DefaultValuesHelper.HidratarDefaultsAusentes.
         e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, valoresJson, ct);
-        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct) ?? e.FechaAtencion;
+        // Prioridad de la fecha de atencion: (1) campo del cuerpo marcado
+        // IsFechaAtencion -> (2) header "Ciudad y Fecha" (ambos los resuelve el
+        // helper) -> (3) valor previo ya seteado -> (4) fecha de REGISTRO
+        // (FechaApertura). Asi nunca queda null: si no hay cuerpo ni header, cae a
+        // la fecha en que se abrio/registro la HC.
+        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct)
+                          ?? e.FechaAtencion ?? e.FechaApertura;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -503,7 +509,13 @@ public sealed class HistoriaClinicaService(
         // Refuerzo del FechaAtencion al Cerrar: recalcula desde el JSON final.
         // Preserva el valor previo si el nuevo calculo es null (para no perder
         // una fecha ya seteada si el doctor limpio los campos marcados al final).
-        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct) ?? e.FechaAtencion;
+        // Prioridad de la fecha de atencion: (1) campo del cuerpo marcado
+        // IsFechaAtencion -> (2) header "Ciudad y Fecha" (ambos los resuelve el
+        // helper) -> (3) valor previo ya seteado -> (4) fecha de REGISTRO
+        // (FechaApertura). Asi nunca queda null: si no hay cuerpo ni header, cae a
+        // la fecha en que se abrio/registro la HC.
+        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct)
+                          ?? e.FechaAtencion ?? e.FechaApertura;
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
         // Auditoria antes de SaveChanges: audit.Write solo agrega la entrada al
@@ -852,8 +864,10 @@ public sealed class HistoriaClinicaService(
         // evoluciono despues de que se guardo la HC origen. Idempotente.
         nueva.ValoresJson = await EnriquecerConDefaultsAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct);
         // FechaAtencion se recalcula sobre el JSON copiado — hereda la del origen
-        // si el schema no cambio, o queda null si el campo marcado ya no existe.
-        nueva.FechaAtencion = await CalcularFechaAtencionAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct);
+        // si el schema no cambio. Si no hay cuerpo ni header, cae a la fecha de
+        // registro (FechaApertura) en vez de quedar null (misma prioridad que Cerrar/Guardar).
+        nueva.FechaAtencion = await CalcularFechaAtencionAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct)
+                              ?? nueva.FechaApertura;
 
         audit.Write(actor, "historia-clinica.copiar", nameof(HistoriaClinica), nueva.Id,
             previousValue: null,

@@ -48,17 +48,23 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         var contratoPorId = contratos.ToDictionary(c => c.Id);
         var contratoIdsSet = contratos.Select(c => c.Id).ToHashSet();
 
-        // 2) HCs cerradas en el rango.
-        //    fecha_cierre es DateTimeOffset? — filtramos por not null y por
-        //    conversion a DateOnly del componente UTC (simple y estable).
+        // 2) HCs cerradas, agrupadas por MES DE ATENCION (no de cierre).
+        //    El periodo del snapshot se arma por fecha_atencion (cuando se presto
+        //    el servicio), con fallback a fecha_cierre cuando la HC no tiene
+        //    fecha_atencion (HCs viejas). Antes se filtraba solo por fecha_cierre,
+        //    lo que dejaba fuera atenciones de un mes digitadas/cerradas el mes
+        //    siguiente (p.ej. atencion 15/09 cerrada 02/10 no caia en septiembre).
+        //    La HC sigue teniendo que estar Cerrada (tiene fecha_cierre not null).
+        //    Comparacion por instante UTC contra los limites del rango (simple y
+        //    estable), igual criterio que antes.
         var inicio = new DateTimeOffset(filtros.FechaInicio.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var fin = new DateTimeOffset(filtros.FechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var hcs = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Estado == HistoriaClinicaEstado.Cerrada
                      && h.FechaCierre != null
-                     && h.FechaCierre >= inicio
-                     && h.FechaCierre < fin)
-            .OrderBy(h => h.FechaCierre)
+                     && (h.FechaAtencion ?? h.FechaCierre) >= inicio
+                     && (h.FechaAtencion ?? h.FechaCierre) < fin)
+            .OrderBy(h => h.FechaAtencion ?? h.FechaCierre)
             .ToListAsync(ct);
         if (hcs.Count == 0) { return Array.Empty<RelacionFacturasHecho>(); }
 

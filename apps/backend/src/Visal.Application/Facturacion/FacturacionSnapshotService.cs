@@ -61,6 +61,7 @@ public sealed class FacturacionSnapshotService(
             FiltrosJson = string.IsNullOrWhiteSpace(cmd.FiltrosJson) ? "{}" : cmd.FiltrosJson,
             Estado = EstadoSnapshot.Ejecutando,
             FechaEjecucionInicio = ahora,
+            VersionApp = string.IsNullOrWhiteSpace(cmd.VersionApp) ? null : cmd.VersionApp.Trim(),
             CreatedBy = actor
         };
         db.FacturacionSnapshots.Add(snap);
@@ -593,7 +594,7 @@ public sealed class FacturacionSnapshotService(
         x.Id, x.Nombre, x.Tipo, x.Estado,
         x.FechaEjecucionInicio, x.FechaEjecucionFin, x.DuracionMs, x.TotalFilas,
         x.CreatedBy, x.ArchivadoPor, x.MotivoArchivado, x.FechaArchivado, x.ErrorMensaje,
-        x.AseguradoraId, aseguradoraNombre);
+        x.AseguradoraId, aseguradoraNombre, x.VersionApp);
 
     /// <summary>
     /// Extrae <c>aseguradoraId</c> del JSON de filtros para poder guardarlo en

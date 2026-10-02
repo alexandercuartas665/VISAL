@@ -9,7 +9,10 @@ namespace Visal.Application.Facturacion;
 public sealed record GenerarSnapshotCmd(
     TipoSnapshot Tipo,
     string? Nombre,
-    string FiltrosJson);
+    string FiltrosJson,
+    // Version del sistema (AppVersion.Current) con la que se genera. La pasa el
+    // caller (capa web) porque AppVersion vive en SuperAdmin, no en Application.
+    string? VersionApp = null);
 
 /// <summary>Filtros del listado de snapshots.</summary>
 public sealed record FiltrosListaSnapshotDto(
@@ -34,7 +37,8 @@ public sealed record FacturacionSnapshotDto(
     DateTimeOffset? FechaArchivado,
     string? ErrorMensaje,
     Guid? AseguradoraId,
-    string? AseguradoraNombre);
+    string? AseguradoraNombre,
+    string? VersionApp = null);
 
 /// <summary>Vista detallada de un snapshot (metadata + columnas del builder).</summary>
 public sealed record FacturacionSnapshotDetalleDto(

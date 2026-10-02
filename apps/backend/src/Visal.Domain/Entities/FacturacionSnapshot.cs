@@ -66,6 +66,11 @@ public class FacturacionSnapshot : TenantEntity
     /// <summary>Mensaje de error cuando <see cref="Estado"/> = Fallido.</summary>
     public string? ErrorMensaje { get; set; }
 
+    /// <summary>Version del sistema (AppVersion.Current) con la que se genero el
+    /// snapshot. Util para saber si una instantanea quedo con una version previa a
+    /// un fix (p.ej. antes del filtro por fecha_atencion). La fija el caller al generar.</summary>
+    public string? VersionApp { get; set; }
+
     /// <summary>Filas del snapshot (una por registro). Cascade en delete pero la UI nunca lo dispara.</summary>
     public List<FacturacionSnapshotFila> Filas { get; set; } = new();
 }

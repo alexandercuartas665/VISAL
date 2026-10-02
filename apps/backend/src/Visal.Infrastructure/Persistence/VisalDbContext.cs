@@ -1691,6 +1691,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
             b.Property(x => x.MotivoArchivado).HasMaxLength(1000);
             b.Property(x => x.ErrorMensaje).HasMaxLength(4000);
+            b.Property(x => x.VersionApp).HasMaxLength(20);
             // Filtros del snapshot como jsonb — permite index gin/consultas futuras y
             // el motor no necesita saber la forma concreta por tipo.
             b.Property(x => x.FiltrosJson).HasColumnType("jsonb").IsRequired();

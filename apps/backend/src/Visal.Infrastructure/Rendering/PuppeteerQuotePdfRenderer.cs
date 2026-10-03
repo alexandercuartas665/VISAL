@@ -37,6 +37,45 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
         });
     }
 
+    public async Task<byte[]> RenderUrlToPdfAsync(string url, string waitForSelector, CancellationToken cancellationToken = default)
+    {
+        await using var browser = await LaunchAsync();
+        await using var page = await browser.NewPageAsync();
+        return await RenderPageAsync(page, url, waitForSelector);
+    }
+
+    public async Task<IReadOnlyList<byte[]>> RenderUrlsToPdfAsync(IReadOnlyList<string> urls, string waitForSelector, CancellationToken cancellationToken = default)
+    {
+        var res = new List<byte[]>(urls.Count);
+        if (urls.Count == 0) { return res; }
+        await using var browser = await LaunchAsync();
+        foreach (var url in urls)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var page = await browser.NewPageAsync();
+            res.Add(await RenderPageAsync(page, url, waitForSelector));
+        }
+        return res;
+    }
+
+    // DOMContentLoaded (no Networkidle0): la pagina Blazor mantiene el WebSocket
+    // abierto, asi que esperamos el selector que aparece cuando el render termino.
+    private static async Task<byte[]> RenderPageAsync(IPage page, string url, string waitForSelector)
+    {
+        await page.GoToAsync(url, new NavigationOptions
+        {
+            WaitUntil = new[] { WaitUntilNavigation.DOMContentLoaded },
+            Timeout = 30000
+        });
+        await page.WaitForSelectorAsync(waitForSelector, new WaitForSelectorOptions { Timeout = 25000 });
+        return await page.PdfDataAsync(new PdfOptions
+        {
+            Format = PaperFormat.A4,
+            PrintBackground = true,
+            MarginOptions = new MarginOptions { Top = "12mm", Bottom = "12mm", Left = "10mm", Right = "10mm" }
+        });
+    }
+
     public async Task<byte[]> RenderUrlToImageAsync(string url, CancellationToken cancellationToken = default)
     {
         await using var browser = await LaunchAsync();

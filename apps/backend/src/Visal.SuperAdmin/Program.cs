@@ -87,6 +87,8 @@ builder.Services.AddScoped<ITenantContext, CookieUserContext>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<Visal.Application.Tenancy.IChatBroadcaster, Visal.SuperAdmin.RealTime.SignalRChatBroadcaster>();
 builder.Services.AddScoped<Visal.SuperAdmin.Facturacion.ITipologiaZipService, Visal.SuperAdmin.Facturacion.TipologiaZipService>();
+// Tokens de un solo uso para render de HC a PDF (Cuenta medica -> Formulario por tipo).
+builder.Services.AddSingleton<Visal.SuperAdmin.Facturacion.IHcPrintTokenStore, Visal.SuperAdmin.Facturacion.HcPrintTokenStore>();
 // Tunel de desarrollo real (cloudflared); reemplaza el no-op de Application.
 builder.Services.AddSingleton<Visal.Application.Tenancy.IDevTunnel, Visal.SuperAdmin.RealTime.CloudflaredTunnel>();
 // Storage de archivos servibles (wwwroot/uploads) para que servicios de Application
@@ -774,6 +776,24 @@ app.MapGet("/comprobante/{paymentId:guid}", async (
     }
 
     return Results.File(receipt.Content, "application/pdf", receipt.FileName);
+}).RequireAuthorization();
+
+// Mintea un token de un solo uso para renderizar SOLO el formulario de una HC en
+// /p/hc-form/{hcId}?t=... (lo usa el generador de Cuenta medica; tambien util para
+// validar el render). Solo si la HC existe en el tenant del usuario (query filter).
+app.MapGet("/facturacion/hc-print-token/{hcId:guid}", async (
+    Guid hcId,
+    Visal.Application.Common.ITenantContext tenant,
+    Visal.Application.Common.IApplicationDbContext db,
+    Visal.SuperAdmin.Facturacion.IHcPrintTokenStore tokens,
+    CancellationToken ct) =>
+{
+    if (tenant.TenantId is not Guid) { return Results.Unauthorized(); }
+    var existe = await db.HistoriasClinicas.AsNoTracking()
+        .AnyAsync(h => h.Id == hcId, ct);
+    if (!existe) { return Results.NotFound(); }
+    var token = tokens.Mint(hcId, tenant.TenantId.Value);
+    return Results.Json(new { token, url = $"/p/hc-form/{hcId}?t={token}" });
 }).RequireAuthorization();
 
 // Webhook crudo de Evolution: traduce el evento, deduce el tenant del nombre de instancia,

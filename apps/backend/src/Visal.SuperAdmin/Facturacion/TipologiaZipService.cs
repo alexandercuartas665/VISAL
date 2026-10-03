@@ -10,6 +10,7 @@ using QuestPDF.Infrastructure;
 using Visal.Application.Common;
 using Visal.Application.Facturacion;
 using Visal.Application.Tenancy;
+using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
 namespace Visal.SuperAdmin.Facturacion;
@@ -22,6 +23,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private readonly ICuentaMedicaConfigService _cuenta;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<TipologiaZipService> _log;
+    private readonly IQuotePdfRenderer _pdfRenderer;
+    private readonly IHcPrintTokenStore _printTokens;
+    private readonly ITenantContext _tenant;
+    private readonly Microsoft.AspNetCore.Hosting.Server.IServer _server;
 
     static TipologiaZipService()
     {
@@ -34,13 +39,21 @@ public sealed class TipologiaZipService : ITipologiaZipService
         IFacturacionSnapshotService snaps,
         ICuentaMedicaConfigService cuenta,
         IWebHostEnvironment env,
-        ILogger<TipologiaZipService> log)
+        ILogger<TipologiaZipService> log,
+        IQuotePdfRenderer pdfRenderer,
+        IHcPrintTokenStore printTokens,
+        ITenantContext tenant,
+        Microsoft.AspNetCore.Hosting.Server.IServer server)
     {
         _db = db;
         _snaps = snaps;
         _cuenta = cuenta;
         _env = env;
         _log = log;
+        _pdfRenderer = pdfRenderer;
+        _printTokens = printTokens;
+        _tenant = tenant;
+        _server = server;
     }
 
     public async Task<ArchivoExportado?> GenerarZipArchivoAsync(
@@ -160,6 +173,32 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 .Select(r => r.PacienteId).Distinct().ToListAsync(ct)) { conFirma.Add(pid); }
         }
 
+        // Formularios por tipo: para los tipos referenciados por algun archivo, que
+        // pacientes del snapshot tienen al menos una HC Cerrada de ese tipo. Lookup
+        // tipo -> set de pacienteIds. (No toca las ramas de autorizacion/firma.)
+        var tiposReferenciados = archivos
+            .SelectMany(a => a.Contenidos)
+            .Where(c => c.Origen == OrigenInformeItem.FormularioPorTipo && !string.IsNullOrWhiteSpace(c.FormularioTipo))
+            .Select(c => c.FormularioTipo!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var conFormTipo = new Dictionary<string, HashSet<Guid>>(StringComparer.OrdinalIgnoreCase);
+        if (idSet.Count > 0 && tiposReferenciados.Count > 0)
+        {
+            var filas = await _db.HistoriasClinicas.AsNoTracking()
+                .Where(h => idSet.Contains(h.PacienteId) && h.Estado == HistoriaClinicaEstado.Cerrada)
+                .Join(_db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id,
+                      (h, f) => new { h.PacienteId, f.Tipo })
+                .Where(x => x.Tipo != null && tiposReferenciados.Contains(x.Tipo))
+                .Distinct()
+                .ToListAsync(ct);
+            foreach (var x in filas)
+            {
+                if (!conFormTipo.TryGetValue(x.Tipo!, out var set)) { conFormTipo[x.Tipo!] = set = new(); }
+                set.Add(x.PacienteId);
+            }
+        }
+
         var res = new Dictionary<Guid, int>();
         foreach (var a in archivos)
         {
@@ -170,7 +209,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 // El paciente cuenta si ALGUN contenido del archivo tiene material para el.
                 var tiene = a.Contenidos.Any(c =>
                     (c.Origen == OrigenInformeItem.AutorizacionAsignacion && conAut.Contains(pid)) ||
-                    (c.Origen == OrigenInformeItem.FirmaPaciente && conFirma.Contains(pid)));
+                    (c.Origen == OrigenInformeItem.FirmaPaciente && conFirma.Contains(pid)) ||
+                    (c.Origen == OrigenInformeItem.FormularioPorTipo
+                        && c.FormularioTipo is string ft
+                        && conFormTipo.TryGetValue(ft, out var set) && set.Contains(pid)));
                 if (tiene) { n++; }
             }
             res[a.Id] = n;
@@ -206,8 +248,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     case OrigenInformeItem.FirmaPaciente:
                         partes.AddRange(await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct));
                         break;
+                    case OrigenInformeItem.FormularioPorTipo:
+                        partes.AddRange(await CargarFormulariosPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, ct));
+                        break;
                     default:
-                        // Origenes de formularios de HC (DocumentoHc, Evolucion, Escala,
+                        // Otros origenes de formularios de HC (DocumentoHc, Evolucion, Escala,
                         // etc.): pendientes de una ola posterior. No producen contenido.
                         break;
                 }
@@ -266,6 +311,61 @@ public sealed class TipologiaZipService : ITipologiaZipService
             if (img is not null) { res.Add(PaginaImagen(img, "Firma del paciente")); }
         }
         return res;
+    }
+
+    /// <summary>Origen "Formulario por tipo": por cada HC Cerrada del paciente cuyo
+    /// FormDefinition.Tipo = <paramref name="tipo"/>, renderiza SOLO el formulario
+    /// (Docs="HC") a PDF via Puppeteer navegando a la ruta publica con token de un
+    /// solo uso. SoloUltimo = solo la HC mas reciente (por fecha de atencion).</summary>
+    private async Task<List<byte[]>> CargarFormulariosPorTipoAsync(
+        Guid pacienteId, string? tipo, bool soloUltimo, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
+
+        var q = _db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.PacienteId == pacienteId && h.Estado == HistoriaClinicaEstado.Cerrada)
+            .Join(_db.FormDefinitions.AsNoTracking(),
+                  h => h.FormDefinitionId, f => f.Id,
+                  (h, f) => new { h.Id, h.FechaCierre, h.FechaAtencion, h.CreatedAt, f.Tipo })
+            .Where(x => x.Tipo == tipo);
+
+        var hcIds = soloUltimo
+            ? await q.OrderByDescending(x => x.FechaAtencion ?? x.FechaCierre ?? x.CreatedAt)
+                     .Take(1).Select(x => x.Id).ToListAsync(ct)
+            : await q.OrderBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.CreatedAt)
+                     .Select(x => x.Id).ToListAsync(ct);
+
+        if (hcIds.Count == 0) { return new(); }
+        var baseUrl = BaseUrlInterna();
+        var urls = hcIds.Select(hcId => $"{baseUrl}/p/hc-form/{hcId}?t={_printTokens.Mint(hcId, tid)}").ToList();
+        try
+        {
+            // Un solo navegador para todas las HC de este paciente+tipo (una pagina c/u).
+            var pdfs = await _pdfRenderer.RenderUrlsToPdfAsync(urls, ".pack-doc", ct);
+            return pdfs.Where(p => p is { Length: > 0 }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Tipologia ZIP: fallo render de formularios tipo {Tipo} del paciente {Pac}", tipo, pacienteId);
+            return new();
+        }
+    }
+
+    /// <summary>URL base interna del propio servidor para que Puppeteer navegue a las
+    /// rutas publicas de render. Sale de las direcciones en que escucha el servidor
+    /// (normalizando 0.0.0.0/+/[::] a localhost); fallback al puerto interno 8080.</summary>
+    private string BaseUrlInterna()
+    {
+        var feat = _server.Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>();
+        var addr = feat?.Addresses?.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(addr))
+        {
+            return addr.Replace("://+", "://localhost")
+                       .Replace("://0.0.0.0", "://localhost")
+                       .Replace("://[::]", "://localhost")
+                       .TrimEnd('/');
+        }
+        return "http://localhost:8080";
     }
 
     // ---- Recuperacion de archivos fisicos (wwwroot) ----

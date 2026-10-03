@@ -3,6 +3,7 @@
 @using Visal.Domain.Enums
 @inject ICuentaMedicaConfigService Svc
 @inject ITipologiaArchivoService TipSvc
+@inject IFormDefinitionService FormSvc
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 
@@ -87,7 +88,7 @@ else
                                 @foreach (var c in it.Contenidos)
                                 {
                                     <span class="cm-card-origen" title="@(c.SoloUltimo ? "Solo el mas reciente" : "Todos")">
-                                        @LabelOrigen(c.Origen)@(string.IsNullOrEmpty(c.TipologiaNombre) ? "" : $" · {c.TipologiaNombre}")@(c.SoloUltimo ? " (1x)" : "")
+                                        @LabelOrigen(c.Origen)@(string.IsNullOrEmpty(c.TipologiaNombre) ? "" : $" · {c.TipologiaNombre}")@(string.IsNullOrEmpty(c.FormularioTipo) ? "" : $" · {c.FormularioTipo}")@(c.SoloUltimo ? " (1x)" : "")
                                     </span>
                                 }
                             }
@@ -270,6 +271,19 @@ else
                                                     @foreach (var t in _tipologias)
                                                     {
                                                         <option value="@t.Id">@t.Nombre</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                        }
+                                        @if (c.Origen == OrigenInformeItem.FormularioPorTipo)
+                                        {
+                                            <div class="cm-f">
+                                                <label>Tipo de formulario *</label>
+                                                <select class="form-select form-select-sm" @bind="c.FormularioTipo">
+                                                    <option value="">Selecciona un tipo...</option>
+                                                    @foreach (var t in _tiposFormulario)
+                                                    {
+                                                        <option value="@t">@t</option>
                                                     }
                                                 </select>
                                             </div>
@@ -478,6 +492,9 @@ else
     private CuentaMedicaConfigDto? _cfg;
     private List<InformeItemDto> _items = new();
     private List<TipologiaArchivoDto> _tipologias = new();
+    // Tipos de formulario del sistema (FormDefinition.Tipo), para el origen
+    // "Formulario por tipo". Mismos que muestra el Motor de Formularios.
+    private List<string> _tiposFormulario = new();
 
     // Portada state (bindeado en el modal)
     private bool _portadaHabilitada;
@@ -506,6 +523,17 @@ else
     {
         try { _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList(); }
         catch { _tipologias = new(); }
+        try
+        {
+            _tiposFormulario = (await FormSvc.ListLiteAsync())
+                .Select(f => f.Tipo)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch { _tiposFormulario = new(); }
     }
 
     protected override async Task OnParametersSetAsync()
@@ -626,6 +654,7 @@ else
                 {
                     Origen = c.Origen,
                     TipologiaArchivoId = c.TipologiaArchivoId,
+                    FormularioTipo = c.FormularioTipo,
                     SoloUltimo = c.SoloUltimo,
                 })
                 .ToList(),
@@ -670,7 +699,7 @@ else
         try
         {
             var contenidos = _itemEdit.Contenidos
-                .Select(c => new GuardarContenidoDto(c.Origen, c.TipologiaArchivoId, c.SoloUltimo))
+                .Select(c => new GuardarContenidoDto(c.Origen, c.TipologiaArchivoId, c.SoloUltimo, c.FormularioTipo))
                 .ToList();
             await Svc.GuardarItemAsync(new GuardarItemRequest(
                 _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
@@ -772,6 +801,7 @@ else
         OrigenInformeItem.Consentimiento => "Consentimiento (HC)",
         OrigenInformeItem.Evolucion => "Evolucion (HC)",
         OrigenInformeItem.Escala => "Escala (HC)",
+        OrigenInformeItem.FormularioPorTipo => "Formulario por tipo",
         _ => o.ToString(),
     };
 
@@ -791,6 +821,7 @@ else
     {
         public OrigenInformeItem Origen { get; set; }
         public Guid? TipologiaArchivoId { get; set; }
+        public string? FormularioTipo { get; set; }
         public bool SoloUltimo { get; set; }
     }
 }

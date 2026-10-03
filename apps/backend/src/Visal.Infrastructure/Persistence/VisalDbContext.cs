@@ -1205,6 +1205,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.ToTable("aseguradora_informe_contenidos");
             b.Property(x => x.Origen).HasConversion<int>();
+            b.Property(x => x.FormularioTipo).HasMaxLength(60);
             b.HasOne(x => x.Item).WithMany(x => x.Contenidos)
                 .HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.ItemId, x.Orden });

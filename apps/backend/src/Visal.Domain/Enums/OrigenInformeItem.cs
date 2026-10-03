@@ -29,4 +29,9 @@ public enum OrigenInformeItem
     Consentimiento = 6,
     Evolucion = 7,
     Escala = 8,
+    /// <summary>Formularios de la HC agrupados por su Tipo (FormDefinition.Tipo:
+    /// HISTORIA CLINICA, EVOLUCION, CONSENTIMIENTO, ESCALAS, NOTAS, etc.). El Tipo
+    /// concreto se guarda en <c>AseguradoraInformeContenido.FormularioTipo</c>. El
+    /// generador (ola posterior) adjunta los formularios de ese tipo de cada HC.</summary>
+    FormularioPorTipo = 9,
 }

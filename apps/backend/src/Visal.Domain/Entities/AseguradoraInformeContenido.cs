@@ -32,6 +32,11 @@ public class AseguradoraInformeContenido : TenantEntity
     /// Null = cualquier tipologia.</summary>
     public Guid? TipologiaArchivoId { get; set; }
 
+    /// <summary>Solo aplica cuando <see cref="Origen"/> = FormularioPorTipo: el
+    /// Tipo de formulario a adjuntar (FormDefinition.Tipo, ej. "HISTORIA CLINICA",
+    /// "EVOLUCION", "NOTAS"). Null para los demas origenes.</summary>
+    public string? FormularioTipo { get; set; }
+
     /// <summary>Solo aplica a origenes multi-instancia. True = incluye SOLO el
     /// mas reciente. False = incluye todos.</summary>
     public bool SoloUltimo { get; set; }

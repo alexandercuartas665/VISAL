@@ -46,7 +46,8 @@ public sealed record InformeContenidoDto(
     OrigenInformeItem Origen,
     Guid? TipologiaArchivoId,
     string? TipologiaNombre,     // enriquecido en lectura para pintar la UI
-    bool SoloUltimo);
+    bool SoloUltimo,
+    string? FormularioTipo = null);   // solo cuando Origen = FormularioPorTipo
 
 public sealed record GuardarItemRequest(
     Guid? Id,                    // null = crear
@@ -63,7 +64,8 @@ public sealed record GuardarItemRequest(
 public sealed record GuardarContenidoDto(
     OrigenInformeItem Origen,
     Guid? TipologiaArchivoId,
-    bool SoloUltimo);
+    bool SoloUltimo,
+    string? FormularioTipo = null);   // solo cuando Origen = FormularioPorTipo
 
 /// <summary>Fila del selector "Copiar de ..." — solo aseguradoras que ya tienen
 /// config con al menos 1 item.</summary>

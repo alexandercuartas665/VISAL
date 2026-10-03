@@ -109,7 +109,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 .Select(c => new InformeContenidoDto(
                     c.Id, c.Orden, c.Origen, c.TipologiaArchivoId,
                     c.TipologiaArchivoId is Guid tg && tipNombres.TryGetValue(tg, out var nm) ? nm : null,
-                    c.SoloUltimo))
+                    c.SoloUltimo, c.FormularioTipo))
                 .ToList()))
             .ToList();
     }
@@ -180,6 +180,9 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 Orden = orden++,
                 Origen = c.Origen,
                 TipologiaArchivoId = PideTipologia(c.Origen) ? c.TipologiaArchivoId : null,
+                FormularioTipo = c.Origen == OrigenInformeItem.FormularioPorTipo
+                    ? (string.IsNullOrWhiteSpace(c.FormularioTipo) ? null : c.FormularioTipo.Trim())
+                    : null,
                 SoloUltimo = c.SoloUltimo,
             });
         }
@@ -309,6 +312,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                         Orden = c.Orden,
                         Origen = c.Origen,
                         TipologiaArchivoId = c.TipologiaArchivoId,
+                        FormularioTipo = c.FormularioTipo,
                         SoloUltimo = c.SoloUltimo,
                     });
                 }

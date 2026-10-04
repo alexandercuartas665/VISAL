@@ -55,7 +55,7 @@ else
                        modo agrupado (EVO N° propio, HC N° = base, subtitulo, fecha de
                        apertura de la evolucion). *@
                     @RenderHeader(HdrHc, _hc.FormatoNombre, "EVO", ConsecutivoPropio(),
-                        FechaAtencionLinea(_hcSchema, _valores, _hc.FechaApertura),
+                        FechaAtencionLinea(_hcSchema, _valores, _hc.FechaApertura, _hc.FechaAtencion),
                         $"Evolucion - Sesion {_evolucionInfo.SesionNumero}")
                 }
                 else
@@ -74,10 +74,11 @@ else
         }
 
         @* ==== EVOLUCIONES (unificadas: sesiones de terapia ligadas + documentos de
-           evolucion), justo debajo de la HC base. Se mezclan ambas fuentes, se
-           ordenan por fecha y se numeran consecutivamente "Evolucion - Sesion N"
-           para que salgan en orden y sin importar como se hayan capturado. Cada una
-           en su propia pagina. *@
+           evolucion), justo debajo de la HC base. Se mezclan ambas fuentes y se
+           ordenan/numeran por el numero de sesion RIGIDO (numero_sesion del turno),
+           no por el orden de digitacion. Los documentos de evolucion sin sesion
+           rigida caen al final y se numeran de corrido como respaldo. Cada una en
+           su propia pagina. *@
         @if (_evolucionesUnificadas.Count > 0)
         {
             var _evoN = 0;
@@ -87,11 +88,12 @@ else
                 var schEvo = TryParseSchema(evo.SchemaJson);
                 var valEvo = TryParseValores(evo.ValoresJson);
                 var hdrEvo = schEvo?.Header ?? FormHeader.Default();
+                var _ses = evo.SesionNumero is int _sn ? _sn : _evoN;
                 <div class="pack-doc">
                     @RenderHeader(hdrEvo, evo.FormatoNombre, "EVO",
                         evo.Id.ToString().Substring(0, 8).ToUpperInvariant(),
-                        FechaAtencionLinea(schEvo, valEvo, evo.FechaApertura),
-                        $"Evolucion - Sesion {_evoN}")
+                        FechaAtencionLinea(schEvo, valEvo, evo.FechaApertura, evo.FechaAtencion),
+                        $"Evolucion - Sesion {_ses}")
                     @if (schEvo is not null)
                     {
                         @foreach (var node in schEvo.Children) { @RenderTopNode(node, valEvo) }
@@ -641,7 +643,8 @@ else
     // evolucion se capturo de formas distintas.
     private sealed record EvoImprimible(
         Guid Id, string? SchemaJson, string? ValoresJson,
-        string FormatoNombre, DateTimeOffset FechaApertura, string? EspecialistaNombre);
+        string FormatoNombre, DateTimeOffset FechaApertura, string? EspecialistaNombre,
+        DateTimeOffset? FechaAtencion, int? SesionNumero);
     private List<EvoImprimible> _evolucionesUnificadas = new();
 
     // HC: schema + valores
@@ -1029,15 +1032,26 @@ else
         {
             evosMerge.Add(new EvoImprimible(
                 evo.Historia.Id, evo.Historia.SchemaJson, evo.Historia.ValoresJson,
-                evo.Historia.FormatoNombre, evo.Historia.FechaApertura, evo.Historia.EspecialistaNombre));
+                evo.Historia.FormatoNombre, evo.Historia.FechaApertura, evo.Historia.EspecialistaNombre,
+                evo.Historia.FechaAtencion, evo.SesionNumero));
         }
         foreach (var doc in _evoDetails)
         {
+            // Los documentos de evolucion (DocumentoHc) no tienen columna fecha_atencion
+            // ni sesion rigida, asi que van en null -> la fecha cae al calculo por
+            // header/apertura y el numero de sesion al contador de respaldo.
             evosMerge.Add(new EvoImprimible(
                 doc.Id, doc.SchemaJson, doc.ValoresJson,
-                doc.FormatoNombre, doc.FechaApertura, doc.EspecialistaNombre));
+                doc.FormatoNombre, doc.FechaApertura, doc.EspecialistaNombre,
+                null, null));
         }
-        _evolucionesUnificadas = evosMerge.OrderBy(e => e.FechaApertura).ToList();
+        // Orden por el numero de sesion RIGIDO (no por fecha de digitacion/apertura,
+        // que puede venir desordenada). Desempate por fecha de atencion. Las que no
+        // tienen sesion rigida (documentos de evolucion) van al final por su fecha.
+        _evolucionesUnificadas = evosMerge
+            .OrderBy(e => e.SesionNumero ?? int.MaxValue)
+            .ThenBy(e => e.FechaAtencion ?? e.FechaApertura)
+            .ToList();
 
         // Auto-print: cuando la pagina host lo pide (boton "Imprimir" del listado
         // por-fila, que antes usaba #print=1). El listado masivo pasa AutoPrint=false
@@ -1345,15 +1359,20 @@ else
     // (FechaCanonicaHc). Antes imprimia solo el campo del encabezado / la apertura.
     private string FechaLineaHc()
     {
-        var fa = FechaAtencionHelper.Calcular(_hcSchema, _valores);
+        // Fuente unica de verdad: la columna fecha_atencion de la HC (la MISMA que usa
+        // facturacion/snapshots). Asi impresion y facturacion no se desalinean. Solo si
+        // la columna esta vacia (HCs viejas sin resolver) se cae al calculo por
+        // header/registro, y de ultimo a la fecha canonica.
+        var fa = _hc?.FechaAtencion ?? FechaAtencionHelper.Calcular(_hcSchema, _valores);
         if (fa is DateTimeOffset f) { return "Fecha: " + FmtFecha(f); }
         return "Fecha: " + FechaCanonicaHc();
     }
 
-    /// <summary>Linea de fecha para un documento (schema+valores): fecha de atencion
-    /// (IsFechaAtencion) si existe, si no la apertura dada. Usada por las evoluciones.</summary>
-    private static string FechaAtencionLinea(FormSchema? schema, IReadOnlyDictionary<string, string?> valores, DateTimeOffset apertura)
-        => "Fecha: " + FmtFecha(FechaAtencionHelper.Calcular(schema, valores) ?? apertura);
+    /// <summary>Linea de fecha para un documento: la columna <c>fecha_atencion</c>
+    /// guardada (misma fuente que facturacion) si viene; si no, el calculo por
+    /// IsFechaAtencion/header; y de ultimo la apertura dada. Usada por las evoluciones.</summary>
+    private static string FechaAtencionLinea(FormSchema? schema, IReadOnlyDictionary<string, string?> valores, DateTimeOffset apertura, DateTimeOffset? fechaAtencion)
+        => "Fecha: " + FmtFecha(fechaAtencion ?? FechaAtencionHelper.Calcular(schema, valores) ?? apertura);
 
     /// <summary>Formatea a hora local; omite la hora cuando es medianoche (campos de
     /// fecha sin hora), para no imprimir "00:00".</summary>

@@ -48,7 +48,8 @@ public sealed record HistoriaClinicaDetailDto(
     string? RipsFinalidadCodigo = null,
     string? RipsFinalidadNombre = null,
     string? RipsCausaExternaCodigo = null,
-    string? RipsCausaExternaNombre = null);
+    string? RipsCausaExternaNombre = null,
+    DateTimeOffset? FechaAtencion = null);
 
 /// <summary>
 /// Opcion del filtro "Asignacion" en el modulo de Historias: una atencion del

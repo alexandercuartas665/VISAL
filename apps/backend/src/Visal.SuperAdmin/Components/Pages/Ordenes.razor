@@ -1960,7 +1960,22 @@ else
     private string? _modalErr;
     private bool _selHc = true, _selMed, _selSrv, _selIns, _selRem, _selRxExt, _selLabExt, _selInsExt, _selInc, _selCert, _selEsc, _selEvo, _selCon;
 
-    protected override async Task OnInitializedAsync()
+    // Serializa TODAS las cargas de datos de la pagina. El IApplicationDbContext es
+    // scoped = una sola instancia por circuito Blazor, asi que dos cargas en paralelo
+    // (p.ej. la carga inicial de la Lista todavia corriendo cuando el usuario hace
+    // clic en otro tab) chocan con "A second operation was started on this context
+    // instance" y tumban el circuito. Este candado las ejecuta de a una. Las *CoreAsync
+    // son el cuerpo real; los metodos publicos lo envuelven en el candado. OJO: nunca
+    // llamar a un metodo gated desde dentro del candado (deadlock) -> usar su *CoreAsync.
+    private readonly SemaphoreSlim _dbGate = new(1, 1);
+    private async Task RunGuardedAsync(Func<Task> work)
+    {
+        await _dbGate.WaitAsync();
+        try { await work(); }
+        finally { _dbGate.Release(); }
+    }
+
+    protected override Task OnInitializedAsync() => RunGuardedAsync(async () =>
     {
         _especialistas = (await OcSvc.ListarEspecialistasAsync()).ToList();
         _aseguradoras = (await OcSvc.ListarAseguradorasAsync()).ToList();
@@ -1976,8 +1991,9 @@ else
         _agenteRevisorId = canonico?.Id ?? _agentesRevisores.FirstOrDefault()?.Id;
         await ResolverPermisosAsync();
         try { _pendientesCount = await MarcasSvc.ContarPendientesAsync(); } catch { _pendientesCount = 0; }
-        await Buscar();
-    }
+        // Dentro del candado -> usar el Core (no el wrapper gated) para no anidar.
+        await BuscarCoreAsync();
+    });
 
     /// <summary>
     /// Determina si el usuario puede revisar / aprobar final del ciclo Kanban.
@@ -2017,7 +2033,9 @@ else
         }
     }
 
-    private async Task Buscar()
+    private Task Buscar() => RunGuardedAsync(BuscarCoreAsync);
+
+    private async Task BuscarCoreAsync()
     {
         _buscando = true;
         try
@@ -2321,7 +2339,9 @@ else
     }
 
     /// <summary>Ola 7 RC7a — carga las metricas del Dashboard de /ordenes.</summary>
-    private async Task RefrescarDashboard()
+    private Task RefrescarDashboard() => RunGuardedAsync(RefrescarDashboardCoreAsync);
+
+    private async Task RefrescarDashboardCoreAsync()
     {
         if (_cargandoDashboard) { return; }
         _cargandoDashboard = true;
@@ -2337,7 +2357,9 @@ else
     }
 
     /// <summary>Carga el listado del tab Archivo con los filtros actuales.</summary>
-    private async Task RefrescarArchivo()
+    private Task RefrescarArchivo() => RunGuardedAsync(RefrescarArchivoCoreAsync);
+
+    private async Task RefrescarArchivoCoreAsync()
     {
         if (_cargandoArchivo) { return; }
         _cargandoArchivo = true;
@@ -2499,7 +2521,9 @@ else
         _revisionMasivaCts?.Cancel();
     }
 
-    private async Task RefrescarKanban()
+    private Task RefrescarKanban() => RunGuardedAsync(RefrescarKanbanCoreAsync);
+
+    private async Task RefrescarKanbanCoreAsync()
     {
         if (_cargandoKanban) { return; }
         _cargandoKanban = true;
@@ -2970,15 +2994,20 @@ else
             var code = g.ToString()[..8].ToUpperInvariant();
             var pacNombre = fila?.PacienteNombre;
             var pacDoc = fila is null ? null : $"{fila.PacienteTipoDoc} {fila.PacienteDoc}".Trim();
-            await MarcasSvc.MarcarAsync(g, code, pacNombre, pacDoc, _marcarObs, _miNombre);
+            await RunGuardedAsync(async () =>
+            {
+                await MarcasSvc.MarcarAsync(g, code, pacNombre, pacDoc, _marcarObs, _miNombre);
+                _pendientesCount = await MarcasSvc.ContarPendientesAsync();
+            });
             _marcarModalAbierto = false;
-            _pendientesCount = await MarcasSvc.ContarPendientesAsync();
             await SeleccionarTab("marcadas");
         }
         finally { _guardandoMarca = false; }
     }
 
-    private async Task RefrescarMarcas()
+    private Task RefrescarMarcas() => RunGuardedAsync(RefrescarMarcasCoreAsync);
+
+    private async Task RefrescarMarcasCoreAsync()
     {
         _cargandoMarcas = true;
         try
@@ -3004,7 +3033,7 @@ else
         _guardandoReparacion = true;
         try
         {
-            await MarcasSvc.RepararAsync(_repararMarca.Id, _repararObs, _miNombre);
+            await RunGuardedAsync(() => MarcasSvc.RepararAsync(_repararMarca.Id, _repararObs, _miNombre));
             _repararMarca = null;
             await RefrescarMarcas();
         }

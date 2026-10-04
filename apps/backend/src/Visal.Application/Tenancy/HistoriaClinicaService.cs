@@ -155,7 +155,8 @@ public sealed class HistoriaClinicaService(
                 x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
                 x.h.RipsViaIngresoCodigo, x.h.RipsViaIngresoNombre,
                 x.h.RipsFinalidadCodigo, x.h.RipsFinalidadNombre,
-                x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre))
+                x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre,
+                x.h.FechaAtencion))
             .FirstOrDefaultAsync(ct);
         return row;
     }
@@ -207,27 +208,37 @@ public sealed class HistoriaClinicaService(
                   // FormatoEvolucionCodigo se auto-anexa y la logica anti-duplicados
                   // del listado impreso lo elimina (imprime "nada").
                   && h.Id != primeraSesionHcId
-            select new HistoriaClinicaDetailDto(
-                h.Id, h.PacienteId, f.Id, f.Codigo, f.Nombre, f.Version,
-                f.SchemaJson, f.PrefillRoutesJson, h.ValoresJson,
-                h.Estado.ToString(), h.FechaApertura, h.FechaCierre,
-                h.EspecialistaNombre, h.MotivoInactivacion, h.ProfesionalId,
-                h.RipsViaIngresoCodigo, h.RipsViaIngresoNombre,
-                h.RipsFinalidadCodigo, h.RipsFinalidadNombre,
-                h.RipsCausaExternaCodigo, h.RipsCausaExternaNombre))
+            select new
+            {
+                Detail = new HistoriaClinicaDetailDto(
+                    h.Id, h.PacienteId, f.Id, f.Codigo, f.Nombre, f.Version,
+                    f.SchemaJson, f.PrefillRoutesJson, h.ValoresJson,
+                    h.Estado.ToString(), h.FechaApertura, h.FechaCierre,
+                    h.EspecialistaNombre, h.MotivoInactivacion, h.ProfesionalId,
+                    h.RipsViaIngresoCodigo, h.RipsViaIngresoNombre,
+                    h.RipsFinalidadCodigo, h.RipsFinalidadNombre,
+                    h.RipsCausaExternaCodigo, h.RipsCausaExternaNombre,
+                    h.FechaAtencion),
+                // Numero de sesion RIGIDO del turno (nace en Coordinacion). Es la
+                // fuente de verdad del "Sesion N", no el orden de digitacion.
+                Sesion = t.NumeroSesion
+            })
             .ToListAsync(ct);
 
-        // Distinct por Id (una HC podria estar ligada a mas de una sesion) y orden
-        // cronologico por apertura. Numeramos como sesiones 2..N (la 1ra es la HC
-        // completa que se esta imprimiendo).
+        // Distinct por Id (una HC podria estar ligada a mas de una sesion). El numero
+        // de sesion y el orden salen del campo RIGIDO numero_sesion (no de la fecha de
+        // digitacion/apertura, que puede estar desordenada si se teclearon las notas
+        // fuera de orden). Desempate por fecha de atencion. Si una evolucion no tiene
+        // sesion rigida (legacy), cae al final y se numera de corrido como respaldo.
         var ordenadas = evoluciones
-            .GroupBy(d => d.Id).Select(g => g.First())
-            .OrderBy(d => d.FechaApertura)
+            .GroupBy(d => d.Detail.Id).Select(g => g.First())
+            .OrderBy(d => d.Sesion ?? int.MaxValue)
+            .ThenBy(d => d.Detail.FechaAtencion ?? d.Detail.FechaApertura)
             .ToList();
         var result = new List<HistoriaEvolucionLigadaDto>(ordenadas.Count);
         for (int i = 0; i < ordenadas.Count; i++)
         {
-            result.Add(new HistoriaEvolucionLigadaDto(i + 2, ordenadas[i]));
+            result.Add(new HistoriaEvolucionLigadaDto(ordenadas[i].Sesion ?? (i + 2), ordenadas[i].Detail));
         }
         return result;
     }

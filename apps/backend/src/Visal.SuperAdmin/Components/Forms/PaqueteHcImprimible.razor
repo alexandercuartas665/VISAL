@@ -10,6 +10,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Forms
+@using Visal.Domain.Common
 @using Visal.SuperAdmin.Components.Forms
 @using Microsoft.AspNetCore.Components.Authorization
 @inject IHistoriaClinicaService HcSvc
@@ -91,7 +92,7 @@ else
                 var _ses = evo.SesionNumero is int _sn ? _sn : _evoN;
                 <div class="pack-doc">
                     @RenderHeader(hdrEvo, evo.FormatoNombre, "EVO",
-                        evo.Id.ToString().Substring(0, 8).ToUpperInvariant(),
+                        evo.Consecutivo > 0 ? CodigoPublico.Hc(evo.Consecutivo) : evo.Id.ToString().Substring(0, 8).ToUpperInvariant(),
                         FechaAtencionLinea(schEvo, valEvo, evo.FechaApertura, evo.FechaAtencion),
                         $"Evolucion - Sesion {_ses}")
                     @if (schEvo is not null)
@@ -644,7 +645,7 @@ else
     private sealed record EvoImprimible(
         Guid Id, string? SchemaJson, string? ValoresJson,
         string FormatoNombre, DateTimeOffset FechaApertura, string? EspecialistaNombre,
-        DateTimeOffset? FechaAtencion, int? SesionNumero);
+        DateTimeOffset? FechaAtencion, int? SesionNumero, long Consecutivo);
     private List<EvoImprimible> _evolucionesUnificadas = new();
 
     // HC: schema + valores
@@ -1033,17 +1034,18 @@ else
             evosMerge.Add(new EvoImprimible(
                 evo.Historia.Id, evo.Historia.SchemaJson, evo.Historia.ValoresJson,
                 evo.Historia.FormatoNombre, evo.Historia.FechaApertura, evo.Historia.EspecialistaNombre,
-                evo.Historia.FechaAtencion, evo.SesionNumero));
+                evo.Historia.FechaAtencion, evo.SesionNumero, evo.Historia.Consecutivo));
         }
         foreach (var doc in _evoDetails)
         {
             // Los documentos de evolucion (DocumentoHc) no tienen columna fecha_atencion
-            // ni sesion rigida, asi que van en null -> la fecha cae al calculo por
-            // header/apertura y el numero de sesion al contador de respaldo.
+            // ni sesion rigida ni consecutivo de HC, asi que van en null/0 -> la fecha
+            // cae al calculo por header/apertura, el numero de sesion al contador de
+            // respaldo y el EVO N° al prefijo hex del documento.
             evosMerge.Add(new EvoImprimible(
                 doc.Id, doc.SchemaJson, doc.ValoresJson,
                 doc.FormatoNombre, doc.FechaApertura, doc.EspecialistaNombre,
-                null, null));
+                null, null, 0));
         }
         // Orden por el numero de sesion RIGIDO (no por fecha de digitacion/apertura,
         // que puede venir desordenada). Desempate por fecha de atencion. Las que no
@@ -1322,13 +1324,13 @@ else
     // sesion), igual que cuando la evolucion se imprime agrupada bajo su base. Asi la
     // linea "HC:" del encabezado y las ordenes derivadas coinciden con la base.
     private string ConsecutivoHc() => _evolucionInfo is not null
-        ? _evolucionInfo.BaseHcId.ToString("N")[..8].ToUpperInvariant()
-        : (_hc is null ? "" : _hc.Id.ToString("N")[..8].ToUpperInvariant());
+        ? CodigoPublico.Hc(_evolucionInfo.BaseConsecutivo)
+        : (_hc is null ? "" : CodigoPublico.Hc(_hc.Consecutivo));
 
     /// <summary>Consecutivo del PROPIO documento impreso (primeros 8 hex de su id),
     /// sin redirigir a la base. Se usa como "EVO N°" cuando la HC impresa es una
     /// evolucion suelta.</summary>
-    private string ConsecutivoPropio() => _hc is null ? "" : _hc.Id.ToString("N")[..8].ToUpperInvariant();
+    private string ConsecutivoPropio() => _hc is null ? "" : CodigoPublico.Hc(_hc.Consecutivo);
 
     /// <summary>
     /// Fecha/hora canonica de la HC para impresion: la que el medico dejo en el

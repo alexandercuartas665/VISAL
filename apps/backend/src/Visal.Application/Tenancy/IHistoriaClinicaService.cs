@@ -78,7 +78,7 @@ public sealed record HistoriaEvolucionLigadaDto(int SesionNumero, HistoriaClinic
 /// imprimir una evolucion SUELTA con el encabezado correcto (EVO N° propio,
 /// HC N° = base, subtitulo "Evolucion - Sesion N").
 /// </summary>
-public sealed record EvolucionBaseDto(Guid BaseHcId, int SesionNumero);
+public sealed record EvolucionBaseDto(Guid BaseHcId, int SesionNumero, long BaseConsecutivo = 0);
 
 public sealed record CrearHistoriaRequest(
     Guid PacienteId,

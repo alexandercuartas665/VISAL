@@ -297,7 +297,10 @@ public sealed class HistoriaClinicaService(
         //    para que coincida exactamente con lo que imprime bajo la base.
         var evos = await GetEvolucionesLigadasAsync(baseHcId, ct);
         var sesion = evos.FirstOrDefault(e => e.Historia.Id == hcId)?.SesionNumero ?? 2;
-        return new EvolucionBaseDto(baseHcId, sesion);
+        // Consecutivo publico de la HC base (para imprimir "HC: HC-000123").
+        var baseCons = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == baseHcId).Select(h => h.Consecutivo).FirstOrDefaultAsync(ct);
+        return new EvolucionBaseDto(baseHcId, sesion, baseCons);
     }
 
     public async Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(

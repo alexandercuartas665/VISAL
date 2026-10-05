@@ -79,4 +79,7 @@ public sealed record RelacionFacturasHecho(
     /// <summary>LoteId de la asignacion relevante (el "codigo de asignacion" que agrupa
     /// todos los servicios del paciente en una operacion). Se muestra en la columna
     /// "Cod. Asignacion" (primeros 8 hex). Null si no se resolvio asignacion.</summary>
-    Guid? AsignacionLoteId = null);
+    Guid? AsignacionLoteId = null,
+    /// <summary>Consecutivo publico del lote/asignacion (AS-000045) para la trazabilidad
+    /// del snapshot. Se resuelve en el selector desde AsignacionLote.Consecutivo.</summary>
+    long? AsignacionConsecutivo = null);

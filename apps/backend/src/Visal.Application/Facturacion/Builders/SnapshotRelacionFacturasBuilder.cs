@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Visal.Application.Facturacion.Selectors;
+using Visal.Domain.Common;
 using Visal.Domain.Enums;
 
 namespace Visal.Application.Facturacion.Builders;
@@ -110,7 +111,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Dirección"]                               = "Direccion de la sede que atendio (Configuracion de Empresa -> sede -> Direccion)",
         ["Telefono"]                                = "Telefono de la sede que atendio (Configuracion de Empresa -> sede -> Telefono)",
         ["Correo electrónico"]                      = "Correo de la sede que atendio (Configuracion de Empresa -> sede -> Correo)",
-        ["HC N°"]                                   = "Codigo interno de la Historia Clinica (primeros 8 hex del Id). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
+        ["HC N°"]                                   = "Consecutivo publico de la Historia Clinica (HC-000123). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
         ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
     };
 
@@ -185,9 +186,11 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Dirección"] = h.Sucursal?.Direccion,                             // 40 — direccion de la sede que atendio (Sucursal.Direccion)
             ["Telefono"] = h.Sucursal?.Telefono,                               // 41 — telefono de la sede que atendio (Sucursal.Telefono)
             ["Correo electrónico"] = h.Sucursal?.Email,                        // 42 — correo de la sede que atendio (Sucursal.Email)
-            // Trazabilidad interna (fuera del template EPS): codigos cortos 8-hex.
-            ["HC N°"] = Corto8(h.Hc.Id),                                       // 43 — Id de la HC (primeros 8 hex)
-            ["Cód. Asignación"] = Corto8(h.AsignacionLoteId),                  // 44 — LoteId de la asignacion (primeros 8 hex)
+            // Trazabilidad interna (fuera del template EPS): consecutivo publico
+            // legible (HC-000123 / AS-000045). Fallback al hex 8 si faltara.
+            ["HC N°"] = CodigoPublico.Hc(h.Hc.Consecutivo),                    // 43 — consecutivo de la HC
+            ["Cód. Asignación"] = h.AsignacionConsecutivo is long _ac         // 44 — consecutivo del lote
+                ? CodigoPublico.Asignacion(_ac) : Corto8(h.AsignacionLoteId),
         };
     }
 

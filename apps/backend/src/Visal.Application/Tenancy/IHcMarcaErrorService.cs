@@ -17,7 +17,9 @@ public sealed record HcMarcaErrorDto(
     DateTimeOffset? ReparadoEn,
     string? ObservacionReparacion,
     HcMarcaErrorOrigen Origen = HcMarcaErrorOrigen.Manual,
-    Guid? HistoriaClinicaId = null);
+    Guid? HistoriaClinicaId = null,
+    Guid? SedeId = null,
+    string? SedeNombre = null);
 
 public interface IHcMarcaErrorService
 {
@@ -32,11 +34,13 @@ public interface IHcMarcaErrorService
         string? marcadoPorNombre,
         CancellationToken ct = default);
 
-    /// <summary>Lista las marcas del tenant, opcionalmente filtradas por estado y/o
-    /// origen (manual vs auto-reparacion), mas recientes primero.</summary>
+    /// <summary>Lista las marcas del tenant, opcionalmente filtradas por estado,
+    /// origen (manual vs auto-reparacion) y/o sede, mas recientes primero. La sede se
+    /// resuelve en vivo via Asignacion -> Paciente.SedeAtencionId -> Sucursal.</summary>
     Task<IReadOnlyList<HcMarcaErrorDto>> ListarAsync(
         HcMarcaErrorEstado? estado,
         HcMarcaErrorOrigen? origen = null,
+        Guid? sedeId = null,
         CancellationToken ct = default);
 
     /// <summary>Cuenta las marcas Pendientes MANUALES (para el badge del tab). Las

@@ -443,6 +443,13 @@ else if (_tabActivo == "marcadas")
                 <option value="manual">Manual</option>
                 <option value="auto">Auto (sistema)</option>
             </select>
+            <select class="form-select form-select-sm" style="width:auto;" @bind="_marcasFiltroSede" @bind:after="RefrescarMarcas" title="Filtrar por sede del paciente">
+                <option value="">Todas las sedes</option>
+                @foreach (var s in _sucursales)
+                {
+                    <option value="@s.Id">@s.Nombre</option>
+                }
+            </select>
             <button class="btn btn-outline-secondary btn-sm" @onclick="RefrescarMarcas" disabled="@_cargandoMarcas">
                 @(_cargandoMarcas ? "Cargando..." : "🔄 Refrescar")
             </button>
@@ -464,6 +471,7 @@ else if (_tabActivo == "marcadas")
                         <tr>
                             <th style="width:120px">Cód. asignación</th>
                             <th style="min-width:200px">Paciente</th>
+                            <th style="width:140px">Sede</th>
                             <th class="text-center" style="width:90px">Origen</th>
                             <th>Observación</th>
                             <th style="width:150px">Marcó</th>
@@ -485,6 +493,7 @@ else if (_tabActivo == "marcadas")
                                 <td>@(string.IsNullOrWhiteSpace(m.PacienteNombre) ? "-" : m.PacienteNombre)
                                     @if (!string.IsNullOrWhiteSpace(m.PacienteDoc)) { <div class="mono" style="font-size:11px;color:#64748b;">@m.PacienteDoc</div> }
                                 </td>
+                                <td>@(string.IsNullOrWhiteSpace(m.SedeNombre) ? "-" : m.SedeNombre)</td>
                                 <td class="text-center">
                                     @if (m.Origen == HcMarcaErrorOrigen.AutoReparacion)
                                     {
@@ -2981,6 +2990,7 @@ else
     private List<HcMarcaErrorDto> _marcas = new();
     private string _marcasFiltroEstado = "pendiente"; // pendiente | reparado | todas
     private string _marcasFiltroOrigen = "todas"; // todas | manual | auto (default no oculta las auto)
+    private string _marcasFiltroSede = ""; // "" = todas; o el Guid de la sucursal
     private int _pendientesCount;
     private bool _cargandoMarcas;
     private string? _miNombre;
@@ -3042,7 +3052,8 @@ else
                 "auto" => HcMarcaErrorOrigen.AutoReparacion,
                 _ => (HcMarcaErrorOrigen?)null
             };
-            _marcas = (await MarcasSvc.ListarAsync(estado, origen)).ToList();
+            Guid? sede = Guid.TryParse(_marcasFiltroSede, out var sg) ? sg : (Guid?)null;
+            _marcas = (await MarcasSvc.ListarAsync(estado, origen, sede)).ToList();
             _pendientesCount = await MarcasSvc.ContarPendientesAsync();
         }
         finally { _cargandoMarcas = false; }

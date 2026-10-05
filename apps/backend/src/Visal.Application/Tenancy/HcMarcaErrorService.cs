@@ -57,21 +57,44 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
     public async Task<IReadOnlyList<HcMarcaErrorDto>> ListarAsync(
         HcMarcaErrorEstado? estado,
         HcMarcaErrorOrigen? origen = null,
+        Guid? sedeId = null,
         CancellationToken ct = default)
     {
         var q = db.HcMarcasError.AsNoTracking();
         if (estado is HcMarcaErrorEstado e) { q = q.Where(m => m.Estado == e); }
         if (origen is HcMarcaErrorOrigen o) { q = q.Where(m => m.Origen == o); }
-        return await q
-            .OrderByDescending(m => m.CreatedAt)
-            .Select(m => new HcMarcaErrorDto(
+        var marcas = await q.OrderByDescending(m => m.CreatedAt).ToListAsync(ct);
+
+        // Sede en vivo: Asignacion -> Paciente.SedeAtencionId -> Sucursal.Nombre.
+        // (La sede vive en el paciente, no en la marca; no se snapshotea.)
+        var asigIds = marcas.Select(m => m.AsignacionId).Where(x => x != Guid.Empty).Distinct().ToList();
+        var sedePorAsig = asigIds.Count == 0
+            ? new Dictionary<Guid, (Guid? SedeId, string? SedeNombre)>()
+            : await (
+                from a in db.Asignaciones.AsNoTracking()
+                where asigIds.Contains(a.Id)
+                join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+                join s in db.Sucursales.AsNoTracking() on p.SedeAtencionId equals s.Id into sj
+                from s in sj.DefaultIfEmpty()
+                select new { a.Id, p.SedeAtencionId, SedeNombre = s != null ? s.Nombre : null })
+              .ToDictionaryAsync(x => x.Id, x => (x.SedeAtencionId, x.SedeNombre), ct);
+
+        var result = new List<HcMarcaErrorDto>(marcas.Count);
+        foreach (var m in marcas)
+        {
+            sedePorAsig.TryGetValue(m.AsignacionId, out var sede);
+            // Filtro por sede: excluye las que no resuelven a esa sede.
+            if (sedeId is Guid sid && sede.SedeId != sid) { continue; }
+            result.Add(new HcMarcaErrorDto(
                 m.Id, m.AsignacionId, m.CodigoAsignacion,
                 m.PacienteNombre, m.PacienteDoc,
                 m.Observacion, m.Estado,
                 m.MarcadoPorNombre, m.CreatedAt,
                 m.ReparadoPorNombre, m.ReparadoEn, m.ObservacionReparacion,
-                m.Origen, m.HistoriaClinicaId))
-            .ToListAsync(ct);
+                m.Origen, m.HistoriaClinicaId,
+                sede.SedeId, sede.SedeNombre));
+        }
+        return result;
     }
 
     // Badge del tab: solo Pendientes MANUALES. Las auto-reparaciones no inflan el badge

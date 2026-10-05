@@ -942,6 +942,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ObservacionReparacion).HasColumnType("text");
             b.HasIndex(x => new { x.TenantId, x.Estado });
             b.HasIndex(x => new { x.TenantId, x.AsignacionId });
+            // Filtro de auditoria: por origen (manual vs auto) + estado.
+            b.HasIndex(x => new { x.TenantId, x.Origen, x.Estado });
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
         });
 
         modelBuilder.Entity<NotaMedicaDocumento>(b =>

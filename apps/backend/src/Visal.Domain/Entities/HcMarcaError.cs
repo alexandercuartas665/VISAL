@@ -10,6 +10,16 @@ public enum HcMarcaErrorEstado
     Reparado = 1
 }
 
+/// <summary>Quien origino la marca: el usuario (triage manual) o una rutina de
+/// reparacion de datos (pista de auditoria de lo que el sistema toco).</summary>
+public enum HcMarcaErrorOrigen
+{
+    /// <summary>El usuario marco con error desde Ordenes Clinicas.</summary>
+    Manual = 0,
+    /// <summary>Una reparacion/backfill de datos toco esta HC (auto-registro).</summary>
+    AutoReparacion = 1
+}
+
 /// <summary>
 /// Marca de control de calidad sobre una ASIGNACION (lote) detectada mientras se
 /// valida/recorre Ordenes Clinicas (p. ej. numeracion de sesion sospechosa). Es
@@ -22,6 +32,13 @@ public class HcMarcaError : TenantEntity
 {
     /// <summary>Lote de asignacion (AsignacionLoteId) que se marco.</summary>
     public Guid AsignacionId { get; set; }
+
+    /// <summary>HC puntual que origino la marca (auditoria por HC). Null en marcas
+    /// manuales viejas y en auto-registros por-asignacion.</summary>
+    public Guid? HistoriaClinicaId { get; set; }
+
+    /// <summary>Origen de la marca: triage manual o auto-reparacion de datos.</summary>
+    public HcMarcaErrorOrigen Origen { get; set; } = HcMarcaErrorOrigen.Manual;
 
     /// <summary>Codigo corto (8 chars) para mostrar/filtrar.</summary>
     public string CodigoAsignacion { get; set; } = "";

@@ -20,9 +20,12 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
 
         // Si ya hay una marca Pendiente para esta asignacion, actualizamos en vez de
         // duplicar: el usuario puede re-marcar para corregir/ampliar la observacion.
+        // Upsert acotado a marcas MANUALES: no debe pisar un auto-registro de
+        // auditoria que comparta la misma asignacion.
         var existente = await db.HcMarcasError
             .FirstOrDefaultAsync(m => m.AsignacionId == asignacionId
-                                   && m.Estado == HcMarcaErrorEstado.Pendiente, ct);
+                                   && m.Estado == HcMarcaErrorEstado.Pendiente
+                                   && m.Origen == HcMarcaErrorOrigen.Manual, ct);
         if (existente is not null)
         {
             existente.Observacion = observacion;
@@ -38,6 +41,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
         {
             TenantId = tid,
             AsignacionId = asignacionId,
+            Origen = HcMarcaErrorOrigen.Manual,
             CodigoAsignacion = codigoAsignacion,
             PacienteNombre = pacienteNombre,
             PacienteDoc = pacienteDoc,
@@ -52,10 +56,12 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
 
     public async Task<IReadOnlyList<HcMarcaErrorDto>> ListarAsync(
         HcMarcaErrorEstado? estado,
+        HcMarcaErrorOrigen? origen = null,
         CancellationToken ct = default)
     {
         var q = db.HcMarcasError.AsNoTracking();
         if (estado is HcMarcaErrorEstado e) { q = q.Where(m => m.Estado == e); }
+        if (origen is HcMarcaErrorOrigen o) { q = q.Where(m => m.Origen == o); }
         return await q
             .OrderByDescending(m => m.CreatedAt)
             .Select(m => new HcMarcaErrorDto(
@@ -63,13 +69,81 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
                 m.PacienteNombre, m.PacienteDoc,
                 m.Observacion, m.Estado,
                 m.MarcadoPorNombre, m.CreatedAt,
-                m.ReparadoPorNombre, m.ReparadoEn, m.ObservacionReparacion))
+                m.ReparadoPorNombre, m.ReparadoEn, m.ObservacionReparacion,
+                m.Origen, m.HistoriaClinicaId))
             .ToListAsync(ct);
     }
 
+    // Badge del tab: solo Pendientes MANUALES. Las auto-reparaciones no inflan el badge
+    // (son pista de auditoria; se ven con el filtro de origen "Auto"/"Todas").
     public async Task<int> ContarPendientesAsync(CancellationToken ct = default)
         => await db.HcMarcasError.AsNoTracking()
-            .CountAsync(m => m.Estado == HcMarcaErrorEstado.Pendiente, ct);
+            .CountAsync(m => m.Estado == HcMarcaErrorEstado.Pendiente
+                          && m.Origen == HcMarcaErrorOrigen.Manual, ct);
+
+    public async Task<Guid> RegistrarTocadoAsync(
+        Guid historiaClinicaId,
+        string motivo,
+        string? detalle = null,
+        CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        // Asignacion por el pivote sesion -> turno -> asignacion. Si la HC no tiene
+        // pivote, cae a Guid.Empty y el codigo son los 8 primeros del HcId.
+        var asigId = await (
+            from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            where pv.HistoriaClinicaId == historiaClinicaId
+            select t.AsignacionId).FirstOrDefaultAsync(ct);
+        var codigo = (asigId != Guid.Empty ? asigId : historiaClinicaId)
+            .ToString()[..8].ToUpperInvariant();
+
+        // Snapshot del paciente de la HC (para la lista del tab, sin joins extra).
+        var pac = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == historiaClinicaId)
+            .Join(db.Pacientes.AsNoTracking(), h => h.PacienteId, p => p.Id, (h, p) => new
+            {
+                Nombre = ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim(),
+                Doc = (p.TipoDocumento + " " + p.NumeroDocumento).Trim()
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var stamp = DateTimeOffset.UtcNow;
+        var linea = $"[{stamp:yyyy-MM-dd HH:mm}] {motivo}."
+            + (string.IsNullOrWhiteSpace(detalle) ? "" : " " + detalle.Trim());
+
+        // Idempotente por (HistoriaClinicaId, Origen=AutoReparacion): si ya hay una
+        // marca auto para esta HC, le anexa la nueva linea; si no, la crea. NUNCA Reparado.
+        var existente = await db.HcMarcasError
+            .FirstOrDefaultAsync(m => m.HistoriaClinicaId == historiaClinicaId
+                                   && m.Origen == HcMarcaErrorOrigen.AutoReparacion, ct);
+        if (existente is not null)
+        {
+            existente.Observacion = (existente.Observacion + "\n" + linea).Trim();
+            existente.Estado = HcMarcaErrorEstado.Pendiente; // reabrir si se habia cerrado
+            await db.SaveChangesAsync(ct);
+            return existente.Id;
+        }
+
+        var marca = new HcMarcaError
+        {
+            TenantId = tid,
+            AsignacionId = asigId,
+            HistoriaClinicaId = historiaClinicaId,
+            Origen = HcMarcaErrorOrigen.AutoReparacion,
+            CodigoAsignacion = codigo,
+            PacienteNombre = pac?.Nombre,
+            PacienteDoc = pac?.Doc,
+            Observacion = linea,
+            Estado = HcMarcaErrorEstado.Pendiente,
+            MarcadoPorNombre = "SISTEMA (auto-reparacion)"
+        };
+        db.HcMarcasError.Add(marca);
+        await db.SaveChangesAsync(ct);
+        return marca.Id;
+    }
 
     public async Task<bool> RepararAsync(
         Guid id,

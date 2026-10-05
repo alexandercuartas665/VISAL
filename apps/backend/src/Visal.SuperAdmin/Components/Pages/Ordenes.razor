@@ -437,6 +437,12 @@ else if (_tabActivo == "marcadas")
                 <option value="reparado">Reparadas</option>
                 <option value="todas">Todas</option>
             </select>
+            <select class="form-select form-select-sm" style="width:auto;" @bind="_marcasFiltroOrigen" @bind:after="RefrescarMarcas"
+                    title="Manual = marcadas por el usuario. Auto = HC tocadas por una reparacion de datos (auditoria).">
+                <option value="todas">Todos los orígenes</option>
+                <option value="manual">Manual</option>
+                <option value="auto">Auto (sistema)</option>
+            </select>
             <button class="btn btn-outline-secondary btn-sm" @onclick="RefrescarMarcas" disabled="@_cargandoMarcas">
                 @(_cargandoMarcas ? "Cargando..." : "🔄 Refrescar")
             </button>
@@ -458,6 +464,7 @@ else if (_tabActivo == "marcadas")
                         <tr>
                             <th style="width:120px">Cód. asignación</th>
                             <th style="min-width:200px">Paciente</th>
+                            <th class="text-center" style="width:90px">Origen</th>
                             <th>Observación</th>
                             <th style="width:150px">Marcó</th>
                             <th class="text-center" style="width:110px">Estado</th>
@@ -477,6 +484,16 @@ else if (_tabActivo == "marcadas")
                                 </td>
                                 <td>@(string.IsNullOrWhiteSpace(m.PacienteNombre) ? "-" : m.PacienteNombre)
                                     @if (!string.IsNullOrWhiteSpace(m.PacienteDoc)) { <div class="mono" style="font-size:11px;color:#64748b;">@m.PacienteDoc</div> }
+                                </td>
+                                <td class="text-center">
+                                    @if (m.Origen == HcMarcaErrorOrigen.AutoReparacion)
+                                    {
+                                        <span class="badge" style="background:#e0e7ff;color:#3730a3;" title="HC tocada por una reparación de datos (auditoría)">Auto</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge" style="background:#f1f5f9;color:#475569;">Manual</span>
+                                    }
                                 </td>
                                 <td style="white-space:pre-wrap;">@m.Observacion</td>
                                 <td>@(m.MarcadoPorNombre ?? "-")<div style="font-size:11px;color:#64748b;">@m.MarcadoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div></td>
@@ -2963,6 +2980,7 @@ else
     // ── Tab "Marcadas" — triage de calidad por asignacion ─────────────────────
     private List<HcMarcaErrorDto> _marcas = new();
     private string _marcasFiltroEstado = "pendiente"; // pendiente | reparado | todas
+    private string _marcasFiltroOrigen = "todas"; // todas | manual | auto (default no oculta las auto)
     private int _pendientesCount;
     private bool _cargandoMarcas;
     private string? _miNombre;
@@ -3018,7 +3036,13 @@ else
                 "reparado" => HcMarcaErrorEstado.Reparado,
                 _ => (HcMarcaErrorEstado?)null
             };
-            _marcas = (await MarcasSvc.ListarAsync(estado)).ToList();
+            HcMarcaErrorOrigen? origen = _marcasFiltroOrigen switch
+            {
+                "manual" => HcMarcaErrorOrigen.Manual,
+                "auto" => HcMarcaErrorOrigen.AutoReparacion,
+                _ => (HcMarcaErrorOrigen?)null
+            };
+            _marcas = (await MarcasSvc.ListarAsync(estado, origen)).ToList();
             _pendientesCount = await MarcasSvc.ContarPendientesAsync();
         }
         finally { _cargandoMarcas = false; }

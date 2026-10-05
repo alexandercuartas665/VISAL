@@ -15,7 +15,9 @@ public sealed record HcMarcaErrorDto(
     DateTimeOffset MarcadoEn,
     string? ReparadoPorNombre,
     DateTimeOffset? ReparadoEn,
-    string? ObservacionReparacion);
+    string? ObservacionReparacion,
+    HcMarcaErrorOrigen Origen = HcMarcaErrorOrigen.Manual,
+    Guid? HistoriaClinicaId = null);
 
 public interface IHcMarcaErrorService
 {
@@ -30,14 +32,26 @@ public interface IHcMarcaErrorService
         string? marcadoPorNombre,
         CancellationToken ct = default);
 
-    /// <summary>Lista las marcas del tenant, opcionalmente filtradas por estado,
-    /// mas recientes primero.</summary>
+    /// <summary>Lista las marcas del tenant, opcionalmente filtradas por estado y/o
+    /// origen (manual vs auto-reparacion), mas recientes primero.</summary>
     Task<IReadOnlyList<HcMarcaErrorDto>> ListarAsync(
         HcMarcaErrorEstado? estado,
+        HcMarcaErrorOrigen? origen = null,
         CancellationToken ct = default);
 
-    /// <summary>Cuenta las marcas Pendientes (para el badge del tab).</summary>
+    /// <summary>Cuenta las marcas Pendientes MANUALES (para el badge del tab). Las
+    /// auto-reparaciones NO inflan el badge; se ven con el filtro de origen.</summary>
     Task<int> ContarPendientesAsync(CancellationToken ct = default);
+
+    /// <summary>Pista de auditoria: registra que una reparacion de datos TOCO esta HC.
+    /// Crea (o amplia) una marca Pendiente con Origen=AutoReparacion, idempotente por
+    /// (HistoriaClinicaId, Origen). NUNCA marca Reparado. Debe llamarse dentro de la
+    /// misma transaccion del arreglo. Devuelve el Id de la marca.</summary>
+    Task<Guid> RegistrarTocadoAsync(
+        Guid historiaClinicaId,
+        string motivo,
+        string? detalle = null,
+        CancellationToken ct = default);
 
     /// <summary>Marca una marca como Reparado. Devuelve false si no existe o ya estaba.</summary>
     Task<bool> RepararAsync(

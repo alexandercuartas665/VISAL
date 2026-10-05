@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Domain.Common;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -36,33 +37,42 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             var esp = filtro.Especialista.Trim().ToLower();
             q = q.Where(h => h.EspecialistaNombre != null && h.EspecialistaNombre.ToLower().Contains(esp));
         }
-        if (!string.IsNullOrWhiteSpace(filtro.CodigoHc)
-            && TryBuildCodigoHcRango(filtro.CodigoHc, out var hcLo, out var hcHi))
+        if (!string.IsNullOrWhiteSpace(filtro.CodigoHc))
         {
-            // Filtramos por RANGO de GUID en vez de ILIKE sobre el texto del id.
-            // El "HC N°" son los primeros 8 hex del GUID (= los primeros 4 bytes).
-            // Un prefijo de N hex acota el id a [prefijo+ceros, prefijo+efes], y la
-            // comparacion de uuid en Postgres es lexicografica sobre esos bytes, asi
-            // que el rango captura exactamente las HC cuyo codigo empieza por el
-            // prefijo. Es index-friendly y no depende de traducir Guid.ToString().
-            q = q.Where(h => h.Id >= hcLo && h.Id <= hcHi);
+            // Preferimos el consecutivo publico (ej. "HC-000123" / "123"). Si el texto
+            // no es un consecutivo (prefijo hex legacy como "019F973B"), caemos al
+            // filtro por RANGO de GUID sobre los primeros 8 hex del id (index-friendly).
+            if (CodigoPublico.ParseNumero(filtro.CodigoHc) is long hcNum)
+            {
+                q = q.Where(h => h.Consecutivo == hcNum);
+            }
+            else if (TryBuildCodigoHcRango(filtro.CodigoHc, out var hcLo, out var hcHi))
+            {
+                q = q.Where(h => h.Id >= hcLo && h.Id <= hcHi);
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(filtro.CodigoAsignacion)
-            && TryBuildCodigoHcRango(filtro.CodigoAsignacion, out var loteLo, out var loteHi))
+        if (!string.IsNullOrWhiteSpace(filtro.CodigoAsignacion))
         {
-            // El "codigo de asignacion" son los primeros hasta 8 hex del GUID del
-            // lote (AsignacionLote) que ata todos los servicios del paciente.
-            // Resolvemos el set de HCs que cuelgan de los lotes en ese rango,
-            // recorriendo Lote -> Asignacion.LoteId -> Turno.AsignacionId ->
-            // Sesion.AsignacionTurnoId -> pivote.SesionId -> HistoriaClinicaId, y
-            // acotamos la query principal con ese set. Data-set chico (una clinica),
-            // asi que los saltos en cadena son baratos y evitan un JOIN de 5 tablas
-            // que el traductor EF Core no digiere tras los query filters de tenant.
-            var loteIds = await db.AsignacionLotes.AsNoTracking()
-                .Where(l => l.Id >= loteLo && l.Id <= loteHi)
-                .Select(l => l.Id)
-                .ToListAsync(ct);
+            // El "codigo de asignacion" identifica el lote (AsignacionLote) que ata
+            // todos los servicios del paciente. Preferimos el consecutivo publico
+            // (ej. "AS-000045" / "45"); si es un prefijo hex legacy, caemos al rango
+            // de GUID. Luego resolvemos las HCs que cuelgan de esos lotes recorriendo
+            // Lote -> Asignacion.LoteId -> Turno.AsignacionId -> Sesion -> pivote -> HC
+            // (data-set chico; evita un JOIN de 5 tablas que EF no digiere tras los
+            // query filters de tenant) y acotamos la query principal con ese set.
+            List<Guid> loteIds;
+            if (CodigoPublico.ParseNumero(filtro.CodigoAsignacion) is long loteNum)
+            {
+                loteIds = await db.AsignacionLotes.AsNoTracking()
+                    .Where(l => l.Consecutivo == loteNum).Select(l => l.Id).ToListAsync(ct);
+            }
+            else if (TryBuildCodigoHcRango(filtro.CodigoAsignacion, out var loteLo, out var loteHi))
+            {
+                loteIds = await db.AsignacionLotes.AsNoTracking()
+                    .Where(l => l.Id >= loteLo && l.Id <= loteHi).Select(l => l.Id).ToListAsync(ct);
+            }
+            else { loteIds = new List<Guid>(); }
             var asigIdsDeLote = await db.Asignaciones.AsNoTracking()
                 .Where(a => loteIds.Contains(a.LoteId))
                 .Select(a => a.Id)
@@ -330,6 +340,14 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(x => new AsigServInfo(x.Id, x.LoteId, x.ServicioId))
                 .ToList();
         var asigToLote = asigInfo.ToDictionary(x => x.Id, x => x.LoteId);
+        // Consecutivo publico del lote (AS-000045) por loteId.
+        var loteIdsDistintos = asigInfo.Select(x => x.LoteId).Distinct().ToList();
+        var loteToConsecutivo = loteIdsDistintos.Count == 0
+            ? new Dictionary<Guid, long>()
+            : await db.AsignacionLotes.AsNoTracking()
+                .Where(l => loteIdsDistintos.Contains(l.Id))
+                .Select(l => new { l.Id, l.Consecutivo })
+                .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
         // ServicioContrato (Guid) por asignacion, para resolver el codigo del servicio
         // del contrato con el que se cargo el servicio en /asignacion.
         var asigToServicioId = asigInfo
@@ -457,7 +475,9 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 sinFirmaSet.Contains(r.Hc.Id),
                 profSinFirmaSet.Contains(r.Hc.Id),
                 codigoServicio,
-                asignacionId
+                asignacionId,
+                r.Hc.Consecutivo,
+                asigLoteId is Guid loteCons && loteToConsecutivo.TryGetValue(loteCons, out var lc) ? lc : (long?)null
             );
         }).ToList();
     }
@@ -742,9 +762,9 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 it.InsExtCount + it.EscalasCount + it.EvolucionesCount + it.ConsentimientosCount;
             var fecha = (it.FechaCierre ?? it.FechaApertura).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
-            var codAsignacion = it.AsignacionLoteId is Guid lid
-                ? lid.ToString()[..8].ToUpperInvariant()
-                : "";
+            var codAsignacion = it.AsignacionConsecutivo is long asc
+                ? CodigoPublico.Asignacion(asc)
+                : (it.AsignacionLoteId is Guid lid ? lid.ToString()[..8].ToUpperInvariant() : "");
             hoja.Cell(row, 1).Value = it.PacienteNombre;
             hoja.Cell(row, 2).Value = $"{it.PacienteTipoDoc} {it.PacienteDoc}".Trim();
             hoja.Cell(row, 3).Value = codAsignacion;

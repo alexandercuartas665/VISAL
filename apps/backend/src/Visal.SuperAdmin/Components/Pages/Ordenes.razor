@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Application.Revision
 @using Visal.Domain.Entities
+@using Visal.Domain.Common
 @inject IOrdenesClinicasService OcSvc
 @inject IHcMarcaErrorService MarcasSvc
 @inject IHistoriaClinicaService HcSvc
@@ -485,7 +486,7 @@ else if (_tabActivo == "marcadas")
                         {
                             <tr>
                                 <td class="mono">
-                                    @m.CodigoAsignacion
+                                    @(m.AsignacionConsecutivo is long amc ? CodigoPublico.Asignacion(amc) : m.CodigoAsignacion)
                                     <button type="button" class="btn btn-link btn-sm" style="padding:0 4px;"
                                             title="Ver esta asignación en la Lista"
                                             @onclick="() => IrAListaConAsignacion(m)">🔎</button>
@@ -554,13 +555,13 @@ else
         <div class="oc-f">
             <label>HC N°</label>
             <input class="form-control form-control-sm mono"
-                   placeholder="Ej. 019F973B"
+                   placeholder="Ej. HC-000123"
                    @bind="_codigoHcFiltro" @onkeyup="OnKeyup" />
         </div>
         <div class="oc-f">
             <label title="Codigo del lote de asignacion que ata todos los servicios del paciente">Cód. asignación</label>
             <input class="form-control form-control-sm mono"
-                   placeholder="Ej. 01A06E26"
+                   placeholder="Ej. AS-000045"
                    title="Trae todas las HC cuyos servicios cuelgan del mismo lote de asignacion"
                    @bind="_codigoAsignacionFiltro" @onkeyup="OnKeyup" />
         </div>
@@ -734,7 +735,7 @@ else
                 <button type="button" class="btn btn-outline-secondary btn-sm oc-asig-btn" title="Asignacion anterior"
                         disabled="@(_navIdx <= 0)" @onclick="() => AsigNavIr(-1)">&lt;</button>
                 <span class="oc-asig-cod mono" title="Codigo de la asignacion enfocada">
-                    @(_asigNavFiltro is Guid _g ? _g.ToString()[..8].ToUpperInvariant() : "Todas")
+                    @AsigNavEtiqueta()
                 </span>
                 <button type="button" class="btn btn-outline-secondary btn-sm oc-asig-btn" title="Asignacion siguiente"
                         disabled="@(_navIdx >= _navCods.Count - 1)" @onclick="() => AsigNavIr(1)">&gt;</button>
@@ -800,7 +801,7 @@ else
                    : !_printAcotado
                        ? $"Demasiadas HC para imprimir ({_vis}). Enfoca una asignacion con el navegador < > o afina los filtros (max {PrintCap})."
                        : _asigNavFiltro is Guid _gp
-                           ? $"Imprimir SOLO la asignacion {_gp.ToString()[..8].ToUpperInvariant()} que esta en pantalla"
+                           ? $"Imprimir SOLO la asignacion {AsigNavEtiqueta()} que esta en pantalla"
                            : $"Imprimir las {_vis} HC(s) del listado en pantalla (todos los pacientes que aparecen)")">
                 🖨 Imprimir listado
             </a>
@@ -1099,9 +1100,9 @@ else
                                 }
                             </td>
                             <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
-                            <td class="mono" title="HC N°">@r.HistoriaClinicaId.ToString()[..8].ToUpperInvariant()</td>
+                            <td class="mono" title="HC N°">@(r.HcConsecutivo is long hcn ? CodigoPublico.Hc(hcn) : "-")</td>
                             <td class="mono" title="Codigo de asignacion (lote que ata todos los servicios)">
-                                @(r.AsignacionLoteId is Guid lid ? lid.ToString()[..8].ToUpperInvariant() : "-")
+                                @(r.AsignacionConsecutivo is long asc ? CodigoPublico.Asignacion(asc) : "-")
                             </td>
                             <td class="mono" title="Codigo del servicio del contrato con el que se cargo en Asignacion">
                                 @(string.IsNullOrWhiteSpace(r.CodigoServicio) ? "-" : r.CodigoServicio)
@@ -1810,7 +1811,7 @@ else
             </div>
             <div class="oc-modal-b">
                 <p style="font-size:13px;color:#475569;margin-bottom:8px;">
-                    Asignación <b class="mono">@(_asigNavFiltro is Guid _mg ? _mg.ToString()[..8].ToUpperInvariant() : "")</b>.
+                    Asignación <b class="mono">@AsigNavEtiqueta()</b>.
                     Escribe qué está mal (obligatorio); quedará en el tab <b>Marcadas</b> para repararla luego.
                 </p>
                 <textarea @bind="_marcarObs" placeholder="Ej. la sesión #3 quedó antes que la #2; revisar numeración."></textarea>
@@ -2115,14 +2116,27 @@ else
     /// El navegador < > tiene prioridad: si hay una asignacion enfocada, imprime
     /// SOLO esa (su codigo de 8 chars, que el backend resuelve por prefijo del
     /// lote). Si no, usa lo escrito en el filtro "Cod. asignacion".</summary>
+    /// <summary>Etiqueta visible de la asignacion enfocada por el navegador: el
+    /// consecutivo del lote (AS-000045). Cae al prefijo hex si la fila no tiene
+    /// consecutivo resuelto; "Todas" cuando no hay asignacion enfocada.</summary>
+    private string AsigNavEtiqueta()
+    {
+        if (_asigNavFiltro is not Guid g) { return "Todas"; }
+        var fila = _rows.FirstOrDefault(r => r.AsignacionId == g);
+        if (fila?.AsignacionConsecutivo is long c) { return CodigoPublico.Asignacion(c); }
+        return (fila?.AsignacionLoteId ?? g).ToString()[..8].ToUpperInvariant();
+    }
+
     private string? CodigoAsignacionEfectivo()
     {
         if (_asigNavFiltro is Guid g)
         {
-            // El navegador enfoca un SERVICIO (a.id). Para acotar la query del
-            // servidor usamos el prefijo de su LOTE (el backend resuelve por lote);
-            // el servicio exacto se aisla luego con el param asignacionId.
+            // El navegador enfoca un SERVICIO (a.id). Para acotar la query del servidor
+            // pasamos el consecutivo de su LOTE (el backend filtra por lote); el servicio
+            // exacto se aisla luego con el param asignacionId. Cae al prefijo hex si la
+            // fila aun no tiene consecutivo resuelto.
             var fila = _rows.FirstOrDefault(r => r.AsignacionId == g);
+            if (fila?.AsignacionConsecutivo is long c) { return CodigoPublico.Asignacion(c); }
             var loteId = fila?.AsignacionLoteId ?? g;
             return loteId.ToString()[..8].ToUpperInvariant();
         }
@@ -3186,8 +3200,8 @@ else
         {
             "paciente"     => r => r.PacienteNombre,
             "documento"    => r => r.PacienteDoc,
-            "hc"           => r => r.HistoriaClinicaId,
-            "asignacion"   => r => r.AsignacionLoteId,
+            "hc"           => r => r.HcConsecutivo ?? long.MaxValue,
+            "asignacion"   => r => r.AsignacionConsecutivo ?? long.MaxValue,
             "formato"      => r => r.FormatoNombre,
             "sesion"       => r => r.SesionNumero ?? int.MaxValue,
             "especialista" => r => r.EspecialistaNombre,

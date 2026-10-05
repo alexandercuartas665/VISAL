@@ -1,4 +1,4 @@
-using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Visal.Domain.Common;
 
@@ -16,21 +16,23 @@ public static class CodigoPublico
     public static string Hc(long consecutivo) => PrefijoHc + consecutivo.ToString("D" + Ancho);
     public static string Asignacion(long consecutivo) => PrefijoAsignacion + consecutivo.ToString("D" + Ancho);
 
+    // Codigo consecutivo = prefijo de letras OPCIONAL + separador + SOLO digitos.
+    // Asi "HC-000123"/"AS-45"/"hc123"/"000123"/"123" -> numero, pero un prefijo HEX
+    // como "01A0D59F" o "019F973B" (digitos MEZCLADOS con letras a-f) NO matchea y
+    // se trata como codigo hex legacy, no como consecutivo.
+    private static readonly Regex RxConsecutivo = new(@"^[A-Za-z]*[-\s]*(\d+)$", RegexOptions.Compiled);
+
     /// <summary>
     /// Extrae el numero consecutivo de un texto de busqueda. Acepta "HC-000123",
-    /// "AS-45", "hc123", "000123" o "123" -> 123. Devuelve null si no hay digitos
-    /// o el numero no es valido. Tolera prefijo/ceros/espacios para que el usuario
-    /// pueda escribir el codigo de cualquier forma razonable.
+    /// "AS-45", "hc123", "000123" o "123" -> 123. Devuelve null si el texto NO es un
+    /// consecutivo (vacio, o un codigo hex con letras intercaladas), para que el
+    /// buscador caiga al matching por prefijo hex legacy.
     /// </summary>
     public static long? ParseNumero(string? texto)
     {
         if (string.IsNullOrWhiteSpace(texto)) { return null; }
-        var sb = new StringBuilder(texto.Length);
-        foreach (var c in texto)
-        {
-            if (char.IsDigit(c)) { sb.Append(c); }
-        }
-        if (sb.Length == 0) { return null; }
-        return long.TryParse(sb.ToString(), out var n) && n > 0 ? n : null;
+        var m = RxConsecutivo.Match(texto.Trim());
+        if (!m.Success) { return null; }
+        return long.TryParse(m.Groups[1].Value, out var n) && n > 0 ? n : null;
     }
 }

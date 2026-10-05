@@ -90,7 +90,11 @@ public sealed record OrdenClinicaItemDto(
     /// (el lote que agrupa VARIOS servicios), este es UNICO por servicio. Se usa
     /// para navegar/filtrar/marcar por servicio aunque el codigo corto de 8 hex
     /// coincida entre servicios del mismo lote. Null si la HC no tiene cadena.</summary>
-    Guid? AsignacionId = null);
+    Guid? AsignacionId = null,
+    /// <summary>Consecutivo publico de la HC (secuencia global). Se muestra "HC-000123".</summary>
+    long? HcConsecutivo = null,
+    /// <summary>Consecutivo publico del lote/asignacion. Se muestra "AS-000045".</summary>
+    long? AsignacionConsecutivo = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

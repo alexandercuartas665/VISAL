@@ -67,27 +67,37 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
 
         // Sede en vivo: Asignacion -> Paciente.SedeAtencionId -> Sucursal.Nombre.
         // (La sede vive en el paciente, no en la marca; no se snapshotea.)
+        // Resolucion en vivo por asignacion (servicio): sede (Paciente.SedeAtencionId ->
+        // Sucursal) y consecutivo del LOTE (Asignacion.LoteId -> AsignacionLote.Consecutivo).
         var asigIds = marcas.Select(m => m.AsignacionId).Where(x => x != Guid.Empty).Distinct().ToList();
-        var sedePorAsig = new Dictionary<Guid, (Guid? SedeId, string? SedeNombre)>();
+        var infoPorAsig = new Dictionary<Guid, (Guid? SedeId, string? SedeNombre, long? AsigCons)>();
         if (asigIds.Count > 0)
         {
             var filas = await (
                 from a in db.Asignaciones.AsNoTracking()
                 where asigIds.Contains(a.Id)
                 join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+                join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id into lj
+                from l in lj.DefaultIfEmpty()
                 join s in db.Sucursales.AsNoTracking() on p.SedeAtencionId equals s.Id into sj
                 from s in sj.DefaultIfEmpty()
-                select new { a.Id, Sede = p.SedeAtencionId, Nombre = s != null ? s.Nombre : null })
+                select new
+                {
+                    a.Id,
+                    Sede = p.SedeAtencionId,
+                    Nombre = s != null ? s.Nombre : null,
+                    AsigCons = l != null ? (long?)l.Consecutivo : null
+                })
               .ToListAsync(ct);
-            foreach (var f in filas) { sedePorAsig[f.Id] = (f.Sede, f.Nombre); }
+            foreach (var f in filas) { infoPorAsig[f.Id] = (f.Sede, f.Nombre, f.AsigCons); }
         }
 
         var result = new List<HcMarcaErrorDto>(marcas.Count);
         foreach (var m in marcas)
         {
-            sedePorAsig.TryGetValue(m.AsignacionId, out var sede);
+            infoPorAsig.TryGetValue(m.AsignacionId, out var info);
             // Filtro por sede: excluye las que no resuelven a esa sede.
-            if (sedeId is Guid sid && sede.SedeId != sid) { continue; }
+            if (sedeId is Guid sid && info.SedeId != sid) { continue; }
             result.Add(new HcMarcaErrorDto(
                 m.Id, m.AsignacionId, m.CodigoAsignacion,
                 m.PacienteNombre, m.PacienteDoc,
@@ -95,7 +105,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
                 m.MarcadoPorNombre, m.CreatedAt,
                 m.ReparadoPorNombre, m.ReparadoEn, m.ObservacionReparacion,
                 m.Origen, m.HistoriaClinicaId,
-                sede.SedeId, sede.SedeNombre));
+                info.SedeId, info.SedeNombre, info.AsigCons));
         }
         return result;
     }

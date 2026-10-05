@@ -19,7 +19,8 @@ public sealed record HcMarcaErrorDto(
     HcMarcaErrorOrigen Origen = HcMarcaErrorOrigen.Manual,
     Guid? HistoriaClinicaId = null,
     Guid? SedeId = null,
-    string? SedeNombre = null);
+    string? SedeNombre = null,
+    long? AsignacionConsecutivo = null);
 
 public interface IHcMarcaErrorService
 {

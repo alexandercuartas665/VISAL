@@ -303,6 +303,14 @@ public sealed class HistoriaClinicaService(
         return new EvolucionBaseDto(baseHcId, sesion, baseCons);
     }
 
+    public async Task<long?> ResolverAsignacionConsecutivoPorTurnoAsync(Guid turnoId, CancellationToken ct = default)
+        => await (
+            from t in db.AsignacionTurnos.AsNoTracking()
+            where t.Id == turnoId
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id
+            select (long?)l.Consecutivo).FirstOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
         Guid pacienteId, CancellationToken ct = default)
     {

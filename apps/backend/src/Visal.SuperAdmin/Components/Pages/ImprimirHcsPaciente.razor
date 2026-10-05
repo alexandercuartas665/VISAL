@@ -6,6 +6,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Forms
+@using Visal.Domain.Common
 @using Visal.SuperAdmin.Components.Forms
 @inject IHistoriaClinicaService HcSvc
 @inject IFormDefinitionService FormsSvc
@@ -141,7 +142,7 @@ else
                                      PacienteDoc="_paciente.NumeroDocumento"
                                      EspecialistaNombre="item.Detail.EspecialistaNombre"
                                      MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(item.Detail.FormatoCodigo)"
-                                     OrdenNum="@item.Detail.Id.ToString().Substring(0,8).ToUpperInvariant()"
+                                     OrdenNum="@CodigoPublico.Hc(item.Detail.Consecutivo)"
                                      FechaLinea="@fechaLinea"
                                      TipoCortoHeader="HC"
                                      TituloFallback="@item.Detail.FormatoNombre" />

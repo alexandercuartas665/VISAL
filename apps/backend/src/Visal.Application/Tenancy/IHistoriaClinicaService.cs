@@ -124,6 +124,11 @@ public interface IHistoriaClinicaService
     Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
         Guid pacienteId, CancellationToken ct = default);
 
+    /// <summary>Consecutivo publico del lote/asignacion (AS-000045) al que pertenece un
+    /// turno. Resuelve AsignacionTurno -> Asignacion.LoteId -> AsignacionLote.Consecutivo.
+    /// Null si el turno no existe o no tiene lote.</summary>
+    Task<long?> ResolverAsignacionConsecutivoPorTurnoAsync(Guid turnoId, CancellationToken ct = default);
+
     /// <summary>Trae la historia completa con su schema y valores.</summary>
     Task<HistoriaClinicaDetailDto?> GetAsync(Guid id, CancellationToken ct = default);
 

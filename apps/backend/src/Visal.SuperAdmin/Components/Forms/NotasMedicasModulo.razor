@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Visal.Application.Tenancy
 @using Visal.Domain.Enums
+@using Visal.Domain.Common
 @inject INotaMedicaService NotaSvc
 @inject IHistoriaClinicaService HcSvc
 @inject IFirmaRemotaService FirmaSvc
@@ -859,7 +860,9 @@ else if (_tabSel == "Ver Historial")
         .OrderByDescending(n => n.FechaNota).ThenByDescending(n => n.HoraNota)
         .ToList();
 
-    private string CodAsignDe(NotaMedicaDto n) => AsignacionTurnoIdCtx?.ToString()[..8] ?? "";
+    private long? _asigConsecutivo;
+    private string CodAsignDe(NotaMedicaDto n)
+        => _asigConsecutivo is long c ? CodigoPublico.Asignacion(c) : (AsignacionTurnoIdCtx?.ToString()[..8] ?? "");
     private string TipoDe(NotaMedicaDto n) => "";
 
     private void VerNotaSeleccionada()
@@ -882,6 +885,9 @@ else if (_tabSel == "Ver Historial")
             _ultimoHcId = HistoriaClinicaId;
             NuevoBorrador();
             await Refrescar();
+            // Consecutivo publico del lote para la columna "Cod asignacion" (AS-000045).
+            _asigConsecutivo = AsignacionTurnoIdCtx is Guid _tctx
+                ? await HcSvc.ResolverAsignacionConsecutivoPorTurnoAsync(_tctx) : null;
             // Tipologias para el dropdown Categoria del tab Documentos Externos.
             // Si el tenant no tiene ninguna, sembramos defaults para no quedarse vacio.
             _tipologias = (await TipSvc.ListAsync(soloActivos: true)).ToList();

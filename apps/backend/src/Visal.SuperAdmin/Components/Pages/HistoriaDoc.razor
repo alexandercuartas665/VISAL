@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Text.Json
 @using Visal.Application.Tenancy
+@using Visal.Domain.Common
 @using Visal.Application.Tenancy.Forms
 @using Visal.SuperAdmin.Components.Forms
 @inject IHistoriaClinicaService HcSvc
@@ -109,7 +110,7 @@ else
                     </div>
                 </div>
                 <div class="doc-hdr-nohist">
-                    No Historia: <b>@_hc.Id.ToString().Substring(0, 8).ToUpperInvariant()</b><br />
+                    No Historia: <b>@CodigoPublico.Hc(_hc.Consecutivo)</b><br />
                     Apertura: @_hc.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
                     @if (_hc.FechaCierre is DateTimeOffset fc)
                     {

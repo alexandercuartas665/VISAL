@@ -6,6 +6,7 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Forms
+@using Visal.Domain.Common
 @using Visal.SuperAdmin.Components.Forms
 @inject IHistoriaClinicaService HcSvc
 @inject IAsignacionService AsigSvc
@@ -174,7 +175,7 @@ else
                 <div class="doc-hdr-nohist">
                     Orden N°: <b>@_ordenNumero</b><br />
                     Fecha: @DateTime.Now.ToString("dd/MM/yyyy HH:mm")<br />
-                    HC: <b>@_hc.Id.ToString().Substring(0,8).ToUpperInvariant()</b>
+                    HC: <b>@CodigoPublico.Hc(_hc.Consecutivo)</b>
                 </div>
             </div>
             <div class="doc-hdr-title">@(_form?.Nombre ?? _tipoLabel)</div>
@@ -466,7 +467,7 @@ else
 
         // Numero corto de orden basado en HC + tipo (+ numero de orden si aplica).
         var sufOrden = NumeroOrden is int nOrd ? $"-{nOrd}" : "";
-        _ordenNumero = $"{_hc.Id.ToString().Substring(0,8).ToUpperInvariant()}-{Tipo.Substring(0, Math.Min(4, Tipo.Length))}{sufOrden}";
+        _ordenNumero = $"{CodigoPublico.Hc(_hc.Consecutivo)}-{Tipo.Substring(0, Math.Min(4, Tipo.Length))}{sufOrden}";
 
         switch (Tipo.ToUpperInvariant())
         {

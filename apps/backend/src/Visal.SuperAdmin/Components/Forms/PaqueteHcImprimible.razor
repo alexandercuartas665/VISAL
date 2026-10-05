@@ -539,7 +539,7 @@ else
                 var hdrEsc = schEsc?.Header ?? FormHeader.Default();
                 <div class="pack-doc">
                     @RenderHeader(hdrEsc, esc.FormatoNombre, "ESC",
-                        esc.Id.ToString().Substring(0,8).ToUpperInvariant(),
+                        ConsecutivoHc(),
                         $"Aplicada: {esc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
                     <div class="pack-band">Resultado</div>
                     @if (schEsc is not null)
@@ -565,7 +565,7 @@ else
                 var hdrCon = schDoc?.Header ?? FormHeader.Default();
                 <div class="pack-doc">
                     @RenderHeader(hdrCon, doc.FormatoNombre, "CON",
-                        doc.Id.ToString().Substring(0,8).ToUpperInvariant(),
+                        ConsecutivoHc(),
                         $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
                     <div class="pack-band">Consentimiento informado</div>
                     @if (schDoc is not null)

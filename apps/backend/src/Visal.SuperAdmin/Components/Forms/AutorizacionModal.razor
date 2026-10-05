@@ -1,0 +1,178 @@
+@* Modal reutilizable para completar/actualizar la autorizacion (numero + PDF) de una
+   ASIGNACION. Reusa el servicio existente CompletarAutorizacionAsync (no duplica logica
+   de negocio). Lo usan el modulo Asignacion y Ordenes Clinicas. El PDF se guarda bajo
+   wwwroot/uploads/autorizaciones y se almacena su URL relativa en la asignacion. *@
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject IAsignacionService AsigSvc
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+
+@if (Visible && _info is not null)
+{
+    <div class="cie-backdrop" @onclick="Cerrar"></div>
+    <div class="cie-modal">
+        <div class="cie-modal-h">
+            <h3>Autorización</h3>
+            <button class="cie-modal-close" @onclick="Cerrar">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="asg-aut-ctx">
+                <div><b>Paciente:</b> @_info.PacienteNombre <span class="mono">(@_info.PacienteDoc)</span></div>
+                <div><b>Servicio:</b> @_info.NombreServicio</div>
+                <div><b>Contrato:</b> <span class="mono">@_info.ContratoCodigo</span></div>
+            </div>
+            @if (_error is not null) { <div class="alert alert-danger py-2 px-3 my-2 small">@_error</div> }
+            <div class="ase-f">
+                <label>Número de autorización</label>
+                <input class="form-control form-control-sm" @bind="_codigo" placeholder="Ej: 123456" />
+            </div>
+            <div class="ase-f">
+                <label>PDF de autorización</label>
+                <div class="asg-input-row">
+                    <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
+                    @if (!string.IsNullOrWhiteSpace(_pdfUrl))
+                    {
+                        <a class="btn btn-outline-secondary btn-sm" href="@_pdfUrl" target="_blank" title="Ver PDF">Ver</a>
+                    }
+                </div>
+                @if (_pdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
+                else if (!string.IsNullOrWhiteSpace(_pdfNombre)) { <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div> }
+            </div>
+        </div>
+        <div class="asg-pago-footer">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Cerrar">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_busy">
+                @(_busy ? "Guardando..." : "Guardar autorización")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    /* Estilos del modal autocontenidos (las clases cie-*/asg-* se definen inline por
+       pagina; este componente se usa en Ordenes, que no las trae, asi que las incluye). */
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-width: 95vw; max-height: 85vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
+    .cie-modal-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#64748b; }
+    .cie-modal-body { padding:18px; overflow:auto; }
+    .asg-aut-ctx { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:13px; display:flex; flex-direction:column; gap:3px; }
+    .ase-f { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; }
+    .ase-f > label { font-size:12px; font-weight:600; color:#475569; }
+    .asg-input-row { display:flex; gap:6px; min-width:0; }
+    .asg-input-row > input, .asg-input-row > select { flex:1; min-width:0; }
+    .asg-hint { font-size:11px; color:#64748b; margin-top:4px; }
+    .asg-hint-ok { color:#059669; }
+    .asg-pago-footer { display:flex; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #e2e8f0; }
+</style>
+
+@code {
+    [Parameter] public Guid? AsignacionId { get; set; }
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback OnCerrar { get; set; }
+    [Parameter] public EventCallback OnGuardado { get; set; }
+    [CascadingParameter] public Task<AuthenticationState>? AuthState { get; set; }
+
+    private AutorizacionInfoDto? _info;
+    private Guid? _cargadoId;
+    private string _codigo = "";
+    private string? _pdfUrl;
+    private string? _pdfNombre;
+    private bool _pdfBusy;
+    private bool _busy;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Carga los datos de la asignacion cuando el modal se abre (o cambia de fila).
+        if (Visible && AsignacionId is Guid aid && aid != _cargadoId)
+        {
+            _cargadoId = aid;
+            _error = null; _pdfNombre = null; _pdfBusy = false; _busy = false;
+            _info = await RetryDb(() => AsigSvc.GetAutorizacionAsync(aid));
+            _codigo = _info?.CodigoAutorizacion ?? "";
+            _pdfUrl = _info?.PdfAutorizacionUrl;
+        }
+        else if (!Visible)
+        {
+            _cargadoId = null;
+        }
+    }
+
+    private async Task Cerrar()
+    {
+        _info = null; _cargadoId = null;
+        await OnCerrar.InvokeAsync();
+    }
+
+    private async Task OnPdfUploaded(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        _pdfBusy = true;
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10L * 1024 * 1024) { _error = "El PDF supera 10 MB."; return; }
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
+            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
+            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
+            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
+            var full = Path.Combine(dir, nombre);
+            await using (var fs = File.Create(full))
+            await using (var src = file.OpenReadStream(10L * 1024 * 1024))
+            {
+                await src.CopyToAsync(fs);
+            }
+            _pdfUrl = $"/uploads/autorizaciones/{nombre}";
+            _pdfNombre = file.Name;
+        }
+        catch (Exception ex) { _error = "No se pudo subir el PDF: " + ex.Message; }
+        finally { _pdfBusy = false; }
+    }
+
+    private async Task Guardar()
+    {
+        if (AsignacionId is not Guid aid) { return; }
+        if (string.IsNullOrWhiteSpace(_codigo)) { _error = "Indica el número de autorización."; return; }
+        _busy = true; _error = null;
+        try
+        {
+            var actor = await Actor();
+            await RetryDb(() => AsigSvc.CompletarAutorizacionAsync(aid, _codigo.Trim(), _pdfUrl, actor));
+            await OnGuardado.InvokeAsync();
+            await Cerrar();
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex) { _error = "No se pudo guardar: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // Reintento ante la colision del DbContext scoped compartido ("A second operation
+    // was started..."): el contexto lo comparten otros componentes del circuito; si
+    // choca, reintentamos (para entonces la otra operacion ya termino).
+    private static async Task<T> RetryDb<T>(Func<Task<T>> op)
+    {
+        for (int i = 0; ; i++)
+        {
+            try { return await op(); }
+            catch (InvalidOperationException ex) when (i < 4
+                && ex.Message.Contains("second operation", StringComparison.OrdinalIgnoreCase))
+            {
+                await Task.Delay(150);
+            }
+        }
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            if (Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)) { return id; }
+        }
+        return Guid.Empty;
+    }
+}

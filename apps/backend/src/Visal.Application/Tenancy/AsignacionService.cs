@@ -523,6 +523,24 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return true;
     }
 
+    public async Task<AutorizacionInfoDto?> GetAutorizacionAsync(Guid asignacionId, CancellationToken ct = default)
+    {
+        var row = await (
+            from a in db.Asignaciones.AsNoTracking()
+            where a.Id == asignacionId
+            join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+            select new
+            {
+                a.Id, a.CodigoAutorizacion, a.PdfAutorizacionUrl, a.NombreServicio, a.ContratoCodigo,
+                p.PrimerNombre, p.PrimerApellido, p.TipoDocumento, p.NumeroDocumento
+            }).FirstOrDefaultAsync(ct);
+        if (row is null) { return null; }
+        var nombre = ((row.PrimerNombre ?? "") + " " + (row.PrimerApellido ?? "")).Trim();
+        var doc = (row.TipoDocumento + " " + row.NumeroDocumento).Trim();
+        return new AutorizacionInfoDto(row.Id, row.CodigoAutorizacion, row.PdfAutorizacionUrl,
+            row.NombreServicio, row.ContratoCodigo, nombre, doc);
+    }
+
     public async Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default)
     {
         // Join principal: asignaciones + paciente (in-tenant por query filter global).

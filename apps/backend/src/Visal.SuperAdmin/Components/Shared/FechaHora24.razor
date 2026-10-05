@@ -13,7 +13,8 @@
 @* flex-wrap: cuando el contenedor es angosto (p.ej. la cabecera del documento) la
    hora baja debajo de la fecha en vez de cortarse; en campos anchos van lado a lado. *@
 <span class="d-inline-flex" style="gap:4px;align-items:center;flex-wrap:wrap;max-width:100%;">
-    <input type="date" class="@Class" style="max-width:150px;min-width:0;" disabled="@Disabled"
+    <input type="date" class="@Class @(_fueraDeRango ? "is-invalid" : "")" style="max-width:150px;min-width:0;" disabled="@Disabled"
+           min="@MinDate" max="@MaxDate" title="@(_fueraDeRango ? "Fecha fuera de rango permitido" : null)"
            value="@_fecha" @onchange="OnFecha" />
     @if (!SoloFecha)
     {
@@ -34,9 +35,17 @@
     /// ("dd/MM/yyyy" o "yyyy-MM-dd").</summary>
     [Parameter] public bool SoloFecha { get; set; }
 
+    /// <summary>Rango permitido (formato "yyyy-MM-dd"). Null = sin restriccion. Lo usa
+    /// FormViewer SOLO en campos de fecha de ATENCION (p.ej. MaxDate=hoy para que no sea
+    /// futura y MinDate para descartar anios imposibles). Otros campos (nacimiento,
+    /// proxima cita, vigencias) no lo pasan y quedan sin restriccion.</summary>
+    [Parameter] public string? MinDate { get; set; }
+    [Parameter] public string? MaxDate { get; set; }
+
     private string _fecha = ""; // yyyy-MM-dd (formato del <input type=date>)
     private string _hora = "";  // HH:mm
     private string? _ultimoValue;
+    private bool _fueraDeRango;
 
     private static readonly string[] FormatosEntrada =
     {
@@ -76,7 +85,31 @@
     private async Task OnFecha(ChangeEventArgs e)
     {
         _fecha = e.Value?.ToString() ?? "";
+        // Validacion de rango (solo si FormViewer paso Min/Max — campos de atencion).
+        // Si la fecha cae fuera, NO se propaga un valor basura: se limpia el valor
+        // guardado y se marca el input en rojo para que el usuario corrija.
+        _fueraDeRango = !string.IsNullOrWhiteSpace(_fecha) && FueraDeRango(_fecha);
+        if (_fueraDeRango)
+        {
+            _ultimoValue = "";
+            Value = "";
+            await ValueChanged.InvokeAsync("");
+            return;
+        }
         await Emit();
+    }
+
+    private bool FueraDeRango(string yyyyMMdd)
+    {
+        if (!DateTime.TryParseExact(yyyyMMdd, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var d)) { return false; }
+        if (!string.IsNullOrWhiteSpace(MinDate)
+            && DateTime.TryParseExact(MinDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var mn)
+            && d < mn) { return true; }
+        if (!string.IsNullOrWhiteSpace(MaxDate)
+            && DateTime.TryParseExact(MaxDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var mx)
+            && d > mx) { return true; }
+        return false;
     }
 
     private async Task OnHora(string? h)

@@ -189,7 +189,11 @@
                                     }
                                     Especialista: <strong>@h.Especialista</strong>
                                 </div>
-                                <div class="hc-item-fecha">Fecha inicial: @h.Fecha.ToString("dd/MM/yyyy")</div>
+                                <div class="hc-item-fecha">Fecha de atención: @h.Fecha.ToString("dd/MM/yyyy")</div>
+                                @if (h.FechaDigitacion != h.Fecha)
+                                {
+                                    <div class="hc-item-fecha-dig">digitado el @h.FechaDigitacion.ToString("dd/MM/yyyy")</div>
+                                }
                                 <div class="hc-item-asig">HC N°: <span class="hc-item-asig-cod">@CodigoPublico.Hc(h.HcConsecutivo)</span></div>
                                 @if (h.AsignacionConsecutivo is long _asc)
                                 {
@@ -914,6 +918,7 @@
     .hc-item-h { display: flex; justify-content: space-between; align-items: flex-start; }
     .hc-item-prof { font-size: 12.5px; color: #0f172a; }
     .hc-item-fecha { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .hc-item-fecha-dig { font-size: 10px; color: #94a3b8; font-style: italic; margin-top: 1px; }
     .hc-item-asig { font-size: 11px; color: #64748b; margin-top: 2px; }
     .hc-item-asig-cod { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; color: #334155; background: #f1f5f9; padding: 0 5px; border-radius: 4px; }
     .hc-item-sesion { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 1px 8px; border-radius: 999px; }
@@ -1732,7 +1737,10 @@
         {
             Id = r.Id,
             Especialista = r.EspecialistaNombre ?? "(sin nombre)",
-            Fecha = DateOnly.FromDateTime(r.FechaApertura.LocalDateTime),
+            // Fecha de ATENCION (coherente con impresion/facturacion); fallback a la
+            // de digitacion si la HC no tiene fecha_atencion resuelta.
+            Fecha = DateOnly.FromDateTime((r.FechaAtencion ?? r.FechaApertura).LocalDateTime),
+            FechaDigitacion = DateOnly.FromDateTime(r.FechaApertura.LocalDateTime),
             Estado = r.Estado,
             Observaciones = $"[{r.FormatoCodigo}] {r.FormatoNombre}" + (r.MotivoInactivacion is not null ? $" — Motivo: {r.MotivoInactivacion}" : ""),
             ProfesionalId = r.ProfesionalId,
@@ -2945,7 +2953,13 @@
     {
         public Guid Id { get; set; }
         public string Especialista { get; set; } = "";
+        /// <summary>Fecha que se muestra y por la que se ordena: fecha de ATENCION
+        /// (clinica/impresa/facturada), con fallback a la de digitacion si la HC no
+        /// tiene fecha_atencion resuelta.</summary>
         public DateOnly Fecha { get; set; }
+        /// <summary>Fecha de DIGITACION (FechaApertura) — cuando se tecleo la nota.
+        /// Se muestra como subtitulo "digitado el ..." para conservar el dato.</summary>
+        public DateOnly FechaDigitacion { get; set; }
         public string Estado { get; set; } = "Abierta";
         public string? Observaciones { get; set; }
         public string? MotivoInactivacion { get; set; }

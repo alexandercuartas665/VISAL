@@ -6,6 +6,7 @@
 @using Visal.Application.Revision
 @using Visal.Domain.Entities
 @using Visal.Domain.Common
+@using Visal.SuperAdmin.Components.Forms
 @inject IOrdenesClinicasService OcSvc
 @inject IHcMarcaErrorService MarcasSvc
 @inject IHistoriaClinicaService HcSvc
@@ -644,7 +645,7 @@ else
             <label>Sesiones</label>
             <div class="form-check" style="padding-top:4px;">
                 <input class="form-check-input" type="checkbox" id="ocSoloMultiSesion"
-                       @bind="_soloMultiSesion" />
+                       @bind="_soloMultiSesion" @bind:after="() => _pagina = 0" />
                 <label class="form-check-label" for="ocSoloMultiSesion"
                        style="font-size:12px;cursor:pointer;"
                        title="Solo servicios con mas de un turno/sesion en el resultado (multi-sesion / terapias)">
@@ -657,7 +658,7 @@ else
             <label>Inactivas</label>
             <div class="form-check" style="padding-top:4px;">
                 <input class="form-check-input" type="checkbox" id="ocNoInactivas"
-                       @bind="_noMostrarInactivas" />
+                       @bind="_noMostrarInactivas" @bind:after="() => _pagina = 0" />
                 <label class="form-check-label" for="ocNoInactivas"
                        style="font-size:12px;cursor:pointer;"
                        title="Oculta del listado las historias en estado Inactiva (descartadas)">
@@ -955,7 +956,7 @@ else
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var r in FilasFiltradas())
+                    @foreach (var r in FilasPagina())
                     {
                         var cerrada = string.Equals(r.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase);
                         var abierta = string.Equals(r.Estado, "Abierta", StringComparison.OrdinalIgnoreCase);
@@ -993,6 +994,13 @@ else
                                                     title="Cargar y ver archivos del paciente (imagenes, PDF) ligados a esta HC">
                                                 <span class="oc-kebab-ico">&#128206;</span> Archivos
                                             </button>
+                                            @if (r.AsignacionId is not null)
+                                            {
+                                                <button class="oc-kebab-item" @onclick="() => KebabRun(() => AbrirAutorizacion(r))"
+                                                        title="Actualizar el número y el PDF de autorización de la asignación de esta HC">
+                                                    <span class="oc-kebab-ico">&#128196;</span> Autorización
+                                                </button>
+                                            }
                                             <div class="oc-kebab-sep"></div>
                                             @if (cerrada)
                                             {
@@ -1109,7 +1117,12 @@ else
                             </td>
                             <td>@r.FormatoNombre</td>
                             <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
-                            <td>@(r.EspecialistaNombre ?? "-")</td>
+                            <td>@(r.EspecialistaNombre ?? "-")
+                                @if (!string.IsNullOrWhiteSpace(r.ProfesionalDocumento))
+                                {
+                                    <div class="mono" style="font-size:11px;color:#64748b;">@r.ProfesionalDocumento</div>
+                                }
+                            </td>
                             <td>@(r.AseguradoraNombre ?? "-")</td>
                             <td>@(r.SedeNombre ?? "-")</td>
                             <td class="text-center">
@@ -1197,6 +1210,22 @@ else
                 </tbody>
             </table>
         </div>
+        @if (_totalFiltradas > _porPagina)
+        {
+            <div class="oc-pager" style="display:flex;align-items:center;gap:10px;justify-content:center;padding:10px;flex-wrap:wrap;">
+                <button class="btn btn-outline-secondary btn-sm" disabled="@(_pagina <= 0)" @onclick="() => IrPagina(_pagina - 1)">&lt; Anterior</button>
+                <span style="font-size:13px;color:#475569;">
+                    Página <b>@(_pagina + 1)</b> de <b>@TotalPaginas</b> · <b>@_totalFiltradas</b> registros
+                </span>
+                <button class="btn btn-outline-secondary btn-sm" disabled="@(_pagina >= TotalPaginas - 1)" @onclick="() => IrPagina(_pagina + 1)">Siguiente &gt;</button>
+                <select class="form-select form-select-sm" style="width:auto;" @bind="_porPagina" @bind:after="() => IrPagina(0)" title="Registros por página">
+                    <option value="25">25 / pág</option>
+                    <option value="50">50 / pág</option>
+                    <option value="100">100 / pág</option>
+                    <option value="200">200 / pág</option>
+                </select>
+            </div>
+        }
     }
 </div>
 }
@@ -1852,6 +1881,11 @@ else
     </div>
 }
 
+@* Modal reutilizable de autorizacion (numero + PDF) sobre la asignacion de la HC. *@
+<AutorizacionModal AsignacionId="_autAsigId" Visible="_autVisible"
+                   OnCerrar="() => { _autVisible = false; _autAsigId = null; }"
+                   OnGuardado="OnAutorizacionGuardada" />
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -1998,7 +2032,24 @@ else
     private async Task RunGuardedAsync(Func<Task> work)
     {
         await _dbGate.WaitAsync();
-        try { await work(); }
+        try
+        {
+            // El candado serializa las cargas de ESTA pagina, pero el DbContext es
+            // scoped por circuito y lo comparten OTROS componentes (p.ej. la
+            // revalidacion de auth al arrancar). Si uno de esos choca con nuestra
+            // carga ("A second operation was started..."), reintentamos: para cuando
+            // reintenta, la otra operacion ya termino. Las cargas reasignan campos
+            // (idempotentes), asi que reintentar es seguro.
+            for (int intento = 0; ; intento++)
+            {
+                try { await work(); return; }
+                catch (InvalidOperationException ex) when (intento < 4
+                    && ex.Message.Contains("second operation", StringComparison.OrdinalIgnoreCase))
+                {
+                    await Task.Delay(150);
+                }
+            }
+        }
         finally { _dbGate.Release(); }
     }
 
@@ -2089,6 +2140,7 @@ else
                 todas = todas.Where(x => string.Equals(x.Estado, "Abierta", StringComparison.OrdinalIgnoreCase)).ToList();
             }
             _rows = todas;
+            _pagina = 0;
         }
         finally { _buscando = false; }
     }
@@ -3026,6 +3078,21 @@ else
 
     private void CerrarMarcarModal() => _marcarModalAbierto = false;
 
+    // ---- Autorizacion (modal reutilizable AutorizacionModal) ----
+    private Guid? _autAsigId;
+    private bool _autVisible;
+    private void AbrirAutorizacion(OrdenClinicaItemDto r)
+    {
+        _autAsigId = r.AsignacionId;
+        _autVisible = _autAsigId is not null;
+    }
+    private Task OnAutorizacionGuardada()
+    {
+        _autVisible = false;
+        _autAsigId = null;
+        return Task.CompletedTask;
+    }
+
     private async Task GuardarMarcaAsync()
     {
         if (_asigNavFiltro is not Guid g || string.IsNullOrWhiteSpace(_marcarObs)) { return; }
@@ -3107,6 +3174,26 @@ else
         }
     }
 
+    // ---- Paginacion de RENDER ----
+    // El server trae hasta 5000 HCs (una clinica) y el UI las filtra/ordena en memoria;
+    // renderizar miles de filas a la vez es lo que se siente lento. Paginamos SOLO lo que
+    // se renderiza (FilasPagina); el contador, Imprimir y Excel siguen sobre el total
+    // filtrado (FilasFiltradas), para no cambiar su alcance.
+    private int _pagina;
+    private int _porPagina = 50;
+    private int _totalFiltradas;
+    private int TotalPaginas => Math.Max(1, (int)Math.Ceiling(_totalFiltradas / (double)_porPagina));
+    private void IrPagina(int p) => _pagina = Math.Clamp(p, 0, TotalPaginas - 1);
+
+    private IEnumerable<OrdenClinicaItemDto> FilasPagina()
+    {
+        var filtradas = FilasFiltradas().ToList();
+        _totalFiltradas = filtradas.Count;
+        if (_pagina >= TotalPaginas) { _pagina = TotalPaginas - 1; }
+        if (_pagina < 0) { _pagina = 0; }
+        return filtradas.Skip(_pagina * _porPagina).Take(_porPagina);
+    }
+
     private IEnumerable<OrdenClinicaItemDto> FilasFiltradas()
     {
         IEnumerable<OrdenClinicaItemDto> baseSet = _rows;
@@ -3170,6 +3257,7 @@ else
         if (string.Equals(_sortCol, col, StringComparison.Ordinal)) { _sortDesc = !_sortDesc; }
         else { _sortCol = col; _sortDesc = false; }
         _kebabRowId = null; // cerrar cualquier kebab abierto al reordenar
+        _pagina = 0;        // nuevo orden -> volver a la primera pagina
     }
 
     /// <summary>Indicador de orden para el header: neutro cuando la columna no es

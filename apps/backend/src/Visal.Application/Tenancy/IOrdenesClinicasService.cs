@@ -94,7 +94,10 @@ public sealed record OrdenClinicaItemDto(
     /// <summary>Consecutivo publico de la HC (secuencia global). Se muestra "HC-000123".</summary>
     long? HcConsecutivo = null,
     /// <summary>Consecutivo publico del lote/asignacion. Se muestra "AS-000045".</summary>
-    long? AsignacionConsecutivo = null);
+    long? AsignacionConsecutivo = null,
+    /// <summary>Numero de documento (identificacion) del profesional tratante. Null si
+    /// la HC no tiene profesional. Se muestra bajo el nombre del especialista.</summary>
+    string? ProfesionalDocumento = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

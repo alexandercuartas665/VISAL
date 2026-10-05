@@ -80,7 +80,7 @@ public sealed class HistoriaClinicaService(
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
                 x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
                 (int?)null, evolucionCodes.Contains(x.f.Codigo), (Guid?)null,
-                x.h.Consecutivo, (long?)null))
+                x.h.Consecutivo, (long?)null, x.h.FechaAtencion))
             .ToListAsync(ct);
 
         // Enriquecer con SesionNumero (nGlobal cronologico) via el pivote

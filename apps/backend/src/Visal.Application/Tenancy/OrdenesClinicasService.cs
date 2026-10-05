@@ -280,6 +280,16 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 x => x.Ultimo.Nota ?? x.Ultimo.Motivo);
         }
 
+        // Documento (identificacion) del profesional tratante por HC.ProfesionalId.
+        var profIds = rows.Where(r => r.Hc.ProfesionalId.HasValue)
+            .Select(r => r.Hc.ProfesionalId!.Value).Distinct().ToList();
+        var profToDoc = profIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Profesionales.AsNoTracking()
+                .Where(p => profIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.NumeroDocumento })
+                .ToDictionaryAsync(x => x.Id, x => x.NumeroDocumento, ct);
+
         // Lookup EPS por paciente: primer contrato del paciente por Orden en
         // paciente_contratos -> Contrato -> Aseguradora. Post-PC4 no existen
         // slots fijos; el contrato "principal" es el orden=1.
@@ -477,7 +487,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 codigoServicio,
                 asignacionId,
                 r.Hc.Consecutivo,
-                asigLoteId is Guid loteCons && loteToConsecutivo.TryGetValue(loteCons, out var lc) ? lc : (long?)null
+                asigLoteId is Guid loteCons && loteToConsecutivo.TryGetValue(loteCons, out var lc) ? lc : (long?)null,
+                r.Hc.ProfesionalId is Guid pid && profToDoc.TryGetValue(pid, out var pdoc) ? pdoc : null
             );
         }).ToList();
     }

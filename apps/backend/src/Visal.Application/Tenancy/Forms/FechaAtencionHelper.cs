@@ -49,6 +49,8 @@ public static class FechaAtencionHelper
                 if (!valores.TryGetValue("hdr:" + c.Id, out var raw) || string.IsNullOrWhiteSpace(raw)) { continue; }
                 if (TryParseHeaderFecha(raw!, out var dt))
                 {
+                    // Guardia: descarta anios imposibles y fechas futuras (ver abajo).
+                    if (!EnRangoAtencion(dt)) { continue; }
                     // Mas temprana = inicio de la atencion (ver doc del tipo).
                     if (mayor is null || dt < mayor) { mayor = dt; }
                 }
@@ -98,6 +100,10 @@ public static class FechaAtencionHelper
                     // y quedaria con offset -05:00 (Bogota), lo que hace que
                     // SaveChangesAsync tire InvalidCastException. Normalizamos.
                     if (dt.Offset != TimeSpan.Zero) { dt = dt.ToUniversalTime(); }
+                    // Guardia SOLO para la fecha de atencion: descarta anios imposibles
+                    // (typos tipo 0006/2626) y fechas futuras (una atencion no puede ser
+                    // futura). No afecta otros campos de fecha (nacimiento, proxima cita).
+                    if (!EnRangoAtencion(dt)) { continue; }
                     // Mas temprana = inicio de la atencion: en formatos de turno evita
                     // agarrar la entrega (fin) en vez de la recepcion (inicio).
                     if (mayor is null || dt < mayor) { mayor = dt; }
@@ -119,6 +125,20 @@ public static class FechaAtencionHelper
     // Colombia usa UTC-5 fijo (sin horario de verano). La hora que el usuario digita en
     // "Ciudad y Fecha" es hora de pared local de Bogota.
     private static readonly TimeSpan BogotaOffset = TimeSpan.FromHours(-5);
+
+    /// <summary>
+    /// Rango valido para una FECHA DE ATENCION: anio >= 1900 (descarta typos imposibles
+    /// como 0006/0226/2626) y la fecha no puede ser FUTURA (una atencion no ocurre
+    /// manana). Se evalua en fecha de pared de Bogota. Solo se aplica aqui — a la fecha
+    /// de atencion — no a otros campos (nacimiento, proxima cita, vigencias) que pueden
+    /// ser muy antiguos o futuros legitimamente.
+    /// </summary>
+    private static bool EnRangoAtencion(DateTimeOffset dt)
+    {
+        var bog = dt.ToOffset(BogotaOffset);
+        var hoy = DateTimeOffset.UtcNow.ToOffset(BogotaOffset).Date;
+        return bog.Year >= 1900 && bog.Date <= hoy;
+    }
 
     /// <summary>
     /// Parsea el valor del campo de cabecera "Ciudad y Fecha". Acepta un prefijo de

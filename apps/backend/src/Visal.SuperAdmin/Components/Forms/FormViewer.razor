@@ -91,12 +91,14 @@ else
                                 @if (tipoHdr == "fechaHora")
                                 {
                                     <FechaHora24 Value="@GetValue(hdrKey)"
-                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" />
+                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy"
+                                                 MinDate="@MinFechaAtencionHeader(cabF)" MaxDate="@MaxFechaAtencionHeader(cabF)" />
                                 }
                                 else if (tipoHdr == "fecha")
                                 {
                                     <FechaHora24 Value="@GetValue(hdrKey)"
-                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" SoloFecha="true" />
+                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy" SoloFecha="true"
+                                                 MinDate="@MinFechaAtencionHeader(cabF)" MaxDate="@MaxFechaAtencionHeader(cabF)" />
                                 }
                                 else if (tipoHdr == "hora")
                                 {
@@ -375,6 +377,19 @@ else
     /// <summary>Tipo efectivo del campo de cabecera: "texto" | "fecha" | "fechaHora" | "hora".
     /// Usa el Tipo configurado en el disenador si esta definido; si no, lo infiere por el
     /// label (retrocompat): con "fecha" -> fechaHora; con "hora" (sin "fecha") -> hora; else texto.</summary>
+    // Hoy en formato ISO (yyyy-MM-dd) para el max de los campos de fecha de atencion.
+    private static string HoyIso => DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Rango para los campos de fecha del HEADER: el header captura la fecha de ATENCION
+    // ("Ciudad y Fecha"), que no puede ser futura ni tener anio imposible. Se EXCLUYEN
+    // los de nacimiento (que pueden ser muy antiguos y no son fecha de atencion).
+    private static bool HeaderEsNacimiento(Visal.Application.Tenancy.Forms.FormHeaderField c)
+        => (c.Label ?? "").IndexOf("nacimiento", StringComparison.OrdinalIgnoreCase) >= 0;
+    private static string? MinFechaAtencionHeader(Visal.Application.Tenancy.Forms.FormHeaderField c)
+        => HeaderEsNacimiento(c) ? null : "1900-01-01";
+    private static string? MaxFechaAtencionHeader(Visal.Application.Tenancy.Forms.FormHeaderField c)
+        => HeaderEsNacimiento(c) ? null : HoyIso;
+
     private static string TipoCampoHeader(Visal.Application.Tenancy.Forms.FormHeaderField c)
     {
         if (!string.IsNullOrWhiteSpace(c.Tipo))
@@ -1120,7 +1135,9 @@ else
                 }
                 break;
             case "datetime":
-                <FechaHora24 Value="@val" ValueChanged="v => SetValue(key, v)" Formato="iso" Disabled="@ro" />
+                <FechaHora24 Value="@val" ValueChanged="v => SetValue(key, v)" Formato="iso" Disabled="@ro"
+                             MinDate="@(node.IsFechaAtencion ? "1900-01-01" : null)"
+                             MaxDate="@(node.IsFechaAtencion ? HoyIso : null)" />
                 break;
             case "number":
                 <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"

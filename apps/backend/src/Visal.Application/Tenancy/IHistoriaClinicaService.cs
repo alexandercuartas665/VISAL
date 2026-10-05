@@ -28,7 +28,12 @@ public sealed record HistoriaClinicaResumenDto(
     /// <summary>Consecutivo publico de la HC (secuencia global). Se muestra "HC-000123".</summary>
     long Consecutivo = 0,
     /// <summary>Consecutivo publico del lote/asignacion. Se muestra "AS-000045".</summary>
-    long? AsignacionConsecutivo = null);
+    long? AsignacionConsecutivo = null,
+    /// <summary>Fecha de atencion (clinica/impresa/facturada) de la HC. Se usa para
+    /// mostrar "Fecha de atencion" en la tarjeta y ordenar en orden clinico, en vez
+    /// de la fecha de digitacion (FechaApertura). Null si la HC no tiene fecha_atencion
+    /// resuelta: en ese caso la UI cae a FechaApertura.</summary>
+    DateTimeOffset? FechaAtencion = null);
 
 /// <summary>Detalle completo de una historia (incluye valores diligenciados).</summary>
 public sealed record HistoriaClinicaDetailDto(

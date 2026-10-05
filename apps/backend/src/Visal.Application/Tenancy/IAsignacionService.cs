@@ -48,6 +48,11 @@ public sealed record PacienteAsignacionDto(
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado, bool RequierePdfAutorizacion);
 
+/// <summary>Datos de autorizacion de una asignacion + contexto para el modal.</summary>
+public sealed record AutorizacionInfoDto(
+    Guid AsignacionId, string? CodigoAutorizacion, string? PdfAutorizacionUrl,
+    string? NombreServicio, string? ContratoCodigo, string? PacienteNombre, string? PacienteDoc);
+
 /// <summary>Filtro tipado para la busqueda avanzada de pacientes (modal BUSCAR PACIENTES).</summary>
 public sealed record BusquedaPacienteFiltro(
     IReadOnlyList<Guid>? ContratoIds = null,
@@ -424,6 +429,11 @@ public interface IAsignacionService
     Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
         Guid actor, CancellationToken ct = default);
+
+    /// <summary>Datos de autorizacion (numero + PDF) de una asignacion, con contexto
+    /// (servicio, contrato, paciente) para mostrar en el modal. Null si no existe.
+    /// Lo usa el modal de autorizacion reutilizable (Asignacion y Ordenes Clinicas).</summary>
+    Task<AutorizacionInfoDto?> GetAutorizacionAsync(Guid asignacionId, CancellationToken ct = default);
 
     /// <summary>Lista tabular de asignaciones para el tab "Listado" con filtros compuestos.
     /// Ordena por CreadoEn desc. Sin limite implicito; la UI puede paginar/scrollear.</summary>

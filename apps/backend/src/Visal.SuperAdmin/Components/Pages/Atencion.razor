@@ -4,6 +4,7 @@
 @using System.Security.Claims
 @using Visal.Application.Tenancy
 @using Visal.Domain.Entities
+@using Visal.Domain.Common
 @using Visal.SuperAdmin.Components.Forms
 @inject IAtencionProfesionalService Svc
 @inject IAsignacionService AsigSvc
@@ -773,8 +774,12 @@ else
             if (!string.IsNullOrWhiteSpace(_filtroPac))
             {
                 var t = _filtroPac.Trim();
+                // Consecutivo publico (AS-000045 / 45): si el texto es un consecutivo,
+                // tambien matchea por el codigo de asignacion legible del lote.
+                var _consec = CodigoPublico.ParseNumero(t);
                 q = q.Where(s => s.NumeroDocPaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
                               || s.NombrePaciente.Contains(t, StringComparison.OrdinalIgnoreCase)
+                              || (_consec.HasValue && s.AsignacionConsecutivo == _consec)
                               // Tambien por codigo interno (CODINT): el corto de 8 que se
                               // muestra en la columna, o cualquier tramo del id de la asignacion.
                               || s.CodigoAsignacionInterna.Contains(t, StringComparison.OrdinalIgnoreCase)
@@ -1184,7 +1189,9 @@ else
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "data-label", label);
                 __b.AddAttribute(seq++, "class", "mono");
-                __b.AddContent(seq++, s.CodigoAsignacionInterna);
+                __b.AddContent(seq++, s.AsignacionConsecutivo is long _asc
+                    ? CodigoPublico.Asignacion(_asc)
+                    : s.CodigoAsignacionInterna);
                 __b.CloseElement();
                 break;
             case "formato_hc":

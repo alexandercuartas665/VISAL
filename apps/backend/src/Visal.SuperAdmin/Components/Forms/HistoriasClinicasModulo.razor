@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Application.Tenancy.Forms
 @using Visal.Domain.Enums
+@using Visal.Domain.Common
 @using Visal.SuperAdmin.Components.Forms
 @inject IFormDefinitionService FormsSvc
 @inject IAsignacionService AsigSvc
@@ -189,9 +190,10 @@
                                     Especialista: <strong>@h.Especialista</strong>
                                 </div>
                                 <div class="hc-item-fecha">Fecha inicial: @h.Fecha.ToString("dd/MM/yyyy")</div>
-                                @if (h.AsignacionId is Guid _aid)
+                                <div class="hc-item-asig">HC N°: <span class="hc-item-asig-cod">@CodigoPublico.Hc(h.HcConsecutivo)</span></div>
+                                @if (h.AsignacionConsecutivo is long _asc)
                                 {
-                                    <div class="hc-item-asig">Asignacion (CODINT): <span class="hc-item-asig-cod">@_aid.ToString()[..8].ToUpperInvariant()</span></div>
+                                    <div class="hc-item-asig">Asignacion: <span class="hc-item-asig-cod">@CodigoPublico.Asignacion(_asc)</span></div>
                                 }
                                 @if (h.SesionNumero.HasValue)
                                 {
@@ -297,7 +299,7 @@
                 {
                     <span class="hc-id-chip" style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border:1px solid var(--border);border-radius:999px;background:var(--card);font-size:12px;color:var(--muted-foreground);white-space:nowrap;"
                           title="@($"Historia clinica - N interno. ID completo: {_historiaSel.Id}")">
-                        HC N&deg;: <b style="color:var(--foreground);font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:.5px;">@_historiaSel.Id.ToString().Substring(0, 8).ToUpperInvariant()</b>
+                        HC N&deg;: <b style="color:var(--foreground);font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:.5px;">@CodigoPublico.Hc(_historiaSel.Consecutivo)</b>
                     </span>
                 }
             </div>
@@ -1736,7 +1738,9 @@
             ProfesionalId = r.ProfesionalId,
             SesionNumero = r.SesionNumero,
             EsEvolucion = r.EsEvolucion,
-            AsignacionId = r.AsignacionId
+            AsignacionId = r.AsignacionId,
+            HcConsecutivo = r.Consecutivo,
+            AsignacionConsecutivo = r.AsignacionConsecutivo
         })
         // Orden por defecto por el N° de sesion RIGIDO (asignacion_turnos.numero_sesion,
         // expuesto como SesionNumero): dentro de cada asignacion las HC salen en orden
@@ -2961,5 +2965,9 @@
         /// su codigo corto (CODINT, primeros 8 chars) en la tarjeta para rastrear a que
         /// asignacion corresponde. Null si la HC no nacio desde una sesion de /atencion.</summary>
         public Guid? AsignacionId { get; set; }
+        /// <summary>Consecutivo publico de la HC (HC-000123).</summary>
+        public long HcConsecutivo { get; set; }
+        /// <summary>Consecutivo publico del lote/asignacion (AS-000045).</summary>
+        public long? AsignacionConsecutivo { get; set; }
     }
 }

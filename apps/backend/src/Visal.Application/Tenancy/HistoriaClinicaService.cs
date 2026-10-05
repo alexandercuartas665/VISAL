@@ -4,6 +4,7 @@ using Visal.Application.Common;
 using Visal.Application.Revision;
 using Visal.Application.Revision.Ia;
 using Visal.Application.Tenancy.Forms;
+using Visal.Domain.Common;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -78,7 +79,8 @@ public sealed class HistoriaClinicaService(
                 x.h.Id, x.f.Id, x.f.Codigo, x.f.Nombre,
                 x.h.Estado.ToString(), x.h.FechaApertura, x.h.FechaCierre,
                 x.h.EspecialistaNombre, x.h.MotivoInactivacion, x.h.ProfesionalId,
-                (int?)null, evolucionCodes.Contains(x.f.Codigo), (Guid?)null))
+                (int?)null, evolucionCodes.Contains(x.f.Codigo), (Guid?)null,
+                x.h.Consecutivo, (long?)null))
             .ToListAsync(ct);
 
         // Enriquecer con SesionNumero (nGlobal cronologico) via el pivote
@@ -108,6 +110,14 @@ public sealed class HistoriaClinicaService(
                     .Select(t => new { t.Id, t.AsignacionId })
                     .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
             var asigIds = turnoToAsig.Values.Distinct().ToList();
+            // Consecutivo del LOTE (AS-000045) por servicio: Asignacion.LoteId -> Lote.Consecutivo.
+            var asigToLoteCons = asigIds.Count == 0
+                ? new Dictionary<Guid, long>()
+                : await (from a in db.Asignaciones.AsNoTracking()
+                         where asigIds.Contains(a.Id)
+                         join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id
+                         select new { a.Id, l.Consecutivo })
+                        .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
             var turnoOrden = new Dictionary<Guid, int>();
             if (asigIds.Count > 0)
             {
@@ -134,7 +144,11 @@ public sealed class HistoriaClinicaService(
                     if (!hcToTurno.TryGetValue(r.Id, out var turnoIdHc)) { return r; }
                     var nuevo = r;
                     if (turnoOrden.TryGetValue(turnoIdHc, out var nGlobal)) { nuevo = nuevo with { SesionNumero = nGlobal }; }
-                    if (turnoToAsig.TryGetValue(turnoIdHc, out var asigId)) { nuevo = nuevo with { AsignacionId = asigId }; }
+                    if (turnoToAsig.TryGetValue(turnoIdHc, out var asigId))
+                    {
+                        nuevo = nuevo with { AsignacionId = asigId };
+                        if (asigToLoteCons.TryGetValue(asigId, out var lc)) { nuevo = nuevo with { AsignacionConsecutivo = lc }; }
+                    }
                     return nuevo;
                 })
                 .ToList();
@@ -156,7 +170,7 @@ public sealed class HistoriaClinicaService(
                 x.h.RipsViaIngresoCodigo, x.h.RipsViaIngresoNombre,
                 x.h.RipsFinalidadCodigo, x.h.RipsFinalidadNombre,
                 x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre,
-                x.h.FechaAtencion))
+                x.h.FechaAtencion, x.h.Consecutivo))
             .FirstOrDefaultAsync(ct);
         return row;
     }
@@ -218,7 +232,7 @@ public sealed class HistoriaClinicaService(
                     h.RipsViaIngresoCodigo, h.RipsViaIngresoNombre,
                     h.RipsFinalidadCodigo, h.RipsFinalidadNombre,
                     h.RipsCausaExternaCodigo, h.RipsCausaExternaNombre,
-                    h.FechaAtencion),
+                    h.FechaAtencion, h.Consecutivo),
                 // Numero de sesion RIGIDO del turno (nace en Coordinacion). Es la
                 // fuente de verdad del "Sesion N", no el orden de digitacion.
                 Sesion = t.NumeroSesion
@@ -307,14 +321,22 @@ public sealed class HistoriaClinicaService(
 
         var asigs = await db.Asignaciones.AsNoTracking()
             .Where(a => asigIds.Contains(a.Id))
-            .Select(a => new { a.Id, a.NombreServicio, a.FechaInicio })
+            .Select(a => new { a.Id, a.NombreServicio, a.FechaInicio, a.LoteId })
             .ToListAsync(ct);
+        // Consecutivo del lote (AS-000045) para la etiqueta del dropdown.
+        var loteIds = asigs.Select(a => a.LoteId).Distinct().ToList();
+        var loteCons = loteIds.Count == 0
+            ? new Dictionary<Guid, long>()
+            : await db.AsignacionLotes.AsNoTracking()
+                .Where(l => loteIds.Contains(l.Id))
+                .Select(l => new { l.Id, l.Consecutivo })
+                .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
 
         return asigs
             .OrderByDescending(a => a.FechaInicio)
             .Select(a => new AsignacionHistoriaOpcionDto(
                 a.Id,
-                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({a.Id.ToString()[..8].ToUpperInvariant()})",
+                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({(loteCons.TryGetValue(a.LoteId, out var c) ? CodigoPublico.Asignacion(c) : a.Id.ToString()[..8].ToUpperInvariant())})",
                 a.FechaInicio))
             .ToList();
     }

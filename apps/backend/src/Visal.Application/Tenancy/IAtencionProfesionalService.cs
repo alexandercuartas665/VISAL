@@ -103,7 +103,10 @@ public sealed record MiServicioAsignadoDto(
     /// no hay formato configurado o cuando el codigo configurado NO resuelve a un
     /// formulario activo (en ese caso la UI avisa que no cargara ningun formato).
     /// </summary>
-    string? FormatoHistoriaNombre = null);
+    string? FormatoHistoriaNombre = null,
+    /// <summary>Consecutivo publico del lote/asignacion (AS-000045). Reemplaza al
+    /// prefijo hex del UUID en la columna CodInt y habilita buscar por ese codigo.</summary>
+    long? AsignacionConsecutivo = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

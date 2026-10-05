@@ -24,7 +24,11 @@ public sealed record HistoriaClinicaResumenDto(
     // pivote sesion-HC -> turno -> asignacion. La UI muestra su codigo corto
     // (CODINT = primeros 8 chars) en la tarjeta para rastrear a que asignacion
     // pertenece cada historia. Null cuando la HC no nacio desde una sesion de /atencion.
-    Guid? AsignacionId = null);
+    Guid? AsignacionId = null,
+    /// <summary>Consecutivo publico de la HC (secuencia global). Se muestra "HC-000123".</summary>
+    long Consecutivo = 0,
+    /// <summary>Consecutivo publico del lote/asignacion. Se muestra "AS-000045".</summary>
+    long? AsignacionConsecutivo = null);
 
 /// <summary>Detalle completo de una historia (incluye valores diligenciados).</summary>
 public sealed record HistoriaClinicaDetailDto(
@@ -49,7 +53,9 @@ public sealed record HistoriaClinicaDetailDto(
     string? RipsFinalidadNombre = null,
     string? RipsCausaExternaCodigo = null,
     string? RipsCausaExternaNombre = null,
-    DateTimeOffset? FechaAtencion = null);
+    DateTimeOffset? FechaAtencion = null,
+    /// <summary>Consecutivo publico de la HC (secuencia global). Se muestra "HC-000123".</summary>
+    long Consecutivo = 0);
 
 /// <summary>
 /// Opcion del filtro "Asignacion" en el modulo de Historias: una atencion del

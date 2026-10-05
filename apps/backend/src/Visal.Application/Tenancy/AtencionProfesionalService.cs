@@ -59,6 +59,18 @@ public sealed class AtencionProfesionalService(
             .Where(a => asigIds.Contains(a.Id))
             .ToListAsync(ct);
         var asigDict = asigs.ToDictionary(a => a.Id);
+        // Consecutivo del LOTE (AS-000045) por servicio: para mostrar/buscar por el
+        // codigo de asignacion legible en vez del prefijo hex del UUID (que colisiona).
+        var loteIdsAt = asigs.Select(a => a.LoteId).Distinct().ToList();
+        var loteConsAt = loteIdsAt.Count == 0
+            ? new Dictionary<Guid, long>()
+            : await db.AsignacionLotes.AsNoTracking()
+                .Where(l => loteIdsAt.Contains(l.Id))
+                .Select(l => new { l.Id, l.Consecutivo })
+                .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
+        long? ConsecutivoLoteDe(Guid asigId)
+            => asigDict.TryGetValue(asigId, out var aa) && loteConsAt.TryGetValue(aa.LoteId, out var c)
+                ? c : (long?)null;
 
         // Formato de HC configurado por servicio: el snapshot Asignacion.FormatoHistoria
         // deberia venir copiado de ServicioContrato.Historia al crear la asignacion,
@@ -413,7 +425,8 @@ public sealed class AtencionProfesionalService(
                     t.FechaInicio,
                     t.HoraInicio,
                     t.LlegoEn != null,
-                    nombreFormatoEfectivo));
+                    nombreFormatoEfectivo,
+                    ConsecutivoLoteDe(a.Id)));
             }
         }
         return result;

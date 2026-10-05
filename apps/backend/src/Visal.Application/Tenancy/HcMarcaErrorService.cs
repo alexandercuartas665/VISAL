@@ -68,16 +68,19 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
         // Sede en vivo: Asignacion -> Paciente.SedeAtencionId -> Sucursal.Nombre.
         // (La sede vive en el paciente, no en la marca; no se snapshotea.)
         var asigIds = marcas.Select(m => m.AsignacionId).Where(x => x != Guid.Empty).Distinct().ToList();
-        var sedePorAsig = asigIds.Count == 0
-            ? new Dictionary<Guid, (Guid? SedeId, string? SedeNombre)>()
-            : await (
+        var sedePorAsig = new Dictionary<Guid, (Guid? SedeId, string? SedeNombre)>();
+        if (asigIds.Count > 0)
+        {
+            var filas = await (
                 from a in db.Asignaciones.AsNoTracking()
                 where asigIds.Contains(a.Id)
                 join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
                 join s in db.Sucursales.AsNoTracking() on p.SedeAtencionId equals s.Id into sj
                 from s in sj.DefaultIfEmpty()
-                select new { a.Id, p.SedeAtencionId, SedeNombre = s != null ? s.Nombre : null })
-              .ToDictionaryAsync(x => x.Id, x => (x.SedeAtencionId, x.SedeNombre), ct);
+                select new { a.Id, Sede = p.SedeAtencionId, Nombre = s != null ? s.Nombre : null })
+              .ToListAsync(ct);
+            foreach (var f in filas) { sedePorAsig[f.Id] = (f.Sede, f.Nombre); }
+        }
 
         var result = new List<HcMarcaErrorDto>(marcas.Count);
         foreach (var m in marcas)

@@ -1115,8 +1115,17 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => new { x.TenantId, x.Activo });
         });
 
+        // Secuencias globales para los consecutivos publicos (HC-000123 / AS-000045).
+        // Globales (no por tenant): el numero es unico en toda la plataforma.
+        modelBuilder.HasSequence<long>("hc_consecutivo_seq");
+        modelBuilder.HasSequence<long>("asignacion_consecutivo_seq");
+
         modelBuilder.Entity<HistoriaClinica>(b =>
         {
+            b.Property(x => x.Consecutivo)
+                .HasDefaultValueSql("nextval('hc_consecutivo_seq')")
+                .ValueGeneratedOnAdd();
+            b.HasIndex(x => x.Consecutivo).IsUnique();
             b.Property(x => x.ValoresJson).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
             b.Property(x => x.MotivoInactivacion).HasMaxLength(500);
@@ -1471,6 +1480,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<AsignacionLote>(b =>
         {
+            b.Property(x => x.Consecutivo)
+                .HasDefaultValueSql("nextval('asignacion_consecutivo_seq')")
+                .ValueGeneratedOnAdd();
+            b.HasIndex(x => x.Consecutivo).IsUnique();
             b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
             b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);

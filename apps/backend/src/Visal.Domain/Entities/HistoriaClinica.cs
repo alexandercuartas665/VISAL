@@ -16,6 +16,11 @@ namespace Visal.Domain.Entities;
 /// </summary>
 public class HistoriaClinica : TenantEntity
 {
+    /// <summary>Numero consecutivo publico de la historia (secuencia global, lo genera
+    /// la BD con nextval). Se muestra como "HC-000123". El Id (UUID) sigue siendo la
+    /// llave interna; este es solo el codigo legible para buscar/mostrar/imprimir.</summary>
+    public long Consecutivo { get; set; }
+
     public Guid PacienteId { get; set; }
     public Paciente? Paciente { get; set; }
 

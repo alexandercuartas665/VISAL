@@ -9,6 +9,11 @@ namespace Visal.Domain.Entities;
 /// </summary>
 public class AsignacionLote : TenantEntity
 {
+    /// <summary>Numero consecutivo publico del lote/asignacion (secuencia global, lo
+    /// genera la BD con nextval). Se muestra como "AS-000045". El Id (UUID) sigue
+    /// siendo la llave interna.</summary>
+    public long Consecutivo { get; set; }
+
     public Guid PacienteId { get; set; }
     public Paciente? Paciente { get; set; }
 

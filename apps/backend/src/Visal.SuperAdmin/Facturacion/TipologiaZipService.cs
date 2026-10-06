@@ -244,6 +244,36 @@ public sealed class TipologiaZipService : ITipologiaZipService
             }
         }
 
+        // Documentos externos por tipologia (origenes DocumentoHc / DocumentoPacienteLibre /
+        // DocumentoNota). Viven en nota_medica_documentos (binario en wwwroot/uploads/notas).
+        // Igual que autorizacion: contamos solo los que EXISTEN en disco y son renderables
+        // (pdf/imagen), para que el conteo cuadre con lo que el ZIP realmente incluye. Lookup
+        // paciente -> lista de (categoria, tieneHc, tieneNota) de sus documentos renderables.
+        var usaDocExterno = archivos.SelectMany(a => a.Contenidos).Any(c => EsOrigenDocExterno(c.Origen));
+        var docsExternos = new Dictionary<Guid, List<(string? Cat, bool Hc, bool Nota)>>();
+        if (idSet.Count > 0 && usaDocExterno)
+        {
+            var rows = await _db.NotaMedicaDocumentos.AsNoTracking()
+                .Where(d => idSet.Contains(d.PacienteId))
+                .Select(d => new
+                {
+                    d.PacienteId,
+                    d.Categoria,
+                    d.RutaArchivo,
+                    Hc = d.HistoriaClinicaId != null,
+                    Nota = d.NotaMedicaId != null
+                })
+                .ToListAsync(ct);
+            foreach (var r in rows)
+            {
+                if (string.IsNullOrWhiteSpace(r.RutaArchivo)
+                    || !EsDocRenderable(r.RutaArchivo)
+                    || !ArchivoExisteEnDisco(r.RutaArchivo)) { continue; }
+                if (!docsExternos.TryGetValue(r.PacienteId, out var list)) { docsExternos[r.PacienteId] = list = new(); }
+                list.Add((r.Categoria, r.Hc, r.Nota));
+            }
+        }
+
         var res = new Dictionary<Guid, int>();
         foreach (var a in archivos)
         {
@@ -257,7 +287,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     (c.Origen == OrigenInformeItem.FirmaPaciente && conFirma.Contains(pid)) ||
                     (c.Origen == OrigenInformeItem.FormularioPorTipo
                         && c.FormularioTipo is string ft
-                        && conFormTipo.TryGetValue(ft, out var set) && set.Contains(pid)));
+                        && conFormTipo.TryGetValue(ft, out var set) && set.Contains(pid)) ||
+                    (EsOrigenDocExterno(c.Origen)
+                        && docsExternos.TryGetValue(pid, out var dl)
+                        && dl.Any(d => DocExternoCoincide(c.Origen, c.TipologiaNombre, d.Cat, d.Hc, d.Nota))));
                 if (tiene) { n++; }
             }
             res[a.Id] = n;
@@ -308,9 +341,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
                         allUrls.Add(url);
                     }
                     break;
+                case OrigenInformeItem.DocumentoHc:
+                case OrigenInformeItem.DocumentoPacienteLibre:
+                case OrigenInformeItem.DocumentoNota:
+                    foreach (var b in await CargarDocumentosExternosAsync(pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct))
+                    {
+                        partes.Add(new PartePlan(b, -1));
+                    }
+                    break;
                 default:
-                    // Otros origenes de formularios de HC (DocumentoHc, Evolucion, Escala,
-                    // etc.): pendientes de una ola posterior. No producen contenido.
+                    // Origenes aun no soportados (HistoriaClinicaPdf, Consentimiento,
+                    // Evolucion, Escala): pendientes de una ola posterior. No producen contenido.
                     break;
             }
         }
@@ -361,6 +402,87 @@ public sealed class TipologiaZipService : ITipologiaZipService
             if (img is not null) { res.Add(PaginaImagen(img, "Firma del paciente")); }
         }
         return res;
+    }
+
+    /// <summary>Origenes de documentos externos (DocumentoHc / DocumentoPacienteLibre /
+    /// DocumentoNota): recupera los adjuntos del paciente en <c>nota_medica_documentos</c>
+    /// (binario en wwwroot/uploads/notas), filtrando por "ambito" segun el origen y por
+    /// categoria = tipologia elegida (si no se eligio, cualquiera). PDFs pasan tal cual;
+    /// imagenes se envuelven en una pagina. SoloUltimo = solo el adjunto mas reciente.</summary>
+    private async Task<List<byte[]>> CargarDocumentosExternosAsync(
+        Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct)
+    {
+        var q = _db.NotaMedicaDocumentos.AsNoTracking()
+            .Where(d => d.PacienteId == pacienteId);
+
+        // Ambito segun el origen seleccionado.
+        //   DocumentoHc   -> adjuntos colgados de una HC.
+        //   DocumentoNota -> adjuntos colgados de una nota medica.
+        //   DocumentoPacienteLibre -> cualquier adjunto del paciente (el mas amplio).
+        q = origen switch
+        {
+            OrigenInformeItem.DocumentoHc => q.Where(d => d.HistoriaClinicaId != null),
+            OrigenInformeItem.DocumentoNota => q.Where(d => d.NotaMedicaId != null),
+            _ => q,
+        };
+
+        // Filtro por tipologia (la categoria del documento). Si no se eligio, cualquiera cuenta.
+        if (!string.IsNullOrWhiteSpace(tipologiaNombre))
+        {
+            var cat = tipologiaNombre.Trim().ToLower();
+            q = q.Where(d => d.Categoria != null && d.Categoria.ToLower() == cat);
+        }
+
+        var rows = await q
+            .OrderByDescending(d => d.CreatedAt)
+            .Select(d => d.RutaArchivo)
+            .ToListAsync(ct);
+        if (rows.Count == 0) { return new List<byte[]>(); }
+
+        // SoloUltimo = el mas reciente; si no, todos en orden cronologico ascendente.
+        var seleccion = soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse();
+
+        var res = new List<byte[]>();
+        foreach (var ruta in seleccion)
+        {
+            if (string.IsNullOrWhiteSpace(ruta) || !EsDocRenderable(ruta)) { continue; }
+            var pdf = LeerArchivoComoPdf(ruta);
+            if (pdf is not null) { res.Add(pdf); }
+        }
+        return res;
+    }
+
+    /// <summary>True si el origen corresponde a documentos externos (adjuntos del paciente
+    /// en nota_medica_documentos).</summary>
+    private static bool EsOrigenDocExterno(OrigenInformeItem o) =>
+        o is OrigenInformeItem.DocumentoHc
+            or OrigenInformeItem.DocumentoPacienteLibre
+            or OrigenInformeItem.DocumentoNota;
+
+    /// <summary>True si la ruta apunta a un tipo renderable (PDF o imagen). Otros tipos
+    /// (p. ej. .pptx) se omiten para no meter paginas basura en el PDF del paciente.</summary>
+    private static bool EsDocRenderable(string ruta)
+    {
+        var ext = Path.GetExtension(ruta).ToLowerInvariant();
+        return ext is ".pdf" or ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" or ".webp";
+    }
+
+    /// <summary>Evalua si un documento externo (con su categoria/ambito) satisface un
+    /// contenido configurado: ambito segun el origen + categoria = tipologia elegida.
+    /// Espejo en memoria de los filtros de <see cref="CargarDocumentosExternosAsync"/>,
+    /// usado por el contador para que el "con contenido" cuadre con el ZIP.</summary>
+    private static bool DocExternoCoincide(
+        OrigenInformeItem origen, string? tipologiaNombre, string? categoria, bool tieneHc, bool tieneNota)
+    {
+        var ambitoOk = origen switch
+        {
+            OrigenInformeItem.DocumentoHc => tieneHc,
+            OrigenInformeItem.DocumentoNota => tieneNota,
+            _ => true, // DocumentoPacienteLibre: cualquier documento del paciente
+        };
+        if (!ambitoOk) { return false; }
+        if (string.IsNullOrWhiteSpace(tipologiaNombre)) { return true; }
+        return string.Equals((categoria ?? "").Trim(), tipologiaNombre.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Origen "Formulario por tipo": devuelve las URLs publicas (con token de un

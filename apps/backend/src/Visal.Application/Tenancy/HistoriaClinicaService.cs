@@ -303,6 +303,44 @@ public sealed class HistoriaClinicaService(
         return new EvolucionBaseDto(baseHcId, sesion, baseCons);
     }
 
+    public async Task<IReadOnlyDictionary<DateOnly, int>> GetSesionesPorFechaAtencionAsync(
+        Guid anyHcId, CancellationToken ct = default)
+    {
+        var vacio = (IReadOnlyDictionary<DateOnly, int>)new Dictionary<DateOnly, int>();
+
+        // Asignacion a la que pertenece la HC (via pivote sesion -> turno -> asignacion).
+        var asigId = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.HistoriaClinicaId == anyHcId)
+            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                  p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
+            .Join(db.AsignacionTurnos.AsNoTracking(),
+                  turnoId => turnoId, t => t.Id, (turnoId, t) => t.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        if (asigId == Guid.Empty) { return vacio; }
+
+        // Todas las HC de la asignacion con su fecha de atencion y el numero_sesion RIGIDO
+        // de su turno. (Incluye la base: su fecha de atencion mapea a su sesion.)
+        var filas = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            where t.AsignacionId == asigId && t.NumeroSesion != null && h.FechaAtencion != null
+            select new { Fecha = h.FechaAtencion!.Value, Sesion = t.NumeroSesion!.Value })
+            .ToListAsync(ct);
+
+        // Dia en hora de pared de Bogota (UTC-5); si dos sesiones caen el mismo dia, gana
+        // la menor (la atencion mas temprana de ese dia).
+        var bogota = TimeSpan.FromHours(-5);
+        var map = new Dictionary<DateOnly, int>();
+        foreach (var f in filas)
+        {
+            var dia = DateOnly.FromDateTime(f.Fecha.ToOffset(bogota).DateTime);
+            if (!map.TryGetValue(dia, out var actual) || f.Sesion < actual) { map[dia] = f.Sesion; }
+        }
+        return map;
+    }
+
     public async Task<long?> ResolverAsignacionConsecutivoPorTurnoAsync(Guid turnoId, CancellationToken ct = default)
         => await (
             from t in db.AsignacionTurnos.AsNoTracking()

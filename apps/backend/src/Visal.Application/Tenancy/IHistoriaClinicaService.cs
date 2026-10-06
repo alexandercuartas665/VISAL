@@ -156,6 +156,15 @@ public interface IHistoriaClinicaService
     /// </summary>
     Task<EvolucionBaseDto?> GetBaseDeEvolucionAsync(Guid hcId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Mapa fecha de atencion (dia, hora Bogota) -&gt; numero de sesion RIGIDO del turno,
+    /// para TODAS las HC de la asignacion a la que pertenece <paramref name="anyHcId"/>
+    /// (incluida la base). Sirve para asignar el numero de sesion a las evoluciones que
+    /// NO cuelgan de un turno (documentos de evolucion), emparejando por su fecha de
+    /// atencion. Si dos sesiones caen el mismo dia, gana la menor.
+    /// </summary>
+    Task<IReadOnlyDictionary<DateOnly, int>> GetSesionesPorFechaAtencionAsync(Guid anyHcId, CancellationToken ct = default);
+
     /// <summary>Crea una historia con estado Abierta y los valores iniciales (prefill).</summary>
     Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default);
 

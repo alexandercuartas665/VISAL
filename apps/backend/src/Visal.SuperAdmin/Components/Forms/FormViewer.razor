@@ -90,9 +90,12 @@ else
                                    de fecha/hora son selectores 24h propios (no dependen del navegador). *@
                                 @if (tipoHdr == "fechaHora")
                                 {
-                                    <FechaHora24 Value="@GetValue(hdrKey)"
-                                                 ValueChanged="v => SetValue(hdrKey, v)" Formato="dmy"
-                                                 MinDate="@MinFechaAtencionHeader(cabF)" MaxDate="@MaxFechaAtencionHeader(cabF)" />
+                                    @* UNA sola caja fecha+hora (datetime-local). Muestra 24h segun el
+                                       locale del SO/navegador. El valor se guarda como "dd/MM/yyyy HH:mm". *@
+                                    <input type="datetime-local" class="form-control form-control-sm"
+                                           value="@HdrFechaAIso(GetValue(hdrKey))"
+                                           min="@HdrMinDateTime(cabF)" max="@HdrMaxDateTime(cabF)"
+                                           @onchange="e => SetValue(hdrKey, HdrFechaDesdeIso(e.Value?.ToString()))" />
                                 }
                                 else if (tipoHdr == "fecha")
                                 {
@@ -413,14 +416,26 @@ else
     private static string HdrFechaAIso(string? val)
     {
         if (string.IsNullOrWhiteSpace(val)) { return ""; }
-        var formatos = new[] { "dd/MM/yyyy HH:mm", "dd/MM/yyyy" };
-        if (DateTime.TryParseExact(val.Trim(), formatos, System.Globalization.CultureInfo.InvariantCulture,
+        var s = val.Trim();
+        // Tolera un prefijo de ciudad ("Pasto, 06/10/2026 08:21"): toma lo que va
+        // despues de la ultima coma, igual que hacia FechaHora24.
+        var coma = s.LastIndexOf(',');
+        if (coma >= 0 && coma < s.Length - 1) { s = s[(coma + 1)..].Trim(); }
+        var formatos = new[] { "dd/MM/yyyy HH:mm", "dd/MM/yyyy", "yyyy-MM-ddTHH:mm", "yyyy-MM-dd" };
+        if (DateTime.TryParseExact(s, formatos, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var dt))
         {
             return dt.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
         return "";
     }
+
+    /// <summary>min/max para el input datetime-local de un campo de FECHA DE ATENCION del
+    /// encabezado (1900 .. hoy 23:59). Null (sin restriccion) para nacimiento u otros.</summary>
+    private static string? HdrMinDateTime(Visal.Application.Tenancy.Forms.FormHeaderField c)
+        => HeaderEsNacimiento(c) ? null : "1900-01-01T00:00";
+    private static string? HdrMaxDateTime(Visal.Application.Tenancy.Forms.FormHeaderField c)
+        => HeaderEsNacimiento(c) ? null : HoyIso + "T23:59";
 
     /// <summary>Convierte el valor ISO del input datetime-local de vuelta a
     /// "dd/MM/yyyy HH:mm" para guardarlo/imprimirlo.</summary>
@@ -1135,9 +1150,11 @@ else
                 }
                 break;
             case "datetime":
-                <FechaHora24 Value="@val" ValueChanged="v => SetValue(key, v)" Formato="iso" Disabled="@ro"
-                             MinDate="@(node.IsFechaAtencion ? "1900-01-01" : null)"
-                             MaxDate="@(node.IsFechaAtencion ? HoyIso : null)" />
+                @* UNA sola caja fecha+hora (datetime-local, 24h segun locale). Valor en ISO. *@
+                <input type="datetime-local" class="form-control form-control-sm" disabled="@ro" value="@val"
+                       min="@(node.IsFechaAtencion ? "1900-01-01T00:00" : null)"
+                       max="@(node.IsFechaAtencion ? HoyIso + "T23:59" : null)"
+                       @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
             case "number":
                 <input type="number" class="form-control form-control-sm" placeholder="@node.Placeholder"
@@ -1367,7 +1384,8 @@ else
                        @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "datetime":
-                <FechaHora24 Value="@val" ValueChanged="v => setCell(v)" Formato="iso" Disabled="@ro" />
+                <input type="datetime-local" class="form-control form-control-sm" disabled="@ro" value="@val"
+                       @onchange="e => setCell(e.Value?.ToString())" />
                 break;
             case "select":
                 // Tolerar diferencias de caso/tildes valor guardado vs opciones.

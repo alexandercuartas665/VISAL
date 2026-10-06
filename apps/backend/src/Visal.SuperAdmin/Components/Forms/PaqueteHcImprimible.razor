@@ -632,6 +632,11 @@ else
     // Se cargan solo cuando la HC impresa es la primera sesion de una terapia.
     private List<HistoriaEvolucionLigadaDto> _evolucionesTerapia = new();
 
+    // Mapa fecha de atencion (dia Bogota) -> numero de sesion RIGIDO de la asignacion.
+    // Para asignar la sesion correcta a los documentos de evolucion (que no cuelgan de un
+    // turno) emparejando por su fecha de atencion.
+    private IReadOnlyDictionary<DateOnly, int> _sesionesPorFecha = new Dictionary<DateOnly, int>();
+
     // Cuando la HC IMPRESA es en si misma una evolucion (se imprime suelta, sin su
     // base en el paquete), aqui viene su base + numero de sesion para armar el
     // encabezado igual que en el modo agrupado (EVO N° propio, HC N° = base,
@@ -840,6 +845,13 @@ else
             // su base + numero de sesion para el encabezado (EVO N° / HC base / Sesion N).
             try { _evolucionInfo = await HcSvc.GetBaseDeEvolucionAsync(HcId); }
             catch { _evolucionInfo = null; }
+
+            // Mapa fecha de atencion -> numero de sesion RIGIDO de la asignacion. Sirve
+            // para numerar los DOCUMENTOS de evolucion (que no cuelgan de un turno) por su
+            // sesion real, emparejando por fecha — en vez de mandarlos al final con un
+            // contador posicional.
+            try { _sesionesPorFecha = await HcSvc.GetSesionesPorFechaAtencionAsync(HcId); }
+            catch { _sesionesPorFecha = new Dictionary<DateOnly, int>(); }
         }
 
         // Cada orden clasica se ubica en form_definitions por su "Codigo formulario"
@@ -1038,14 +1050,22 @@ else
         }
         foreach (var doc in _evoDetails)
         {
-            // Los documentos de evolucion (DocumentoHc) no tienen columna fecha_atencion
-            // ni sesion rigida ni consecutivo de HC, asi que van en null/0 -> la fecha
-            // cae al calculo por header/apertura, el numero de sesion al contador de
-            // respaldo y el EVO N° al prefijo hex del documento.
+            // El documento de evolucion no cuelga de un turno (sin columna fecha_atencion
+            // ni sesion rigida). Computamos su fecha de atencion del header/cuerpo y le
+            // asignamos el numero_sesion RIGIDO de la sesion que cae ese mismo dia (mapa
+            // por fecha). Asi queda ordenado y numerado por su sesion real y no al final
+            // con un contador posicional. Si no se puede emparejar, cae al respaldo.
+            var faDoc = FechaAtencionHelper.Calcular(TryParseSchema(doc.SchemaJson), TryParseValores(doc.ValoresJson));
+            int? sesDoc = null;
+            if (faDoc is DateTimeOffset fav)
+            {
+                var dia = DateOnly.FromDateTime(fav.ToOffset(TimeSpan.FromHours(-5)).DateTime);
+                if (_sesionesPorFecha.TryGetValue(dia, out var sn)) { sesDoc = sn; }
+            }
             evosMerge.Add(new EvoImprimible(
                 doc.Id, doc.SchemaJson, doc.ValoresJson,
                 doc.FormatoNombre, doc.FechaApertura, doc.EspecialistaNombre,
-                null, null, 0));
+                faDoc, sesDoc, 0));
         }
         // Orden por el numero de sesion RIGIDO (no por fecha de digitacion/apertura,
         // que puede venir desordenada). Desempate por fecha de atencion. Las que no

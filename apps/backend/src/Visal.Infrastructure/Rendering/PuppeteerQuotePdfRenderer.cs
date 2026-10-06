@@ -128,6 +128,20 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
         });
     }
 
+    /// <summary>
+    /// Descarga (BrowserFetcher) el Chromium que ESTA version de PuppeteerSharp espera,
+    /// en <paramref name="installPath"/>, y devuelve la ruta del ejecutable. Se usa en
+    /// tiempo de build (Dockerfile) para HORNEAR el navegador compatible en la imagen y
+    /// evitar la descarga en runtime y la incompatibilidad con el chromium del sistema
+    /// ("Invalid referrerPolicy"). No lanza el navegador: solo lo deja en disco.
+    /// </summary>
+    public static async Task<string> DownloadBrowserAsync(string installPath)
+    {
+        var fetcher = new BrowserFetcher(new BrowserFetcherOptions { Path = installPath });
+        var installed = await fetcher.DownloadAsync();
+        return installed.GetExecutablePath();
+    }
+
     // Lanza un Chromium headless (sistema si esta configurado, o el de BrowserFetcher).
     private async Task<IBrowser> LaunchAsync()
     {

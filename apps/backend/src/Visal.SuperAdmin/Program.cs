@@ -39,6 +39,21 @@ Log.Logger = new LoggerConfiguration()
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] ({SourceContext}) {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
+// Modo warmup de build (Dockerfile): descarga el Chromium compatible con esta version
+// de PuppeteerSharp y termina, SIN levantar la app (no toca BD). Se invoca como
+//   dotnet Visal.SuperAdmin.dll --download-chromium <ruta>
+// para hornear el navegador en la imagen y no depender del chromium del sistema ni de
+// una descarga en runtime. Ver Dockerfile.superadmin.
+if (args.Contains("--download-chromium"))
+{
+    var destino = args.SkipWhile(a => a != "--download-chromium").Skip(1).FirstOrDefault()
+                  ?? "/opt/visal-chromium";
+    var exe = await Visal.Infrastructure.Rendering.PuppeteerQuotePdfRenderer.DownloadBrowserAsync(destino);
+    Console.WriteLine($"CHROMIUM_EXECUTABLE={exe}");
+    Log.CloseAndFlush();
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
 

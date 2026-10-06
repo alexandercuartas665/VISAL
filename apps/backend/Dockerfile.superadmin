@@ -35,6 +35,20 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=build /app/publish ./
+
+# Horneamos el Chromium que ESTA version de PuppeteerSharp espera (BrowserFetcher),
+# en tiempo de build (CI tiene internet confiable). Asi NO se usa el chromium del
+# sistema (version distinta -> CDP "Invalid referrerPolicy") NI se descarga en runtime
+# (se perderia en cada recreate y depende de la red del server). El binario queda
+# enlazado en /usr/local/bin/visal-chrome y VISAL_CHROME_PATH lo selecciona.
+# Nota: el env del docker-compose NO debe fijar VISAL_CHROME_PATH (dejar que gane este).
+RUN dotnet Visal.SuperAdmin.dll --download-chromium /opt/visal-chromium \
+    && CHROME_BIN="$(find /opt/visal-chromium -type f -name chrome | head -n1)" \
+    && test -n "$CHROME_BIN" \
+    && ln -sf "$CHROME_BIN" /usr/local/bin/visal-chrome \
+    && echo "Chromium horneado en: $CHROME_BIN"
+ENV VISAL_CHROME_PATH=/usr/local/bin/visal-chrome
+
 # Railway inyecta PORT; definir en Railway ASPNETCORE_HTTP_PORTS=${{PORT}}.
 # Este valor es solo fallback local.
 ENV ASPNETCORE_HTTP_PORTS=8080

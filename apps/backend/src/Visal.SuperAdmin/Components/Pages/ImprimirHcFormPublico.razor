@@ -5,7 +5,11 @@
    dentro del circuito (en SSR estatico no renderiza datos). El tenant se fija en
    TenantAmbient y fluye al circuito (verificado). Puppeteer NO usa Networkidle0
    (el WebSocket queda abierto): espera el elemento .pack-doc, que solo aparece
-   cuando el componente termino de cargar. *@
+   cuando el componente termino de cargar.
+   NOTA: se probo SSR estatico para acelerar el render del ZIP de Cuenta Medica, pero
+   NO acelera: el costo dominante es la carga de datos por formulario (~18 servicios) +
+   el overhead por pagina de Puppeteer, no el handshake del circuito. Se mantiene
+   interactivo; la robustez del ZIP grande se resolvio con generacion en background. *@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IDisposable
 @using Microsoft.AspNetCore.Authorization

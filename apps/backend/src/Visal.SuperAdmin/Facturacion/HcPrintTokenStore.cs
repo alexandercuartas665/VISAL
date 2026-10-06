@@ -21,7 +21,10 @@ public interface IHcPrintTokenStore
 
 public sealed class HcPrintTokenStore(IMemoryCache cache) : IHcPrintTokenStore
 {
-    private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(3);
+    // 10 min: el ZIP de Cuenta Medica mintea TODOS los tokens de un lote al inicio y luego
+    // los rinde en paralelo; con archivos grandes (cientos de HC) el render puede tardar,
+    // asi que el token debe sobrevivir hasta que su pagina se renderice.
+    private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
 
     private static string Key(string token) => "hcprint:" + token;
 

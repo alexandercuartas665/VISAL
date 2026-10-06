@@ -12,9 +12,11 @@
 @inject IAseguradoraService AseSvc
 @inject ICuentaMedicaConfigService CuentaSvc
 @inject Visal.SuperAdmin.Facturacion.ITipologiaZipService ZipSvc
+@inject Visal.SuperAdmin.Facturacion.ITipologiaZipJobService ZipJobSvc
 @inject ISucursalService SucSvc
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
+@implements IDisposable
 
 @*
    Modulo generico de snapshots de facturacion (Capa 07).
@@ -633,12 +635,33 @@
                                             </span>
                                         </button>
                                         <div class="sn-tip-arch-foot">
-                                            <a class="btn btn-sm sn-tip-dl @(con == 0 ? "off" : "")"
-                                               href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/tipologia/{a.Id}/zip")"
-                                               target="_blank" rel="noopener"
-                                               title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : "Descargar ZIP: un PDF por paciente con contenido, nombrado con el patron")">
-                                                &#11015; Descargar ZIP@(con > 0 ? $" ({con})" : "")
-                                            </a>
+                                            @{
+                                                _zipUi.TryGetValue(a.Id, out var zu);
+                                            }
+                                            @if (zu is { Corriendo: true })
+                                            {
+                                                <button type="button" class="btn btn-sm sn-tip-dl" disabled>
+                                                    <span class="sn-zip-spin"></span>
+                                                    @if (zu.Total > 0) { <text>@zu.Fase @zu.Hechos/@zu.Total</text> }
+                                                    else { <text>@zu.Fase...</text> }
+                                                </button>
+                                            }
+                                            else if (zu is { Error: not null })
+                                            {
+                                                <button type="button" class="btn btn-sm sn-tip-dl" @onclick="() => IniciarZip(a)"
+                                                        title="@zu.Error">
+                                                    &#8635; Reintentar ZIP
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-sm sn-tip-dl @(con == 0 ? "off" : "")"
+                                                        disabled="@(con == 0)"
+                                                        @onclick="() => IniciarZip(a)"
+                                                        title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : "Generar y descargar ZIP: un PDF por paciente con contenido, nombrado con el patron")">
+                                                    &#11015; Descargar ZIP@(con > 0 ? $" ({con})" : "")
+                                                </button>
+                                            }
                                         </div>
                                     </div>
                                 }
@@ -750,11 +773,30 @@
                             </div>
                         </div>
                         <div class="sn-arch-modal-f">
-                            <a class="btn btn-success btn-sm"
-                               href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/tipologia/{_archModal.Id}/zip")"
-                               target="_blank" rel="noopener">
-                                &#11015; Descargar ZIP (@(_tipConteos.TryGetValue(_archModal.Id, out var cm) ? cm : 0) con contenido)
-                            </a>
+                            @{
+                                var cm = _tipConteos.TryGetValue(_archModal.Id, out var cmv) ? cmv : 0;
+                                _zipUi.TryGetValue(_archModal.Id, out var zm);
+                            }
+                            @if (zm is { Corriendo: true })
+                            {
+                                <button class="btn btn-success btn-sm" disabled>
+                                    <span class="sn-zip-spin"></span>
+                                    @if (zm.Total > 0) { <text>@zm.Fase @zm.Hechos/@zm.Total</text> }
+                                    else { <text>@zm.Fase...</text> }
+                                </button>
+                            }
+                            else if (zm is { Error: not null })
+                            {
+                                <button class="btn btn-success btn-sm" @onclick="() => IniciarZip(_archModal!)" title="@zm.Error">
+                                    &#8635; Reintentar ZIP
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-success btn-sm" disabled="@(cm == 0)" @onclick="() => IniciarZip(_archModal!)">
+                                    &#11015; Descargar ZIP (@cm con contenido)
+                                </button>
+                            }
                             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivoModal">Cerrar</button>
                         </div>
                     </div>
@@ -1107,6 +1149,9 @@
     .sn-tip-dl.off { background:#f1f5f9; border-color:#e2e8f0; color:#94a3b8; }
     .sn-tip-dl.off:hover { background:#e2e8f0; color:#64748b; }
     .sn-tip-dl { width:100%; }
+    .sn-tip-dl:disabled { opacity:.85; cursor:progress; }
+    .sn-zip-spin { width:12px; height:12px; border:2px solid rgba(255,255,255,.45); border-top-color:#fff; border-radius:50%; display:inline-block; animation:snZipSpin .7s linear infinite; }
+    @@keyframes snZipSpin { to { transform:rotate(360deg); } }
     /* Modal de contenido del archivo (por encima del modal Ver) */
     .sn-arch-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1200; display:flex; align-items:center; justify-content:center; padding:20px; }
     .sn-arch-modal { background:#fff; border-radius:10px; max-width:780px; width:100%; box-shadow:0 24px 64px rgba(0,0,0,.35); display:flex; flex-direction:column; max-height:88vh; overflow:hidden; }
@@ -1228,10 +1273,30 @@
         var el = document.getElementById('fccImportJsonInput');
         if (el) { el.value = ''; el.click(); }
     };
+    // Dispara la descarga del ZIP ya generado (el server responde con Content-Disposition
+    // attachment, asi que el navegador baja el archivo sin salir de la pagina).
+    window.snapFccDescargarZip = function (url) {
+        var a = document.createElement('a');
+        a.href = url; a.download = '';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    };
 </script>
 
 @code {
     private enum Tab { Vigentes, Archivados }
+
+    // --- Estado de generacion de ZIP por archivo (job en background + descarga) ---
+    private sealed class ZipUi
+    {
+        public Guid JobId;
+        public bool Corriendo;
+        public string Fase = "Preparando";
+        public int Hechos;
+        public int Total;
+        public string? Error;
+    }
+    private readonly Dictionary<Guid, ZipUi> _zipUi = new();
+    private bool _disposed;
 
     private Tab _tab = Tab.Vigentes;
     private bool _cargando;
@@ -1345,6 +1410,69 @@
 
     private void AbrirArchivoModal(InformeItemDto a) => _archModal = a;
     private void CerrarArchivoModal() => _archModal = null;
+
+    // --- Generacion de ZIP en background + descarga al terminar ---
+    // El boton arranca un job (desacoplado del request), se consulta su progreso cada
+    // ~800ms y, al terminar, se dispara la descarga del resultado ya cacheado. Asi un
+    // archivo con cientos de formularios no muere por timeout del navegador/proxy.
+    private async Task IniciarZip(InformeItemDto a)
+    {
+        if (_verDetalle is null) { return; }
+        var (tenantId, userId, sucursalId) = await ClaimsAsync();
+        if (tenantId is not Guid tid) { _error = "No se pudo determinar el tenant para generar el ZIP."; return; }
+
+        var ui = new ZipUi { Corriendo = true, Fase = "Preparando", Hechos = 0, Total = 0 };
+        _zipUi[a.Id] = ui;
+        ui.JobId = ZipJobSvc.Iniciar(_verDetalle.Metadata.Id, a.Id, tid, userId, sucursalId);
+        StateHasChanged();
+        _ = PollZipAsync(_verDetalle.Metadata.Id, a.Id, ui.JobId);
+    }
+
+    private async Task PollZipAsync(Guid snapshotId, Guid archivoId, Guid jobId)
+    {
+        while (!_disposed)
+        {
+            await Task.Delay(800);
+            if (_disposed) { return; }
+            // Si el usuario relanzo el mismo archivo, este poll es viejo: abortar.
+            if (!_zipUi.TryGetValue(archivoId, out var ui) || ui.JobId != jobId) { return; }
+
+            var info = ZipJobSvc.Obtener(jobId);
+            if (info is null) { return; }
+
+            ui.Fase = info.Fase; ui.Hechos = info.Hechos; ui.Total = info.Total;
+
+            if (info.Estado == Visal.SuperAdmin.Facturacion.ZipJobEstado.Listo)
+            {
+                ui.Corriendo = false;
+                var url = $"/facturacion-clinica/snapshots/{snapshotId}/tipologia/{archivoId}/zip/result/{jobId}";
+                await InvokeAsync(StateHasChanged);
+                try { await JS.InvokeVoidAsync("snapFccDescargarZip", url); } catch { /* no bloquear si falla JS */ }
+                _zipUi.Remove(archivoId);
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            if (info.Estado == Visal.SuperAdmin.Facturacion.ZipJobEstado.Error)
+            {
+                ui.Corriendo = false;
+                ui.Error = string.IsNullOrWhiteSpace(info.Error) ? "Error generando el ZIP." : info.Error;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task<(Guid? tenant, Guid? user, Guid? sucursal)> ClaimsAsync()
+    {
+        var st = await AuthState.GetAuthenticationStateAsync();
+        Guid? t = Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tg) ? tg : null;
+        Guid? u = Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var ug) ? ug : null;
+        Guid? s = Guid.TryParse(st.User.FindFirst("sucursal_id")?.Value, out var sg) ? sg : null;
+        return (t, u, s);
+    }
+
+    public void Dispose() => _disposed = true;
 
     // Origenes cuyo contenido real ya genera el ZIP (ola 1). El resto (formularios
     // de HC) queda pendiente y en el PDF sale una pagina-nota.

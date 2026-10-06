@@ -1,5 +1,6 @@
 using Visal.Application.Common;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
 
@@ -13,10 +14,12 @@ namespace Visal.Infrastructure.Rendering;
 public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
 {
     private readonly IConfiguration _config;
+    private readonly ILogger<PuppeteerQuotePdfRenderer> _log;
 
-    public PuppeteerQuotePdfRenderer(IConfiguration config)
+    public PuppeteerQuotePdfRenderer(IConfiguration config, ILogger<PuppeteerQuotePdfRenderer> log)
     {
         _config = config;
+        _log = log;
     }
 
     public async Task<byte[]> RenderUrlToPdfAsync(string url, CancellationToken cancellationToken = default)
@@ -44,17 +47,48 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
         return await RenderPageAsync(page, url, waitForSelector);
     }
 
-    public async Task<IReadOnlyList<byte[]>> RenderUrlsToPdfAsync(IReadOnlyList<string> urls, string waitForSelector, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<byte[]>> RenderUrlsToPdfAsync(IReadOnlyList<string> urls, string waitForSelector, int maxConcurrency = 4, IProgress<int>? onProgress = null, CancellationToken cancellationToken = default)
     {
-        var res = new List<byte[]>(urls.Count);
-        if (urls.Count == 0) { return res; }
+        if (urls.Count == 0) { return Array.Empty<byte[]>(); }
+        var hechos = 0;
+
+        // UN SOLO navegador para todo el lote (evita ~N arranques de Chrome). Las
+        // paginas se rinden en paralelo hasta 'maxConcurrency' a la vez. El resultado
+        // conserva el orden de 'urls'; una URL que falle queda como arreglo vacio para
+        // no abortar todo el lote (p. ej. una HC que no renderiza no tumba el ZIP mensual).
+        var res = new byte[urls.Count][];
+        var grado = Math.Max(1, maxConcurrency);
         await using var browser = await LaunchAsync();
-        foreach (var url in urls)
+        using var gate = new SemaphoreSlim(grado);
+
+        var tasks = new List<Task>(urls.Count);
+        for (var i = 0; i < urls.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await using var page = await browser.NewPageAsync();
-            res.Add(await RenderPageAsync(page, url, waitForSelector));
+            var idx = i;
+            var url = urls[i];
+            await gate.WaitAsync(cancellationToken);
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    await using var page = await browser.NewPageAsync();
+                    res[idx] = await RenderPageAsync(page, url, waitForSelector);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "RenderUrlsToPdf: fallo el render de {Url}; se omite esa pagina", url);
+                    res[idx] = Array.Empty<byte>();
+                }
+                finally
+                {
+                    gate.Release();
+                    onProgress?.Report(Interlocked.Increment(ref hechos));
+                }
+            }, cancellationToken));
         }
+
+        await Task.WhenAll(tasks);
         return res;
     }
 

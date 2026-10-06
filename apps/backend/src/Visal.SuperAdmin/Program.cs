@@ -87,6 +87,9 @@ builder.Services.AddScoped<ITenantContext, CookieUserContext>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<Visal.Application.Tenancy.IChatBroadcaster, Visal.SuperAdmin.RealTime.SignalRChatBroadcaster>();
 builder.Services.AddScoped<Visal.SuperAdmin.Facturacion.ITipologiaZipService, Visal.SuperAdmin.Facturacion.TipologiaZipService>();
+// Generacion de ZIP de tipologia EN BACKGROUND (singleton: jobs en memoria del proceso).
+// Desacopla la generacion del request para que archivos grandes no mueran por timeout.
+builder.Services.AddSingleton<Visal.SuperAdmin.Facturacion.ITipologiaZipJobService, Visal.SuperAdmin.Facturacion.TipologiaZipJobService>();
 // Tokens de un solo uso para render de HC a PDF (Cuenta medica -> Formulario por tipo).
 builder.Services.AddSingleton<Visal.SuperAdmin.Facturacion.IHcPrintTokenStore, Visal.SuperAdmin.Facturacion.HcPrintTokenStore>();
 // Tunel de desarrollo real (cloudflared); reemplaza el no-op de Application.
@@ -1365,15 +1368,30 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
 
 // Descarga del ZIP de una tipologia/archivo de la cuenta medica para TODOS los
 // pacientes del snapshot (un PDF por paciente, nombrado con el patron configurado).
+// Generacion SINCRONA (legacy): se mantiene por compatibilidad, pero la UI usa el flujo
+// en background (job) + descarga del resultado, para no morir por timeout en archivos grandes.
 app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/zip", async (
     Guid id,
     Guid itemId,
     Visal.SuperAdmin.Facturacion.ITipologiaZipService zipSvc,
     CancellationToken ct) =>
 {
-    var archivo = await zipSvc.GenerarZipArchivoAsync(id, itemId, ct);
+    var archivo = await zipSvc.GenerarZipArchivoAsync(id, itemId, progreso: null, ct: ct);
     if (archivo is null) { return Results.NotFound(); }
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
+// Descarga del ZIP ya generado por un job en background (solo sirve los bytes cacheados;
+// la generacion ya ocurrio desacoplada del request). La UI llama aqui cuando el job termina.
+app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/zip/result/{jobId:guid}", (
+    Guid id,
+    Guid itemId,
+    Guid jobId,
+    Visal.SuperAdmin.Facturacion.ITipologiaZipJobService jobs) =>
+{
+    var r = jobs.TomarResultado(jobId);
+    if (r is null) { return Results.NotFound(); }
+    return Results.File(r.Value.Bytes, "application/zip", r.Value.Nombre);
 }).RequireAuthorization();
 
 // Export XLSX del listado /ordenes (todas las filas visibles con los filtros

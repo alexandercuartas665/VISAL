@@ -2,6 +2,12 @@ using Visal.Application.Facturacion;
 
 namespace Visal.SuperAdmin.Facturacion;
 
+/// <summary>Progreso de la generacion de un ZIP de tipologia, para mostrar en la UI
+/// mientras corre en background. <see cref="Fase"/> es un texto corto ("Renderizando
+/// formularios", "Armando PDFs"); <see cref="Hechos"/>/<see cref="Total"/> es el avance
+/// de la fase larga (render de formularios).</summary>
+public readonly record struct ZipProgreso(string Fase, int Hechos, int Total);
+
 /// <summary>
 /// Genera el ZIP de una tipologia/archivo de la cuenta medica para TODOS los
 /// pacientes de un snapshot: un PDF por paciente (fusionando el contenido real
@@ -21,7 +27,7 @@ public interface ITipologiaZipService
     /// snapshot no tiene aseguradora.
     /// </summary>
     Task<ArchivoExportado?> GenerarZipArchivoAsync(
-        Guid snapshotId, Guid archivoItemId, CancellationToken ct = default);
+        Guid snapshotId, Guid archivoItemId, IProgress<ZipProgreso>? progreso = null, CancellationToken ct = default);
 
     /// <summary>
     /// Para cada archivo (tipologia) configurado en la aseguradora del snapshot,

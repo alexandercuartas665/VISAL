@@ -28,6 +28,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private readonly ITenantContext _tenant;
     private readonly Microsoft.AspNetCore.Hosting.Server.IServer _server;
 
+    // Cuantas paginas rinde Puppeteer en paralelo (un solo navegador para todo el ZIP).
+    // 4 equilibra velocidad y memoria del headless Chrome en el server.
+    private const int MaxRenderConcurrency = 4;
+
+    /// <summary>Una parte del PDF de un paciente: o bytes ya listos (autorizacion/firma,
+    /// leidos de disco/BD) via <see cref="Inline"/>, o una referencia a la URL global
+    /// <see cref="RenderIdx"/> que se renderiza en lote (formulario por tipo).</summary>
+    private readonly record struct PartePlan(byte[]? Inline, int RenderIdx);
+
     static TipologiaZipService()
     {
         // QuestPDF Community (gratis para este uso). Idempotente.
@@ -57,7 +66,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     }
 
     public async Task<ArchivoExportado?> GenerarZipArchivoAsync(
-        Guid snapshotId, Guid archivoItemId, CancellationToken ct = default)
+        Guid snapshotId, Guid archivoItemId, IProgress<ZipProgreso>? progreso = null, CancellationToken ct = default)
     {
         var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
         if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId)
@@ -75,20 +84,56 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
+        // --- Pase 1: plan por paciente + junta TODAS las URLs de formularios-por-tipo.
+        // En vez de lanzar un Chrome por paciente y rendir en serie, juntamos todas las
+        // URLs de todos los pacientes para rendirlas de una sola vez (un navegador, en
+        // paralelo). Las partes de disco/BD (autorizacion, firma) se resuelven aqui. ---
+        var allUrls = new List<string>();
+        var planes = new List<(PacienteSnapshotDto pac, List<PartePlan> partes)>();
+        foreach (var pac in pacientes)
+        {
+            ct.ThrowIfCancellationRequested();
+            var partes = await ConstruirPlanPacienteAsync(archivo, pac, allUrls, ct);
+            if (partes is null) { continue; } // paciente no existe en el sistema
+            planes.Add((pac, partes));
+        }
+
+        // --- Render en lote: UN solo Chrome, hasta MaxRenderConcurrency paginas a la vez. ---
+        IReadOnlyList<byte[]> rendered;
+        if (allUrls.Count > 0)
+        {
+            progreso?.Report(new ZipProgreso("Renderizando formularios", 0, allUrls.Count));
+            var onEach = progreso is null ? null
+                : new Progress<int>(n => progreso.Report(new ZipProgreso("Renderizando formularios", n, allUrls.Count)));
+            rendered = await _pdfRenderer.RenderUrlsToPdfAsync(allUrls, ".pack-doc", MaxRenderConcurrency, onEach, ct);
+        }
+        else
+        {
+            rendered = Array.Empty<byte[]>();
+        }
+        progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
+
         using var zipMs = new MemoryStream();
         var incluidos = 0;
         using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
         {
             var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var pac in pacientes)
+            // --- Pase 2: ensambla cada PDF con las partes ya resueltas/renderizadas. ---
+            foreach (var (pac, partes) in planes)
             {
                 ct.ThrowIfCancellationRequested();
-                // Solo se incluye el paciente si REALMENTE tiene contenido para este
-                // archivo (firma, autorizacion, etc.). Los que no lo tienen se omiten
-                // — no se genera un PDF-nota vacio. Aplica a cualquier tipo de archivo.
-                var pdf = await ArmarPdfPacienteAsync(archivo, pac, ct);
-                if (pdf is null) { continue; }
+                var bytesPartes = new List<byte[]>(partes.Count);
+                foreach (var p in partes)
+                {
+                    if (p.Inline is { Length: > 0 }) { bytesPartes.Add(p.Inline); }
+                    else if (p.RenderIdx >= 0 && p.RenderIdx < rendered.Count
+                             && rendered[p.RenderIdx] is { Length: > 0 } b) { bytesPartes.Add(b); }
+                }
+                // Solo se incluye el paciente si REALMENTE quedo contenido (firma,
+                // autorizacion o formularios renderizados). Los vacios se omiten.
+                if (bytesPartes.Count == 0) { continue; }
 
+                var pdf = FusionarPdfs(bytesPartes);
                 var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac));
                 var name = baseName + ".pdf";
                 // Evita colisiones de nombre (dos pacientes con mismo patron).
@@ -224,47 +269,52 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// Arma el PDF de un archivo para un paciente: recorre los contenidos, recupera
     /// el contenido real de los origenes soportados y fusiona todo en un solo PDF.
     /// </summary>
-    private async Task<byte[]?> ArmarPdfPacienteAsync(
-        InformeItemDto archivo, PacienteSnapshotDto pac, CancellationToken ct)
+    /// <summary>Pase 1: arma el "plan" ordenado de partes de un paciente. Las partes de
+    /// disco/BD (autorizacion, firma) se resuelven aqui como bytes; las de formulario-por-tipo
+    /// se agregan como URLs al lote global <paramref name="allUrls"/> y se referencian por
+    /// indice, para rendirse todas juntas luego (un solo navegador, en paralelo).
+    /// Devuelve null si el paciente no existe en el sistema.</summary>
+    private async Task<List<PartePlan>?> ConstruirPlanPacienteAsync(
+        InformeItemDto archivo, PacienteSnapshotDto pac, List<string> allUrls, CancellationToken ct)
     {
         var pid = await _db.Pacientes.AsNoTracking()
             .Where(p => p.NumeroDocumento == pac.Documento)
             .Select(p => (Guid?)p.Id)
             .FirstOrDefaultAsync(ct);
+        if (pid is not Guid pacienteId) { return null; }
 
-        // Lista de PDFs (bytes) a fusionar, en el orden de los contenidos.
-        var partes = new List<byte[]>();
-
-        if (pid is Guid pacienteId)
+        var partes = new List<PartePlan>();
+        foreach (var c in archivo.Contenidos)
         {
-            foreach (var c in archivo.Contenidos)
+            ct.ThrowIfCancellationRequested();
+            switch (c.Origen)
             {
-                ct.ThrowIfCancellationRequested();
-                switch (c.Origen)
-                {
-                    case OrigenInformeItem.AutorizacionAsignacion:
-                        partes.AddRange(await CargarAutorizacionesAsync(pacienteId, c.SoloUltimo, ct));
-                        break;
-                    case OrigenInformeItem.FirmaPaciente:
-                        partes.AddRange(await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct));
-                        break;
-                    case OrigenInformeItem.FormularioPorTipo:
-                        partes.AddRange(await CargarFormulariosPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, ct));
-                        break;
-                    default:
-                        // Otros origenes de formularios de HC (DocumentoHc, Evolucion, Escala,
-                        // etc.): pendientes de una ola posterior. No producen contenido.
-                        break;
-                }
+                case OrigenInformeItem.AutorizacionAsignacion:
+                    foreach (var b in await CargarAutorizacionesAsync(pacienteId, c.SoloUltimo, ct))
+                    {
+                        partes.Add(new PartePlan(b, -1));
+                    }
+                    break;
+                case OrigenInformeItem.FirmaPaciente:
+                    foreach (var b in await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct))
+                    {
+                        partes.Add(new PartePlan(b, -1));
+                    }
+                    break;
+                case OrigenInformeItem.FormularioPorTipo:
+                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, ct))
+                    {
+                        partes.Add(new PartePlan(null, allUrls.Count));
+                        allUrls.Add(url);
+                    }
+                    break;
+                default:
+                    // Otros origenes de formularios de HC (DocumentoHc, Evolucion, Escala,
+                    // etc.): pendientes de una ola posterior. No producen contenido.
+                    break;
             }
         }
-
-        // Sin contenido real para este paciente: se OMITE del ZIP (no se genera un
-        // PDF-nota vacio). El caller cuenta cuantos se incluyeron.
-        if (partes.Count == 0) { return null; }
-
-        var fusion = FusionarPdfs(partes);
-        return fusion;
+        return partes;
     }
 
     private async Task<List<byte[]>> CargarAutorizacionesAsync(Guid pacienteId, bool soloUltimo, CancellationToken ct)
@@ -313,11 +363,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return res;
     }
 
-    /// <summary>Origen "Formulario por tipo": por cada HC Cerrada del paciente cuyo
-    /// FormDefinition.Tipo = <paramref name="tipo"/>, renderiza SOLO el formulario
-    /// (Docs="HC") a PDF via Puppeteer navegando a la ruta publica con token de un
-    /// solo uso. SoloUltimo = solo la HC mas reciente (por fecha de atencion).</summary>
-    private async Task<List<byte[]>> CargarFormulariosPorTipoAsync(
+    /// <summary>Origen "Formulario por tipo": devuelve las URLs publicas (con token de un
+    /// solo uso) de cada HC Cerrada del paciente cuyo FormDefinition.Tipo =
+    /// <paramref name="tipo"/>. No renderiza aqui: las URLs se juntan con las de los demas
+    /// pacientes y se rinden en lote (un solo navegador, en paralelo). SoloUltimo = solo la
+    /// HC mas reciente (por fecha de atencion).</summary>
+    private async Task<List<string>> ResolverUrlsFormularioPorTipoAsync(
         Guid pacienteId, string? tipo, bool soloUltimo, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
@@ -337,18 +388,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         if (hcIds.Count == 0) { return new(); }
         var baseUrl = BaseUrlInterna();
-        var urls = hcIds.Select(hcId => $"{baseUrl}/p/hc-form/{hcId}?t={_printTokens.Mint(hcId, tid)}").ToList();
-        try
-        {
-            // Un solo navegador para todas las HC de este paciente+tipo (una pagina c/u).
-            var pdfs = await _pdfRenderer.RenderUrlsToPdfAsync(urls, ".pack-doc", ct);
-            return pdfs.Where(p => p is { Length: > 0 }).ToList();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Tipologia ZIP: fallo render de formularios tipo {Tipo} del paciente {Pac}", tipo, pacienteId);
-            return new();
-        }
+        return hcIds.Select(hcId => $"{baseUrl}/p/hc-form/{hcId}?t={_printTokens.Mint(hcId, tid)}").ToList();
     }
 
     /// <summary>URL base interna del propio servidor para que Puppeteer navegue a las

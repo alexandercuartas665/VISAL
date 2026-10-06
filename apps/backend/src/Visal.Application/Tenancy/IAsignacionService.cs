@@ -355,7 +355,9 @@ public sealed record AsignacionListadoFiltro(
     Guid? AseguradoraId, Guid? PacienteId,
     string? ContratoCodigo, string? Modulo, string? NombreServicio,
     // Cuando es true, solo devuelve asignaciones con la autorizacion pendiente.
-    bool SoloAutorizacionPendiente = false);
+    bool SoloAutorizacionPendiente = false,
+    // Nombre de sede (Asignacion.Sucursal) para filtrar por sede. Null = todas.
+    string? Sucursal = null);
 
 /// <summary>Fila del listado tabular de asignaciones. Incluye todos los datos
 /// relacionados (paciente + aseguradora + contrato + programacion) para que el
@@ -438,6 +440,10 @@ public interface IAsignacionService
     /// <summary>Lista tabular de asignaciones para el tab "Listado" con filtros compuestos.
     /// Ordena por CreadoEn desc. Sin limite implicito; la UI puede paginar/scrollear.</summary>
     Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default);
+
+    /// <summary>Nombres de sede (Asignacion.Sucursal) distintos presentes en las
+    /// asignaciones del tenant, para poblar el filtro por sede del listado.</summary>
+    Task<IReadOnlyList<string>> ListarSucursalesAsignacionesAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Lista las asignaciones cuyo modulo coincida con uno de los permitidos, filtradas

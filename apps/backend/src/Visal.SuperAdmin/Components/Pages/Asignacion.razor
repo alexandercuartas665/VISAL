@@ -491,6 +491,15 @@ else
                         }
                     </select>
                 </div>
+                <div class="ase-f"><label>Sede</label>
+                    <select class="form-select form-select-sm" @bind="_fSede">
+                        <option value="">(todas)</option>
+                        @foreach (var sede in _sedesFiltro)
+                        {
+                            <option value="@sede">@sede</option>
+                        }
+                    </select>
+                </div>
                 <div class="ase-f"><label>Paciente (documento)</label>
                     <input class="form-control form-control-sm mono" placeholder="Cedula del paciente..."
                            @bind="_fDocumento" @bind:event="oninput" />
@@ -1215,6 +1224,8 @@ else
     private string _fDocumento = "";
     private string _fNombreServ = "";
     private bool _fSoloPendiente;
+    private string _fSede = "";
+    private List<string> _sedesFiltro = new();
     private List<AsignacionListadoDto> _listado = new();
     private List<AseguradoraDto> _aseguradorasFiltro = new();
     private bool _listBusy;
@@ -1237,6 +1248,12 @@ else
             {
                 _aseguradorasFiltro = (await AseSvc.ListAseguradorasAsync()).ToList();
             }
+            // Sedes para el filtro (nombres distintos de Asignacion.Sucursal del tenant).
+            if (_sedesFiltro.Count == 0)
+            {
+                try { _sedesFiltro = (await Svc.ListarSucursalesAsignacionesAsync()).ToList(); }
+                catch { _sedesFiltro = new(); }
+            }
             await AplicarFiltrosListado();
             _listadoInicializado = true;
         }
@@ -1254,7 +1271,8 @@ else
                 string.IsNullOrWhiteSpace(_fContratoCod) ? null : _fContratoCod,
                 string.IsNullOrWhiteSpace(_fModulo) ? null : _fModulo,
                 string.IsNullOrWhiteSpace(_fNombreServ) ? null : _fNombreServ,
-                _fSoloPendiente);
+                _fSoloPendiente,
+                string.IsNullOrWhiteSpace(_fSede) ? null : _fSede);
             var lista = await Svc.ListarAsignacionesAsync(filtro);
             // Filtro por documento en memoria (evita joinar en el backend por texto libre).
             if (!string.IsNullOrWhiteSpace(_fDocumento))
@@ -1273,7 +1291,7 @@ else
         var hoy = DateTime.Now;
         _fFechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
         _fFechaFin = DateOnly.FromDateTime(hoy);
-        _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = "";
+        _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = _fSede = "";
         _fSoloPendiente = false;
         await AplicarFiltrosListado();
     }

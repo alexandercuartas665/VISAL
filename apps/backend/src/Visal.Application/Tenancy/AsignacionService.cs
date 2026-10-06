@@ -583,6 +583,13 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         {
             q = q.Where(x => x.a.AutorizacionPendiente);
         }
+        if (!string.IsNullOrWhiteSpace(filtro.Sucursal))
+        {
+            // Sede: Asignacion.Sucursal es el nombre de la sede (string). Las opciones del
+            // dropdown salen de ListarSucursalesAsignacionesAsync, asi que coinciden exacto.
+            var suc = filtro.Sucursal.Trim();
+            q = q.Where(x => x.a.Sucursal == suc);
+        }
 
         // Filtro por aseguradora: se hace via contrato_codigo -> ContratoAseguradora -> AseguradoraId.
         if (filtro.AseguradoraId is Guid ase)
@@ -644,6 +651,14 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             r.Sucursal,
             r.AutorizacionPendiente, r.PdfAutorizacionUrl)).ToList();
     }
+
+    public async Task<IReadOnlyList<string>> ListarSucursalesAsignacionesAsync(CancellationToken ct = default)
+        => await db.Asignaciones.AsNoTracking()
+            .Where(a => a.Sucursal != null && a.Sucursal != "")
+            .Select(a => a.Sucursal)
+            .Distinct()
+            .OrderBy(s => s)
+            .ToListAsync(ct);
 
     public async Task<IReadOnlyList<AsignacionPendienteDto>> ListarPendientesAsync(
         IReadOnlyList<string> modulosPermitidos,

@@ -60,7 +60,11 @@ public sealed record HistoriaClinicaDetailDto(
     string? RipsCausaExternaNombre = null,
     DateTimeOffset? FechaAtencion = null,
     /// <summary>Consecutivo publico de la HC (secuencia global). Se muestra "HC-000123".</summary>
-    long Consecutivo = 0);
+    long Consecutivo = 0,
+    /// <summary>Consecutivo publico del lote/asignacion (AS-000045) al que pertenece la HC,
+    /// via pivote sesion -> turno -> asignacion -> lote. Null si la HC no nace de una
+    /// asignacion. Se usa para imprimir "AS-000045" en el encabezado.</summary>
+    long? AsignacionConsecutivo = null);
 
 /// <summary>
 /// Opcion del filtro "Asignacion" en el modulo de Historias: una atencion del

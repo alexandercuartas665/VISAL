@@ -150,6 +150,7 @@ else
                 MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(_form?.Codigo, _form?.CodigoSecundario, Tipo)"
                 FechaLinea="@FechaFormulaOrd()"
                 HcConsecutivo="@(_hc is null ? null : CodigoPublico.Hc(_hc.Consecutivo))"
+                AsignacionConsecutivo="@(_hc?.AsignacionConsecutivo is long asc ? CodigoPublico.Asignacion(asc) : null)"
                 OrdenNum="@_ordenNumero" TipoCortoHeader="ORD" TituloFallback="@_tipoLabel" />
         </div>
     }

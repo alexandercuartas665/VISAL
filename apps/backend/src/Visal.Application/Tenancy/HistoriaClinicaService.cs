@@ -170,8 +170,22 @@ public sealed class HistoriaClinicaService(
                 x.h.RipsViaIngresoCodigo, x.h.RipsViaIngresoNombre,
                 x.h.RipsFinalidadCodigo, x.h.RipsFinalidadNombre,
                 x.h.RipsCausaExternaCodigo, x.h.RipsCausaExternaNombre,
-                x.h.FechaAtencion, x.h.Consecutivo))
+                x.h.FechaAtencion, x.h.Consecutivo, (long?)null))
             .FirstOrDefaultAsync(ct);
+        if (row is null) { return null; }
+
+        // Consecutivo del lote/asignacion (AS-000045) al que pertenece la HC, via el
+        // pivote sesion -> turno -> asignacion -> lote. Null si la HC no nacio de una
+        // asignacion (p.ej. HC suelta). Se usa para imprimir "AS-000045" en el encabezado.
+        var asigCons = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            where p.HistoriaClinicaId == id
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id
+            select (long?)l.Consecutivo).FirstOrDefaultAsync(ct);
+        if (asigCons is not null) { row = row with { AsignacionConsecutivo = asigCons }; }
         return row;
     }
 
@@ -232,7 +246,7 @@ public sealed class HistoriaClinicaService(
                     h.RipsViaIngresoCodigo, h.RipsViaIngresoNombre,
                     h.RipsFinalidadCodigo, h.RipsFinalidadNombre,
                     h.RipsCausaExternaCodigo, h.RipsCausaExternaNombre,
-                    h.FechaAtencion, h.Consecutivo),
+                    h.FechaAtencion, h.Consecutivo, (long?)null),
                 // Numero de sesion RIGIDO del turno (nace en Coordinacion). Es la
                 // fuente de verdad del "Sesion N", no el orden de digitacion.
                 Sesion = t.NumeroSesion

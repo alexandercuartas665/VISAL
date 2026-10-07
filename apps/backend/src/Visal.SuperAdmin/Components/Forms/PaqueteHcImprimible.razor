@@ -127,6 +127,7 @@ else
                                          MostrarPieFormula="true"
                                          FechaLinea="@FechaLineaHc()"
                                          HcConsecutivo="@ConsecutivoHc()"
+                                         AsignacionConsecutivo="@AsignacionConsecutivoTxt()"
                                          OrdenNum="@($"{ConsecutivoHc()}-MED{(_ordenesMed.Count > 1 ? "-" + om.NumeroOrden : "")}")"
                                          TipoCortoHeader="ORD"
                                          Subtitulo="@(_ordenesMed.Count > 1 ? $"Orden {om.NumeroOrden} de {_ordenesMed.Count}" : null)"
@@ -1352,6 +1353,11 @@ else
     /// evolucion suelta.</summary>
     private string ConsecutivoPropio() => _hc is null ? "" : CodigoPublico.Hc(_hc.Consecutivo);
 
+    /// <summary>Consecutivo del lote/asignacion (AS-000045) de la HC impresa, para
+    /// trazabilidad en el encabezado. Vacio si la HC no nace de una asignacion.</summary>
+    private string AsignacionConsecutivoTxt() => _hc?.AsignacionConsecutivo is long c
+        ? CodigoPublico.Asignacion(c) : "";
+
     /// <summary>
     /// Fecha/hora canonica de la HC para impresion: la que el medico dejo en el
     /// campo de FECHA del encabezado (editable, "dd/MM/yyyy HH:mm"). Si no hay, cae
@@ -1443,6 +1449,10 @@ else
                         @tipoCorto N°: <b>@ordenNum</b><br />
                         @fechaLinea<br />
                         HC: <b>@ConsecutivoHc()</b>
+                        @if (!string.IsNullOrWhiteSpace(AsignacionConsecutivoTxt()))
+                        {
+                            <br /><text>AS: </text><b>@AsignacionConsecutivoTxt()</b>
+                        }
                     </div>
                 }
                 else if (!string.IsNullOrWhiteSpace(ConsecutivoHc()) || !string.IsNullOrWhiteSpace(fechaLinea))
@@ -1459,6 +1469,10 @@ else
                         @if (!string.IsNullOrWhiteSpace(ConsecutivoHc()))
                         {
                             <text>HC: </text><b>@ConsecutivoHc()</b>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(AsignacionConsecutivoTxt()))
+                        {
+                            <br /><text>AS: </text><b>@AsignacionConsecutivoTxt()</b>
                         }
                     </div>
                 }

@@ -74,9 +74,13 @@
                     {
                         <text>HC: </text><b>@HcConsecutivo</b>
                     }
+                    @if (!string.IsNullOrWhiteSpace(AsignacionConsecutivo))
+                    {
+                        <br /><text>AS: </text><b>@AsignacionConsecutivo</b>
+                    }
                 </div>
             }
-            else if (!string.IsNullOrWhiteSpace(FechaLinea) || !string.IsNullOrWhiteSpace(HcConsecutivo))
+            else if (!string.IsNullOrWhiteSpace(FechaLinea) || !string.IsNullOrWhiteSpace(HcConsecutivo) || !string.IsNullOrWhiteSpace(AsignacionConsecutivo))
             {
                 @* Formatos con el bloque HC N°/apertura oculto (p.ej. la formula
                    medica, ver FAT-5) que aun asi deben mostrar la fecha de
@@ -89,6 +93,10 @@
                     @if (!string.IsNullOrWhiteSpace(HcConsecutivo))
                     {
                         <text>HC: </text><b>@HcConsecutivo</b>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(AsignacionConsecutivo))
+                    {
+                        <br /><text>AS: </text><b>@AsignacionConsecutivo</b>
                     }
                 </div>
             }
@@ -181,6 +189,9 @@
     /// <summary>Consecutivo/N. de la HC de origen. Se imprime como "HC: {valor}" para
     /// trazabilidad, incluso cuando ImprimirCodigoFecha esta apagado (p.ej. formula medica).</summary>
     [Parameter] public string? HcConsecutivo { get; set; }
+    /// <summary>Consecutivo del lote/asignacion (AS-000045). Se imprime como "AS: {valor}"
+    /// junto al HC para trazabilidad. Vacio = no se renderiza.</summary>
+    [Parameter] public string? AsignacionConsecutivo { get; set; }
     [Parameter] public string TipoCortoHeader { get; set; } = "HC";
     [Parameter] public string? TituloFallback { get; set; }
     [Parameter] public HashSet<string>? SeccionesOpcionalesIncluidas { get; set; }

@@ -144,6 +144,7 @@ else
                                      MostrarPieFormula="@DocumentoImprimible.EsFormatoOrdenMedicamentos(item.Detail.FormatoCodigo)"
                                      OrdenNum="@CodigoPublico.Hc(item.Detail.Consecutivo)"
                                      HcConsecutivo="@CodigoPublico.Hc(item.Detail.Consecutivo)"
+                                     AsignacionConsecutivo="@(item.Detail.AsignacionConsecutivo is long asc ? CodigoPublico.Asignacion(asc) : null)"
                                      FechaLinea="@fechaLinea"
                                      TipoCortoHeader="HC"
                                      TituloFallback="@item.Detail.FormatoNombre" />

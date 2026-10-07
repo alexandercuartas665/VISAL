@@ -1096,7 +1096,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         modelBuilder.Entity<FirmaPacienteRequest>(b =>
         {
             b.Property(x => x.Token).HasMaxLength(64).IsRequired();
-            b.Property(x => x.Telefono).HasMaxLength(20).IsRequired();
+            // 120 para alinear con pacientes.Telefono (misma fuente). El valor se guarda
+            // "solo digitos", pero un telefono de paciente puede traer DOS numeros o texto
+            // que, al quedar en digitos, supera 20 chars y rompia el guardado (22001).
+            b.Property(x => x.Telefono).HasMaxLength(120).IsRequired();
             b.Property(x => x.NombreContacto).HasMaxLength(200);
             b.Property(x => x.ImageDataUrl).HasColumnType("text");
             // Token globalmente unico (no por tenant): es la clave de la URL publica

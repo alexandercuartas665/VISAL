@@ -1445,6 +1445,23 @@ else
                         HC: <b>@ConsecutivoHc()</b>
                     </div>
                 }
+                else if (!string.IsNullOrWhiteSpace(ConsecutivoHc()) || !string.IsNullOrWhiteSpace(fechaLinea))
+                {
+                    @* Formato con el bloque codigo/fecha APAGADO (ImprimirCodigoFecha=false,
+                       p.ej. PP-FO-87): aun asi imprimimos la trazabilidad de la HC (N° de
+                       historia) — y la fecha si viene — igual que DocumentoImprimible. Sin
+                       esto el id de la HC desaparecia del encabezado en Snapshots/Atencion. *@
+                    <div class="pack-hdr-nohist">
+                        @if (!string.IsNullOrWhiteSpace(fechaLinea))
+                        {
+                            @fechaLinea<br />
+                        }
+                        @if (!string.IsNullOrWhiteSpace(ConsecutivoHc()))
+                        {
+                            <text>HC: </text><b>@ConsecutivoHc()</b>
+                        }
+                    </div>
+                }
             </div>
             <div class="pack-hdr-title">@tituloFinal</div>
             @if (!string.IsNullOrWhiteSpace(subtitulo))

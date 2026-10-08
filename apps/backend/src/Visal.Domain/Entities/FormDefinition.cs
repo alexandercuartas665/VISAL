@@ -54,4 +54,17 @@ public class FormDefinition : TenantEntity
     /// este mismo formato).
     /// </summary>
     public string? FormatoEvolucionCodigo { get; set; }
+
+    /// <summary>
+    /// Modo terapia — "puente" entre asignaciones. Numero de meses durante los cuales
+    /// el puente de evolucion se mantiene ABIERTO despues de la ultima atencion del
+    /// paciente en este formato. Cuando una asignacion NUEVA del mismo paciente+formato
+    /// arranca (su sesion 1) y la ultima atencion del paciente en este formato cae
+    /// dentro de esta ventana (deslizante: se mide desde la ultima fecha_atencion),
+    /// esa sesion 1 tambien se sirve con el <see cref="FormatoEvolucionCodigo"/> (sigue
+    /// el puente) en vez de abrir una historia base nueva. Null o 0 = sin puente entre
+    /// asignaciones (comportamiento historico: cada asignacion reinicia en formato base).
+    /// Solo aplica si <see cref="FormatoEvolucionCodigo"/> esta configurado.
+    /// </summary>
+    public int? MesesPuente { get; set; }
 }

@@ -270,18 +270,96 @@ public sealed class AtencionProfesionalService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var evolucionPorFormato = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Puente entre asignaciones: codigo base -> meses que el puente sigue abierto
+        // despues de la ultima atencion. Null/0 = sin puente (cada asignacion reinicia base).
+        var mesesPuentePorFormato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (formatosHc.Count > 0)
         {
             var defs = await db.FormDefinitions.AsNoTracking()
                 .Where(f => f.FormatoEvolucionCodigo != null
                             && (formatosHc.Contains(f.Codigo)
                                 || (f.CodigoSecundario != null && formatosHc.Contains(f.CodigoSecundario))))
-                .Select(f => new { f.Codigo, f.CodigoSecundario, f.FormatoEvolucionCodigo })
+                .Select(f => new { f.Codigo, f.CodigoSecundario, f.FormatoEvolucionCodigo, f.MesesPuente })
                 .ToListAsync(ct);
             foreach (var d in defs)
             {
                 if (!string.IsNullOrWhiteSpace(d.Codigo)) { evolucionPorFormato[d.Codigo] = d.FormatoEvolucionCodigo!; }
                 if (!string.IsNullOrWhiteSpace(d.CodigoSecundario)) { evolucionPorFormato[d.CodigoSecundario!] = d.FormatoEvolucionCodigo!; }
+                if (d.MesesPuente is int mp && mp > 0)
+                {
+                    if (!string.IsNullOrWhiteSpace(d.Codigo)) { mesesPuentePorFormato[d.Codigo] = mp; }
+                    if (!string.IsNullOrWhiteSpace(d.CodigoSecundario)) { mesesPuentePorFormato[d.CodigoSecundario!] = mp; }
+                }
+            }
+        }
+
+        // ── Puente por meses (modo terapia que trasciende asignaciones) ──────────
+        // Para los formatos base que declaran MesesPuente, resolvemos la ULTIMA fecha
+        // de atencion del paciente en esa terapia (HCs cuyo FormDefinition es el base O
+        // su formato de evolucion). Si una asignacion NUEVA arranca (sesion 1) dentro de
+        // la ventana deslizante desde esa ultima atencion, su sesion 1 tambien se sirve
+        // con el formato de evolucion (sigue el puente) en vez de abrir base nuevo.
+        // Clave: (PacienteId, codigo base). Valor: ultima fecha_atencion.
+        var ultimaAtencionPorPacienteFormato = new Dictionary<(Guid, string), DateTimeOffset>();
+        if (mesesPuentePorFormato.Count > 0 && pacIds.Count > 0)
+        {
+            // Codigos de la(s) terapia(s) con puente: base + su evolucion.
+            var codigosTerapia = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var baseCod in mesesPuentePorFormato.Keys)
+            {
+                codigosTerapia.Add(baseCod);
+                if (evolucionPorFormato.TryGetValue(baseCod, out var evo) && !string.IsNullOrWhiteSpace(evo))
+                {
+                    codigosTerapia.Add(evo);
+                }
+            }
+            // Resolver esos codigos -> FormDefinitionId, y mapear cada def al codigo BASE
+            // de su terapia (un def base mapea a si mismo; un def de evolucion mapea al
+            // base cuyo FormatoEvolucionCodigo lo apunta).
+            var defsTerapia = await db.FormDefinitions.AsNoTracking()
+                .Where(f => codigosTerapia.Contains(f.Codigo)
+                            || (f.CodigoSecundario != null && codigosTerapia.Contains(f.CodigoSecundario)))
+                .Select(f => new { f.Id, f.Codigo, f.CodigoSecundario })
+                .ToListAsync(ct);
+            // evoCod -> baseCod (invertir evolucionPorFormato solo para las bases con puente).
+            var evoABase = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var baseCod in mesesPuentePorFormato.Keys)
+            {
+                if (evolucionPorFormato.TryGetValue(baseCod, out var evo) && !string.IsNullOrWhiteSpace(evo))
+                {
+                    evoABase[evo] = baseCod;
+                }
+            }
+            var defIdABase = new Dictionary<Guid, string>();
+            foreach (var d in defsTerapia)
+            {
+                string? baseCod = null;
+                if (!string.IsNullOrWhiteSpace(d.Codigo) && mesesPuentePorFormato.ContainsKey(d.Codigo)) { baseCod = d.Codigo; }
+                else if (!string.IsNullOrWhiteSpace(d.CodigoSecundario) && mesesPuentePorFormato.ContainsKey(d.CodigoSecundario!)) { baseCod = d.CodigoSecundario; }
+                else if (!string.IsNullOrWhiteSpace(d.Codigo) && evoABase.TryGetValue(d.Codigo, out var b1)) { baseCod = b1; }
+                else if (!string.IsNullOrWhiteSpace(d.CodigoSecundario) && evoABase.TryGetValue(d.CodigoSecundario!, out var b2)) { baseCod = b2; }
+                if (baseCod != null) { defIdABase[d.Id] = baseCod; }
+            }
+            if (defIdABase.Count > 0)
+            {
+                var defIds = defIdABase.Keys.ToList();
+                var atenciones = await db.HistoriasClinicas.AsNoTracking()
+                    .Where(h => pacIds.Contains(h.PacienteId)
+                                && defIds.Contains(h.FormDefinitionId)
+                                && h.Estado != HistoriaClinicaEstado.Inactiva
+                                && h.FechaAtencion != null)
+                    .Select(h => new { h.PacienteId, h.FormDefinitionId, h.FechaAtencion })
+                    .ToListAsync(ct);
+                foreach (var at in atenciones)
+                {
+                    if (!defIdABase.TryGetValue(at.FormDefinitionId, out var baseCod)) { continue; }
+                    var key = (at.PacienteId, baseCod);
+                    var fecha = at.FechaAtencion!.Value;
+                    if (!ultimaAtencionPorPacienteFormato.TryGetValue(key, out var prev) || fecha > prev)
+                    {
+                        ultimaAtencionPorPacienteFormato[key] = fecha;
+                    }
+                }
             }
         }
 
@@ -383,10 +461,31 @@ public sealed class AtencionProfesionalService(
                 // usa el formato de evolucion si el formato de HC lo tiene configurado.
                 var formatoBase = FormatoBaseDe(a);
                 var formatoEfectivo = formatoBase;
-                if (nGlobal >= 2 && !string.IsNullOrWhiteSpace(formatoBase)
+                if (!string.IsNullOrWhiteSpace(formatoBase)
                     && evolucionPorFormato.TryGetValue(formatoBase.Trim(), out var evoCod))
                 {
-                    formatoEfectivo = evoCod;
+                    if (nGlobal >= 2)
+                    {
+                        // 2da sesion en adelante de ESTA asignacion -> evolucion.
+                        formatoEfectivo = evoCod;
+                    }
+                    else if (mesesPuentePorFormato.TryGetValue(formatoBase.Trim(), out var mesesPuente)
+                             && ultimaAtencionPorPacienteFormato.TryGetValue((a.PacienteId, formatoBase.Trim()), out var ultimaAtencion))
+                    {
+                        // Sesion 1 de una asignacion NUEVA: si el paciente tuvo una atencion
+                        // previa en esta misma terapia dentro de la ventana deslizante de
+                        // MesesPuente meses (medida desde la ultima fecha de atencion), el
+                        // puente sigue abierto y esta sesion 1 tambien usa evolucion.
+                        // Referencia del "momento de la nueva sesion": la fecha programada
+                        // del turno (t.FechaInicio); fallback a hoy.
+                        var fechaNuevaSesion = t.FechaInicio is DateOnly fIni
+                            ? new DateTimeOffset(fIni.ToDateTime(TimeOnly.MinValue), DateTimeOffset.Now.Offset)
+                            : DateTimeOffset.Now;
+                        if (ultimaAtencion >= fechaNuevaSesion.AddMonths(-mesesPuente))
+                        {
+                            formatoEfectivo = evoCod;
+                        }
+                    }
                 }
                 // Nombre del formato que se serviria hoy (null si el codigo no resuelve
                 // a un formulario activo — la UI lo marca como "no cargara").

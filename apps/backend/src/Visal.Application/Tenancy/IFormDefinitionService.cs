@@ -22,7 +22,8 @@ public sealed record FormDefinitionDetailDto(
     string SchemaJson,
     string? PrefillRoutesJson,
     string? CodigoSecundario = null,
-    string? FormatoEvolucionCodigo = null);
+    string? FormatoEvolucionCodigo = null,
+    int? MesesPuente = null);
 
 /// <summary>Alta o actualizacion. Si <see cref="Id"/> es null se crea; si no, se actualiza.</summary>
 public sealed record SaveFormDefinitionRequest(
@@ -35,7 +36,8 @@ public sealed record SaveFormDefinitionRequest(
     bool Activo,
     string? PrefillRoutesJson = null,
     string? CodigoSecundario = null,
-    string? FormatoEvolucionCodigo = null);
+    string? FormatoEvolucionCodigo = null,
+    int? MesesPuente = null);
 
 /// <summary>Gestion de definiciones de formularios (Motor de Formularios, 2.M10), tenant-scoped.</summary>
 public interface IFormDefinitionService

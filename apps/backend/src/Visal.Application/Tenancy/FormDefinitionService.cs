@@ -34,7 +34,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         return await _db.FormDefinitions
             .AsNoTracking()
             .Where(f => f.Id == id)
-            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo))
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo, f.MesesPuente))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -46,7 +46,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             .AsNoTracking()
             .Where(f => f.Activo && f.Tipo == t)
             .OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt)
-            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo))
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo, f.MesesPuente))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -58,7 +58,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             .AsNoTracking()
             .Where(f => f.Activo && f.CodigoSecundario == c)
             .OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt)
-            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo))
+            .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo, f.MesesPuente))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -97,6 +97,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             existing.Activo = request.Activo;
             if (request.PrefillRoutesJson is not null) { existing.PrefillRoutesJson = request.PrefillRoutesJson; }
             existing.FormatoEvolucionCodigo = string.IsNullOrWhiteSpace(request.FormatoEvolucionCodigo) ? null : request.FormatoEvolucionCodigo.Trim();
+            existing.MesesPuente = request.MesesPuente is int mp && mp > 0 ? mp : null;
             entity = existing;
 
             _audit.Write(actorUserId, "form-definition.update", nameof(FormDefinition), entity.Id,
@@ -126,7 +127,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 SchemaJson = string.IsNullOrWhiteSpace(request.SchemaJson) ? "{\"children\":[]}" : request.SchemaJson,
                 Activo = request.Activo,
                 PrefillRoutesJson = request.PrefillRoutesJson,
-                FormatoEvolucionCodigo = string.IsNullOrWhiteSpace(request.FormatoEvolucionCodigo) ? null : request.FormatoEvolucionCodigo.Trim()
+                FormatoEvolucionCodigo = string.IsNullOrWhiteSpace(request.FormatoEvolucionCodigo) ? null : request.FormatoEvolucionCodigo.Trim(),
+                MesesPuente = request.MesesPuente is int mp && mp > 0 ? mp : null
             };
             _db.FormDefinitions.Add(entity);
 
@@ -135,7 +137,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson, entity.PrefillRoutesJson, entity.CodigoSecundario, entity.FormatoEvolucionCodigo);
+        return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson, entity.PrefillRoutesJson, entity.CodigoSecundario, entity.FormatoEvolucionCodigo, entity.MesesPuente);
     }
 
     public async Task<bool> UpdatePrefillRoutesAsync(Guid id, string? prefillRoutesJson, Guid actorUserId, CancellationToken cancellationToken = default)

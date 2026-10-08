@@ -110,8 +110,43 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                     c.Id, c.Orden, c.Origen, c.TipologiaArchivoId,
                     c.TipologiaArchivoId is Guid tg && tipNombres.TryGetValue(tg, out var nm) ? nm : null,
                     c.SoloUltimo, c.FormularioTipo))
-                .ToList()))
+                .ToList(),
+            ParseOrdenNiveles(i.OrdenJson)))
             .ToList();
+    }
+
+    /// <summary>Parsea el JSON de orden multinivel (<c>[{"campo":"cup|fecha","desc":bool}]</c>)
+    /// a la lista de niveles. Null/invalido/vacio => null (orden cronologico por defecto).</summary>
+    private static IReadOnlyList<InformeOrdenNivelDto>? ParseOrdenNiveles(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return null; }
+        try
+        {
+            var raw = System.Text.Json.JsonSerializer.Deserialize<List<OrdenNivelRaw>>(json);
+            if (raw is null || raw.Count == 0) { return null; }
+            var niveles = raw
+                .Where(x => x.Campo is "cup" or "fecha")
+                .Select(x => new InformeOrdenNivelDto(x.Campo!, x.Desc))
+                .ToList();
+            return niveles.Count > 0 ? niveles : null;
+        }
+        catch { return null; }
+    }
+
+    private sealed class OrdenNivelRaw
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("campo")] public string? Campo { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("desc")] public bool Desc { get; set; }
+    }
+
+    /// <summary>Serializa los niveles de orden a JSON para persistir en el item. Vacio => null.</summary>
+    private static string? SerializeOrdenNiveles(IReadOnlyList<InformeOrdenNivelDto>? niveles)
+    {
+        var limpios = (niveles ?? Array.Empty<InformeOrdenNivelDto>())
+            .Where(n => n.Campo is "cup" or "fecha")
+            .Select(n => new OrdenNivelRaw { Campo = n.Campo, Desc = n.Desc })
+            .ToList();
+        return limpios.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(limpios);
     }
 
     public async Task<InformeItemDto> GuardarItemAsync(
@@ -163,6 +198,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         item.Descripcion = NullIfBlank(req.Descripcion);
         item.PatronNombre = NullIfBlank(req.PatronNombre);
         item.Obligatorio = req.Obligatorio;
+        item.OrdenJson = SerializeOrdenNiveles(req.OrdenNiveles);
         // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
         // compatibilidad; la fuente de verdad es la tabla de contenidos.
         var primero = contenidos[0];

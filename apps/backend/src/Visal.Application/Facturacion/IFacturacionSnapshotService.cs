@@ -38,7 +38,10 @@ public sealed record FacturacionSnapshotDto(
     string? ErrorMensaje,
     Guid? AseguradoraId,
     string? AseguradoraNombre,
-    string? VersionApp = null);
+    string? VersionApp = null,
+    // Nombre/email del usuario que creo el snapshot (resuelto de CreadoPor via
+    // tenant_users). Null si no se pudo resolver.
+    string? CreadoPorNombre = null);
 
 /// <summary>Vista detallada de un snapshot (metadata + columnas del builder).</summary>
 public sealed record FacturacionSnapshotDetalleDto(

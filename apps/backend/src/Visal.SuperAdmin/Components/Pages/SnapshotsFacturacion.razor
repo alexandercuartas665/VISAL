@@ -98,6 +98,16 @@
             </select>
         </div>
         <div class="sn-f">
+            <label>Usuario</label>
+            <select class="form-select form-select-sm" @bind="_filtroUsuario" @bind:after="CargarLista">
+                <option value="">(Todos)</option>
+                @foreach (var u in _usuariosFiltro)
+                {
+                    <option value="@u.Id">@u.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="sn-f">
             <label>Fecha desde</label>
             <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" @bind:after="CargarLista" />
         </div>
@@ -126,6 +136,7 @@
                     <tr>
                         <th>Nombre</th>
                         <th>Aseguradora</th>
+                        <th>Usuario</th>
                         <th>Tipo</th>
                         <th>Estado</th>
                         <th>Inicio</th>
@@ -152,6 +163,7 @@
                                 }
                             </td>
                             <td>@(s.AseguradoraNombre ?? "-")</td>
+                            <td class="sn-truncate" title="@s.CreadoPorNombre">@(s.CreadoPorNombre ?? "-")</td>
                             <td><span class="sn-tag">@s.Tipo</span></td>
                             <td>
                                 <span class="sn-estado sn-estado-@(s.Estado.ToString().ToLower())">@s.Estado</span>
@@ -257,11 +269,12 @@
                             <label>
                                 Filtro paciente <small class="text-muted">(opcional — para pruebas del sistema)</small>
                             </label>
-                            <input class="form-control form-control-sm"
-                                   @bind="_relPacienteQuery"
-                                   placeholder="Nombre o identificacion del paciente" />
+                            <textarea class="form-control form-control-sm"
+                                      rows="3"
+                                      @bind="_relPacienteQuery"
+                                      placeholder="Un paciente por linea: nombre o identificacion"></textarea>
                             <small class="text-muted d-block mt-1">
-                                Solo se incluiran en el snapshot las HC de pacientes cuyo nombre o documento contenga este texto (case y tildes insensibles). Vacio = todos.
+                                <b>Un paciente por linea</b> (nombre o documento). Se incluyen las HC de pacientes cuyo nombre o documento contenga <b>alguno</b> de los textos (case y tildes insensibles). Vacio = todos.
                             </small>
                         </div>
                         <div class="snf-f">
@@ -1311,8 +1324,12 @@
     // Filtros del listado.
     private string _filtroTipo = "";
     private string _filtroAseguradora = "";
+    private string _filtroUsuario = "";
     private DateOnly? _filtroDesde;
     private DateOnly? _filtroHasta;
+    // Usuarios creadores (distinct) para el dropdown de filtro. Se arma de la lista
+    // completa (vigentes + archivados) en CargarLista.
+    private List<(Guid Id, string Nombre)> _usuariosFiltro = new();
 
     // Modal Nuevo.
     private bool _showNuevo;
@@ -1562,7 +1579,9 @@
             if (!string.IsNullOrWhiteSpace(_filtroTipo) && Enum.TryParse<TipoSnapshot>(_filtroTipo, out var t)) { tipo = t; }
             Guid? asegFiltro = null;
             if (!string.IsNullOrWhiteSpace(_filtroAseguradora) && Guid.TryParse(_filtroAseguradora, out var af)) { asegFiltro = af; }
-            var filtros = new FiltrosListaSnapshotDto(null, _filtroDesde, _filtroHasta, asegFiltro);
+            Guid? usuarioFiltro = null;
+            if (!string.IsNullOrWhiteSpace(_filtroUsuario) && Guid.TryParse(_filtroUsuario, out var uf)) { usuarioFiltro = uf; }
+            var filtros = new FiltrosListaSnapshotDto(usuarioFiltro, _filtroDesde, _filtroHasta, asegFiltro);
             _lista = (await Svc.ListarAsync(estado, tipo, filtros)).ToList();
 
             // Refrescamos ambos contadores en paralelo para el tab.
@@ -1570,6 +1589,13 @@
             var arcCount = await Svc.ListarAsync(EstadoSnapshot.Archivado, null, null);
             _conteoVigentes = vigCount.Count;
             _conteoArchivados = arcCount.Count;
+            // Dropdown de usuarios: distinct creadores de toda la lista (vig + arch).
+            _usuariosFiltro = vigCount.Concat(arcCount)
+                .Where(s => s.CreadoPor is not null && !string.IsNullOrWhiteSpace(s.CreadoPorNombre))
+                .GroupBy(s => s.CreadoPor!.Value)
+                .Select(g => (Id: g.Key, Nombre: g.First().CreadoPorNombre!))
+                .OrderBy(x => x.Nombre)
+                .ToList();
         }
         catch (Exception ex) { _error = "Error al listar snapshots: " + ex.Message; }
         finally { _cargando = false; }
@@ -1677,14 +1703,20 @@
                     // El nombre queda tal cual lo puso el usuario — la EPS ahora es un
                     // campo estructurado (columna Aseguradora + filtro), asi que ya no
                     // se necesita sufijarla al nombre para distinguir los snapshots.
-                    var pq = string.IsNullOrWhiteSpace(_relPacienteQuery) ? null : _relPacienteQuery.Trim();
+                    // Filtro de pacientes (opcional, para pruebas): uno por linea.
+                    // Se envia como arreglo "pacienteQueries"; el snapshot incluye las
+                    // HC de pacientes que coincidan con ALGUNO de los textos.
+                    var pqArray = (_relPacienteQuery ?? string.Empty)
+                        .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
                     var payload = new
                     {
                         aseguradoraId = a.Id.ToString(),
                         sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
                         fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
                         fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
-                        pacienteQuery = pq,
+                        pacienteQueries = pqArray.Length > 0 ? pqArray : null,
                     };
                     var filtrosJson = JsonSerializer.Serialize(payload);
                     try

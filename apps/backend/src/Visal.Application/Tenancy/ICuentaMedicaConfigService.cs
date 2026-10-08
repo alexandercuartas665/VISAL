@@ -27,6 +27,11 @@ public sealed record GuardarPortadaRequest(
     bool IndiceHabilitado,
     string? PatronNombreDefault);
 
+/// <summary>Un nivel de ordenamiento del contenido "Formulario por tipo" dentro del
+/// PDF del paciente. <see cref="Campo"/> = "cup" (CodigoRips de la asignacion) o
+/// "fecha" (fecha de atencion). Se aplican en secuencia (nivel 0 primero).</summary>
+public sealed record InformeOrdenNivelDto(string Campo, bool Desc = false);
+
 /// <summary>Un archivo/tipologia de salida = nombre + patron + N contenidos.</summary>
 public sealed record InformeItemDto(
     Guid Id,
@@ -37,7 +42,10 @@ public sealed record InformeItemDto(
     string? Descripcion,
     string? PatronNombre,
     bool Obligatorio,
-    IReadOnlyList<InformeContenidoDto> Contenidos);
+    IReadOnlyList<InformeContenidoDto> Contenidos,
+    // Orden multinivel de las Historias medicas (Formulario por tipo). Vacio =
+    // cronologico ascendente (historico).
+    IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null);
 
 /// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
 public sealed record InformeContenidoDto(
@@ -57,7 +65,8 @@ public sealed record GuardarItemRequest(
     string? Descripcion,
     string? PatronNombre,
     bool Obligatorio,
-    IReadOnlyList<GuardarContenidoDto> Contenidos);
+    IReadOnlyList<GuardarContenidoDto> Contenidos,
+    IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null);
 
 /// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
 /// todos en cada guardado).</summary>

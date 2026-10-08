@@ -74,13 +74,17 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             .Where(p => pacienteIds.Contains(p.Id))
             .ToListAsync(ct);
 
-        // 3.1) Filtro PacienteQuery (opcional, pensado para pruebas): match
-        //      case+tilde-insensitive por CONTIENE contra el nombre completo
-        //      o contra la identificacion. Se aplica sobre la coleccion ya
+        // 3.1) Filtro PacienteQueries (opcional, pensado para pruebas): un paciente
+        //      entra si su nombre completo o identificacion CONTIENE ALGUNO de los
+        //      textos (case+tilde-insensitive). Se aplica sobre la coleccion ya
         //      cargada en memoria para no reescribir la query EF.
-        if (!string.IsNullOrWhiteSpace(filtros.PacienteQuery))
+        var needles = (filtros.PacienteQueries ?? Array.Empty<string>())
+            .Select(NormalizarParaBusqueda)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (needles.Count > 0)
         {
-            var needle = NormalizarParaBusqueda(filtros.PacienteQuery);
             pacientes = pacientes
                 .Where(p =>
                 {
@@ -92,8 +96,9 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                         p.SegundoApellido
                     }.Where(x => !string.IsNullOrWhiteSpace(x))));
                     var docu = NormalizarParaBusqueda(p.NumeroDocumento);
-                    return nombre.Contains(needle, StringComparison.Ordinal)
-                        || docu.Contains(needle, StringComparison.Ordinal);
+                    return needles.Any(n =>
+                        nombre.Contains(n, StringComparison.Ordinal)
+                        || docu.Contains(n, StringComparison.Ordinal));
                 })
                 .ToList();
             if (pacientes.Count == 0) { return Array.Empty<RelacionFacturasHecho>(); }

@@ -59,4 +59,10 @@ public class AseguradoraInformeItem : TenantEntity
     /// AutorizacionAsignacion). True = incluye SOLO la mas reciente. False =
     /// incluye todas.</summary>
     public bool SoloUltimo { get; set; }
+
+    /// <summary>Orden multinivel del contenido "Formulario por tipo" (Historias
+    /// medicas) dentro del PDF del paciente. JSON: arreglo de niveles
+    /// <c>[{"campo":"cup|fecha","desc":false}, ...]</c> aplicados en secuencia.
+    /// Null/vacio = orden cronologico ascendente (comportamiento historico).</summary>
+    public string? OrdenJson { get; set; }
 }

@@ -257,13 +257,30 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             fechaFin = ffParsed;
         }
 
-        string? pacienteQuery = null;
+        // Filtro de pacientes (para pruebas): acepta varios. Formato nuevo
+        // "pacienteQueries" (array de strings); se mantiene compat con el formato
+        // viejo "pacienteQuery" (string unico) de snapshots previos.
+        var pacienteQueries = new List<string>();
+        if (root.TryGetProperty("pacienteQueries", out var pqs) && pqs.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in pqs.EnumerateArray())
+            {
+                if (el.ValueKind == JsonValueKind.String)
+                {
+                    var s = el.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) { pacienteQueries.Add(s.Trim()); }
+                }
+            }
+        }
         if (root.TryGetProperty("pacienteQuery", out var pq) && pq.ValueKind == JsonValueKind.String)
         {
             var s = pq.GetString();
-            if (!string.IsNullOrWhiteSpace(s)) { pacienteQuery = s.Trim(); }
+            if (!string.IsNullOrWhiteSpace(s)) { pacienteQueries.Add(s.Trim()); }
         }
+        var pacienteQueriesFinal = pacienteQueries.Count > 0
+            ? pacienteQueries.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : null;
 
-        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQuery);
+        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQueriesFinal);
     }
 }

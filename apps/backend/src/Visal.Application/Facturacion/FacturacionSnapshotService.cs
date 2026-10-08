@@ -246,7 +246,21 @@ public sealed class FacturacionSnapshotService(
             : await db.Aseguradoras.AsNoTracking()
                 .Where(a => asegIds.Contains(a.Id))
                 .ToDictionaryAsync(a => a.Id, a => a.Nombre, ct);
-        return rows.Select(r => Map(r, r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null)).ToList();
+        // Nombre del usuario creador (email del tenant_user) por CreatedBy (platform_user_id).
+        var creadorIds = rows.Where(r => r.CreatedBy is not null).Select(r => r.CreatedBy!.Value).Distinct().ToList();
+        var creadores = new Dictionary<Guid, string>();
+        if (creadorIds.Count > 0)
+        {
+            var tus = await db.TenantUsers.AsNoTracking()
+                .Where(tu => creadorIds.Contains(tu.PlatformUserId))
+                .Select(tu => new { tu.PlatformUserId, tu.Email })
+                .ToListAsync(ct);
+            foreach (var tu in tus) { creadores[tu.PlatformUserId] = tu.Email; }
+        }
+        return rows.Select(r => Map(
+            r,
+            r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null,
+            r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var em) ? em : null)).ToList();
     }
 
     public async Task<FacturacionSnapshotDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
@@ -590,11 +604,11 @@ public sealed class FacturacionSnapshotService(
             .ToListAsync(ct);
     }
 
-    private static FacturacionSnapshotDto Map(FacturacionSnapshot x, string? aseguradoraNombre = null) => new(
+    private static FacturacionSnapshotDto Map(FacturacionSnapshot x, string? aseguradoraNombre = null, string? creadoPorNombre = null) => new(
         x.Id, x.Nombre, x.Tipo, x.Estado,
         x.FechaEjecucionInicio, x.FechaEjecucionFin, x.DuracionMs, x.TotalFilas,
         x.CreatedBy, x.ArchivadoPor, x.MotivoArchivado, x.FechaArchivado, x.ErrorMensaje,
-        x.AseguradoraId, aseguradoraNombre, x.VersionApp);
+        x.AseguradoraId, aseguradoraNombre, x.VersionApp, creadoPorNombre);
 
     /// <summary>
     /// Extrae <c>aseguradoraId</c> del JSON de filtros para poder guardarlo en

@@ -37,6 +37,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <see cref="RenderIdx"/> que se renderiza en lote (formulario por tipo).</summary>
     private readonly record struct PartePlan(byte[]? Inline, int RenderIdx);
 
+    /// <summary>Fila de HC para ordenar el contenido "Formulario por tipo": id + fecha
+    /// de atencion (para orden cronologico) — el CUP se resuelve aparte por lote.</summary>
+    private readonly record struct FilaHcOrden(Guid Id, DateTimeOffset Fecha);
+
     static TipologiaZipService()
     {
         // QuestPDF Community (gratis para este uso). Idempotente.
@@ -335,7 +339,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, ct))
+                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, ct))
                     {
                         partes.Add(new PartePlan(null, allUrls.Count));
                         allUrls.Add(url);
@@ -489,28 +493,76 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// solo uso) de cada HC Cerrada del paciente cuyo FormDefinition.Tipo =
     /// <paramref name="tipo"/>. No renderiza aqui: las URLs se juntan con las de los demas
     /// pacientes y se rinden en lote (un solo navegador, en paralelo). SoloUltimo = solo la
-    /// HC mas reciente (por fecha de atencion).</summary>
+    /// HC mas reciente (por fecha de atencion). <paramref name="ordenNiveles"/> define el
+    /// orden multinivel (cup/fecha); vacio = cronologico ascendente (historico).</summary>
     private async Task<List<string>> ResolverUrlsFormularioPorTipoAsync(
-        Guid pacienteId, string? tipo, bool soloUltimo, CancellationToken ct)
+        Guid pacienteId, string? tipo, bool soloUltimo,
+        IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
 
-        var q = _db.HistoriasClinicas.AsNoTracking()
+        var filas = (await _db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId && h.Estado == HistoriaClinicaEstado.Cerrada)
             .Join(_db.FormDefinitions.AsNoTracking(),
                   h => h.FormDefinitionId, f => f.Id,
                   (h, f) => new { h.Id, h.FechaCierre, h.FechaAtencion, h.CreatedAt, f.Tipo })
-            .Where(x => x.Tipo == tipo);
+            .Where(x => x.Tipo == tipo)
+            .Select(x => new { x.Id, Fecha = x.FechaAtencion ?? x.FechaCierre ?? x.CreatedAt })
+            .ToListAsync(ct))
+            .Select(x => new FilaHcOrden(x.Id, x.Fecha))
+            .ToList();
+        if (filas.Count == 0) { return new(); }
 
-        var hcIds = soloUltimo
-            ? await q.OrderByDescending(x => x.FechaAtencion ?? x.FechaCierre ?? x.CreatedAt)
-                     .Take(1).Select(x => x.Id).ToListAsync(ct)
-            : await q.OrderBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.CreatedAt)
-                     .Select(x => x.Id).ToListAsync(ct);
+        if (soloUltimo)
+        {
+            // SoloUltimo = la HC mas reciente por fecha, independiente del orden configurado.
+            filas = new List<FilaHcOrden> { filas.OrderByDescending(f => f.Fecha).First() };
+        }
+        else
+        {
+            // Orden multinivel: si no hay config, cronologico ascendente (historico).
+            var niveles = (ordenNiveles is { Count: > 0 })
+                ? ordenNiveles
+                : new List<InformeOrdenNivelDto> { new("fecha", false) };
 
-        if (hcIds.Count == 0) { return new(); }
+            // CUP (CodigoRips de la asignacion) por HC, via pivote sesion->turno->asignacion.
+            // Solo se consulta si algun nivel ordena por "cup".
+            var cupPorHc = new Dictionary<Guid, string>();
+            if (niveles.Any(n => n.Campo == "cup"))
+            {
+                var ids = filas.Select(f => f.Id).ToList();
+                var cups = await (
+                    from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+                    where ids.Contains(p.HistoriaClinicaId)
+                    join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                    join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                    join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                    select new { p.HistoriaClinicaId, a.CodigoRips })
+                    .ToListAsync(ct);
+                foreach (var r in cups)
+                {
+                    if (!cupPorHc.ContainsKey(r.HistoriaClinicaId) && !string.IsNullOrWhiteSpace(r.CodigoRips))
+                    {
+                        cupPorHc[r.HistoriaClinicaId] = r.CodigoRips!;
+                    }
+                }
+            }
+
+            IOrderedEnumerable<FilaHcOrden>? ordered = null;
+            foreach (var n in niveles)
+            {
+                Func<FilaHcOrden, IComparable> key = n.Campo == "cup"
+                    ? (f => cupPorHc.TryGetValue(f.Id, out var c) ? c : "")
+                    : (f => f.Fecha);
+                ordered = ordered is null
+                    ? (n.Desc ? filas.OrderByDescending(key) : filas.OrderBy(key))
+                    : (n.Desc ? ordered.ThenByDescending(key) : ordered.ThenBy(key));
+            }
+            filas = (ordered ?? filas.OrderBy(f => f.Fecha)).ToList();
+        }
+
         var baseUrl = BaseUrlInterna();
-        return hcIds.Select(hcId => $"{baseUrl}/p/hc-form/{hcId}?t={_printTokens.Mint(hcId, tid)}").ToList();
+        return filas.Select(f => $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}").ToList();
     }
 
     /// <summary>URL base interna del propio servidor para que Puppeteer navegue a las

@@ -13,9 +13,9 @@ public sealed record RelacionFacturasFiltros(
     DateOnly FechaInicio,
     DateOnly FechaFin,
     // Opcional: filtra los pacientes cuyo nombre completo o identificacion CONTIENE
-    // este texto (case-insensitive, sin tildes). Pensado para pruebas del sistema
-    // — un solo paciente por snapshot. Vacio/null => no filtra.
-    string? PacienteQuery = null);
+    // ALGUNO de estos textos (case-insensitive, sin tildes). Pensado para pruebas del
+    // sistema — uno o varios pacientes por snapshot. Vacio/null => no filtra.
+    IReadOnlyList<string>? PacienteQueries = null);
 
 /// <summary>
 /// "Hecho facturable" resuelto por el selector — todo lo que el builder de

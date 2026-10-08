@@ -302,6 +302,52 @@ else
                             }
                         </div>
                     }
+
+                    @* ===== Orden de las Historias medicas (Formulario por tipo) ===== *@
+                    @if (ItemTieneFormularioPorTipo())
+                    {
+                        <div class="cm-cont-head" style="margin-top:16px;">
+                            <div>
+                                <div class="cm-cont-title">Orden de las historias medicas</div>
+                                <div class="cm-cont-sub">Define el orden (en niveles) de las HC dentro del PDF. Sin niveles = cronologico ascendente.</div>
+                            </div>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="AgregarNivelOrden" type="button">+ Agregar nivel</button>
+                        </div>
+                        @if (_itemEdit.OrdenNiveles.Count == 0)
+                        {
+                            <div class="cm-cont-empty">Sin niveles: las HC salen en orden cronologico (fecha de atencion ascendente).</div>
+                        }
+                        else
+                        {
+                            <div class="cm-cont-list">
+                                @foreach (var (n, ni) in _itemEdit.OrdenNiveles.Select((v, i) => (v, i)))
+                                {
+                                    <div class="cm-cont-card" style="display:flex;align-items:flex-end;gap:10px;">
+                                        <span class="badge bg-secondary" style="margin-bottom:6px;">@(ni + 1)</span>
+                                        <div class="cm-f" style="min-width:160px;">
+                                            <label>Campo</label>
+                                            <select class="form-select form-select-sm" @bind="n.Campo">
+                                                <option value="cup">Codigo CUP</option>
+                                                <option value="fecha">Fecha de atencion</option>
+                                            </select>
+                                        </div>
+                                        <div class="cm-f" style="min-width:150px;">
+                                            <label>Direccion</label>
+                                            <select class="form-select form-select-sm" @bind="n.Desc">
+                                                <option value="false">Ascendente</option>
+                                                <option value="true">Descendente</option>
+                                            </select>
+                                        </div>
+                                        <div style="margin-left:auto;display:flex;gap:4px;margin-bottom:4px;">
+                                            <button class="cm-card-arrow" type="button" @onclick="() => MoverNivelOrden(ni, ni - 1)" disabled="@(ni == 0)" title="Subir">&#9650;</button>
+                                            <button class="cm-card-arrow" type="button" @onclick="() => MoverNivelOrden(ni, ni + 1)" disabled="@(ni == _itemEdit.OrdenNiveles.Count - 1)" title="Bajar">&#9660;</button>
+                                            <button class="btn btn-outline-danger btn-sm" type="button" @onclick="() => QuitarNivelOrden(ni)" title="Quitar">&times;</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
                 </div>
             </div>
             <div class="cm-modal-f">
@@ -658,9 +704,34 @@ else
                     SoloUltimo = c.SoloUltimo,
                 })
                 .ToList(),
+            OrdenNiveles = (it.OrdenNiveles ?? Array.Empty<InformeOrdenNivelDto>())
+                .Select(n => new OrdenNivelEditModel { Campo = n.Campo, Desc = n.Desc })
+                .ToList(),
         };
         _itemModalOpen = true;
     }
+
+    private void AgregarNivelOrden()
+        => _itemEdit?.OrdenNiveles.Add(new OrdenNivelEditModel { Campo = "cup", Desc = false });
+
+    private void QuitarNivelOrden(int idx)
+    {
+        if (_itemEdit is null || idx < 0 || idx >= _itemEdit.OrdenNiveles.Count) { return; }
+        _itemEdit.OrdenNiveles.RemoveAt(idx);
+    }
+
+    private void MoverNivelOrden(int desde, int hacia)
+    {
+        if (_itemEdit is null || hacia < 0 || hacia >= _itemEdit.OrdenNiveles.Count || desde == hacia) { return; }
+        var n = _itemEdit.OrdenNiveles[desde];
+        _itemEdit.OrdenNiveles.RemoveAt(desde);
+        _itemEdit.OrdenNiveles.Insert(hacia, n);
+    }
+
+    /// <summary>True si el archivo tiene algun contenido "Formulario por tipo"
+    /// (Historias medicas) — unico origen al que aplica el orden configurable.</summary>
+    private bool ItemTieneFormularioPorTipo()
+        => _itemEdit?.Contenidos.Any(c => c.Origen == OrigenInformeItem.FormularioPorTipo) ?? false;
 
     private void AgregarContenido()
     {
@@ -701,10 +772,14 @@ else
             var contenidos = _itemEdit.Contenidos
                 .Select(c => new GuardarContenidoDto(c.Origen, c.TipologiaArchivoId, c.SoloUltimo, c.FormularioTipo))
                 .ToList();
+            var ordenNiveles = _itemEdit.OrdenNiveles
+                .Where(n => n.Campo is "cup" or "fecha")
+                .Select(n => new InformeOrdenNivelDto(n.Campo, n.Desc))
+                .ToList();
             await Svc.GuardarItemAsync(new GuardarItemRequest(
                 _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
                 _itemEdit.Descripcion, _itemEdit.PatronNombre, _itemEdit.Obligatorio,
-                contenidos),
+                contenidos, ordenNiveles),
                 Guid.Empty);
             CerrarItemModal();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
@@ -815,6 +890,8 @@ else
         public string? PatronNombre { get; set; }
         public bool Obligatorio { get; set; }
         public List<ContenidoEditModel> Contenidos { get; set; } = new();
+        // Orden multinivel de Historias medicas (Formulario por tipo). Vacio = cronologico.
+        public List<OrdenNivelEditModel> OrdenNiveles { get; set; } = new();
     }
 
     private sealed class ContenidoEditModel
@@ -823,5 +900,11 @@ else
         public Guid? TipologiaArchivoId { get; set; }
         public string? FormularioTipo { get; set; }
         public bool SoloUltimo { get; set; }
+    }
+
+    private sealed class OrdenNivelEditModel
+    {
+        public string Campo { get; set; } = "cup";   // "cup" | "fecha"
+        public bool Desc { get; set; }
     }
 }

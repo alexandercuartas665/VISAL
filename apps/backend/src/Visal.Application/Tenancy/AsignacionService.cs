@@ -369,6 +369,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 ValorPagoReal = req.ValorPagoReal,
                 Estado = AsignacionEstado.Pendiente,
                 AutorizacionPendiente = req.AutorizacionPendiente,
+                EsFolio = req.EsFolio,
                 PaqueteInstanciaId = it.PaqueteInstanciaId,
                 PaqueteCodigo = it.PaqueteCodigo,
                 PaqueteValorPactado = valorPactado,

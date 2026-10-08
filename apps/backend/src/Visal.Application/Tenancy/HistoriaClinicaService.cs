@@ -719,6 +719,24 @@ public sealed class HistoriaClinicaService(
         return true;
     }
 
+    public async Task<bool> SetFolioPorHcAsync(Guid hcId, bool esFolio, Guid actor, CancellationToken ct = default)
+    {
+        // Resuelve la(s) asignacion(es) de la HC via el pivote sesion->turno->asignacion
+        // y marca/desmarca EsFolio. Afecta la asignacion completa (todas sus HCs), que es
+        // lo esperado: "esta asignacion es un folio". Las folio no caen en RelacionFacturas.
+        var asigIds = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            where p.HistoriaClinicaId == hcId
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            select t.AsignacionId).Distinct().ToListAsync(ct);
+        if (asigIds.Count == 0) { return false; }
+        var asigs = await db.Asignaciones.Where(a => asigIds.Contains(a.Id)).ToListAsync(ct);
+        foreach (var a in asigs) { a.EsFolio = esFolio; a.UpdatedBy = actor; }
+        await db.SaveChangesAsync(ct);
+        return asigs.Count > 0;
+    }
+
     public async Task<bool> DescartarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default)
     {
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);

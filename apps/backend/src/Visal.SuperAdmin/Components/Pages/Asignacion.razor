@@ -351,6 +351,13 @@
                     </label>
                     <div class="asg-hint">Guarda el registro sin n&uacute;mero ni PDF; queda marcado para completar despu&eacute;s desde el tab <b>Listado</b>.</div>
                 </div>
+                <div class="ase-f ase-f-wide">
+                    <label class="asg-chk">
+                        <input type="checkbox" @bind="_esFolio" disabled="@(_paciente == null)" />
+                        <span>Es folio</span>
+                    </label>
+                    <div class="asg-hint">Marca estos servicios como <b>folio</b>: NO se incluyen en el snapshot de facturaci&oacute;n (Snapshots).</div>
+                </div>
                 @if (_contratoSel is not null && _contratoSel.RequierePdfAutorizacion && !_autorizacionPendiente)
                 {
                     <div class="ase-f ase-f-wide">
@@ -1177,6 +1184,8 @@ else
     private string? _autorizacion;
     // Marca "guardar sin autorizacion (pendiente)" del formulario de registro.
     private bool _autorizacionPendiente;
+    // Marca el lote como "folio": las asignaciones NO caen en el snapshot RelacionFacturas.
+    private bool _esFolio;
     private DateOnly? _fechaInicio = DateOnly.FromDateTime(DateTime.Now);
     private DateOnly? _fechaFinal;
     private string _anio = DateTime.Now.Year.ToString();
@@ -1882,7 +1891,7 @@ else
             var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items,
                 _pdfAutorizacionUrl,
                 _tipoPago, _categoriaPago, _valorPagoSugerido, _valorPagoReal,
-                _autorizacionPendiente);
+                _autorizacionPendiente, _esFolio);
             var r = await Svc.CrearLoteAsync(req, await Actor());
             _ok = _autorizacionPendiente
                 ? $"Lote guardado: {r.CantidadServicios} servicio(s). Quedaron con AUTORIZACION PENDIENTE (complétalas en el tab Listado)."
@@ -1892,6 +1901,7 @@ else
             LimpiarPdf();
             LimpiarPago();
             _autorizacionPendiente = false;
+            _esFolio = false;
             _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();
         }
         catch (InvalidOperationException ex) { _error = UiError.Negocio("ASG", 100, ex.Message); }

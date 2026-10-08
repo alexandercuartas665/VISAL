@@ -345,7 +345,10 @@ public sealed record CrearLoteRequest(
     // Cuando es true, el lote se guarda SIN exigir el PDF de autorizacion (aunque el
     // contrato lo pida) y cada asignacion queda marcada como "autorizacion pendiente"
     // para completarla despues desde el tab Listado.
-    bool AutorizacionPendiente = false);
+    bool AutorizacionPendiente = false,
+    // Cuando es true, todas las asignaciones del lote se marcan como "folio" (EsFolio):
+    // servicios que NO caen en el snapshot RelacionFacturas (excluidos de Snapshots).
+    bool EsFolio = false);
 
 /// <summary>Filtros del tab "Listado" en /asignacion. Todos opcionales; los null/vacios
 /// simplemente no aplican. Fecha_inicial y fecha_final aplican sobre FechaInicio de la

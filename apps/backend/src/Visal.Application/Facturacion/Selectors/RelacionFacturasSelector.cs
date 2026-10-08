@@ -338,6 +338,10 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                         .FirstOrDefault();
             }
 
+            // Folio: si la asignacion de la HC esta marcada como folio, el servicio NO
+            // se factura por este snapshot -> se excluye de RelacionFacturas (Snapshots).
+            if (asigRelevante?.EsFolio == true) { continue; }
+
             // TipoArchivoRips desde el modulo de la asignacion via catalogo.
             string? tipoArchivoRips = null;
             if (!string.IsNullOrEmpty(asigRelevante?.Modulo)

@@ -350,6 +350,13 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Select(x => new AsigServInfo(x.Id, x.LoteId, x.ServicioId))
                 .ToList();
         var asigToLote = asigInfo.ToDictionary(x => x.Id, x => x.LoteId);
+        // EsFolio por asignacion (para mostrar/toggle "folio" en el kebab de Ordenes).
+        var asigToEsFolio = asigIds.Count == 0
+            ? new Dictionary<Guid, bool>()
+            : await db.Asignaciones.AsNoTracking()
+                .Where(a => asigIds.Contains(a.Id))
+                .Select(a => new { a.Id, a.EsFolio })
+                .ToDictionaryAsync(x => x.Id, x => x.EsFolio, ct);
         // Consecutivo publico del lote (AS-000045) por loteId.
         var loteIdsDistintos = asigInfo.Select(x => x.LoteId).Distinct().ToList();
         var loteToConsecutivo = loteIdsDistintos.Count == 0
@@ -488,7 +495,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 asignacionId,
                 r.Hc.Consecutivo,
                 asigLoteId is Guid loteCons && loteToConsecutivo.TryGetValue(loteCons, out var lc) ? lc : (long?)null,
-                r.Hc.ProfesionalId is Guid pid && profToDoc.TryGetValue(pid, out var pdoc) ? pdoc : null
+                r.Hc.ProfesionalId is Guid pid && profToDoc.TryGetValue(pid, out var pdoc) ? pdoc : null,
+                asignacionId is Guid afid && asigToEsFolio.TryGetValue(afid, out var ef) && ef
             );
         }).ToList();
     }

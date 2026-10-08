@@ -1743,6 +1743,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // WHERE DatosJson::text ILIKE '%buscar%' — barato para N por debajo de
             // 100k filas por snapshot.
             b.Property(x => x.DatosJson).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.Observacion).HasColumnType("text");
 
             b.HasOne(x => x.Snapshot).WithMany(x => x.Filas)
                 .HasForeignKey(x => x.SnapshotId)

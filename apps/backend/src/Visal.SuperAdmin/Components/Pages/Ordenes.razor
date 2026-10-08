@@ -1047,6 +1047,14 @@ else
                                                             title="Reabrir la HC — pasa a estado Abierta y limpia la fecha de cierre">
                                                         <span class="oc-kebab-ico">🔓</span> Reabrir historia
                                                     </button>
+                                                    <button class="oc-kebab-item oc-kebab-danger" @onclick="() => KebabRunAsync(() => InactivarHcAsync(r))"
+                                                            title="Inactivar la HC (quedo mal) — pasa a estado Inactiva y NO cae en Snapshots">
+                                                        <span class="oc-kebab-ico">🚫</span> Inactivar historia
+                                                    </button>
+                                                    <button class="oc-kebab-item" @onclick="() => KebabRunAsync(() => ToggleFolioAsync(r))"
+                                                            title="Marcar/quitar la asignacion como folio — las folio NO caen en Snapshots">
+                                                        <span class="oc-kebab-ico">🏷</span> @(r.EsFolio ? "Quitar folio" : "Marcar como folio")
+                                                    </button>
                                                 }
                                             }
                                             else if (esInactiva)
@@ -2266,6 +2274,52 @@ else
         {
             await JS.InvokeVoidAsync("alert", "No se pudo reabrir: " + ex.Message);
         }
+    }
+
+    /// <summary>Inactiva (descarta) una HC Cerrada que quedo mal: pasa a estado
+    /// Inactiva con motivo obligatorio. Las inactivas NO caen en Snapshots (el selector
+    /// de RelacionFacturas filtra solo Cerradas). Reversible con "Activar historia".</summary>
+    private async Task InactivarHcAsync(OrdenClinicaItemDto r)
+    {
+        if (!_puedeReabrir) { return; }
+        var motivo = await JS.InvokeAsync<string?>("prompt",
+            $"Inactivar la historia clinica de {r.PacienteNombre}?\n\nLa HC pasara a INACTIVA y NO se incluira en Snapshots (facturacion).\n\nMotivo (obligatorio):",
+            "");
+        if (motivo is null) { return; } // prompt cancelado
+        if (string.IsNullOrWhiteSpace(motivo))
+        {
+            await JS.InvokeVoidAsync("alert", "Debes indicar un motivo para inactivar la historia.");
+            return;
+        }
+        try
+        {
+            await HcSvc.DescartarAsync(r.HistoriaClinicaId, motivo.Trim(), _actorId);
+            await Buscar();
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", "No se pudo inactivar: " + ex.Message);
+        }
+    }
+
+    /// <summary>Marca/quita el "folio" de la asignacion de la HC. Las asignaciones folio
+    /// NO caen en el snapshot RelacionFacturas (se excluyen de Snapshots).</summary>
+    private async Task ToggleFolioAsync(OrdenClinicaItemDto r)
+    {
+        if (!_puedeReabrir) { return; }
+        var nuevo = !r.EsFolio;
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            nuevo
+                ? $"Marcar la asignacion de {r.PacienteNombre} como FOLIO?\n\nLos servicios de esta asignacion NO caeran en Snapshots (facturacion)."
+                : $"Quitar el folio de la asignacion de {r.PacienteNombre}?\n\nLos servicios volveran a caer en Snapshots.");
+        if (!ok) { return; }
+        try
+        {
+            var done = await HcSvc.SetFolioPorHcAsync(r.HistoriaClinicaId, nuevo, _actorId);
+            if (!done) { await JS.InvokeVoidAsync("alert", "La HC no tiene asignacion en cadena para marcar como folio."); return; }
+            await Buscar();
+        }
+        catch (Exception ex) { await JS.InvokeVoidAsync("alert", "No se pudo cambiar el folio: " + ex.Message); }
     }
 
     /// <summary>Reactiva una HC Inactiva (descartada). Pide motivo opcional para

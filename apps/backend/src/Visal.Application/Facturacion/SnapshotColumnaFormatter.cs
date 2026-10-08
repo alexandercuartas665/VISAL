@@ -55,6 +55,7 @@ public static class SnapshotColumnaFormatter
     {
         SnapshotColumnaFormato.Texto => "@",
         SnapshotColumnaFormato.NumeroEntero => "#,##0",
+        SnapshotColumnaFormato.NumeroPlano => "0",
         SnapshotColumnaFormato.NumeroDecimal => "#,##0.00",
         SnapshotColumnaFormato.Moneda => "\"$\" #,##0.00",
         SnapshotColumnaFormato.Porcentaje => "0.00%",
@@ -74,6 +75,9 @@ public static class SnapshotColumnaFormatter
         {
             case SnapshotColumnaFormato.NumeroEntero:
                 return TryNumero(val, out var e) ? e.ToString("#,##0", Co) : val.ToString() ?? string.Empty;
+            case SnapshotColumnaFormato.NumeroPlano:
+                // Entero sin separadores (ni puntos ni comas). Cultura invariante.
+                return TryNumero(val, out var np) ? np.ToString("0", CultureInfo.InvariantCulture) : val.ToString() ?? string.Empty;
             case SnapshotColumnaFormato.NumeroDecimal:
                 return TryNumero(val, out var d) ? d.ToString("#,##0.00", Co) : val.ToString() ?? string.Empty;
             case SnapshotColumnaFormato.Moneda:

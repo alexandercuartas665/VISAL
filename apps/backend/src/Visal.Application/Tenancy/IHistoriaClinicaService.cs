@@ -194,6 +194,11 @@ public interface IHistoriaClinicaService
     /// <summary>Marca como Inactiva (descarte) con motivo opcional.</summary>
     Task<bool> DescartarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default);
 
+    /// <summary>Marca/desmarca como "folio" la(s) asignacion(es) de la HC (via pivote).
+    /// Las folio NO caen en el snapshot RelacionFacturas. Devuelve false si la HC no
+    /// tiene asignacion en cadena.</summary>
+    Task<bool> SetFolioPorHcAsync(Guid hcId, bool esFolio, Guid actor, CancellationToken ct = default);
+
     /// <summary>Reactiva una HC previamente Inactiva (descartada), moviendola a
     /// Abierta y limpiando FechaCierre + MotivoInactivacion. Solo aplica si el
     /// estado actual es Inactiva. El caller debe validar el permiso administrativo

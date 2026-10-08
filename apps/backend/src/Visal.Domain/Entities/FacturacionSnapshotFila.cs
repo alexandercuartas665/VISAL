@@ -38,4 +38,9 @@ public class FacturacionSnapshotFila : TenantEntity
     /// destacar filas; no afecta la facturacion ni los exports de datos.
     /// </summary>
     public string? Color { get; set; }
+
+    /// <summary>Observacion/nota manual de la fila (texto libre). Nota operativa para
+    /// marcar problemas en ese registro; se muestra truncada con tooltip en el detalle
+    /// y se puede filtrar/eliminar. No afecta la facturacion ni los exports de datos.</summary>
+    public string? Observacion { get; set; }
 }

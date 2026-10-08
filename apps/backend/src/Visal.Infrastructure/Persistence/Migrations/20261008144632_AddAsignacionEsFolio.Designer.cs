@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Visal.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Visal.Infrastructure.Persistence;
 namespace Visal.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(VisalDbContext))]
-    partial class VisalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261008144632_AddAsignacionEsFolio")]
+    partial class AddAsignacionEsFolio
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2962,10 +2965,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<int>("NumeroFila")
                         .HasColumnType("integer")
                         .HasColumnName("numero_fila");
-
-                    b.Property<string>("Observacion")
-                        .HasColumnType("text")
-                        .HasColumnName("observacion");
 
                     b.Property<Guid>("SnapshotId")
                         .HasColumnType("uuid")

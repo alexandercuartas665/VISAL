@@ -293,6 +293,7 @@ public sealed class FacturacionSnapshotService(
         string? buscar = null,
         IReadOnlyList<FiltroColumna>? filtros = null,
         string? colorFiltro = null,
+        string? observacionFiltro = null,
         CancellationToken ct = default)
     {
         if (pagina < 1) { pagina = 1; }
@@ -346,6 +347,19 @@ public sealed class FacturacionSnapshotService(
             }
         }
 
+        // Filtro por observacion: "__con__" -> filas con nota; "__sin__" -> sin nota.
+        if (!string.IsNullOrWhiteSpace(observacionFiltro))
+        {
+            if (string.Equals(observacionFiltro, "__sin__", StringComparison.Ordinal))
+            {
+                q = q.Where(x => x.Observacion == null || x.Observacion == "");
+            }
+            else // "__con__" (o cualquier otro valor) -> filas con observacion
+            {
+                q = q.Where(x => x.Observacion != null && x.Observacion != "");
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(buscar))
         {
             var b = buscar.Trim().ToLower();
@@ -358,7 +372,7 @@ public sealed class FacturacionSnapshotService(
         var filas = await q.OrderBy(x => x.NumeroFila)
             .Skip((pagina - 1) * tamanoPagina)
             .Take(tamanoPagina)
-            .Select(x => new { x.Id, x.DatosJson, x.Color, x.NumeroFila })
+            .Select(x => new { x.Id, x.DatosJson, x.Color, x.Observacion, x.NumeroFila })
             .ToListAsync(ct);
 
         // Enriquecemos cada dict con __filaId (para ubicar la fila al editar celdas),
@@ -369,6 +383,7 @@ public sealed class FacturacionSnapshotService(
             var dict = new Dictionary<string, object?>(Deserializar(f.DatosJson), StringComparer.Ordinal);
             dict["__filaId"] = f.Id;
             dict["__color"] = f.Color;
+            dict["__observacion"] = f.Observacion;
             dict["__numeroFila"] = f.NumeroFila;
             return (IReadOnlyDictionary<string, object?>)dict;
         }).ToList();
@@ -514,6 +529,31 @@ public sealed class FacturacionSnapshotService(
         if (string.Equals(fila.Color, limpio, StringComparison.OrdinalIgnoreCase)) { return; }
 
         fila.Color = limpio;
+        fila.UpdatedBy = actor;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SetObservacionFilaAsync(
+        Guid snapshotId,
+        Guid filaId,
+        string? observacion,
+        Guid actor,
+        CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid) { throw new InvalidOperationException("Sin tenant activo."); }
+
+        var fila = await db.FacturacionSnapshotFilas.FirstOrDefaultAsync(
+            x => x.Id == filaId && x.SnapshotId == snapshotId, ct)
+            ?? throw new InvalidOperationException("Fila no encontrada en el snapshot.");
+
+        // Nota manual de la fila. Vacio/null borra la observacion. Es una marca
+        // operativa (no toca datos ni auditoria de celdas). Se permite en cualquier
+        // estado del snapshot. Tope de longitud defensivo.
+        var limpio = string.IsNullOrWhiteSpace(observacion) ? null : observacion.Trim();
+        if (limpio is { Length: > 1000 }) { limpio = limpio[..1000]; }
+        if (string.Equals(fila.Observacion, limpio, StringComparison.Ordinal)) { return; }
+
+        fila.Observacion = limpio;
         fila.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
     }
@@ -797,6 +837,7 @@ public sealed class FacturacionSnapshotService(
                 cell.Value = val.ToString();
                 break;
             case SnapshotColumnaFormato.NumeroEntero:
+            case SnapshotColumnaFormato.NumeroPlano:
             case SnapshotColumnaFormato.NumeroDecimal:
             case SnapshotColumnaFormato.Moneda:
             case SnapshotColumnaFormato.Porcentaje:

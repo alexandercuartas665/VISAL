@@ -100,6 +100,11 @@ public class Asignacion : TenantEntity
     /// <summary>Valor real que pago el paciente (puede diferir del sugerido).</summary>
     public decimal? ValorPagoReal { get; set; }
 
+    /// <summary>Marca la asignacion como "folio": un servicio que NO se factura por el
+    /// snapshot RelacionFacturas (se excluye de Snapshots). Se define al crear la
+    /// asignacion. Default false.</summary>
+    public bool EsFolio { get; set; }
+
     public AsignacionEstado Estado { get; set; } = AsignacionEstado.Pendiente;
 
     // ---------------- Trazabilidad de paquete ----------------

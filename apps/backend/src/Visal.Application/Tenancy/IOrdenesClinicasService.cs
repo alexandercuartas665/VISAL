@@ -97,7 +97,10 @@ public sealed record OrdenClinicaItemDto(
     long? AsignacionConsecutivo = null,
     /// <summary>Numero de documento (identificacion) del profesional tratante. Null si
     /// la HC no tiene profesional. Se muestra bajo el nombre del especialista.</summary>
-    string? ProfesionalDocumento = null);
+    string? ProfesionalDocumento = null,
+    /// <summary>True si la asignacion de la HC esta marcada como "folio": ese servicio
+    /// NO cae en el snapshot RelacionFacturas. Se puede marcar/quitar desde el kebab.</summary>
+    bool EsFolio = false);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

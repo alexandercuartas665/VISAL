@@ -21,5 +21,9 @@ public enum SnapshotColumnaFormato
     FechaIso = 8,
     /// <summary>Fecha y hora con el ano adelante: aaaa/mm/dd hh:mm.</summary>
     FechaHoraIso = 9,
+    /// <summary>Numero plano: entero SIN separadores de miles ni decimales (ni puntos ni
+    /// comas). La celda cae tipada como numero (ej. 3500000, no "3.500.000"). Util para
+    /// codigos/cantidades/valores que la EPS espera como numero crudo.</summary>
+    NumeroPlano = 10,
     Personalizado = 99
 }

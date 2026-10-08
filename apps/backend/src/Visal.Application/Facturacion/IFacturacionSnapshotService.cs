@@ -134,6 +134,7 @@ public interface IFacturacionSnapshotService
         string? buscar = null,
         IReadOnlyList<FiltroColumna>? filtros = null,
         string? colorFiltro = null,
+        string? observacionFiltro = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -210,6 +211,15 @@ public interface IFacturacionSnapshotService
         Guid snapshotId,
         Guid filaId,
         string? color,
+        Guid actor,
+        CancellationToken ct = default);
+
+    /// <summary>Set/clear de la observacion (nota manual) de una fila del snapshot.
+    /// Vacio/null borra la nota.</summary>
+    Task SetObservacionFilaAsync(
+        Guid snapshotId,
+        Guid filaId,
+        string? observacion,
         Guid actor,
         CancellationToken ct = default);
 

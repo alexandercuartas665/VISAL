@@ -1066,7 +1066,7 @@ else
             evosMerge.Add(new EvoImprimible(
                 doc.Id, doc.SchemaJson, doc.ValoresJson,
                 doc.FormatoNombre, doc.FechaApertura, doc.EspecialistaNombre,
-                faDoc, sesDoc, 0));
+                faDoc, sesDoc, doc.Consecutivo));
         }
         // Orden por el numero de sesion RIGIDO (no por fecha de digitacion/apertura,
         // que puede venir desordenada). Desempate por fecha de atencion. Las que no

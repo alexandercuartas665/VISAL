@@ -79,7 +79,11 @@
 else if (_tenantId is Guid)
 {
     <div class="pack">
-        <PaqueteHcImprimible HcId="HcId" Docs="HC" AutoEmitir="false" AutoPrint="false" />
+        @* Docs clinicos completos (HC + evoluciones-documento + escalas + consentimientos).
+           Sin esto (solo "HC") los documentos de evolucion/escala/consentimiento no se
+           cargaban en el render de Snapshots. NO se incluyen ordenes (MED/SRV/...), que
+           van en archivos aparte de Cuenta Medica. *@
+        <PaqueteHcImprimible HcId="HcId" Docs="HC,EVO,ESC,CON" AutoEmitir="false" AutoPrint="false" />
     </div>
     @* Marcador de render listo para que Puppeteer (o un wait) sepa que termino. *@
     <div id="hc-form-ready" style="display:none">ok</div>

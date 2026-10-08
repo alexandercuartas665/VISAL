@@ -141,7 +141,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
             formato.Codigo, formato.Nombre, formato.Version,
             formato.SchemaJson, formato.PrefillRoutesJson, entity.ValoresJson,
             entity.Estado.ToString(), entity.FechaApertura, entity.FechaCierre,
-            entity.EspecialistaNombre);
+            entity.EspecialistaNombre, entity.Consecutivo);
     }
 
     public async Task<DocumentoHcDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
@@ -153,7 +153,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
                 d.Id, d.HistoriaClinicaId, d.FormDefinitionId, d.Tipo,
                 FormatoCodigo = f.Codigo, FormatoNombre = f.Nombre, FormatoVersion = f.Version,
                 f.SchemaJson, f.PrefillRoutesJson, d.ValoresJson,
-                d.Estado, d.FechaApertura, d.FechaCierre, d.EspecialistaNombre
+                d.Estado, d.FechaApertura, d.FechaCierre, d.EspecialistaNombre, d.Consecutivo
             })
             .FirstOrDefaultAsync(ct);
         return r is null ? null : new DocumentoHcDetailDto(
@@ -161,7 +161,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
             r.FormatoCodigo, r.FormatoNombre, r.FormatoVersion,
             r.SchemaJson, r.PrefillRoutesJson, r.ValoresJson,
             r.Estado.ToString(), r.FechaApertura, r.FechaCierre,
-            r.EspecialistaNombre);
+            r.EspecialistaNombre, r.Consecutivo);
     }
 
     public async Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)

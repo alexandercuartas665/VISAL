@@ -907,6 +907,12 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Tipo).HasMaxLength(40).IsRequired();
             b.Property(x => x.ValoresJson).HasColumnType("jsonb").IsRequired();
             b.Property(x => x.EspecialistaNombre).HasMaxLength(200);
+            // Consecutivo publico desde la MISMA secuencia global que las HC, para que
+            // las evoluciones/notas-documento impriman "HC-00xxxx" en vez del hex del GUID.
+            b.Property(x => x.Consecutivo)
+                .HasDefaultValueSql("nextval('hc_consecutivo_seq')")
+                .ValueGeneratedOnAdd();
+            b.HasIndex(x => x.Consecutivo).IsUnique();
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasOne(x => x.FormDefinition).WithMany().HasForeignKey(x => x.FormDefinitionId)

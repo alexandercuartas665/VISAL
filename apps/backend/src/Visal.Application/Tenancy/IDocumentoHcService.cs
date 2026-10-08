@@ -26,7 +26,9 @@ public sealed record DocumentoHcDetailDto(
     string Estado,
     DateTimeOffset FechaApertura,
     DateTimeOffset? FechaCierre,
-    string? EspecialistaNombre);
+    string? EspecialistaNombre,
+    // Consecutivo publico (secuencia global de HC). Se imprime "HC-00xxxx".
+    long Consecutivo = 0);
 
 public sealed record DocumentoHcFormatoDto(
     Guid Id,

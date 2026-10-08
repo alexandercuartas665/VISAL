@@ -38,4 +38,10 @@ public class HistoriaClinicaDocumento : TenantEntity
 
     /// <summary>Profesional que lo diligencio (cache de nombre para mostrar sin join).</summary>
     public string? EspecialistaNombre { get; set; }
+
+    /// <summary>Consecutivo publico (secuencia global <c>hc_consecutivo_seq</c>, la MISMA
+    /// de las historias clinicas). Las evoluciones/notas guardadas como documento se
+    /// imprimen "HC-00xxxx" como las HC, en vez del prefijo hex del GUID. Value-generated
+    /// por default en BD (nextval).</summary>
+    public long Consecutivo { get; set; }
 }

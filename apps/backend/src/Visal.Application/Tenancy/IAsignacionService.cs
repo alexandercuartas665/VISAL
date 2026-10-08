@@ -360,7 +360,9 @@ public sealed record AsignacionListadoFiltro(
     // Cuando es true, solo devuelve asignaciones con la autorizacion pendiente.
     bool SoloAutorizacionPendiente = false,
     // Nombre de sede (Asignacion.Sucursal) para filtrar por sede. Null = todas.
-    string? Sucursal = null);
+    string? Sucursal = null,
+    // Filtra por numero de autorizacion (CONTIENE, case-insensitive). Null = todas.
+    string? CodigoAutorizacionFiltro = null);
 
 /// <summary>Fila del listado tabular de asignaciones. Incluye todos los datos
 /// relacionados (paciente + aseguradora + contrato + programacion) para que el
@@ -376,7 +378,9 @@ public sealed record AsignacionListadoDto(
     string? CodigoAutorizacion, string? Observaciones,
     string? Sucursal,
     bool AutorizacionPendiente = false,
-    string? PdfAutorizacionUrl = null);
+    string? PdfAutorizacionUrl = null,
+    // Consecutivo publico del lote de asignacion (se muestra "AS-000045").
+    long? Consecutivo = null);
 
 /// <summary>Payload para actualizar una asignacion existente (solo si esta Pendiente).
 /// Se persiste sobre el mismo registro sin tocar el lote. Los campos vienen de la

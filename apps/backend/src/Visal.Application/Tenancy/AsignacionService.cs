@@ -545,9 +545,12 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default)
     {
         // Join principal: asignaciones + paciente (in-tenant por query filter global).
+        // + lote (left join) para traer el consecutivo publico "AS-000045".
         var q = from a in db.Asignaciones.AsNoTracking()
                 join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
-                select new { a, p };
+                join lo in db.AsignacionLotes.AsNoTracking() on a.LoteId equals lo.Id into loj
+                from lo in loj.DefaultIfEmpty()
+                select new { a, p, lo };
 
         if (filtro.FechaInicial is DateOnly fi) { q = q.Where(x => x.a.FechaInicio >= fi); }
         if (filtro.FechaFinal is DateOnly ff) { q = q.Where(x => x.a.FechaInicio <= ff); }
@@ -583,6 +586,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (filtro.SoloAutorizacionPendiente)
         {
             q = q.Where(x => x.a.AutorizacionPendiente);
+        }
+        if (!string.IsNullOrWhiteSpace(filtro.CodigoAutorizacionFiltro))
+        {
+            var ca = filtro.CodigoAutorizacionFiltro.Trim().ToLower();
+            q = q.Where(x => x.a.CodigoAutorizacion != null && x.a.CodigoAutorizacion.ToLower().Contains(ca));
         }
         if (!string.IsNullOrWhiteSpace(filtro.Sucursal))
         {
@@ -625,7 +633,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 x.a.Observaciones,
                 x.a.Sucursal,
                 x.a.AutorizacionPendiente,
-                x.a.PdfAutorizacionUrl
+                x.a.PdfAutorizacionUrl,
+                Consecutivo = (long?)(x.lo != null ? x.lo.Consecutivo : (long?)null)
             })
             .ToListAsync(ct);
 
@@ -650,7 +659,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             r.AnioServicio, r.MesVigencia, r.MesFinal,
             r.CodigoAutorizacion, r.Observaciones,
             r.Sucursal,
-            r.AutorizacionPendiente, r.PdfAutorizacionUrl)).ToList();
+            r.AutorizacionPendiente, r.PdfAutorizacionUrl,
+            r.Consecutivo)).ToList();
     }
 
     public async Task<IReadOnlyList<string>> ListarSucursalesAsignacionesAsync(CancellationToken ct = default)

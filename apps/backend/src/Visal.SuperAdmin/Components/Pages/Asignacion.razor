@@ -3,6 +3,8 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
 @using Visal.Application.Tenancy
+@using Visal.Domain.Common
+@using Visal.SuperAdmin.Components.Forms
 @inject IAsignacionService Svc
 @inject IPacienteService PacSvc
 @inject IPaqueteService PaqSvc
@@ -515,6 +517,10 @@ else
                     <input class="form-control form-control-sm" placeholder="Busca por descripcion del servicio..."
                            @bind="_fNombreServ" @bind:event="oninput" />
                 </div>
+                <div class="ase-f"><label>Autorizacion</label>
+                    <input class="form-control form-control-sm mono" placeholder="N° de autorizacion..."
+                           @bind="_fAutorizacion" @bind:event="oninput" />
+                </div>
                 <div class="ase-f ase-f-wide">
                     <label class="asg-chk">
                         <input type="checkbox" @bind="_fSoloPendiente" />
@@ -542,6 +548,7 @@ else
                     <thead>
                         <tr>
                             <th>Fecha creado</th>
+                            <th>Cód.</th>
                             <th>Documento</th>
                             <th>Paciente</th>
                             <th>Aseguradora</th>
@@ -559,12 +566,13 @@ else
                     <tbody>
                         @if (_listado.Count == 0)
                         {
-                            <tr><td colspan="13" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
+                            <tr><td colspan="14" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
                         }
                         @foreach (var a in _listado)
                         {
                             <tr>
                                 <td class="mono">@a.CreadoEn.LocalDateTime.ToString("dd/MM/yy HH:mm")</td>
+                                <td class="mono">@(a.Consecutivo is long _c ? CodigoPublico.Asignacion(_c) : "")</td>
                                 <td class="mono">@a.PacienteDocumento</td>
                                 <td>@a.PacienteNombre</td>
                                 <td>@(a.AseguradoraNombre ?? "-")</td>
@@ -583,7 +591,9 @@ else
                                     }
                                     else
                                     {
-                                        @(a.CodigoAutorizacion ?? "")
+                                        <span>@(a.CodigoAutorizacion ?? "")</span>
+                                        <button class="btn btn-outline-secondary btn-sm asg-aut-btn" title="Ver / editar la autorización (número y PDF)"
+                                                @onclick="() => AbrirModalAutorizacion(a)">Ver</button>
                                     }
                                 </td>
                                 <td class="text-muted small">@(a.Observaciones ?? "")</td>
@@ -681,47 +691,12 @@ else
     </div>
 }
 
-@* ============ Modal COMPLETAR AUTORIZACION ============ *@
-@if (_modalAut && _modalAutRow is not null)
-{
-    <div class="cie-backdrop" @onclick="CerrarModalAutorizacion"></div>
-    <div class="cie-modal asg-aut-modal">
-        <div class="cie-modal-h">
-            <h3>Completar autorizaci&oacute;n</h3>
-            <button class="cie-modal-close" @onclick="CerrarModalAutorizacion">&times;</button>
-        </div>
-        <div class="cie-modal-body">
-            <div class="asg-aut-ctx">
-                <div><b>Paciente:</b> @_modalAutRow.PacienteNombre <span class="mono">(@_modalAutRow.PacienteDocumento)</span></div>
-                <div><b>Servicio:</b> @_modalAutRow.NombreServicio</div>
-                <div><b>Contrato:</b> <span class="mono">@_modalAutRow.ContratoCodigo</span></div>
-            </div>
-            @if (_modalAutError is not null) { <div class="alert alert-danger py-2 px-3 my-2 small">@_modalAutError</div> }
-            <div class="ase-f">
-                <label>N&uacute;mero de autorizaci&oacute;n</label>
-                <input class="form-control form-control-sm" @bind="_modalAutCodigo" placeholder="Ej: 123456" />
-            </div>
-            <div class="ase-f">
-                <label>PDF de autorizaci&oacute;n</label>
-                <div class="asg-input-row">
-                    <InputFile OnChange="OnModalAutPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
-                    @if (!string.IsNullOrWhiteSpace(_modalAutPdfUrl))
-                    {
-                        <a class="btn btn-outline-secondary btn-sm" href="@_modalAutPdfUrl" target="_blank" title="Ver PDF">Ver</a>
-                    }
-                </div>
-                @if (_modalAutPdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
-                else if (!string.IsNullOrWhiteSpace(_modalAutPdfNombre)) { <div class="asg-hint asg-hint-ok">@_modalAutPdfNombre cargado.</div> }
-            </div>
-        </div>
-        <div class="asg-pago-footer">
-            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModalAutorizacion">Cancelar</button>
-            <button class="btn btn-primary btn-sm" @onclick="GuardarAutorizacion" disabled="@_modalAutBusy">
-                @(_modalAutBusy ? "Guardando..." : "Guardar y marcar completado")
-            </button>
-        </div>
-    </div>
-}
+@* ============ Modal AUTORIZACION (componente compartido: numero + PDF embebido) ============ *@
+@* Mismo visor que Ordenes Clinicas: al abrir muestra el PDF embebido inline si existe,
+   permite editar numero y subir PDF. Reusa IAsignacionService (sin duplicar logica). *@
+<AutorizacionModal AsignacionId="_autAsigId" Visible="_autVisible"
+                   OnCerrar="() => _autVisible = false"
+                   OnGuardado="OnAutorizacionGuardada" />
 
 @* ============ Modal BUSCAR PACIENTES (filtros + grid) ============ *@
 @if (_modal)
@@ -1234,6 +1209,7 @@ else
     private string _fNombreServ = "";
     private bool _fSoloPendiente;
     private string _fSede = "";
+    private string _fAutorizacion = "";
     private List<string> _sedesFiltro = new();
     private List<AsignacionListadoDto> _listado = new();
     private List<AseguradoraDto> _aseguradorasFiltro = new();
@@ -1281,7 +1257,8 @@ else
                 string.IsNullOrWhiteSpace(_fModulo) ? null : _fModulo,
                 string.IsNullOrWhiteSpace(_fNombreServ) ? null : _fNombreServ,
                 _fSoloPendiente,
-                string.IsNullOrWhiteSpace(_fSede) ? null : _fSede);
+                string.IsNullOrWhiteSpace(_fSede) ? null : _fSede,
+                string.IsNullOrWhiteSpace(_fAutorizacion) ? null : _fAutorizacion);
             var lista = await Svc.ListarAsignacionesAsync(filtro);
             // Filtro por documento en memoria (evita joinar en el backend por texto libre).
             if (!string.IsNullOrWhiteSpace(_fDocumento))
@@ -1300,79 +1277,28 @@ else
         var hoy = DateTime.Now;
         _fFechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
         _fFechaFin = DateOnly.FromDateTime(hoy);
-        _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = _fSede = "";
+        _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = _fSede = _fAutorizacion = "";
         _fSoloPendiente = false;
         await AplicarFiltrosListado();
     }
 
-    // ── Modal "Completar autorizacion" ──────────────────────────────────
-    private bool _modalAut;
-    private AsignacionListadoDto? _modalAutRow;
-    private string _modalAutCodigo = "";
-    private string? _modalAutPdfUrl;
-    private string? _modalAutPdfNombre;
-    private bool _modalAutPdfBusy;
-    private bool _modalAutBusy;
-    private string? _modalAutError;
+    // ── Modal Autorizacion (componente compartido AutorizacionModal) ────────
+    // Visor/editor reutilizable: numero + PDF embebido inline. Lo abre tanto la
+    // accion "Completar" (pendientes) como "Ver" (ya completadas).
+    private Guid? _autAsigId;
+    private bool _autVisible;
 
     private void AbrirModalAutorizacion(AsignacionListadoDto a)
     {
-        _modalAutRow = a;
-        _modalAutCodigo = a.CodigoAutorizacion ?? "";
-        _modalAutPdfUrl = a.PdfAutorizacionUrl;
-        _modalAutPdfNombre = null;
-        _modalAutError = null;
-        _modalAut = true;
+        _autAsigId = a.Id;
+        _autVisible = true;
     }
 
-    private void CerrarModalAutorizacion()
+    private async Task OnAutorizacionGuardada()
     {
-        _modalAut = false;
-        _modalAutRow = null;
-        _modalAutError = null;
-    }
-
-    private async Task OnModalAutPdfUploaded(InputFileChangeEventArgs e)
-    {
-        _modalAutError = null;
-        _modalAutPdfBusy = true;
-        try
-        {
-            var file = e.File;
-            if (file.Size > 10L * 1024 * 1024) { _modalAutError = "El PDF supera 10 MB."; return; }
-            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
-            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
-            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
-            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
-            var full = Path.Combine(dir, nombre);
-            await using (var fs = File.Create(full))
-            await using (var src = file.OpenReadStream(10L * 1024 * 1024))
-            {
-                await src.CopyToAsync(fs);
-            }
-            _modalAutPdfUrl = $"/uploads/autorizaciones/{nombre}";
-            _modalAutPdfNombre = file.Name;
-        }
-        catch (Exception ex) { _modalAutError = "No se pudo subir el PDF: " + ex.Message; }
-        finally { _modalAutPdfBusy = false; }
-    }
-
-    private async Task GuardarAutorizacion()
-    {
-        if (_modalAutRow is null) { return; }
-        if (string.IsNullOrWhiteSpace(_modalAutCodigo)) { _modalAutError = "Indica el numero de autorizacion."; return; }
-        _modalAutBusy = true;
-        _modalAutError = null;
-        try
-        {
-            await Svc.CompletarAutorizacionAsync(_modalAutRow.Id, _modalAutCodigo.Trim(), _modalAutPdfUrl, await Actor());
-            _ok = "Autorizacion completada.";
-            CerrarModalAutorizacion();
-            await AplicarFiltrosListado();
-        }
-        catch (InvalidOperationException ex) { _modalAutError = UiError.Negocio("ASG", 103, ex.Message); }
-        catch (Exception ex) { _modalAutError = UiError.Tecnico("ASG", 903, ex); }
-        finally { _modalAutBusy = false; }
+        _autVisible = false;
+        _ok = "Autorizacion completada.";
+        await AplicarFiltrosListado();
     }
 
     private static string FormatVigencia(short? anio, short? mesVig, short? mesFin)

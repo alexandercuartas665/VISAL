@@ -278,6 +278,15 @@
                             </small>
                         </div>
                         <div class="snf-f">
+                            <label class="sn-chk">
+                                <input type="checkbox" @bind="_relUsarDatosPaciente" />
+                                <span>Usar datos del <b>paciente</b> en Dirección, Teléfono y Correo</span>
+                            </label>
+                            <small class="text-muted d-block mt-1">
+                                Si se marca, esas tres columnas salen de la ficha del <b>paciente</b>. Si se deja sin marcar, salen de la <b>sede</b> que atendió (comportamiento actual).
+                            </small>
+                        </div>
+                        <div class="snf-f">
                             <label>
                                 Aseguradoras *
                                 <small class="text-muted">
@@ -1119,6 +1128,8 @@
     .snf-form { display:grid; grid-template-columns:1fr; gap:14px; }
     .snf-row-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .snf-f { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .sn-chk { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text); font-weight:500; }
+    .sn-chk input { width:16px; height:16px; cursor:pointer; }
     .snf-f > label { font-size:12px; font-weight:600; color:#334155; }
     .snf-f > label small { font-weight:400; color:#64748b; margin-left:4px; }
     .sn-modal-xl { max-width:96vw; max-height:92vh; }
@@ -1369,6 +1380,9 @@
     // Filtro opcional pensado para pruebas: nombre o identificacion del paciente
     // (contiene, case+tildes insensitive). Vacio = no filtra.
     private string _relPacienteQuery = string.Empty;
+    // Cuando es true, Direccion/Telefono/Correo del snapshot salen del paciente
+    // (no de la sede). Default false = datos de la sede (comportamiento historico).
+    private bool _relUsarDatosPaciente;
 
     // Modal Ver.
     private bool _showVer;
@@ -1655,6 +1669,7 @@
         _relFechaInicio = new DateOnly(hoy.Year, hoy.Month, 1);
         _relFechaFin = hoy;
         _relPacienteQuery = string.Empty;
+        _relUsarDatosPaciente = false;
         _showNuevo = true;
     }
 
@@ -1745,6 +1760,7 @@
                         fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
                         fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
                         pacienteQueries = pqArray.Length > 0 ? pqArray : null,
+                        usarDatosPaciente = _relUsarDatosPaciente,
                     };
                     var filtrosJson = JsonSerializer.Serialize(payload);
                     try

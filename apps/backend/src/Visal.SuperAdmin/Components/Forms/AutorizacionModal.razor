@@ -34,11 +34,19 @@
                     <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
                     @if (!string.IsNullOrWhiteSpace(_pdfUrl))
                     {
-                        <a class="btn btn-outline-secondary btn-sm" href="@_pdfUrl" target="_blank" title="Ver PDF">Ver</a>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _verInline = !_verInline"
+                                title="Ver el PDF aquí mismo, sin salir del sistema">
+                            @(_verInline ? "Ocultar" : "Ver")
+                        </button>
+                        <a class="btn btn-outline-secondary btn-sm" href="@_pdfUrl" download title="Descargar el PDF a tu equipo">⬇</a>
                     }
                 </div>
                 @if (_pdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
                 else if (!string.IsNullOrWhiteSpace(_pdfNombre)) { <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div> }
+                @if (_verInline && !string.IsNullOrWhiteSpace(_pdfUrl))
+                {
+                    <iframe class="asg-pdf-frame" src="@_pdfUrl" title="PDF de autorización"></iframe>
+                }
             </div>
         </div>
         <div class="asg-pago-footer">
@@ -54,7 +62,7 @@
     /* Estilos del modal autocontenidos (las clases cie-*/asg-* se definen inline por
        pagina; este componente se usa en Ordenes, que no las trae, asi que las incluye). */
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
-    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 560px; max-width: 95vw; max-height: 85vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 820px; max-width: 96vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
     .cie-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #e2e8f0; }
     .cie-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
     .cie-modal-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#64748b; }
@@ -66,6 +74,7 @@
     .asg-input-row > input, .asg-input-row > select { flex:1; min-width:0; }
     .asg-hint { font-size:11px; color:#64748b; margin-top:4px; }
     .asg-hint-ok { color:#059669; }
+    .asg-pdf-frame { width:100%; height:55vh; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px; background:#525659; }
     .asg-pago-footer { display:flex; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #e2e8f0; }
 </style>
 
@@ -81,6 +90,7 @@
     private string _codigo = "";
     private string? _pdfUrl;
     private string? _pdfNombre;
+    private bool _verInline;
     private bool _pdfBusy;
     private bool _busy;
     private string? _error;
@@ -91,10 +101,13 @@
         if (Visible && AsignacionId is Guid aid && aid != _cargadoId)
         {
             _cargadoId = aid;
-            _error = null; _pdfNombre = null; _pdfBusy = false; _busy = false;
+            _error = null; _pdfNombre = null; _pdfBusy = false; _busy = false; _verInline = false;
             _info = await RetryDb(() => AsigSvc.GetAutorizacionAsync(aid));
             _codigo = _info?.CodigoAutorizacion ?? "";
             _pdfUrl = _info?.PdfAutorizacionUrl;
+            // Si ya hay PDF cargado, lo mostramos embebido de una vez: este modal ES el
+            // visor de la autorizacion de ESTE registro (no se abre otra pagina).
+            _verInline = !string.IsNullOrWhiteSpace(_pdfUrl);
         }
         else if (!Visible)
         {
@@ -128,6 +141,7 @@
             }
             _pdfUrl = $"/uploads/autorizaciones/{nombre}";
             _pdfNombre = file.Name;
+            _verInline = true;  // muestra el PDF recien subido de inmediato
         }
         catch (Exception ex) { _error = "No se pudo subir el PDF: " + ex.Message; }
         finally { _pdfBusy = false; }

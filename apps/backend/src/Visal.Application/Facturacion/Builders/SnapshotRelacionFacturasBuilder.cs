@@ -108,9 +108,9 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Grupo Servicios"]                         = "Aseguradoras → Contratos → Servicios → columna GRUPO SERV. FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
         ["Servicios"]                               = "Aseguradoras → Contratos → Servicios → columna SERVICIO FACT. (config del servicio del contrato, editable en masa desde \"Actualizar en masa\")",
         ["Nacionalidad"]                            = "sale del modulo de admision Datos del paciente",
-        ["Dirección"]                               = "Direccion de la sede que atendio (Configuracion de Empresa -> sede -> Direccion)",
-        ["Telefono"]                                = "Telefono de la sede que atendio (Configuracion de Empresa -> sede -> Telefono)",
-        ["Correo electrónico"]                      = "Correo de la sede que atendio (Configuracion de Empresa -> sede -> Correo)",
+        ["Dirección"]                               = "Direccion de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
+        ["Telefono"]                                = "Telefono de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
+        ["Correo electrónico"]                      = "Correo de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
         ["HC N°"]                                   = "Consecutivo publico de la Historia Clinica (HC-000123). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
         ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
     };
@@ -125,11 +125,11 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         foreach (var h in hechos)
         {
             ct.ThrowIfCancellationRequested();
-            yield return Mapear(h);
+            yield return Mapear(h, filtros.UsarDatosPaciente);
         }
     }
 
-    private static Dictionary<string, object?> Mapear(RelacionFacturasHecho h)
+    private static Dictionary<string, object?> Mapear(RelacionFacturasHecho h, bool usarDatosPaciente)
     {
         // v3: la HC es la unidad base. Los campos de asignacion/turno/sesion/
         // servicio ya no aplican (prod no genera esos registros). Los dejamos
@@ -183,9 +183,10 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Nacionalidad"] = h.NacionalidadNombre ?? "COLOMBIA",             // 37
             ["Departamento"] = h.DepartamentoNombre,                           // 38
             ["Municipio"] = h.MunicipioNombre,                                 // 39
-            ["Dirección"] = h.Sucursal?.Direccion,                             // 40 — direccion de la sede que atendio (Sucursal.Direccion)
-            ["Telefono"] = h.Sucursal?.Telefono,                               // 41 — telefono de la sede que atendio (Sucursal.Telefono)
-            ["Correo electrónico"] = h.Sucursal?.Email,                        // 42 — correo de la sede que atendio (Sucursal.Email)
+            // 40-42 — direccion/telefono/correo: del PACIENTE si usarDatosPaciente, si no de la sede.
+            ["Dirección"] = usarDatosPaciente ? h.Paciente.Direccion : h.Sucursal?.Direccion,
+            ["Telefono"] = usarDatosPaciente ? h.Paciente.Telefono : h.Sucursal?.Telefono,
+            ["Correo electrónico"] = usarDatosPaciente ? h.Paciente.Email : h.Sucursal?.Email,
             // Trazabilidad interna (fuera del template EPS): consecutivo publico
             // legible (HC-000123 / AS-000045). Fallback al hex 8 si faltara.
             ["HC N°"] = CodigoPublico.Hc(h.Hc.Consecutivo),                    // 43 — consecutivo de la HC
@@ -281,6 +282,12 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ? pacienteQueries.Distinct(StringComparer.OrdinalIgnoreCase).ToList()
             : null;
 
-        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQueriesFinal);
+        // Flag: usar datos de contacto del PACIENTE (direccion/telefono/correo) en vez
+        // de los de la sede. Default false (datos de la sede, comportamiento historico).
+        var usarDatosPaciente = root.TryGetProperty("usarDatosPaciente", out var udp)
+            && (udp.ValueKind == JsonValueKind.True
+                || (udp.ValueKind == JsonValueKind.String && bool.TryParse(udp.GetString(), out var b) && b));
+
+        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQueriesFinal, usarDatosPaciente);
     }
 }

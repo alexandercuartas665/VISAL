@@ -15,7 +15,11 @@ public sealed record RelacionFacturasFiltros(
     // Opcional: filtra los pacientes cuyo nombre completo o identificacion CONTIENE
     // ALGUNO de estos textos (case-insensitive, sin tildes). Pensado para pruebas del
     // sistema — uno o varios pacientes por snapshot. Vacio/null => no filtra.
-    IReadOnlyList<string>? PacienteQueries = null);
+    IReadOnlyList<string>? PacienteQueries = null,
+    // Opcional: cuando es true, las columnas Direccion/Telefono/Correo salen del
+    // PACIENTE (Paciente.Direccion/Telefono/Email) en vez de la sede que atendio.
+    // Default false => datos de la sede (comportamiento historico).
+    bool UsarDatosPaciente = false);
 
 /// <summary>
 /// "Hecho facturable" resuelto por el selector — todo lo que el builder de

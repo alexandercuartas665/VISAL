@@ -295,12 +295,15 @@ public sealed class AtencionProfesionalService(
 
         // ── Puente por meses (modo terapia que trasciende asignaciones) ──────────
         // Para los formatos base que declaran MesesPuente, resolvemos la ULTIMA fecha
-        // de atencion del paciente en esa terapia (HCs cuyo FormDefinition es el base O
-        // su formato de evolucion). Si una asignacion NUEVA arranca (sesion 1) dentro de
-        // la ventana deslizante desde esa ultima atencion, su sesion 1 tambien se sirve
-        // con el formato de evolucion (sigue el puente) en vez de abrir base nuevo.
-        // Clave: (PacienteId, codigo base). Valor: ultima fecha_atencion.
-        var ultimaAtencionPorPacienteFormato = new Dictionary<(Guid, string), DateTimeOffset>();
+        // de atencion del paciente+profesional en esa terapia (HCs cuyo FormDefinition es
+        // el base O su formato de evolucion). Si una asignacion NUEVA arranca (sesion 1)
+        // dentro de la ventana deslizante desde esa ultima atencion, su sesion 1 tambien
+        // se sirve con el formato de evolucion (sigue el puente) en vez de abrir base.
+        // El puente es por PROFESIONAL EXACTO: si atiende otro profesional, no hereda el
+        // hilo del colega y arranca en formato base (cada profesional su propia historia).
+        // Clave: (PacienteId, codigo base, ProfesionalId). Valor: ultima fecha_atencion.
+        // Las HCs con profesional_id NULL (data legacy) no abren puente (lado seguro: base).
+        var ultimaAtencionPorPacienteFormato = new Dictionary<(Guid, string, Guid), DateTimeOffset>();
         if (mesesPuentePorFormato.Count > 0 && pacIds.Count > 0)
         {
             // Codigos de la(s) terapia(s) con puente: base + su evolucion.
@@ -347,13 +350,14 @@ public sealed class AtencionProfesionalService(
                     .Where(h => pacIds.Contains(h.PacienteId)
                                 && defIds.Contains(h.FormDefinitionId)
                                 && h.Estado != HistoriaClinicaEstado.Inactiva
-                                && h.FechaAtencion != null)
-                    .Select(h => new { h.PacienteId, h.FormDefinitionId, h.FechaAtencion })
+                                && h.FechaAtencion != null
+                                && h.ProfesionalId != null)
+                    .Select(h => new { h.PacienteId, h.FormDefinitionId, h.FechaAtencion, h.ProfesionalId })
                     .ToListAsync(ct);
                 foreach (var at in atenciones)
                 {
                     if (!defIdABase.TryGetValue(at.FormDefinitionId, out var baseCod)) { continue; }
-                    var key = (at.PacienteId, baseCod);
+                    var key = (at.PacienteId, baseCod, at.ProfesionalId!.Value);
                     var fecha = at.FechaAtencion!.Value;
                     if (!ultimaAtencionPorPacienteFormato.TryGetValue(key, out var prev) || fecha > prev)
                     {
@@ -470,12 +474,13 @@ public sealed class AtencionProfesionalService(
                         formatoEfectivo = evoCod;
                     }
                     else if (mesesPuentePorFormato.TryGetValue(formatoBase.Trim(), out var mesesPuente)
-                             && ultimaAtencionPorPacienteFormato.TryGetValue((a.PacienteId, formatoBase.Trim()), out var ultimaAtencion))
+                             && ultimaAtencionPorPacienteFormato.TryGetValue((a.PacienteId, formatoBase.Trim(), t.ProfesionalId), out var ultimaAtencion))
                     {
-                        // Sesion 1 de una asignacion NUEVA: si el paciente tuvo una atencion
-                        // previa en esta misma terapia dentro de la ventana deslizante de
-                        // MesesPuente meses (medida desde la ultima fecha de atencion), el
-                        // puente sigue abierto y esta sesion 1 tambien usa evolucion.
+                        // Sesion 1 de una asignacion NUEVA: si el MISMO profesional tuvo una
+                        // atencion previa de este paciente en esta misma terapia dentro de la
+                        // ventana deslizante de MesesPuente meses (medida desde la ultima fecha
+                        // de atencion), el puente sigue abierto y esta sesion 1 tambien usa
+                        // evolucion. Si atiende otro profesional, no hay match -> formato base.
                         // Referencia del "momento de la nueva sesion": la fecha programada
                         // del turno (t.FechaInicio); fallback a hoy.
                         var fechaNuevaSesion = t.FechaInicio is DateOnly fIni

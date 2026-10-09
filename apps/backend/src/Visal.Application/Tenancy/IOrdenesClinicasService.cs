@@ -131,7 +131,10 @@ public sealed record OrdenesClinicasFiltro(
     string? CodigoAsignacion = null,
     /// <summary>Si true, solo trae HCs con formulas emitidas activas SIN firma en el
     /// snapshot y con profesional que hoy si tiene firma (reparables).</summary>
-    bool SoloSinFirma = false);
+    bool SoloSinFirma = false,
+    /// <summary>Filtra por el numero de autorizacion de la asignacion
+    /// (Asignacion.CodigoAutorizacion, CONTIENE, case-insensitive). Vacio = sin filtro.</summary>
+    string? CodigoAutorizacion = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);

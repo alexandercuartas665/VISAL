@@ -574,15 +574,12 @@ else
             <label>Fecha hasta</label>
             <input type="date" class="form-control form-control-sm" @bind="_hasta" />
         </div>
-        <div class="oc-f oc-f-wide">
-            <label>Especialista</label>
-            <select class="form-select form-select-sm" @bind="_especialista">
-                <option value="">(Todos)</option>
-                @foreach (var e in _especialistas)
-                {
-                    <option value="@e">@e</option>
-                }
-            </select>
+        <div class="oc-f">
+            <label>Autorización</label>
+            <input class="form-control form-control-sm mono"
+                   placeholder="N° de autorización..."
+                   title="Filtra por el número de autorización de la asignación (contiene)"
+                   @bind="_codigoAutorizacionFiltro" @onkeyup="OnKeyup" />
         </div>
         <div class="oc-f oc-f-toggle">
             <label>&nbsp;</label>
@@ -596,6 +593,16 @@ else
     @if (_mostrarMasFiltros)
     {
     <div class="oc-filtros oc-filtros-mas">
+        <div class="oc-f oc-f-wide">
+            <label>Especialista</label>
+            <select class="form-select form-select-sm" @bind="_especialista">
+                <option value="">(Todos)</option>
+                @foreach (var e in _especialistas)
+                {
+                    <option value="@e">@e</option>
+                }
+            </select>
+        </div>
         <div class="oc-f oc-f-wide">
             <label>EPS</label>
             <select class="form-select form-select-sm" @bind="_aseguradoraFiltro">
@@ -1095,6 +1102,15 @@ else
                                                 <button class="oc-kebab-item" disabled title="La HC debe estar cerrada para entrar al ciclo de revision">
                                                     <span class="oc-kebab-ico">🔍</span> Ver revision
                                                 </button>
+                                                @* Una HC Abierta tambien se puede inactivar (quedo mal / se abrio por error). *@
+                                                @if (_puedeReabrir)
+                                                {
+                                                    <div class="oc-kebab-sep"></div>
+                                                    <button class="oc-kebab-item oc-kebab-danger" @onclick="() => KebabRunAsync(() => InactivarHcAsync(r))"
+                                                            title="Inactivar la HC abierta (quedo mal / se abrio por error) — pasa a estado Inactiva y NO cae en Snapshots">
+                                                        <span class="oc-kebab-ico">🚫</span> Inactivar historia
+                                                    </button>
+                                                }
                                             }
                                         </div>
                                     }
@@ -1965,6 +1981,7 @@ else
     private string _filtroPaciente = "";
     private string _codigoHcFiltro = "";
     private string _codigoAsignacionFiltro = "";
+    private string _codigoAutorizacionFiltro = "";
     private DateTime? _desde;
     private DateTime? _hasta;
     private string _especialista = "";
@@ -1995,6 +2012,7 @@ else
     private int FiltrosSecundariosActivos()
     {
         var n = 0;
+        if (!string.IsNullOrWhiteSpace(_especialista)) { n++; }
         if (!string.IsNullOrWhiteSpace(_aseguradoraFiltro)) { n++; }
         if (!string.IsNullOrWhiteSpace(_sucursalFiltro)) { n++; }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { n++; }
@@ -2187,7 +2205,8 @@ else
                 FormatoCodigo: string.IsNullOrWhiteSpace(_formatoFiltro) ? null : _formatoFiltro,
                 CodigoHc: string.IsNullOrWhiteSpace(_codigoHcFiltro) ? null : _codigoHcFiltro.Trim(),
                 CodigoAsignacion: string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? null : _codigoAsignacionFiltro.Trim(),
-                SoloSinFirma: _soloSinFirma);
+                SoloSinFirma: _soloSinFirma,
+                CodigoAutorizacion: string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro) ? null : _codigoAutorizacionFiltro.Trim());
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -2206,7 +2225,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false;
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false;
         _soloMultiSesion = false; _noMostrarInactivas = false; _asigNavFiltro = null;
         await Buscar();
     }
@@ -2270,6 +2289,7 @@ else
         // ignoraba ese filtro e imprimia TODAS las HC del paciente/asignacion en vez de
         // la(s) filtrada(s). Lo pasamos para que el paquete impreso respete el HC N°.
         if (!string.IsNullOrWhiteSpace(_codigoHcFiltro)) { qs.Add($"codigoHc={Uri.EscapeDataString(_codigoHcFiltro.Trim())}"); }
+        if (!string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro)) { qs.Add($"codigoAutorizacion={Uri.EscapeDataString(_codigoAutorizacionFiltro.Trim())}"); }
         // FAT-4 — el orden del listado impreso respeta el criterio elegido en el toolbar.
         qs.Add($"ordenarPor={Uri.EscapeDataString(_ordenarPor)}");
         return qs.Count == 0
@@ -2299,6 +2319,7 @@ else
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { qs.Add($"estado={Uri.EscapeDataString(_estadoFiltro)}"); }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
         if (CodigoAsignacionEfectivo() is string codAsig) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(codAsig)}"); }
+        if (!string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro)) { qs.Add($"codigoAutorizacion={Uri.EscapeDataString(_codigoAutorizacionFiltro.Trim())}"); }
         return qs.Count == 0 ? "/ordenes/export.xlsx" : $"/ordenes/export.xlsx?{string.Join("&", qs)}";
     }
 

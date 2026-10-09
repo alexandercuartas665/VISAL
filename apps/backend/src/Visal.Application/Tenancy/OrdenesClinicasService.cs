@@ -22,15 +22,18 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             q = q.Where(h => h.Estado == HistoriaClinicaEstado.Cerrada);
         }
 
+        // El rango Desde/Hasta aplica sobre la FECHA DE ATENCION (lo que el profesional
+        // capturo en el schema), con fallback a cierre/apertura solo cuando la HC no tiene
+        // fecha de atencion. Misma semantica que el orden "Fecha de atencion" del toolbar.
         if (filtro.Desde is DateOnly d)
         {
             var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            q = q.Where(h => (h.FechaCierre ?? h.FechaApertura) >= dStart);
+            q = q.Where(h => (h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura) >= dStart);
         }
         if (filtro.Hasta is DateOnly h2)
         {
             var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
-            q = q.Where(h => (h.FechaCierre ?? h.FechaApertura) <= dEnd);
+            q = q.Where(h => (h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura) <= dEnd);
         }
         if (!string.IsNullOrWhiteSpace(filtro.Especialista))
         {
@@ -92,6 +95,24 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .ToListAsync(ct);
             // Set vacio => sin coincidencias (Contains sobre lista vacia no trae filas).
             q = q.Where(h => hcIdsDeLote.Contains(h.Id));
+        }
+
+        // Filtro por NUMERO DE AUTORIZACION (Asignacion.CodigoAutorizacion, CONTIENE). Se
+        // resuelve igual que el codigo de asignacion: asignaciones que matchean -> sus HCs
+        // via turno -> sesion -> pivote. Acota la query principal con ese set.
+        if (!string.IsNullOrWhiteSpace(filtro.CodigoAutorizacion))
+        {
+            var ca = filtro.CodigoAutorizacion.Trim().ToLower();
+            var asigIdsAut = await db.Asignaciones.AsNoTracking()
+                .Where(a => a.CodigoAutorizacion != null && a.CodigoAutorizacion.ToLower().Contains(ca))
+                .Select(a => a.Id).ToListAsync(ct);
+            var turnoIdsAut = await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => asigIdsAut.Contains(t.AsignacionId)).Select(t => t.Id).ToListAsync(ct);
+            var sesionIdsAut = await db.AsignacionTurnoSesiones.AsNoTracking()
+                .Where(s => turnoIdsAut.Contains(s.AsignacionTurnoId)).Select(s => s.Id).ToListAsync(ct);
+            var hcIdsAut = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .Where(p => sesionIdsAut.Contains(p.SesionId)).Select(p => p.HistoriaClinicaId).Distinct().ToListAsync(ct);
+            q = q.Where(h => hcIdsAut.Contains(h.Id));
         }
 
         // Filtro "solo sin firma": restringe a HCs con formulas emitidas activas cuyo

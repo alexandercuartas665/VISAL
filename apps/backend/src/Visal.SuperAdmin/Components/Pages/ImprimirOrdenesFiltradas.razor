@@ -212,6 +212,7 @@ else
             _especialistaFiltro = Get(q, "especialista");
             var codigoAsignacion = Get(q, "codigoAsignacion");
             var codigoHc = Get(q, "codigoHc");
+            var codigoAutorizacion = Get(q, "codigoAutorizacion");
             Guid? asignacionId = null;
             if (q.TryGetValue("asignacionId", out var aiv) && Guid.TryParse(aiv.ToString(), out var aidServ)) { asignacionId = aidServ; }
             if (q.TryGetValue("desde", out var dd) && DateOnly.TryParse(dd.ToString(), out var d1)) { _desdeFiltro = d1; }
@@ -231,7 +232,8 @@ else
                 SucursalId: sucursalId,
                 FormatoCodigo: _formatoCodigoFiltro,
                 CodigoHc: string.IsNullOrWhiteSpace(codigoHc) ? null : codigoHc.Trim(),
-                CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim());
+                CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim(),
+                CodigoAutorizacion: string.IsNullOrWhiteSpace(codigoAutorizacion) ? null : codigoAutorizacion.Trim());
 
             var todas = (await OcSvc.BuscarAsync(filtro)).ToList();
             // Las HC INACTIVAS nunca se imprimen: se excluyen de la raiz del paquete

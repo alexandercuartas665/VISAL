@@ -7,6 +7,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Visal.Application.Tenancy
 @inject IAsignacionService AsigSvc
+@inject IAutorizacionExtractorService Extractor
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 
 @if (Visible && _info is not null)
@@ -24,29 +25,105 @@
                 <div><b>Contrato:</b> <span class="mono">@_info.ContratoCodigo</span></div>
             </div>
             @if (_error is not null) { <div class="alert alert-danger py-2 px-3 my-2 small">@_error</div> }
-            <div class="ase-f">
-                <label>Número de autorización</label>
-                <input class="form-control form-control-sm" @bind="_codigo" placeholder="Ej: 123456" />
-            </div>
-            <div class="ase-f">
-                <label>PDF de autorización</label>
-                <div class="asg-input-row">
-                    <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
-                    @if (!string.IsNullOrWhiteSpace(_pdfUrl))
+
+            <div class="asg-cols">
+                @* ── IZQUIERDA: documento (visor PDF) ── *@
+                <div class="asg-col-pdf">
+                    <div class="ase-f">
+                        <label>PDF de autorización</label>
+                        <div class="asg-input-row">
+                            <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" />
+                            @if (!string.IsNullOrWhiteSpace(_pdfUrl))
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _verInline = !_verInline"
+                                        title="Ver/ocultar el PDF">
+                                    @(_verInline ? "Ocultar" : "Ver")
+                                </button>
+                                <a class="btn btn-outline-secondary btn-sm" href="@_pdfUrl" download title="Descargar el PDF a tu equipo">⬇</a>
+                            }
+                        </div>
+                        @if (_pdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
+                        else if (!string.IsNullOrWhiteSpace(_pdfNombre)) { <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div> }
+                    </div>
+                    @if (_verInline && !string.IsNullOrWhiteSpace(_pdfUrl))
                     {
-                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _verInline = !_verInline"
-                                title="Ver el PDF aquí mismo, sin salir del sistema">
-                            @(_verInline ? "Ocultar" : "Ver")
-                        </button>
-                        <a class="btn btn-outline-secondary btn-sm" href="@_pdfUrl" download title="Descargar el PDF a tu equipo">⬇</a>
+                        <iframe class="asg-pdf-col" src="@_pdfUrl" title="PDF de autorización"></iframe>
+                    }
+                    else if (string.IsNullOrWhiteSpace(_pdfUrl))
+                    {
+                        <div class="asg-pdf-empty">Sin PDF cargado. Adjunta uno para verlo y extraer sus datos.</div>
                     }
                 </div>
-                @if (_pdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
-                else if (!string.IsNullOrWhiteSpace(_pdfNombre)) { <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div> }
-                @if (_verInline && !string.IsNullOrWhiteSpace(_pdfUrl))
-                {
-                    <iframe class="asg-pdf-frame" src="@_pdfUrl" title="PDF de autorización"></iframe>
-                }
+
+                @* ── DERECHA: número + extracción + datos ── *@
+                <div class="asg-col-data">
+                    <div class="ase-f">
+                        <label>Número de autorización</label>
+                        <input class="form-control form-control-sm" @bind="_codigo" placeholder="Ej: 123456" />
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_pdfUrl))
+                    {
+                        <div class="ase-f">
+                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ExtraerConIaAsync" disabled="@_extBusy"
+                                    title="@(_extHecho ? "Ya hay datos extraídos y guardados. Volver a extraer consume tokens de IA." : "Extrae los datos del PDF con la IA")">
+                                @(_extBusy ? "Extrayendo con IA…" : _extHecho ? "🔄 Volver a extraer (consume tokens)" : "✨ Extraer datos del PDF con IA")
+                            </button>
+                            @if (_extError is not null) { <div class="asg-hint" style="color:#b91c1c;">@_extError</div> }
+                            else if (_extHecho)
+                            {
+                                <div class="asg-hint asg-hint-ok">
+                                    @(_extGuardadoEn is DateTimeOffset g
+                                        ? $"Datos guardados (extraídos el {g.ToLocalTime():dd/MM/yyyy HH:mm}). Si editas, presiona Guardar metadatos."
+                                        : "Datos extraídos y guardados automáticamente.")
+                                </div>
+                            }
+                        </div>
+                        @if (_extHecho)
+                        {
+                    <div class="asg-ext">
+                        <div class="asg-ext-h">Datos extraídos por IA <span class="asg-ext-tag">revisar / editar</span></div>
+                        <div class="asg-ext-grid">
+                            <div class="ase-f"><label>Nombre</label><input class="form-control form-control-sm" @bind="_exNombre" /></div>
+                            <div class="ase-f"><label>Tipo doc</label><input class="form-control form-control-sm" @bind="_exTipoDoc" /></div>
+                            <div class="ase-f"><label>Documento</label><input class="form-control form-control-sm mono" @bind="_exDocumento" /></div>
+                            <div class="ase-f"><label>Teléfonos</label><input class="form-control form-control-sm mono" @bind="_exTelefonos" /></div>
+                            <div class="ase-f"><label>Correo</label><input class="form-control form-control-sm" @bind="_exCorreo" /></div>
+                            <div class="ase-f"><label>Dirección</label><input class="form-control form-control-sm" @bind="_exDireccion" /></div>
+                        </div>
+
+                        @* Comparar contra la ficha del paciente y proponer actualizar. *@
+                        <div class="asg-cmp">
+                            <div class="asg-cmp-h">Comparar con la ficha del paciente</div>
+                            <div class="asg-cmp-row">
+                                <label class="asg-cmp-chk"><input type="checkbox" @bind="_aplicarTel" /> Teléfono</label>
+                                <span class="asg-cmp-pac">Paciente: <b>@(string.IsNullOrWhiteSpace(_info?.PacienteTelefono) ? "—" : _info!.PacienteTelefono)</b></span>
+                                <span class="asg-cmp-ia @(MismaInfo(PrimerTel(), _info?.PacienteTelefono) ? "" : "asg-cmp-diff")">IA: <b>@(string.IsNullOrWhiteSpace(PrimerTel()) ? "—" : PrimerTel())</b></span>
+                            </div>
+                            <div class="asg-cmp-row">
+                                <label class="asg-cmp-chk"><input type="checkbox" @bind="_aplicarCorreo" /> Correo</label>
+                                <span class="asg-cmp-pac">Paciente: <b>@(string.IsNullOrWhiteSpace(_info?.PacienteCorreo) ? "—" : _info!.PacienteCorreo)</b></span>
+                                <span class="asg-cmp-ia @(MismaInfo(_exCorreo, _info?.PacienteCorreo) ? "" : "asg-cmp-diff")">IA: <b>@(string.IsNullOrWhiteSpace(_exCorreo) ? "—" : _exCorreo)</b></span>
+                            </div>
+                            <div class="asg-cmp-row">
+                                <label class="asg-cmp-chk"><input type="checkbox" @bind="_aplicarDir" /> Dirección</label>
+                                <span class="asg-cmp-pac">Paciente: <b>@(string.IsNullOrWhiteSpace(_info?.PacienteDireccion) ? "—" : _info!.PacienteDireccion)</b></span>
+                                <span class="asg-cmp-ia @(MismaInfo(_exDireccion, _info?.PacienteDireccion) ? "" : "asg-cmp-diff")">IA: <b>@(string.IsNullOrWhiteSpace(_exDireccion) ? "—" : _exDireccion)</b></span>
+                            </div>
+                            <div class="asg-cmp-acts">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="GuardarMetadatosAsync" disabled="@_metaBusy">
+                                    💾 Guardar metadatos
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm" @onclick="ActualizarPacienteAsync" disabled="@_metaBusy">
+                                    👤 Actualizar ficha del paciente
+                                </button>
+                                @if (_metaMsg is not null) { <span class="asg-hint @(_metaMsg.StartsWith("No") ? "" : "asg-hint-ok")">@_metaMsg</span> }
+                            </div>
+                        </div>
+                    </div>
+                        }
+                    }
+                </div>
             </div>
         </div>
         <div class="asg-pago-footer">
@@ -62,7 +139,7 @@
     /* Estilos del modal autocontenidos (las clases cie-*/asg-* se definen inline por
        pagina; este componente se usa en Ordenes, que no las trae, asi que las incluye). */
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
-    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 820px; max-width: 96vw; max-height: 90vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 1200px; max-width: 97vw; max-height: 92vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
     .cie-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid #e2e8f0; }
     .cie-modal-h h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
     .cie-modal-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#64748b; }
@@ -75,7 +152,32 @@
     .asg-hint { font-size:11px; color:#64748b; margin-top:4px; }
     .asg-hint-ok { color:#059669; }
     .asg-pdf-frame { width:100%; height:55vh; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px; background:#525659; }
+    /* Layout de dos columnas: documento (izq) + datos (der). */
+    .asg-cols { display:flex; gap:16px; align-items:stretch; }
+    .asg-col-pdf { flex:1.25; min-width:0; display:flex; flex-direction:column; }
+    .asg-col-data { flex:1; min-width:380px; max-height:72vh; overflow-y:auto; padding-right:4px; }
+    .asg-pdf-col { flex:1; width:100%; min-height:64vh; border:1px solid #e2e8f0; border-radius:8px; margin-top:4px; background:#525659; }
+    .asg-pdf-empty { flex:1; display:flex; align-items:center; justify-content:center; min-height:64vh; border:1px dashed #cbd5e1; border-radius:8px; color:#94a3b8; font-size:13px; text-align:center; padding:16px; }
+    @@media (max-width: 900px) {
+        .asg-cols { flex-direction:column; }
+        .asg-col-data { min-width:0; max-height:none; overflow:visible; }
+        .asg-pdf-col, .asg-pdf-empty { min-height:40vh; }
+    }
     .asg-pago-footer { display:flex; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid #e2e8f0; }
+    .asg-ext { border:1px solid #c7d2fe; background:#eef2ff; border-radius:8px; padding:12px; margin-top:4px; }
+    .asg-ext-h { font-size:13px; font-weight:700; color:#3730a3; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+    .asg-ext-tag { font-size:10px; font-weight:700; background:#c7d2fe; color:#3730a3; border-radius:6px; padding:1px 7px; text-transform:uppercase; }
+    .asg-ext-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; }
+    .asg-col-data .asg-ext-grid { grid-template-columns:1fr; }
+    .asg-ext-grid .ase-f { margin-bottom:0; }
+    .asg-cmp { margin-top:12px; border-top:1px dashed #c7d2fe; padding-top:10px; }
+    .asg-cmp-h { font-size:12px; font-weight:700; color:#3730a3; margin-bottom:6px; }
+    .asg-cmp-row { display:grid; grid-template-columns:130px 1fr 1fr; gap:8px; align-items:center; font-size:12px; margin-bottom:5px; }
+    .asg-cmp-chk { display:flex; align-items:center; gap:6px; font-weight:600; color:#334155; cursor:pointer; margin:0; }
+    .asg-cmp-pac { color:#64748b; }
+    .asg-cmp-ia { color:#334155; }
+    .asg-cmp-diff { color:#b45309; background:#fffbeb; border-radius:5px; padding:1px 6px; }
+    .asg-cmp-acts { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
 </style>
 
 @code {
@@ -95,6 +197,23 @@
     private bool _busy;
     private string? _error;
 
+    // ── Extraccion con IA (DeepSeek lee el texto del PDF) ───────────────────
+    private bool _extBusy;
+    private bool _extHecho;
+    private string? _extError;
+    private string? _exNombre, _exTipoDoc, _exDocumento, _exCorreo, _exDireccion;
+    private string _exTelefonos = "";
+    private string? _rawJson;
+    private DateTimeOffset? _extGuardadoEn;   // cuando hay datos guardados (cache)
+
+    // ── Persistencia de metadatos + actualizacion del paciente ─────────────
+    private bool _metaBusy;
+    private string? _metaMsg;
+    private bool _aplicarTel, _aplicarCorreo, _aplicarDir;
+
+    private string? PrimerTel()
+        => (_exTelefonos ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+
     protected override async Task OnParametersSetAsync()
     {
         // Carga los datos de la asignacion cuando el modal se abre (o cambia de fila).
@@ -102,12 +221,25 @@
         {
             _cargadoId = aid;
             _error = null; _pdfNombre = null; _pdfBusy = false; _busy = false; _verInline = false;
+            _extBusy = false; _extHecho = false; _extError = null; _rawJson = null; _extGuardadoEn = null;
+            _exNombre = _exTipoDoc = _exDocumento = _exCorreo = _exDireccion = null; _exTelefonos = "";
+            _metaBusy = false; _metaMsg = null; _aplicarTel = _aplicarCorreo = _aplicarDir = false;
             _info = await RetryDb(() => AsigSvc.GetAutorizacionAsync(aid));
             _codigo = _info?.CodigoAutorizacion ?? "";
             _pdfUrl = _info?.PdfAutorizacionUrl;
             // Si ya hay PDF cargado, lo mostramos embebido de una vez: este modal ES el
             // visor de la autorizacion de ESTE registro (no se abre otra pagina).
             _verInline = !string.IsNullOrWhiteSpace(_pdfUrl);
+            // Metadatos ya guardados (si se extrajo antes): se precargan para revisar/editar.
+            var meta = await RetryDb(() => Extractor.GetMetadatoAsync(aid));
+            if (meta is not null)
+            {
+                _exNombre = meta.Nombre; _exTipoDoc = meta.TipoDocumento; _exDocumento = meta.Documento;
+                _exCorreo = meta.Correo; _exDireccion = meta.Direccion;
+                _exTelefonos = string.Join(", ", meta.Telefonos);
+                _extGuardadoEn = meta.ExtraidoEn;
+                _extHecho = true;
+            }
         }
         else if (!Visible)
         {
@@ -179,6 +311,104 @@
             }
         }
     }
+
+    private async Task ExtraerConIaAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_pdfUrl)) { _extError = "No hay PDF para extraer."; return; }
+        _extBusy = true; _extError = null;
+        try
+        {
+            // Resolver la ruta fisica del PDF bajo wwwroot (los binarios viven en el server).
+            var rel = _pdfUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+            var full = Path.Combine(Env.WebRootPath, rel);
+            if (!File.Exists(full))
+            {
+                _extError = "El archivo PDF no está en este servidor (los PDFs viven en producción). Prueba en prod.";
+                return;
+            }
+            var bytes = await File.ReadAllBytesAsync(full);
+            var r = await RetryDb(() => Extractor.ExtraerDesdePdfAsync(bytes));
+            if (!r.Ok)
+            {
+                _extError = r.Error ?? "La IA no pudo extraer los datos.";
+                return;
+            }
+            _exNombre = r.Nombre; _exTipoDoc = r.TipoDocumento; _exDocumento = r.Documento;
+            _exCorreo = r.Correo; _exDireccion = r.Direccion;
+            _exTelefonos = string.Join(", ", r.Telefonos);
+            _rawJson = r.RawJson;
+            // Auto-llena el numero de autorizacion si esta vacio.
+            if (string.IsNullOrWhiteSpace(_codigo) && !string.IsNullOrWhiteSpace(r.NumeroAutorizacion))
+            {
+                _codigo = r.NumeroAutorizacion!;
+            }
+            // Pre-marca "actualizar" solo cuando la IA trajo un valor y DIFIERE del paciente.
+            _aplicarTel = !string.IsNullOrWhiteSpace(PrimerTel()) && !MismaInfo(PrimerTel(), _info?.PacienteTelefono);
+            _aplicarCorreo = !string.IsNullOrWhiteSpace(_exCorreo) && !MismaInfo(_exCorreo, _info?.PacienteCorreo);
+            _aplicarDir = !string.IsNullOrWhiteSpace(_exDireccion) && !MismaInfo(_exDireccion, _info?.PacienteDireccion);
+            _extHecho = true;
+
+            // Auto-guarda la extraccion de inmediato: asi al reabrir la autorizacion se
+            // muestran los datos guardados y NO se vuelve a consumir tokens re-extrayendo.
+            if (AsignacionId is Guid aid)
+            {
+                try
+                {
+                    var tels = (_exTelefonos ?? "")
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                    var input = new GuardarAutorizacionMetadatoInput(
+                        _exNombre, _exTipoDoc, _exDocumento, _codigo, tels, _exCorreo, _exDireccion, _rawJson);
+                    await RetryDb(async () => { await Extractor.GuardarMetadatoAsync(aid, input); return true; });
+                    _extGuardadoEn = DateTimeOffset.Now;
+                }
+                catch { /* si el auto-guardado falla, quedan en pantalla para guardar a mano */ }
+            }
+        }
+        catch (Exception ex) { _extError = "Error extrayendo: " + ex.Message; }
+        finally { _extBusy = false; }
+    }
+
+    private async Task GuardarMetadatosAsync()
+    {
+        if (AsignacionId is not Guid aid) { return; }
+        _metaBusy = true; _metaMsg = null;
+        try
+        {
+            var tels = (_exTelefonos ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            var input = new GuardarAutorizacionMetadatoInput(
+                _exNombre, _exTipoDoc, _exDocumento, _codigo, tels, _exCorreo, _exDireccion, _rawJson);
+            await RetryDb(async () => { await Extractor.GuardarMetadatoAsync(aid, input); return true; });
+            _extGuardadoEn = DateTimeOffset.Now;
+            _metaMsg = "Metadatos guardados.";
+        }
+        catch (Exception ex) { _metaMsg = "No se pudo guardar: " + ex.Message; }
+        finally { _metaBusy = false; }
+    }
+
+    private async Task ActualizarPacienteAsync()
+    {
+        if (_info is null || _info.PacienteId == Guid.Empty) { return; }
+        if (!_aplicarTel && !_aplicarCorreo && !_aplicarDir) { _metaMsg = "Marca al menos un campo para actualizar."; return; }
+        _metaBusy = true; _metaMsg = null;
+        try
+        {
+            var req = new ActualizarContactoPacienteRequest(
+                _info.PacienteId,
+                _aplicarTel, PrimerTel(),
+                _aplicarCorreo, _exCorreo,
+                _aplicarDir, _exDireccion);
+            var actor = await Actor();
+            var ok = await RetryDb(() => AsigSvc.ActualizarContactoPacienteAsync(req, actor));
+            _metaMsg = ok ? "Ficha del paciente actualizada." : "No se aplicó ningún cambio.";
+        }
+        catch (Exception ex) { _metaMsg = "No se pudo actualizar el paciente: " + ex.Message; }
+        finally { _metaBusy = false; }
+    }
+
+    // Compara dos valores de contacto de forma laxa (trim + case-insensitive).
+    private static bool MismaInfo(string? a, string? b)
+        => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
     private async Task<Guid> Actor()
     {

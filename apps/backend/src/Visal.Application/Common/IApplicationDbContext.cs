@@ -63,6 +63,7 @@ public interface IApplicationDbContext
     DbSet<PacienteContactoEmergencia> PacienteContactosEmergencia { get; }
     DbSet<CatalogoPaciente> CatalogosPaciente { get; }
     DbSet<AsignacionLote> AsignacionLotes { get; }
+    DbSet<AsignacionAutorizacionDato> AsignacionAutorizacionDatos { get; }
     DbSet<Asignacion> Asignaciones { get; }
     DbSet<AsignacionTurno> AsignacionTurnos { get; }
     DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones { get; }

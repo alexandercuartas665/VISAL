@@ -81,6 +81,7 @@ public static class DependencyInjection
         services.AddScoped<Application.Common.IQuotePdfRenderer, Rendering.PuppeteerQuotePdfRenderer>();
         // QR de verificacion de ordenes de medicamentos (QRCoder, PNG managed).
         services.AddSingleton<Application.Common.IQrCodeGenerator, Rendering.QRCoderQrCodeGenerator>();
+        services.AddSingleton<Application.Common.IPdfTextExtractor, Rendering.PdfPigTextExtractor>();
 
         // Ingesta de correos -> PQR: lector IMAP (MailKit) + poller en background (patron PreRevisionIaWorker).
         services.AddSingleton<Visal.Application.Tenancy.Email.IImapEmailReader, Email.MailKitImapReader>();

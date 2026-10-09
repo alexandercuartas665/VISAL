@@ -234,6 +234,11 @@ else
                 CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim());
 
             var todas = (await OcSvc.BuscarAsync(filtro)).ToList();
+            // Las HC INACTIVAS nunca se imprimen: se excluyen de la raiz del paquete
+            // (las evoluciones ligadas ya filtran Cerrada en GetEvolucionesLigadasAsync).
+            // Se filtra ANTES de calcular 'ligadas' para que, si una base quedo inactiva,
+            // sus evoluciones Cerradas se reagrupen bajo otra base viva o salgan solas.
+            todas = todas.Where(x => !string.Equals(x.Estado, "Inactiva", StringComparison.OrdinalIgnoreCase)).ToList();
             // Post-filtro "Solo Abiertas" (mismo criterio que Ordenes.razor: SoloCerradas
             // se maneja en el service; para "Abiertas" filtramos en memoria).
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))

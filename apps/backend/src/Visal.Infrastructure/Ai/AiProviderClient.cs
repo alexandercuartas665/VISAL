@@ -143,14 +143,14 @@ public sealed class AiProviderClient : IAiProviderClient
         var body = new
         {
             systemInstruction = string.IsNullOrWhiteSpace(systemPrompt) ? null : new { parts = new[] { new { text = systemPrompt } } },
-            contents = turns.Select(t => new { role = t.Role == "model" ? "model" : "user", parts = new[] { new { text = t.Text } } }).ToArray()
+            contents = turns.Select(t => new { role = t.Role == "model" ? "model" : "user", parts = GeminiParts(t) }).ToArray()
         };
         using var resp = await _http.PostAsync(url, JsonContent(body), ct);
         var raw = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode) { return Fail(resp.StatusCode is var s ? (int)s : 0, raw); }
 
         using var doc = JsonDocument.Parse(raw);
-        var text = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
+        var text = GeminiText(doc.RootElement);
         var (inTok, outTok) = (0, 0);
         if (doc.RootElement.TryGetProperty("usageMetadata", out var um))
         {
@@ -158,6 +158,49 @@ public sealed class AiProviderClient : IAiProviderClient
             outTok = um.TryGetProperty("candidatesTokenCount", out var c) ? c.GetInt32() : 0;
         }
         return new AiChatResult(true, text, null, inTok, outTok);
+    }
+
+    // Parts de un turno Gemini: el texto (si hay) + un inline_data por adjunto (PDF/imagen,
+    // base64). Gemini v1beta REST usa camelCase: inlineData { mimeType, data }.
+    private static object[] GeminiParts(AiChatTurn t)
+    {
+        var parts = new List<object>();
+        if (!string.IsNullOrWhiteSpace(t.Text)) { parts.Add(new { text = t.Text }); }
+        if (t.Inlines is { Count: > 0 })
+        {
+            foreach (var inl in t.Inlines)
+            {
+                parts.Add(new { inlineData = new { mimeType = inl.MimeType, data = Convert.ToBase64String(inl.Data) } });
+            }
+        }
+        if (parts.Count == 0) { parts.Add(new { text = string.Empty }); }
+        return parts.ToArray();
+    }
+
+    // Lee el texto de la respuesta Gemini de forma defensiva: concatena TODOS los parts
+    // de texto del primer candidate. Devuelve "" si el candidate no trae texto (p.ej.
+    // bloqueado por safety o solo inline), para no reventar con un KeyNotFound.
+    private static string GeminiText(JsonElement root)
+    {
+        if (!root.TryGetProperty("candidates", out var cands) || cands.ValueKind != JsonValueKind.Array || cands.GetArrayLength() == 0)
+        {
+            return string.Empty;
+        }
+        var cand = cands[0];
+        if (!cand.TryGetProperty("content", out var content) || !content.TryGetProperty("parts", out var parts)
+            || parts.ValueKind != JsonValueKind.Array)
+        {
+            return string.Empty;
+        }
+        var sb = new StringBuilder();
+        foreach (var part in parts.EnumerateArray())
+        {
+            if (part.TryGetProperty("text", out var tx) && tx.ValueKind == JsonValueKind.String)
+            {
+                sb.Append(tx.GetString());
+            }
+        }
+        return sb.ToString();
     }
 
     // ===== OpenAI / ChatGPT / DeepSeek (formato chat/completions) =====

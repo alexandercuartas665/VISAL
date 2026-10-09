@@ -106,7 +106,14 @@ public sealed record MiServicioAsignadoDto(
     string? FormatoHistoriaNombre = null,
     /// <summary>Consecutivo publico del lote/asignacion (AS-000045). Reemplaza al
     /// prefijo hex del UUID en la columna CodInt y habilita buscar por ese codigo.</summary>
-    long? AsignacionConsecutivo = null);
+    long? AsignacionConsecutivo = null,
+    // ── Vigencia del servicio (Asignacion) — para filtrar la grilla por mes de trabajo.
+    /// <summary>Anio de vigencia del servicio (Asignacion.AnioServicio). Null si no se capturo.</summary>
+    short? AnioServicio = null,
+    /// <summary>Mes inicial de vigencia (Asignacion.MesVigencia, 1..12).</summary>
+    short MesVigencia = 0,
+    /// <summary>Mes final de vigencia (Asignacion.MesFinal). Null = igual a MesVigencia (un solo mes).</summary>
+    short? MesFinal = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

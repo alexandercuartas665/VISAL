@@ -142,6 +142,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<PacienteContactoEmergencia> PacienteContactosEmergencia => Set<PacienteContactoEmergencia>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
     public DbSet<AsignacionLote> AsignacionLotes => Set<AsignacionLote>();
+    public DbSet<AsignacionAutorizacionDato> AsignacionAutorizacionDatos => Set<AsignacionAutorizacionDato>();
     public DbSet<Asignacion> Asignaciones => Set<Asignacion>();
     public DbSet<AsignacionTurno> AsignacionTurnos => Set<AsignacionTurno>();
     public DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones => Set<AsignacionTurnoSesion>();
@@ -1498,6 +1499,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.Items).WithOne(x => x.Lote!).HasForeignKey(x => x.LoteId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
+        });
+
+        modelBuilder.Entity<AsignacionAutorizacionDato>(b =>
+        {
+            b.HasIndex(x => x.AsignacionId).IsUnique();
+            b.Property(x => x.Nombre).HasMaxLength(300);
+            b.Property(x => x.TipoDocumento).HasMaxLength(20);
+            b.Property(x => x.Documento).HasMaxLength(40);
+            b.Property(x => x.NumeroAutorizacion).HasMaxLength(60);
+            b.Property(x => x.TelefonosCsv).HasMaxLength(300);
+            b.Property(x => x.Correo).HasMaxLength(200);
+            b.Property(x => x.Direccion).HasMaxLength(300);
+            b.HasIndex(x => x.TenantId);
         });
 
         modelBuilder.Entity<Asignacion>(b =>

@@ -100,7 +100,10 @@ public sealed record OrdenClinicaItemDto(
     string? ProfesionalDocumento = null,
     /// <summary>True si la asignacion de la HC esta marcada como "folio": ese servicio
     /// NO cae en el snapshot RelacionFacturas. Se puede marcar/quitar desde el kebab.</summary>
-    bool EsFolio = false);
+    bool EsFolio = false,
+    /// <summary>Numero de autorizacion de la asignacion (Asignacion.CodigoAutorizacion).
+    /// Se muestra en el listado con su boton de copiar. Null si no tiene.</summary>
+    string? CodigoAutorizacion = null);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,

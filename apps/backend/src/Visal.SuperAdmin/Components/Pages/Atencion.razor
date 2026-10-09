@@ -78,6 +78,15 @@ else
                     <option value="Todos">Todos</option>
                 </select>
             </div>
+            <div class="at-fbar-sort" title="Muestra los servicios cuya vigencia (según la asignación) cae en el mes seleccionado. Por defecto, el mes actual.">
+                <span class="at-fbar-sort-lbl">Mes:</span>
+                <select @bind="_mesTrabajoKey">
+                    @foreach (var op in OpcionesMes())
+                    {
+                        <option value="@op.Key">@op.Label</option>
+                    }
+                </select>
+            </div>
             <div class="at-fbar-sort">
                 <span class="at-fbar-sort-lbl">Ordenar:</span>
                 <select @bind="_sortBy">
@@ -250,7 +259,7 @@ else
             // Firma del estado de filtros/orden/busqueda. Si cambia, volvemos a la
             // pagina 1 (asi el usuario no queda "atrapado" en una pagina alta tras
             // filtrar). Se calcula en render, sin tocar cada handler.
-            var _sig = string.Join("|", _filtroPac, _filtroEstado, _sortBy, _filPaquete, _filFecha,
+            var _sig = string.Join("|", _filtroPac, _filtroEstado, _mesTrabajoKey, _sortBy, _filPaquete, _filFecha,
                 _filFechaDesde, _filFechaHasta,
                 string.Join(",", _filTipos.OrderBy(x => x)),
                 string.Join(",", _filFormatosHc.OrderBy(x => x)),
@@ -682,6 +691,48 @@ else
     // incluirCompletados=false; los otros dos traen todo y filtran en cliente.
     private string _filtroEstado = "Pendiente";
 
+    // Mes de trabajo (vigencia): por defecto el mes actual. "todos" = sin filtro de mes.
+    private string _mesTrabajoKey = $"{DateTime.Today:yyyy-MM}";
+
+    // (anio, mes) seleccionado; null cuando es "Todos los meses".
+    private (int anio, int mes)? MesSel()
+    {
+        if (string.IsNullOrWhiteSpace(_mesTrabajoKey) || string.Equals(_mesTrabajoKey, "todos", StringComparison.OrdinalIgnoreCase)) { return null; }
+        var p = _mesTrabajoKey.Split('-');
+        if (p.Length == 2 && int.TryParse(p[0], out var y) && int.TryParse(p[1], out var m)) { return (y, m); }
+        return null;
+    }
+
+    // Opciones del selector: "Todos los meses" + los ultimos 12 meses (mes actual primero).
+    private static List<(string Key, string Label)> OpcionesMes()
+    {
+        var list = new List<(string, string)> { ("todos", "Todos los meses") };
+        var d = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        for (var i = 0; i < 12; i++)
+        {
+            var m = d.AddMonths(-i);
+            list.Add(($"{m.Year:0000}-{m.Month:00}", $"{MesNombreLargo(m.Month)} {m.Year}"));
+        }
+        return list;
+    }
+
+    // Vigente en (anio, mes): segun la vigencia de la asignacion (AnioServicio + MesVigencia..MesFinal).
+    // Sin vigencia capturada (AnioServicio null o MesVigencia 0) -> se muestra siempre (no se oculta).
+    private static bool VigenteEnMes(MiServicioAsignadoDto s, int anio, int mes)
+    {
+        if (s.AnioServicio is not short ay || s.MesVigencia < 1) { return true; }
+        int ini = s.MesVigencia;
+        int fin = (s.MesFinal is short mf && mf >= ini) ? mf : ini;
+        return ay == anio && mes >= ini && mes <= fin;
+    }
+
+    private static string MesNombreLargo(int m) => m switch
+    {
+        1 => "Enero", 2 => "Febrero", 3 => "Marzo", 4 => "Abril", 5 => "Mayo", 6 => "Junio",
+        7 => "Julio", 8 => "Agosto", 9 => "Septiembre", 10 => "Octubre", 11 => "Noviembre", 12 => "Diciembre",
+        _ => "?"
+    };
+
     // Estado del toolbar de filtros (portado del pipeline CUBOT). Solo vive en
     // memoria de la sesion; si el usuario recarga la pagina, se pierde.
     private bool _filtrosOpen;
@@ -797,6 +848,10 @@ else
             // con completados por un cambio de _filtroEstado sin recarga aun.
             if (string.Equals(_filtroEstado, "Pendiente", StringComparison.OrdinalIgnoreCase)) { q = q.Where(s => !s.Completado); }
             else if (string.Equals(_filtroEstado, "Terminado", StringComparison.OrdinalIgnoreCase)) { q = q.Where(s => s.Completado); }
+            // Mes de trabajo: solo los servicios VIGENTES en el mes elegido (Asignacion.AnioServicio
+            // + MesVigencia..MesFinal). "Todos los meses" no filtra. Servicios sin vigencia capturada
+            // se muestran siempre (no se ocultan por falta de dato).
+            if (MesSel() is (int _vy, int _vm)) { q = q.Where(s => VigenteEnMes(s, _vy, _vm)); }
             if (_filServicios.Count > 0) { q = q.Where(s => _filServicios.Contains(s.NombreServicio)); }
             if (_filProfesionales.Count > 0) { q = q.Where(s => _filProfesionales.Contains(s.NombreProfesional)); }
             if (_filPaquete == "con") { q = q.Where(s => !string.IsNullOrWhiteSpace(s.PaqueteCodigo)); }

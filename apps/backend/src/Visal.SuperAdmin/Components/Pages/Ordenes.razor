@@ -584,6 +584,18 @@ else
                 }
             </select>
         </div>
+        <div class="oc-f oc-f-toggle">
+            <label>&nbsp;</label>
+            <button type="button" class="btn btn-outline-secondary btn-sm oc-mas-btn"
+                    title="Mostrar/ocultar los filtros avanzados (EPS, agencia, formato, estado, revisión, etc.)"
+                    @onclick="() => _mostrarMasFiltros = !_mostrarMasFiltros">
+                @(_mostrarMasFiltros ? "▴ Menos filtros" : "▾ Más filtros")@{ var _fsa = FiltrosSecundariosActivos(); }@(_fsa > 0 ? $" ({_fsa})" : "")
+            </button>
+        </div>
+    </div>@* fin grid de filtros comunes (siempre visibles) *@
+    @if (_mostrarMasFiltros)
+    {
+    <div class="oc-filtros oc-filtros-mas">
         <div class="oc-f oc-f-wide">
             <label>EPS</label>
             <select class="form-select form-select-sm" @bind="_aseguradoraFiltro">
@@ -725,7 +737,8 @@ else
                 <option value="cierre">Fecha de cierre</option>
             </select>
         </div>
-    </div>@* fin .oc-filtros (grid). El navegador y las acciones van en barras full-width debajo. *@
+    </div>@* fin grid de filtros avanzados *@
+    }
 
     @{ var _navCods = AsigNavCodigos(); var _navIdx = AsigNavIndice(); }
     <div class="oc-toolbar">
@@ -926,11 +939,9 @@ else
                         @* Headers clicables: un click ordena por esa columna; otro click
                            en la misma invierte el sentido. Acc./Hora/Documentos no ordenan. *@
                         <th class="text-center" style="width:60px">Acc.</th>
-                        <th class="oc-th-sort" style="min-width:220px" title="Ordenar por paciente" @onclick='() => Ordenar("paciente")'>Paciente @Caret("paciente")</th>
-                        <th class="oc-th-sort" style="width:160px" title="Ordenar por documento" @onclick='() => Ordenar("documento")'>Documento @Caret("documento")</th>
-                        <th class="oc-th-sort" style="width:96px" title="Numero corto de la HC (primeros 8 del identificador). Click para ordenar." @onclick='() => Ordenar("hc")'>HC N° @Caret("hc")</th>
-                        <th class="oc-th-sort" style="width:110px" title="Codigo del lote de asignacion que ata todos los servicios del paciente. Click para ordenar." @onclick='() => Ordenar("asignacion")'>Cód. asignación @Caret("asignacion")</th>
-                        <th style="width:110px" title="Codigo del servicio del contrato con el que se cargo el servicio en Asignacion (ServicioContrato.CodigoServicio).">Cód. servicio</th>
+                        <th class="oc-th-sort" style="min-width:220px" title="Ordenar por paciente (incluye documento)" @onclick='() => Ordenar("paciente")'>Paciente @Caret("paciente")</th>
+                        <th class="oc-th-sort" style="width:168px" title="HC N° / Cód. asignación / Cód. servicio. Click ordena por HC N°." @onclick='() => Ordenar("hc")'>HC / Asig / Servicio @Caret("hc")</th>
+                        <th style="width:120px" title="Número de autorización de la asignación de esta HC">Autorización</th>
                         <th class="oc-th-sort" title="Ordenar por formato" @onclick='() => Ordenar("formato")'>Formato HC @Caret("formato")</th>
                         <th class="text-center oc-th-sort" style="width:70px" title="Numero global de sesion dentro de la asignacion. Click para ordenar." @onclick='() => Ordenar("sesion")'>Sesion @Caret("sesion")</th>
                         <th class="oc-th-sort" style="width:180px" title="Ordenar por especialista" @onclick='() => Ordenar("especialista")'>Especialista @Caret("especialista")</th>
@@ -941,14 +952,10 @@ else
                            Cuando el criterio es "atencion" muestra la fecha capturada por el
                            profesional en el schema (mayor entre campos con IsFechaAtencion);
                            cuando es "cierre" muestra la fecha del cierre definitivo. *@
-                        <th class="text-center oc-th-sort" style="width:110px"
-                            title="@(_ordenarPor == "atencion" ? "Fecha real de la atencion (schema del formulario). Fallback a fecha de cierre. Click para ordenar." : "Fecha de cierre de la HC. Click para ordenar.")"
+                        <th class="text-center oc-th-sort" style="width:135px"
+                            title="@(_ordenarPor == "atencion" ? "Fecha y hora real de la atencion (schema del formulario). Fallback a cierre. Click para ordenar." : "Fecha y hora de cierre de la HC. Click para ordenar.")"
                             @onclick='() => Ordenar("fecha")'>
-                            @(_ordenarPor == "atencion" ? "Fecha atencion" : "Fecha cierre") @Caret("fecha")
-                        </th>
-                        <th class="text-center" style="width:80px"
-                            title="@(_ordenarPor == "atencion" ? "Hora local de la atencion" : "Hora local del cierre")">
-                            Hora
+                            @(_ordenarPor == "atencion" ? "Fecha/hora atencion" : "Fecha/hora cierre") @Caret("fecha")
                         </th>
                         <th class="text-center" style="width:320px">Documentos</th>
                         <th class="text-center oc-th-sort" style="width:130px" title="Estado del ciclo de revision (Capa 08). Click para ordenar." @onclick='() => Ordenar("revision")'>Revision @Caret("revision")</th>
@@ -1100,6 +1107,7 @@ else
                                     else if (abierta) { <text>HC abierta el @(r.FechaApertura.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
                                     else { <text>HC @r.Estado.ToLower() el @(fechaMostrar.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</text> }
                                 </div>
+                                <div class="oc-pdoc mono">@r.PacienteTipoDoc @r.PacienteDoc @CopiarBtn(r.PacienteDoc)</div>
                                 @if (r.ProfesionalSinFirma)
                                 {
                                     <span class="badge bg-danger" style="font-size:.62rem;margin-top:2px;"
@@ -1115,13 +1123,19 @@ else
                                     </span>
                                 }
                             </td>
-                            <td class="mono">@r.PacienteTipoDoc @r.PacienteDoc</td>
-                            <td class="mono" title="HC N°">@(r.HcConsecutivo is long hcn ? CodigoPublico.Hc(hcn) : "-")</td>
-                            <td class="mono" title="Codigo de asignacion (lote que ata todos los servicios)">
-                                @(r.AsignacionConsecutivo is long asc ? CodigoPublico.Asignacion(asc) : "-")
+                            @{
+                                var hcCod = r.HcConsecutivo is long hcn ? CodigoPublico.Hc(hcn) : null;
+                                var asCod = r.AsignacionConsecutivo is long asc ? CodigoPublico.Asignacion(asc) : null;
+                                var servCod = string.IsNullOrWhiteSpace(r.CodigoServicio) ? null : r.CodigoServicio;
+                                var autCod = string.IsNullOrWhiteSpace(r.CodigoAutorizacion) ? null : r.CodigoAutorizacion;
+                            }
+                            <td class="mono oc-ident">
+                                <div class="oc-idrow"><span class="oc-idlbl">HC</span><span class="oc-idval">@(hcCod ?? "-")</span>@CopiarBtn(hcCod)</div>
+                                <div class="oc-idrow"><span class="oc-idlbl">AS</span><span class="oc-idval">@(asCod ?? "-")</span>@CopiarBtn(asCod)</div>
+                                <div class="oc-idrow"><span class="oc-idlbl">Serv</span><span class="oc-idval">@(servCod ?? "-")</span>@CopiarBtn(servCod)</div>
                             </td>
-                            <td class="mono" title="Codigo del servicio del contrato con el que se cargo en Asignacion">
-                                @(string.IsNullOrWhiteSpace(r.CodigoServicio) ? "-" : r.CodigoServicio)
+                            <td class="mono oc-aut" title="Número de autorización de la asignación">
+                                <span class="oc-idval">@(autCod ?? "-")</span>@CopiarBtn(autCod)
                             </td>
                             <td>@r.FormatoNombre</td>
                             <td class="text-center">@(r.SesionNumero is int sn ? $"#{sn}" : "-")</td>
@@ -1155,11 +1169,8 @@ else
                                     ? (r.FechaAtencion ?? r.FechaCierre)
                                     : r.FechaCierre;
                             }
-                            <td class="text-center">
-                                @(fechaCol?.ToLocalTime().ToString("dd/MM/yyyy") ?? "-")
-                            </td>
-                            <td class="text-center">
-                                @(fechaCol?.ToLocalTime().ToString("HH:mm") ?? "-")
+                            <td class="text-center mono">
+                                @(fechaCol?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")
                             </td>
                             <td class="text-center">
                                 <div class="oc-pills">
@@ -1570,6 +1581,22 @@ else
     .oc-sort { margin-left:4px; font-size:10px; opacity:.4; }
     .oc-sort-on { opacity:1; }
 
+    /* Columnas de identidad unificadas + boton de copiar por valor */
+    .oc-copy { border:none; background:none; cursor:pointer; color:#94a3b8; font-size:12px;
+               padding:0 2px; margin-left:3px; line-height:1; vertical-align:middle; }
+    .oc-copy:hover { color:#2563eb; }
+    .oc-pdoc { font-size:12px; color:#475569; margin-top:3px; display:flex; align-items:center; gap:2px; }
+    .oc-ident { line-height:1.55; }
+    .oc-idrow { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+    .oc-idlbl { display:inline-block; min-width:30px; color:#94a3b8; font-size:10px; font-weight:700; text-transform:uppercase; }
+    .oc-idval { font-size:12px; }
+    .oc-aut { white-space:nowrap; }
+
+    /* Toggle "Mas filtros" + panel de filtros avanzados colapsable */
+    .oc-f-toggle { display:flex; flex-direction:column; justify-content:flex-end; }
+    .oc-mas-btn { white-space:nowrap; }
+    .oc-filtros-mas { border-top:1px dashed #e2e8f0; margin-top:8px; padding-top:10px; }
+
     /* Modal doble columna "Ver revision" */
     .oc-rv-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1050; }
     .oc-rv-modal {
@@ -1959,6 +1986,25 @@ else
     /// Cuando el usuario necesite un universo mayor, combina con los filtros
     /// que si viajan al servidor (fechas / EPS / sede / formato / estado / paciente).</summary>
     private string _filtroRevision = "";
+    // Colapsa/expande los filtros avanzados (EPS, agencia, formato, estado, firma,
+    // sesiones, inactivas, revision, agente, ordenar) para dar aire al modulo.
+    private bool _mostrarMasFiltros;
+
+    // Cuenta cuantos filtros AVANZADOS estan activos, para mostrarlo en el boton
+    // "Mas filtros" aunque el panel este colapsado.
+    private int FiltrosSecundariosActivos()
+    {
+        var n = 0;
+        if (!string.IsNullOrWhiteSpace(_aseguradoraFiltro)) { n++; }
+        if (!string.IsNullOrWhiteSpace(_sucursalFiltro)) { n++; }
+        if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { n++; }
+        if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { n++; }
+        if (_soloSinFirma) { n++; }
+        if (_soloMultiSesion) { n++; }
+        if (_noMostrarInactivas) { n++; }
+        if (!string.IsNullOrWhiteSpace(_filtroRevision)) { n++; }
+        return n;
+    }
 
     /// <summary>FAT-4 — Criterio de orden y de columna Fecha en la tabla.
     /// "atencion" = OrderByDescending(FechaAtencion ?? FechaCierre ?? FechaApertura).
@@ -2898,9 +2944,24 @@ else
 
     // ─────────────── Kebab de acciones ───────────────
 
+    // Cuando se abre un kebab, pedimos reposicionarlo como 'fixed' via JS tras el render
+    // (asi no lo recorta el overflow del contenedor de la tabla, p.ej. con una sola fila).
+    private bool _kebabNeedsPlace;
+
     private void ToggleKebab(Guid rowId)
     {
-        _kebabRowId = _kebabRowId == rowId ? null : rowId;
+        var abriendo = _kebabRowId != rowId;
+        _kebabRowId = abriendo ? rowId : null;
+        _kebabNeedsPlace = abriendo;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_kebabNeedsPlace && _kebabRowId is not null)
+        {
+            _kebabNeedsPlace = false;
+            try { await JS.InvokeVoidAsync("ocKebab.place"); } catch { /* el JS puede no estar listo */ }
+        }
     }
 
     /// <summary>Cierra el kebab y ejecuta la accion sincrona. Uso: acciones de UI
@@ -3049,6 +3110,28 @@ else
         try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", code); _asigCopiado = true; }
         catch { _asigCopiado = false; }
     }
+
+    // Copiar al portapapeles un valor de celda (documento, HC N°, AS, servicio,
+    // autorizacion). Muestra un ✓ fugaz en el boton que se clickeo.
+    private string? _copiadoFlash;
+    private async Task CopiarAsync(string? texto)
+    {
+        if (string.IsNullOrWhiteSpace(texto)) { return; }
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", texto); } catch { }
+        _copiadoFlash = texto;
+        StateHasChanged();
+        await Task.Delay(1100);
+        if (_copiadoFlash == texto) { _copiadoFlash = null; StateHasChanged(); }
+    }
+
+    // Boton de copiar reutilizable por celda. No renderiza nada si el valor es vacio/"-".
+    private RenderFragment CopiarBtn(string? valor) =>@<text>
+        @if (!string.IsNullOrWhiteSpace(valor) && valor != "-")
+        {
+            <button type="button" class="oc-copy" title="Copiar @valor"
+                    @onclick="() => CopiarAsync(valor)" @onclick:stopPropagation>@(_copiadoFlash == valor ? "✓" : "⧉")</button>
+        }
+    </text>;
 
     // Filtro client-side: solo servicios (lote + Cod. servicio) con mas de una
     // sesion/HC en el resultado cargado. Pensado para aislar terapias y multi-sesion.

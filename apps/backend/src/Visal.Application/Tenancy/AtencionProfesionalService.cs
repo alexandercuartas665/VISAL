@@ -530,7 +530,10 @@ public sealed class AtencionProfesionalService(
                     t.HoraInicio,
                     t.LlegoEn != null,
                     nombreFormatoEfectivo,
-                    ConsecutivoLoteDe(a.Id)));
+                    ConsecutivoLoteDe(a.Id),
+                    a.AnioServicio,
+                    a.MesVigencia,
+                    a.MesFinal));
             }
         }
         return result;

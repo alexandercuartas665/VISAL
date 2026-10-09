@@ -2,8 +2,14 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-/// <summary>Un turno de la conversacion de prueba. Role: "user" (cliente) o "model" (agente).</summary>
-public sealed record AiChatTurn(string Role, string Text);
+/// <summary>Adjunto binario inline para un turno multimodal (p.ej. un PDF o imagen que
+/// el proveedor lee con vision). Hoy solo lo consume la rama Gemini (inline_data). Los
+/// proveedores solo-texto lo ignoran.</summary>
+public sealed record AiInlineData(string MimeType, byte[] Data);
+
+/// <summary>Un turno de la conversacion de prueba. Role: "user" (cliente) o "model" (agente).
+/// <paramref name="Inlines"/> lleva adjuntos binarios (PDF/imagen) para turnos multimodales.</summary>
+public sealed record AiChatTurn(string Role, string Text, IReadOnlyList<AiInlineData>? Inlines = null);
 
 /// <summary>Recurso que el agente decidio entregar en el chat (imagen, video, pdf, ubicacion o texto).</summary>
 public sealed record AiChatAttachment(string Name, AgentResourceType ResourceType, string? FileUrl, string? FileName, string? Detail);

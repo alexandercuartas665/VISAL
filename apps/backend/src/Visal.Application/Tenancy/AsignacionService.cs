@@ -533,13 +533,55 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             select new
             {
                 a.Id, a.CodigoAutorizacion, a.PdfAutorizacionUrl, a.NombreServicio, a.ContratoCodigo,
-                p.PrimerNombre, p.PrimerApellido, p.TipoDocumento, p.NumeroDocumento
+                p.PrimerNombre, p.PrimerApellido, p.TipoDocumento, p.NumeroDocumento,
+                PacienteId = p.Id, p.CodigoPaisTelefono, p.Telefono, p.Email, p.Direccion
             }).FirstOrDefaultAsync(ct);
         if (row is null) { return null; }
         var nombre = ((row.PrimerNombre ?? "") + " " + (row.PrimerApellido ?? "")).Trim();
         var doc = (row.TipoDocumento + " " + row.NumeroDocumento).Trim();
+        var tel = string.IsNullOrWhiteSpace(row.Telefono)
+            ? null
+            : (string.IsNullOrWhiteSpace(row.CodigoPaisTelefono) ? row.Telefono : $"{row.CodigoPaisTelefono} {row.Telefono}");
         return new AutorizacionInfoDto(row.Id, row.CodigoAutorizacion, row.PdfAutorizacionUrl,
-            row.NombreServicio, row.ContratoCodigo, nombre, doc);
+            row.NombreServicio, row.ContratoCodigo, nombre, doc,
+            row.PacienteId, tel, row.Email, row.Direccion);
+    }
+
+    public async Task<bool> ActualizarContactoPacienteAsync(ActualizarContactoPacienteRequest req, Guid actor, CancellationToken ct = default)
+    {
+        if (req.PacienteId == Guid.Empty) { return false; }
+        var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == req.PacienteId, ct);
+        if (p is null) { return false; }
+
+        var cambio = false;
+        if (req.ActualizarTelefono)
+        {
+            // El telefono puede venir con prefijo de pais ("+57 300..."); lo separamos.
+            var (pais, num) = SepararTelefono(req.Telefono);
+            p.CodigoPaisTelefono = pais ?? p.CodigoPaisTelefono;
+            p.Telefono = num;
+            cambio = true;
+        }
+        if (req.ActualizarCorreo) { p.Email = string.IsNullOrWhiteSpace(req.Correo) ? null : req.Correo.Trim(); cambio = true; }
+        if (req.ActualizarDireccion) { p.Direccion = string.IsNullOrWhiteSpace(req.Direccion) ? null : req.Direccion.Trim(); cambio = true; }
+
+        if (!cambio) { return false; }
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    // Separa un telefono en (codigo pais, numero). "+57 3001234567" -> ("+57","3001234567").
+    // Si no hay prefijo, deja el pais en null (se conserva el existente del paciente).
+    private static (string? pais, string? numero) SepararTelefono(string? tel)
+    {
+        if (string.IsNullOrWhiteSpace(tel)) { return (null, null); }
+        var t = tel.Trim();
+        if (t.StartsWith('+'))
+        {
+            var sp = t.IndexOf(' ');
+            if (sp > 0) { return (t[..sp].Trim(), t[(sp + 1)..].Trim()); }
+        }
+        return (null, t);
     }
 
     public async Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default)

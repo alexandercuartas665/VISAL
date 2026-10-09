@@ -357,6 +357,13 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Where(a => asigIds.Contains(a.Id))
                 .Select(a => new { a.Id, a.EsFolio })
                 .ToDictionaryAsync(x => x.Id, x => x.EsFolio, ct);
+        // Numero de autorizacion por asignacion (columna "Autorizacion" con copiar).
+        var asigToAutorizacion = asigIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await db.Asignaciones.AsNoTracking()
+                .Where(a => asigIds.Contains(a.Id))
+                .Select(a => new { a.Id, a.CodigoAutorizacion })
+                .ToDictionaryAsync(x => x.Id, x => x.CodigoAutorizacion, ct);
         // Consecutivo publico del lote (AS-000045) por loteId.
         var loteIdsDistintos = asigInfo.Select(x => x.LoteId).Distinct().ToList();
         var loteToConsecutivo = loteIdsDistintos.Count == 0
@@ -496,7 +503,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 r.Hc.Consecutivo,
                 asigLoteId is Guid loteCons && loteToConsecutivo.TryGetValue(loteCons, out var lc) ? lc : (long?)null,
                 r.Hc.ProfesionalId is Guid pid && profToDoc.TryGetValue(pid, out var pdoc) ? pdoc : null,
-                asignacionId is Guid afid && asigToEsFolio.TryGetValue(afid, out var ef) && ef
+                asignacionId is Guid afid && asigToEsFolio.TryGetValue(afid, out var ef) && ef,
+                asignacionId is Guid afid2 && asigToAutorizacion.TryGetValue(afid2, out var aut) ? aut : null
             );
         }).ToList();
     }

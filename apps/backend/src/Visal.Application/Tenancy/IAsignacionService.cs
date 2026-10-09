@@ -51,7 +51,15 @@ public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string
 /// <summary>Datos de autorizacion de una asignacion + contexto para el modal.</summary>
 public sealed record AutorizacionInfoDto(
     Guid AsignacionId, string? CodigoAutorizacion, string? PdfAutorizacionUrl,
-    string? NombreServicio, string? ContratoCodigo, string? PacienteNombre, string? PacienteDoc);
+    string? NombreServicio, string? ContratoCodigo, string? PacienteNombre, string? PacienteDoc,
+    // Contacto actual del paciente, para comparar con lo extraido de la autorizacion.
+    Guid PacienteId = default, string? PacienteTelefono = null, string? PacienteCorreo = null,
+    string? PacienteDireccion = null);
+
+/// <summary>Contacto a actualizar en la ficha del paciente (desde el modal de autorizacion).</summary>
+public sealed record ActualizarContactoPacienteRequest(
+    Guid PacienteId, bool ActualizarTelefono, string? Telefono,
+    bool ActualizarCorreo, string? Correo, bool ActualizarDireccion, string? Direccion);
 
 /// <summary>Filtro tipado para la busqueda avanzada de pacientes (modal BUSCAR PACIENTES).</summary>
 public sealed record BusquedaPacienteFiltro(
@@ -443,6 +451,10 @@ public interface IAsignacionService
     /// (servicio, contrato, paciente) para mostrar en el modal. Null si no existe.
     /// Lo usa el modal de autorizacion reutilizable (Asignacion y Ordenes Clinicas).</summary>
     Task<AutorizacionInfoDto?> GetAutorizacionAsync(Guid asignacionId, CancellationToken ct = default);
+
+    /// <summary>Actualiza el contacto (telefono/correo/direccion) del paciente con lo que
+    /// el usuario confirmo desde el modal de autorizacion. Solo toca los campos marcados.</summary>
+    Task<bool> ActualizarContactoPacienteAsync(ActualizarContactoPacienteRequest req, Guid actor, CancellationToken ct = default);
 
     /// <summary>Lista tabular de asignaciones para el tab "Listado" con filtros compuestos.
     /// Ordena por CreadoEn desc. Sin limite implicito; la UI puede paginar/scrollear.</summary>

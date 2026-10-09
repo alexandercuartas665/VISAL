@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IAiAgentService, Tenancy.AiAgentService>();
         services.AddScoped<Tenancy.IAiUsageService, Tenancy.AiUsageService>();
         services.AddScoped<Tenancy.IAiInferenceService, Tenancy.AiInferenceService>();
+        services.AddScoped<Tenancy.IAutorizacionExtractorService, Tenancy.AutorizacionExtractorService>();
         // Ingesta de correos -> PQR: procesador (lee buzon + clasifica + crea tarjeta) + ABM de buzones.
         services.AddScoped<Tenancy.Email.IEmailIngestProcessor, Tenancy.Email.EmailIngestProcessor>();
         services.AddScoped<Tenancy.Email.IEmailIngestConfigService, Tenancy.Email.EmailIngestConfigService>();

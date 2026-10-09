@@ -183,7 +183,7 @@ public sealed class PacienteContratosTests
         var saved = await svc.SaveAsync(Req(null, "666", lista), Actor);
         Assert.NotNull(saved);
 
-        var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant });
+        var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var pAsig = await asig.GetPacienteAsync(saved!.Id);
 
         Assert.NotNull(pAsig);
@@ -203,7 +203,7 @@ public sealed class PacienteContratosTests
         var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var saved = await svc.SaveAsync(Req(null, "777", Array.Empty<PacienteContratoDto>()), Actor);
 
-        var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant });
+        var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var pAsig = await asig.GetPacienteAsync(saved!.Id);
 
         Assert.NotNull(pAsig);

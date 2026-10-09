@@ -1166,6 +1166,14 @@ else
                        disabled="@ro" value="@val"
                        @onchange="e => SetValue(key, e.Value?.ToString())" />
                 break;
+            case "hora":
+            case "time":
+                @* Selector de hora 24h propio (Hora24). Normaliza al perder foco y
+                   LIMPIA el valor si no es convertible a una hora valida, para que un
+                   campo de hora nunca persista basura ("10.45", "17}:30", "10.00AM"). *@
+                <Hora24 Value="@val" Disabled="@ro"
+                        ValueChanged="v => SetValue(key, v)" />
+                break;
             case "email":
                 <input type="email" class="form-control form-control-sm" placeholder="@node.Placeholder"
                        disabled="@ro" value="@val"
@@ -1386,6 +1394,11 @@ else
             case "datetime":
                 <input type="datetime-local" class="form-control form-control-sm" disabled="@ro" value="@val"
                        @onchange="e => setCell(e.Value?.ToString())" />
+                break;
+            case "hora":
+            case "time":
+                @* Hora 24h validada: normaliza o limpia (no persiste basura). *@
+                <Hora24 Value="@val" Disabled="@ro" ValueChanged="v => setCell(v)" />
                 break;
             case "select":
                 // Tolerar diferencias de caso/tildes valor guardado vs opciones.

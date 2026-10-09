@@ -2330,6 +2330,30 @@
                     SessionNo: SessionNo),
                 actorUid);
 
+            // Si la guardia "1 historia base por hilo" del backend forzo el formato de
+            // EVOLUCION (el hilo ya tenia una historia base), recargamos el esquema y el
+            // prefill del formato realmente usado. Sin esto el doctor veria el formulario
+            // base que se habia preparado mientras la HC quedo en evolucion (esquema y
+            // datos desalineados en la sesion abierta).
+            if (creada.FormDefinitionId != fid)
+            {
+                stage = "ReloadFormatoForzado";
+                var detailEvo = await FormsSvc.GetAsync(creada.FormDefinitionId);
+                if (detailEvo is not null)
+                {
+                    detail = detailEvo;
+                    _schemaActual = FormSchema.FromJson(detail.SchemaJson);
+                    _prefillRoutesActual = PrefillRouteSet.FromJson(detail.PrefillRoutesJson);
+                    _valores = new();
+                    DefaultValuesHelper.Aplicar(_valores, _schemaActual);
+                    await PrefillFromPaciente();
+                    _formatoActualNombre = detail.Nombre;
+                    _subtituloFormato = !string.IsNullOrWhiteSpace(detail.Version)
+                        ? $"Codigo: {detail.Codigo}  -  Version: {detail.Version}"
+                        : $"Codigo: {detail.Codigo}";
+                }
+            }
+
             stage = "HeaderAutoFillHelper.Aplicar";
             _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura, hcAbierta: true);
             _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);

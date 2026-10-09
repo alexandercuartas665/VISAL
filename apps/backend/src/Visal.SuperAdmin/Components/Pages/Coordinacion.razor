@@ -4,6 +4,8 @@
 @using System.Security.Claims
 @using Visal.Application.Tenancy
 @inject IAsignacionService Svc
+@inject ICierrePeriodoService CierreSvc
+@inject IJSRuntime JS
 @inject IUsuarioAdminService UsuSvc
 @inject ISucursalService SucSvc
 @inject IAseguradoraService AsegSvc
@@ -863,6 +865,149 @@ else if (_tabSel == "Calendario")
     }
 }
 
+else if (_tabSel == "Cierre de periodos")
+{
+    @if (_modulos.Count == 0)
+    {
+        <div class="ase-card"><div class="ase-empty cd-no-perm">Sin permisos de coordinacion.</div></div>
+    }
+    else
+    {
+        <div class="ase-card">
+            <div class="ase-card-h">Cerrar un periodo</div>
+            <div class="ase-form cd-form">
+                <div class="ase-f">
+                    <label>Periodo</label>
+                    <select class="form-select form-select-sm" @bind="_anio">
+                        @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Mes</label>
+                    <select class="form-select form-select-sm" @bind="_mesCierre">
+                        @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                    </select>
+                </div>
+                <div class="ase-f ase-f-wide cd-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="PrevisualizarCierreAsync" disabled="@_cierreBusy">
+                        @(_cierreBusy ? "Calculando..." : "Previsualizar pendientes")
+                    </button>
+                </div>
+            </div>
+            <div class="cd-cierre-hint">
+                Muestra las sesiones <b>pendientes</b> (no atendidas) de los servicios cuya vigencia
+                <b>termina</b> en el mes elegido. Al <b>cerrar</b>, esas sesiones se inactivan (ya no
+                aparecen en Atención) y queda este resumen guardado.
+            </div>
+        </div>
+
+        @if (_cierreMsg is not null) { <div class="ase-card"><div class="cd-cierre-msg">@_cierreMsg</div></div> }
+
+        @if (_cierrePreview is not null)
+        {
+            <div class="ase-card">
+                <div class="ase-card-h cd-cierre-head">
+                    <span>Pendientes de @MesNombre(_cierrePreview.Mes) @_cierrePreview.Anio</span>
+                    <span class="cd-cierre-tot">@_cierrePreview.TotalServicios servicio(s) · @_cierrePreview.TotalSesiones sesión(es)</span>
+                </div>
+
+                @if (_cierrePreview.YaCerrado)
+                {
+                    <div class="cd-cierre-cerrado">⚠ Este periodo ya está <b>cerrado</b>. Para rehacerlo, reábrelo desde el historial de abajo.</div>
+                }
+
+                @if (_cierrePreview.Filas.Count == 0)
+                {
+                    <div class="ase-empty">No hay sesiones pendientes para ese periodo.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr><th>Paciente</th><th>Documento</th><th>Servicio</th><th class="text-end">Sesiones no atendidas</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var f in _cierrePreview.Filas)
+                                {
+                                    <tr>
+                                        <td>@f.PacienteNombre</td>
+                                        <td class="mono">@(f.PacienteDocumento ?? "-")</td>
+                                        <td>@f.ServicioNombre</td>
+                                        <td class="text-end">@f.CantidadPendiente</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (!_cierrePreview.YaCerrado)
+                    {
+                        <div class="cd-actions" style="padding:10px 0;">
+                            <button class="btn btn-danger btn-sm" @onclick="CerrarPeriodoAsync" disabled="@_cierreBusy">
+                                🔒 Cerrar periodo e inactivar @_cierrePreview.TotalSesiones sesión(es)
+                            </button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+
+        @* Historial de cierres *@
+        <div class="ase-card">
+            <div class="ase-card-h cd-cierre-head">
+                <span>Periodos cerrados</span>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CargarCierresAsync">↻ Refrescar</button>
+            </div>
+            @if (_cierres is null) { <div class="ase-empty">Presiona Refrescar para ver el historial.</div> }
+            else if (_cierres.Count == 0) { <div class="ase-empty">Aún no hay periodos cerrados.</div> }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr><th>Periodo</th><th>Cerrado</th><th class="text-end">Servicios</th><th class="text-end">Sesiones</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in _cierres)
+                            {
+                                <tr>
+                                    <td>@MesNombre(c.Mes) @c.Anio</td>
+                                    <td class="mono">@c.CerradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td class="text-end">@c.TotalServicios</td>
+                                    <td class="text-end">@c.TotalSesiones</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerDetalleCierreAsync(c)">Ver</button>
+                                        <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirCierreAsync(c)" disabled="@_cierreBusy"
+                                                title="Reabrir: devuelve las sesiones a pendientes y borra el cierre">Reabrir</button>
+                                    </td>
+                                </tr>
+                                @if (_cierreDetalleId == c.Id && _cierreDetalle is not null)
+                                {
+                                    <tr><td colspan="5" class="cd-cierre-det">
+                                        @if (_cierreDetalle.Count == 0) { <span class="text-muted">Sin detalle.</span> }
+                                        else
+                                        {
+                                            <table class="table table-sm">
+                                                <thead><tr><th>Paciente</th><th>Documento</th><th>Servicio</th><th class="text-end">Sesiones</th></tr></thead>
+                                                <tbody>
+                                                    @foreach (var d in _cierreDetalle)
+                                                    {
+                                                        <tr><td>@d.PacienteNombre</td><td class="mono">@(d.PacienteDocumento ?? "-")</td><td>@d.ServicioNombre</td><td class="text-end">@d.CantidadPendiente</td></tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        }
+                                    </td></tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
+
 @* ============== Modal visor del documento adjunto de la asignacion ============== *@
 @if (_docView is AsignacionPendienteDto dv && !string.IsNullOrWhiteSpace(dv.PdfAutorizacionUrl))
 {
@@ -1100,6 +1245,16 @@ else if (_tabSel == "Calendario")
     .cd-kb-card-prog { margin-top: 6px; font-size: 10.5px; color: #16a34a; font-weight: 600; }
 
     /* ============ CALENDARIO ============ */
+    .cd-cierre-ph { display:flex; gap:16px; align-items:flex-start; padding:18px; }
+    .cd-cierre-ico { font-size:34px; opacity:.7; }
+    .cd-cierre-txt { font-size:13px; color:#334155; max-width:720px; }
+    .cd-cierre-txt p { margin:6px 0 0; color:#64748b; line-height:1.5; }
+    .cd-cierre-hint { font-size:12px; color:#64748b; padding:0 2px 4px; line-height:1.5; }
+    .cd-cierre-msg { font-size:13px; color:#0f172a; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:10px 12px; }
+    .cd-cierre-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .cd-cierre-tot { font-size:12px; font-weight:600; color:#1d4ed8; background:#eff6ff; border-radius:999px; padding:2px 10px; }
+    .cd-cierre-cerrado { font-size:12px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 12px; margin-bottom:8px; }
+    .cd-cierre-det { background:#f8fafc; padding:8px 14px; }
     .cd-cal { margin-top: 14px; }
     .cd-cal-head { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
     .cd-cal-dw { text-align: center; font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: .03em; text-transform: uppercase; padding: 6px 0; background: #f1f5f9; border-radius: 4px; }
@@ -1228,7 +1383,7 @@ else if (_tabSel == "Calendario")
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private readonly string[] _tabs = new[] { "Solicitudes", "Coordinaciones", "Kanban", "Calendario" };
+    private readonly string[] _tabs = new[] { "Solicitudes", "Coordinaciones", "Kanban", "Calendario", "Cierre de periodos" };
     private string _tabSel = "Solicitudes";
 
     // Permisos del usuario logueado (que modulos puede coordinar).
@@ -1354,6 +1509,88 @@ else if (_tabSel == "Calendario")
     // ============ Tablero Calendario ============
     private int _mesCalendario = DateTime.Now.Month;
     private List<SesionCalendarioDto> _calChips = new();
+
+    // ============ Tab Cierre de periodos ============
+    private int _mesCierre = DateTime.Now.Month;
+    private bool _cierreBusy;
+    private string? _cierreMsg;
+    private CierrePeriodoPreviewDto? _cierrePreview;
+    private IReadOnlyList<CierrePeriodoDto>? _cierres;
+    private Guid? _cierreDetalleId;
+    private IReadOnlyList<CierrePeriodoFilaDto>? _cierreDetalle;
+
+    private async Task PrevisualizarCierreAsync()
+    {
+        _cierreBusy = true; _cierreMsg = null; _cierreDetalleId = null; _cierreDetalle = null;
+        try { _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre); }
+        catch (Exception ex) { _cierreMsg = "No se pudo previsualizar: " + ex.Message; }
+        finally { _cierreBusy = false; }
+    }
+
+    private async Task CerrarPeriodoAsync()
+    {
+        if (_cierrePreview is null) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Vas a CERRAR {MesNombre(_cierrePreview.Mes)} {_cierrePreview.Anio} e inactivar {_cierrePreview.TotalSesiones} sesión(es) pendiente(s). Ya no se podrán atender. ¿Continuar?");
+        if (!ok) { return; }
+        _cierreBusy = true; _cierreMsg = null;
+        try
+        {
+            var actor = await Actor();
+            var c = await CierreSvc.CerrarAsync(_anio, _mesCierre, actor);
+            _cierreMsg = $"Periodo {MesNombre(c.Mes)} {c.Anio} cerrado: {c.TotalServicios} servicio(s), {c.TotalSesiones} sesión(es) inactivada(s).";
+            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre);
+            await CargarCierresAsync();
+        }
+        catch (Exception ex) { _cierreMsg = "No se pudo cerrar: " + ex.Message; }
+        finally { _cierreBusy = false; }
+    }
+
+    private async Task CargarCierresAsync()
+    {
+        try { _cierres = await CierreSvc.ListarCierresAsync(); }
+        catch (Exception ex) { _cierreMsg = "No se pudo cargar el historial: " + ex.Message; }
+    }
+
+    private async Task VerDetalleCierreAsync(CierrePeriodoDto c)
+    {
+        if (_cierreDetalleId == c.Id) { _cierreDetalleId = null; _cierreDetalle = null; return; }
+        _cierreDetalleId = c.Id;
+        try { _cierreDetalle = await CierreSvc.GetDetalleAsync(c.Id); }
+        catch (Exception ex) { _cierreMsg = "No se pudo cargar el detalle: " + ex.Message; }
+    }
+
+    private async Task ReabrirCierreAsync(CierrePeriodoDto c)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Reabrir {MesNombre(c.Mes)} {c.Anio}: las {c.TotalSesiones} sesión(es) vuelven a quedar pendientes y se borra este cierre. ¿Continuar?");
+        if (!ok) { return; }
+        _cierreBusy = true; _cierreMsg = null;
+        try
+        {
+            var actor = await Actor();
+            await CierreSvc.ReabrirAsync(c.Id, actor);
+            _cierreMsg = $"Periodo {MesNombre(c.Mes)} {c.Anio} reabierto. Las sesiones volvieron a pendientes.";
+            if (_cierreDetalleId == c.Id) { _cierreDetalleId = null; _cierreDetalle = null; }
+            await CargarCierresAsync();
+            if (_cierrePreview is not null && _cierrePreview.Anio == c.Anio && _cierrePreview.Mes == c.Mes)
+            {
+                _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre);
+            }
+        }
+        catch (Exception ex) { _cierreMsg = "No se pudo reabrir: " + ex.Message; }
+        finally { _cierreBusy = false; }
+    }
+
+    private async Task<Guid> Actor()
+    {
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            if (Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)) { return id; }
+        }
+        return Guid.Empty;
+    }
     private List<DateOnly> _calDias = new();
 
     private sealed record KanbanColumnaVm(EstadoTablero Estado, string Titulo, string Bg, string Fg);

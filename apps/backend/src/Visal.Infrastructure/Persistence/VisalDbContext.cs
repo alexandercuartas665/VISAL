@@ -143,6 +143,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
     public DbSet<AsignacionLote> AsignacionLotes => Set<AsignacionLote>();
     public DbSet<AsignacionAutorizacionDato> AsignacionAutorizacionDatos => Set<AsignacionAutorizacionDato>();
+    public DbSet<CierrePeriodo> CierrePeriodos => Set<CierrePeriodo>();
+    public DbSet<CierrePeriodoDetalle> CierrePeriodoDetalles => Set<CierrePeriodoDetalle>();
     public DbSet<Asignacion> Asignaciones => Set<Asignacion>();
     public DbSet<AsignacionTurno> AsignacionTurnos => Set<AsignacionTurno>();
     public DbSet<AsignacionTurnoSesion> AsignacionTurnoSesiones => Set<AsignacionTurnoSesion>();
@@ -1499,6 +1501,25 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.Items).WithOne(x => x.Lote!).HasForeignKey(x => x.LoteId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
+        });
+
+        modelBuilder.Entity<CierrePeriodo>(b =>
+        {
+            b.HasIndex(x => new { x.TenantId, x.Anio, x.Mes });
+            b.HasMany(x => x.Detalles).WithOne(d => d.CierrePeriodo!)
+                .HasForeignKey(d => d.CierrePeriodoId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<CierrePeriodoDetalle>(b =>
+        {
+            b.Property(x => x.PacienteNombre).HasMaxLength(300);
+            b.Property(x => x.PacienteDocumento).HasMaxLength(40);
+            b.Property(x => x.ServicioNombre).HasMaxLength(300);
+            b.Property(x => x.CodigoServicio).HasMaxLength(60);
+            b.HasIndex(x => x.CierrePeriodoId);
+        });
+        modelBuilder.Entity<AsignacionTurno>(b =>
+        {
+            b.HasIndex(x => x.CierrePeriodoId);
         });
 
         modelBuilder.Entity<AsignacionAutorizacionDato>(b =>

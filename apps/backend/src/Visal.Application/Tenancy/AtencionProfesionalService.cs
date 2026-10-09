@@ -35,6 +35,8 @@ public sealed class AtencionProfesionalService(
 
         // Construimos la query base (filtrada por tenant via el global filter de EF).
         var turnosQ = db.AsignacionTurnos.AsNoTracking().AsQueryable();
+        // Turnos anulados por un cierre de periodo: sesiones pendientes que ya no se atienden.
+        turnosQ = turnosQ.Where(t => t.CierrePeriodoId == null);
         if (!esAdmin)
         {
             // Especialista: solo sus propios turnos. Sin profesional vinculado -> grid vacio.
@@ -398,6 +400,33 @@ public sealed class AtencionProfesionalService(
         // sesion #1 de SU turno pero no de la asignacion completa).
         var contadorPorAsignacion = new Dictionary<Guid, int>();
 
+        // Indice de sesion POR HILO (asignacion + profesional) para decidir base vs
+        // evolucion. A diferencia de NumeroSesion —global por asignacion, rigido, que
+        // se usa para el DISPLAY "Sesion N"— este indice REINICIA por profesional: en
+        // asignaciones multi-profesional cada profesional tiene su propia "sesion 1" =
+        // base, y las siguientes del mismo profesional son evolucion. Robustez ante
+        // numero_sesion NULL: se ordena por (NumeroSesion ?? +inf, CreatedAt, Id) y se
+        // numeran consecutivos los slots (turno, n). Esto corrige el bug de que una
+        // sesion que debia ser >=2 se evaluaba como "sesion 1" (abria 2da base en el hilo).
+        var indiceHiloPorSlot = new Dictionary<(Guid, int), int>();
+        foreach (var grupo in turnos.GroupBy(t => (t.AsignacionId, t.ProfesionalId)))
+        {
+            var ordenados = grupo
+                .OrderBy(t => t.NumeroSesion ?? int.MaxValue)
+                .ThenBy(t => t.CreatedAt)
+                .ThenBy(t => t.Id)
+                .ToList();
+            int idxHilo = 0;
+            foreach (var t in ordenados)
+            {
+                for (int n = 1; n <= t.Cantidad; n++)
+                {
+                    idxHilo++;
+                    indiceHiloPorSlot[(t.Id, n)] = idxHilo;
+                }
+            }
+        }
+
         var result = new List<MiServicioAsignadoDto>();
         foreach (var t in turnos)
         {
@@ -463,14 +492,20 @@ public sealed class AtencionProfesionalService(
 
                 // Sesion 1 (cronologica) usa el formato HC completo; de la 2da en adelante
                 // usa el formato de evolucion si el formato de HC lo tiene configurado.
+                // Indice del hilo (profesional+asignacion) para esta sesion: >=2 = ya
+                // hubo una sesion anterior del MISMO profesional -> evolucion. Se usa
+                // este, no nGlobal (global por asignacion), para numerar bien el hilo en
+                // asignaciones multi-profesional. Fallback a nGlobal si faltara el slot.
+                var indiceHilo = indiceHiloPorSlot.TryGetValue((t.Id, n), out var ih) ? ih : nGlobal;
+
                 var formatoBase = FormatoBaseDe(a);
                 var formatoEfectivo = formatoBase;
                 if (!string.IsNullOrWhiteSpace(formatoBase)
                     && evolucionPorFormato.TryGetValue(formatoBase.Trim(), out var evoCod))
                 {
-                    if (nGlobal >= 2)
+                    if (indiceHilo >= 2)
                     {
-                        // 2da sesion en adelante de ESTA asignacion -> evolucion.
+                        // 2da sesion en adelante del hilo (profesional) -> evolucion.
                         formatoEfectivo = evoCod;
                     }
                     else if (mesesPuentePorFormato.TryGetValue(formatoBase.Trim(), out var mesesPuente)

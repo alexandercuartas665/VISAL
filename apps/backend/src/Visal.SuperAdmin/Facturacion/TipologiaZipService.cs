@@ -191,23 +191,41 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var p in pacs) { docToId[p.NumeroDocumento] = p.Id; }
         var idSet = docToId.Values.ToHashSet();
 
+        // Codigos de autorizacion que aparecen en ESTE snapshot, por paciente. Solo esas
+        // autorizaciones cuentan/se adjuntan — no todas las del paciente (bug: se adjuntaban
+        // autorizaciones de otras asignaciones del paciente ajenas al snapshot).
+        var autCodesPorPid = new Dictionary<Guid, HashSet<string>>();
+        foreach (var pac in pacientes)
+        {
+            if (!docToId.TryGetValue(pac.Documento, out var pidPac)) { continue; }
+            if (!autCodesPorPid.TryGetValue(pidPac, out var set))
+            {
+                autCodesPorPid[pidPac] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+            foreach (var a in pac.Autorizaciones)
+            {
+                if (!string.IsNullOrWhiteSpace(a)) { set.Add(a.Trim()); }
+            }
+        }
+
         // Precarga: pacientes (del snapshot) con autorizacion y con firma.
         // Autorizacion: el ZIP lee el PDF fisico de wwwroot, asi que aqui contamos solo
         // los que TIENEN el archivo en disco — de lo contrario el conteo diria "18" pero
         // el ZIP saldria vacio (p. ej. en local, donde no estan los archivos de prod).
+        // Ademas, solo cuentan las asignaciones cuya autorizacion esta en el snapshot.
         var conAut = new HashSet<Guid>();
         if (idSet.Count > 0)
         {
             var autRows = await _db.Asignaciones.AsNoTracking()
-                .Where(a => idSet.Contains(a.PacienteId) && a.PdfAutorizacionUrl != null)
-                .Select(a => new { a.PacienteId, a.PdfAutorizacionUrl })
+                .Where(a => idSet.Contains(a.PacienteId) && a.PdfAutorizacionUrl != null && a.CodigoAutorizacion != null)
+                .Select(a => new { a.PacienteId, a.PdfAutorizacionUrl, a.CodigoAutorizacion })
                 .ToListAsync(ct);
             foreach (var r in autRows)
             {
-                if (!conAut.Contains(r.PacienteId) && ArchivoExisteEnDisco(r.PdfAutorizacionUrl!))
-                {
-                    conAut.Add(r.PacienteId);
-                }
+                if (conAut.Contains(r.PacienteId)) { continue; }
+                if (!autCodesPorPid.TryGetValue(r.PacienteId, out var codes)
+                    || !codes.Contains(r.CodigoAutorizacion!.Trim())) { continue; }
+                if (ArchivoExisteEnDisco(r.PdfAutorizacionUrl!)) { conAut.Add(r.PacienteId); }
             }
         }
         // Firma: data URL en BD (dos fuentes: notas y solicitudes de firma remota).
@@ -327,7 +345,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             switch (c.Origen)
             {
                 case OrigenInformeItem.AutorizacionAsignacion:
-                    foreach (var b in await CargarAutorizacionesAsync(pacienteId, c.SoloUltimo, ct))
+                    foreach (var b in await CargarAutorizacionesAsync(pacienteId, pac.Autorizaciones, c.SoloUltimo, ct))
                     {
                         partes.Add(new PartePlan(b, -1));
                     }
@@ -362,18 +380,50 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return partes;
     }
 
-    private async Task<List<byte[]>> CargarAutorizacionesAsync(Guid pacienteId, bool soloUltimo, CancellationToken ct)
+    /// <summary>
+    /// Carga los PDF de autorizacion de un paciente, PERO solo los de las autorizaciones
+    /// que aparecen en el snapshot (<paramref name="codigosSnapshot"/> = codigos de la
+    /// columna "Autorizacion" para ese paciente). Antes traia TODAS las autorizaciones del
+    /// paciente, adjuntando documentos de otras asignaciones ajenas al snapshot. Una
+    /// autorizacion = un PDF: se agrupa por codigo y se toma el mas reciente de cada uno;
+    /// <paramref name="soloUltimo"/> reduce a la ultima autorizacion.
+    /// </summary>
+    private async Task<List<byte[]>> CargarAutorizacionesAsync(
+        Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct)
     {
-        var q = _db.Asignaciones.AsNoTracking()
-            .Where(a => a.PacienteId == pacienteId && a.PdfAutorizacionUrl != null);
-        var urls = soloUltimo
-            ? await q.OrderByDescending(a => a.CreatedAt).Select(a => a.PdfAutorizacionUrl!).Take(1).ToListAsync(ct)
-            : await q.OrderBy(a => a.CreatedAt).Select(a => a.PdfAutorizacionUrl!).ToListAsync(ct);
+        var codSet = codigosSnapshot
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (codSet.Count == 0) { return new List<byte[]>(); }
+
+        // Cargamos las asignaciones del paciente con PDF (son pocas) y filtramos en
+        // memoria por codigo con trim en ambos lados: el snapshot guarda el codigo
+        // trimmeado (NormalizarAutorizacion) y en BD puede tener espacios.
+        var filas = (await _db.Asignaciones.AsNoTracking()
+            .Where(a => a.PacienteId == pacienteId
+                        && a.PdfAutorizacionUrl != null
+                        && a.CodigoAutorizacion != null)
+            .Select(a => new { a.CodigoAutorizacion, a.PdfAutorizacionUrl, a.CreatedAt })
+            .ToListAsync(ct))
+            .Where(x => codSet.Contains(x.CodigoAutorizacion!.Trim()))
+            .ToList();
+
+        // Una autorizacion = un PDF: el mas reciente por codigo. Orden cronologico estable;
+        // soloUltimo deja solo la autorizacion mas reciente.
+        var porCodigo = filas
+            .GroupBy(x => x.CodigoAutorizacion!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(x => x.CreatedAt).First());
+        var ordenadas = soloUltimo
+            ? porCodigo.OrderByDescending(x => x.CreatedAt).Take(1).ToList()
+            : porCodigo.OrderBy(x => x.CreatedAt).ToList();
 
         var res = new List<byte[]>();
-        foreach (var url in urls.Distinct())
+        var urlsVistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in ordenadas)
         {
-            var pdf = LeerArchivoComoPdf(url);
+            if (!urlsVistas.Add(f.PdfAutorizacionUrl!)) { continue; }  // mismo PDF compartido por 2 codigos
+            var pdf = LeerArchivoComoPdf(f.PdfAutorizacionUrl!);
             if (pdf is not null) { res.Add(pdf); }
         }
         return res;

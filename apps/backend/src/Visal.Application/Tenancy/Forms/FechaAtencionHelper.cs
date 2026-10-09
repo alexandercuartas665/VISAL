@@ -200,7 +200,14 @@ public static class FechaAtencionHelper
     {
         hora = default;
         if (string.IsNullOrWhiteSpace(raw)) { return false; }
-        if (DateTime.TryParseExact(raw.Trim(), HoraFormatos, CultureInfo.InvariantCulture,
+        // Backstop: normalizamos con la MISMA logica que el control de captura
+        // (HoraNormalizer) antes de parsear. Asi un valor recuperable que entro por
+        // fuera de la UI (prefill, import, datos legacy) — "10.45", "17}:30",
+        // "10.00AM" — produce la hora correcta en vez de perderse y dejar la atencion
+        // a las 00:00. Lo no convertible devuelve null y no aporta hora.
+        var norm = HoraNormalizer.Normalizar(raw);
+        if (string.IsNullOrEmpty(norm)) { return false; }
+        if (DateTime.TryParseExact(norm, HoraFormatos, CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out var dt))
         {
             hora = dt.TimeOfDay;

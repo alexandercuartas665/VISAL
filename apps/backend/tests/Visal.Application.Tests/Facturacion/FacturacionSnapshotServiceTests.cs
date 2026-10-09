@@ -212,11 +212,16 @@ public sealed class FacturacionSnapshotServiceTests
         using var ms = new MemoryStream(archivo.Contenido);
         using var wb = new ClosedXML.Excel.XLWorkbook(ms);
         var hoja = wb.Worksheets.First();
-        Assert.Equal("Consecutivo Factura", hoja.Cell(1, 1).GetString());
-        Assert.Equal("Identificación", hoja.Cell(1, 2).GetString());
-        Assert.Equal("Descripción del procedimiento (Factura)", hoja.Cell(1, 3).GetString());
-        Assert.Equal("2245956", hoja.Cell(2, 2).GetString());
-        Assert.Equal("104578855", hoja.Cell(3, 2).GetString());
+        // Columna 1 = contador de fila "Nº"; los headers del builder arrancan en la 2.
+        Assert.Equal("Nº", hoja.Cell(1, 1).GetString());
+        Assert.Equal("Consecutivo Factura", hoja.Cell(1, 2).GetString());
+        Assert.Equal("Identificación", hoja.Cell(1, 3).GetString());
+        Assert.Equal("Descripción del procedimiento (Factura)", hoja.Cell(1, 4).GetString());
+        // Contador de fila 1..N en la columna 1.
+        Assert.Equal(1, hoja.Cell(2, 1).GetValue<int>());
+        Assert.Equal(2, hoja.Cell(3, 1).GetValue<int>());
+        Assert.Equal("2245956", hoja.Cell(2, 3).GetString());
+        Assert.Equal("104578855", hoja.Cell(3, 3).GetString());
     }
 
     [Fact]
@@ -247,9 +252,10 @@ public sealed class FacturacionSnapshotServiceTests
         using var ms = new MemoryStream(archivo!.Contenido);
         using var wb = new ClosedXML.Excel.XLWorkbook(ms);
         var hoja = wb.Worksheets.First();
-        Assert.Equal("1985-04-12", hoja.Cell(2, 1).GetString());
-        Assert.Equal("2026-06-15", hoja.Cell(2, 2).GetString());
-        Assert.Equal("14:35:22", hoja.Cell(2, 3).GetString());
+        // Datos corridos +1 por la columna "Nº" (contador de fila) en la columna 1.
+        Assert.Equal("1985-04-12", hoja.Cell(2, 2).GetString());
+        Assert.Equal("2026-06-15", hoja.Cell(2, 3).GetString());
+        Assert.Equal("14:35:22", hoja.Cell(2, 4).GetString());
     }
 
     [Fact]
@@ -278,14 +284,15 @@ public sealed class FacturacionSnapshotServiceTests
         using var wb = new ClosedXML.Excel.XLWorkbook(ms);
         var hoja = wb.Worksheets.First();
 
-        // Las celdas son numericas — el DataType lo confirma.
-        Assert.Equal(ClosedXML.Excel.XLDataType.Number, hoja.Cell(2, 1).DataType);
+        // Las celdas son numericas — el DataType lo confirma. Datos corridos +1 por
+        // la columna "Nº": Cantidad en la col 2, Valor Unitario en la col 3.
         Assert.Equal(ClosedXML.Excel.XLDataType.Number, hoja.Cell(2, 2).DataType);
-        Assert.Equal(1d, hoja.Cell(2, 1).GetDouble());
-        Assert.Equal(145000d, hoja.Cell(2, 2).GetDouble());
+        Assert.Equal(ClosedXML.Excel.XLDataType.Number, hoja.Cell(2, 3).DataType);
+        Assert.Equal(1d, hoja.Cell(2, 2).GetDouble());
+        Assert.Equal(145000d, hoja.Cell(2, 3).GetDouble());
         // Formato de numero por default de ClosedXML — cadena vacia = "General",
         // que es lo que exige el spec (sin moneda, sin miles, sin decimales fijos).
-        Assert.True(string.IsNullOrEmpty(hoja.Cell(2, 2).Style.NumberFormat.Format));
+        Assert.True(string.IsNullOrEmpty(hoja.Cell(2, 3).Style.NumberFormat.Format));
     }
 
     [Fact]
@@ -314,9 +321,11 @@ public sealed class FacturacionSnapshotServiceTests
         using var ms = new MemoryStream(archivo!.Contenido);
         using var wb = new ClosedXML.Excel.XLWorkbook(ms);
         var hoja = wb.Worksheets.First();
-        Assert.True(hoja.Cell(2, 1).IsEmpty());
-        Assert.True(hoja.Cell(2, 2).IsEmpty());
-        Assert.Equal("TOL-004-26-P", hoja.Cell(2, 3).GetString());
+        // Col 1 = contador "Nº" (no vacia); los datos del builder arrancan en la col 2.
+        Assert.False(hoja.Cell(2, 1).IsEmpty());
+        Assert.True(hoja.Cell(2, 2).IsEmpty());   // Consecutivo Factura (null)
+        Assert.True(hoja.Cell(2, 3).IsEmpty());   // Orden (null)
+        Assert.Equal("TOL-004-26-P", hoja.Cell(2, 4).GetString());
     }
 
     [Fact]

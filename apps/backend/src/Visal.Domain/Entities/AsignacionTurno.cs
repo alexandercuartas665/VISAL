@@ -91,4 +91,11 @@ public class AsignacionTurno : TenantEntity
     /// ajuste posterior; por ahora refleja el orden de creacion, como antes.)
     /// </summary>
     public int? NumeroSesion { get; set; }
+
+    /// <summary>
+    /// Cierre de periodo que ANULO este turno (sesion pendiente que ya no se atendera porque
+    /// el periodo se cerro). Cuando no es null, el turno/sesion NO aparece como pendiente en
+    /// Atencion. Lo estampa <c>ICierrePeriodoService.CerrarAsync</c>. Null = turno normal.
+    /// </summary>
+    public Guid? CierrePeriodoId { get; set; }
 }

@@ -519,11 +519,22 @@ public sealed class HistoriaClinicaService(
             }
         }
 
+        // ── Guardia "1 historia base por hilo" (modo terapia) ────────────────────
+        // Si el formato pedido es un formato BASE que declara evolucion y el hilo
+        // (paciente, formato base, profesional) ya tiene una historia base activa
+        // —en la misma asignacion, o dentro de la ventana de puente por meses— NO se
+        // puede abrir una segunda historia completa: se fuerza el formato de evolucion.
+        // Es autoritativo: protege aunque el cliente mande el formato base (conteo de
+        // sesion mal por numero_sesion NULL o asignacion multi-profesional, UI vieja,
+        // o llamadas fuera de la UI).
+        var formDefIdFinal = await ResolverFormatoPorHiloAsync(
+            formato, req.PacienteId, profesionalResuelto, req.AsignacionTurnoId, ct);
+
         var entity = new HistoriaClinica
         {
             TenantId = tid,
             PacienteId = req.PacienteId,
-            FormDefinitionId = req.FormDefinitionId,
+            FormDefinitionId = formDefIdFinal,
             ValoresJson = string.IsNullOrWhiteSpace(req.ValoresJson) ? "{}" : req.ValoresJson,
             Estado = HistoriaClinicaEstado.Abierta,
             FechaApertura = DateTimeOffset.UtcNow,
@@ -549,6 +560,93 @@ public sealed class HistoriaClinicaService(
         }
 
         return (await GetAsync(entity.Id, ct))!;
+    }
+
+    /// <summary>
+    /// Decide el formato definitivo de una HC que nace en modo terapia. Si
+    /// <paramref name="formatoBase"/> declara <c>FormatoEvolucionCodigo</c> y el hilo
+    /// (paciente, formato base, profesional) ya tiene una historia base NO inactiva
+    /// —en la misma asignacion, o con una atencion previa dentro de la ventana de
+    /// <c>MesesPuente</c>— devuelve el Id del formato de EVOLUCION (fuerza evolucion).
+    /// En cualquier otro caso devuelve el Id del formato base recibido. No lanza: ante
+    /// la duda (sin profesional, sin formato de evolucion activo) deja el formato base.
+    /// Replica la semantica del puente de AtencionProfesionalService (profesional exacto).
+    /// </summary>
+    private async Task<Guid> ResolverFormatoPorHiloAsync(
+        FormDefinition formatoBase, Guid pacienteId, Guid? profesionalId,
+        Guid? asignacionTurnoId, CancellationToken ct)
+    {
+        // Solo aplica a formatos base que declaran evolucion (modo terapia).
+        if (string.IsNullOrWhiteSpace(formatoBase.FormatoEvolucionCodigo)) { return formatoBase.Id; }
+        // Sin profesional no se puede identificar el hilo -> lado seguro: base
+        // (mismo criterio que el puente, que ignora HCs con profesional NULL).
+        if (profesionalId is not Guid prof || prof == Guid.Empty) { return formatoBase.Id; }
+
+        // Resolver el FormDefinition de evolucion activo (por codigo o codigo secundario).
+        var evoCode = formatoBase.FormatoEvolucionCodigo!.Trim();
+        var evoDefId = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Activo && (f.Codigo == evoCode || f.CodigoSecundario == evoCode))
+            .Select(f => (Guid?)f.Id)
+            .FirstOrDefaultAsync(ct);
+        if (evoDefId is not Guid evoId) { return formatoBase.Id; }  // sin evolucion activa -> base
+
+        // (A) Misma asignacion: ¿ya existe una base NO inactiva de este MISMO profesional
+        //     y MISMO formato base? Entonces una sesion anterior ya abrio la base del hilo.
+        if (asignacionTurnoId is Guid turnoId)
+        {
+            var asigId = await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => t.Id == turnoId)
+                .Select(t => (Guid?)t.AsignacionId)
+                .FirstOrDefaultAsync(ct);
+            if (asigId is Guid aid)
+            {
+                var yaHayBaseEnAsignacion = await (
+                    from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                    join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                    join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                    join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+                    where t.AsignacionId == aid
+                          && h.FormDefinitionId == formatoBase.Id
+                          && h.ProfesionalId == prof
+                          && h.Estado != HistoriaClinicaEstado.Inactiva
+                    select h.Id).AnyAsync(ct);
+                if (yaHayBaseEnAsignacion) { return evoId; }
+            }
+        }
+
+        // (B) Puente por meses: hay una atencion previa del hilo (base o evolucion), NO
+        //     inactiva, cuya ultima fecha de atencion cae dentro de la ventana deslizante
+        //     medida desde la fecha de la nueva sesion (programada del turno; fallback hoy).
+        if (formatoBase.MesesPuente is int mp && mp > 0)
+        {
+            var fechas = await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => h.PacienteId == pacienteId
+                            && h.ProfesionalId == prof
+                            && (h.FormDefinitionId == formatoBase.Id || h.FormDefinitionId == evoId)
+                            && h.Estado != HistoriaClinicaEstado.Inactiva
+                            && h.FechaAtencion != null)
+                .Select(h => h.FechaAtencion!.Value)
+                .ToListAsync(ct);
+            if (fechas.Count > 0)
+            {
+                var ultima = fechas.Max();
+                var fechaNuevaSesion = DateTimeOffset.UtcNow;
+                if (asignacionTurnoId is Guid tId)
+                {
+                    var fIni = await db.AsignacionTurnos.AsNoTracking()
+                        .Where(t => t.Id == tId)
+                        .Select(t => t.FechaInicio)
+                        .FirstOrDefaultAsync(ct);
+                    if (fIni is DateOnly d)
+                    {
+                        fechaNuevaSesion = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+                    }
+                }
+                if (ultima >= fechaNuevaSesion.AddMonths(-mp)) { return evoId; }
+            }
+        }
+
+        return formatoBase.Id;
     }
 
     public async Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)

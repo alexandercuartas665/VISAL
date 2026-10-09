@@ -28,6 +28,13 @@ public sealed class ReasignarTurnosTests
         public Guid? SucursalId { get; set; }
     }
 
+    private sealed class NoopAudit : Visal.Application.Common.IAuditWriter
+    {
+        public void Write(Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            Visal.Domain.Enums.AuditActorType actorType = Visal.Domain.Enums.AuditActorType.Human) { }
+    }
+
     private static VisalDbContext NewCtx() =>
         new(new DbContextOptionsBuilder<VisalDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options,
@@ -108,7 +115,7 @@ public sealed class ReasignarTurnosTests
         await using var ctx = NewCtx();
         var (_, turnoIds, origen, destino) = await SembrarAsync(ctx, cerrarPrimero: true);
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var res = await svc.ReasignarTurnosAsync(
             new ReasignarTurnosRequest(turnoIds, destino), Guid.NewGuid());
 
@@ -128,7 +135,7 @@ public sealed class ReasignarTurnosTests
         await using var ctx = NewCtx();
         var (_, turnoIds, _, destino) = await SembrarAsync(ctx, cerrarPrimero: false);
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var res = await svc.ReasignarTurnosAsync(
             new ReasignarTurnosRequest(turnoIds, destino), Guid.NewGuid());
 
@@ -144,7 +151,7 @@ public sealed class ReasignarTurnosTests
         // Destino es TERAPIA, el servicio es ENFERMERIA -> no elegible.
         var (_, turnoIds, _, destino) = await SembrarAsync(ctx, cerrarPrimero: false, tipoDestino: "TERAPIA");
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.ReasignarTurnosAsync(new ReasignarTurnosRequest(turnoIds, destino), Guid.NewGuid()));
     }
@@ -155,7 +162,7 @@ public sealed class ReasignarTurnosTests
         await using var ctx = NewCtx();
         var (asigId, turnoIds, _, _) = await SembrarAsync(ctx, cerrarPrimero: true);
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var lista = await svc.ListarTurnosReasignablesAsync(asigId);
 
         Assert.Equal(3, lista.Count);

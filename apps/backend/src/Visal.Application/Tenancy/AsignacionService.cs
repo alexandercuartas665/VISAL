@@ -238,16 +238,20 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<AsignacionMiniDto>> UltimasAsignacionesAsync(Guid pacienteId, int n, CancellationToken ct = default)
     {
         if (n <= 0) { n = 10; }
-        return await db.Asignaciones.AsNoTracking()
-            .Where(a => a.PacienteId == pacienteId)
-            .OrderByDescending(a => a.CreatedAt)
-            .Take(n)
-            .Select(a => new AsignacionMiniDto(
-                a.Id, a.NombreServicio, a.TipoServicio, a.Cantidad,
-                a.FechaInicio, a.FechaFinal, a.Estado.ToString(), a.ContratoCodigo, a.CreatedAt,
-                a.CodigoAutorizacion, a.AnioServicio, a.MesVigencia, a.MesFinal, a.Observaciones,
-                a.ServicioId, a.Modulo))
-            .ToListAsync(ct);
+        // Left-join al lote para traer su Consecutivo (codigo publico AS-xxxxxx),
+        // igual que el Listado. DefaultIfEmpty por si una asignacion no tiene lote.
+        var q = from a in db.Asignaciones.AsNoTracking()
+                join lo in db.AsignacionLotes.AsNoTracking() on a.LoteId equals lo.Id into loj
+                from lo in loj.DefaultIfEmpty()
+                where a.PacienteId == pacienteId
+                orderby a.CreatedAt descending
+                select new AsignacionMiniDto(
+                    a.Id, a.NombreServicio, a.TipoServicio, a.Cantidad,
+                    a.FechaInicio, a.FechaFinal, a.Estado.ToString(), a.ContratoCodigo, a.CreatedAt,
+                    a.CodigoAutorizacion, a.AnioServicio, a.MesVigencia, a.MesFinal, a.Observaciones,
+                    a.ServicioId, a.Modulo,
+                    (long?)(lo != null ? lo.Consecutivo : (long?)null));
+        return await q.Take(n).ToListAsync(ct);
     }
 
     public async Task<LoteCreadoDto> CrearLoteAsync(CrearLoteRequest req, Guid actor, CancellationToken ct = default)

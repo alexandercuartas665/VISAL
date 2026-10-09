@@ -276,7 +276,13 @@
                             <span>@u.FechaInicio.ToString("dd MMM")</span>
                             <span class="asg-state asg-st-@u.Estado.ToLower()">@u.Estado</span>
                         </div>
-                        <div class="asg-hist-sub2">@u.ContratoCodigo · @u.CreadoEn.LocalDateTime.ToString("dd MMM yyyy HH:mm")</div>
+                        <div class="asg-hist-sub2">
+                            @if (u.Consecutivo is long _cns)
+                            {
+                                <code class="asg-hist-cod" title="Codigo de asignacion">@CodigoPublico.Asignacion(_cns)</code><span> · </span>
+                            }
+                            @u.ContratoCodigo · @u.CreadoEn.LocalDateTime.ToString("dd MMM yyyy HH:mm")
+                        </div>
                     </div>
                 }
             </div>
@@ -943,6 +949,7 @@ else
     .asg-cart-obs { font-style: italic; color: #64748b; }
     .asg-hist-sub, .asg-cart-sub { display: flex; gap: 10px; font-size: 11px; color: #64748b; margin-top: 6px; align-items: center; flex-wrap: wrap; }
     .asg-hist-sub2 { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .asg-hist-cod { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#eef2ff; color:#3730a3; padding:1px 6px; border-radius:4px; font-size:10.5px; font-weight:700; }
     .asg-pill { background: #dbeafe; color: #1e40af; padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; }
     .asg-state { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
     .asg-st-pendiente { background: #fef3c7; color: #92400e; }

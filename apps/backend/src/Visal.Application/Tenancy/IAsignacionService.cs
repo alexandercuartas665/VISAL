@@ -90,7 +90,10 @@ public sealed record AsignacionMiniDto(
     string ContratoCodigo, DateTimeOffset CreadoEn,
     string? CodigoAutorizacion, short? AnioServicio,
     short? MesVigencia, short? MesFinal, string? Observaciones,
-    string ServicioId, string? Modulo);
+    string ServicioId, string? Modulo,
+    // Consecutivo del LOTE (asignacion_lotes.Consecutivo) para mostrar el codigo
+    // publico AS-xxxxxx en la tarjeta. Null si el lote no tiene consecutivo asignado.
+    long? Consecutivo);
 
 /// <summary>Fila del grid "Servicios No Asignados" en /coordinacion. Incluye paciente y contrato.
 /// TurnosCoordinados es la suma de Cantidad de los AsignacionTurnos creados para esta

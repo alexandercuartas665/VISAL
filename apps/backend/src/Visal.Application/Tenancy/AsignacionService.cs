@@ -1719,6 +1719,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? aseguradoraNombre = null,
         DateOnly? fechaAsignacion = null,
         bool incluirConAtencion = false,
+        string? idAsignacion = null,
         CancellationToken ct = default)
     {
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
@@ -1782,6 +1783,17 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                           && a.Paciente.Aseguradora.Nombre == asg);
         }
         if (fechaAsignacion is DateOnly fa) { q = q.Where(a => a.FechaInicio == fa); }
+        // Filtro por codigo de asignacion (consecutivo del lote). Se toman solo los
+        // digitos del texto ("AS-000045"/"45" -> 45). Sin digitos validos no hay match.
+        if (!string.IsNullOrWhiteSpace(idAsignacion))
+        {
+            var digs = new string(idAsignacion.Where(char.IsDigit).ToArray());
+            if (!long.TryParse(digs, out var consFiltro)) { return Array.Empty<CoordinacionEliminableDto>(); }
+            var loteIdsFiltro = db.AsignacionLotes.AsNoTracking()
+                .Where(l => l.Consecutivo == consFiltro)
+                .Select(l => l.Id);
+            q = q.Where(a => loteIdsFiltro.Contains(a.LoteId));
+        }
 
         var asigs = await q
             .OrderByDescending(a => a.CreatedAt)
@@ -1798,6 +1810,13 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Where(p => pacIds.Contains(p.Id))
             .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto })
             .ToDictionaryAsync(p => p.Id, p => p, ct);
+
+        // Consecutivo del lote (codigo AS-xxxxxx) por asignacion, para mostrarlo en la fila.
+        var loteIds = asigs.Select(a => a.LoteId).Distinct().ToList();
+        var loteCons = await db.AsignacionLotes.AsNoTracking()
+            .Where(l => loteIds.Contains(l.Id))
+            .Select(l => new { l.Id, l.Consecutivo })
+            .ToDictionaryAsync(x => x.Id, x => (long?)x.Consecutivo, ct);
 
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => asigIds.Contains(t.AsignacionId))
@@ -1865,7 +1884,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 CreadoEn: a.CreatedAt,
                 FechaAsignacion: a.FechaInicio,
                 SesionesCompletadas: completadasPorAsig.TryGetValue(a.Id, out var cc) ? cc : 0,
-                TieneAtencion: atencionAsigs.Contains(a.Id)));
+                TieneAtencion: atencionAsigs.Contains(a.Id),
+                Consecutivo: loteCons.TryGetValue(a.LoteId, out var cns) ? cns : null));
         }
         return result;
     }

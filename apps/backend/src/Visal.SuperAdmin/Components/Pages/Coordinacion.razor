@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
 @using Visal.Application.Tenancy
+@using Visal.Domain.Common
 @inject IAsignacionService Svc
 @inject ICierrePeriodoService CierreSvc
 @inject IJSRuntime JS
@@ -405,6 +406,10 @@ else if (_tabSel == "Coordinaciones")
                     <input class="form-control form-control-sm mono" @bind="_coNoOrden" placeholder="" />
                 </div>
                 <div class="ase-f">
+                    <label>ID Asignacion</label>
+                    <input class="form-control form-control-sm mono" @bind="_coIdAsignacion" placeholder="AS-000045 o 45" />
+                </div>
+                <div class="ase-f">
                     <label>Numero Documento</label>
                     <input class="form-control form-control-sm mono" @bind="_coDoc" placeholder="BUSQUEDA DE PACIENTE" />
                 </div>
@@ -517,6 +522,7 @@ else if (_tabSel == "Coordinaciones")
                     <table class="table table-sm cd-coord-tbl">
                         <thead>
                             <tr>
+                                <th>Asignacion</th>
                                 <th>Paciente</th>
                                 <th>Fecha asig.</th>
                                 <th>Contrato</th>
@@ -535,6 +541,7 @@ else if (_tabSel == "Coordinaciones")
                         @foreach (var c in _coordList)
                         {
                             <tr>
+                                <td class="small mono">@(c.Consecutivo is long _ac ? CodigoPublico.Asignacion(_ac) : "-")</td>
                                 <td>
                                     <div class="fw-600">@c.PacienteNombre</div>
                                     <div class="small text-muted">@c.PacienteDoc</div>
@@ -1146,7 +1153,11 @@ else if (_tabSel == "Cierre de periodos")
 
     .cd-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .cd-form .ase-f-wide { grid-column: span 2; }
-    .cd-form .cd-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    /* Fila de acciones: botones de tamano natural, en linea y alineados a la derecha.
+       Specificity .ase-f.cd-actions para ganarle al .ase-f base (flex-direction:column)
+       que, heredado, estiraba los botones a todo el ancho y los apilaba. */
+    .cd-form .ase-f.cd-actions { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+    .cd-form .ase-f.cd-actions .btn { flex: 0 0 auto; width: auto; }
     .cd-input-row { display: flex; gap: 6px; }
     .cd-input-row > select, .cd-input-row > input { flex: 1; }
 
@@ -1410,6 +1421,7 @@ else if (_tabSel == "Cierre de periodos")
     private int _coAnio = DateTime.Now.Year;
     private int _coMes = 0;
     private string _coNoOrden = "";
+    private string _coIdAsignacion = "";
     private string _coDoc = "";
     private string _coSedeSel = "";
     private string _coEpsSel = "";
@@ -2097,7 +2109,8 @@ else if (_tabSel == "Cierre de periodos")
                 string.IsNullOrWhiteSpace(_coDoc) ? null : _coDoc,
                 string.IsNullOrWhiteSpace(_coEpsSel) ? null : _coEpsSel,
                 _coFecha,
-                _coIncluirConAtencion);
+                _coIncluirConAtencion,
+                string.IsNullOrWhiteSpace(_coIdAsignacion) ? null : _coIdAsignacion);
             _coordList = raw.ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -2107,6 +2120,7 @@ else if (_tabSel == "Cierre de periodos")
     private void LimpiarFiltrosCoord()
     {
         _coTipoSel = ""; _coNoOrden = ""; _coDoc = ""; _coSedeSel = ""; _coEpsSel = "";
+        _coIdAsignacion = "";
         _coAnio = DateTime.Now.Year; _coMes = 0; _coFecha = null; _coIncluirConAtencion = false;
     }
 

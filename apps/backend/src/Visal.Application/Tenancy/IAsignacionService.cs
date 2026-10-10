@@ -253,7 +253,10 @@ public sealed record CoordinacionEliminableDto(
     // actividad clinica (HC). Cuando TieneAtencion es true, borrar la coordinacion
     // elimina historias clinicas -> la UI exige doble confirmacion.
     int SesionesCompletadas = 0,
-    bool TieneAtencion = false);
+    bool TieneAtencion = false,
+    // Consecutivo del LOTE (codigo publico AS-xxxxxx) para mostrar/filtrar por el id
+    // de la asignacion. Null si el lote no tiene consecutivo.
+    long? Consecutivo = null);
 
 /// <summary>Fila del historial de eliminaciones de coordinaciones (auditoria).
 /// Reconstruida desde super_admin_audit_logs + el snapshot JSON guardado.</summary>
@@ -591,6 +594,9 @@ public interface IAsignacionService
         // (HC/notas) — el DTO marca TieneAtencion y SesionesCompletadas para que
         // la UI las distinga y pida doble confirmacion al borrarlas.
         bool incluirConAtencion = false,
+        // Filtro por el codigo de asignacion (consecutivo del lote, AS-xxxxxx). Se
+        // leen solo sus digitos: "AS-000045", "000045" o "45" matchean el lote 45.
+        string? idAsignacion = null,
         CancellationToken ct = default);
 
     /// <summary>

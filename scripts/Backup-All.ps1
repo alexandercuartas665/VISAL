@@ -44,6 +44,10 @@ function Run-Step {
 
 Run-Step "Backup Docker locales"        (Join-Path $here "Backup-DockerDatabases.ps1")
 Run-Step "Backup Produccion Visal"      (Join-Path $here "Backup-VisalProdDatabase.ps1")
+# Archivos subidos (volumen visal-uploads) que el dump de BD NO captura. Incremental
+# (GNU tar): la 1ra corrida bajo todo, las siguientes solo lo nuevo. -Full semanal se
+# corre a mano cuando se quiera empezar cadena nueva.
+Run-Step "Backup Uploads Visal (incremental)" (Join-Path $here "Backup-VisalProdUploads.ps1")
 Run-Step "Backup Produccion Ecorex.tareas" (Join-Path $here "Backup-EcorexTareasProdDatabase.ps1")
 # Las transcripciones de Claude Code solo viven en disco local; sin esto no hay copia.
 Run-Step "Backup sesiones Claude"       (Join-Path $here "Backup-ClaudeSessions.ps1")

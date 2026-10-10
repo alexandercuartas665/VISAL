@@ -60,7 +60,10 @@ public sealed record PacienteSnapshotDto(
     string TipoDocumento,
     string Nombre,
     IReadOnlyList<string> Autorizaciones,
-    int Servicios);
+    int Servicios,
+    // Codigo de habilitacion de la sede que atendio (columna "codigo habilitacion"
+    // del snapshot) — el "id de la sede" para armar el nombre de archivo. "" si no viene.
+    string CodigoHabilitacionSede = "");
 
 /// <summary>Resultado de completar los codigos de trazabilidad de un snapshot.</summary>
 public sealed record CompletarCodigosResultado(

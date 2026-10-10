@@ -59,7 +59,12 @@ public sealed record AutorizacionInfoDto(
 /// <summary>Contacto a actualizar en la ficha del paciente (desde el modal de autorizacion).</summary>
 public sealed record ActualizarContactoPacienteRequest(
     Guid PacienteId, bool ActualizarTelefono, string? Telefono,
-    bool ActualizarCorreo, string? Correo, bool ActualizarDireccion, string? Direccion);
+    bool ActualizarCorreo, string? Correo, bool ActualizarDireccion, string? Direccion,
+    // 2do telefono (va a TelefonoEmergencia) y nombre separado en los 4 campos del paciente.
+    bool ActualizarTelefono2 = false, string? Telefono2 = null,
+    bool ActualizarNombre = false,
+    string? PrimerNombre = null, string? SegundoNombre = null,
+    string? PrimerApellido = null, string? SegundoApellido = null);
 
 /// <summary>Filtro tipado para la busqueda avanzada de pacientes (modal BUSCAR PACIENTES).</summary>
 public sealed record BusquedaPacienteFiltro(

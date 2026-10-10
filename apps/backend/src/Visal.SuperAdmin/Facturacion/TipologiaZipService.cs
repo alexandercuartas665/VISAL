@@ -86,6 +86,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
             : !string.IsNullOrWhiteSpace(cfg.PatronNombreDefault) ? cfg.PatronNombreDefault!
             : "{sigla}_{cedula}";
 
+        // NIT del IPS (tenant) para el token {nit} del nombre de archivo. Uno por IPS.
+        var nitIps = (_tenant.TenantId is Guid tnit
+            ? await _db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
+            : null) ?? "";
+
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
         // --- Pase 1: plan por paciente + junta TODAS las URLs de formularios-por-tipo.
@@ -138,7 +143,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 if (bytesPartes.Count == 0) { continue; }
 
                 var pdf = FusionarPdfs(bytesPartes);
-                var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac));
+                var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac, nitIps));
                 var name = baseName + ".pdf";
                 // Evita colisiones de nombre (dos pacientes con mismo patron).
                 var n = 2;
@@ -768,7 +773,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     // ---- Nombre de archivo (mismos tokens que el resumen del tab) ----
 
-    private static string ResolverNombre(string patron, InformeItemDto a, PacienteSnapshotDto p)
+    private static string ResolverNombre(string patron, InformeItemDto a, PacienteSnapshotDto p, string? nitIps = null)
     {
         var hoy = DateTimeOffset.Now.ToLocalTime();
         var aut = p.Autorizaciones.Count > 0 ? p.Autorizaciones[0] : "";
@@ -778,6 +783,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .Replace("{cedula}", p.Documento ?? "")
             .Replace("{autorizacion}", aut)
             .Replace("{nombre}", nombre)
+            // Tipo de documento del paciente (codigo: CC, RC, TI, CE...).
+            .Replace("{tipo_doc}", p.TipoDocumento ?? "")
+            // "id de la sede" = codigo de habilitacion de la sede que atendio.
+            .Replace("{sede}", p.CodigoHabilitacionSede ?? "")
+            // NIT del IPS (tenant). Uno por IPS, igual para todas las sedes.
+            .Replace("{nit}", nitIps ?? "")
             .Replace("{consecutivo}", "")
             .Replace("{codigo_hc}", "")
             .Replace("{tipo_servicio}", "")

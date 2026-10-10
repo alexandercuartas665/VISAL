@@ -17,7 +17,10 @@ public sealed record AutorizacionExtraccionResult(
     IReadOnlyList<string> Telefonos,
     string? Correo,
     string? Direccion,
-    string? RawJson)
+    string? RawJson,
+    // Nombre separado (para cargar los campos del paciente). Null si el agente no los trajo.
+    string? Nombres = null,
+    string? Apellidos = null)
 {
     public static AutorizacionExtraccionResult Falla(string error) =>
         new(false, error, null, null, null, null, Array.Empty<string>(), null, null, null);
@@ -146,11 +149,20 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
     // (Provider=Gemini) para que el usuario pueda editarlo en el modulo Agentes.
     private async Task<Guid> ResolverOCrearAgenteAsync(CancellationToken ct)
     {
-        var existente = await _db.AiAgents.AsNoTracking()
-            .Where(a => a.Name == IAutorizacionExtractorService.AgenteNombre)
-            .Select(a => new { a.Id })
-            .FirstOrDefaultAsync(ct);
-        if (existente is not null) { return existente.Id; }
+        var existente = await _db.AiAgents
+            .FirstOrDefaultAsync(a => a.Name == IAutorizacionExtractorService.AgenteNombre, ct);
+        if (existente is not null)
+        {
+            // Auto-upgrade: si el prompt es una version vieja (sin el schema de nombres/apellidos),
+            // lo subimos al default nuevo para que el agente devuelva esos campos separados.
+            if (string.IsNullOrWhiteSpace(existente.SystemPrompt)
+                || !existente.SystemPrompt.Contains("apellidos", StringComparison.OrdinalIgnoreCase))
+            {
+                existente.SystemPrompt = PromptPorDefecto;
+                await _db.SaveChangesAsync(ct);
+            }
+            return existente.Id;
+        }
 
         var agente = new AiAgent
         {
@@ -186,7 +198,9 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
                 Telefonos(r),
                 Str(r, "correo"),
                 Str(r, "direccion"),
-                json);
+                json,
+                Str(r, "nombres"),
+                Str(r, "apellidos"));
         }
         catch (JsonException ex)
         {
@@ -245,6 +259,8 @@ Devuelve EXCLUSIVAMENTE un JSON valido, sin markdown, sin ```json y sin ningun t
 con EXACTAMENTE este schema:
 {
   "nombre": string|null,
+  "nombres": string|null,
+  "apellidos": string|null,
   "tipoDocumento": string|null,
   "documento": string|null,
   "numeroAutorizacion": string|null,
@@ -255,10 +271,16 @@ con EXACTAMENTE este schema:
 
 Reglas:
 - "nombre": nombre completo del paciente tal como aparece.
+- "nombres": SOLO los nombres de pila del paciente (sin apellidos). Ej: "JULIANA".
+- "apellidos": SOLO los apellidos del paciente (sin nombres). Ej: "ROSERO HERNANDEZ".
+  En Colombia el nombre del afiliado suele venir como "APELLIDO1 APELLIDO2 NOMBRE1 [NOMBRE2]":
+  normalmente los 2 primeros tokens son apellidos y el resto nombres. Usa el contexto del
+  documento si hay duda.
 - "tipoDocumento": tipo de identificacion si aparece (CC, TI, CE, RC, PA, etc.).
 - "documento": numero de identificacion del paciente (solo digitos, sin puntos).
 - "numeroAutorizacion": numero de la autorizacion.
-- "telefonos": todos los telefonos del paciente (celular/fijo), sin duplicar; array vacio si no hay.
+- "telefonos": todos los telefonos del paciente (celular/fijo), cada numero como un elemento
+  SEPARADO del array (NO los unas en un mismo string), sin duplicar; array vacio si no hay.
 - "correo": correo electronico del paciente.
 - "direccion": direccion de residencia del paciente.
 - Usa null cuando el dato NO este en el documento. NUNCA inventes datos.

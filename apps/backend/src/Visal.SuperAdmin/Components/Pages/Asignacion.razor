@@ -14,6 +14,7 @@
 @inject ICatalogoPacienteService CatPacSvc
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
+@inject IAutorizacionExtractorService Extractor
 
 <PageTitle>Asignacion de Servicios - Visal</PageTitle>
 
@@ -351,7 +352,34 @@
                elegir un servicio en la grilla. El boton Agregar si sigue gateado por
                la preseleccion de servicio, porque sin servicio no hay nada que agregar. *@
             <div class="ase-form asg-form-col3">
-                <div class="ase-f"><label>Autorizacion</label><input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_paciente == null || _autorizacionPendiente)" /></div>
+                @* Asistente de autorizacion ANTES del numero: abre el modal grande (visor
+                   del PDF + datos del paciente); al subir el PDF la IA extrae el numero y lo
+                   trae a la caja. Gated: el contrato exige PDF y no es "pendiente". *@
+                @if (_contratoSel is not null && _contratoSel.RequierePdfAutorizacion && !_autorizacionPendiente)
+                {
+                    <div class="ase-f ase-f-wide">
+                        <label>
+                            PDF de autorizacion <span class="asg-req-badge" title="El contrato exige adjuntar el PDF de autorizacion">obligatorio</span>
+                        </label>
+                        <div class="asg-input-row">
+                            <button type="button" class="btn btn-primary btn-sm" @onclick="AbrirAsistenteAutorizacion" disabled="@(_paciente == null)"
+                                    title="Abre el asistente: sube el PDF, la IA extrae el numero y lo trae a la caja">
+                                &#128206; Cargar / asistente de autorizacion
+                            </button>
+                            @if (!string.IsNullOrWhiteSpace(_pdfAutorizacionUrl))
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="AbrirAsistenteAutorizacion" title="Ver en el asistente (mismo modal)">Ver</button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="LimpiarPdf" type="button" title="Quitar PDF">&times;</button>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_pdfNombre)) { <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div> }
+                        else { <div class="asg-hint">Abre el asistente para subir el PDF; la IA extrae el n&uacute;mero y lo pone en la caja.</div> }
+                    </div>
+                }
+                <div class="ase-f"><label>Autorizacion</label>
+                    <input class="form-control form-control-sm" @bind="_autorizacion" disabled="@(_paciente == null || _autorizacionPendiente)" />
+                    @if (!_autorizacionPendiente) { <div class="asg-hint">La llena el asistente al subir el PDF (editable).</div> }
+                </div>
                 <div class="ase-f ase-f-wide">
                     <label class="asg-chk">
                         <input type="checkbox" @bind="_autorizacionPendiente" disabled="@(_paciente == null)" />
@@ -366,27 +394,6 @@
                     </label>
                     <div class="asg-hint">Marca estos servicios como <b>folio</b>: NO se incluyen en el snapshot de facturaci&oacute;n (Snapshots).</div>
                 </div>
-                @if (_contratoSel is not null && _contratoSel.RequierePdfAutorizacion && !_autorizacionPendiente)
-                {
-                    <div class="ase-f ase-f-wide">
-                        <label>
-                            PDF de autorizacion <span class="asg-req-badge" title="El contrato exige adjuntar el PDF de autorizacion">obligatorio</span>
-                        </label>
-                        <div class="asg-input-row">
-                            <InputFile OnChange="OnPdfUploaded" accept="application/pdf" class="form-control form-control-sm" disabled="@(_paciente == null)" />
-                            @if (!string.IsNullOrWhiteSpace(_pdfAutorizacionUrl))
-                            {
-                                <a class="btn btn-outline-secondary btn-sm" href="@_pdfAutorizacionUrl" target="_blank" title="Ver PDF cargado">Ver</a>
-                                <button class="btn btn-outline-danger btn-sm" @onclick="LimpiarPdf" type="button" title="Quitar PDF">&times;</button>
-                            }
-                        </div>
-                        @if (_pdfBusy) { <div class="asg-hint">Subiendo PDF...</div> }
-                        else if (!string.IsNullOrWhiteSpace(_pdfNombre))
-                        {
-                            <div class="asg-hint asg-hint-ok">@_pdfNombre cargado.</div>
-                        }
-                    </div>
-                }
                 @* ── Panel Cuota moderadora / Copago ──────────────────────── *@
                 <div class="ase-f ase-f-wide">
                     <div class="asg-pago-head">
@@ -519,7 +526,7 @@ else
                     <input class="form-control form-control-sm mono" placeholder="Cedula del paciente..."
                            @bind="_fDocumento" @bind:event="oninput" />
                 </div>
-                <div class="ase-f ase-f-wide"><label>Nombre servicio</label>
+                <div class="ase-f"><label>Nombre servicio</label>
                     <input class="form-control form-control-sm" placeholder="Busca por descripcion del servicio..."
                            @bind="_fNombreServ" @bind:event="oninput" />
                 </div>
@@ -703,6 +710,11 @@ else
 <AutorizacionModal AsignacionId="_autAsigId" Visible="_autVisible"
                    OnCerrar="() => _autVisible = false"
                    OnGuardado="OnAutorizacionGuardada" />
+
+@* Asistente en modo BORRADOR (crear asignacion): sin AsignacionId; devuelve numero + PDF. *@
+<AutorizacionModal Visible="_draftAutVisible" DraftInfo="_draftAutInfo"
+                   OnCerrar="() => _draftAutVisible = false"
+                   OnDraftConfirmado="OnDraftAutorizacionConfirmada" />
 
 @* ============ Modal BUSCAR PACIENTES (filtros + grid) ============ *@
 @if (_modal)
@@ -1083,9 +1095,46 @@ else
             _pdfAutorizacionUrl = $"/uploads/autorizaciones/{nombre}";
             _pdfNombre = file.Name;
             _ok = $"PDF '{file.Name}' cargado.";
+
+            // OCR/IA al subir: extrae los datos del PDF y autollena el numero de
+            // autorizacion en la caja (editable). Solo si no es "autorizacion pendiente".
+            if (!_autorizacionPendiente)
+            {
+                await ExtraerAutorizacionDesdePdfAsync(full);
+            }
         }
         catch (Exception ex) { _error = "No se pudo subir el PDF: " + ex.Message; }
         finally { _pdfBusy = false; }
+    }
+
+    // Corre la extraccion con IA (la misma de las autorizaciones) sobre el PDF recien
+    // subido y autollena el numero de autorizacion. No bloquea: si la IA falla o no lo
+    // detecta, deja la caja para escribirlo a mano (siempre editable).
+    private bool _ocrBusy;
+    private async Task ExtraerAutorizacionDesdePdfAsync(string fullPath)
+    {
+        _ocrBusy = true;
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(fullPath);
+            var r = await Extractor.ExtraerDesdePdfAsync(bytes);
+            if (r.Ok && !string.IsNullOrWhiteSpace(r.NumeroAutorizacion))
+            {
+                // Solo autollena si la caja esta vacia (no pisa lo que el usuario ya escribio).
+                if (string.IsNullOrWhiteSpace(_autorizacion)) { _autorizacion = r.NumeroAutorizacion!.Trim(); }
+                _ok = $"PDF cargado. Numero de autorizacion extraido por IA: {r.NumeroAutorizacion!.Trim()}";
+            }
+            else if (!r.Ok)
+            {
+                _ok = $"PDF cargado. La IA no pudo extraer el numero ({r.Error}). Escribelo a mano.";
+            }
+            else
+            {
+                _ok = "PDF cargado. La IA no encontro un numero de autorizacion; escribelo a mano.";
+            }
+        }
+        catch (Exception ex) { _ok = "PDF cargado. No se pudo extraer con IA: " + ex.Message + ". Escribe el numero a mano."; }
+        finally { _ocrBusy = false; }
     }
 
     private void LimpiarPdf()
@@ -1306,6 +1355,42 @@ else
         _autVisible = false;
         _ok = "Autorizacion completada.";
         await AplicarFiltrosListado();
+    }
+
+    // ── Asistente de autorizacion en modo BORRADOR (tab Registrar) ──────────
+    // La asignacion aun no existe: el modal recibe los datos del paciente/servicio y
+    // devuelve (numero, pdfUrl) tras subir el PDF + OCR, que se vuelcan al formulario.
+    private bool _draftAutVisible;
+    private AutorizacionInfoDto? _draftAutInfo;
+
+    private void AbrirAsistenteAutorizacion()
+    {
+        if (_paciente is null) { return; }
+        _draftAutInfo = new AutorizacionInfoDto(
+            AsignacionId: Guid.Empty,
+            CodigoAutorizacion: _autorizacion,
+            PdfAutorizacionUrl: _pdfAutorizacionUrl,
+            NombreServicio: _servicioSel?.Descripcion,
+            ContratoCodigo: _contratoSel?.CodigoContrato,
+            PacienteNombre: _paciente.NombreCompleto,
+            PacienteDoc: _paciente.NumeroDocumento,
+            PacienteId: _paciente.Id,
+            PacienteTelefono: _paciente.Telefono,
+            PacienteCorreo: _paciente.Email,
+            PacienteDireccion: _paciente.Direccion);
+        _draftAutVisible = true;
+    }
+
+    private void OnDraftAutorizacionConfirmada((string? Codigo, string? PdfUrl) r)
+    {
+        _draftAutVisible = false;
+        if (!string.IsNullOrWhiteSpace(r.Codigo)) { _autorizacion = r.Codigo!.Trim(); }
+        if (!string.IsNullOrWhiteSpace(r.PdfUrl))
+        {
+            _pdfAutorizacionUrl = r.PdfUrl;
+            _pdfNombre = System.IO.Path.GetFileName(r.PdfUrl!.TrimEnd('/'));
+        }
+        _ok = "Autorizacion lista desde el asistente.";
     }
 
     private static string FormatVigencia(short? anio, short? mesVig, short? mesFin)

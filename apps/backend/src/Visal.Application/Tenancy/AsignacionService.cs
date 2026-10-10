@@ -568,6 +568,26 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
         if (req.ActualizarCorreo) { p.Email = string.IsNullOrWhiteSpace(req.Correo) ? null : req.Correo.Trim(); cambio = true; }
         if (req.ActualizarDireccion) { p.Direccion = string.IsNullOrWhiteSpace(req.Direccion) ? null : req.Direccion.Trim(); cambio = true; }
+        // Segundo telefono del paciente -> campo de emergencia (unico 2do campo de tel existente).
+        if (req.ActualizarTelefono2)
+        {
+            var (_, num2) = SepararTelefono(req.Telefono2);
+            p.TelefonoEmergencia = num2;
+            cambio = true;
+        }
+        // Nombre separado en los 4 campos + recomputa NombreCompleto (nombres primero, luego apellidos).
+        if (req.ActualizarNombre)
+        {
+            static string? N(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            p.PrimerNombre = N(req.PrimerNombre);
+            p.SegundoNombre = N(req.SegundoNombre);
+            p.PrimerApellido = N(req.PrimerApellido);
+            p.SegundoApellido = N(req.SegundoApellido);
+            var completo = string.Join(" ", new[] { p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(completo)) { p.NombreCompleto = completo; }
+            cambio = true;
+        }
 
         if (!cambio) { return false; }
         await db.SaveChangesAsync(ct);

@@ -154,6 +154,9 @@ else
                             <small class="text-muted">
                                 Tokens disponibles:
                                 <code>{sigla}</code> <code>{cedula}</code> <code>{nombre}</code>
+                                <code title="Tipo de documento del paciente (CC, RC, TI...)">{tipo_doc}</code>
+                                <code title="Codigo de habilitacion de la sede que atendio">{sede}</code>
+                                <code title="NIT del IPS (tenant)">{nit}</code>
                                 <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
                                 <code>{mes}</code> <code>{codigo_hc}</code> <code>{tipo_servicio}</code>
                             </small>
@@ -221,7 +224,11 @@ else
                         <input class="form-control form-control-sm mono" @bind="_itemEdit.PatronNombre" placeholder="{sigla}_{cedula}_{fecha:yyyyMMdd}" />
                         <small class="text-muted">
                             Tokens: <code>{sigla}</code> <code>{cedula}</code> <code>{autorizacion}</code>
-                            <code>{nombre}</code> <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
+                            <code>{nombre}</code>
+                            <code title="Tipo de documento del paciente (CC, RC, TI...)">{tipo_doc}</code>
+                            <code title="Codigo de habilitacion de la sede que atendio">{sede}</code>
+                            <code title="NIT del IPS (tenant)">{nit}</code>
+                            <code>{fecha:yyyyMMdd}</code> <code>{consecutivo}</code>
                         </small>
                     </div>
                     <div class="cm-f">

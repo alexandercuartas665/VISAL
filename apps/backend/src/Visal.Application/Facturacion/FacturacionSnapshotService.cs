@@ -690,6 +690,19 @@ public sealed class FacturacionSnapshotService(
         {
             var d = Deserializar(json);
             string S(string k) => d.TryGetValue(k, out var v) ? (v?.ToString() ?? "").Trim() : "";
+            // La columna del codigo de habilitacion viene con espacio final ("codigo
+            // habilitacion ") en el builder; la buscamos tolerante (trim + lower).
+            string SHab()
+            {
+                foreach (var kv in d)
+                {
+                    if (string.Equals(kv.Key?.Trim(), "codigo habilitacion", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return (kv.Value?.ToString() ?? "").Trim();
+                    }
+                }
+                return "";
+            }
             var doc = S("Identificación");
             if (string.IsNullOrWhiteSpace(doc)) { doc = "(sin documento)"; }
             var nombre = string.Join(" ", new[]
@@ -706,6 +719,7 @@ public sealed class FacturacionSnapshotService(
             }
             cur.Servicios++;
             if (string.IsNullOrWhiteSpace(cur.Nombre) && !string.IsNullOrWhiteSpace(nombre)) { cur.Nombre = nombre; }
+            if (string.IsNullOrWhiteSpace(cur.CodHab)) { var hab = SHab(); if (!string.IsNullOrWhiteSpace(hab)) { cur.CodHab = hab; } }
             var aut = S("Autorizacion");
             if (!string.IsNullOrWhiteSpace(aut)) { cur.Auts.Add(aut); }
         }
@@ -714,7 +728,7 @@ public sealed class FacturacionSnapshotService(
         {
             var c = acc[doc];
             return new PacienteSnapshotDto(doc, c.Tipo, c.Nombre,
-                c.Auts.OrderBy(x => x).ToList(), c.Servicios);
+                c.Auts.OrderBy(x => x).ToList(), c.Servicios, c.CodHab);
         }).ToList();
     }
 
@@ -722,6 +736,7 @@ public sealed class FacturacionSnapshotService(
     {
         public string Tipo = "";
         public string Nombre = "";
+        public string CodHab = "";
         public HashSet<string> Auts = new(StringComparer.OrdinalIgnoreCase);
         public int Servicios;
     }

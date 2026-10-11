@@ -12,6 +12,14 @@ public class CierrePeriodo : TenantEntity
     public int Anio { get; set; }
     public int Mes { get; set; }
 
+    /// <summary>Si el cierre fue acotado a UN paciente (cierre parcial), su id; null = todo el
+    /// periodo (todos los pacientes). Permite varios cierres parciales en el mismo periodo.</summary>
+    public Guid? PacienteId { get; set; }
+
+    /// <summary>Nombre del paciente del cierre parcial (denormalizado para el historial); null
+    /// cuando el cierre cubrio todos los pacientes del periodo.</summary>
+    public string? PacienteNombre { get; set; }
+
     public DateTimeOffset CerradoEn { get; set; }
 
     /// <summary>Servicios (asignaciones) con sesiones pendientes anuladas en este cierre.</summary>

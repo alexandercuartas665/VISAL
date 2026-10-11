@@ -1509,7 +1509,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<CierrePeriodo>(b =>
         {
+            b.Property(x => x.PacienteNombre).HasMaxLength(300);
             b.HasIndex(x => new { x.TenantId, x.Anio, x.Mes });
+            b.HasIndex(x => new { x.TenantId, x.Anio, x.Mes, x.PacienteId });
             b.HasMany(x => x.Detalles).WithOne(d => d.CierrePeriodo!)
                 .HasForeignKey(d => d.CierrePeriodoId).OnDelete(DeleteBehavior.Cascade);
         });

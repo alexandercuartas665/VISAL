@@ -2134,6 +2134,15 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("mes");
 
+                    b.Property<Guid?>("PacienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("paciente_id");
+
+                    b.Property<string>("PacienteNombre")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("paciente_nombre");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -2159,6 +2168,9 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "Anio", "Mes")
                         .HasDatabaseName("ix_cierre_periodos_tenant_id_anio_mes");
+
+                    b.HasIndex("TenantId", "Anio", "Mes", "PacienteId")
+                        .HasDatabaseName("ix_cierre_periodos_tenant_id_anio_mes_paciente_id");
 
                     b.ToTable("cierre_periodos", (string)null);
                 });

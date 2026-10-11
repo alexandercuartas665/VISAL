@@ -77,7 +77,11 @@ public sealed record DocumentoPacienteDto(
     // Datos de la nota origen para mostrar contexto.
     DateOnly? FechaNota,
     string? CodigoNota,
-    string? Estado);
+    string? Estado,
+    // True cuando el documento NO cuelga de una HC ni de una nota medica: es un
+    // adjunto "libre" (subido directo desde Admision o firma del propio paciente).
+    // Solo estos permiten editar su categoria/tipologia.
+    bool EsLibre = false);
 
 public sealed record AdjuntarDocumentoRequest(
     Guid NotaMedicaId,

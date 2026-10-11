@@ -6,27 +6,33 @@ namespace Visal.Application.Tenancy;
 
 /// <summary>Fila del resumen de un cierre/previsualizacion: un servicio con sesiones pendientes.</summary>
 public sealed record CierrePeriodoFilaDto(
-    string PacienteNombre, string? PacienteDocumento,
+    Guid PacienteId, string PacienteNombre, string? PacienteDocumento,
     string ServicioNombre, string? CodigoServicio, int CantidadPendiente);
 
-/// <summary>Previsualizacion del cierre de un periodo (sin mutar): que quedaria anulado.</summary>
+/// <summary>Previsualizacion del cierre de un periodo (sin mutar): que quedaria anulado.
+/// Filas abarca TODO el periodo (todos los pacientes con pendientes); la UI filtra por
+/// paciente del lado cliente y acota el cierre pasando el PacienteId a CerrarAsync.</summary>
 public sealed record CierrePeriodoPreviewDto(
     int Anio, int Mes, bool YaCerrado,
     IReadOnlyList<CierrePeriodoFilaDto> Filas, int TotalServicios, int TotalSesiones);
 
-/// <summary>Cabecera de un cierre ya realizado (para el historial).</summary>
+/// <summary>Cabecera de un cierre ya realizado (para el historial). PacienteNombre != null
+/// cuando el cierre fue parcial (acotado a un paciente).</summary>
 public sealed record CierrePeriodoDto(
     Guid Id, int Anio, int Mes, DateTimeOffset CerradoEn,
-    int TotalServicios, int TotalSesiones);
+    int TotalServicios, int TotalSesiones,
+    Guid? PacienteId = null, string? PacienteNombre = null);
 
 public interface ICierrePeriodoService
 {
-    /// <summary>Resumen de sesiones PENDIENTES que se anularian al cerrar (anio, mes). No muta.</summary>
+    /// <summary>Resumen de sesiones PENDIENTES que se anularian al cerrar (anio, mes), de TODO
+    /// el periodo. No muta. La UI filtra por paciente localmente.</summary>
     Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, CancellationToken ct = default);
 
     /// <summary>Cierra el periodo: anula las sesiones pendientes (marca sus turnos) y guarda el
-    /// resumen. Lanza si el periodo ya esta cerrado. Devuelve el cierre creado.</summary>
-    Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid actor, CancellationToken ct = default);
+    /// resumen. Si <paramref name="pacienteId"/> viene, el cierre es PARCIAL (solo ese paciente).
+    /// Lanza si no hay sesiones pendientes que cerrar. Devuelve el cierre creado.</summary>
+    Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, Guid actor, CancellationToken ct = default);
 
     /// <summary>Reabre un periodo cerrado: devuelve las sesiones a pendientes (quita la marca) y
     /// borra el cierre + su resumen.</summary>
@@ -56,23 +62,37 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             filas.Count, filas.Sum(f => f.CantidadPendiente));
     }
 
-    public async Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid actor, CancellationToken ct = default)
+    public async Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, Guid actor, CancellationToken ct = default)
     {
-        var yaCerrado = await _db.CierrePeriodos.AsNoTracking()
-            .AnyAsync(c => c.Anio == anio && c.Mes == mes, ct);
-        if (yaCerrado)
+        // Turnos pendientes en el periodo (acotados al paciente si viene). Cerrar es idempotente:
+        // los turnos ya anulados por un cierre previo salen del calculo de pendientes, asi que un
+        // cierre parcial no choca con otros del mismo periodo (indice no unico).
+        var turnosPend = await TurnosPendientesAsync(anio, mes, pacienteId, ct);
+        if (turnosPend.Count == 0)
         {
-            throw new InvalidOperationException($"El periodo {mes:00}/{anio} ya esta cerrado. Reabrelo primero si necesitas rehacerlo.");
+            var quien = pacienteId is null ? "" : " para el paciente seleccionado";
+            throw new InvalidOperationException(
+                $"No hay sesiones pendientes que cerrar en {mes:00}/{anio}{quien}.");
         }
-
-        // Turnos pendientes en el periodo (los mismos que la previsualizacion).
-        var turnosPend = await TurnosPendientesAsync(anio, mes, ct);
         var filas = await ResumirAsync(turnosPend, ct);
+
+        // Nombre del paciente (denormalizado) cuando el cierre es parcial.
+        string? pacNombre = null;
+        if (pacienteId is Guid pid)
+        {
+            pacNombre = await _db.Pacientes.AsNoTracking()
+                .Where(p => p.Id == pid)
+                .Select(p => ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim())
+                .FirstOrDefaultAsync(ct);
+            if (string.IsNullOrWhiteSpace(pacNombre)) { pacNombre = filas.FirstOrDefault()?.PacienteNombre; }
+        }
 
         var cierre = new CierrePeriodo
         {
             Anio = anio,
             Mes = mes,
+            PacienteId = pacienteId,
+            PacienteNombre = pacNombre,
             CerradoEn = DateTimeOffset.UtcNow,
             TotalServicios = filas.Count,
             TotalSesiones = filas.Sum(f => f.CantidadPendiente),
@@ -98,7 +118,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
         }
 
         return new CierrePeriodoDto(cierre.Id, cierre.Anio, cierre.Mes, cierre.CerradoEn,
-            cierre.TotalServicios, cierre.TotalSesiones);
+            cierre.TotalServicios, cierre.TotalSesiones, cierre.PacienteId, cierre.PacienteNombre);
     }
 
     public async Task<bool> ReabrirAsync(Guid cierreId, Guid actor, CancellationToken ct = default)
@@ -118,14 +138,15 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     public async Task<IReadOnlyList<CierrePeriodoDto>> ListarCierresAsync(CancellationToken ct = default)
         => await _db.CierrePeriodos.AsNoTracking()
             .OrderByDescending(c => c.Anio).ThenByDescending(c => c.Mes).ThenByDescending(c => c.CerradoEn)
-            .Select(c => new CierrePeriodoDto(c.Id, c.Anio, c.Mes, c.CerradoEn, c.TotalServicios, c.TotalSesiones))
+            .Select(c => new CierrePeriodoDto(c.Id, c.Anio, c.Mes, c.CerradoEn, c.TotalServicios, c.TotalSesiones,
+                c.PacienteId, c.PacienteNombre))
             .ToListAsync(ct);
 
     public async Task<IReadOnlyList<CierrePeriodoFilaDto>> GetDetalleAsync(Guid cierreId, CancellationToken ct = default)
         => await _db.CierrePeriodoDetalles.AsNoTracking()
             .Where(d => d.CierrePeriodoId == cierreId)
             .OrderBy(d => d.PacienteNombre)
-            .Select(d => new CierrePeriodoFilaDto(d.PacienteNombre, d.PacienteDocumento, d.ServicioNombre, d.CodigoServicio, d.CantidadPendiente))
+            .Select(d => new CierrePeriodoFilaDto(Guid.Empty, d.PacienteNombre, d.PacienteDocumento, d.ServicioNombre, d.CodigoServicio, d.CantidadPendiente))
             .ToListAsync(ct);
 
     // ── Internos ────────────────────────────────────────────────────────────
@@ -134,15 +155,16 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     // Turnos pendientes del periodo: asignaciones cuya vigencia TERMINA en (anio, mes)
     // [(MesFinal ?? MesVigencia) == mes && AnioServicio == anio], turnos no anulados por un
-    // cierre previo, y SIN ninguna sesion completada (atendida y cerrada).
-    private async Task<List<TurnoPendiente>> TurnosPendientesAsync(int anio, int mes, CancellationToken ct)
+    // cierre previo, y SIN ninguna sesion completada (atendida y cerrada). Si viene pacienteId,
+    // acota a las asignaciones de ese paciente (cierre parcial).
+    private async Task<List<TurnoPendiente>> TurnosPendientesAsync(int anio, int mes, Guid? pacienteId, CancellationToken ct)
     {
         short anioS = (short)anio, mesS = (short)mes;
 
-        var asigIds = await _db.Asignaciones.AsNoTracking()
-            .Where(a => a.AnioServicio == anioS && (a.MesFinal ?? a.MesVigencia) == mesS)
-            .Select(a => a.Id)
-            .ToListAsync(ct);
+        var asigQ = _db.Asignaciones.AsNoTracking()
+            .Where(a => a.AnioServicio == anioS && (a.MesFinal ?? a.MesVigencia) == mesS);
+        if (pacienteId is Guid pid) { asigQ = asigQ.Where(a => a.PacienteId == pid); }
+        var asigIds = await asigQ.Select(a => a.Id).ToListAsync(ct);
         if (asigIds.Count == 0) { return new List<TurnoPendiente>(); }
 
         var turnos = await _db.AsignacionTurnos.AsNoTracking()
@@ -166,7 +188,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     }
 
     private async Task<IReadOnlyList<CierrePeriodoFilaDto>> CalcularPendientesAsync(int anio, int mes, CancellationToken ct)
-        => await ResumirAsync(await TurnosPendientesAsync(anio, mes, ct), ct);
+        => await ResumirAsync(await TurnosPendientesAsync(anio, mes, null, ct), ct);
 
     // Agrupa los turnos pendientes por asignacion y resuelve paciente + servicio.
     private async Task<IReadOnlyList<CierrePeriodoFilaDto>> ResumirAsync(List<TurnoPendiente> turnos, CancellationToken ct)
@@ -183,7 +205,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             join p in _db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
             select new
             {
-                a.Id, a.NombreServicio,
+                a.Id, a.PacienteId, a.NombreServicio,
                 p.PrimerNombre, p.PrimerApellido, p.TipoDocumento, p.NumeroDocumento
             }).ToListAsync(ct);
 
@@ -192,6 +214,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
                 var nombre = ((a.PrimerNombre ?? "") + " " + (a.PrimerApellido ?? "")).Trim();
                 var doc = (a.TipoDocumento + " " + a.NumeroDocumento).Trim();
                 return new CierrePeriodoFilaDto(
+                    a.PacienteId,
                     string.IsNullOrWhiteSpace(nombre) ? "(sin paciente)" : nombre,
                     string.IsNullOrWhiteSpace(doc) ? null : doc,
                     a.NombreServicio ?? "(sin servicio)",

@@ -283,7 +283,7 @@ public sealed class NotaMedicaService(
             .SelectMany(x => x.ns.DefaultIfEmpty(),
                         (x, n) => new
                         {
-                            x.d.Id, x.d.NotaMedicaId, x.d.NombreOriginal, x.d.RutaArchivo,
+                            x.d.Id, x.d.NotaMedicaId, x.d.HistoriaClinicaId, x.d.NombreOriginal, x.d.RutaArchivo,
                             x.d.TipoMime, x.d.Tamano, x.d.Categoria, x.d.TipoTerapia, x.d.Mes,
                             x.d.Anotaciones, x.d.CreatedAt,
                             FechaNota = (DateOnly?)(n != null ? n.FechaNota : null),
@@ -299,7 +299,9 @@ public sealed class NotaMedicaService(
                 x.TipoMime, x.Tamano, x.Categoria, x.TipoTerapia, x.Mes,
                 x.Anotaciones, x.CreatedAt,
                 x.FechaNota, x.CodigoUnico,
-                x.EstadoNota.HasValue ? ((Visal.Domain.Entities.NotaMedicaEstado)x.EstadoNota.Value).ToString() : null))
+                x.EstadoNota.HasValue ? ((Visal.Domain.Entities.NotaMedicaEstado)x.EstadoNota.Value).ToString() : null,
+                // Libre = no cuelga de nota ni de HC -> editable su categoria.
+                EsLibre: x.NotaMedicaId is null && x.HistoriaClinicaId is null))
             .ToList();
     }
 
@@ -416,21 +418,14 @@ public sealed class NotaMedicaService(
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
 
-        // Gate ADM: si el documento pertenece a una HC (directa o via nota), esa HC
-        // debe estar Abierta. Documento libre del paciente (sin HC ni nota) se puede
-        // editar siempre porque no hay documento clinico firmado que proteger.
-        Guid? hcId = e.HistoriaClinicaId;
-        if (hcId is null && e.NotaMedicaId is Guid notaId)
+        // La edicion de categoria SOLO aplica a documentos "libres": adjuntos subidos
+        // directo desde Admision o firmas del propio paciente (sin HC ni nota). Los
+        // anexos de una historia clinica o de una nota medica NO se reclasifican aqui
+        // (su tipologia es parte del documento clinico, abierto o cerrado).
+        if (e.HistoriaClinicaId is not null || e.NotaMedicaId is not null)
         {
-            hcId = await db.NotasMedicas
-                .AsNoTracking()
-                .Where(n => n.Id == notaId)
-                .Select(n => (Guid?)n.HistoriaClinicaId)
-                .FirstOrDefaultAsync(ct);
-        }
-        if (hcId is Guid hcIdVal)
-        {
-            await db.EnsureAbiertaAsync(hcIdVal, ct);
+            throw new InvalidOperationException(
+                "Solo se puede cambiar la categoria de documentos adjuntados desde Admision o por el paciente, no de los anexos de historias clinicas.");
         }
 
         var nueva = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();

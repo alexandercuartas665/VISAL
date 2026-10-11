@@ -3,6 +3,7 @@
    de negocio). Lo usan el modulo Asignacion y Ordenes Clinicas. El PDF se guarda bajo
    wwwroot/uploads/autorizaciones y se almacena su URL relativa en la asignacion. *@
 @using System.Security.Claims
+@using System.Security.Cryptography
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Visal.Application.Tenancy
@@ -148,6 +149,31 @@
                 @(_busy ? "Guardando..." : _draft ? "Usar esta autorización" : "Guardar autorización")
             </button>
         </div>
+
+        @* Doble confirmacion anti-duplicados: avisa si el archivo o el numero ya estan en
+           uso en otra asignacion. No bloquea: el usuario puede continuar igual. *@
+        @if (_dupInfo is not null)
+        {
+            <div class="aut-dup-backdrop" @onclick="() => _dupInfo = null"></div>
+            <div class="aut-dup-box">
+                <div class="aut-dup-h">⚠️ Autorización posiblemente duplicada</div>
+                <div class="aut-dup-body">
+                    @if (_dupInfo.MatchHash)
+                    {
+                        <div>El <b>archivo PDF</b> ya está en uso en <b>@_dupInfo.HashUsadoEn</b>.</div>
+                    }
+                    @if (_dupInfo.MatchNumero)
+                    {
+                        <div>El <b>número</b> <span class="mono">@_codigo</span> ya está en uso en <b>@_dupInfo.NumeroUsadoEn</b>.</div>
+                    }
+                    <div class="aut-dup-q">¿Deseas continuar de todos modos?</div>
+                </div>
+                <div class="aut-dup-acts">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _dupInfo = null">Cancelar</button>
+                    <button class="btn btn-warning btn-sm" @onclick="ConfirmarDuplicado">Continuar de todos modos</button>
+                </div>
+            </div>
+        }
     </div>
 }
 
@@ -197,6 +223,13 @@
     .asg-cmp-ia { color:#334155; }
     .asg-cmp-diff { color:#b45309; background:#fffbeb; border-radius:5px; padding:1px 6px; }
     .asg-cmp-acts { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
+    /* Dialogo de doble confirmacion anti-duplicados (encima del modal). */
+    .aut-dup-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:1060; }
+    .aut-dup-box { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:460px; max-width:92vw; background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(15,23,42,.3); z-index:1061; padding:18px 20px; }
+    .aut-dup-h { font-size:15px; font-weight:700; color:#92400e; margin-bottom:10px; }
+    .aut-dup-body { font-size:13px; color:#334155; display:flex; flex-direction:column; gap:6px; }
+    .aut-dup-q { margin-top:6px; font-weight:600; color:#0f172a; }
+    .aut-dup-acts { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 
 @code {
@@ -208,7 +241,7 @@
     // paciente/servicio/contrato en DraftInfo (AsignacionId = Guid.Empty) y, al confirmar,
     // el modal devuelve (numero, pdfUrl) por OnDraftConfirmado en vez de persistir.
     [Parameter] public AutorizacionInfoDto? DraftInfo { get; set; }
-    [Parameter] public EventCallback<(string? Codigo, string? PdfUrl)> OnDraftConfirmado { get; set; }
+    [Parameter] public EventCallback<(string? Codigo, string? PdfUrl, string? Hash)> OnDraftConfirmado { get; set; }
     [CascadingParameter] public Task<AuthenticationState>? AuthState { get; set; }
 
     private bool _draft;
@@ -220,6 +253,7 @@
         _extBusy = false; _extHecho = false; _extError = null; _rawJson = null; _extGuardadoEn = null;
         _exNombre = _exTipoDoc = _exDocumento = _exCorreo = _exDireccion = null; _exTelefonos = "";
         _metaBusy = false; _metaMsg = null; _aplicarTel = _aplicarCorreo = _aplicarDir = false;
+        _pdfHash = null; _dupInfo = null; _dupConfirmado = false;
     }
 
     private AutorizacionInfoDto? _info;
@@ -231,6 +265,11 @@
     private bool _pdfBusy;
     private bool _busy;
     private string? _error;
+
+    // ── Control anti-duplicados ─────────────────────────────────────────────
+    private string? _pdfHash;                 // SHA-256 del PDF recien subido (null si no se subio)
+    private DuplicadoAutorizacionDto? _dupInfo; // != null -> mostrar el dialogo de confirmacion
+    private bool _dupConfirmado;              // el usuario ya confirmo continuar con el duplicado
 
     // ── Extraccion con IA (DeepSeek lee el texto del PDF) ───────────────────
     private bool _extBusy;
@@ -321,13 +360,19 @@
             var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
             var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
             var full = Path.Combine(dir, nombre);
-            await using (var fs = File.Create(full))
+            // Leemos los bytes una sola vez: sirven para guardar el archivo y para el hash.
+            byte[] bytes;
             await using (var src = file.OpenReadStream(10L * 1024 * 1024))
+            using (var ms = new MemoryStream())
             {
-                await src.CopyToAsync(fs);
+                await src.CopyToAsync(ms);
+                bytes = ms.ToArray();
             }
+            await File.WriteAllBytesAsync(full, bytes);
             _pdfUrl = $"/uploads/autorizaciones/{nombre}";
             _pdfNombre = file.Name;
+            _pdfHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            _dupConfirmado = false;  // archivo nuevo -> re-verificar duplicados al guardar
             _verInline = true;  // muestra el PDF recien subido de inmediato
         }
         catch (Exception ex) { _error = "No se pudo subir el PDF: " + ex.Message; }
@@ -345,25 +390,48 @@
     private async Task Guardar()
     {
         if (string.IsNullOrWhiteSpace(_codigo)) { _error = "Indica el número de autorización."; return; }
-        // Modo borrador: no persiste; devuelve numero + PDF al formulario de creacion.
+        // Modo borrador: no persiste; devuelve numero + PDF + hash al formulario de creacion.
+        // La verificacion de duplicados del ALTA la hace Asignacion.Guardar (asi cubre tambien
+        // el registro directo sin asistente) -> aqui NO preguntamos, para no duplicar el aviso.
         if (_draft)
         {
-            await OnDraftConfirmado.InvokeAsync((_codigo.Trim(), _pdfUrl));
+            await OnDraftConfirmado.InvokeAsync((_codigo.Trim(), _pdfUrl, _pdfHash));
             await Cerrar();
             return;
         }
         if (AsignacionId is not Guid aid) { return; }
+
+        // Control anti-duplicados (flujos "completar"): avisa si el archivo o el numero ya
+        // estan en uso en OTRA asignacion del tenant y pide doble confirmacion. No bloquea.
+        if (!_dupConfirmado)
+        {
+            try
+            {
+                var dup = await RetryDb(() => AsigSvc.VerificarDuplicadoAutorizacionAsync(_pdfHash, _codigo.Trim(), aid));
+                if (dup.HayDuplicado) { _dupInfo = dup; return; }
+            }
+            catch { /* si la verificacion falla, no bloqueamos el guardado */ }
+        }
+
         _busy = true; _error = null;
         try
         {
             var actor = await Actor();
-            await RetryDb(() => AsigSvc.CompletarAutorizacionAsync(aid, _codigo.Trim(), _pdfUrl, actor));
+            await RetryDb(() => AsigSvc.CompletarAutorizacionAsync(aid, _codigo.Trim(), _pdfUrl, actor, _pdfHash));
             await OnGuardado.InvokeAsync();
             await Cerrar();
         }
         catch (InvalidOperationException ex) { _error = ex.Message; }
         catch (Exception ex) { _error = "No se pudo guardar: " + ex.Message; }
         finally { _busy = false; }
+    }
+
+    // El usuario acepto continuar pese al duplicado: marca confirmado y reintenta guardar.
+    private async Task ConfirmarDuplicado()
+    {
+        _dupConfirmado = true;
+        _dupInfo = null;
+        await Guardar();
     }
 
     // Reintento ante la colision del DbContext scoped compartido ("A second operation

@@ -177,4 +177,10 @@ public interface IApplicationDbContext
     /// servicio de limpieza de pacientes de prueba, que borra en varias tablas
     /// (algunas sin DbSet) dentro de una sola transaccion.</summary>
     DatabaseFacade Database { get; }
+
+    /// <summary>Refresca una entidad rastreada con los valores actuales de la BD. El
+    /// DbContext es scoped (compartido por el circuito Blazor Server); si la entidad venia
+    /// rastreada con valores desactualizados, EF compararia los cambios contra ese estado en
+    /// memoria y podria OMITIR el UPDATE. Recargar desde la BD hace el guardado fiable.</summary>
+    Task ReloadEntityAsync(object entity, CancellationToken ct = default);
 }

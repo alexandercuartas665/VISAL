@@ -18,6 +18,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         _tenantContext = tenantContext;
     }
 
+    /// <inheritdoc />
+    public Task ReloadEntityAsync(object entity, CancellationToken ct = default)
+        => Entry(entity).ReloadAsync(ct);
+
     // Globales (administradas por Super Admin / plataforma)
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<SaasPlan> SaasPlans => Set<SaasPlan>();
@@ -1551,6 +1555,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.CodigoAutorizacion).HasMaxLength(60);
             b.Property(x => x.FormatoHistoria).HasMaxLength(60);
             b.Property(x => x.PdfAutorizacionUrl).HasMaxLength(500);
+            b.Property(x => x.PdfAutorizacionHash).HasMaxLength(64);
             b.Property(x => x.TipoPago).HasMaxLength(20);
             b.Property(x => x.CategoriaCopago).HasMaxLength(80);
             b.Property(x => x.ValorPagoSugerido).HasPrecision(14, 2);
@@ -1570,6 +1575,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.HasIndex(x => x.LoteId);
             b.HasIndex(x => x.PaqueteInstanciaId);
             b.HasIndex(x => new { x.TenantId, x.AutorizacionPendiente });
+            // Busqueda del control anti-duplicados: por hash del PDF dentro del tenant.
+            b.HasIndex(x => new { x.TenantId, x.PdfAutorizacionHash });
         });
 
         // Motor de alertas: reglas configurables + outbox de envios (idempotencia).

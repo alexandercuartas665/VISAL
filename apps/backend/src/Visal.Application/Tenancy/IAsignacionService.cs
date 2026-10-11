@@ -56,6 +56,16 @@ public sealed record AutorizacionInfoDto(
     Guid PacienteId = default, string? PacienteTelefono = null, string? PacienteCorreo = null,
     string? PacienteDireccion = null);
 
+/// <summary>Resultado del control anti-duplicados de una autorizacion. Cada match trae
+/// una descripcion de DONDE esta en uso (paciente + AS-xxxxxx) para el aviso al usuario.</summary>
+public sealed record DuplicadoAutorizacionDto(
+    bool MatchHash, string? HashUsadoEn,
+    bool MatchNumero, string? NumeroUsadoEn)
+{
+    /// <summary>True si hay al menos un duplicado (por archivo o por numero).</summary>
+    public bool HayDuplicado => MatchHash || MatchNumero;
+}
+
 /// <summary>Contacto a actualizar en la ficha del paciente (desde el modal de autorizacion).</summary>
 public sealed record ActualizarContactoPacienteRequest(
     Guid PacienteId, bool ActualizarTelefono, string? Telefono,
@@ -367,7 +377,9 @@ public sealed record CrearLoteRequest(
     bool AutorizacionPendiente = false,
     // Cuando es true, todas las asignaciones del lote se marcan como "folio" (EsFolio):
     // servicios que NO caen en el snapshot RelacionFacturas (excluidos de Snapshots).
-    bool EsFolio = false);
+    bool EsFolio = false,
+    // SHA-256 (hex) del PDF de autorizacion, para el control anti-duplicados.
+    string? PdfAutorizacionHash = null);
 
 /// <summary>Filtros del tab "Listado" en /asignacion. Todos opcionales; los null/vacios
 /// simplemente no aplican. Fecha_inicial y fecha_final aplican sobre FechaInicio de la
@@ -456,7 +468,15 @@ public interface IAsignacionService
     /// estado de la asignacion (es un dato administrativo).</summary>
     Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
-        Guid actor, CancellationToken ct = default);
+        Guid actor, string? pdfAutorizacionHash = null, CancellationToken ct = default);
+
+    /// <summary>Control anti-duplicados de autorizaciones: busca si el HASH del PDF o el
+    /// NUMERO de autorizacion ya estan en uso en OTRA asignacion del tenant (cualquier
+    /// paciente). Solo informa (para pedir doble confirmacion en la UI), no bloquea.
+    /// <paramref name="excludeAsignacionId"/> excluye la asignacion en edicion (null al crear).</summary>
+    Task<DuplicadoAutorizacionDto> VerificarDuplicadoAutorizacionAsync(
+        string? pdfAutorizacionHash, string? codigoAutorizacion,
+        Guid? excludeAsignacionId = null, CancellationToken ct = default);
 
     /// <summary>Datos de autorizacion (numero + PDF) de una asignacion, con contexto
     /// (servicio, contrato, paciente) para mostrar en el modal. Null si no existe.

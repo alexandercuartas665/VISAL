@@ -12,9 +12,7 @@
 @inject ICuotaCopagoService CuotaSvc
 @inject ICatalogoTipoServicioService TipoSvcCat
 @inject ICatalogoPacienteService CatPacSvc
-@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 @inject IJSRuntime JS
-@inject IAutorizacionExtractorService Extractor
 
 <PageTitle>Asignacion de Servicios - Visal</PageTitle>
 
@@ -716,6 +714,30 @@ else
                    OnCerrar="() => _draftAutVisible = false"
                    OnDraftConfirmado="OnDraftAutorizacionConfirmada" />
 
+@* Doble confirmacion anti-duplicados al crear la asignacion (archivo o numero ya en uso). *@
+@if (_altaDupInfo is not null)
+{
+    <div class="asg-dup-backdrop" @onclick="() => _altaDupInfo = null"></div>
+    <div class="asg-dup-box">
+        <div class="asg-dup-h">&#9888;&#65039; Autorizaci&oacute;n posiblemente duplicada</div>
+        <div class="asg-dup-body">
+            @if (_altaDupInfo.MatchHash)
+            {
+                <div>El <b>archivo PDF</b> ya est&aacute; en uso en <b>@_altaDupInfo.HashUsadoEn</b>.</div>
+            }
+            @if (_altaDupInfo.MatchNumero)
+            {
+                <div>El <b>n&uacute;mero</b> <span class="mono">@_autorizacion</span> ya est&aacute; en uso en <b>@_altaDupInfo.NumeroUsadoEn</b>.</div>
+            }
+            <div class="asg-dup-q">&iquest;Deseas continuar de todos modos?</div>
+        </div>
+        <div class="asg-dup-acts">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _altaDupInfo = null">Cancelar</button>
+            <button class="btn btn-warning btn-sm" @onclick="ConfirmarDuplicadoAlta">Continuar de todos modos</button>
+        </div>
+    </div>
+}
+
 @* ============ Modal BUSCAR PACIENTES (filtros + grid) ============ *@
 @if (_modal)
 {
@@ -1001,6 +1023,13 @@ else
     .cie-result-item:hover { background:#eff6ff; }
     .cie-title { flex:1; font-size:13px; color:#0f172a; }
     .cie-id { font-family: monospace; font-size:10px; color:#94a3b8; }
+    /* Dialogo de doble confirmacion anti-duplicados de autorizacion. */
+    .asg-dup-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:1060; }
+    .asg-dup-box { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:460px; max-width:92vw; background:#fff; border-radius:12px; box-shadow:0 20px 60px rgba(15,23,42,.3); z-index:1061; padding:18px 20px; }
+    .asg-dup-h { font-size:15px; font-weight:700; color:#92400e; margin-bottom:10px; }
+    .asg-dup-body { font-size:13px; color:#334155; display:flex; flex-direction:column; gap:6px; }
+    .asg-dup-q { margin-top:6px; font-weight:600; color:#0f172a; }
+    .asg-dup-acts { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 
 @code {
@@ -1065,82 +1094,17 @@ else
     private Guid? _editandoId;
 
     // PDF de autorizacion adjunto (solo aplica si _contratoSel.RequierePdfAutorizacion).
-    // Se guarda en wwwroot/uploads/autorizaciones/ y la URL relativa va al backend.
+    // El PDF se sube/visualiza desde el asistente (AutorizacionModal en modo borrador), que
+    // devuelve URL + hash por OnDraftAutorizacionConfirmada; aqui solo guardamos lo recibido.
     private string? _pdfAutorizacionUrl;
     private string? _pdfNombre;
-    private bool _pdfBusy;
-
-    private async Task OnPdfUploaded(InputFileChangeEventArgs e)
-    {
-        _error = null;
-        _pdfBusy = true;
-        try
-        {
-            var file = e.File;
-            if (file.Size > 10L * 1024 * 1024)
-            {
-                _error = "El PDF supera 10 MB. Reduce el tamano antes de cargarlo.";
-                return;
-            }
-            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
-            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
-            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
-            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
-            var full = Path.Combine(dir, nombre);
-            await using (var fs = File.Create(full))
-            await using (var src = file.OpenReadStream(10L * 1024 * 1024))
-            {
-                await src.CopyToAsync(fs);
-            }
-            _pdfAutorizacionUrl = $"/uploads/autorizaciones/{nombre}";
-            _pdfNombre = file.Name;
-            _ok = $"PDF '{file.Name}' cargado.";
-
-            // OCR/IA al subir: extrae los datos del PDF y autollena el numero de
-            // autorizacion en la caja (editable). Solo si no es "autorizacion pendiente".
-            if (!_autorizacionPendiente)
-            {
-                await ExtraerAutorizacionDesdePdfAsync(full);
-            }
-        }
-        catch (Exception ex) { _error = "No se pudo subir el PDF: " + ex.Message; }
-        finally { _pdfBusy = false; }
-    }
-
-    // Corre la extraccion con IA (la misma de las autorizaciones) sobre el PDF recien
-    // subido y autollena el numero de autorizacion. No bloquea: si la IA falla o no lo
-    // detecta, deja la caja para escribirlo a mano (siempre editable).
-    private bool _ocrBusy;
-    private async Task ExtraerAutorizacionDesdePdfAsync(string fullPath)
-    {
-        _ocrBusy = true;
-        try
-        {
-            var bytes = await File.ReadAllBytesAsync(fullPath);
-            var r = await Extractor.ExtraerDesdePdfAsync(bytes);
-            if (r.Ok && !string.IsNullOrWhiteSpace(r.NumeroAutorizacion))
-            {
-                // Solo autollena si la caja esta vacia (no pisa lo que el usuario ya escribio).
-                if (string.IsNullOrWhiteSpace(_autorizacion)) { _autorizacion = r.NumeroAutorizacion!.Trim(); }
-                _ok = $"PDF cargado. Numero de autorizacion extraido por IA: {r.NumeroAutorizacion!.Trim()}";
-            }
-            else if (!r.Ok)
-            {
-                _ok = $"PDF cargado. La IA no pudo extraer el numero ({r.Error}). Escribelo a mano.";
-            }
-            else
-            {
-                _ok = "PDF cargado. La IA no encontro un numero de autorizacion; escribelo a mano.";
-            }
-        }
-        catch (Exception ex) { _ok = "PDF cargado. No se pudo extraer con IA: " + ex.Message + ". Escribe el numero a mano."; }
-        finally { _ocrBusy = false; }
-    }
+    private string? _pdfAutorizacionHash;  // SHA-256 del PDF, para el control anti-duplicados
 
     private void LimpiarPdf()
     {
         _pdfAutorizacionUrl = null;
         _pdfNombre = null;
+        _pdfAutorizacionHash = null;
     }
 
     // ── Panel Cuota moderadora / Copago ─────────────────────────────────
@@ -1363,6 +1327,17 @@ else
     private bool _draftAutVisible;
     private AutorizacionInfoDto? _draftAutInfo;
 
+    // Doble confirmacion anti-duplicados del ALTA (archivo/numero ya en uso en otra asignacion).
+    private DuplicadoAutorizacionDto? _altaDupInfo;
+    private bool _altaDupConfirmado;
+
+    private async Task ConfirmarDuplicadoAlta()
+    {
+        _altaDupConfirmado = true;
+        _altaDupInfo = null;
+        await Guardar();
+    }
+
     private void AbrirAsistenteAutorizacion()
     {
         if (_paciente is null) { return; }
@@ -1381,7 +1356,7 @@ else
         _draftAutVisible = true;
     }
 
-    private void OnDraftAutorizacionConfirmada((string? Codigo, string? PdfUrl) r)
+    private void OnDraftAutorizacionConfirmada((string? Codigo, string? PdfUrl, string? Hash) r)
     {
         _draftAutVisible = false;
         if (!string.IsNullOrWhiteSpace(r.Codigo)) { _autorizacion = r.Codigo!.Trim(); }
@@ -1389,6 +1364,7 @@ else
         {
             _pdfAutorizacionUrl = r.PdfUrl;
             _pdfNombre = System.IO.Path.GetFileName(r.PdfUrl!.TrimEnd('/'));
+            _pdfAutorizacionHash = r.Hash;
         }
         _ok = "Autorizacion lista desde el asistente.";
     }
@@ -1858,6 +1834,20 @@ else
                 return;
             }
 
+            // Control anti-duplicados del ALTA: si el archivo (hash) o el numero ya estan en
+            // uso en otra asignacion del tenant, avisa y pide doble confirmacion (no bloquea).
+            // Cubre el asistente (hash + numero) y el registro directo (numero tecleado sin PDF).
+            if (!_autorizacionPendiente && !_altaDupConfirmado
+                && (!string.IsNullOrWhiteSpace(_autorizacion) || !string.IsNullOrWhiteSpace(_pdfAutorizacionHash)))
+            {
+                try
+                {
+                    var dup = await Svc.VerificarDuplicadoAutorizacionAsync(_pdfAutorizacionHash, _autorizacion, null);
+                    if (dup.HayDuplicado) { _altaDupInfo = dup; return; }
+                }
+                catch { /* si la verificacion falla, no bloqueamos el guardado */ }
+            }
+
             // Paquete: NO se exige agregar TODOS los servicios del paquete. El
             // coordinador puede guardar solo los servicios que apliquen (incluso
             // uno solo). Antes habia un control que bloqueaba si faltaba algun
@@ -1909,7 +1899,7 @@ else
             var req = new CrearLoteRequest(_paciente.Id, _contratoSel.CodigoContrato, _paciente.Sede ?? "-", items,
                 _pdfAutorizacionUrl,
                 _tipoPago, _categoriaPago, _valorPagoSugerido, _valorPagoReal,
-                _autorizacionPendiente, _esFolio);
+                _autorizacionPendiente, _esFolio, _pdfAutorizacionHash);
             var r = await Svc.CrearLoteAsync(req, await Actor());
             _ok = _autorizacionPendiente
                 ? $"Lote guardado: {r.CantidadServicios} servicio(s). Quedaron con AUTORIZACION PENDIENTE (complétalas en el tab Listado)."
@@ -1920,6 +1910,7 @@ else
             LimpiarPago();
             _autorizacionPendiente = false;
             _esFolio = false;
+            _altaDupConfirmado = false;
             _ultimas = (await Svc.UltimasAsignacionesAsync(_paciente.Id, 10)).ToList();
         }
         catch (InvalidOperationException ex) { _error = UiError.Negocio("ASG", 100, ex.Message); }

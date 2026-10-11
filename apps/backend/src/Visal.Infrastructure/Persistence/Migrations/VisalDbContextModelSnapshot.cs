@@ -1130,6 +1130,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(14,2)")
                         .HasColumnName("paquete_valor_pactado");
 
+                    b.Property<string>("PdfAutorizacionHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("pdf_autorizacion_hash");
+
                     b.Property<string>("PdfAutorizacionUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -1207,6 +1212,9 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "PacienteId")
                         .HasDatabaseName("ix_asignaciones_tenant_id_paciente_id");
+
+                    b.HasIndex("TenantId", "PdfAutorizacionHash")
+                        .HasDatabaseName("ix_asignaciones_tenant_id_pdf_autorizacion_hash");
 
                     b.HasIndex("TenantId", "Estado", "MesVigencia", "AnioServicio")
                         .HasDatabaseName("ix_asignaciones_tenant_id_estado_mes_vigencia_anio_servicio");

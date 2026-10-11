@@ -82,6 +82,12 @@ public class Asignacion : TenantEntity
     /// vuelve obligatorio cuando el ContratoAseguradora.RequierePdfAutorizacion es true.</summary>
     public string? PdfAutorizacionUrl { get; set; }
 
+    /// <summary>SHA-256 (hex, 64 chars) del PDF de autorizacion adjunto. Se calcula al
+    /// subir el PDF y sirve para detectar que un mismo archivo se reuse en otra asignacion
+    /// (control anti-duplicados, solo aviso con doble confirmacion, no bloquea). Null si la
+    /// asignacion no tiene PDF o es anterior a esta funcionalidad.</summary>
+    public string? PdfAutorizacionHash { get; set; }
+
     /// <summary>Marca que la asignacion se guardo SIN la autorizacion (numero y/o PDF)
     /// y queda a la espera de completarla. Cuando es true, el flujo de creacion no exige
     /// el PDF aunque el contrato lo pida; se completa despues desde el tab "Listado"

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Domain.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
@@ -367,6 +368,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 Observaciones = it.Observaciones,
                 FormatoHistoria = it.FormatoHistoria,
                 PdfAutorizacionUrl = req.PdfAutorizacionUrl,
+                PdfAutorizacionHash = req.PdfAutorizacionHash,
                 TipoPago = req.TipoPago,
                 CategoriaCopago = req.CategoriaCopago,
                 ValorPagoSugerido = req.ValorPagoSugerido,
@@ -499,7 +501,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
-        Guid actor, CancellationToken ct = default)
+        Guid actor, string? pdfAutorizacionHash = null, CancellationToken ct = default)
     {
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
         if (a is null) { return false; }
@@ -521,11 +523,66 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         }
 
         a.CodigoAutorizacion = codigoAutorizacion.Trim();
-        if (!string.IsNullOrWhiteSpace(pdfAutorizacionUrl)) { a.PdfAutorizacionUrl = pdfAutorizacionUrl; }
+        // El hash viaja junto al PDF: solo se actualiza cuando se adjunta uno nuevo
+        // (si no se sube PDF, se conserva el hash existente).
+        if (!string.IsNullOrWhiteSpace(pdfAutorizacionUrl))
+        {
+            a.PdfAutorizacionUrl = pdfAutorizacionUrl;
+            a.PdfAutorizacionHash = pdfAutorizacionHash;
+        }
         a.AutorizacionPendiente = false;
 
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<DuplicadoAutorizacionDto> VerificarDuplicadoAutorizacionAsync(
+        string? pdfAutorizacionHash, string? codigoAutorizacion,
+        Guid? excludeAsignacionId = null, CancellationToken ct = default)
+    {
+        var hash = string.IsNullOrWhiteSpace(pdfAutorizacionHash) ? null : pdfAutorizacionHash.Trim();
+        var numero = string.IsNullOrWhiteSpace(codigoAutorizacion) ? null : codigoAutorizacion.Trim();
+        if (hash is null && numero is null)
+        {
+            return new DuplicadoAutorizacionDto(false, null, false, null);
+        }
+
+        // Candidatas: asignaciones del tenant (el query filter aisla el tenant) que
+        // coincidan por hash de archivo o por numero de autorizacion, excluyendo la que
+        // se esta editando. Solo informamos; no bloqueamos.
+        var q = db.Asignaciones.AsNoTracking()
+            .Where(a => (hash != null && a.PdfAutorizacionHash == hash)
+                     || (numero != null && a.CodigoAutorizacion == numero));
+        if (excludeAsignacionId is Guid ex) { q = q.Where(a => a.Id != ex); }
+
+        var rows = await (
+            from a in q
+            join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id into pj
+            from p in pj.DefaultIfEmpty()
+            join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id into lj
+            from l in lj.DefaultIfEmpty()
+            select new
+            {
+                a.PdfAutorizacionHash,
+                a.CodigoAutorizacion,
+                PacienteNombre = p != null ? p.NombreCompleto : null,
+                Consecutivo = (long?)(l != null ? l.Consecutivo : 0)
+            }).ToListAsync(ct);
+
+        var porHash = hash is null ? null : rows.FirstOrDefault(r => r.PdfAutorizacionHash == hash);
+        var porNumero = numero is null ? null : rows.FirstOrDefault(r => r.CodigoAutorizacion == numero);
+
+        return new DuplicadoAutorizacionDto(
+            MatchHash: porHash is not null, HashUsadoEn: DescribirUso(porHash?.PacienteNombre, porHash?.Consecutivo),
+            MatchNumero: porNumero is not null, NumeroUsadoEn: DescribirUso(porNumero?.PacienteNombre, porNumero?.Consecutivo));
+
+        // "PACIENTE (AS-000045)" para el aviso al usuario.
+        static string? DescribirUso(string? paciente, long? consecutivo)
+        {
+            if (paciente is null && (consecutivo is null || consecutivo == 0)) { return null; }
+            var nom = string.IsNullOrWhiteSpace(paciente) ? "otra asignacion" : paciente!.Trim();
+            return consecutivo is long c && c > 0 ? $"{nom} ({CodigoPublico.Asignacion(c)})" : nom;
+        }
     }
 
     public async Task<AutorizacionInfoDto?> GetAutorizacionAsync(Guid asignacionId, CancellationToken ct = default)
@@ -556,6 +613,13 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (req.PacienteId == Guid.Empty) { return false; }
         var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == req.PacienteId, ct);
         if (p is null) { return false; }
+
+        // El DbContext es scoped (compartido por el circuito Blazor Server). Si el paciente ya
+        // venia rastreado con valores desactualizados en el contexto, EF compararia los nuevos
+        // valores contra ese estado en memoria (no contra la BD) y podria OMITIR el UPDATE al
+        // creer que el dato "ya coincide" (p.ej. el correo). Refrescamos desde la BD para que
+        // los cambios se detecten contra el estado real persistido y el guardado sea fiable.
+        await db.ReloadEntityAsync(p, ct);
 
         var cambio = false;
         if (req.ActualizarTelefono)

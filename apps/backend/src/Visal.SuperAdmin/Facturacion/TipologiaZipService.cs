@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
@@ -87,9 +88,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
             : "{sigla}_{cedula}";
 
         // NIT del IPS (tenant) para el token {nit} del nombre de archivo. Uno por IPS.
+        // Se expone SOLO con digitos: NIT + digito de verificacion PEGADO, sin guion ni
+        // puntos (p. ej. "900123456-7" -> "9001234567"), que es como lo piden las cuentas.
         var nitIps = (_tenant.TenantId is Guid tnit
             ? await _db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
             : null) ?? "";
+        nitIps = new string(nitIps.Where(char.IsDigit).ToArray());
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
@@ -177,12 +181,150 @@ public sealed class TipologiaZipService : ITipologiaZipService
     public async Task<IReadOnlyDictionary<Guid, int>> ContarConContenidoAsync(
         Guid snapshotId, CancellationToken ct = default)
     {
-        var vacio = new Dictionary<Guid, int>();
+        var lookup = await ConstruirLookupAsync(snapshotId, ct);
+        if (lookup is null) { return new Dictionary<Guid, int>(); }
+
+        var res = new Dictionary<Guid, int>();
+        foreach (var a in lookup.Archivos)
+        {
+            var n = 0;
+            foreach (var pac in lookup.Pacientes)
+            {
+                if (!lookup.DocToId.TryGetValue(pac.Documento, out var pid)) { continue; }
+                if (lookup.Tiene(a, pid)) { n++; }
+            }
+            res[a.Id] = n;
+        }
+        return res;
+    }
+
+    /// <inheritdoc />
+    public async Task<ArchivoExportado?> GenerarExcelFaltantesAsync(
+        Guid snapshotId, Guid archivoItemId, CancellationToken ct = default)
+    {
+        var lookup = await ConstruirLookupAsync(snapshotId, ct);
+        if (lookup is null) { return null; }
+
+        var archivo = lookup.Archivos.FirstOrDefault(a => a.Id == archivoItemId);
+        if (archivo is null) { return null; }
+
+        // Pacientes del snapshot para los que ESTE archivo NO se generaria: o no existen en
+        // el sistema (no hay con que generar), o existen pero ningun contenido del archivo
+        // tiene material para ellos. Misma regla exacta que el contador de la tarjeta, asi
+        // "faltantes + con contenido = total del snapshot".
+        var faltantes = new List<(PacienteSnapshotDto Pac, string Motivo)>();
+        foreach (var pac in lookup.Pacientes)
+        {
+            if (!lookup.DocToId.TryGetValue(pac.Documento, out var pid))
+            {
+                faltantes.Add((pac, "Paciente no existe en el sistema"));
+            }
+            else if (!lookup.Tiene(archivo, pid))
+            {
+                faltantes.Add((pac, "Sin contenido"));
+            }
+        }
+
+        var nombreArchivo = string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion!;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Sin archivo");
+
+        // Encabezado contextual (snapshot + archivo).
+        ws.Cell(1, 1).Value = "Pacientes sin el archivo";
+        ws.Cell(1, 1).Style.Font.Bold = true;
+        ws.Cell(1, 1).Style.Font.FontSize = 13;
+        ws.Cell(2, 1).Value = $"Archivo: {nombreArchivo} ({archivo.Alias})";
+        ws.Cell(3, 1).Value = $"Snapshot: {lookup.SnapshotNombre}";
+        ws.Cell(4, 1).Value = $"Faltantes: {faltantes.Count} de {lookup.Pacientes.Count} paciente(s) del snapshot";
+        ws.Cell(5, 1).Value = $"Generado: {DateTimeOffset.Now.ToLocalTime():yyyy-MM-dd HH:mm}";
+
+        const int hdr = 7;
+        string[] cols = { "#", "Paciente", "Tipo doc", "Documento", "Servicios", "Autorizaciones", "Sede", "Motivo" };
+        for (var i = 0; i < cols.Length; i++)
+        {
+            var cell = ws.Cell(hdr, i + 1);
+            cell.Value = cols[i];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1565C0");
+            cell.Style.Font.FontColor = XLColor.White;
+        }
+
+        var row = hdr + 1;
+        var n = 0;
+        foreach (var (pac, motivo) in faltantes)
+        {
+            n++;
+            ws.Cell(row, 1).Value = n;
+            ws.Cell(row, 2).Value = string.IsNullOrWhiteSpace(pac.Nombre) ? "-" : pac.Nombre;
+            ws.Cell(row, 3).Value = pac.TipoDocumento ?? "";
+            ws.Cell(row, 4).Value = pac.Documento ?? "";
+            ws.Cell(row, 4).Style.NumberFormat.Format = "@"; // documento como texto (no notacion cientifica)
+            ws.Cell(row, 5).Value = pac.Servicios;
+            ws.Cell(row, 6).Value = string.Join(", ", pac.Autorizaciones.Where(x => !string.IsNullOrWhiteSpace(x)));
+            ws.Cell(row, 7).Value = pac.CodigoHabilitacionSede ?? "";
+            ws.Cell(row, 8).Value = motivo;
+            row++;
+        }
+
+        if (faltantes.Count == 0)
+        {
+            ws.Cell(hdr + 1, 1).Value = "Todos los pacientes del snapshot generaron este archivo.";
+        }
+
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var nombre = SanitizarNombre($"SIN_{archivo.Alias}_{lookup.SnapshotNombre}") + ".xlsx";
+        return new ArchivoExportado(
+            ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            nombre);
+    }
+
+    /// <summary>Material precalculado para decidir, por archivo y paciente del snapshot, si
+    /// hay contenido real (la misma regla que usan el contador de la tarjeta y el ZIP). Se
+    /// construye una sola vez por snapshot con <see cref="ConstruirLookupAsync"/>.</summary>
+    private sealed class ContenidoLookup
+    {
+        public required string SnapshotNombre { get; init; }
+        public required IReadOnlyList<InformeItemDto> Archivos { get; init; }
+        public required IReadOnlyList<PacienteSnapshotDto> Pacientes { get; init; }
+        /// <summary>documento del paciente -> pacienteId (solo los del snapshot que existen en el sistema).</summary>
+        public required Dictionary<string, Guid> DocToId { get; init; }
+        public required HashSet<Guid> ConAut { get; init; }
+        public required HashSet<Guid> ConFirma { get; init; }
+        public required Dictionary<string, HashSet<Guid>> ConFormTipo { get; init; }
+        public required Dictionary<Guid, List<(string? Cat, bool Hc, bool Nota)>> DocsExternos { get; init; }
+
+        /// <summary>True si ALGUN contenido del archivo tiene material para el paciente.</summary>
+        public bool Tiene(InformeItemDto a, Guid pid) =>
+            a.Contenidos.Any(c =>
+                (c.Origen == OrigenInformeItem.AutorizacionAsignacion && ConAut.Contains(pid)) ||
+                (c.Origen == OrigenInformeItem.FirmaPaciente && ConFirma.Contains(pid)) ||
+                (c.Origen == OrigenInformeItem.FormularioPorTipo
+                    && c.FormularioTipo is string ft
+                    && ConFormTipo.TryGetValue(ft, out var set) && set.Contains(pid)) ||
+                (EsOrigenDocExterno(c.Origen)
+                    && DocsExternos.TryGetValue(pid, out var dl)
+                    && dl.Any(d => DocExternoCoincide(c.Origen, c.TipologiaNombre, d.Cat, d.Hc, d.Nota))));
+    }
+
+    /// <summary>
+    /// Precarga, una sola vez por snapshot, todo lo necesario para decidir "¿tiene contenido
+    /// este paciente para este archivo?" (autorizaciones con PDF en disco, firmas, HC cerradas
+    /// por tipo, documentos externos renderables por tipologia). Lo comparten el contador de la
+    /// tarjeta y el Excel de faltantes para que nunca se desalineen. Devuelve null si el
+    /// snapshot no existe, no tiene aseguradora o la aseguradora no tiene archivos configurados.
+    /// </summary>
+    private async Task<ContenidoLookup?> ConstruirLookupAsync(Guid snapshotId, CancellationToken ct)
+    {
         var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
-        if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return vacio; }
+        if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return null; }
 
         var archivos = await _cuenta.ListarItemsAsync(aseguradoraId, ct);
-        if (archivos.Count == 0) { return vacio; }
+        if (archivos.Count == 0) { return null; }
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
         var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
@@ -301,28 +443,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
             }
         }
 
-        var res = new Dictionary<Guid, int>();
-        foreach (var a in archivos)
+        return new ContenidoLookup
         {
-            var n = 0;
-            foreach (var pac in pacientes)
-            {
-                if (!docToId.TryGetValue(pac.Documento, out var pid)) { continue; }
-                // El paciente cuenta si ALGUN contenido del archivo tiene material para el.
-                var tiene = a.Contenidos.Any(c =>
-                    (c.Origen == OrigenInformeItem.AutorizacionAsignacion && conAut.Contains(pid)) ||
-                    (c.Origen == OrigenInformeItem.FirmaPaciente && conFirma.Contains(pid)) ||
-                    (c.Origen == OrigenInformeItem.FormularioPorTipo
-                        && c.FormularioTipo is string ft
-                        && conFormTipo.TryGetValue(ft, out var set) && set.Contains(pid)) ||
-                    (EsOrigenDocExterno(c.Origen)
-                        && docsExternos.TryGetValue(pid, out var dl)
-                        && dl.Any(d => DocExternoCoincide(c.Origen, c.TipologiaNombre, d.Cat, d.Hc, d.Nota))));
-                if (tiene) { n++; }
-            }
-            res[a.Id] = n;
-        }
-        return res;
+            SnapshotNombre = detalle.Metadata.Nombre,
+            Archivos = archivos,
+            Pacientes = pacientes,
+            DocToId = docToId,
+            ConAut = conAut,
+            ConFirma = conFirma,
+            ConFormTipo = conFormTipo,
+            DocsExternos = docsExternos,
+        };
     }
 
     /// <summary>

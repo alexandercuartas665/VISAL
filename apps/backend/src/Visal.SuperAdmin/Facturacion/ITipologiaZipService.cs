@@ -37,4 +37,15 @@ public interface ITipologiaZipService
     /// </summary>
     Task<IReadOnlyDictionary<Guid, int>> ContarConContenidoAsync(
         Guid snapshotId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Genera un Excel (.xlsx) con los pacientes del snapshot para los que el archivo
+    /// <paramref name="archivoItemId"/> NO se generaria (no se encontro contenido): o el
+    /// paciente no existe en el sistema, o ningun contenido del archivo tiene material para
+    /// el. Usa la MISMA regla que <see cref="ContarConContenidoAsync"/>, de modo que
+    /// faltantes + con contenido = total de pacientes del snapshot. Devuelve null si el
+    /// snapshot/archivo no existen o el snapshot no tiene aseguradora configurada.
+    /// </summary>
+    Task<ArchivoExportado?> GenerarExcelFaltantesAsync(
+        Guid snapshotId, Guid archivoItemId, CancellationToken ct = default);
 }

@@ -880,6 +880,15 @@ else if (_tabSel == "Cierre de periodos")
     }
     else
     {
+        <div class="cd-cierre-subtabs">
+            <button type="button" class="cd-cierre-subtab @(_cierreSubTab == "preparar" ? "active" : "")" @onclick='() => _cierreSubTab = "preparar"'>Preparar cierre</button>
+            <button type="button" class="cd-cierre-subtab @(_cierreSubTab == "historicos" ? "active" : "")" @onclick="AbrirHistoricosCierreAsync">Históricos de cierres</button>
+        </div>
+
+        @if (_cierreMsg is not null) { <div class="ase-card"><div class="cd-cierre-msg">@_cierreMsg</div></div> }
+
+        @if (_cierreSubTab == "preparar")
+        {
         <div class="ase-card">
             <div class="ase-card-h">Cerrar un periodo</div>
             <div class="cd-cierre-form">
@@ -895,15 +904,38 @@ else if (_tabSel == "Cierre de periodos")
                         @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
                     </select>
                 </div>
-                <div class="ase-f cd-f-md">
+                <div class="ase-f cd-f-md cd-ac-wrap">
                     <label>Paciente</label>
-                    <select class="form-select form-select-sm" @bind="_pacienteCierreSel" disabled="@(_cierrePreview is null)">
-                        <option value="">Todos los pacientes</option>
-                        @foreach (var p in PacientesPendientes)
+                    <div class="cd-ac-input">
+                        <input class="form-control form-control-sm" autocomplete="off"
+                               placeholder="Todos — escribe nombre o documento"
+                               value="@_pacienteCierreBusqueda" @oninput="OnInputPacienteCierre"
+                               disabled="@(_cierrePreview is null)" />
+                        @if (!string.IsNullOrEmpty(_pacienteCierreBusqueda) || !string.IsNullOrEmpty(_pacienteCierreSel))
                         {
-                            <option value="@p.Id">@p.Nombre@(string.IsNullOrWhiteSpace(p.Documento) ? "" : $" ({p.Documento})")</option>
+                            <button type="button" class="cd-ac-clear" title="Quitar filtro (todos los pacientes)" @onclick="LimpiarPacienteCierre">&times;</button>
                         }
-                    </select>
+                    </div>
+                    @if (_cierrePreview is not null && string.IsNullOrEmpty(_pacienteCierreSel) && !string.IsNullOrWhiteSpace(_pacienteCierreBusqueda))
+                    {
+                        <div class="cd-ac-list">
+                            @{ var sugeridos = PacientesCierreSugeridos.ToList(); }
+                            @if (sugeridos.Count == 0)
+                            {
+                                <div class="cd-ac-empty">Sin coincidencias</div>
+                            }
+                            else
+                            {
+                                @foreach (var p in sugeridos)
+                                {
+                                    <button type="button" class="cd-ac-item" @onclick="() => SeleccionarPacienteCierre(p)">
+                                        <span class="cd-ac-nom">@p.Nombre</span>
+                                        @if (!string.IsNullOrWhiteSpace(p.Documento)) { <span class="cd-ac-doc">@p.Documento</span> }
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
                 </div>
                 <div class="ase-f cd-cierre-acts">
                     <button class="btn btn-outline-secondary btn-sm" @onclick="PrevisualizarCierreAsync" disabled="@_cierreBusy">
@@ -939,8 +971,6 @@ else if (_tabSel == "Cierre de periodos")
                 </div>
             }
         </div>
-
-        @if (_cierreMsg is not null) { <div class="ase-card"><div class="cd-cierre-msg">@_cierreMsg</div></div> }
 
         @* Tarjeta con el RESUMEN del cierre recien hecho (pacientes/servicios inactivados). *@
         @if (_cierreResultado is not null && _cierreResultadoDetalle is not null)
@@ -1012,60 +1042,65 @@ else if (_tabSel == "Cierre de periodos")
             </div>
         }
 
-        @* Historial de cierres *@
-        <div class="ase-card">
-            <div class="ase-card-h cd-cierre-head">
-                <span>Periodos cerrados</span>
-                <button class="btn btn-outline-secondary btn-sm" @onclick="CargarCierresAsync">↻ Refrescar</button>
-            </div>
-            @if (_cierres is null) { <div class="ase-empty">Presiona Refrescar para ver el historial.</div> }
-            else if (_cierres.Count == 0) { <div class="ase-empty">Aún no hay periodos cerrados.</div> }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped">
-                        <thead>
-                            <tr><th>Periodo</th><th>Paciente</th><th>Cerrado</th><th class="text-end">Servicios</th><th class="text-end">Sesiones</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var c in _cierres)
-                            {
-                                <tr>
-                                    <td>@MesNombre(c.Mes) @c.Anio</td>
-                                    <td>@(c.PacienteNombre ?? "Todos")</td>
-                                    <td class="mono">@c.CerradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
-                                    <td class="text-end">@c.TotalServicios</td>
-                                    <td class="text-end">@c.TotalSesiones</td>
-                                    <td class="text-end">
-                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerDetalleCierreAsync(c)">Ver</button>
-                                        <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirCierreAsync(c)" disabled="@_cierreBusy"
-                                                title="Reabrir: devuelve las sesiones a pendientes y borra el cierre">Reabrir</button>
-                                    </td>
-                                </tr>
+        }
+        else
+        {
+            @* Historicos de cierres en formato de tarjeta. *@
+            <div class="ase-card cd-cierre-hist">
+                <div class="ase-card-h cd-cierre-head">
+                    <span>Históricos de cierres realizados</span>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CargarCierresAsync" disabled="@_cierreBusy">↻ Refrescar</button>
+                </div>
+                @if (_cierres is null) { <div class="ase-empty"><em>Cargando…</em></div> }
+                else if (_cierres.Count == 0) { <div class="ase-empty">Aún no hay periodos cerrados.</div> }
+                else
+                {
+                    <div class="cd-cierre-cards">
+                        @foreach (var c in _cierres)
+                        {
+                            <div class="cd-cierre-card">
+                                <div class="cd-cc-top">
+                                    <span class="cd-cc-periodo">@MesNombre(c.Mes) @c.Anio</span>
+                                    <span class="cd-cc-pac">@(c.PacienteNombre ?? "Todos los pacientes")</span>
+                                </div>
+                                <div class="cd-cc-big">
+                                    <span class="cd-cc-num">@c.TotalPacientes</span>
+                                    <span class="cd-cc-num-lbl">paciente(s)</span>
+                                </div>
+                                <div class="cd-cc-sub">@c.TotalServicios servicio(s) · @c.TotalSesiones sesión(es) inactivada(s)</div>
+                                <div class="cd-cc-meta">
+                                    <div title="Usuario que cerró">👤 @(string.IsNullOrWhiteSpace(c.UsuarioCerro) ? "—" : c.UsuarioCerro)</div>
+                                    <div title="Fecha y hora del cierre">🕒 @c.CerradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+                                </div>
+                                <div class="cd-cc-acts">
+                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerDetalleCierreAsync(c)">@(_cierreDetalleId == c.Id ? "Ocultar" : "Ver detalle")</button>
+                                    <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirCierreAsync(c)" disabled="@_cierreBusy"
+                                            title="Reabrir: devuelve las sesiones a pendientes y borra el cierre">Reabrir</button>
+                                </div>
                                 @if (_cierreDetalleId == c.Id && _cierreDetalle is not null)
                                 {
-                                    <tr><td colspan="6" class="cd-cierre-det">
+                                    <div class="cd-cc-det">
                                         @if (_cierreDetalle.Count == 0) { <span class="text-muted">Sin detalle.</span> }
                                         else
                                         {
                                             <table class="table table-sm">
-                                                <thead><tr><th>Paciente</th><th>Documento</th><th>Servicio</th><th class="text-end">Sesiones</th></tr></thead>
+                                                <thead><tr><th>Paciente</th><th>Servicio</th><th class="text-end">Ses.</th></tr></thead>
                                                 <tbody>
                                                     @foreach (var d in _cierreDetalle)
                                                     {
-                                                        <tr><td>@d.PacienteNombre</td><td class="mono">@(d.PacienteDocumento ?? "-")</td><td>@d.ServicioNombre</td><td class="text-end">@d.CantidadPendiente</td></tr>
+                                                        <tr><td>@d.PacienteNombre</td><td>@d.ServicioNombre</td><td class="text-end">@d.CantidadPendiente</td></tr>
                                                     }
                                                 </tbody>
                                             </table>
                                         }
-                                    </td></tr>
+                                    </div>
                                 }
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
     }
 }
 
@@ -1325,6 +1360,19 @@ else if (_tabSel == "Cierre de periodos")
     .cd-cierre-form .ase-f { margin:0; }
     .cd-cierre-form .cd-f-sm { flex:0 0 130px; width:130px; }
     .cd-cierre-form .cd-f-md { flex:0 0 300px; width:300px; max-width:100%; }
+    /* Autocompletado del filtro de paciente. */
+    .cd-ac-wrap { position:relative; }
+    .cd-ac-input { position:relative; }
+    .cd-ac-input input { padding-right:26px; }
+    .cd-ac-clear { position:absolute; right:6px; top:50%; transform:translateY(-50%); border:none; background:none; color:#94a3b8; font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
+    .cd-ac-clear:hover { color:#ef4444; }
+    .cd-ac-list { position:absolute; z-index:40; top:100%; left:0; right:0; margin-top:3px; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 8px 24px rgba(15,23,42,.15); max-height:260px; overflow-y:auto; }
+    .cd-ac-item { display:flex; align-items:baseline; justify-content:space-between; gap:8px; width:100%; text-align:left; border:none; background:none; padding:7px 10px; cursor:pointer; font-size:13px; color:#0f172a; border-bottom:1px solid #f1f5f9; }
+    .cd-ac-item:last-child { border-bottom:none; }
+    .cd-ac-item:hover { background:#eff6ff; }
+    .cd-ac-nom { font-weight:600; }
+    .cd-ac-doc { font-family:monospace; font-size:11px; color:#64748b; white-space:nowrap; }
+    .cd-ac-empty { padding:8px 10px; font-size:12px; color:#94a3b8; }
     .cd-cierre-form .cd-cierre-acts { flex:1 1 auto; display:flex; flex-direction:row; align-items:center; justify-content:flex-end; gap:8px; }
     .cd-cierre-form .cd-cierre-acts .btn { flex:0 0 auto; width:auto; }
     /* Panel de doble confirmacion (paso 1 en-UI). */
@@ -1333,6 +1381,25 @@ else if (_tabSel == "Cierre de periodos")
     .cd-cierre-confirm-acts { display:flex; gap:8px; flex:0 0 auto; }
     /* Tarjeta de resumen del cierre hecho. */
     .cd-cierre-ok { border:1px solid #a7f3d0; }
+    /* Sub-tabs del modulo de cierre (Preparar / Historicos). */
+    .cd-cierre-subtabs { display:flex; gap:8px; margin-bottom:12px; }
+    .cd-cierre-subtab { border:1px solid #e2e8f0; background:#fff; color:#475569; font-size:13px; font-weight:600; padding:7px 16px; border-radius:8px; cursor:pointer; }
+    .cd-cierre-subtab.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+    /* Historicos en tarjetas. */
+    .cd-cierre-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
+    .cd-cierre-card { border:1px solid #e2e8f0; border-radius:10px; padding:14px; background:#fff; display:flex; flex-direction:column; gap:8px; }
+    .cd-cc-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .cd-cc-periodo { font-size:14px; font-weight:800; color:#0f172a; }
+    .cd-cc-pac { font-size:11px; font-weight:700; color:#1d4ed8; background:#eff6ff; border-radius:999px; padding:2px 10px; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cd-cc-big { display:flex; align-items:baseline; gap:6px; }
+    .cd-cc-num { font-size:30px; font-weight:800; color:#0f172a; line-height:1; }
+    .cd-cc-num-lbl { font-size:12px; color:#64748b; font-weight:600; }
+    .cd-cc-sub { font-size:12px; color:#475569; }
+    .cd-cc-meta { display:flex; flex-direction:column; gap:3px; font-size:12px; color:#334155; border-top:1px dashed #e2e8f0; padding-top:8px; }
+    .cd-cc-meta > div { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cd-cc-acts { display:flex; gap:6px; margin-top:2px; }
+    .cd-cc-det { border-top:1px dashed #e2e8f0; padding-top:8px; font-size:12px; }
+    .cd-cc-det table { margin:0; }
     .cd-cal { margin-top: 14px; }
     .cd-cal-head { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
     .cd-cal-dw { text-align: center; font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: .03em; text-transform: uppercase; padding: 6px 0; background: #f1f5f9; border-radius: 4px; }
@@ -1383,6 +1450,42 @@ else if (_tabSel == "Cierre de periodos")
     .cd-reasig-foot > button { align-self: flex-end; }
     .cd-reasig-result { font-size: 12.5px; color: #0f172a; background: #f1f5f9; border-radius: 6px; padding: 8px 10px; }
     .cd-reasig-btn { line-height: 1; padding: 2px 7px; font-size: 13px; }
+
+    /* ===== Responsive (tablet / celular) =====
+       La pagina estaba fija a layout de escritorio (cd-grid 2 col, cd-rform 4 col,
+       Kanban 6 col) y en movil se aplastaba todo -incluida la zona del profesional
+       del formulario de coordinar. Colapsamos a 1-2 columnas segun el ancho. */
+    @@media (max-width: 1024px) {
+        /* El split Filtros | Datos de la solicitud se apila (el panel de coordinar
+           pasa a ancho completo). */
+        .cd-grid { grid-template-columns: 1fr; }
+        /* Apilado ya no hay 2da columna que acote la altura: la lista de servicios
+           crecia miles de px y empujaba el formulario hasta el fondo. La acotamos para
+           que haga scroll interno y el panel de coordinar quede alcanzable. */
+        .cd-col { min-height: 0; }
+        .cd-grid-wrap { max-height: 55vh; }
+        /* Formulario de coordinar: de 4 a 2 columnas. */
+        .cd-rform { grid-template-columns: 1fr 1fr; }
+        .cd-rform .ase-f-wide,
+        .cd-rform .ase-f-wide-2,
+        .cd-rform .ase-f-wide-3 { grid-column: span 2; }
+        /* Kanban mas angosto. */
+        .cd-kb { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 640px) {
+        /* Celular: todo en una sola columna. */
+        .cd-rform { grid-template-columns: 1fr; gap: 8px; padding: 12px; }
+        .cd-rform .ase-f-wide,
+        .cd-rform .ase-f-wide-2,
+        .cd-rform .ase-f-wide-3 { grid-column: span 1; }
+        .cd-form { grid-template-columns: 1fr; }
+        .cd-kb { grid-template-columns: 1fr; }
+        /* Fila "Seleccione Especialista / Turnos / Agregar": que envuelva en vez de
+           aplastarse. El select ocupa todo el ancho; turnos + Agregar debajo. */
+        .cd-especialista-input { flex-wrap: wrap; }
+        .cd-especialista-sel { flex: 1 1 100%; }
+        .cd-input-row .cd-turnos { flex: 1 1 auto; }
+    }
 </style>
 
 @* ============ Modal Aplicar programacion ============ *@
@@ -1611,6 +1714,43 @@ else if (_tabSel == "Cierre de periodos")
             .Select(g => (g.Key, g.First().PacienteNombre, g.First().PacienteDocumento))
             .OrderBy(x => x.Item2, StringComparer.OrdinalIgnoreCase);
 
+    // Autocompletado del filtro de paciente (la lista puede tener cientos). El texto que se teclea
+    // filtra PacientesPendientes por nombre o documento; elegir una sugerencia fija el PacienteId.
+    private string _pacienteCierreBusqueda = "";
+    private IEnumerable<(Guid Id, string Nombre, string? Documento)> PacientesCierreSugeridos
+    {
+        get
+        {
+            var q = (_pacienteCierreBusqueda ?? "").Trim();
+            var fuente = PacientesPendientes;
+            if (!string.IsNullOrEmpty(q))
+            {
+                fuente = fuente.Where(p =>
+                    (p.Nombre ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || (p.Documento ?? "").Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+            return fuente.Take(15);
+        }
+    }
+
+    private void OnInputPacienteCierre(ChangeEventArgs e)
+    {
+        _pacienteCierreBusqueda = e.Value?.ToString() ?? "";
+        _pacienteCierreSel = "";   // al teclear se deselecciona hasta elegir una sugerencia
+    }
+
+    private void SeleccionarPacienteCierre((Guid Id, string Nombre, string? Documento) p)
+    {
+        _pacienteCierreSel = p.Id.ToString();
+        _pacienteCierreBusqueda = string.IsNullOrWhiteSpace(p.Documento) ? p.Nombre : $"{p.Nombre} ({p.Documento})";
+    }
+
+    private void LimpiarPacienteCierre()
+    {
+        _pacienteCierreSel = "";
+        _pacienteCierreBusqueda = "";
+    }
+
     // Doble confirmacion del cierre.
     private bool _confirmandoCierre;
     private int _confirmSesiones, _confirmServicios;
@@ -1620,10 +1760,21 @@ else if (_tabSel == "Cierre de periodos")
     private CierrePeriodoDto? _cierreResultado;
     private IReadOnlyList<CierrePeriodoFilaDto>? _cierreResultadoDetalle;
 
+    // Sub-tabs del modulo de cierre: "preparar" (flujo de cierre) | "historicos" (tarjetas).
+    private string _cierreSubTab = "preparar";
+
+    // Abre el sub-tab de historicos y carga los cierres si aun no estan en memoria.
+    private async Task AbrirHistoricosCierreAsync()
+    {
+        _cierreSubTab = "historicos";
+        _cierreMsg = null;
+        if (_cierres is null) { await CargarCierresAsync(); }
+    }
+
     // Al cambiar periodo/mes, el filtro de paciente y la vista previa dejan de ser validos.
     private void OnCierreFiltroPeriodoChange()
     {
-        _cierrePreview = null; _pacienteCierreSel = ""; _confirmandoCierre = false;
+        _cierrePreview = null; _pacienteCierreSel = ""; _pacienteCierreBusqueda = ""; _confirmandoCierre = false;
         _cierreResultado = null; _cierreResultadoDetalle = null; _cierreMsg = null;
     }
 
@@ -1638,7 +1789,7 @@ else if (_tabSel == "Cierre de periodos")
             if (!string.IsNullOrEmpty(_pacienteCierreSel)
                 && !_cierrePreview.Filas.Any(f => f.PacienteId.ToString() == _pacienteCierreSel))
             {
-                _pacienteCierreSel = "";
+                _pacienteCierreSel = ""; _pacienteCierreBusqueda = "";
             }
         }
         catch (Exception ex) { _cierreMsg = "No se pudo previsualizar: " + ex.Message; }
@@ -1684,7 +1835,7 @@ else if (_tabSel == "Cierre de periodos")
             _cierreResultadoDetalle = await CierreSvc.GetDetalleAsync(c.Id);
             _cierreMsg = $"Periodo {MesNombre(c.Mes)} {c.Anio}{(c.PacienteNombre is null ? "" : " — " + c.PacienteNombre)} cerrado: {c.TotalServicios} servicio(s), {c.TotalSesiones} sesión(es) inactivada(s).";
             _confirmandoCierre = false;
-            _pacienteCierreSel = "";
+            _pacienteCierreSel = ""; _pacienteCierreBusqueda = "";
             _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre);
             await CargarCierresAsync();
         }

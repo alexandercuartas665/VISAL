@@ -21,7 +21,9 @@ public sealed record CierrePeriodoPreviewDto(
 public sealed record CierrePeriodoDto(
     Guid Id, int Anio, int Mes, DateTimeOffset CerradoEn,
     int TotalServicios, int TotalSesiones,
-    Guid? PacienteId = null, string? PacienteNombre = null);
+    Guid? PacienteId = null, string? PacienteNombre = null,
+    // Cantidad de pacientes distintos del cierre y usuario (email) que lo cerro.
+    int TotalPacientes = 0, string? UsuarioCerro = null);
 
 public interface ICierrePeriodoService
 {
@@ -136,11 +138,47 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     }
 
     public async Task<IReadOnlyList<CierrePeriodoDto>> ListarCierresAsync(CancellationToken ct = default)
-        => await _db.CierrePeriodos.AsNoTracking()
+    {
+        var cierres = await _db.CierrePeriodos.AsNoTracking()
             .OrderByDescending(c => c.Anio).ThenByDescending(c => c.Mes).ThenByDescending(c => c.CerradoEn)
-            .Select(c => new CierrePeriodoDto(c.Id, c.Anio, c.Mes, c.CerradoEn, c.TotalServicios, c.TotalSesiones,
-                c.PacienteId, c.PacienteNombre))
+            .Select(c => new
+            {
+                c.Id, c.Anio, c.Mes, c.CerradoEn, c.TotalServicios, c.TotalSesiones,
+                c.PacienteId, c.PacienteNombre, c.CreatedBy
+            })
             .ToListAsync(ct);
+        if (cierres.Count == 0) { return Array.Empty<CierrePeriodoDto>(); }
+
+        var ids = cierres.Select(c => c.Id).ToList();
+
+        // Cantidad de pacientes DISTINTOS por cierre, desde el detalle guardado (nombre+documento).
+        var pacPorCierre = (await _db.CierrePeriodoDetalles.AsNoTracking()
+                .Where(d => ids.Contains(d.CierrePeriodoId))
+                .Select(d => new { d.CierrePeriodoId, d.PacienteNombre, d.PacienteDocumento })
+                .ToListAsync(ct))
+            .GroupBy(d => d.CierrePeriodoId)
+            .ToDictionary(g => g.Key,
+                g => g.Select(x => (x.PacienteNombre + "|" + (x.PacienteDocumento ?? "")).Trim())
+                      .Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        // Usuario que cerro: email del tenant_user por CreatedBy (= platform_user_id del interceptor).
+        var userIds = cierres.Where(c => c.CreatedBy is not null).Select(c => c.CreatedBy!.Value).Distinct().ToList();
+        var usuarios = new Dictionary<Guid, string>();
+        if (userIds.Count > 0)
+        {
+            var tus = await _db.TenantUsers.AsNoTracking()
+                .Where(tu => userIds.Contains(tu.PlatformUserId))
+                .Select(tu => new { tu.PlatformUserId, tu.Email })
+                .ToListAsync(ct);
+            foreach (var tu in tus) { usuarios[tu.PlatformUserId] = tu.Email; }
+        }
+
+        return cierres.Select(c => new CierrePeriodoDto(
+            c.Id, c.Anio, c.Mes, c.CerradoEn, c.TotalServicios, c.TotalSesiones,
+            c.PacienteId, c.PacienteNombre,
+            pacPorCierre.TryGetValue(c.Id, out var np) ? np : 0,
+            c.CreatedBy is Guid cb && usuarios.TryGetValue(cb, out var em) ? em : null)).ToList();
+    }
 
     public async Task<IReadOnlyList<CierrePeriodoFilaDto>> GetDetalleAsync(Guid cierreId, CancellationToken ct = default)
         => await _db.CierrePeriodoDetalles.AsNoTracking()

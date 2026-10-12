@@ -677,31 +677,48 @@
                                             @{
                                                 _zipUi.TryGetValue(a.Id, out var zu);
                                             }
-                                            @if (zu is { Corriendo: true })
-                                            {
-                                                <button type="button" class="btn btn-sm sn-tip-dl" disabled>
-                                                    <span class="sn-zip-spin"></span>
-                                                    @if (zu.Total > 0) { <text>@zu.Fase @zu.Hechos/@zu.Total</text> }
-                                                    else { <text>@zu.Fase...</text> }
-                                                </button>
-                                            }
-                                            else if (zu is { Error: not null })
-                                            {
-                                                <button type="button" class="btn btn-sm sn-tip-dl" @onclick="() => IniciarZip(a)"
-                                                        title="@zu.Error">
-                                                    &#8635; Reintentar ZIP
-                                                </button>
-                                            }
-                                            else
-                                            {
-                                                <button type="button" class="btn btn-sm sn-tip-dl @(con == 0 ? "off" : "")"
-                                                        disabled="@(con == 0)"
-                                                        @onclick="() => IniciarZip(a)"
-                                                        title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : "Generar y descargar ZIP: un PDF por paciente con contenido, nombrado con el patron")">
-                                                    &#11015; Descargar ZIP@(con > 0 ? $" ({con})" : "")
-                                                </button>
-                                            }
+                                            <div class="sn-tip-dl-wrap">
+                                                @if (zu is { Corriendo: true })
+                                                {
+                                                    <button type="button" class="btn btn-sm sn-tip-dl" disabled>
+                                                        <span class="sn-zip-spin"></span>
+                                                        @if (zu.Total > 0) { <text>@zu.Fase @zu.Hechos/@zu.Total</text> }
+                                                        else { <text>@zu.Fase...</text> }
+                                                    </button>
+                                                }
+                                                else if (zu is { Error: not null })
+                                                {
+                                                    <button type="button" class="btn btn-sm sn-tip-dl" @onclick="() => IniciarZip(a)"
+                                                            title="@zu.Error">
+                                                        &#8635; Reintentar ZIP
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <button type="button" class="btn btn-sm sn-tip-dl @(con == 0 ? "off" : "")"
+                                                            disabled="@(con == 0)"
+                                                            @onclick="() => IniciarZip(a)"
+                                                            title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : "Generar y descargar ZIP: un PDF por paciente con contenido, nombrado con el patron")">
+                                                        &#11015; Descargar ZIP@(con > 0 ? $" ({con})" : "")
+                                                    </button>
+                                                }
+                                            </div>
+                                            <button type="button" class="sn-tip-kebab @(_menuArchivoId == a.Id ? "abierto" : "")"
+                                                    title="Mas opciones / reportes de este archivo"
+                                                    @onclick="() => ToggleMenuArchivo(a.Id)">&#8942;</button>
                                         </div>
+                                        @if (_menuArchivoId == a.Id)
+                                        {
+                                            <div class="sn-tip-arch-menu">
+                                                <a class="sn-tip-menu-item"
+                                                   href="@($"/facturacion-clinica/snapshots/{_verDetalle!.Metadata.Id}/tipologia/{a.Id}/faltantes.xlsx")"
+                                                   target="_blank" rel="noopener"
+                                                   @onclick="() => _menuArchivoId = null">
+                                                    <span>&#128229; Pacientes sin este archivo (Excel)</span>
+                                                    <span class="sn-tip-menu-sub">@(total - con) de @total sin contenido</span>
+                                                </a>
+                                            </div>
+                                        }
                                     </div>
                                 }
                             </div>
@@ -1185,13 +1202,21 @@
     .sn-tip-note { font-size:11.5px; color:#64748b; font-style:italic; }
     .sn-tip-scope { font-size:12px; color:#1e3a8a; background:#eff6ff; border-left:3px solid #2563eb; border-radius:4px; padding:6px 10px; margin-top:-2px; }
     .sn-tip-body .mono, .sn-tip-arch .mono, .sn-tip-file.mono, .sn-tip-arch-code.mono, .sn-arch-modal .mono { font-family: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, monospace; }
-    .sn-tip-arch-foot { padding:8px 10px; border-top:1px solid #eef2f7; background:#fafcff; }
+    .sn-tip-arch-foot { padding:8px 10px; border-top:1px solid #eef2f7; background:#fafcff; display:flex; align-items:center; gap:8px; }
+    .sn-tip-dl-wrap { flex:1 1 auto; min-width:0; }
     .sn-tip-dl { width:100%; display:inline-flex; align-items:center; justify-content:center; gap:6px; background:#059669; border:1px solid #059669; color:#fff; font-weight:600; }
     .sn-tip-dl:hover { background:#047857; border-color:#047857; color:#fff; }
     .sn-tip-dl.off { background:#f1f5f9; border-color:#e2e8f0; color:#94a3b8; }
     .sn-tip-dl.off:hover { background:#e2e8f0; color:#64748b; }
     .sn-tip-dl { width:100%; }
     .sn-tip-dl:disabled { opacity:.85; cursor:progress; }
+    .sn-tip-kebab { flex:0 0 auto; width:32px; height:32px; border-radius:8px; border:1px solid #e2e8f0; background:#fff; color:#475569; font-size:18px; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+    .sn-tip-kebab:hover { background:#f1f5f9; border-color:#cbd5e1; color:#1e293b; }
+    .sn-tip-kebab.abierto { background:#eef2ff; border-color:#a5b4fc; color:#4f46e5; }
+    .sn-tip-arch-menu { border-top:1px solid #eef2f7; background:#fff; padding:6px; }
+    .sn-tip-menu-item { display:flex; flex-direction:column; gap:2px; padding:8px 10px; border-radius:8px; text-decoration:none; color:#0f172a; font-size:12.5px; font-weight:600; }
+    .sn-tip-menu-item:hover { background:#f8fafc; color:#4f46e5; }
+    .sn-tip-menu-sub { font-size:10.5px; font-weight:500; color:#64748b; }
     .sn-zip-spin { width:12px; height:12px; border:2px solid rgba(255,255,255,.45); border-top-color:#fff; border-radius:50%; display:inline-block; animation:snZipSpin .7s linear infinite; }
     @@keyframes snZipSpin { to { transform:rotate(360deg); } }
     /* Modal de contenido del archivo (por encima del modal Ver) */
@@ -1466,9 +1491,12 @@
     // archivoItemId -> nro de pacientes del snapshot que SI tienen contenido para ese archivo.
     private IReadOnlyDictionary<Guid, int> _tipConteos = new Dictionary<Guid, int>();
     private InformeItemDto? _archModal;
+    // Tarjeta de archivo cuyo menu kebab (⋮) esta abierto. Null = ninguno.
+    private Guid? _menuArchivoId;
 
     private void AbrirArchivoModal(InformeItemDto a) => _archModal = a;
     private void CerrarArchivoModal() => _archModal = null;
+    private void ToggleMenuArchivo(Guid id) => _menuArchivoId = _menuArchivoId == id ? null : id;
 
     // --- Generacion de ZIP en background + descarga al terminar ---
     // El boton arranca un job (desacoplado del request), se consulta su progreso cada

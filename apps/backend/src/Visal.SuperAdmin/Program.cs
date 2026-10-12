@@ -1409,6 +1409,20 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/zip
     return Results.File(r.Value.Bytes, "application/zip", r.Value.Nombre);
 }).RequireAuthorization();
 
+// Excel (.xlsx) de pacientes del snapshot para los que un archivo/tipologia de la cuenta
+// medica NO se genero (no se encontro contenido). Sincrono: es solo una lista de pacientes
+// (no renderiza PDFs), misma regla que el contador de la tarjeta.
+app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/faltantes.xlsx", async (
+    Guid id,
+    Guid itemId,
+    Visal.SuperAdmin.Facturacion.ITipologiaZipService zipSvc,
+    CancellationToken ct) =>
+{
+    var archivo = await zipSvc.GenerarExcelFaltantesAsync(id, itemId, ct);
+    if (archivo is null) { return Results.NotFound(); }
+    return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
 // Export XLSX del listado /ordenes (todas las filas visibles con los filtros
 // aplicados). Reusa BuscarAsync + global query filter por tenant, asi que la
 // respuesta esta siempre acotada al tenant activo.

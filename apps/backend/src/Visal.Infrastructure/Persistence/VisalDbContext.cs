@@ -85,6 +85,15 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantEmailIngestConfig> TenantEmailIngestConfigs => Set<TenantEmailIngestConfig>();
     public DbSet<EmailIngestLog> EmailIngestLogs => Set<EmailIngestLog>();
     public DbSet<TenantNavMenuConfig> TenantNavMenuConfigs => Set<TenantNavMenuConfig>();
+
+    // Modulo Capacitaciones (LMS interno de personal).
+    public DbSet<Curso> Cursos => Set<Curso>();
+    public DbSet<CursoModulo> CursoModulos => Set<CursoModulo>();
+    public DbSet<CursoLeccion> CursoLecciones => Set<CursoLeccion>();
+    public DbSet<CuestionarioCapacitacion> Cuestionarios => Set<CuestionarioCapacitacion>();
+    public DbSet<CuestionarioPregunta> CuestionarioPreguntas => Set<CuestionarioPregunta>();
+    public DbSet<CursoProgreso> CursoProgresos => Set<CursoProgreso>();
+    public DbSet<CuestionarioIntento> CuestionarioIntentos => Set<CuestionarioIntento>();
     public DbSet<HistoriaClinicaIncapacidad> HistoriaClinicaIncapacidades => Set<HistoriaClinicaIncapacidad>();
     public DbSet<HistoriaClinicaCertificacion> HistoriaClinicaCertificaciones => Set<HistoriaClinicaCertificacion>();
     public DbSet<HistoriaClinicaRemision> HistoriaClinicaRemisiones => Set<HistoriaClinicaRemision>();
@@ -2018,6 +2027,55 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.UploadedByName).HasMaxLength(200);
             b.HasOne(x => x.TaskCard).WithMany().HasForeignKey(x => x.TaskCardId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TaskCardId, x.CreatedAt });
+        });
+
+        // ===== Modulo Capacitaciones (LMS interno de personal) =====
+        modelBuilder.Entity<Curso>(b =>
+        {
+            b.Property(x => x.Titulo).HasMaxLength(300).IsRequired();
+            // Evaluacion final opcional: borrar la evaluacion no borra el curso.
+            b.HasOne(x => x.Cuestionario).WithMany().HasForeignKey(x => x.CuestionarioId).OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(x => new { x.TenantId, x.Titulo });
+        });
+        modelBuilder.Entity<CursoModulo>(b =>
+        {
+            b.Property(x => x.Titulo).HasMaxLength(300).IsRequired();
+            b.HasOne(x => x.Curso).WithMany(c => c.Modulos).HasForeignKey(x => x.CursoId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.CursoId, x.Orden });
+        });
+        modelBuilder.Entity<CursoLeccion>(b =>
+        {
+            b.Property(x => x.Titulo).HasMaxLength(300).IsRequired();
+            b.Property(x => x.Tipo).HasMaxLength(20).IsRequired();
+            b.Property(x => x.RutaArchivo).HasMaxLength(500);
+            b.Property(x => x.Mime).HasMaxLength(150);
+            b.HasOne(x => x.Modulo).WithMany(m => m.Lecciones).HasForeignKey(x => x.CursoModuloId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.CursoModuloId, x.Orden });
+        });
+        modelBuilder.Entity<CuestionarioCapacitacion>(b =>
+        {
+            b.Property(x => x.Modulo).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Titulo).HasMaxLength(300).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Modulo });
+        });
+        modelBuilder.Entity<CuestionarioPregunta>(b =>
+        {
+            b.Property(x => x.Enunciado).IsRequired();
+            b.Property(x => x.OpcionesJson).HasColumnType("jsonb");
+            b.HasOne(x => x.Cuestionario).WithMany(q => q.Preguntas).HasForeignKey(x => x.CuestionarioId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.CuestionarioId, x.Orden });
+        });
+        modelBuilder.Entity<CursoProgreso>(b =>
+        {
+            b.HasOne(x => x.Curso).WithMany().HasForeignKey(x => x.CursoId).OnDelete(DeleteBehavior.Cascade);
+            // Un solo avance por (tenant, curso, usuario).
+            b.HasIndex(x => new { x.TenantId, x.CursoId, x.UsuarioId }).IsUnique();
+        });
+        modelBuilder.Entity<CuestionarioIntento>(b =>
+        {
+            b.Property(x => x.RespuestasJson).HasColumnType("jsonb");
+            b.HasOne(x => x.Cuestionario).WithMany().HasForeignKey(x => x.CuestionarioId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.CuestionarioId, x.UsuarioId });
         });
     }
 

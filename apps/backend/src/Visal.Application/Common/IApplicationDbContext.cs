@@ -171,6 +171,17 @@ public interface IApplicationDbContext
     // Menu lateral personalizable por tenant (grupos + orden + ocultas + enlaces externos).
     DbSet<TenantNavMenuConfig> TenantNavMenuConfigs { get; }
 
+    // Modulo Capacitaciones (LMS interno de personal): cursos -> modulos -> lecciones
+    // + evaluaciones (cuestionarios con preguntas de opcion multiple).
+    DbSet<Curso> Cursos { get; }
+    DbSet<CursoModulo> CursoModulos { get; }
+    DbSet<CursoLeccion> CursoLecciones { get; }
+    DbSet<CuestionarioCapacitacion> Cuestionarios { get; }
+    DbSet<CuestionarioPregunta> CuestionarioPreguntas { get; }
+    // Lado alumno: avance e intentos por usuario (platform_user_id).
+    DbSet<CursoProgreso> CursoProgresos { get; }
+    DbSet<CuestionarioIntento> CuestionarioIntentos { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Acceso a transacciones y ejecucion de SQL parametrizado. Lo usa el

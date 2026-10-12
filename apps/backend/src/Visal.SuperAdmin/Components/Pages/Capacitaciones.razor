@@ -1,0 +1,718 @@
+@page "/capacitaciones"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Visal.Application.Tenancy
+@inject ICursoService Svc
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+
+<PageTitle>Capacitaciones - Visal</PageTitle>
+
+<div class="cap-wrap">
+    <div class="cap-head">
+        <div>
+            <h1 class="cap-title">Capacitaciones</h1>
+            <div class="cap-sub">Gestor de cursos y evaluaciones para el personal.</div>
+        </div>
+    </div>
+
+    @if (_error is not null) { <div class="cap-alert err">@_error</div> }
+    @if (_ok is not null) { <div class="cap-alert ok">@_ok</div> }
+
+    <div class="cap-tabs">
+        <button class="cap-tab @(_tab == "cursos" ? "active" : "")" @onclick='() => _tab = "cursos"'>Cursos</button>
+        <button class="cap-tab @(_tab == "evaluaciones" ? "active" : "")" @onclick="AbrirEvaluaciones">Evaluaciones</button>
+    </div>
+
+    @if (_tab == "cursos")
+    {
+        <div class="cap-grid">
+            @* ----- Columna izquierda: lista de cursos ----- *@
+            <div class="cap-col">
+                <div class="cap-col-h">
+                    <span>Cursos (@_cursos.Count)</span>
+                    <button class="btn btn-primary btn-sm" @onclick="NuevoCurso">+ Nuevo</button>
+                </div>
+                <div class="cap-list">
+                    @if (_cursos.Count == 0) { <div class="cap-empty">Aun no hay cursos.</div> }
+                    @foreach (var c in _cursos)
+                    {
+                        <button class="cap-item @(_cursoSel?.Id == c.Id ? "sel" : "")" @onclick="() => AbrirCurso(c.Id)">
+                            <div class="cap-item-t">@c.Titulo @(c.Activo ? "" : "(inactivo)")</div>
+                            <div class="cap-item-m">@c.Modulos modulo(s) - @c.Lecciones leccion(es)@(c.CuestionarioTitulo is null ? "" : " - eval: " + c.CuestionarioTitulo)</div>
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @* ----- Columna derecha: editor del curso ----- *@
+            <div class="cap-col">
+                @if (_cursoForm is null)
+                {
+                    <div class="cap-empty">Selecciona un curso o crea uno nuevo.</div>
+                }
+                else
+                {
+                    <div class="cap-col-h"><span>@(_cursoForm.Id is null ? "Nuevo curso" : "Editar curso")</span></div>
+                    <div class="cap-form">
+                        <label class="cap-f">
+                            <span>Titulo</span>
+                            <input class="cap-in" @bind="_cursoForm.Titulo" maxlength="300" />
+                        </label>
+                        <label class="cap-f">
+                            <span>Descripcion</span>
+                            <textarea class="cap-in" rows="2" @bind="_cursoForm.Descripcion"></textarea>
+                        </label>
+                        <div class="cap-f-row">
+                            <label class="cap-chk"><input type="checkbox" @bind="_cursoForm.Activo" /> Activo</label>
+                            <label class="cap-f">
+                                <span>Evaluacion final</span>
+                                <select class="cap-in" @bind="_cursoEvalSel">
+                                    <option value="">(sin evaluacion)</option>
+                                    @foreach (var q in _cuestionariosCat)
+                                    {
+                                        <option value="@q.Id">@q.Titulo</option>
+                                    }
+                                </select>
+                            </label>
+                        </div>
+                        <div class="cap-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="GuardarCurso">Guardar curso</button>
+                            @if (_cursoForm.Id is Guid cid)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarCurso(cid)">Eliminar curso</button>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_cursoSel is not null)
+                    {
+                        <div class="cap-mods">
+                            <div class="cap-col-h sub">
+                                <span>Modulos</span>
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => NuevoModulo(_cursoSel.Id)">+ Modulo</button>
+                            </div>
+
+                            @foreach (var m in _cursoSel.Modulos)
+                            {
+                                <div class="cap-mod">
+                                    <div class="cap-mod-h">
+                                        <input class="cap-in" @bind="_moduloTitulos[m.Id]" />
+                                        <button class="btn btn-primary btn-xs" @onclick="() => GuardarModulo(m.Id)">Guardar</button>
+                                        <button class="btn btn-outline-primary btn-xs" @onclick="() => NuevaLeccion(m.Id)">+ Leccion</button>
+                                        <button class="btn btn-outline-danger btn-xs" @onclick="() => EliminarModulo(m.Id)">X</button>
+                                    </div>
+                                    <div class="cap-lecs">
+                                        @if (m.Lecciones.Count == 0) { <div class="cap-empty sm">Sin lecciones.</div> }
+                                        @foreach (var l in m.Lecciones)
+                                        {
+                                            <div class="cap-lec">
+                                                <div class="cap-lec-h">
+                                                    <input class="cap-in" @bind="_leccionTitulos[l.Id]" placeholder="Titulo de la leccion" />
+                                                    <select class="cap-in cap-in-sm" @bind="_leccionTipos[l.Id]">
+                                                        <option value="VIDEO">VIDEO</option>
+                                                        <option value="IMAGEN">IMAGEN</option>
+                                                        <option value="PDF">PDF</option>
+                                                        <option value="TEXTO">TEXTO</option>
+                                                    </select>
+                                                    <button class="btn btn-primary btn-xs" @onclick="() => GuardarLeccion(l.Id)">Guardar</button>
+                                                    <button class="btn btn-outline-primary btn-xs" @onclick="() => AbrirContenido(l)" title="Editar descripcion enriquecida (negrita, tablas, imagenes...)">
+                                                        Contenido@(string.IsNullOrWhiteSpace(l.DescripcionHtml) ? "" : " ✓")
+                                                    </button>
+                                                    <button class="btn btn-outline-danger btn-xs" @onclick="() => EliminarLeccion(l.Id)">X</button>
+                                                </div>
+                                                @if (_leccionTipos.TryGetValue(l.Id, out var tp) && tp == "TEXTO")
+                                                {
+                                                    <textarea class="cap-in" rows="2" placeholder="Contenido de texto" @bind="_leccionContenidos[l.Id]"></textarea>
+                                                }
+                                                else
+                                                {
+                                                    <div class="cap-lec-file">
+                                                        <InputFile OnChange="(e) => OnArchivo(e, l.Id)" />
+                                                        @if (!string.IsNullOrEmpty(l.RutaArchivo))
+                                                        {
+                                                            <a href="@l.RutaArchivo" target="_blank" rel="noopener">ver recurso actual</a>
+                                                            <span class="cap-lec-sz">@TamanoLegible(l.TamanoBytes)</span>
+                                                        }
+                                                        else { <span class="cap-empty sm">Sin archivo</span> }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="cap-empty sm">Guarda el curso para agregarle modulos y lecciones.</div>
+                    }
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        @* ===================== EVALUACIONES ===================== *@
+        <div class="cap-grid">
+            <div class="cap-col">
+                <div class="cap-col-h">
+                    <span>Evaluaciones (@_evaluaciones.Count)</span>
+                    <button class="btn btn-primary btn-sm" @onclick="NuevaEvaluacion">+ Nueva</button>
+                </div>
+                <div class="cap-list">
+                    @if (_evaluaciones.Count == 0) { <div class="cap-empty">Aun no hay evaluaciones.</div> }
+                    @foreach (var q in _evaluaciones)
+                    {
+                        <button class="cap-item @(_evalSel?.Cabecera.Id == q.Id ? "sel" : "")" @onclick="() => AbrirEvaluacion(q.Id)">
+                            <div class="cap-item-t">@q.Titulo @(q.Activo ? "" : "(inactiva)")</div>
+                            <div class="cap-item-m">@q.Preguntas pregunta(s) - minimo @q.PuntajeMinimo/100</div>
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div class="cap-col">
+                @if (_evalForm is null)
+                {
+                    <div class="cap-empty">Selecciona una evaluacion o crea una nueva.</div>
+                }
+                else
+                {
+                    <div class="cap-col-h"><span>@(_evalForm.Id is null ? "Nueva evaluacion" : "Editar evaluacion")</span></div>
+                    <div class="cap-form">
+                        <label class="cap-f"><span>Titulo</span><input class="cap-in" @bind="_evalForm.Titulo" maxlength="300" /></label>
+                        <label class="cap-f"><span>Descripcion</span><textarea class="cap-in" rows="2" @bind="_evalForm.Descripcion"></textarea></label>
+                        <div class="cap-f-row">
+                            <label class="cap-f"><span>Puntaje minimo (0-100)</span><input class="cap-in cap-in-sm" type="number" min="0" max="100" @bind="_evalForm.PuntajeMinimo" /></label>
+                            <label class="cap-chk"><input type="checkbox" @bind="_evalForm.Activo" /> Activa</label>
+                        </div>
+                        <div class="cap-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="GuardarEvaluacion">Guardar evaluacion</button>
+                            @if (_evalForm.Id is Guid qid)
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarEvaluacion(qid)">Eliminar</button>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_evalSel is not null)
+                    {
+                        <div class="cap-mods">
+                            <div class="cap-col-h sub">
+                                <span>Preguntas</span>
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => NuevaPregunta(_evalSel.Cabecera.Id)">+ Pregunta</button>
+                            </div>
+                            @if (_evalSel.Preguntas.Count == 0) { <div class="cap-empty sm">Sin preguntas.</div> }
+                            @foreach (var p in _evalSel.Preguntas)
+                            {
+                                <div class="cap-preg">
+                                    <div class="cap-preg-h">
+                                        <span class="cap-preg-n">#@p.Orden</span>
+                                        <button class="btn btn-outline-secondary btn-xs" @onclick="() => MoverPregunta(p.Id, true)">arriba</button>
+                                        <button class="btn btn-outline-secondary btn-xs" @onclick="() => MoverPregunta(p.Id, false)">abajo</button>
+                                        <button class="btn btn-outline-danger btn-xs" @onclick="() => EliminarPregunta(p.Id)">X</button>
+                                    </div>
+                                    <textarea class="cap-in" rows="2" placeholder="Enunciado" @bind="_pregEnunciados[p.Id]"></textarea>
+                                    <div class="cap-opts">
+                                        @for (var i = 0; i < _pregOpciones[p.Id].Count; i++)
+                                        {
+                                            var idx = i;
+                                            <div class="cap-opt">
+                                                <input type="radio" name="@("correcta-" + p.Id)" checked="@(_pregCorrecta[p.Id] == idx)" @onchange="() => _pregCorrecta[p.Id] = idx" />
+                                                <input class="cap-in" @bind="_pregOpciones[p.Id][idx]" placeholder="@("Opcion " + (idx + 1))" />
+                                                <button class="btn btn-outline-danger btn-xs" @onclick="() => QuitarOpcion(p.Id, idx)">-</button>
+                                            </div>
+                                        }
+                                        <button class="btn btn-outline-primary btn-xs" @onclick="() => AgregarOpcion(p.Id)">+ opcion</button>
+                                    </div>
+                                    <input class="cap-in" placeholder="Retroalimentacion (opcional)" @bind="_pregRetro[p.Id]" />
+                                    <button class="btn btn-primary btn-xs" @onclick="() => GuardarPregunta(p.Id)">Guardar pregunta</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="cap-empty sm">Guarda la evaluacion para agregarle preguntas.</div>
+                    }
+                }
+            </div>
+        </div>
+    }
+
+    @* ===== Modal: editor enriquecido de la descripcion de la leccion ===== *@
+    @if (_leccionHtmlId is not null)
+    {
+        <div class="cap-modal-back" @onclick="CerrarContenido">
+            <div class="cap-modal" @onclick:stopPropagation>
+                <div class="cap-modal-h">
+                    <span>Contenido de la leccion: <b>@_leccionHtmlTitulo</b></span>
+                    <button class="cap-modal-x" @onclick="CerrarContenido">&times;</button>
+                </div>
+                <div class="cap-modal-b">
+                    <div class="cap-modal-hint">Escribe la descripcion con formato (negrita, subrayado, listas, enlaces, tablas, imagenes). Las imagenes se pegan/insertan embebidas.</div>
+                    <textarea id="capLeccionEditor"></textarea>
+                </div>
+                <div class="cap-modal-f">
+                    <button class="btn btn-primary btn-sm" @onclick="GuardarContenido">Guardar contenido</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarContenido">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string _tab = "cursos";
+    private string? _error;
+    private string? _ok;
+
+    // --- Cursos ---
+    private List<CursoDto> _cursos = new();
+    private List<(Guid Id, string Titulo)> _cuestionariosCat = new();
+    private CursoDetalleDto? _cursoSel;
+    private GuardarCursoRequest? _cursoForm;
+    private string _cursoEvalSel = ""; // id de la evaluacion final como string (bind del select)
+    private readonly Dictionary<Guid, string> _moduloTitulos = new();
+    private readonly Dictionary<Guid, string> _leccionTitulos = new();
+    private readonly Dictionary<Guid, string> _leccionTipos = new();
+    private readonly Dictionary<Guid, string?> _leccionContenidos = new();
+
+    // --- Editor enriquecido (modal TinyMCE) de la descripcion de una leccion ---
+    private const string EditorSelector = "#capLeccionEditor";
+    private Guid? _leccionHtmlId;
+    private string _leccionHtmlTitulo = "";
+    private string? _leccionHtmlInicial;
+    private bool _tinyPendienteInit;
+
+    // --- Evaluaciones ---
+    private List<CuestionarioAdminDto> _evaluaciones = new();
+    private CuestionarioDetalleAdminDto? _evalSel;
+    private GuardarCuestionarioRequest? _evalForm;
+    private readonly Dictionary<Guid, string> _pregEnunciados = new();
+    private readonly Dictionary<Guid, List<string>> _pregOpciones = new();
+    private readonly Dictionary<Guid, int> _pregCorrecta = new();
+    private readonly Dictionary<Guid, string?> _pregRetro = new();
+
+    protected override async Task OnInitializedAsync() => await CargarCursosAsync();
+
+    private async Task<Guid> Actor()
+    {
+        var st = await AuthState.GetAuthenticationStateAsync();
+        return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+
+    private void Flash(string? ok = null, string? err = null) { _ok = ok; _error = err; }
+
+    // ===================== CURSOS =====================
+
+    private async Task CargarCursosAsync()
+    {
+        try
+        {
+            _cursos = (await Svc.ListarCursosAsync()).ToList();
+            _cuestionariosCat = (await Svc.CuestionariosAsync()).ToList();
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private void NuevoCurso()
+    {
+        _cursoSel = null;
+        _cursoForm = new GuardarCursoRequest { Activo = true };
+        _cursoEvalSel = "";
+        Flash();
+    }
+
+    private async Task AbrirCurso(Guid id)
+    {
+        try
+        {
+            _cursoSel = await Svc.DetalleAsync(id);
+            if (_cursoSel is null) { Flash(err: "El curso ya no existe."); await CargarCursosAsync(); return; }
+            _cursoForm = new GuardarCursoRequest
+            {
+                Id = _cursoSel.Id,
+                Titulo = _cursoSel.Titulo,
+                Descripcion = _cursoSel.Descripcion,
+                Activo = _cursoSel.Activo,
+                CuestionarioId = _cursoSel.CuestionarioId,
+            };
+            _cursoEvalSel = _cursoSel.CuestionarioId?.ToString() ?? "";
+            SyncModuloLeccionBuffers();
+            Flash();
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private void SyncModuloLeccionBuffers()
+    {
+        if (_cursoSel is null) { return; }
+        foreach (var m in _cursoSel.Modulos)
+        {
+            _moduloTitulos[m.Id] = m.Titulo;
+            foreach (var l in m.Lecciones)
+            {
+                _leccionTitulos[l.Id] = l.Titulo;
+                _leccionTipos[l.Id] = l.Tipo;
+                _leccionContenidos[l.Id] = l.Contenido;
+            }
+        }
+    }
+
+    private async Task GuardarCurso()
+    {
+        if (_cursoForm is null) { return; }
+        try
+        {
+            _cursoForm.CuestionarioId = Guid.TryParse(_cursoEvalSel, out var qg) ? qg : null;
+            var id = await Svc.GuardarCursoAsync(_cursoForm, await Actor());
+            await CargarCursosAsync();
+            if (id is Guid g) { await AbrirCurso(g); }
+            Flash(ok: "Curso guardado.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task EliminarCurso(Guid id)
+    {
+        try
+        {
+            await Svc.EliminarCursoAsync(id, await Actor());
+            _cursoSel = null; _cursoForm = null;
+            await CargarCursosAsync();
+            Flash(ok: "Curso eliminado.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    // ----- Modulos -----
+    private async Task NuevoModulo(Guid cursoId)
+    {
+        try
+        {
+            await Svc.GuardarModuloAsync(new GuardarModuloRequest { CursoId = cursoId, Titulo = "Nuevo modulo" }, await Actor());
+            await AbrirCurso(cursoId);
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task GuardarModulo(Guid moduloId)
+    {
+        if (_cursoSel is null) { return; }
+        try
+        {
+            await Svc.GuardarModuloAsync(new GuardarModuloRequest { Id = moduloId, CursoId = _cursoSel.Id, Titulo = _moduloTitulos.GetValueOrDefault(moduloId, "") }, await Actor());
+            await AbrirCurso(_cursoSel.Id);
+            Flash(ok: "Modulo guardado.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task EliminarModulo(Guid moduloId)
+    {
+        if (_cursoSel is null) { return; }
+        try { await Svc.EliminarModuloAsync(moduloId, await Actor()); await AbrirCurso(_cursoSel.Id); }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    // ----- Lecciones -----
+    private async Task NuevaLeccion(Guid moduloId)
+    {
+        if (_cursoSel is null) { return; }
+        try
+        {
+            await Svc.GuardarLeccionAsync(new GuardarLeccionRequest { CursoModuloId = moduloId, Titulo = "Nueva leccion", Tipo = "VIDEO" }, await Actor());
+            await AbrirCurso(_cursoSel.Id);
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task GuardarLeccion(Guid leccionId)
+    {
+        if (_cursoSel is null) { return; }
+        try
+        {
+            var modId = _cursoSel.Modulos.FirstOrDefault(m => m.Lecciones.Any(l => l.Id == leccionId))?.Id ?? Guid.Empty;
+            await Svc.GuardarLeccionAsync(new GuardarLeccionRequest
+            {
+                Id = leccionId,
+                CursoModuloId = modId,
+                Titulo = _leccionTitulos.GetValueOrDefault(leccionId, ""),
+                Tipo = _leccionTipos.GetValueOrDefault(leccionId, "VIDEO"),
+                Contenido = _leccionContenidos.GetValueOrDefault(leccionId),
+            }, await Actor());
+            await AbrirCurso(_cursoSel.Id);
+            Flash(ok: "Leccion guardada.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task EliminarLeccion(Guid leccionId)
+    {
+        if (_cursoSel is null) { return; }
+        try { await Svc.EliminarLeccionAsync(leccionId, await Actor()); await AbrirCurso(_cursoSel.Id); }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task OnArchivo(InputFileChangeEventArgs e, Guid leccionId)
+    {
+        if (_cursoSel is null) { return; }
+        var file = e.File;
+        if (file is null) { return; }
+        try
+        {
+            const long max = 1024L * 1024 * 1024; // 1 GB
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(max).CopyToAsync(ms);
+            await Svc.SubirRecursoAsync(leccionId, ms.ToArray(), file.Name, file.ContentType, await Actor());
+            await AbrirCurso(_cursoSel.Id);
+            Flash(ok: "Archivo subido.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    // ----- Editor enriquecido de la descripcion de la leccion -----
+    private void AbrirContenido(CursoLeccionDto l)
+    {
+        _leccionHtmlId = l.Id;
+        _leccionHtmlTitulo = l.Titulo;
+        _leccionHtmlInicial = l.DescripcionHtml;
+        _tinyPendienteInit = true;
+        Flash();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_tinyPendienteInit && _leccionHtmlId is not null)
+        {
+            _tinyPendienteInit = false;
+            try { await JS.InvokeVoidAsync("capEditor.init", EditorSelector, _leccionHtmlInicial ?? ""); }
+            catch (Exception ex) { _error = "No se pudo cargar el editor: " + ex.Message; await InvokeAsync(StateHasChanged); }
+        }
+    }
+
+    private async Task GuardarContenido()
+    {
+        if (_leccionHtmlId is not Guid id) { return; }
+        try
+        {
+            var html = await JS.InvokeAsync<string>("capEditor.get", EditorSelector);
+            await Svc.GuardarDescripcionHtmlAsync(id, html, await Actor());
+            await CerrarContenido();
+            if (_cursoSel is not null) { await AbrirCurso(_cursoSel.Id); }
+            Flash(ok: "Contenido guardado.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task CerrarContenido()
+    {
+        try { await JS.InvokeVoidAsync("capEditor.destroy", EditorSelector); } catch { /* el editor ya no existe */ }
+        _leccionHtmlId = null;
+        _leccionHtmlInicial = null;
+        _tinyPendienteInit = false;
+    }
+
+    private static string TamanoLegible(long? bytes)
+    {
+        if (bytes is not long b) { return ""; }
+        string[] u = { "B", "KB", "MB", "GB" };
+        double v = b; var i = 0;
+        while (v >= 1024 && i < u.Length - 1) { v /= 1024; i++; }
+        return $"{v:0.#} {u[i]}";
+    }
+
+    // ===================== EVALUACIONES =====================
+
+    private async Task AbrirEvaluaciones()
+    {
+        _tab = "evaluaciones";
+        await CargarEvaluacionesAsync();
+    }
+
+    private async Task CargarEvaluacionesAsync()
+    {
+        try { _evaluaciones = (await Svc.CuestionariosAdminAsync()).ToList(); }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private void NuevaEvaluacion()
+    {
+        _evalSel = null;
+        _evalForm = new GuardarCuestionarioRequest { Activo = true, PuntajeMinimo = 60 };
+        Flash();
+    }
+
+    private async Task AbrirEvaluacion(Guid id)
+    {
+        try
+        {
+            _evalSel = await Svc.CuestionarioAsync(id);
+            if (_evalSel is null) { Flash(err: "La evaluacion ya no existe."); await CargarEvaluacionesAsync(); return; }
+            var c = _evalSel.Cabecera;
+            _evalForm = new GuardarCuestionarioRequest { Id = c.Id, Modulo = c.Modulo, Titulo = c.Titulo, Descripcion = c.Descripcion, PuntajeMinimo = c.PuntajeMinimo, Activo = c.Activo };
+            foreach (var p in _evalSel.Preguntas)
+            {
+                _pregEnunciados[p.Id] = p.Enunciado;
+                _pregOpciones[p.Id] = p.Opciones.ToList();
+                _pregCorrecta[p.Id] = p.IndiceCorrecto;
+                _pregRetro[p.Id] = p.Retroalimentacion;
+            }
+            Flash();
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task GuardarEvaluacion()
+    {
+        if (_evalForm is null) { return; }
+        try
+        {
+            var id = await Svc.GuardarCuestionarioAsync(_evalForm, await Actor());
+            await CargarEvaluacionesAsync();
+            if (id is Guid g) { await AbrirEvaluacion(g); }
+            Flash(ok: "Evaluacion guardada.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task EliminarEvaluacion(Guid id)
+    {
+        try
+        {
+            await Svc.EliminarCuestionarioAsync(id, await Actor());
+            _evalSel = null; _evalForm = null;
+            await CargarEvaluacionesAsync();
+            Flash(ok: "Evaluacion eliminada.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task NuevaPregunta(Guid cuestionarioId)
+    {
+        try
+        {
+            await Svc.GuardarPreguntaAsync(new GuardarPreguntaRequest
+            {
+                CuestionarioId = cuestionarioId,
+                Enunciado = "Nueva pregunta",
+                Opciones = new() { "Opcion 1", "Opcion 2" },
+                IndiceCorrecto = 0,
+            }, await Actor());
+            await AbrirEvaluacion(cuestionarioId);
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task GuardarPregunta(Guid preguntaId)
+    {
+        if (_evalSel is null) { return; }
+        try
+        {
+            await Svc.GuardarPreguntaAsync(new GuardarPreguntaRequest
+            {
+                Id = preguntaId,
+                CuestionarioId = _evalSel.Cabecera.Id,
+                Enunciado = _pregEnunciados.GetValueOrDefault(preguntaId, ""),
+                Opciones = _pregOpciones.GetValueOrDefault(preguntaId, new()),
+                IndiceCorrecto = _pregCorrecta.GetValueOrDefault(preguntaId, 0),
+                Retroalimentacion = _pregRetro.GetValueOrDefault(preguntaId),
+            }, await Actor());
+            await AbrirEvaluacion(_evalSel.Cabecera.Id);
+            Flash(ok: "Pregunta guardada.");
+        }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task EliminarPregunta(Guid preguntaId)
+    {
+        if (_evalSel is null) { return; }
+        try { await Svc.EliminarPreguntaAsync(preguntaId, await Actor()); await AbrirEvaluacion(_evalSel.Cabecera.Id); }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private async Task MoverPregunta(Guid preguntaId, bool arriba)
+    {
+        if (_evalSel is null) { return; }
+        try { await Svc.MoverPreguntaAsync(preguntaId, arriba, await Actor()); await AbrirEvaluacion(_evalSel.Cabecera.Id); }
+        catch (Exception ex) { Flash(err: ex.Message); }
+    }
+
+    private void AgregarOpcion(Guid preguntaId)
+    {
+        if (!_pregOpciones.TryGetValue(preguntaId, out var l)) { _pregOpciones[preguntaId] = l = new(); }
+        l.Add("");
+    }
+
+    private void QuitarOpcion(Guid preguntaId, int idx)
+    {
+        if (!_pregOpciones.TryGetValue(preguntaId, out var l) || idx < 0 || idx >= l.Count) { return; }
+        l.RemoveAt(idx);
+        if (_pregCorrecta.GetValueOrDefault(preguntaId) >= l.Count) { _pregCorrecta[preguntaId] = 0; }
+    }
+}
+
+<style>
+    .cap-wrap { padding: 16px; max-width: 1200px; margin: 0 auto; }
+    .cap-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .cap-title { font-size:22px; font-weight:800; margin:0; color:#0f172a; }
+    .cap-sub { color:#64748b; font-size:13px; }
+    .cap-alert { padding:8px 12px; border-radius:8px; margin-bottom:10px; font-size:13px; }
+    .cap-alert.err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+    .cap-alert.ok { background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; }
+    .cap-tabs { display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid #e2e8f0; }
+    .cap-tab { background:none; border:none; padding:8px 16px; font-weight:600; color:#64748b; cursor:pointer; border-bottom:2px solid transparent; }
+    .cap-tab.active { color:#4f46e5; border-bottom-color:#4f46e5; }
+    .cap-grid { display:grid; grid-template-columns: 340px 1fr; gap:16px; align-items:start; }
+    .cap-col { border:1px solid #e2e8f0; border-radius:10px; background:#fff; overflow:hidden; }
+    .cap-col-h { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#f8fafc; border-bottom:1px solid #eef2f7; font-weight:700; font-size:13px; color:#334155; }
+    .cap-col-h.sub { background:#fff; margin-top:8px; }
+    .cap-list { display:flex; flex-direction:column; max-height:70vh; overflow:auto; }
+    .cap-item { text-align:left; background:none; border:none; border-bottom:1px solid #f1f5f9; padding:10px 12px; cursor:pointer; }
+    .cap-item:hover { background:#f8fafc; }
+    .cap-item.sel { background:#eef2ff; }
+    .cap-item-t { font-weight:600; color:#0f172a; font-size:13.5px; }
+    .cap-item-m { font-size:11.5px; color:#64748b; }
+    .cap-empty { padding:16px; color:#94a3b8; font-size:13px; text-align:center; }
+    .cap-empty.sm { padding:8px; font-size:12px; }
+    .cap-form { padding:12px; display:flex; flex-direction:column; gap:10px; }
+    .cap-f { display:flex; flex-direction:column; gap:3px; font-size:12px; color:#475569; font-weight:600; }
+    .cap-f-row { display:flex; gap:12px; align-items:flex-end; }
+    .cap-chk { display:flex; align-items:center; gap:6px; font-size:12.5px; color:#334155; }
+    .cap-in { border:1px solid #cbd5e1; border-radius:7px; padding:6px 9px; font-size:13px; width:100%; font-family:inherit; }
+    .cap-in-sm { width:auto; min-width:120px; }
+    .cap-actions { display:flex; gap:8px; margin-top:4px; }
+    .cap-mods { padding:0 12px 12px; }
+    .cap-mod { border:1px solid #e2e8f0; border-radius:8px; margin-bottom:10px; overflow:hidden; }
+    .cap-mod-h { display:flex; gap:6px; align-items:center; padding:8px; background:#f8fafc; }
+    .cap-lecs { padding:8px; display:flex; flex-direction:column; gap:8px; }
+    .cap-lec { border:1px solid #eef2f7; border-radius:7px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+    .cap-lec-h { display:flex; gap:6px; align-items:center; }
+    .cap-lec-file { display:flex; gap:8px; align-items:center; font-size:12px; color:#64748b; flex-wrap:wrap; }
+    .cap-lec-sz { color:#94a3b8; }
+    .cap-preg { border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; }
+    .cap-preg-h { display:flex; gap:6px; align-items:center; }
+    .cap-preg-n { font-weight:700; color:#4f46e5; font-size:12px; margin-right:auto; }
+    .cap-opts { display:flex; flex-direction:column; gap:5px; padding-left:4px; }
+    .cap-opt { display:flex; gap:6px; align-items:center; }
+    .btn-xs { padding:3px 8px; font-size:11.5px; line-height:1.2; }
+
+    .cap-modal-back { position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; z-index:1050; padding:16px; }
+    .cap-modal { background:#fff; border-radius:12px; width:min(900px, 100%); max-height:92vh; display:flex; flex-direction:column; box-shadow:0 20px 50px rgba(2,6,23,.35); }
+    .cap-modal-h { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid #eef2f7; font-size:14px; color:#334155; }
+    .cap-modal-x { background:none; border:none; font-size:24px; line-height:1; color:#94a3b8; cursor:pointer; }
+    .cap-modal-b { padding:14px 16px; overflow:auto; }
+    .cap-modal-hint { font-size:12px; color:#64748b; margin-bottom:8px; }
+    .cap-modal-f { display:flex; gap:8px; padding:12px 16px; border-top:1px solid #eef2f7; }
+
+    @@media (max-width: 860px) {
+        .cap-grid { grid-template-columns: 1fr; }
+        .cap-list { max-height:40vh; }
+    }
+</style>

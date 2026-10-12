@@ -40,6 +40,8 @@ public static class ModuloCatalogo
         // lo tienen implicito (mismo criterio que historias.reabrir).
         new("atencion.saltar-orden", "Atencion - Abrir HC saltando el orden secuencial", "Operacion Clinica"),
         new("ordenes", "Ordenes Clinicas", "Operacion Clinica"),
+        // Capacitaciones (LMS interno de personal): gestor de cursos + evaluaciones.
+        new("capacitaciones", "Capacitaciones", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),
         new("formularios", "Motor de Formularios", "Operacion Clinica"),
         new("formularios.versionado", "Formularios - Historial y restaurar versiones", "Operacion Clinica"),

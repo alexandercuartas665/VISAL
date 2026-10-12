@@ -2436,6 +2436,195 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("conversations", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.CuestionarioCapacitacion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Descripcion")
+                        .HasColumnType("text")
+                        .HasColumnName("descripcion");
+
+                    b.Property<string>("Modulo")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("modulo");
+
+                    b.Property<int>("PuntajeMinimo")
+                        .HasColumnType("integer")
+                        .HasColumnName("puntaje_minimo");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Titulo")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("titulo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_cuestionarios");
+
+                    b.HasIndex("TenantId", "Modulo")
+                        .HasDatabaseName("ix_cuestionarios_tenant_id_modulo");
+
+                    b.ToTable("cuestionarios", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CuestionarioIntento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Aprobado")
+                        .HasColumnType("boolean")
+                        .HasColumnName("aprobado");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("CuestionarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cuestionario_id");
+
+                    b.Property<DateTimeOffset>("FechaIntento")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_intento");
+
+                    b.Property<int>("Puntaje")
+                        .HasColumnType("integer")
+                        .HasColumnName("puntaje");
+
+                    b.Property<string>("RespuestasJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("respuestas_json");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_cuestionario_intentos");
+
+                    b.HasIndex("CuestionarioId")
+                        .HasDatabaseName("ix_cuestionario_intentos_cuestionario_id");
+
+                    b.HasIndex("TenantId", "CuestionarioId", "UsuarioId")
+                        .HasDatabaseName("ix_cuestionario_intentos_tenant_id_cuestionario_id_usuario_id");
+
+                    b.ToTable("cuestionario_intentos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CuestionarioPregunta", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("CuestionarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cuestionario_id");
+
+                    b.Property<string>("Enunciado")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("enunciado");
+
+                    b.Property<int>("IndiceCorrecto")
+                        .HasColumnType("integer")
+                        .HasColumnName("indice_correcto");
+
+                    b.Property<string>("OpcionesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("opciones_json");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<string>("Retroalimentacion")
+                        .HasColumnType("text")
+                        .HasColumnName("retroalimentacion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_cuestionario_preguntas");
+
+                    b.HasIndex("CuestionarioId")
+                        .HasDatabaseName("ix_cuestionario_preguntas_cuestionario_id");
+
+                    b.HasIndex("TenantId", "CuestionarioId", "Orden")
+                        .HasDatabaseName("ix_cuestionario_preguntas_tenant_id_cuestionario_id_orden");
+
+                    b.ToTable("cuestionario_preguntas", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.CuotaCopago", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2497,6 +2686,273 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_cuotas_copagos_tenant_id_tipo_categoria");
 
                     b.ToTable("cuotas_copagos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.Curso", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid?>("CuestionarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cuestionario_id");
+
+                    b.Property<string>("Descripcion")
+                        .HasColumnType("text")
+                        .HasColumnName("descripcion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Titulo")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("titulo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_cursos");
+
+                    b.HasIndex("CuestionarioId")
+                        .HasDatabaseName("ix_cursos_cuestionario_id");
+
+                    b.HasIndex("TenantId", "Titulo")
+                        .HasDatabaseName("ix_cursos_tenant_id_titulo");
+
+                    b.ToTable("cursos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoLeccion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Contenido")
+                        .HasColumnType("text")
+                        .HasColumnName("contenido");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("CursoModuloId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("curso_modulo_id");
+
+                    b.Property<string>("Descripcion")
+                        .HasColumnType("text")
+                        .HasColumnName("descripcion");
+
+                    b.Property<string>("DescripcionHtml")
+                        .HasColumnType("text")
+                        .HasColumnName("descripcion_html");
+
+                    b.Property<string>("Mime")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("mime");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<string>("RutaArchivo")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("ruta_archivo");
+
+                    b.Property<long?>("TamanoBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tamano_bytes");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("tipo");
+
+                    b.Property<string>("Titulo")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("titulo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_curso_lecciones");
+
+                    b.HasIndex("CursoModuloId")
+                        .HasDatabaseName("ix_curso_lecciones_curso_modulo_id");
+
+                    b.HasIndex("TenantId", "CursoModuloId", "Orden")
+                        .HasDatabaseName("ix_curso_lecciones_tenant_id_curso_modulo_id_orden");
+
+                    b.ToTable("curso_lecciones", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoModulo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("CursoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("curso_id");
+
+                    b.Property<string>("Descripcion")
+                        .HasColumnType("text")
+                        .HasColumnName("descripcion");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Titulo")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("titulo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_curso_modulos");
+
+                    b.HasIndex("CursoId")
+                        .HasDatabaseName("ix_curso_modulos_curso_id");
+
+                    b.HasIndex("TenantId", "CursoId", "Orden")
+                        .HasDatabaseName("ix_curso_modulos_tenant_id_curso_id_orden");
+
+                    b.ToTable("curso_modulos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoProgreso", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Aprobado")
+                        .HasColumnType("boolean")
+                        .HasColumnName("aprobado");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("CursoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("curso_id");
+
+                    b.Property<DateTimeOffset?>("FechaAprobacion")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_aprobacion");
+
+                    b.Property<DateTimeOffset?>("FechaInicio")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_inicio");
+
+                    b.Property<int>("Intentos")
+                        .HasColumnType("integer")
+                        .HasColumnName("intentos");
+
+                    b.Property<int>("MejorNota")
+                        .HasColumnType("integer")
+                        .HasColumnName("mejor_nota");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_curso_progresos");
+
+                    b.HasIndex("CursoId")
+                        .HasDatabaseName("ix_curso_progresos_curso_id");
+
+                    b.HasIndex("TenantId", "CursoId", "UsuarioId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_curso_progresos_tenant_id_curso_id_usuario_id");
+
+                    b.ToTable("curso_progresos", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.Departamento", b =>
@@ -12105,6 +12561,77 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Navigation("Sucursal");
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.CuestionarioIntento", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.CuestionarioCapacitacion", "Cuestionario")
+                        .WithMany()
+                        .HasForeignKey("CuestionarioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_cuestionario_intentos_cuestionarios_cuestionario_id");
+
+                    b.Navigation("Cuestionario");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CuestionarioPregunta", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.CuestionarioCapacitacion", "Cuestionario")
+                        .WithMany("Preguntas")
+                        .HasForeignKey("CuestionarioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_cuestionario_preguntas_cuestionarios_cuestionario_id");
+
+                    b.Navigation("Cuestionario");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.Curso", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.CuestionarioCapacitacion", "Cuestionario")
+                        .WithMany()
+                        .HasForeignKey("CuestionarioId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_cursos_cuestionarios_cuestionario_id");
+
+                    b.Navigation("Cuestionario");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoLeccion", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.CursoModulo", "Modulo")
+                        .WithMany("Lecciones")
+                        .HasForeignKey("CursoModuloId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_curso_lecciones_curso_modulos_curso_modulo_id");
+
+                    b.Navigation("Modulo");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoModulo", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.Curso", "Curso")
+                        .WithMany("Modulos")
+                        .HasForeignKey("CursoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_curso_modulos_cursos_curso_id");
+
+                    b.Navigation("Curso");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoProgreso", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.Curso", "Curso")
+                        .WithMany()
+                        .HasForeignKey("CursoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_curso_progresos_cursos_curso_id");
+
+                    b.Navigation("Curso");
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.Departamento", b =>
                 {
                     b.HasOne("Visal.Domain.Entities.Pais", "Pais")
@@ -13071,6 +13598,21 @@ namespace Visal.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Visal.Domain.Entities.CierrePeriodo", b =>
                 {
                     b.Navigation("Detalles");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CuestionarioCapacitacion", b =>
+                {
+                    b.Navigation("Preguntas");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.Curso", b =>
+                {
+                    b.Navigation("Modulos");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.CursoModulo", b =>
+                {
+                    b.Navigation("Lecciones");
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.FacturacionSnapshot", b =>

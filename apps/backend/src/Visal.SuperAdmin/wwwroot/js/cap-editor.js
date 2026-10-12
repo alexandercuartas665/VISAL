@@ -1,12 +1,12 @@
 // Editor enriquecido (TinyMCE) para la descripcion/contenido de una leccion.
-// TinyMCE se carga BAJO DEMANDA desde jsDelivr la primera vez que se abre el
-// editor, asi no pesa en el resto de la app. Licencia GPL (sin API key / nube).
+// TinyMCE esta AUTO-ALOJADO en wwwroot/lib/tinymce (GPL, v7.6.1) y se carga
+// BAJO DEMANDA la primera vez que se abre el editor, asi no pesa en el resto de
+// la app ni depende de ningun CDN externo.
 // Las imagenes pegadas quedan embebidas como base64 (no se suben al servidor).
 (function () {
     "use strict";
-    var VER = "7.6.1";
-    var SRC = "https://cdn.jsdelivr.net/npm/tinymce@" + VER + "/tinymce.min.js";
-    var BASE = "https://cdn.jsdelivr.net/npm/tinymce@" + VER;
+    var SRC = "/lib/tinymce/tinymce.min.js";
+    var BASE = "/lib/tinymce";
     var loading = null;
 
     function ensure() {

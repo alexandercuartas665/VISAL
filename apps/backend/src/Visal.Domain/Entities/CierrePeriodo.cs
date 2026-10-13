@@ -20,6 +20,10 @@ public class CierrePeriodo : TenantEntity
     /// cuando el cierre cubrio todos los pacientes del periodo.</summary>
     public string? PacienteNombre { get; set; }
 
+    /// <summary>Sede (nombre de la sucursal) a la que se acoto el cierre; null = todas las
+    /// sedes del periodo. Coincide con <see cref="Asignacion.Sucursal"/> (texto).</summary>
+    public string? Sucursal { get; set; }
+
     public DateTimeOffset CerradoEn { get; set; }
 
     /// <summary>Servicios (asignaciones) con sesiones pendientes anuladas en este cierre.</summary>

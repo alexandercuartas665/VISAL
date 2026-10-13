@@ -904,6 +904,21 @@ else if (_tabSel == "Cierre de periodos")
                         @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
                     </select>
                 </div>
+                <div class="ase-f cd-f-sm">
+                    <label>Sede</label>
+                    @if (_puedeElegirSede)
+                    {
+                        <select class="form-select form-select-sm" @bind="_sedeCierreSel" @bind:after="OnCierreSedeChange">
+                            <option value="">Todas las sedes</option>
+                            @foreach (var sd in _sedes) { <option value="@sd">@sd</option> }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="form-control form-control-sm" value="@(_miSucursalNombre ?? "—")" disabled
+                               title="Tu usuario tiene una sede fija; el cierre se acota a ella" />
+                    }
+                </div>
                 <div class="ase-f cd-f-md cd-ac-wrap">
                     <label>Paciente</label>
                     <div class="cd-ac-input">
@@ -959,6 +974,7 @@ else if (_tabSel == "Cierre de periodos")
                     <div class="cd-cierre-confirm-txt">
                         ⚠ Vas a <b>inactivar @_confirmSesiones sesión(es)</b> de @_confirmServicios servicio(s)
                         @(PacienteCierreId is null ? "de TODO el periodo (todos los pacientes)" : $"del paciente {_confirmPacienteNombre}")
+                        @(SedeCierreEfectiva is null ? "" : $"en la sede {SedeCierreEfectiva}")
                         en <b>@MesNombre(_mesCierre) @_anio</b>. Ya no se podrán atender.
                     </div>
                     <div class="cd-cierre-confirm-acts">
@@ -976,7 +992,7 @@ else if (_tabSel == "Cierre de periodos")
         {
             <div class="ase-card cd-cierre-ok">
                 <div class="ase-card-h cd-cierre-head">
-                    <span>✅ Resumen del cierre — @MesNombre(_cierreResultado.Mes) @_cierreResultado.Anio@(_cierreResultado.PacienteNombre is null ? " · todos" : $" · {_cierreResultado.PacienteNombre}")</span>
+                    <span>✅ Resumen del cierre — @MesNombre(_cierreResultado.Mes) @_cierreResultado.Anio@(_cierreResultado.PacienteNombre is null ? " · todos" : $" · {_cierreResultado.PacienteNombre}")@(string.IsNullOrWhiteSpace(_cierreResultado.Sucursal) ? "" : $" · sede {_cierreResultado.Sucursal}")</span>
                     <span class="cd-cierre-tot">@_cierreResultado.TotalServicios servicio(s) · @_cierreResultado.TotalSesiones sesión(es) inactivada(s)</span>
                 </div>
                 @if (_cierreResultadoDetalle.Count == 0) { <div class="ase-empty">Sin sesiones pendientes.</div> }
@@ -1062,19 +1078,33 @@ else if (_tabSel == "Cierre de periodos")
                                     <span class="cd-cc-periodo">@MesNombre(c.Mes) @c.Anio</span>
                                     <span class="cd-cc-pac">@(c.PacienteNombre ?? "Todos los pacientes")</span>
                                 </div>
+                                @if (!string.IsNullOrWhiteSpace(c.Sucursal))
+                                {
+                                    <div class="cd-cc-sede" title="Sede del cierre">🏢 @c.Sucursal</div>
+                                }
                                 <div class="cd-cc-big">
                                     <span class="cd-cc-num">@c.TotalPacientes</span>
                                     <span class="cd-cc-num-lbl">paciente(s)</span>
                                 </div>
                                 <div class="cd-cc-sub">@c.TotalServicios servicio(s) · @c.TotalSesiones sesión(es) inactivada(s)</div>
                                 <div class="cd-cc-meta">
-                                    <div title="Usuario que cerró">👤 @(string.IsNullOrWhiteSpace(c.UsuarioCerro) ? "—" : c.UsuarioCerro)</div>
+                                    <div title="Usuario que cerró">
+                                        👤 @if (!string.IsNullOrWhiteSpace(c.UsuarioNombre))
+                                           {
+                                               <b>@c.UsuarioNombre</b>
+                                               @if (!string.IsNullOrWhiteSpace(c.UsuarioCerro)) { <text> (@c.UsuarioCerro)</text> }
+                                           }
+                                           else
+                                           {
+                                               @(string.IsNullOrWhiteSpace(c.UsuarioCerro) ? "—" : c.UsuarioCerro)
+                                           }
+                                    </div>
                                     <div title="Fecha y hora del cierre">🕒 @c.CerradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                                 </div>
                                 <div class="cd-cc-acts">
                                     <a class="btn btn-outline-success btn-sm" href="/coordinacion/cierres/@c.Id/detalle.xlsx"
                                        target="_blank" rel="noopener"
-                                       title="Descargar Excel con el detalle completo (paciente, EPS, contrato, CUP, profesional, fechas, sesiones)">⬇ Excel</a>
+                                       title="Descargar Excel con el detalle completo (paciente, documento, EPS, contrato, cód. servicio, profesional, fechas, sesiones)">⬇ Excel</a>
                                     <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirCierreAsync(c)" disabled="@_cierreBusy"
                                             title="Reabrir: devuelve las sesiones a pendientes y borra el cierre">Reabrir</button>
                                 </div>
@@ -1378,6 +1408,7 @@ else if (_tabSel == "Cierre de periodos")
     .cd-cc-num { font-size:30px; font-weight:800; color:#0f172a; line-height:1; }
     .cd-cc-num-lbl { font-size:12px; color:#64748b; font-weight:600; }
     .cd-cc-sub { font-size:12px; color:#475569; }
+    .cd-cc-sede { font-size:12px; color:#1565c0; font-weight:600; margin-top:2px; }
     .cd-cc-meta { display:flex; flex-direction:column; gap:3px; font-size:12px; color:#334155; border-top:1px dashed #e2e8f0; padding-top:8px; }
     .cd-cc-meta > div { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .cd-cc-acts { display:flex; gap:6px; margin-top:2px; }
@@ -1686,6 +1717,18 @@ else if (_tabSel == "Cierre de periodos")
     // preparar, con busqueda en vivo contra toda la base de pacientes del tenant.
     private string _pacienteCierreSel = "";
     private Guid? PacienteCierreId => Guid.TryParse(_pacienteCierreSel, out var g) ? g : (Guid?)null;
+
+    // Filtro por sede del cierre. Usuarios con sede fija (_puedeElegirSede==false) quedan
+    // acotados a la suya; los globales eligen "" (todas) o una del catalogo.
+    private string _sedeCierreSel = "";
+    private string? SedeCierreEfectiva => _puedeElegirSede
+        ? (string.IsNullOrWhiteSpace(_sedeCierreSel) ? null : _sedeCierreSel)
+        : (string.IsNullOrWhiteSpace(_miSucursalNombre) ? null : _miSucursalNombre);
+    private void OnCierreSedeChange()
+    {
+        _cierrePreview = null; _confirmandoCierre = false;
+        _cierreResultado = null; _cierreResultadoDetalle = null; _cierreMsg = null;
+    }
     private IEnumerable<CierrePeriodoFilaDto> FilasFiltradas =>
         _cierrePreview is null ? Enumerable.Empty<CierrePeriodoFilaDto>()
         : (PacienteCierreId is Guid pid ? _cierrePreview.Filas.Where(f => f.PacienteId == pid) : _cierrePreview.Filas);
@@ -1762,8 +1805,8 @@ else if (_tabSel == "Cierre de periodos")
         _confirmandoCierre = false; _cierreResultado = null; _cierreResultadoDetalle = null;
         try
         {
-            // Acota la vista previa al paciente elegido (si hay) para una preparacion liviana.
-            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId);
+            // Acota la vista previa al paciente y/o sede elegidos (si hay) para preparacion liviana.
+            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId, SedeCierreEfectiva);
         }
         catch (Exception ex) { _cierreMsg = "No se pudo previsualizar: " + ex.Message; }
         finally { _cierreBusy = false; }
@@ -1795,7 +1838,9 @@ else if (_tabSel == "Cierre de periodos")
     // Paso 2: confirm del navegador + ejecucion. Deja la tarjeta de resumen del cierre.
     private async Task ConfirmarCierreAsync()
     {
+        var sedeEf = SedeCierreEfectiva;
         var quien = PacienteCierreId is null ? "de todo el periodo" : "del paciente " + _confirmPacienteNombre;
+        if (sedeEf is not null) { quien += $" (sede {sedeEf})"; }
         var ok = await JS.InvokeAsync<bool>("confirm",
             $"CONFIRMACIÓN FINAL: se inactivarán {_confirmSesiones} sesión(es) {quien} de {MesNombre(_mesCierre)} {_anio}. Ya no se podrán atender. ¿Cerrar ahora?");
         if (!ok) { return; }
@@ -1803,13 +1848,13 @@ else if (_tabSel == "Cierre de periodos")
         try
         {
             var actor = await Actor();
-            var c = await CierreSvc.CerrarAsync(_anio, _mesCierre, PacienteCierreId, actor);
+            var c = await CierreSvc.CerrarAsync(_anio, _mesCierre, PacienteCierreId, sedeEf, actor);
             _cierreResultado = c;
             _cierreResultadoDetalle = await CierreSvc.GetDetalleAsync(c.Id);
             _cierreMsg = $"Periodo {MesNombre(c.Mes)} {c.Anio}{(c.PacienteNombre is null ? "" : " — " + c.PacienteNombre)} cerrado: {c.TotalServicios} servicio(s), {c.TotalSesiones} sesión(es) inactivada(s).";
             _confirmandoCierre = false;
             _pacienteCierreSel = ""; _pacienteCierreBusqueda = "";
-            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre);
+            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, null, SedeCierreEfectiva);
             await CargarCierresAsync();
         }
         catch (Exception ex) { _cierreMsg = "No se pudo cerrar: " + ex.Message; _confirmandoCierre = false; }
@@ -1837,7 +1882,7 @@ else if (_tabSel == "Cierre de periodos")
             await CargarCierresAsync();
             if (_cierrePreview is not null && _cierrePreview.Anio == c.Anio && _cierrePreview.Mes == c.Mes)
             {
-                _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre);
+                _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId, SedeCierreEfectiva);
             }
         }
         catch (Exception ex) { _cierreMsg = "No se pudo reabrir: " + ex.Message; }

@@ -2143,6 +2143,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(300)")
                         .HasColumnName("paciente_nombre");
 
+                    b.Property<string>("Sucursal")
+                        .HasColumnType("text")
+                        .HasColumnName("sucursal");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");

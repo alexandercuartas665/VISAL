@@ -1887,7 +1887,7 @@
         }
         // Re-aplicar header autofill (No Historia / Fecha / Hora) por si la HC se
         // creo antes de esta feature o el schema cambio. Mantiene el header sincronizado.
-        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura, string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase));
+        _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, detail.Consecutivo, detail.FechaApertura, string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase));
         _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
         _formatoActualNombre = detail.FormatoNombre;
         _subtituloFormato = !string.IsNullOrWhiteSpace(detail.FormatoVersion)
@@ -2074,7 +2074,7 @@
                 if (detail is not null)
                 {
                     _valores = DeserializeValores(detail.ValoresJson);
-                    _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, h.Id, detail.FechaApertura, string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase));
+                    _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, detail.Consecutivo, detail.FechaApertura, string.Equals(h.Estado, "Abierta", StringComparison.OrdinalIgnoreCase));
                 }
                 await RefrescarPrefillHistoriaMedicaAsync(h.Id);
                 // Persistir las filas auto-cargadas (no esperar al autosave debounced)
@@ -2355,7 +2355,7 @@
             }
 
             stage = "HeaderAutoFillHelper.Aplicar";
-            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Id, creada.FechaApertura, hcAbierta: true);
+            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, creada.Consecutivo, creada.FechaApertura, hcAbierta: true);
             _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
             stage = "HcSvc.GuardarValoresAsync";
             await HcSvc.GuardarValoresAsync(creada.Id, SerializeValores(_valores), Guid.Empty);
@@ -2583,7 +2583,7 @@
             // (fecha/hora/medico/firmas del usuario actual). Los campos clinicos libres
             // del origen se preservan porque el prefill solo escribe las keys mapeadas.
             await PrefillFromPaciente();
-            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, copia.Id, copia.FechaApertura, hcAbierta: true);
+            _hcHeaderReadOnlyKeys = HeaderAutoFillHelper.Aplicar(_valores, _schemaActual.Header, copia.Consecutivo, copia.FechaApertura, hcAbierta: true);
             _hcReadOnlyKeys = new HashSet<string>(_hcHeaderReadOnlyKeys, StringComparer.OrdinalIgnoreCase);
 
             // Persistir los valores actualizados (source + prefill fresco) en la copia.

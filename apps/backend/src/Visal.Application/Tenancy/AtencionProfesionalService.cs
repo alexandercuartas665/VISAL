@@ -537,7 +537,11 @@ public sealed class AtencionProfesionalService(
                     n, t.Cantidad,
                     a.TipoServicio,
                     a.NombreServicio,
-                    a.Id.ToString()[..8],
+                    // Id COMPLETO de la asignacion (no el prefijo de 8 hex del UUID v7, que
+                    // colisiona entre servicios de un mismo lote creados en el mismo ms). La UI
+                    // muestra AS-000NNN (AsignacionConsecutivo) + el nombre del servicio; este id
+                    // solo se usa para busqueda/identidad, nunca como codigo visible recortado.
+                    a.Id.ToString(),
                     a.CodigoAutorizacion ?? "",
                     DateOnly.FromDateTime(a.CreatedAt.LocalDateTime),
                     ordenMap[a.Id],

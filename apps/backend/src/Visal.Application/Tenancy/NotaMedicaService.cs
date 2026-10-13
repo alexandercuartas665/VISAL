@@ -223,7 +223,10 @@ public sealed class NotaMedicaService(
 
         if (string.IsNullOrEmpty(entity.CodigoUnico))
         {
-            entity.CodigoUnico = entity.Id.ToString()[..8];
+            // Id COMPLETO, no el prefijo de 8 hex del UUID v7: dos notas creadas en el mismo
+            // milisegundo comparten los primeros 8 hex y colisionarian como "la misma nota".
+            // Las notas no tienen consecutivo publico propio, asi que el respaldo es el id entero.
+            entity.CodigoUnico = entity.Id.ToString();
             await db.SaveChangesAsync(ct);
         }
         return Map(entity);

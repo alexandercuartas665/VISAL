@@ -455,7 +455,7 @@ public interface IAsignacionService
     Task<LoteCreadoDto> CrearLoteAsync(CrearLoteRequest req, Guid actor, CancellationToken ct = default);
 
     /// <summary>Elimina una asignacion del lote (caso "eliminar item" de la grilla).</summary>
-    Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default);
+    Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, string? motivo = null, CancellationToken ct = default);
 
     /// <summary>Actualiza una asignacion existente. Solo se permite si esta Pendiente y
     /// no tiene turnos coordinados. Lanza InvalidOperationException si no se cumple.</summary>

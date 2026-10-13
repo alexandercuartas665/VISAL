@@ -554,6 +554,7 @@ else
 
         <div class="ase-card">
             <div class="ase-card-h">Asignaciones</div>
+            @if (_ok is not null) { <div class="ase-ok asg-svc-ok">@_ok</div> }
             <div class="table-responsive asg-list-wrap">
                 <table class="table table-sm table-striped asg-list-tbl">
                     <thead>
@@ -572,12 +573,13 @@ else
                             <th>Fecha inicio</th>
                             <th>Autorizacion</th>
                             <th>Observaciones</th>
+                            <th class="text-center">Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
                         @if (_listado.Count == 0)
                         {
-                            <tr><td colspan="14" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
+                            <tr><td colspan="15" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
                         }
                         @foreach (var a in _listado)
                         {
@@ -608,6 +610,27 @@ else
                                     }
                                 </td>
                                 <td class="text-muted small">@(a.Observaciones ?? "")</td>
+                                <td class="text-center">
+                                    @{
+                                        var puedeBorrarL = !string.Equals(a.Estado, "Asignado", StringComparison.OrdinalIgnoreCase)
+                                                        && !string.Equals(a.Estado, "Cerrado", StringComparison.OrdinalIgnoreCase);
+                                    }
+                                    @if (_eliminarListadoId == a.Id)
+                                    {
+                                        @* Paso 1 de la doble confirmacion (inline). Paso 2 = confirm() del navegador. *@
+                                        <span class="asg-del-confirm">
+                                            ¿Eliminar?
+                                            <button class="btn btn-danger btn-sm" @onclick="() => ConfirmarEliminarListadoAsync(a)" disabled="@_delBusy">@(_delBusy ? "..." : "Sí")</button>
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _eliminarListadoId = null" disabled="@_delBusy">No</button>
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-outline-danger btn-sm" disabled="@(!puedeBorrarL)"
+                                                title="@(puedeBorrarL ? "Eliminar asignación (doble confirmación + queda registrada)" : "Ya está tomada por Coordinación o cerrada: no se puede eliminar")"
+                                                @onclick="() => { _eliminarListadoId = a.Id; _ok = null; _error = null; }">&#128465;</button>
+                                    }
+                                </td>
                             </tr>
                         }
                     </tbody>
@@ -946,6 +969,8 @@ else
     .asg-chk input { width: 15px; height: 15px; }
     .asg-aut-pend { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #fee2e2; color: #b91c1c; }
     .asg-aut-btn { padding: 0 8px; line-height: 18px; margin-left: 6px; }
+    .asg-del-confirm { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; font-size:11px; color:#b91c1c; font-weight:600; }
+    .asg-del-confirm .btn { padding:0 8px; line-height:20px; }
     .asg-aut-ctx { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
     .asg-aut-modal { max-width: 520px; }
     .asg-tar { color: #1565c0; font-weight: 600; }
@@ -1300,6 +1325,36 @@ else
         _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = _fSede = _fAutorizacion = "";
         _fSoloPendiente = false;
         await AplicarFiltrosListado();
+    }
+
+    // ── Eliminar asignacion desde el Listado (doble confirmacion + auditoria) ──
+    // Paso 1: el boton 🗑 setea _eliminarListadoId (confirm inline en la celda).
+    // Paso 2: "Sí" abre el confirm() del navegador y recien ahi se elimina. El
+    // servicio bloquea si la asignacion esta Asignada/Cerrada o tiene turnos, y
+    // registra en auditoria (SuperAdminAuditLog) quien/que/cuando elimino.
+    private Guid? _eliminarListadoId;
+    private bool _delBusy;
+    private async Task ConfirmarEliminarListadoAsync(AsignacionListadoDto a)
+    {
+        var cod = a.Consecutivo is long c ? CodigoPublico.Asignacion(c) : "";
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"CONFIRMACIÓN FINAL: eliminar la asignación {cod} — {a.NombreServicio} de {a.PacienteNombre}?\n\nEsta acción NO se puede deshacer y queda registrada con tu usuario.");
+        if (!ok) { return; }
+        _delBusy = true; _error = null; _ok = null;
+        try
+        {
+            var borrada = await Svc.EliminarAsignacionAsync(a.Id, await Actor());
+            if (borrada)
+            {
+                _listado.RemoveAll(x => x.Id == a.Id);
+                _ok = $"Asignación {cod} eliminada.";
+            }
+            else { _error = UiError.Negocio("ASG", 104, "La asignación ya no existe."); }
+            _eliminarListadoId = null;
+        }
+        catch (InvalidOperationException ex) { _error = UiError.Negocio("ASG", 103, ex.Message); _ok = null; }
+        catch (Exception ex) { _error = UiError.Tecnico("ASG", 903, ex); _ok = null; }
+        finally { _delBusy = false; }
     }
 
     // ── Modal Autorizacion (componente compartido AutorizacionModal) ────────

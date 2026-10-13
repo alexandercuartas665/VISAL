@@ -399,7 +399,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         return ServicioCodigo.Base(servicioId);
     }
 
-    public async Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, CancellationToken ct = default)
+    public async Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, string? motivo = null, CancellationToken ct = default)
     {
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
         if (a is null) { return false; }
@@ -427,6 +427,44 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             throw new InvalidOperationException(
                 "No se puede eliminar: la asignacion tiene turnos creados por Coordinacion.");
         }
+
+        // Auditoria: snapshot del registro ANTES de borrarlo, para que el log sea legible
+        // aunque la asignacion ya no exista. Registra quien elimino (actor), que, y cuando
+        // (SuperAdminAuditLog.CreatedAt via interceptor). Se persiste junto con el Remove.
+        var pac = await db.Pacientes.AsNoTracking()
+            .Where(p => p.Id == a.PacienteId)
+            .Select(p => new { p.NombreCompleto, p.NumeroDocumento })
+            .FirstOrDefaultAsync(ct);
+        var cons = await db.AsignacionLotes.AsNoTracking()
+            .Where(l => l.Id == a.LoteId)
+            .Select(l => (long?)l.Consecutivo)
+            .FirstOrDefaultAsync(ct);
+        audit.Write(
+            actorUserId: actor,
+            actionName: "Asignacion.Eliminada",
+            entityName: "Asignacion",
+            entityId: a.Id,
+            previousValue: new
+            {
+                asignacionId = a.Id,
+                loteId = a.LoteId,
+                consecutivo = cons,
+                codigoPublico = cons is long cc ? CodigoPublico.Asignacion(cc) : null,
+                pacienteId = a.PacienteId,
+                pacienteNombre = pac?.NombreCompleto,
+                pacienteDoc = pac?.NumeroDocumento,
+                servicioId = a.ServicioId,
+                nombreServicio = a.NombreServicio,
+                tipoServicio = a.TipoServicio,
+                cantidad = a.Cantidad,
+                sede = a.Sucursal,
+                contratoCodigo = a.ContratoCodigo,
+                codigoAutorizacion = a.CodigoAutorizacion,
+                estado = a.Estado.ToString()
+            },
+            newValue: null,
+            tenantId: a.TenantId,
+            reason: string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim());
 
         db.Asignaciones.Remove(a);
         await db.SaveChangesAsync(ct);

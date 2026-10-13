@@ -92,7 +92,7 @@ else
                 var _ses = evo.SesionNumero is int _sn ? _sn : _evoN;
                 <div class="pack-doc">
                     @RenderHeader(hdrEvo, evo.FormatoNombre, "EVO",
-                        evo.Consecutivo > 0 ? CodigoPublico.Hc(evo.Consecutivo) : evo.Id.ToString().Substring(0, 8).ToUpperInvariant(),
+                        evo.Consecutivo > 0 ? CodigoPublico.Hc(evo.Consecutivo) : evo.Id.ToString().ToUpperInvariant(),
                         FechaAtencionLinea(schEvo, valEvo, evo.FechaApertura, evo.FechaAtencion),
                         $"Evolucion - Sesion {_ses}")
                     @if (schEvo is not null)

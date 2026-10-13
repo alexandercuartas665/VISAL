@@ -1,4 +1,5 @@
 using Visal.Application.Tenancy.Forms;
+using Visal.Domain.Common;
 
 namespace Visal.SuperAdmin.Components.Forms;
 
@@ -25,17 +26,17 @@ public static class HeaderAutoFillHelper
     public static HashSet<string> Aplicar(
         Dictionary<string, string?> valores,
         FormHeader? header,
-        Guid hcId,
+        long hcConsecutivo,
         DateTimeOffset fechaApertura,
         bool hcAbierta = false)
     {
         var bloqueadas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (header is null) { return bloqueadas; }
 
-        // Consecutivo legible del HC: PRIMEROS 8 hex del Guid, para que coincida con
-        // el "HC N°" que muestra/busca la lista de Ordenes Clinicas (antes usaba los
-        // ultimos 8 -> el numero del encabezado no coincidia con el buscable).
-        var consecutivo = hcId.ToString("N")[..8].ToUpperInvariant();
+        // "HC N°" legible = consecutivo publico HC-000123 (secuencia global unica), NO el
+        // prefijo de 8 hex del UUID v7, que colisiona entre HCs creadas en el mismo ms y
+        // devolvia duplicados al buscar por ese numero en Ordenes Clinicas.
+        var consecutivo = CodigoPublico.Hc(hcConsecutivo);
         var local = fechaApertura.ToLocalTime();
         // La fecha ahora incluye la hora (dd/MM/yyyy HH:mm) para que el documento
         // muestre ambas y el medico pueda editarlas mientras la HC este abierta.

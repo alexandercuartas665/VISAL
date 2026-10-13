@@ -399,7 +399,7 @@ public sealed class HistoriaClinicaService(
             .OrderByDescending(a => a.FechaInicio)
             .Select(a => new AsignacionHistoriaOpcionDto(
                 a.Id,
-                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({(loteCons.TryGetValue(a.LoteId, out var c) ? CodigoPublico.Asignacion(c) : a.Id.ToString()[..8].ToUpperInvariant())})",
+                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({(loteCons.TryGetValue(a.LoteId, out var c) ? CodigoPublico.Asignacion(c) : a.Id.ToString().ToUpperInvariant())})",
                 a.FechaInicio))
             .ToList();
     }

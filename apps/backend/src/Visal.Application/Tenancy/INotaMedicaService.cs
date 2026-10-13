@@ -79,8 +79,9 @@ public sealed record DocumentoPacienteDto(
     string? CodigoNota,
     string? Estado,
     // True cuando el documento NO cuelga de una HC ni de una nota medica: es un
-    // adjunto "libre" (subido directo desde Admision o firma del propio paciente).
-    // Solo estos permiten editar su categoria/tipologia.
+    // Documento NO atado a una nota medica: adjunto "Directo" (subido desde Admision o
+    // firma del paciente) o documento externo de una HC (p.ej. scan de WhatsApp). Solo
+    // estos permiten editar su categoria/tipologia; los anexos de una nota medica no.
     bool EsLibre = false);
 
 public sealed record AdjuntarDocumentoRequest(

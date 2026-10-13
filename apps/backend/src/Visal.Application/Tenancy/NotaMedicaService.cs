@@ -300,8 +300,11 @@ public sealed class NotaMedicaService(
                 x.Anotaciones, x.CreatedAt,
                 x.FechaNota, x.CodigoUnico,
                 x.EstadoNota.HasValue ? ((Visal.Domain.Entities.NotaMedicaEstado)x.EstadoNota.Value).ToString() : null,
-                // Libre = no cuelga de nota ni de HC -> editable su categoria.
-                EsLibre: x.NotaMedicaId is null && x.HistoriaClinicaId is null))
+                // Editable = no atado a una NOTA medica. Incluye los adjuntos "Directo"
+                // (subidos desde Admision o firmas del paciente) y los documentos externos
+                // de una HC (p.ej. scans que llegan por WhatsApp). Los anexos de una nota
+                // medica (NotaMedicaId != null) NO se reclasifican aqui.
+                EsLibre: x.NotaMedicaId is null))
             .ToList();
     }
 
@@ -418,14 +421,15 @@ public sealed class NotaMedicaService(
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
 
-        // La edicion de categoria SOLO aplica a documentos "libres": adjuntos subidos
-        // directo desde Admision o firmas del propio paciente (sin HC ni nota). Los
-        // anexos de una historia clinica o de una nota medica NO se reclasifican aqui
-        // (su tipologia es parte del documento clinico, abierto o cerrado).
-        if (e.HistoriaClinicaId is not null || e.NotaMedicaId is not null)
+        // La edicion de categoria aplica a documentos NO atados a una nota medica:
+        // adjuntos "Directo" (subidos desde Admision o firmas del paciente) y documentos
+        // externos de una HC (p.ej. scans que llegan por WhatsApp). Los anexos de una
+        // NOTA medica (NotaMedicaId != null) NO se reclasifican aqui (su tipologia es
+        // parte del documento clinico de la nota).
+        if (e.NotaMedicaId is not null)
         {
             throw new InvalidOperationException(
-                "Solo se puede cambiar la categoria de documentos adjuntados desde Admision o por el paciente, no de los anexos de historias clinicas.");
+                "Solo se puede cambiar la categoria de documentos directos o externos de una historia clinica, no de los anexos de una nota medica.");
         }
 
         var nueva = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();

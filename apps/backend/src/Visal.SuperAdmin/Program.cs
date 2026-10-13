@@ -1423,6 +1423,19 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/fal
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();
 
+// Export XLSX del detalle de un cierre de periodo (Coordinacion > Historicos de cierres).
+// Trae todos los datos del paciente/servicio (identificacion, EPS, contrato, CUP, profesional,
+// autorizacion, fechas, cantidades). El servicio aplica el global query filter por tenant.
+app.MapGet("/coordinacion/cierres/{id:guid}/detalle.xlsx", async (
+    Guid id,
+    Visal.Application.Tenancy.ICierrePeriodoService cierreSvc,
+    CancellationToken ct) =>
+{
+    var archivo = await cierreSvc.GenerarExcelDetalleAsync(id, ct);
+    if (archivo is null) { return Results.NotFound(); }
+    return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
 // Export XLSX del listado /ordenes (todas las filas visibles con los filtros
 // aplicados). Reusa BuscarAsync + global query filter por tenant, asi que la
 // respuesta esta siempre acotada al tenant activo.

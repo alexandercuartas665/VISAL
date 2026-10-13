@@ -1,8 +1,13 @@
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Facturacion;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
+
+/// <summary>Paciente candidato para el filtro del cierre (busqueda ligera por nombre/documento).</summary>
+public sealed record PacienteCierreBusquedaDto(Guid Id, string Nombre, string? Documento);
 
 /// <summary>Fila del resumen de un cierre/previsualizacion: un servicio con sesiones pendientes.</summary>
 public sealed record CierrePeriodoFilaDto(
@@ -27,9 +32,19 @@ public sealed record CierrePeriodoDto(
 
 public interface ICierrePeriodoService
 {
-    /// <summary>Resumen de sesiones PENDIENTES que se anularian al cerrar (anio, mes), de TODO
-    /// el periodo. No muta. La UI filtra por paciente localmente.</summary>
-    Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, CancellationToken ct = default);
+    /// <summary>Resumen de sesiones PENDIENTES que se anularian al cerrar (anio, mes). Si
+    /// <paramref name="pacienteId"/> viene, acota la vista previa a ese paciente (preparacion
+    /// liviana); null = todo el periodo. No muta.</summary>
+    Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, CancellationToken ct = default);
+
+    /// <summary>Busqueda ligera de pacientes por nombre o documento (para el filtro del cierre,
+    /// antes de preparar). Tenant-scoped. Devuelve hasta 15 coincidencias.</summary>
+    Task<IReadOnlyList<PacienteCierreBusquedaDto>> BuscarPacientesAsync(string? texto, CancellationToken ct = default);
+
+    /// <summary>Genera el Excel de detalle de un cierre con TODOS los datos del paciente/servicio
+    /// (identificacion, EPS, contrato, CUP, profesional, autorizacion, fechas, cantidades). Se
+    /// arma en vivo desde los turnos que el cierre anulo. Null si el cierre no existe.</summary>
+    Task<ArchivoExportado?> GenerarExcelDetalleAsync(Guid cierreId, CancellationToken ct = default);
 
     /// <summary>Cierra el periodo: anula las sesiones pendientes (marca sus turnos) y guarda el
     /// resumen. Si <paramref name="pacienteId"/> viene, el cierre es PARCIAL (solo ese paciente).
@@ -53,15 +68,30 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     public CierrePeriodoService(IApplicationDbContext db) => _db = db;
 
-    public async Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, CancellationToken ct = default)
+    public async Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, CancellationToken ct = default)
     {
         var yaCerrado = await _db.CierrePeriodos.AsNoTracking()
             .AnyAsync(c => c.Anio == anio && c.Mes == mes, ct);
 
-        var filas = await CalcularPendientesAsync(anio, mes, ct);
+        var filas = await ResumirAsync(await TurnosPendientesAsync(anio, mes, pacienteId, ct), ct);
         return new CierrePeriodoPreviewDto(
             anio, mes, yaCerrado, filas,
             filas.Count, filas.Sum(f => f.CantidadPendiente));
+    }
+
+    public async Task<IReadOnlyList<PacienteCierreBusquedaDto>> BuscarPacientesAsync(string? texto, CancellationToken ct = default)
+    {
+        var q = _db.Pacientes.AsNoTracking();
+        var f = (texto ?? "").Trim().ToLower();
+        if (!string.IsNullOrEmpty(f))
+        {
+            q = q.Where(p => p.NumeroDocumento.ToLower().Contains(f) || p.NombreCompleto.ToLower().Contains(f));
+        }
+        return await q.OrderBy(p => p.NombreCompleto).Take(15)
+            .Select(p => new PacienteCierreBusquedaDto(
+                p.Id, p.NombreCompleto,
+                ((p.TipoDocumento ?? "") + " " + (p.NumeroDocumento ?? "")).Trim()))
+            .ToListAsync(ct);
     }
 
     public async Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, Guid actor, CancellationToken ct = default)
@@ -225,9 +255,6 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             .ToList();
     }
 
-    private async Task<IReadOnlyList<CierrePeriodoFilaDto>> CalcularPendientesAsync(int anio, int mes, CancellationToken ct)
-        => await ResumirAsync(await TurnosPendientesAsync(anio, mes, null, ct), ct);
-
     // Agrupa los turnos pendientes por asignacion y resuelve paciente + servicio.
     private async Task<IReadOnlyList<CierrePeriodoFilaDto>> ResumirAsync(List<TurnoPendiente> turnos, CancellationToken ct)
     {
@@ -261,5 +288,158 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             })
             .OrderBy(f => f.PacienteNombre, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static readonly string[] Meses =
+        { "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+          "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre" };
+
+    public async Task<ArchivoExportado?> GenerarExcelDetalleAsync(Guid cierreId, CancellationToken ct = default)
+    {
+        var cierre = await _db.CierrePeriodos.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == cierreId, ct);
+        if (cierre is null) { return null; }
+
+        // Detalle en vivo desde los turnos que ESTE cierre anulo (CierrePeriodoId == cierreId).
+        // Join a asignacion/paciente/profesional/aseguradora para exponer todos los datos.
+        var filas = await (
+            from t in _db.AsignacionTurnos.AsNoTracking()
+            where t.CierrePeriodoId == cierreId
+            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join p in _db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+            join prof in _db.Profesionales.AsNoTracking() on t.ProfesionalId equals prof.Id into pj
+            from prof in pj.DefaultIfEmpty()
+            join aseg in _db.Aseguradoras.AsNoTracking() on p.AseguradoraId equals aseg.Id into aj
+            from aseg in aj.DefaultIfEmpty()
+            select new
+            {
+                a.Id,
+                PacienteNombre = p.NombreCompleto,
+                p.TipoDocumento,
+                p.NumeroDocumento,
+                EpsAsig = a.AseguradoraNombre,
+                EpsPac = aseg != null ? aseg.Nombre : null,
+                a.ContratoCodigo,
+                a.CodigoRips,
+                a.NombreServicio,
+                a.TipoServicio,
+                a.Sucursal,
+                a.CodigoAutorizacion,
+                CantidadAsignacion = a.Cantidad,
+                a.FechaInicio,
+                a.FechaFinal,
+                TurnoCantidad = t.Cantidad,
+                t.NumeroSesion,
+                ProfNombre = prof != null ? prof.NombreCompleto : null
+            }).ToListAsync(ct);
+
+        // Agrupar por servicio (asignacion) + profesional: una fila por combinacion, con las
+        // sesiones inactivadas sumadas y la lista de numeros de sesion.
+        var grupos = filas
+            .GroupBy(x => new { x.Id, x.ProfNombre })
+            .Select(g =>
+            {
+                var f0 = g.First();
+                var nums = g.Where(x => x.NumeroSesion.HasValue)
+                            .Select(x => x.NumeroSesion!.Value).OrderBy(n => n).ToList();
+                return new
+                {
+                    f0.PacienteNombre, f0.TipoDocumento, f0.NumeroDocumento,
+                    Eps = string.IsNullOrWhiteSpace(f0.EpsAsig) ? f0.EpsPac : f0.EpsAsig,
+                    f0.ContratoCodigo, f0.CodigoRips, f0.NombreServicio, f0.TipoServicio, f0.Sucursal,
+                    f0.CodigoAutorizacion, f0.CantidadAsignacion, f0.FechaInicio, f0.FechaFinal,
+                    Profesional = f0.ProfNombre,
+                    SesionesInactivadas = g.Sum(x => x.TurnoCantidad),
+                    NumerosSesion = string.Join(", ", nums)
+                };
+            })
+            .OrderBy(x => x.PacienteNombre, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.NombreServicio, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var mesNom = cierre.Mes >= 1 && cierre.Mes <= 12 ? Meses[cierre.Mes] : cierre.Mes.ToString();
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Detalle cierre");
+
+        ws.Cell(1, 1).Value = "Detalle del cierre de periodo";
+        ws.Cell(1, 1).Style.Font.Bold = true;
+        ws.Cell(1, 1).Style.Font.FontSize = 13;
+        ws.Cell(2, 1).Value = $"Periodo: {mesNom} {cierre.Anio}";
+        ws.Cell(3, 1).Value = $"Alcance: {(cierre.PacienteNombre is null ? "Todos los pacientes" : cierre.PacienteNombre)}";
+        ws.Cell(4, 1).Value = $"Total: {grupos.Count} servicio(s) · {grupos.Sum(x => x.SesionesInactivadas)} sesion(es) inactivada(s)";
+        ws.Cell(5, 1).Value = $"Cerrado: {cierre.CerradoEn.ToLocalTime():yyyy-MM-dd HH:mm}";
+        ws.Cell(6, 1).Value = $"Generado: {DateTimeOffset.Now.ToLocalTime():yyyy-MM-dd HH:mm}";
+
+        const int hdr = 8;
+        string[] cols =
+        {
+            "#", "Paciente", "Tipo doc", "Documento", "EPS", "Contrato", "CUP",
+            "Servicio", "Tipo servicio", "Sede", "Profesional", "Autorizacion",
+            "Cant. asignada", "Sesiones inactivadas", "N° sesiones",
+            "Vigencia desde", "Vigencia hasta"
+        };
+        for (var i = 0; i < cols.Length; i++)
+        {
+            var cell = ws.Cell(hdr, i + 1);
+            cell.Value = cols[i];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1565C0");
+            cell.Style.Font.FontColor = XLColor.White;
+        }
+
+        var row = hdr + 1;
+        var n = 0;
+        foreach (var g in grupos)
+        {
+            n++;
+            ws.Cell(row, 1).Value = n;
+            ws.Cell(row, 2).Value = string.IsNullOrWhiteSpace(g.PacienteNombre) ? "-" : g.PacienteNombre;
+            ws.Cell(row, 3).Value = g.TipoDocumento ?? "";
+            ws.Cell(row, 4).Value = g.NumeroDocumento ?? "";
+            ws.Cell(row, 4).Style.NumberFormat.Format = "@"; // documento como texto
+            ws.Cell(row, 5).Value = g.Eps ?? "";
+            ws.Cell(row, 6).Value = g.ContratoCodigo ?? "";
+            ws.Cell(row, 7).Value = g.CodigoRips ?? "";
+            ws.Cell(row, 8).Value = g.NombreServicio ?? "";
+            ws.Cell(row, 9).Value = g.TipoServicio ?? "";
+            ws.Cell(row, 10).Value = g.Sucursal ?? "";
+            ws.Cell(row, 11).Value = string.IsNullOrWhiteSpace(g.Profesional) ? "(sin profesional)" : g.Profesional;
+            ws.Cell(row, 12).Value = g.CodigoAutorizacion ?? "";
+            ws.Cell(row, 13).Value = g.CantidadAsignacion;
+            ws.Cell(row, 14).Value = g.SesionesInactivadas;
+            ws.Cell(row, 15).Value = g.NumerosSesion;
+            ws.Cell(row, 15).Style.NumberFormat.Format = "@";
+            ws.Cell(row, 16).Value = g.FechaInicio.ToString("yyyy-MM-dd");
+            ws.Cell(row, 17).Value = g.FechaFinal.HasValue ? g.FechaFinal.Value.ToString("yyyy-MM-dd") : "";
+            row++;
+        }
+
+        if (grupos.Count == 0)
+        {
+            ws.Cell(hdr + 1, 1).Value = "El cierre no tiene turnos anulados (pudo reabrirse).";
+        }
+
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var pacSuffix = cierre.PacienteNombre is null ? "" : "_" + SanitizarNombre(cierre.PacienteNombre);
+        var nombre = $"CIERRE_{mesNom}_{cierre.Anio}{pacSuffix}.xlsx";
+        return new ArchivoExportado(
+            ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            nombre);
+    }
+
+    private static string SanitizarNombre(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var ch in s)
+        {
+            sb.Append(char.IsLetterOrDigit(ch) ? ch : '_');
+        }
+        var r = sb.ToString().Trim('_');
+        return string.IsNullOrEmpty(r) ? "cierre" : r;
     }
 }

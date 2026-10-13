@@ -909,24 +909,22 @@ else if (_tabSel == "Cierre de periodos")
                     <div class="cd-ac-input">
                         <input class="form-control form-control-sm" autocomplete="off"
                                placeholder="Todos — escribe nombre o documento"
-                               value="@_pacienteCierreBusqueda" @oninput="OnInputPacienteCierre"
-                               disabled="@(_cierrePreview is null)" />
+                               value="@_pacienteCierreBusqueda" @oninput="OnInputPacienteCierre" />
                         @if (!string.IsNullOrEmpty(_pacienteCierreBusqueda) || !string.IsNullOrEmpty(_pacienteCierreSel))
                         {
                             <button type="button" class="cd-ac-clear" title="Quitar filtro (todos los pacientes)" @onclick="LimpiarPacienteCierre">&times;</button>
                         }
                     </div>
-                    @if (_cierrePreview is not null && string.IsNullOrEmpty(_pacienteCierreSel) && !string.IsNullOrWhiteSpace(_pacienteCierreBusqueda))
+                    @if (string.IsNullOrEmpty(_pacienteCierreSel) && !string.IsNullOrWhiteSpace(_pacienteCierreBusqueda))
                     {
                         <div class="cd-ac-list">
-                            @{ var sugeridos = PacientesCierreSugeridos.ToList(); }
-                            @if (sugeridos.Count == 0)
+                            @if (_pacCierreResultados.Count == 0)
                             {
-                                <div class="cd-ac-empty">Sin coincidencias</div>
+                                <div class="cd-ac-empty">@(_pacCierreBuscando ? "Buscando…" : "Sin coincidencias")</div>
                             }
                             else
                             {
-                                @foreach (var p in sugeridos)
+                                @foreach (var p in _pacCierreResultados)
                                 {
                                     <button type="button" class="cd-ac-item" @onclick="() => SeleccionarPacienteCierre(p)">
                                         <span class="cd-ac-nom">@p.Nombre</span>
@@ -948,9 +946,10 @@ else if (_tabSel == "Cierre de periodos")
             </div>
             <div class="cd-cierre-hint">
                 Inactiva las sesiones <b>pendientes</b> (no atendidas) de los servicios cuya vigencia
-                <b>termina</b> en el mes elegido. Elige un <b>paciente</b> para cerrar solo lo suyo
-                (cierre parcial) o déjalo en <b>Todos</b>. Al cerrar, esas sesiones ya no aparecen en
-                Atención y queda el resumen guardado.
+                <b>termina</b> en el mes elegido. Elige un <b>paciente</b> (busca por nombre o documento)
+                para preparar y cerrar solo lo suyo —<b>cierre parcial</b>— o déjalo en <b>Todos</b>.
+                Luego pulsa <b>Ver pendientes</b>. Al cerrar, esas sesiones ya no aparecen en Atención y
+                queda el resumen guardado.
             </div>
 
             @* Doble confirmacion: paso 1 (en-UI) + paso 2 (confirm del navegador) al pulsar "Si, cerrar". *@
@@ -1073,28 +1072,12 @@ else if (_tabSel == "Cierre de periodos")
                                     <div title="Fecha y hora del cierre">🕒 @c.CerradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                                 </div>
                                 <div class="cd-cc-acts">
-                                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => VerDetalleCierreAsync(c)">@(_cierreDetalleId == c.Id ? "Ocultar" : "Ver detalle")</button>
+                                    <a class="btn btn-outline-success btn-sm" href="/coordinacion/cierres/@c.Id/detalle.xlsx"
+                                       target="_blank" rel="noopener"
+                                       title="Descargar Excel con el detalle completo (paciente, EPS, contrato, CUP, profesional, fechas, sesiones)">⬇ Excel</a>
                                     <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirCierreAsync(c)" disabled="@_cierreBusy"
                                             title="Reabrir: devuelve las sesiones a pendientes y borra el cierre">Reabrir</button>
                                 </div>
-                                @if (_cierreDetalleId == c.Id && _cierreDetalle is not null)
-                                {
-                                    <div class="cd-cc-det">
-                                        @if (_cierreDetalle.Count == 0) { <span class="text-muted">Sin detalle.</span> }
-                                        else
-                                        {
-                                            <table class="table table-sm">
-                                                <thead><tr><th>Paciente</th><th>Servicio</th><th class="text-end">Ses.</th></tr></thead>
-                                                <tbody>
-                                                    @foreach (var d in _cierreDetalle)
-                                                    {
-                                                        <tr><td>@d.PacienteNombre</td><td>@d.ServicioNombre</td><td class="text-end">@d.CantidadPendiente</td></tr>
-                                                    }
-                                                </tbody>
-                                            </table>
-                                        }
-                                    </div>
-                                }
                             </div>
                         }
                     </div>
@@ -1698,57 +1681,52 @@ else if (_tabSel == "Cierre de periodos")
     private string? _cierreMsg;
     private CierrePeriodoPreviewDto? _cierrePreview;
     private IReadOnlyList<CierrePeriodoDto>? _cierres;
-    private Guid? _cierreDetalleId;
-    private IReadOnlyList<CierrePeriodoFilaDto>? _cierreDetalle;
 
-    // Filtro por paciente (acota el cierre): "" = todos. Selector poblado con los pacientes que
-    // tienen pendientes en el periodo previsualizado.
+    // Filtro por paciente (acota la preparacion y el cierre): "" = todos. Se elige ANTES de
+    // preparar, con busqueda en vivo contra toda la base de pacientes del tenant.
     private string _pacienteCierreSel = "";
     private Guid? PacienteCierreId => Guid.TryParse(_pacienteCierreSel, out var g) ? g : (Guid?)null;
     private IEnumerable<CierrePeriodoFilaDto> FilasFiltradas =>
         _cierrePreview is null ? Enumerable.Empty<CierrePeriodoFilaDto>()
         : (PacienteCierreId is Guid pid ? _cierrePreview.Filas.Where(f => f.PacienteId == pid) : _cierrePreview.Filas);
-    private IEnumerable<(Guid Id, string Nombre, string? Documento)> PacientesPendientes =>
-        _cierrePreview is null ? Enumerable.Empty<(Guid, string, string?)>()
-        : _cierrePreview.Filas.GroupBy(f => f.PacienteId)
-            .Select(g => (g.Key, g.First().PacienteNombre, g.First().PacienteDocumento))
-            .OrderBy(x => x.Item2, StringComparer.OrdinalIgnoreCase);
 
-    // Autocompletado del filtro de paciente (la lista puede tener cientos). El texto que se teclea
-    // filtra PacientesPendientes por nombre o documento; elegir una sugerencia fija el PacienteId.
+    // Autocompletado del filtro de paciente: busqueda en vivo (nombre o documento) contra el
+    // servicio. Elegir una sugerencia fija el PacienteId usado para preparar/cerrar.
     private string _pacienteCierreBusqueda = "";
-    private IEnumerable<(Guid Id, string Nombre, string? Documento)> PacientesCierreSugeridos
-    {
-        get
-        {
-            var q = (_pacienteCierreBusqueda ?? "").Trim();
-            var fuente = PacientesPendientes;
-            if (!string.IsNullOrEmpty(q))
-            {
-                fuente = fuente.Where(p =>
-                    (p.Nombre ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
-                    || (p.Documento ?? "").Contains(q, StringComparison.OrdinalIgnoreCase));
-            }
-            return fuente.Take(15);
-        }
-    }
+    private List<PacienteCierreBusquedaDto> _pacCierreResultados = new();
+    private bool _pacCierreBuscando;
+    private int _pacCierreBuscaSeq;
 
-    private void OnInputPacienteCierre(ChangeEventArgs e)
+    private async Task OnInputPacienteCierre(ChangeEventArgs e)
     {
         _pacienteCierreBusqueda = e.Value?.ToString() ?? "";
         _pacienteCierreSel = "";   // al teclear se deselecciona hasta elegir una sugerencia
+        var q = _pacienteCierreBusqueda.Trim();
+        var seq = ++_pacCierreBuscaSeq;   // descarta respuestas de busquedas viejas (race)
+        if (q.Length < 2) { _pacCierreResultados = new(); _pacCierreBuscando = false; return; }
+        _pacCierreBuscando = true;
+        try
+        {
+            var res = await CierreSvc.BuscarPacientesAsync(q);
+            if (seq != _pacCierreBuscaSeq) { return; }   // llego una busqueda mas nueva
+            _pacCierreResultados = res.ToList();
+        }
+        catch { if (seq == _pacCierreBuscaSeq) { _pacCierreResultados = new(); } }
+        finally { if (seq == _pacCierreBuscaSeq) { _pacCierreBuscando = false; } }
     }
 
-    private void SeleccionarPacienteCierre((Guid Id, string Nombre, string? Documento) p)
+    private void SeleccionarPacienteCierre(PacienteCierreBusquedaDto p)
     {
         _pacienteCierreSel = p.Id.ToString();
         _pacienteCierreBusqueda = string.IsNullOrWhiteSpace(p.Documento) ? p.Nombre : $"{p.Nombre} ({p.Documento})";
+        _pacCierreResultados = new();
     }
 
     private void LimpiarPacienteCierre()
     {
         _pacienteCierreSel = "";
         _pacienteCierreBusqueda = "";
+        _pacCierreResultados = new();
     }
 
     // Doble confirmacion del cierre.
@@ -1780,17 +1758,12 @@ else if (_tabSel == "Cierre de periodos")
 
     private async Task PrevisualizarCierreAsync()
     {
-        _cierreBusy = true; _cierreMsg = null; _cierreDetalleId = null; _cierreDetalle = null;
+        _cierreBusy = true; _cierreMsg = null;
         _confirmandoCierre = false; _cierreResultado = null; _cierreResultadoDetalle = null;
         try
         {
-            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre);
-            // Si el paciente filtrado ya no tiene pendientes (p.ej. se cerro), vuelve a "Todos".
-            if (!string.IsNullOrEmpty(_pacienteCierreSel)
-                && !_cierrePreview.Filas.Any(f => f.PacienteId.ToString() == _pacienteCierreSel))
-            {
-                _pacienteCierreSel = ""; _pacienteCierreBusqueda = "";
-            }
+            // Acota la vista previa al paciente elegido (si hay) para una preparacion liviana.
+            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId);
         }
         catch (Exception ex) { _cierreMsg = "No se pudo previsualizar: " + ex.Message; }
         finally { _cierreBusy = false; }
@@ -1849,14 +1822,6 @@ else if (_tabSel == "Cierre de periodos")
         catch (Exception ex) { _cierreMsg = "No se pudo cargar el historial: " + ex.Message; }
     }
 
-    private async Task VerDetalleCierreAsync(CierrePeriodoDto c)
-    {
-        if (_cierreDetalleId == c.Id) { _cierreDetalleId = null; _cierreDetalle = null; return; }
-        _cierreDetalleId = c.Id;
-        try { _cierreDetalle = await CierreSvc.GetDetalleAsync(c.Id); }
-        catch (Exception ex) { _cierreMsg = "No se pudo cargar el detalle: " + ex.Message; }
-    }
-
     private async Task ReabrirCierreAsync(CierrePeriodoDto c)
     {
         var ok = await JS.InvokeAsync<bool>("confirm",
@@ -1868,7 +1833,6 @@ else if (_tabSel == "Cierre de periodos")
             var actor = await Actor();
             await CierreSvc.ReabrirAsync(c.Id, actor);
             _cierreMsg = $"Periodo {MesNombre(c.Mes)} {c.Anio} reabierto. Las sesiones volvieron a pendientes.";
-            if (_cierreDetalleId == c.Id) { _cierreDetalleId = null; _cierreDetalle = null; }
             if (_cierreResultado?.Id == c.Id) { _cierreResultado = null; _cierreResultadoDetalle = null; }
             await CargarCierresAsync();
             if (_cierrePreview is not null && _cierrePreview.Anio == c.Anio && _cierrePreview.Mes == c.Mes)

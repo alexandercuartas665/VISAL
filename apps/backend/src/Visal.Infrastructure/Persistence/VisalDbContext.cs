@@ -126,6 +126,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<NovedadProfesional> NovedadesProfesional => Set<NovedadProfesional>();
     public DbSet<ProfesionalServicio> ProfesionalServicios => Set<ProfesionalServicio>();
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
+    public DbSet<AutorizacionToken> AutorizacionTokens => Set<AutorizacionToken>();
+    public DbSet<AutorizacionConcepto> AutorizacionConceptos => Set<AutorizacionConcepto>();
+    public DbSet<RevisionAgenteLog> RevisionAgenteLogs => Set<RevisionAgenteLog>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
     public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
@@ -1104,8 +1107,50 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Codigo).HasMaxLength(40).IsRequired();
             b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
             b.Property(x => x.TipoArchivoRips).HasMaxLength(2);
+            // Limites de tiempo (opcionales): primera sesion en dias, siguientes en horas.
+            b.Property(x => x.LimiteDiasPrimeraSesion);
+            b.Property(x => x.LimiteHorasSesionesSiguientes);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
+        });
+
+        modelBuilder.Entity<AutorizacionToken>(b =>
+        {
+            b.Property(x => x.Codigo).HasMaxLength(6).IsRequired();
+            b.Property(x => x.ConceptoNombre).HasMaxLength(200);
+            b.Property(x => x.Observacion).HasColumnType("text").IsRequired();
+            b.Property(x => x.GeneradoPorNombre).HasMaxLength(200);
+            b.Property(x => x.UsadoPorNombre).HasMaxLength(200);
+            b.Property(x => x.MotivoUso).HasColumnType("text");
+            b.Property(x => x.Estado).HasConversion<int>();
+            b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Estado });
+        });
+
+        modelBuilder.Entity<AutorizacionConcepto>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.Nombre }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
+        });
+
+        modelBuilder.Entity<RevisionAgenteLog>(b =>
+        {
+            b.Property(x => x.AgenteCodigo).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Proveedor).HasMaxLength(60);
+            b.Property(x => x.Modelo).HasMaxLength(120);
+            b.Property(x => x.Resultado).HasMaxLength(20);
+            b.Property(x => x.Confianza).HasColumnType("numeric(4,3)");
+            b.Property(x => x.Nota).HasColumnType("text");
+            b.Property(x => x.HallazgosJson).HasColumnType("text");
+            b.Property(x => x.Error).HasColumnType("text");
+            b.Property(x => x.SystemPrompt).HasColumnType("text");
+            b.Property(x => x.ContextoEnviado).HasColumnType("text");
+            b.Property(x => x.CamposLegiblesJson).HasColumnType("text");
+            b.Property(x => x.ToolsJson).HasColumnType("text");
+            b.Property(x => x.RespuestaCruda).HasColumnType("text");
+            b.HasIndex(x => new { x.TenantId, x.RevisionClinicaId });
+            b.HasIndex(x => x.HistoriaClinicaId);
         });
 
         modelBuilder.Entity<TenantUserTipoCoordinado>(b =>
@@ -1144,6 +1189,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         // Globales (no por tenant): el numero es unico en toda la plataforma.
         modelBuilder.HasSequence<long>("hc_consecutivo_seq");
         modelBuilder.HasSequence<long>("asignacion_consecutivo_seq");
+        // Consecutivo por SERVICIO (asignaciones.consecutivo). Distinta de la del lote.
+        modelBuilder.HasSequence<long>("asignacion_item_consecutivo_seq");
 
         modelBuilder.Entity<HistoriaClinica>(b =>
         {
@@ -1552,6 +1599,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<Asignacion>(b =>
         {
+            // Consecutivo publico UNICO por servicio (AS-000045). Secuencia global propia,
+            // asignado por la BD en cualquier insercion. Reemplaza al consecutivo del lote
+            // como fuente del numero visible. Ver Asignacion.Consecutivo.
+            b.Property(x => x.Consecutivo)
+                .HasDefaultValueSql("nextval('asignacion_item_consecutivo_seq')")
+                .ValueGeneratedOnAdd();
+            b.HasIndex(x => x.Consecutivo).IsUnique();
             b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
             b.Property(x => x.ServicioId).HasMaxLength(60).IsRequired();
             // Sin cap de longitud: las descripciones CUPS de servicios pueden ser

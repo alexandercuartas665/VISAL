@@ -111,6 +111,32 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         return eventos.Select(ToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<RevisionAgenteLogDto>> ListarAgenteLogsAsync(Guid revisionClinicaId, CancellationToken ct = default)
+    {
+        var logs = await _db.RevisionAgenteLogs.AsNoTracking()
+            .Where(x => x.RevisionClinicaId == revisionClinicaId)
+            .OrderByDescending(x => x.CreatedAt)
+            .ThenByDescending(x => x.Id)
+            .ToListAsync(ct);
+        return logs.Select(l => new RevisionAgenteLogDto(
+            l.Id, l.CreatedAt, l.AgenteCodigo, l.Proveedor, l.Modelo, l.Ok, l.Error,
+            l.Resultado, l.Confianza, l.TokensIn, l.TokensOut,
+            l.Nota, DeserializarHallazgos(l.HallazgosJson),
+            l.SystemPrompt, l.ContextoEnviado, l.CamposLegiblesJson, l.ToolsJson, l.RespuestaCruda))
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> DeserializarHallazgos(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return Array.Empty<string>(); }
+        try
+        {
+            var lista = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
+            return lista?.Where(s => !string.IsNullOrWhiteSpace(s)).ToList() ?? (IReadOnlyList<string>)Array.Empty<string>();
+        }
+        catch { return Array.Empty<string>(); }
+    }
+
     public async Task<RevisionClinicaDto> AsignarRevisorAsync(AsignarRevisorCmd cmd, CancellationToken ct = default)
     {
         var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);

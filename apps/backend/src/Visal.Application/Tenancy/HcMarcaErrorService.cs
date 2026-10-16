@@ -77,8 +77,6 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
                 from a in db.Asignaciones.AsNoTracking()
                 where asigIds.Contains(a.Id)
                 join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
-                join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id into lj
-                from l in lj.DefaultIfEmpty()
                 join s in db.Sucursales.AsNoTracking() on p.SedeAtencionId equals s.Id into sj
                 from s in sj.DefaultIfEmpty()
                 select new
@@ -86,7 +84,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
                     a.Id,
                     Sede = p.SedeAtencionId,
                     Nombre = s != null ? s.Nombre : null,
-                    AsigCons = l != null ? (long?)l.Consecutivo : null
+                    AsigCons = (long?)a.Consecutivo   // consecutivo POR SERVICIO (AS-xxxxxx)
                 })
               .ToListAsync(ct);
             foreach (var f in filas) { infoPorAsig[f.Id] = (f.Sede, f.Nombre, f.AsigCons); }

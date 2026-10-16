@@ -24,6 +24,8 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
             modelBuilder.HasSequence("asignacion_consecutivo_seq");
 
+            modelBuilder.HasSequence("asignacion_item_consecutivo_seq");
+
             modelBuilder.HasSequence("hc_consecutivo_seq");
 
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
@@ -1050,6 +1052,12 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("codigo_rips");
 
+                    b.Property<long>("Consecutivo")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("consecutivo")
+                        .HasDefaultValueSql("nextval('asignacion_item_consecutivo_seq')");
+
                     b.Property<string>("ContratoCodigo")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -1197,6 +1205,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_asignaciones");
+
+                    b.HasIndex("Consecutivo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_asignaciones_consecutivo");
 
                     b.HasIndex("LoteId")
                         .HasDatabaseName("ix_asignaciones_lote_id");
@@ -1854,6 +1866,154 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("automation_rules", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.AutorizacionConcepto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("nombre");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_autorizacion_conceptos");
+
+                    b.HasIndex("TenantId", "Nombre")
+                        .IsUnique()
+                        .HasDatabaseName("ix_autorizacion_conceptos_tenant_id_nombre");
+
+                    b.HasIndex("TenantId", "Activo", "Orden")
+                        .HasDatabaseName("ix_autorizacion_conceptos_tenant_id_activo_orden");
+
+                    b.ToTable("autorizacion_conceptos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.AutorizacionToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AsignacionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asignacion_id");
+
+                    b.Property<string>("Codigo")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)")
+                        .HasColumnName("codigo");
+
+                    b.Property<string>("ConceptoNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("concepto_nombre");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<int>("Estado")
+                        .HasColumnType("integer")
+                        .HasColumnName("estado");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("GeneradoPorNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("generado_por_nombre");
+
+                    b.Property<Guid?>("HistoriaClinicaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("historia_clinica_id");
+
+                    b.Property<string>("MotivoUso")
+                        .HasColumnType("text")
+                        .HasColumnName("motivo_uso");
+
+                    b.Property<string>("Observacion")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("observacion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<DateTimeOffset?>("UsadoEn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("usado_en");
+
+                    b.Property<string>("UsadoPorNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("usado_por_nombre");
+
+                    b.Property<Guid?>("UsadoPorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usado_por_user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_autorizacion_tokens");
+
+                    b.HasIndex("TenantId", "Codigo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_autorizacion_tokens_tenant_id_codigo");
+
+                    b.HasIndex("TenantId", "Estado")
+                        .HasDatabaseName("ix_autorizacion_tokens_tenant_id_estado");
+
+                    b.ToTable("autorizacion_tokens", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.CatalogoPaciente", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2000,6 +2160,14 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
+
+                    b.Property<int?>("LimiteDiasPrimeraSesion")
+                        .HasColumnType("integer")
+                        .HasColumnName("limite_dias_primera_sesion");
+
+                    b.Property<int?>("LimiteHorasSesionesSiguientes")
+                        .HasColumnType("integer")
+                        .HasColumnName("limite_horas_sesiones_siguientes");
 
                     b.Property<string>("Nombre")
                         .IsRequired()
@@ -4423,6 +4591,14 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("AutorizacionFechaAutorizada")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("autorizacion_fecha_autorizada");
+
+                    b.Property<Guid?>("AutorizacionFechaTokenId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("autorizacion_fecha_token_id");
 
                     b.Property<long>("Consecutivo")
                         .ValueGeneratedOnAdd()
@@ -8664,6 +8840,122 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasName("pk_reporte_usuarios");
 
                     b.ToTable("reporte_usuarios", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.RevisionAgenteLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AgenteCodigo")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("agente_codigo");
+
+                    b.Property<string>("CamposLegiblesJson")
+                        .HasColumnType("text")
+                        .HasColumnName("campos_legibles_json");
+
+                    b.Property<decimal?>("Confianza")
+                        .HasColumnType("numeric(4,3)")
+                        .HasColumnName("confianza");
+
+                    b.Property<string>("ContextoEnviado")
+                        .HasColumnType("text")
+                        .HasColumnName("contexto_enviado");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text")
+                        .HasColumnName("error");
+
+                    b.Property<string>("HallazgosJson")
+                        .HasColumnType("text")
+                        .HasColumnName("hallazgos_json");
+
+                    b.Property<Guid>("HistoriaClinicaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("historia_clinica_id");
+
+                    b.Property<string>("Modelo")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("modelo");
+
+                    b.Property<string>("Nota")
+                        .HasColumnType("text")
+                        .HasColumnName("nota");
+
+                    b.Property<bool>("Ok")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ok");
+
+                    b.Property<string>("Proveedor")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("proveedor");
+
+                    b.Property<string>("RespuestaCruda")
+                        .HasColumnType("text")
+                        .HasColumnName("respuesta_cruda");
+
+                    b.Property<string>("Resultado")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("resultado");
+
+                    b.Property<Guid>("RevisionClinicaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_clinica_id");
+
+                    b.Property<string>("SystemPrompt")
+                        .HasColumnType("text")
+                        .HasColumnName("system_prompt");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<int>("TokensIn")
+                        .HasColumnType("integer")
+                        .HasColumnName("tokens_in");
+
+                    b.Property<int>("TokensOut")
+                        .HasColumnType("integer")
+                        .HasColumnName("tokens_out");
+
+                    b.Property<string>("ToolsJson")
+                        .HasColumnType("text")
+                        .HasColumnName("tools_json");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_revision_agente_logs");
+
+                    b.HasIndex("HistoriaClinicaId")
+                        .HasDatabaseName("ix_revision_agente_logs_historia_clinica_id");
+
+                    b.HasIndex("TenantId", "RevisionClinicaId")
+                        .HasDatabaseName("ix_revision_agente_logs_tenant_id_revision_clinica_id");
+
+                    b.ToTable("revision_agente_logs", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.RevisionClinica", b =>

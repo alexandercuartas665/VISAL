@@ -431,26 +431,12 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 codHabResuelto, tipoArchivoRips, codigoAutorizacion,
                 nombreServicio, valorUnitario, valorTotal, cuotaModeradora, copago,
                 modalidadFacturacion, grupoServicioFacturacion, servicioFacturacion,
-                asigRelevante?.LoteId));
+                asigRelevante?.LoteId,
+                // AS-000045 POR SERVICIO (asignacion.Consecutivo); el lote se conserva solo
+                // como agrupador interno (AsignacionLoteId) para filtros de facturacion.
+                AsignacionConsecutivo: asigRelevante?.Consecutivo));
         }
 
-        // Consecutivo publico del lote (AS-000045) para la trazabilidad del snapshot.
-        var loteIdsSnap = hechos.Where(x => x.AsignacionLoteId.HasValue)
-            .Select(x => x.AsignacionLoteId!.Value).Distinct().ToList();
-        if (loteIdsSnap.Count > 0)
-        {
-            var loteCons = await db.AsignacionLotes.AsNoTracking()
-                .Where(l => loteIdsSnap.Contains(l.Id))
-                .Select(l => new { l.Id, l.Consecutivo })
-                .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
-            for (int i = 0; i < hechos.Count; i++)
-            {
-                if (hechos[i].AsignacionLoteId is Guid lid && loteCons.TryGetValue(lid, out var c))
-                {
-                    hechos[i] = hechos[i] with { AsignacionConsecutivo = c };
-                }
-            }
-        }
         return hechos;
     }
 

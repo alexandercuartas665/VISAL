@@ -17,7 +17,9 @@ public sealed class HistoriaClinicaService(
     IRevisionKanbanService kanban,
     IPreRevisionIaQueue preRevisionQueue,
     IPreRevisionIaPendingStore preRevisionStore,
-    IAtencionOrdenService atencionOrden) : IHistoriaClinicaService
+    IAtencionOrdenService atencionOrden,
+    IAutorizacionTokenService tokenSvc,
+    TimeProvider clock) : IHistoriaClinicaService
 {
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
@@ -110,13 +112,12 @@ public sealed class HistoriaClinicaService(
                     .Select(t => new { t.Id, t.AsignacionId })
                     .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
             var asigIds = turnoToAsig.Values.Distinct().ToList();
-            // Consecutivo del LOTE (AS-000045) por servicio: Asignacion.LoteId -> Lote.Consecutivo.
-            var asigToLoteCons = asigIds.Count == 0
+            // Consecutivo publico AS-000045 POR SERVICIO: asignacion.Consecutivo.
+            var asigToCons = asigIds.Count == 0
                 ? new Dictionary<Guid, long>()
-                : await (from a in db.Asignaciones.AsNoTracking()
-                         where asigIds.Contains(a.Id)
-                         join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id
-                         select new { a.Id, l.Consecutivo })
+                : await db.Asignaciones.AsNoTracking()
+                        .Where(a => asigIds.Contains(a.Id))
+                        .Select(a => new { a.Id, a.Consecutivo })
                         .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
             var turnoOrden = new Dictionary<Guid, int>();
             if (asigIds.Count > 0)
@@ -147,7 +148,7 @@ public sealed class HistoriaClinicaService(
                     if (turnoToAsig.TryGetValue(turnoIdHc, out var asigId))
                     {
                         nuevo = nuevo with { AsignacionId = asigId };
-                        if (asigToLoteCons.TryGetValue(asigId, out var lc)) { nuevo = nuevo with { AsignacionConsecutivo = lc }; }
+                        if (asigToCons.TryGetValue(asigId, out var lc)) { nuevo = nuevo with { AsignacionConsecutivo = lc }; }
                     }
                     return nuevo;
                 })
@@ -174,17 +175,16 @@ public sealed class HistoriaClinicaService(
             .FirstOrDefaultAsync(ct);
         if (row is null) { return null; }
 
-        // Consecutivo del lote/asignacion (AS-000045) al que pertenece la HC, via el
-        // pivote sesion -> turno -> asignacion -> lote. Null si la HC no nacio de una
-        // asignacion (p.ej. HC suelta). Se usa para imprimir "AS-000045" en el encabezado.
+        // Consecutivo publico AS-000045 del SERVICIO al que pertenece la HC, via el
+        // pivote sesion -> turno -> asignacion. Null si la HC no nacio de una asignacion
+        // (p.ej. HC suelta). Se usa para imprimir "AS-000045" en el encabezado.
         var asigCons = await (
             from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
             where p.HistoriaClinicaId == id
             join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
             join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
             join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-            join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id
-            select (long?)l.Consecutivo).FirstOrDefaultAsync(ct);
+            select (long?)a.Consecutivo).FirstOrDefaultAsync(ct);
         if (asigCons is not null) { row = row with { AsignacionConsecutivo = asigCons }; }
         return row;
     }
@@ -360,8 +360,7 @@ public sealed class HistoriaClinicaService(
             from t in db.AsignacionTurnos.AsNoTracking()
             where t.Id == turnoId
             join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-            join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id
-            select (long?)l.Consecutivo).FirstOrDefaultAsync(ct);
+            select (long?)a.Consecutivo).FirstOrDefaultAsync(ct);
 
     public async Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
         Guid pacienteId, CancellationToken ct = default)
@@ -384,22 +383,15 @@ public sealed class HistoriaClinicaService(
 
         var asigs = await db.Asignaciones.AsNoTracking()
             .Where(a => asigIds.Contains(a.Id))
-            .Select(a => new { a.Id, a.NombreServicio, a.FechaInicio, a.LoteId })
+            .Select(a => new { a.Id, a.NombreServicio, a.FechaInicio, a.Consecutivo })
             .ToListAsync(ct);
-        // Consecutivo del lote (AS-000045) para la etiqueta del dropdown.
-        var loteIds = asigs.Select(a => a.LoteId).Distinct().ToList();
-        var loteCons = loteIds.Count == 0
-            ? new Dictionary<Guid, long>()
-            : await db.AsignacionLotes.AsNoTracking()
-                .Where(l => loteIds.Contains(l.Id))
-                .Select(l => new { l.Id, l.Consecutivo })
-                .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
 
+        // Codigo publico AS-000045 POR SERVICIO (a.Consecutivo) para la etiqueta del dropdown.
         return asigs
             .OrderByDescending(a => a.FechaInicio)
             .Select(a => new AsignacionHistoriaOpcionDto(
                 a.Id,
-                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({(loteCons.TryGetValue(a.LoteId, out var c) ? CodigoPublico.Asignacion(c) : a.Id.ToString().ToUpperInvariant())})",
+                $"{a.NombreServicio} - {a.FechaInicio:dd/MM/yyyy} ({CodigoPublico.Asignacion(a.Consecutivo)})",
                 a.FechaInicio))
             .ToList();
     }
@@ -710,6 +702,16 @@ public sealed class HistoriaClinicaService(
         // la fecha en que se abrio/registro la HC.
         e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct)
                           ?? e.FechaAtencion ?? e.FechaApertura;
+        // Respaldo DURO del control de fecha de atencion: si la fecha quedo fuera del
+        // limite del tipo de servicio y la HC no tiene una autorizacion (token) que la
+        // cubra, abortamos el cierre ANTES de mutar estado/persistir. La UI lo captura y
+        // abre el modal de token. (El enganche principal esta en el autoguardado.)
+        var controlCierre = await EvaluarControlFechaAsync(e, ct);
+        if (controlCierre.RequiereToken)
+        {
+            throw new CierreRequiereAutorizacionException(controlCierre.Detalle
+                ?? "La fecha de atencion excede el limite permitido. Requiere token de autorizacion.");
+        }
         e.Estado = HistoriaClinicaEstado.Cerrada;
         e.FechaCierre = DateTimeOffset.UtcNow;
         // Auditoria antes de SaveChanges: audit.Write solo agrega la entrada al
@@ -1235,5 +1237,113 @@ public sealed class HistoriaClinicaService(
         if (valores is null) { return null; }
         var schema = FormSchema.FromJson(schemaJson);
         return FechaAtencionHelper.Calcular(schema, valores);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    //  Control de fecha de atencion (limite de oportunidad por tipo de servicio)
+    //  1a sesion: max N DIAS desde la coordinacion (turno.CreatedAt).
+    //  Siguientes: la fecha no puede estar mas de N HORAS antes de ahora (backdating).
+    //  Si se viola y la HC no tiene autorizacion (token) para esa fecha -> RequiereToken.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly TimeSpan ControlBogotaOffset = TimeSpan.FromHours(-5);
+
+    /// <summary>Resuelve (NumeroSesion, coordinacion=turno.CreatedAt, AsignacionId, Tipo, Modulo)
+    /// de la asignacion ligada a la HC via pivote sesion-HC -> sesion -> turno -> asignacion.
+    /// Toma el turno de menor NumeroSesion. null si la HC no esta ligada a ninguna sesion.</summary>
+    private async Task<(int NumeroSesion, DateTimeOffset Coordinacion, Guid AsignacionId, string? Tipo, string? Modulo)?>
+        ResolverTurnoAsigDeHcAsync(Guid hcId, CancellationToken ct)
+    {
+        var fila = await (
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            where p.HistoriaClinicaId == hcId
+            orderby (t.NumeroSesion ?? int.MaxValue), t.CreatedAt, t.Id
+            select new { Num = t.NumeroSesion, t.CreatedAt, AsigId = a.Id, a.TipoServicio, a.Modulo })
+            .FirstOrDefaultAsync(ct);
+        if (fila is null) { return null; }
+        return (fila.Num ?? 1, fila.CreatedAt, fila.AsigId, fila.TipoServicio, fila.Modulo);
+    }
+
+    private async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(HistoriaClinica e, CancellationToken ct)
+    {
+        if (e.FechaAtencion is not DateTimeOffset fecha)
+        {
+            return new ControlFechaAtencionDto(false, null, null, null, null);
+        }
+        var info = await ResolverTurnoAsigDeHcAsync(e.Id, ct);
+        if (info is null)
+        {
+            // HC suelta (sin sesion): no hay tipo/coordinacion -> sin control.
+            return new ControlFechaAtencionDto(false, null, null, null, fecha);
+        }
+        var (numeroSesion, coordinacion, asignacionId, tipo, modulo) = info.Value;
+
+        var cod = (tipo ?? modulo ?? "").Trim().ToUpperInvariant();
+        if (cod.Length == 0) { return new ControlFechaAtencionDto(false, null, null, asignacionId, fecha); }
+        var lim = await db.CatalogosTipoServicio.AsNoTracking()
+            .Where(c => c.Codigo.ToUpper() == cod)
+            .Select(c => new { c.LimiteDiasPrimeraSesion, c.LimiteHorasSesionesSiguientes })
+            .FirstOrDefaultAsync(ct);
+        if (lim is null) { return new ControlFechaAtencionDto(false, null, null, asignacionId, fecha); }
+
+        bool viola = false; string? unidad = null; string? detalle = null;
+        if (numeroSesion <= 1)
+        {
+            if (lim.LimiteDiasPrimeraSesion is int dd)
+            {
+                var fBog = fecha.ToOffset(ControlBogotaOffset).Date;
+                var cBog = coordinacion.ToOffset(ControlBogotaOffset).Date;
+                var dias = (fBog - cBog).Days;
+                if (dias > dd)
+                {
+                    viola = true; unidad = "dias";
+                    detalle = $"La fecha de atencion ({fBog:dd/MM/yyyy}) supera el limite de {dd} dia(s) desde la coordinacion ({cBog:dd/MM/yyyy}): lleva {dias} dia(s).";
+                }
+            }
+        }
+        else if (lim.LimiteHorasSesionesSiguientes is int hh)
+        {
+            var horas = (clock.GetUtcNow() - fecha).TotalHours;
+            if (horas > hh)
+            {
+                viola = true; unidad = "horas";
+                detalle = $"La fecha de atencion esta {Math.Floor(horas)} hora(s) antes de ahora y supera el limite de {hh} hora(s) para sesiones de seguimiento.";
+            }
+        }
+
+        if (!viola) { return new ControlFechaAtencionDto(false, unidad, null, asignacionId, fecha); }
+
+        // Autorizada para esta MISMA fecha?
+        var autorizada = e.AutorizacionFechaTokenId != null && e.AutorizacionFechaAutorizada == fecha;
+        return new ControlFechaAtencionDto(!autorizada, unidad, detalle, asignacionId, fecha);
+    }
+
+    public async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, CancellationToken ct = default)
+    {
+        var e = await db.HistoriasClinicas.AsNoTracking().FirstOrDefaultAsync(h => h.Id == hcId, ct);
+        if (e is null) { return new ControlFechaAtencionDto(false, null, null, null, null); }
+        return await EvaluarControlFechaAsync(e, ct);
+    }
+
+    public async Task<AutorizarFechaResult> AutorizarFechaConTokenAsync(
+        Guid hcId, string codigo, string motivo, string? actorNombre, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == hcId, ct);
+        if (e is null) { return new AutorizarFechaResult(false, "Historia clinica no encontrada."); }
+        if (e.FechaAtencion is not DateTimeOffset fecha)
+        {
+            return new AutorizarFechaResult(false, "La historia aun no tiene fecha de atencion.");
+        }
+        var info = await ResolverTurnoAsigDeHcAsync(e.Id, ct);
+        var res = await tokenSvc.ValidarYMarcarUsoAsync(codigo, e.Id, info?.AsignacionId, actorNombre, actor, motivo, ct);
+        if (!res.Ok) { return new AutorizarFechaResult(false, res.Mensaje); }
+        // Marca la HC como autorizada para ESTA fecha (no re-pregunta mientras no cambie).
+        e.AutorizacionFechaTokenId = res.TokenId;
+        e.AutorizacionFechaAutorizada = fecha;
+        await db.SaveChangesAsync(ct); // persiste el token marcado + la HC en una sola transaccion
+        return new AutorizarFechaResult(true, null);
     }
 }

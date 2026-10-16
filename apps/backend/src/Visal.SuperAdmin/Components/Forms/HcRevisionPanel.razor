@@ -137,6 +137,75 @@ else
                 </div>
             }
         </div>
+
+        @* ===== Log del agente IA: que recibio, que proceso hizo, que respondio ===== *@
+        <div class="rev-timeline-h">Log del agente IA (@_agenteLogs.Count)</div>
+        @if (_agenteLogs.Count == 0)
+        {
+            <div class="rev-log-empty">Aun no hay corridas del agente registradas con detalle. (Se captura desde ahora en cada revision con agente.)</div>
+        }
+        else
+        {
+            @foreach (var (log, idx) in _agenteLogs.Select((l, i) => (l, i)))
+            {
+                <div class="rev-log">
+                    <div class="rev-log-hdr">
+                        <span class="rev-chip @(log.Ok ? AgenteCls(ParseResultado(log.Resultado)) : "rev-chip-rech")">
+                            @(log.Ok ? (log.Resultado ?? "—") : "Error")
+                        </span>
+                        @if (log.Confianza is decimal cf) { <span class="rev-log-meta">confianza @(Math.Round(cf * 100)) %</span> }
+                        <span class="rev-log-meta">@log.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                        <span class="rev-log-meta">@(log.Modelo ?? "") @(string.IsNullOrWhiteSpace(log.Proveedor) ? "" : "· " + log.Proveedor)</span>
+                        <span class="rev-log-meta">tokens: @log.TokensIn → @log.TokensOut</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(log.Error))
+                    {
+                        <div class="rev-log-error">@log.Error</div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(log.Nota))
+                    {
+                        <div class="rev-log-just">
+                            <div class="rev-log-just-lbl">Justificacion del agente</div>
+                            <div class="rev-log-just-txt">@log.Nota</div>
+                        </div>
+                    }
+                    @if (log.Hallazgos.Count > 0)
+                    {
+                        <div class="rev-log-hall">
+                            <div class="rev-log-just-lbl">Hallazgos (@log.Hallazgos.Count)</div>
+                            <ul class="rev-log-hall-list">
+                                @foreach (var h in log.Hallazgos)
+                                {
+                                    <li>@h</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    <details class="rev-log-sec">
+                        <summary>📥 Historia clinica que recibio (campo → contenido)</summary>
+                        <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.CamposLegiblesJson) ? "(no disponible)" : log.CamposLegiblesJson)</pre>
+                    </details>
+                    <details class="rev-log-sec">
+                        <summary>🧭 Instrucciones (system prompt)</summary>
+                        <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.SystemPrompt) ? "(no disponible)" : log.SystemPrompt)</pre>
+                    </details>
+                    <details class="rev-log-sec">
+                        <summary>🧩 Proceso: herramientas ejecutadas</summary>
+                        <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.ToolsJson) ? "(no disponible)" : log.ToolsJson)</pre>
+                    </details>
+                    <details class="rev-log-sec">
+                        <summary>📦 Contexto completo enviado al modelo</summary>
+                        <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.ContextoEnviado) ? "(no disponible)" : log.ContextoEnviado)</pre>
+                    </details>
+                    <details class="rev-log-sec">
+                        <summary>💬 Respuesta cruda del modelo</summary>
+                        <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.RespuestaCruda) ? "(no disponible)" : log.RespuestaCruda)</pre>
+                    </details>
+                </div>
+            }
+        }
     </div>
 }
 
@@ -184,6 +253,24 @@ else
     .rev-evt-actor { color:#64748b; font-size:11px; margin-bottom:3px; }
     .rev-evt-motivo { color:#334155; margin-top:3px; }
     .rev-evt-nota { color:#475569; margin-top:3px; font-style:italic; }
+
+    /* Log del agente IA */
+    .rev-log-empty { color:#94a3b8; font-size:12px; padding:8px 2px; }
+    .rev-log { border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:10px; background:#fff; }
+    .rev-log-hdr { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; }
+    .rev-log-meta { font-size:11px; color:#64748b; }
+    .rev-log-error { font-size:12px; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:6px 8px; margin-bottom:6px; }
+    .rev-log-just { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 10px; margin-bottom:8px; }
+    .rev-log-just-lbl { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#1d4ed8; margin-bottom:3px; }
+    .rev-log-just-txt { font-size:13px; color:#1e293b; line-height:1.4; }
+    .rev-log-hall { margin-bottom:8px; }
+    .rev-log-hall-list { margin:2px 0 0; padding-left:18px; }
+    .rev-log-hall-list li { font-size:12.5px; color:#334155; margin-bottom:2px; }
+    .rev-log-sec { border-top:1px solid #f1f5f9; padding:4px 0; }
+    .rev-log-sec > summary { cursor:pointer; font-size:12px; font-weight:600; color:#334155; padding:3px 0; list-style:revert; }
+    .rev-log-sec > summary:hover { color:#1d4ed8; }
+    .rev-log-pre { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; font-size:11.5px;
+        white-space:pre-wrap; word-break:break-word; max-height:320px; overflow:auto; margin:6px 0 2px; color:#1e293b; font-family:ui-monospace,Menlo,Consolas,monospace; }
 </style>
 
 @code {
@@ -199,6 +286,10 @@ else
 
     private RevisionClinicaDto? _revision;
     private List<RevisionEventoDto> _eventos = new();
+    private List<RevisionAgenteLogDto> _agenteLogs = new();
+
+    private static RevisionResultado ParseResultado(string? r)
+        => Enum.TryParse<RevisionResultado>(r, out var v) ? v : RevisionResultado.Neutral;
     private bool _cargando;
     private bool _procesando;
     private string? _error;
@@ -266,6 +357,7 @@ else
                     .OrderByDescending(e => e.OcurridoEn)
                     .ThenByDescending(e => e.Iteracion)
                     .ToList();
+                _agenteLogs = (await RevisionSvc.ListarAgenteLogsAsync(_revision.Id)).ToList();
             }
         }
         catch (Exception ex)

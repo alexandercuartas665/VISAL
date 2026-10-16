@@ -107,6 +107,9 @@ public interface IApplicationDbContext
     DbSet<NovedadProfesional> NovedadesProfesional { get; }
     DbSet<ProfesionalServicio> ProfesionalServicios { get; }
     DbSet<CatalogoTipoServicio> CatalogosTipoServicio { get; }
+    DbSet<AutorizacionToken> AutorizacionTokens { get; }
+    DbSet<AutorizacionConcepto> AutorizacionConceptos { get; }
+    DbSet<RevisionAgenteLog> RevisionAgenteLogs { get; }
     DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados { get; }
     DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }
     DbSet<TipologiaArchivo> TipologiaArchivos { get; }

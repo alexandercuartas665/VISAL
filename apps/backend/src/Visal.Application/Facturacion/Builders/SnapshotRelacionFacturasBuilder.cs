@@ -188,17 +188,13 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Telefono"] = usarDatosPaciente ? h.Paciente.Telefono : h.Sucursal?.Telefono,
             ["Correo electrónico"] = usarDatosPaciente ? h.Paciente.Email : h.Sucursal?.Email,
             // Trazabilidad interna (fuera del template EPS): consecutivo publico
-            // legible (HC-000123 / AS-000045). Fallback al hex 8 si faltara.
+            // legible (HC-000123 / AS-000045). El AS sale POR SERVICIO (asignacion.Consecutivo);
+            // null solo si la HC no nacio de una asignacion.
             ["HC N°"] = CodigoPublico.Hc(h.Hc.Consecutivo),                    // 43 — consecutivo de la HC
-            ["Cód. Asignación"] = h.AsignacionConsecutivo is long _ac         // 44 — consecutivo del lote
-                ? CodigoPublico.Asignacion(_ac) : Corto8(h.AsignacionLoteId),
+            ["Cód. Asignación"] = h.AsignacionConsecutivo is long _ac         // 44 — consecutivo por servicio
+                ? CodigoPublico.Asignacion(_ac) : null,
         };
     }
-
-    /// <summary>Codigo corto: primeros 8 hex del GUID en mayuscula (igual que "HC N°"
-    /// y el "codigo de asignacion" del modulo Ordenes). Null/Empty -> null.</summary>
-    private static string? Corto8(Guid? id)
-        => id is Guid g && g != Guid.Empty ? g.ToString()[..8].ToUpperInvariant() : null;
 
     // Autorizacion viene de Asignacion.CodigoAutorizacion. Legacy tiene "." como
     // placeholder de "sin autorizacion" — la EPS lo quiere en blanco/null. Lo

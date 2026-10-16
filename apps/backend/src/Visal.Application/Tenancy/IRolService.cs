@@ -40,6 +40,10 @@ public static class ModuloCatalogo
         // lo tienen implicito (mismo criterio que historias.reabrir).
         new("atencion.saltar-orden", "Atencion - Abrir HC saltando el orden secuencial", "Operacion Clinica"),
         new("ordenes", "Ordenes Clinicas", "Operacion Clinica"),
+        // Autorizaciones: genera tokens de 6 chars (30 min, un solo uso) para saltar el
+        // control de fecha de atencion. Solo los "usuarios de autorizacion" (y Owner/Admin
+        // por bypass) ven el modulo /autorizaciones y pueden generar tokens.
+        new("autorizaciones", "Autorizaciones (tokens de fecha)", "Operacion Clinica"),
         // Capacitaciones (LMS interno de personal): gestor de cursos + evaluaciones.
         new("capacitaciones", "Capacitaciones", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),

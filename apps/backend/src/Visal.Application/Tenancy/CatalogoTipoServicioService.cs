@@ -20,14 +20,16 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
         var rows = await q.ToListAsync(ct);
         return rows
             .OrderBy(r => r.Orden).ThenBy(r => r.Codigo, StringComparer.OrdinalIgnoreCase)
-            .Select(r => new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips))
+            .Select(r => new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips,
+                r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes))
             .ToList();
     }
 
     public async Task<CatalogoTipoServicioDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
         var r = await db.CatalogosTipoServicio.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        return r is null ? null : new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips);
+        return r is null ? null : new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips,
+            r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes);
     }
 
     public async Task<CatalogoTipoServicioDto> GuardarAsync(GuardarTipoServicioRequest req, Guid actor, CancellationToken ct = default)
@@ -56,8 +58,13 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
         entity.Orden = req.Orden;
         entity.Activo = req.Activo;
         entity.TipoArchivoRips = string.IsNullOrWhiteSpace(req.TipoArchivoRips) ? null : req.TipoArchivoRips.Trim().ToUpperInvariant();
+        // Limites de tiempo: un valor <= 0 equivale a "sin limite" (null), para no confundir
+        // "0 dias" con control estricto accidental.
+        entity.LimiteDiasPrimeraSesion = req.LimiteDiasPrimeraSesion is int d && d > 0 ? d : null;
+        entity.LimiteHorasSesionesSiguientes = req.LimiteHorasSesionesSiguientes is int h && h > 0 ? h : null;
         await db.SaveChangesAsync(ct);
-        return new CatalogoTipoServicioDto(entity.Id, entity.Codigo, entity.Nombre, entity.Orden, entity.Activo, entity.TipoArchivoRips);
+        return new CatalogoTipoServicioDto(entity.Id, entity.Codigo, entity.Nombre, entity.Orden, entity.Activo, entity.TipoArchivoRips,
+            entity.LimiteDiasPrimeraSesion, entity.LimiteHorasSesionesSiguientes);
     }
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)

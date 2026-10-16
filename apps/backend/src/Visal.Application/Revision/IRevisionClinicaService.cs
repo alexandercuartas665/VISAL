@@ -29,6 +29,27 @@ public sealed record RevisionEventoDto(
     string? PayloadJson,
     DateTimeOffset OcurridoEn);
 
+/// <summary>DTO del log de una corrida del agente IA (que recibio, que hizo, que respondio).</summary>
+public sealed record RevisionAgenteLogDto(
+    Guid Id,
+    DateTimeOffset CreatedAt,
+    string AgenteCodigo,
+    string? Proveedor,
+    string? Modelo,
+    bool Ok,
+    string? Error,
+    string? Resultado,
+    decimal? Confianza,
+    int TokensIn,
+    int TokensOut,
+    string? Nota,
+    IReadOnlyList<string> Hallazgos,
+    string? SystemPrompt,
+    string? ContextoEnviado,
+    string? CamposLegiblesJson,
+    string? ToolsJson,
+    string? RespuestaCruda);
+
 /// <summary>Comando para abrir el ciclo. Si ya existe una revision viva para la HC, la devuelve.</summary>
 public sealed record SolicitarRevisionCmd(Guid HistoriaClinicaId, Guid? SolicitadaPor, string? Nota);
 
@@ -85,6 +106,10 @@ public interface IRevisionClinicaService
     Task<RevisionClinicaDto> SolicitarAsync(SolicitarRevisionCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto?> GetPorHistoriaAsync(Guid historiaClinicaId, CancellationToken ct = default);
     Task<IReadOnlyList<RevisionEventoDto>> ListarEventosAsync(Guid revisionClinicaId, CancellationToken ct = default);
+
+    /// <summary>Lista los logs de corridas del agente IA de un ciclo (recientes primero), con el
+    /// detalle de instrucciones/contexto/tools/respuesta para el panel "Log del agente".</summary>
+    Task<IReadOnlyList<RevisionAgenteLogDto>> ListarAgenteLogsAsync(Guid revisionClinicaId, CancellationToken ct = default);
     Task<RevisionClinicaDto> AsignarRevisorAsync(AsignarRevisorCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto> RegistrarVeredictoAgenteAsync(VeredictoAgenteCmd cmd, CancellationToken ct = default);
     Task<RevisionClinicaDto> AprobarAsync(AprobarCmd cmd, CancellationToken ct = default);

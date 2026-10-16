@@ -657,6 +657,21 @@ else
                 </label>
             </div>
         </div>
+        @* TEXTO REPETIDO — Sobre el resultado filtrado, deja solo HCs del MISMO formato
+           cuyo texto clinico (narrativa) es IDENTICO a otra (deteccion de copy-paste).
+           Cada grupo de duplicados comparte un numero en la columna. *@
+        <div class="oc-f oc-f-wide">
+            <label>Texto repetido</label>
+            <div class="form-check" style="padding-top:4px;">
+                <input class="form-check-input" type="checkbox" id="ocSoloTextoRepetido"
+                       @bind="_soloTextoRepetido" />
+                <label class="form-check-label" for="ocSoloTextoRepetido"
+                       style="font-size:12px;cursor:pointer;"
+                       title="Solo documentos del mismo formato con texto clinico identico (copy-paste)">
+                    Solo texto repetido
+                </label>
+            </div>
+        </div>
         @* Filtro client-side sobre el resultado cargado: deja solo los servicios
            (lote + Cod. servicio) que tienen mas de una sesion/HC — las terapias y
            multi-sesion donde el N° de sesion importa. Util para validar el backfill. *@
@@ -1138,6 +1153,15 @@ else
                                         Formula sin firma (reparable)
                                     </span>
                                 }
+                                @if (r.GrupoTextoRepetido is int grp)
+                                {
+                                    <button type="button" class="badge border-0"
+                                            style="@($"font-size:.62rem;margin-top:2px;display:inline-block;color:#fff;cursor:pointer;background:{ColorGrupo(grp)};")"
+                                            title="Ver el texto repetido y las HC de este grupo (posible copy-paste)."
+                                            @onclick="() => AbrirTextoRepetido(r)">
+                                        &#9112; Texto repetido &middot; Grupo @grp
+                                    </button>
+                                }
                             </td>
                             @{
                                 var hcCod = r.HcConsecutivo is long hcn ? CodigoPublico.Hc(hcn) : null;
@@ -1590,7 +1614,75 @@ else
     </div>
 }
 
+@* ============= MODAL: Texto repetido (copy-paste) ============= *@
+@if (_textoRepModalOpen)
+{
+    <div class="oc-tr-backdrop" @onclick="() => _textoRepModalOpen = false"></div>
+    <div class="oc-tr-modal">
+        <div class="oc-tr-h">
+            <h3>Texto repetido · Grupo @_textoRepGrupo</h3>
+            <button class="oc-tr-close" @onclick="() => _textoRepModalOpen = false">&times;</button>
+        </div>
+        <div class="oc-tr-body">
+            <div class="oc-tr-sub">
+                Este texto clinico (narrativa) es IDENTICO en las siguientes
+                @_textoRepMiembros.Count historia(s) clinica(s) del formato <b>@_textoRepFormato</b>:
+            </div>
+            <div class="oc-tr-miembros">
+                @foreach (var m in _textoRepMiembros)
+                {
+                    <div class="oc-tr-mi">
+                        <span class="oc-tr-pac">@m.PacienteNombre</span>
+                        <span class="mono oc-tr-meta">@m.PacienteTipoDoc @m.PacienteDoc</span>
+                        <span class="mono oc-tr-meta">@(m.HcConsecutivo is long hn ? CodigoPublico.Hc(hn) : "-")</span>
+                        <span class="oc-tr-meta">@(m.EspecialistaNombre ?? "-")</span>
+                        <span class="oc-tr-meta">@((m.FechaAtencion ?? m.FechaCierre ?? m.FechaApertura).ToLocalTime().ToString("dd/MM/yyyy"))</span>
+                    </div>
+                }
+            </div>
+            <div class="oc-tr-txtlbl">Texto repetido (por campo):</div>
+            @if (_textoRepCampos.Count > 0)
+            {
+                @foreach (var c in _textoRepCampos)
+                {
+                    <div class="oc-tr-campo">
+                        <div class="oc-tr-campolbl">@c.Label</div>
+                        <pre class="oc-tr-txt">@c.Texto</pre>
+                    </div>
+                }
+            }
+            else
+            {
+                <pre class="oc-tr-txt">@_textoRepTexto</pre>
+            }
+        </div>
+        <div class="oc-tr-foot">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _textoRepModalOpen = false">Cerrar</button>
+        </div>
+    </div>
+}
+
 <style>
+    .oc-tr-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 1300; }
+    .oc-tr-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        width: 720px; max-width: 95vw; max-height: 88vh; background: #fff; border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(15,23,42,.3); z-index: 1301; display: flex; flex-direction: column; }
+    .oc-tr-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .oc-tr-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .oc-tr-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .oc-tr-body { padding: 16px 18px; overflow: auto; }
+    .oc-tr-sub { font-size: 13px; color: #475569; margin-bottom: 10px; }
+    .oc-tr-miembros { border: 1px solid #e2e8f0; border-radius: 8px; max-height: 190px; overflow: auto; margin-bottom: 14px; }
+    .oc-tr-mi { display: grid; grid-template-columns: 1.6fr 1.1fr .8fr 1.2fr .7fr; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
+    .oc-tr-mi:last-child { border-bottom: none; }
+    .oc-tr-pac { font-weight: 600; color: #0f172a; }
+    .oc-tr-meta { color: #64748b; }
+    .oc-tr-txtlbl { font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px; }
+    .oc-tr-campo { margin-bottom: 10px; }
+    .oc-tr-campolbl { font-size: 11.5px; font-weight: 700; color: #1d4ed8; margin-bottom: 2px; }
+    .oc-tr-txt { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; font-size: 12.5px;
+        white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; margin: 0; font-family: inherit; color: #1e293b; }
+
     /* Ordenamiento por columnas: click en el header ordena asc/desc */
     .oc-tbl thead th.oc-th-sort { cursor:pointer; user-select:none; }
     .oc-tbl thead th.oc-th-sort:hover { filter:brightness(1.08); }
@@ -1992,6 +2084,37 @@ else
     /// registrada (reparables). Viaja al servidor via OrdenesClinicasFiltro.SoloSinFirma.</summary>
     private bool _soloSinFirma = false;
 
+    /// <summary>Filtro "texto repetido": solo HCs del mismo formato con narrativa clinica
+    /// identica (copy-paste). Viaja al servidor via OrdenesClinicasFiltro.SoloTextoRepetido.</summary>
+    private bool _soloTextoRepetido = false;
+
+    /// <summary>Color estable para el badge de "Grupo N" de texto repetido (ciclico).</summary>
+    private static string ColorGrupo(int grupo)
+    {
+        string[] cols = { "#2563eb", "#16a34a", "#db2777", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#dc2626" };
+        return cols[(Math.Abs(grupo) - 1) % cols.Length];
+    }
+
+    // ── Modal "ver texto repetido" ───────────────────────────────────────────────
+    private bool _textoRepModalOpen;
+    private int _textoRepGrupo;
+    private string? _textoRepTexto;
+    private string _textoRepFormato = "";
+    private List<OrdenClinicaItemDto> _textoRepMiembros = new();
+    private IReadOnlyList<CampoRepetidoDto> _textoRepCampos = Array.Empty<CampoRepetidoDto>();
+
+    private void AbrirTextoRepetido(OrdenClinicaItemDto r)
+    {
+        if (r.GrupoTextoRepetido is not int grp) { return; }
+        _textoRepGrupo = grp;
+        _textoRepTexto = string.IsNullOrWhiteSpace(r.TextoRepetido) ? "(sin texto)" : r.TextoRepetido;
+        _textoRepCampos = r.TextoRepetidoCampos ?? Array.Empty<CampoRepetidoDto>();
+        _textoRepFormato = r.FormatoNombre;
+        _textoRepMiembros = _rows.Where(x => x.GrupoTextoRepetido == grp)
+            .OrderBy(x => x.PacienteNombre).ToList();
+        _textoRepModalOpen = true;
+    }
+
     /// <summary>FIRMA — true mientras corre la reparacion masiva de firmas; bloquea
     /// el boton para evitar dobles disparos.</summary>
     private bool _reparandoFirmas = false;
@@ -2018,6 +2141,7 @@ else
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { n++; }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { n++; }
         if (_soloSinFirma) { n++; }
+        if (_soloTextoRepetido) { n++; }
         if (_soloMultiSesion) { n++; }
         if (_noMostrarInactivas) { n++; }
         if (!string.IsNullOrWhiteSpace(_filtroRevision)) { n++; }
@@ -2206,6 +2330,7 @@ else
                 CodigoHc: string.IsNullOrWhiteSpace(_codigoHcFiltro) ? null : _codigoHcFiltro.Trim(),
                 CodigoAsignacion: string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? null : _codigoAsignacionFiltro.Trim(),
                 SoloSinFirma: _soloSinFirma,
+                SoloTextoRepetido: _soloTextoRepetido,
                 CodigoAutorizacion: string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro) ? null : _codigoAutorizacionFiltro.Trim());
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
@@ -2225,7 +2350,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false;
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false; _soloTextoRepetido = false;
         _soloMultiSesion = false; _noMostrarInactivas = false; _asigNavFiltro = null;
         await Buscar();
     }

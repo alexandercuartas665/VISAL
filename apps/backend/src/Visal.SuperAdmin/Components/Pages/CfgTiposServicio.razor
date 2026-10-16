@@ -43,6 +43,7 @@
                         <th style="width:180px">Codigo</th>
                         <th>Nombre</th>
                         <th style="width:130px" class="text-center" title="Tipo de archivo RIPS: AC (Consultas), AP (Procedimientos), AT (Otros servicios), AM (Medicamentos)">Tipo archivo RIPS</th>
+                        <th style="width:160px" class="text-center" title="Tiempo maximo: primera sesion en dias (desde coordinacion), siguientes en horas (entre sesiones)">Limites de oportunidad</th>
                         <th style="width:90px" class="text-center">Activo</th>
                         <th style="width:110px"></th>
                     </tr>
@@ -59,6 +60,15 @@
                                 { <span class="badge bg-info">@r.TipoArchivoRips</span> }
                                 else
                                 { <span class="text-muted">—</span> }
+                            </td>
+                            <td class="text-center">
+                                @if (r.LimiteDiasPrimeraSesion is null && r.LimiteHorasSesionesSiguientes is null)
+                                { <span class="text-muted">—</span> }
+                                else
+                                {
+                                    <span class="ts-lim-chip" title="Primera sesion (dias desde coordinacion)">1ª: @(r.LimiteDiasPrimeraSesion is int d ? $"{d} d" : "—")</span>
+                                    <span class="ts-lim-chip" title="Siguientes sesiones (horas entre sesiones)">2ª+: @(r.LimiteHorasSesionesSiguientes is int h ? $"{h} h" : "—")</span>
+                                }
                             </td>
                             <td class="text-center">
                                 @if (r.Activo) { <span class="badge bg-success">Activo</span> }
@@ -111,6 +121,25 @@
                         <option value="AM">AM - Medicamentos</option>
                     </select>
                 </div>
+
+                <div class="ts-limites">
+                    <div class="ts-limites-h">Limites de oportunidad <small class="text-muted">(opcional, dejar vacio = sin control)</small></div>
+                    <div class="ts-limites-grid">
+                        <div class="ase-f">
+                            <label>Primera sesion <small class="text-muted">(dias)</small></label>
+                            <input type="number" class="form-control form-control-sm" @bind="_fLimiteDias" min="1"
+                                   placeholder="Ej: 4" />
+                            <small class="text-muted">Dias maximos entre la coordinacion y la primera atencion.</small>
+                        </div>
+                        <div class="ase-f">
+                            <label>Siguientes sesiones <small class="text-muted">(horas)</small></label>
+                            <input type="number" class="form-control form-control-sm" @bind="_fLimiteHoras" min="1"
+                                   placeholder="Ej: 48" />
+                            <small class="text-muted">Horas maximas entre una sesion y la siguiente.</small>
+                        </div>
+                    </div>
+                </div>
+
                 <label class="ase-chk" style="margin-top:4px;">
                     <input type="checkbox" @bind="_fActivo" /> <span>Activo</span>
                 </label>
@@ -129,6 +158,13 @@
 <style>
     .rf-row-inactiva { opacity: 0.55; background: #f8fafc; }
     .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+    .ts-limites { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-top: 10px; background: #f8fafc; }
+    .ts-limites-h { font-weight: 600; font-size: 13px; color: #334155; margin-bottom: 8px; }
+    .ts-limites-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @@media (max-width: 480px) { .ts-limites-grid { grid-template-columns: 1fr; } }
+    .ts-limites-grid .ase-f small { display: block; line-height: 1.2; margin-top: 2px; }
+    .ts-lim-chip { display: inline-block; font-size: 11px; background: #eef2ff; color: #3730a3; border-radius: 6px; padding: 1px 6px; margin: 1px; white-space: nowrap; }
 
     /* Modal styles copiados de RelacionesFormularios (los estilos scoped no
        se comparten entre paginas). */
@@ -163,6 +199,8 @@
     private int _fOrden = 100;
     private bool _fActivo = true;
     private string _fTipoArchivoRips = "";
+    private int? _fLimiteDias;
+    private int? _fLimiteHoras;
     private string? _modalError;
 
     protected override async Task OnInitializedAsync()
@@ -184,6 +222,7 @@
         _fOrden = (_rows.Count == 0 ? 1 : _rows.Max(r => r.Orden) + 1);
         _fActivo = true;
         _fTipoArchivoRips = "";
+        _fLimiteDias = null; _fLimiteHoras = null;
         _modalOpen = true;
     }
 
@@ -192,6 +231,8 @@
         _editId = r.Id; _modalError = null;
         _fCodigo = r.Codigo; _fNombre = r.Nombre; _fOrden = r.Orden; _fActivo = r.Activo;
         _fTipoArchivoRips = r.TipoArchivoRips ?? "";
+        _fLimiteDias = r.LimiteDiasPrimeraSesion;
+        _fLimiteHoras = r.LimiteHorasSesionesSiguientes;
         _modalOpen = true;
     }
 
@@ -206,7 +247,8 @@
         try
         {
             var actor = await ActorAsync();
-            var req = new GuardarTipoServicioRequest(_editId, _fCodigo, _fNombre, _fOrden, _fActivo, _fTipoArchivoRips);
+            var req = new GuardarTipoServicioRequest(_editId, _fCodigo, _fNombre, _fOrden, _fActivo, _fTipoArchivoRips,
+                _fLimiteDias, _fLimiteHoras);
             await Svc.GuardarAsync(req, actor);
             _ok = _editId is null ? "Tipo creado." : "Tipo actualizado.";
             _modalOpen = false;

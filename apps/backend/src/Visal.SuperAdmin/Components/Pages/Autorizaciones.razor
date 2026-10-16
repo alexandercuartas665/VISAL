@@ -1,0 +1,362 @@
+@page "/autorizaciones"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Tenancy
+@using Visal.Domain.Entities
+@inject IAutorizacionTokenService Svc
+@inject IJSRuntime JS
+
+<PageTitle>Autorizaciones - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Autorizaciones</h1>
+        <small class="text-muted">
+            Genera tokens de 6 caracteres para autorizar fechas de atencion fuera del limite de
+            oportunidad del tipo de servicio. Cada token vence en 30 minutos, es de un solo uso,
+            y queda trazado (quien lo uso, en que HC/asignacion y con que motivo).
+        </small>
+    </div>
+    @if (_puede)
+    {
+        <div style="display:flex; gap:8px;">
+            <button class="btn btn-outline-secondary" @onclick="AbrirConceptos" disabled="@_busy">Conceptos</button>
+            <button class="btn btn-primary" @onclick="AbrirGenerar" disabled="@_busy">+ Generar nuevo token</button>
+        </div>
+    }
+</div>
+
+@if (!_puede)
+{
+    <div class="ase-alert">No tienes permiso para este modulo. Pide el permiso "Autorizaciones" a un administrador.</div>
+}
+else
+{
+    @if (_error is not null) { <div class="ase-alert">@_error</div> }
+    @if (_tokenGenerado is not null)
+    {
+        <div class="ase-ok">
+            Token generado: <code class="tok-big">@_tokenGenerado</code>
+            — vence @(_tokenGeneradoVence?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")).
+            Comunicaselo al operador; es de un solo uso.
+        </div>
+    }
+
+    <div class="ase-card">
+        @if (_loading)
+        {
+            <div class="ase-empty">Cargando...</div>
+        }
+        else if (_rows.Count == 0)
+        {
+            <div class="ase-empty" style="padding:30px;">Aun no se han generado tokens.</div>
+        }
+        else
+        {
+            <div class="med-tbl-wrap">
+                <table class="table table-sm med-tbl">
+                    <thead>
+                        <tr>
+                            <th style="width:90px">Codigo</th>
+                            <th style="width:110px" class="text-center">Estado</th>
+                            <th style="width:180px">Concepto</th>
+                            <th>Observacion</th>
+                            <th style="width:150px">Generado</th>
+                            <th style="width:150px">Vence</th>
+                            <th>Uso</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rows)
+                        {
+                            <tr class="@(r.Estado == AutorizacionTokenEstado.Usado ? "tok-usado" : (r.Vencido ? "tok-venc" : ""))">
+                                <td><code class="mono">@r.Codigo</code></td>
+                                <td class="text-center">
+                                    @if (r.Estado == AutorizacionTokenEstado.Usado)
+                                    { <span class="badge bg-secondary">Usado</span> }
+                                    else if (r.Vencido)
+                                    { <span class="badge bg-warning text-dark">Vencido</span> }
+                                    else
+                                    { <span class="badge bg-success">Activo</span> }
+                                </td>
+                                <td>@(string.IsNullOrWhiteSpace(r.ConceptoNombre) ? (MarkupString)"<span class='text-muted'>—</span>" : (MarkupString)System.Net.WebUtility.HtmlEncode(r.ConceptoNombre))</td>
+                                <td>@r.Observacion</td>
+                                <td>
+                                    <div>@r.GeneradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+                                    @if (!string.IsNullOrWhiteSpace(r.GeneradoPorNombre))
+                                    { <small class="text-muted">@r.GeneradoPorNombre</small> }
+                                </td>
+                                <td>@r.ExpiresAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                <td>
+                                    @if (r.UsadoEn is DateTimeOffset u)
+                                    {
+                                        <div><small class="text-muted">@u.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</small>
+                                            @if (!string.IsNullOrWhiteSpace(r.UsadoPorNombre)) { <text> · @r.UsadoPorNombre</text> }
+                                        </div>
+                                        <div>
+                                            @if (r.HistoriaClinicaConsecutivo is long hc) { <span class="badge bg-light text-dark">HC-@hc.ToString("D6")</span> }
+                                            @if (r.AsignacionConsecutivo is long asg) { <span class="badge bg-light text-dark">AS-@asg.ToString("D6")</span> }
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(r.MotivoUso)) { <small class="text-muted">@r.MotivoUso</small> }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@* ============= MODAL GENERAR ============= *@
+@if (_modalOpen)
+{
+    <div class="cie-backdrop" @onclick="Cerrar"></div>
+    <div class="cie-modal" style="width:560px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>Generar nuevo token</h3>
+            <button class="cie-modal-close" @onclick="Cerrar">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="az-field">
+                <label>Concepto <small class="text-muted">(categoria)</small></label>
+                <select class="form-select form-select-sm" @bind="_fConcepto" style="width:100%;">
+                    <option value="">-- Selecciona un concepto --</option>
+                    @foreach (var c in _conceptos)
+                    {
+                        <option value="@c.Nombre">@c.Nombre</option>
+                    }
+                </select>
+            </div>
+            <div class="az-field">
+                <label>Observacion de uso * <small class="text-muted">(por que se autoriza)</small></label>
+                <textarea class="form-control form-control-sm" rows="3" @bind="_fObservacion" style="width:100%;"
+                          placeholder="Ej: Autorizo registro tardio por falla de conectividad del profesional."></textarea>
+            </div>
+            <small class="text-muted">El token tendra 6 caracteres y vence en 30 minutos. Un solo uso.</small>
+            @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Cerrar">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GenerarAsync" disabled="@_busy">Generar</button>
+        </div>
+    </div>
+}
+
+@* ============= MODAL CONCEPTOS (configurar) ============= *@
+@if (_conceptosModalOpen)
+{
+    <div class="cie-backdrop" @onclick="CerrarConceptos"></div>
+    <div class="cie-modal" style="width:520px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>Conceptos de autorizacion</h3>
+            <button class="cie-modal-close" @onclick="CerrarConceptos">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <small class="text-muted">Lista de conceptos seleccionables al generar un token. Puedes agregar o quitar.</small>
+            <div class="az-field" style="margin-top:10px; display:flex; gap:8px;">
+                <input class="form-control form-control-sm" @bind="_fNuevoConcepto" style="flex:1;"
+                       placeholder="Nuevo concepto..." />
+                <button class="btn btn-primary btn-sm" @onclick="AgregarConceptoAsync" disabled="@_busy">Agregar</button>
+            </div>
+            @if (_conceptosError is not null) { <div class="text-danger small mt-1">@_conceptosError</div> }
+            <div class="med-tbl-wrap" style="margin-top:10px;">
+                <table class="table table-sm med-tbl">
+                    <thead><tr><th>Concepto</th><th style="width:70px"></th></tr></thead>
+                    <tbody>
+                        @if (_conceptosAll.Count == 0)
+                        {
+                            <tr><td colspan="2" class="text-muted">Aun no hay conceptos.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var c in _conceptosAll)
+                            {
+                                <tr>
+                                    <td>@c.Nombre</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-link btn-sm text-danger" title="Eliminar"
+                                                @onclick="() => EliminarConceptoAsync(c)">&#128465;</button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarConceptos">Cerrar</button>
+        </div>
+    </div>
+}
+
+<style>
+    .az-field { margin-bottom: 12px; }
+    .az-field label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 3px; }
+    .tok-big { font-size: 20px; letter-spacing: 3px; font-weight: 700; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 2px; font-weight: 700; }
+    .tok-usado { opacity: 0.7; }
+    .tok-venc { background: #fffbeb; }
+
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        max-width: 95vw; max-height: 90vh; background: #fff;
+        border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25);
+        z-index: 1051; display: flex; flex-direction: column;
+    }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    .cie-modal-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _puede;
+    private string? _error;
+
+    private List<AutorizacionTokenDto> _rows = new();
+
+    private bool _modalOpen;
+    private string _fObservacion = "";
+    private string _fConcepto = "";
+    private string? _modalError;
+    private string? _tokenGenerado;
+    private DateTimeOffset? _tokenGeneradoVence;
+
+    private List<AutorizacionConceptoDto> _conceptos = new();     // activos (para el select)
+    private List<AutorizacionConceptoDto> _conceptosAll = new();  // todos (para configurar)
+    private bool _conceptosModalOpen;
+    private string _fNuevoConcepto = "";
+    private string? _conceptosError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolverPermisoAsync();
+        if (_puede)
+        {
+            await CargarAsync();
+            try { _conceptos = (await Svc.ListarConceptosAsync()).ToList(); } catch { }
+        }
+        _loading = false;
+    }
+
+    private async Task ResolverPermisoAsync()
+    {
+        if (AuthState is null) { _puede = false; return; }
+        var st = await AuthState;
+        var rol = st.User.FindFirst(ClaimTypes.Role)?.Value ?? "";
+        var tenantRole = st.User.FindFirst("tenant_role")?.Value ?? "";
+        var platformRole = st.User.FindFirst("platform_role")?.Value ?? "";
+        var esAdmin = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(rol, "Administrador", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+        var perms = st.User.FindFirst("perms")?.Value;
+        var tienePermiso = !string.IsNullOrEmpty(perms)
+            && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(p => string.Equals(p.Trim(), "autorizaciones", StringComparison.OrdinalIgnoreCase));
+        _puede = esAdmin || tienePermiso;
+    }
+
+    private async Task CargarAsync()
+    {
+        try { _rows = (await Svc.ListarAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void AbrirGenerar()
+    {
+        _modalError = null; _fObservacion = ""; _fConcepto = "";
+        _modalOpen = true;
+    }
+
+    private void Cerrar() => _modalOpen = false;
+
+    private async Task GenerarAsync()
+    {
+        _modalError = null;
+        if (string.IsNullOrWhiteSpace(_fObservacion)) { _modalError = "La observacion es obligatoria."; return; }
+        _busy = true; _error = null;
+        try
+        {
+            var (actor, nombre) = await ActorAsync();
+            var codigo = await Svc.GenerarAsync(_fConcepto, _fObservacion, nombre, actor);
+            _tokenGenerado = codigo;
+            _tokenGeneradoVence = DateTimeOffset.UtcNow.AddMinutes(30);
+            _modalOpen = false;
+            await CargarAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ── Conceptos configurables ──────────────────────────────────────────────────
+    private async Task AbrirConceptos()
+    {
+        _conceptosError = null; _fNuevoConcepto = "";
+        try { _conceptosAll = (await Svc.ListarConceptosAsync(incluirInactivos: true)).ToList(); }
+        catch (Exception ex) { _conceptosError = ex.Message; }
+        _conceptosModalOpen = true;
+    }
+
+    private void CerrarConceptos() => _conceptosModalOpen = false;
+
+    private async Task AgregarConceptoAsync()
+    {
+        _conceptosError = null;
+        if (string.IsNullOrWhiteSpace(_fNuevoConcepto)) { _conceptosError = "Escribe el concepto."; return; }
+        _busy = true;
+        try
+        {
+            var (actor, _) = await ActorAsync();
+            var orden = _conceptosAll.Count == 0 ? 1 : _conceptosAll.Max(c => c.Orden) + 1;
+            await Svc.GuardarConceptoAsync(null, _fNuevoConcepto, orden, true, actor);
+            _fNuevoConcepto = "";
+            _conceptosAll = (await Svc.ListarConceptosAsync(incluirInactivos: true)).ToList();
+            _conceptos = (await Svc.ListarConceptosAsync()).ToList();
+        }
+        catch (Exception ex) { _conceptosError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EliminarConceptoAsync(AutorizacionConceptoDto c)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Eliminar el concepto '{c.Nombre}'?");
+        if (!ok) { return; }
+        _conceptosError = null; _busy = true;
+        try
+        {
+            var (actor, _) = await ActorAsync();
+            await Svc.EliminarConceptoAsync(c.Id, actor);
+            _conceptosAll = (await Svc.ListarConceptosAsync(incluirInactivos: true)).ToList();
+            _conceptos = (await Svc.ListarConceptosAsync()).ToList();
+        }
+        catch (Exception ex) { _conceptosError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<(Guid actor, string? nombre)> ActorAsync()
+    {
+        if (AuthState is null) { return (Guid.Empty, null); }
+        var st = await AuthState;
+        var actor = Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+        var nombre = st.User.FindFirst("name")?.Value
+                     ?? st.User.FindFirst(ClaimTypes.Name)?.Value
+                     ?? st.User.Identity?.Name;
+        return (actor, nombre);
+    }
+}

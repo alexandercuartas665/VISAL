@@ -1,9 +1,11 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Admin;
 using Visal.Application.Common;
 using Visal.Application.Tenancy;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
@@ -117,6 +119,9 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
         if (!result.Ok || string.IsNullOrWhiteSpace(result.Text))
         {
+            await GuardarAgenteLogAsync(revision, agent, model, systemPrompt, contextoJson, contexto,
+                ok: false, error: result.Error ?? "El proveedor no devolvio texto.", resultado: null, confianza: null,
+                result.InputTokens, result.OutputTokens, result.Text, ct);
             return Err(result.Error ?? "El proveedor no devolvio texto.") with { InputTokens = result.InputTokens, OutputTokens = result.OutputTokens };
         }
 
@@ -124,6 +129,9 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         try { parsed = ParseVeredicto(result.Text!); }
         catch (Exception ex)
         {
+            await GuardarAgenteLogAsync(revision, agent, model, systemPrompt, contextoJson, contexto,
+                ok: false, error: "No se pudo interpretar la respuesta del agente: " + ex.Message, resultado: null, confianza: null,
+                result.InputTokens, result.OutputTokens, result.Text, ct);
             return new PreRevisionIaResult(false, null, 0m, null, null, "No se pudo interpretar la respuesta del agente: " + ex.Message, result.InputTokens, result.OutputTokens);
         }
 
@@ -143,6 +151,13 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         await _revision.RegistrarVeredictoAgenteAsync(
             new VeredictoAgenteCmd(revisionClinicaId, IPreRevisionIaService.AgenteNombre, parsed.Resultado, parsed.Nota, payloadJson),
             ct);
+
+        // Log completo del agente (que recibio, que proceso hizo, que respondio) para el
+        // panel "Log del agente". Best-effort: nunca rompe la revision ya registrada.
+        await GuardarAgenteLogAsync(revision, agent, model, systemPrompt, contextoJson, contexto,
+            ok: true, error: null, resultado: parsed.Resultado.ToString(), confianza: parsed.Confianza,
+            result.InputTokens, result.OutputTokens, result.Text, ct,
+            nota: parsed.Nota, hallazgos: parsed.Hallazgos);
 
         // Ola 6 RC6c — Adopcion automatica del veredicto agente.
         // Reglas: solo aplica si (a) la policy del tenant lo permite explicitamente,
@@ -257,8 +272,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("{");
         sb.AppendLine("  \"resultado\": \"Aprobado\" | \"Rechazado\" | \"Neutral\",");
         sb.AppendLine("  \"confianza\": number entre 0 y 1,");
-        sb.AppendLine("  \"nota\": \"cadena breve en espanol\",");
-        sb.AppendLine("  \"hallazgos\": [\"observacion 1\", \"observacion 2\"]");
+        sb.AppendLine("  \"nota\": \"justificacion clara y especifica de tu decision, en 2 a 4 frases\",");
+        sb.AppendLine("  \"hallazgos\": [\"hallazgo concreto 1\", \"hallazgo concreto 2\"]");
         sb.AppendLine("}");
         sb.AppendLine();
         sb.AppendLine("Reglas:");
@@ -266,6 +281,14 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("- 'Aprobado' = HC completa, congruente, sin faltantes clinicos evidentes.");
         sb.AppendLine("- 'Rechazado' = falta un dato clinico critico, incongruencia grave o riesgo clinico.");
         sb.AppendLine("- 'Neutral' = evidencia insuficiente para decidir.");
+        sb.AppendLine("- La 'nota' es tu JUSTIFICACION, no una etiqueta generica: en 2 a 4 frases explica POR QUE");
+        sb.AppendLine("  llegaste a ese resultado, CITANDO los datos concretos de la HC que lo sustentan (nombres de");
+        sb.AppendLine("  campos, fechas, valores, ordenes, incongruencias). Si RECHAZAS, di EXACTAMENTE que falta o");
+        sb.AppendLine("  que esta mal, en que parte de la HC, y POR QUE impide aprobar o facturar.");
+        sb.AppendLine("- Cada 'hallazgo' es un punto CONCRETO y verificable (no generalidades): nombra el campo o dato");
+        sb.AppendLine("  y el problema puntual. Si Apruebas, puedes listar lo que validaste. Ordena los mas graves primero.");
+        sb.AppendLine("- Se especifico y evita frases de relleno. La nota debe permitirle a un auditor humano entender");
+        sb.AppendLine("  tu decision sin volver a leer toda la HC.");
         sb.AppendLine("- Devuelve JSON puro. Nada de markdown, ni prefijos, ni sufijos, ni ```json```.");
         return sb.ToString();
     }
@@ -290,6 +313,130 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>Persiste el log completo de una corrida del agente (best-effort). Nunca lanza.</summary>
+    private async Task GuardarAgenteLogAsync(
+        RevisionClinica revision, AiAgent agent, string model,
+        string? systemPrompt, string? contextoEnviado, HistoriaClinicaContextoIa? contexto,
+        bool ok, string? error, string? resultado, decimal? confianza,
+        int tokensIn, int tokensOut, string? respuestaCruda, CancellationToken ct,
+        string? nota = null, IReadOnlyList<string>? hallazgos = null)
+    {
+        try
+        {
+            var camposJson = await BuildCamposLegiblesAsync(revision.HistoriaClinicaId, ct);
+            string? toolsJson = null;
+            if (contexto is not null)
+            {
+                var tools = contexto.InvocacionesExitosas
+                    .Select(i => new { tool = i.ToolName, ok = true, tokens = i.EstimatedTokens, error = (string?)null, payload = i.JsonPayload })
+                    .Concat(contexto.InvocacionesFallidas
+                        .Select(i => new { tool = i.ToolName, ok = false, tokens = i.EstimatedTokens, error = i.Error, payload = i.JsonPayload }))
+                    .ToList();
+                toolsJson = JsonSerializer.Serialize(tools, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            }
+            _db.RevisionAgenteLogs.Add(new RevisionAgenteLog
+            {
+                TenantId = revision.TenantId,
+                RevisionClinicaId = revision.Id,
+                HistoriaClinicaId = revision.HistoriaClinicaId,
+                AgenteCodigo = string.IsNullOrWhiteSpace(agent.Name) ? IPreRevisionIaService.AgenteNombre : agent.Name,
+                Proveedor = agent.Provider.ToString(),
+                Modelo = model,
+                Ok = ok,
+                Error = error,
+                Resultado = resultado,
+                Confianza = confianza,
+                TokensIn = tokensIn,
+                TokensOut = tokensOut,
+                Nota = nota,
+                HallazgosJson = hallazgos is { Count: > 0 }
+                    ? JsonSerializer.Serialize(hallazgos, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
+                    : null,
+                SystemPrompt = systemPrompt,
+                ContextoEnviado = contextoEnviado,
+                CamposLegiblesJson = camposJson,
+                ToolsJson = toolsJson,
+                RespuestaCruda = respuestaCruda,
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+        catch { /* el log es best-effort; nunca romper la revision */ }
+    }
+
+    /// <summary>HC legible como JSON { "label del campo": "contenido" } cruzando ValoresJson con el
+    /// esquema del formato. Solo para mostrar en el log (no es lo que se le envia al agente).</summary>
+    private async Task<string?> BuildCamposLegiblesAsync(Guid hcId, CancellationToken ct)
+    {
+        var hc = await _db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == hcId)
+            .Select(h => new { h.ValoresJson, h.FormDefinitionId })
+            .FirstOrDefaultAsync(ct);
+        if (hc is null || string.IsNullOrWhiteSpace(hc.ValoresJson)) { return null; }
+        var schemaJson = await _db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Id == hc.FormDefinitionId)
+            .Select(f => f.SchemaJson)
+            .FirstOrDefaultAsync(ct);
+        return CamposLegibles(hc.ValoresJson, schemaJson);
+    }
+
+    private static string? CamposLegibles(string valoresJson, string? schemaJson)
+    {
+        Dictionary<string, string?>? v;
+        try { v = JsonSerializer.Deserialize<Dictionary<string, string?>>(valoresJson); }
+        catch { return null; }
+        if (v is null || v.Count == 0) { return null; }
+
+        var keyToLabel = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(schemaJson))
+        {
+            try
+            {
+                var schema = FormSchema.FromJson(schemaJson);
+                if (schema?.Children is not null)
+                {
+                    void Recurse(IEnumerable<FormNode> nodes)
+                    {
+                        foreach (var n in nodes)
+                        {
+                            if (n.IsSection && n.Children is not null) { Recurse(n.Children); continue; }
+                            if (!string.IsNullOrWhiteSpace(n.Name) && !string.IsNullOrWhiteSpace(n.Label))
+                            {
+                                keyToLabel[n.Name!] = n.Label!;
+                            }
+                        }
+                    }
+                    Recurse(schema.Children);
+                }
+                if (schema?.Header?.Campos is { Count: > 0 } campos)
+                {
+                    foreach (var c in campos)
+                    {
+                        if (!string.IsNullOrWhiteSpace(c.Label)) { keyToLabel["hdr:" + c.Id] = c.Label!; }
+                    }
+                }
+            }
+            catch { /* sin labels, se usan las claves crudas */ }
+        }
+
+        var outMap = new Dictionary<string, object?>();
+        foreach (var kv in v)
+        {
+            if (string.IsNullOrWhiteSpace(kv.Value)) { continue; }
+            if ((kv.Key ?? "").Contains("firma", StringComparison.OrdinalIgnoreCase)) { continue; } // firmas base64
+            var label = keyToLabel.TryGetValue(kv.Key!, out var lbl) && !string.IsNullOrWhiteSpace(lbl) ? lbl : kv.Key!;
+            var finalLabel = label;
+            var i = 2;
+            while (outMap.ContainsKey(finalLabel)) { finalLabel = label + " (" + i++ + ")"; }
+            outMap[finalLabel] = kv.Value;
+        }
+        if (outMap.Count == 0) { return null; }
+        return JsonSerializer.Serialize(outMap, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 
     private sealed record VeredictoParsed(RevisionResultado Resultado, decimal Confianza, string? Nota, IReadOnlyList<string> Hallazgos);

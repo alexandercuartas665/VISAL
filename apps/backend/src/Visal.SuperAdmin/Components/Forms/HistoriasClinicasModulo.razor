@@ -1101,10 +1101,68 @@
         font-size: 11px; color: #1d4ed8; cursor: pointer;
     }
     .hc-acomp-chip-cambiar:hover { background: #dbeafe; }
+
+    /* ===== Modal de token de autorizacion de fecha ===== */
+    .tk-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 1200; }
+    .tk-modal {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        width: 460px; max-width: 95vw; background: #fff; border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(15,23,42,.3); z-index: 1201; display: flex; flex-direction: column;
+    }
+    .tk-h { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .tk-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #b45309; }
+    .tk-body { padding: 18px; }
+    .tk-det { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+    .tk-f { margin-bottom: 10px; }
+    .tk-f label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 3px; }
+    .tk-code { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 4px; text-transform: uppercase; font-weight: 700; }
+    .tk-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px; }
 </style>
+
+@if (_tokenModalOpen)
+{
+    <div class="tk-backdrop" @onclick="CancelarTokenModal"></div>
+    <div class="tk-modal">
+        <div class="tk-h">
+            <span>&#128273;</span>
+            <h3>Autorizacion requerida</h3>
+        </div>
+        <div class="tk-body">
+            @if (!string.IsNullOrWhiteSpace(_tokenControlDetalle))
+            {
+                <div class="tk-det">@_tokenControlDetalle</div>
+            }
+            <div class="tk-f">
+                <label>Token de autorizacion (6 caracteres)</label>
+                <input class="form-control form-control-sm tk-code" maxlength="6" @bind="_tokenCodigo"
+                       placeholder="______" />
+            </div>
+            <div class="tk-f">
+                <label>Motivo de uso *</label>
+                <textarea class="form-control form-control-sm" rows="2" @bind="_tokenMotivo"
+                          placeholder="Por que se registra con esta fecha."></textarea>
+            </div>
+            @if (_tokenError is not null) { <div class="text-danger small">@_tokenError</div> }
+            <small class="text-muted">El token lo genera un usuario de autorizacion en el modulo Autorizaciones. Es de un solo uso y vence a los 30 minutos.</small>
+        </div>
+        <div class="tk-foot">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarTokenModal" disabled="@_tokenBusy">Cancelar</button>
+            <button class="btn btn-warning btn-sm" @onclick="AutorizarTokenAsync" disabled="@_tokenBusy">Autorizar</button>
+        </div>
+    </div>
+}
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    // ── Control de fecha de atencion: estado del modal de token ──────────────────
+    private bool _tokenModalOpen;
+    private string? _tokenControlDetalle;
+    private string _tokenCodigo = "";
+    private string _tokenMotivo = "";
+    private string? _tokenError;
+    private bool _tokenBusy;
+    private bool _cerrarTrasAutorizar;
 
     /// <summary>Paciente para el que se abre el modulo. Si esta seteado, NO se permite cambiar.</summary>
     [Parameter] public PacienteAsignacionDto? PacienteContexto { get; set; }
@@ -1518,6 +1576,81 @@
             return Guid.TryParse(idStr, out var g) ? g : Guid.Empty;
         }
         catch { return Guid.Empty; }
+    }
+
+    /// <summary>Nombre legible del usuario logueado (para trazar quien uso el token).</summary>
+    private async Task<string?> ResolverActorNombreAsync()
+    {
+        if (AuthState is null) { return null; }
+        try
+        {
+            var state = await AuthState;
+            return state.User.FindFirst("name")?.Value
+                   ?? state.User.FindFirst(ClaimTypes.Name)?.Value
+                   ?? state.User.Identity?.Name;
+        }
+        catch { return null; }
+    }
+
+    // ── Control de fecha de atencion: evaluacion + modal de token ────────────────
+
+    /// <summary>Tras cada autoguardado: si la fecha de atencion quedo fuera del limite del
+    /// tipo de servicio y la HC no esta autorizada, abre el modal para pedir el token.</summary>
+    private async Task VerificarControlFechaAsync(Guid hcId)
+    {
+        try
+        {
+            var ctrl = await HcSvc.EvaluarControlFechaAsync(hcId);
+            if (ctrl.RequiereToken && !_tokenModalOpen)
+            {
+                AbrirTokenModal(ctrl.Detalle, cerrarTrasAutorizar: false);
+            }
+        }
+        catch { /* no bloquear el autoguardado por un fallo de evaluacion del control */ }
+    }
+
+    private void AbrirTokenModal(string? detalle, bool cerrarTrasAutorizar)
+    {
+        _tokenControlDetalle = detalle;
+        _tokenCodigo = ""; _tokenMotivo = ""; _tokenError = null;
+        _cerrarTrasAutorizar = cerrarTrasAutorizar;
+        _tokenModalOpen = true;
+        StateHasChanged();
+    }
+
+    private void CancelarTokenModal()
+    {
+        _tokenModalOpen = false;
+        _cerrarTrasAutorizar = false;
+    }
+
+    private async Task AutorizarTokenAsync()
+    {
+        _tokenError = null;
+        if (_historiaSel is not HistoriaRow h) { _tokenModalOpen = false; return; }
+        if (string.IsNullOrWhiteSpace(_tokenCodigo)) { _tokenError = "Ingresa el token de autorizacion."; return; }
+        if (string.IsNullOrWhiteSpace(_tokenMotivo)) { _tokenError = "El motivo de uso es obligatorio."; return; }
+        _tokenBusy = true;
+        // Cancelar cualquier autoguardado pendiente para no chocar en el DbContext compartido.
+        _autosaveCts?.Cancel();
+        try
+        {
+            var actor = await ResolverActorAsync();
+            var nombre = await ResolverActorNombreAsync();
+            AutorizarFechaResult res;
+            await _dbLock.WaitAsync();
+            try
+            {
+                res = await HcSvc.AutorizarFechaConTokenAsync(h.Id, _tokenCodigo, _tokenMotivo, nombre, actor);
+            }
+            finally { _dbLock.Release(); }
+            if (!res.Ok) { _tokenError = res.Mensaje ?? "Token invalido."; return; }
+            _tokenModalOpen = false;
+            // Reintentar el cierre FUERA del lock (Cerrar gestiona su propio flujo).
+            if (_cerrarTrasAutorizar) { _cerrarTrasAutorizar = false; await Cerrar(); }
+        }
+        catch (Exception ex) { _tokenError = ex.Message; }
+        finally { _tokenBusy = false; }
     }
 
     /// <summary>
@@ -2650,7 +2783,17 @@
             // proximos documentos la resuelvan en vivo y la ficha deje de salir
             // "sin firma". No debe bloquear el cierre si algo falla.
             await AutoguardarFirmaProfesionalSiFaltaAsync(h);
-            await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), await ResolverActorAsync());
+            try
+            {
+                await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), await ResolverActorAsync());
+            }
+            catch (Visal.Application.Tenancy.CierreRequiereAutorizacionException ex)
+            {
+                // La fecha de atencion excede el limite y no hay autorizacion: pedir token
+                // y reintentar el cierre tras autorizar.
+                AbrirTokenModal(ex.Message, cerrarTrasAutorizar: true);
+                return;
+            }
             h.Estado = "Cerrada";
         }
         _schemaActual = null; _valores = new();
@@ -2943,6 +3086,10 @@
         try
         {
             await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty, ct);
+            // Control de fecha de atencion (enganche principal: al escribir/cambiar la fecha).
+            // Si la fecha quedo fuera del limite del tipo de servicio y la HC no esta autorizada,
+            // abrimos el modal para pedir el token. No bloquea el autoguardado del borrador.
+            await VerificarControlFechaAsync(h.Id);
             _ultimoGuardado = DateTime.Now;
             _saveStatus = "guardado";
             _saveTitle = $"Ultimo guardado: {_ultimoGuardado:HH:mm:ss}";

@@ -103,7 +103,20 @@ public sealed record OrdenClinicaItemDto(
     bool EsFolio = false,
     /// <summary>Numero de autorizacion de la asignacion (Asignacion.CodigoAutorizacion).
     /// Se muestra en el listado con su boton de copiar. Null si no tiene.</summary>
-    string? CodigoAutorizacion = null);
+    string? CodigoAutorizacion = null,
+    /// <summary>Numero de grupo de "texto repetido": las HCs del MISMO formato cuyo texto
+    /// clinico (narrativa) es identico comparten el mismo numero. Null cuando el filtro de
+    /// texto repetido esta apagado o la HC no pertenece a ningun grupo duplicado.</summary>
+    int? GrupoTextoRepetido = null,
+    /// <summary>Texto clinico (narrativa) compartido por el grupo — para mostrar "que texto se
+    /// repitio". Solo se llena cuando la HC pertenece a un grupo de texto repetido.</summary>
+    string? TextoRepetido = null,
+    /// <summary>El texto repetido desglosado POR CAMPO (label del campo + su valor), para ver
+    /// de que campo salio cada fragmento. Solo se llena en grupos de texto repetido.</summary>
+    IReadOnlyList<CampoRepetidoDto>? TextoRepetidoCampos = null);
+
+/// <summary>Un campo que aporto al texto repetido: su etiqueta (label del schema) y el valor.</summary>
+public sealed record CampoRepetidoDto(string Label, string Texto);
 
 public sealed record OrdenesClinicasFiltro(
     string? PacienteTexto = null,
@@ -134,7 +147,11 @@ public sealed record OrdenesClinicasFiltro(
     bool SoloSinFirma = false,
     /// <summary>Filtra por el numero de autorizacion de la asignacion
     /// (Asignacion.CodigoAutorizacion, CONTIENE, case-insensitive). Vacio = sin filtro.</summary>
-    string? CodigoAutorizacion = null);
+    string? CodigoAutorizacion = null,
+    /// <summary>Si true, solo trae HCs cuyo texto clinico (narrativa) es IDENTICO al de otra(s)
+    /// HC del MISMO formato dentro del resultado (deteccion de copy-paste). Cada grupo de
+    /// duplicados comparte un numero en <see cref="OrdenClinicaItemDto.GrupoTextoRepetido"/>.</summary>
+    bool SoloTextoRepetido = false);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);

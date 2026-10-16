@@ -57,29 +57,18 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
         if (!string.IsNullOrWhiteSpace(filtro.CodigoAsignacion))
         {
-            // El "codigo de asignacion" identifica el lote (AsignacionLote) que ata
-            // todos los servicios del paciente. Preferimos el consecutivo publico
-            // (ej. "AS-000045" / "45"); si es un prefijo hex legacy, caemos al rango
-            // de GUID. Luego resolvemos las HCs que cuelgan de esos lotes recorriendo
-            // Lote -> Asignacion.LoteId -> Turno.AsignacionId -> Sesion -> pivote -> HC
+            // El "codigo de asignacion" (AS-000045) identifica un SERVICIO concreto
+            // (asignacion.Consecutivo), no el lote. Resolvemos la(s) HC que cuelgan de
+            // esa asignacion recorriendo Asignacion -> Turno -> Sesion -> pivote -> HC
             // (data-set chico; evita un JOIN de 5 tablas que EF no digiere tras los
             // query filters de tenant) y acotamos la query principal con ese set.
-            List<Guid> loteIds;
-            if (CodigoPublico.ParseNumero(filtro.CodigoAsignacion) is long loteNum)
+            List<Guid> asigIdsDeLote;
+            if (CodigoPublico.ParseNumero(filtro.CodigoAsignacion) is long consNum)
             {
-                loteIds = await db.AsignacionLotes.AsNoTracking()
-                    .Where(l => l.Consecutivo == loteNum).Select(l => l.Id).ToListAsync(ct);
+                asigIdsDeLote = await db.Asignaciones.AsNoTracking()
+                    .Where(a => a.Consecutivo == consNum).Select(a => a.Id).ToListAsync(ct);
             }
-            else if (TryBuildCodigoHcRango(filtro.CodigoAsignacion, out var loteLo, out var loteHi))
-            {
-                loteIds = await db.AsignacionLotes.AsNoTracking()
-                    .Where(l => l.Id >= loteLo && l.Id <= loteHi).Select(l => l.Id).ToListAsync(ct);
-            }
-            else { loteIds = new List<Guid>(); }
-            var asigIdsDeLote = await db.Asignaciones.AsNoTracking()
-                .Where(a => loteIds.Contains(a.LoteId))
-                .Select(a => a.Id)
-                .ToListAsync(ct);
+            else { asigIdsDeLote = new List<Guid>(); }
             var turnoIdsDeLote = await db.AsignacionTurnos.AsNoTracking()
                 .Where(t => asigIdsDeLote.Contains(t.AsignacionId))
                 .Select(t => t.Id)
@@ -385,13 +374,12 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 .Where(a => asigIds.Contains(a.Id))
                 .Select(a => new { a.Id, a.CodigoAutorizacion })
                 .ToDictionaryAsync(x => x.Id, x => x.CodigoAutorizacion, ct);
-        // Consecutivo publico del lote (AS-000045) por loteId.
-        var loteIdsDistintos = asigInfo.Select(x => x.LoteId).Distinct().ToList();
-        var loteToConsecutivo = loteIdsDistintos.Count == 0
+        // Consecutivo publico AS-000045 POR SERVICIO (asignacion.Consecutivo).
+        var asigToConsecutivo = asigIds.Count == 0
             ? new Dictionary<Guid, long>()
-            : await db.AsignacionLotes.AsNoTracking()
-                .Where(l => loteIdsDistintos.Contains(l.Id))
-                .Select(l => new { l.Id, l.Consecutivo })
+            : await db.Asignaciones.AsNoTracking()
+                .Where(a => asigIds.Contains(a.Id))
+                .Select(a => new { a.Id, a.Consecutivo })
                 .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
         // ServicioContrato (Guid) por asignacion, para resolver el codigo del servicio
         // del contrato con el que se cargo el servicio en /asignacion.
@@ -446,7 +434,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         var sinFirmaSet = await SetSinFirmaAsync(hcIds, soloReparables: true, ct);
         var profSinFirmaSet = await SetProfSinFirmaAsync(hcIds, ct);
 
-        return rows.Select(r =>
+        var result = rows.Select(r =>
         {
             Guid? aseId = null;
             string? aseNombre = null;
@@ -522,12 +510,138 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 codigoServicio,
                 asignacionId,
                 r.Hc.Consecutivo,
-                asigLoteId is Guid loteCons && loteToConsecutivo.TryGetValue(loteCons, out var lc) ? lc : (long?)null,
+                asignacionId is Guid acid && asigToConsecutivo.TryGetValue(acid, out var lc) ? lc : (long?)null,
                 r.Hc.ProfesionalId is Guid pid && profToDoc.TryGetValue(pid, out var pdoc) ? pdoc : null,
                 asignacionId is Guid afid && asigToEsFolio.TryGetValue(afid, out var ef) && ef,
                 asignacionId is Guid afid2 && asigToAutorizacion.TryGetValue(afid2, out var aut) ? aut : null
             );
         }).ToList();
+
+        // ── Deteccion de "texto repetido" (copy-paste) ──────────────────────────────
+        // Sobre el resultado ya filtrado: agrupa HCs del MISMO formato cuya narrativa
+        // clinica (campos de texto largo, sin encabezado ni firmas) es IDENTICA. El
+        // ValoresJson ya viene cargado en r.Hc (la query trae la entidad completa), asi
+        // que el calculo es en memoria, sin queries extra.
+        if (filtro.SoloTextoRepetido)
+        {
+            // Mapa clave->label del campo por formato (para mostrar de que campo salio el texto).
+            var labelPorFormato = new Dictionary<Guid, Dictionary<string, string>>();
+            foreach (var r in rows)
+            {
+                if (!labelPorFormato.ContainsKey(r.Hc.FormDefinitionId))
+                {
+                    labelPorFormato[r.Hc.FormDefinitionId] = ConstruirKeyToLabel(r.Fo.SchemaJson);
+                }
+            }
+            var firmaPorHc = rows.ToDictionary(
+                r => r.Hc.Id,
+                r => (Fmt: r.Hc.FormDefinitionId,
+                      Firma: FirmaContenido(r.Hc.ValoresJson, labelPorFormato.GetValueOrDefault(r.Hc.FormDefinitionId))));
+            var hcToGrupo = new Dictionary<Guid, int>();
+            var textoPorGrupo = new Dictionary<int, string>();
+            var camposPorGrupo = new Dictionary<int, IReadOnlyList<CampoRepetidoDto>>();
+            var gnum = 0;
+            var grupos = firmaPorHc
+                .Where(x => x.Value.Firma.Hash != null)
+                .GroupBy(x => (x.Value.Fmt, x.Value.Firma.Hash))
+                .Where(g => g.Count() >= 2)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key.Hash, StringComparer.Ordinal);
+            foreach (var g in grupos)
+            {
+                gnum++;
+                // Texto/campos representativos del grupo (los del primer miembro).
+                var firmaRep = firmaPorHc[g.First().Key].Firma;
+                textoPorGrupo[gnum] = firmaRep.Texto ?? "";
+                camposPorGrupo[gnum] = firmaRep.Campos;
+                foreach (var m in g) { hcToGrupo[m.Key] = gnum; }
+            }
+            result = result
+                .Where(x => hcToGrupo.ContainsKey(x.HistoriaClinicaId))
+                .Select(x =>
+                {
+                    var grp = hcToGrupo[x.HistoriaClinicaId];
+                    return x with
+                    {
+                        GrupoTextoRepetido = grp,
+                        TextoRepetido = textoPorGrupo.GetValueOrDefault(grp),
+                        TextoRepetidoCampos = camposPorGrupo.GetValueOrDefault(grp)
+                    };
+                })
+                .OrderBy(x => x.GrupoTextoRepetido).ThenBy(x => x.PacienteNombre)
+                .ToList();
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Firma (hash) del CONTENIDO narrativo de una HC para detectar copy-paste: concatena
+    /// los valores de texto LARGO (&gt;=20 chars normalizados) excluyendo el encabezado
+    /// (claves "hdr:*") y las firmas (claves con "firma", que son base64). Normaliza
+    /// espacios y mayus/minus. Devuelve null si no hay texto significativo. Comparar por
+    /// este hash (y por formato) identifica notas con el MISMO texto aunque cambie el paciente.
+    /// </summary>
+    private static (string? Hash, string? Texto, IReadOnlyList<CampoRepetidoDto> Campos) FirmaContenido(
+        string? valoresJson, IReadOnlyDictionary<string, string>? keyToLabel)
+    {
+        var sinCampos = (IReadOnlyList<CampoRepetidoDto>)Array.Empty<CampoRepetidoDto>();
+        if (string.IsNullOrWhiteSpace(valoresJson)) { return (null, null, sinCampos); }
+        Dictionary<string, string?>? v;
+        try { v = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string?>>(valoresJson); }
+        catch { return (null, null, sinCampos); }
+        if (v is null || v.Count == 0) { return (null, null, sinCampos); }
+
+        // sbNorm: version normalizada (minusculas, espacios colapsados) para el HASH de agrupacion.
+        // sbLegible/campos: valores ORIGINALES de los campos que entraron, con su label, para MOSTRAR.
+        var sbNorm = new System.Text.StringBuilder();
+        var sbLegible = new System.Text.StringBuilder();
+        var campos = new List<CampoRepetidoDto>();
+        foreach (var kv in v.OrderBy(x => x.Key, StringComparer.Ordinal))
+        {
+            var key = kv.Key ?? "";
+            if (key.StartsWith("hdr:", StringComparison.OrdinalIgnoreCase)) { continue; }
+            if (key.Contains("firma", StringComparison.OrdinalIgnoreCase)) { continue; }
+            if (string.IsNullOrWhiteSpace(kv.Value)) { continue; }
+            var norm = string.Join(' ', kv.Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+            if (norm.Length < 20) { continue; }
+            sbNorm.Append(norm).Append('\u001f');
+            var valor = kv.Value!.Trim();
+            if (sbLegible.Length > 0) { sbLegible.Append("\n\n"); }
+            sbLegible.Append(valor);
+            var label = keyToLabel != null && keyToLabel.TryGetValue(key, out var lbl) && !string.IsNullOrWhiteSpace(lbl)
+                ? lbl : key;
+            campos.Add(new CampoRepetidoDto(label, valor));
+        }
+        var contenido = sbNorm.ToString();
+        if (contenido.Length < 20) { return (null, null, sinCampos); }
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(contenido)));
+        return (hash, sbLegible.ToString(), campos);
+    }
+
+    /// <summary>Mapa clave(Name)->label a partir del SchemaJson del FormDefinition, recorriendo
+    /// secciones. Permite mostrar el label del campo en el modal de texto repetido.</summary>
+    private static Dictionary<string, string> ConstruirKeyToLabel(string? schemaJson)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(schemaJson)) { return map; }
+        Forms.FormSchema? schema;
+        try { schema = Forms.FormSchema.FromJson(schemaJson); }
+        catch { return map; }
+        if (schema?.Children is null) { return map; }
+        void Recurse(IEnumerable<Forms.FormNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.IsSection && n.Children is not null) { Recurse(n.Children); continue; }
+                if (!string.IsNullOrWhiteSpace(n.Name) && !string.IsNullOrWhiteSpace(n.Label))
+                {
+                    map[n.Name!] = n.Label!;
+                }
+            }
+        }
+        Recurse(schema.Children);
+        return map;
     }
 
     // ===== Firmas faltantes en formulas emitidas (deteccion + reparacion) =====
@@ -810,9 +924,10 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
                 it.InsExtCount + it.EscalasCount + it.EvolucionesCount + it.ConsentimientosCount;
             var fecha = (it.FechaCierre ?? it.FechaApertura).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
+            // AS-000045 POR SERVICIO; siempre presente (asignacion.Consecutivo NOT NULL).
             var codAsignacion = it.AsignacionConsecutivo is long asc
                 ? CodigoPublico.Asignacion(asc)
-                : (it.AsignacionLoteId is Guid lid ? lid.ToString()[..8].ToUpperInvariant() : "");
+                : "";
             hoja.Cell(row, 1).Value = it.PacienteNombre;
             hoja.Cell(row, 2).Value = $"{it.PacienteTipoDoc} {it.PacienteDoc}".Trim();
             hoja.Cell(row, 3).Value = codAsignacion;

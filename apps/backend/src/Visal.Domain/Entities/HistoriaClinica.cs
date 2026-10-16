@@ -52,6 +52,20 @@ public class HistoriaClinica : TenantEntity
     /// </summary>
     public DateTimeOffset? FechaAtencion { get; set; }
 
+    /// <summary>
+    /// Token de autorizacion (AutorizacionToken) que se uso para permitir una
+    /// <see cref="FechaAtencion"/> que excede el limite de oportunidad del tipo de
+    /// servicio. Null = no se requirio/uso autorizacion. Junto con
+    /// <see cref="AutorizacionFechaAutorizada"/> blinda contra re-pedir el token si la
+    /// fecha no cambia, y habilita el cierre.
+    /// </summary>
+    public Guid? AutorizacionFechaTokenId { get; set; }
+
+    /// <summary>La <see cref="FechaAtencion"/> exacta que quedo autorizada por el token.
+    /// Si el operador cambia la fecha a OTRO valor fuera de rango, deja de coincidir y el
+    /// sistema vuelve a pedir token.</summary>
+    public DateTimeOffset? AutorizacionFechaAutorizada { get; set; }
+
     /// <summary>Motivo de inactivacion cuando Estado = Inactiva.</summary>
     public string? MotivoInactivacion { get; set; }
 

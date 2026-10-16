@@ -146,6 +146,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IDocumentoNotaService, Tenancy.DocumentoNotaService>();
         services.AddScoped<Tenancy.IHcMenuConfigService, Tenancy.HcMenuConfigService>();
         services.AddScoped<Tenancy.ICatalogoTipoServicioService, Tenancy.CatalogoTipoServicioService>();
+        services.AddScoped<Tenancy.IAutorizacionTokenService, Tenancy.AutorizacionTokenService>();
         services.AddScoped<Tenancy.IAtencionColumnaConfigService, Tenancy.AtencionColumnaConfigService>();
         services.AddScoped<Tenancy.IAtencionOrdenService, Tenancy.AtencionOrdenService>();
         services.AddScoped<Tenancy.Turnos.ITurnoProgramacionService, Tenancy.Turnos.TurnoProgramacionService>();

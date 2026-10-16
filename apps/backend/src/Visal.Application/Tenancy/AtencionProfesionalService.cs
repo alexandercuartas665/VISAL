@@ -61,18 +61,11 @@ public sealed class AtencionProfesionalService(
             .Where(a => asigIds.Contains(a.Id))
             .ToListAsync(ct);
         var asigDict = asigs.ToDictionary(a => a.Id);
-        // Consecutivo del LOTE (AS-000045) por servicio: para mostrar/buscar por el
-        // codigo de asignacion legible en vez del prefijo hex del UUID (que colisiona).
-        var loteIdsAt = asigs.Select(a => a.LoteId).Distinct().ToList();
-        var loteConsAt = loteIdsAt.Count == 0
-            ? new Dictionary<Guid, long>()
-            : await db.AsignacionLotes.AsNoTracking()
-                .Where(l => loteIdsAt.Contains(l.Id))
-                .Select(l => new { l.Id, l.Consecutivo })
-                .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
-        long? ConsecutivoLoteDe(Guid asigId)
-            => asigDict.TryGetValue(asigId, out var aa) && loteConsAt.TryGetValue(aa.LoteId, out var c)
-                ? c : (long?)null;
+        // Consecutivo publico AS-000045 POR SERVICIO (asignacion.Consecutivo), para
+        // mostrar/buscar por el codigo legible. Cada servicio tiene el suyo (el lote ya
+        // no es la fuente del numero).
+        long? ConsecutivoAsignacionDe(Guid asigId)
+            => asigDict.TryGetValue(asigId, out var aa) ? (long?)aa.Consecutivo : null;
 
         // Formato de HC configurado por servicio: el snapshot Asignacion.FormatoHistoria
         // deberia venir copiado de ServicioContrato.Historia al crear la asignacion,
@@ -161,6 +154,38 @@ public sealed class AtencionProfesionalService(
                 .ToListAsync(ct))
                 .GroupBy(x => x.SesionId)
                 .ToDictionary(g => g.Key, g => g.Max(x => x.FechaCierre!.Value));
+
+        // ── Oportunidad de atencion: limites de tiempo por tipo de servicio ──────────
+        // Catalogo de limites configurados en /config/tipos-servicio (dias para la 1a
+        // sesion desde la coordinacion; horas para las siguientes desde la ultima
+        // atencion). Solo cargamos los tipos que tienen algun limite.
+        var limitesPorTipo = (await db.CatalogosTipoServicio.AsNoTracking()
+            .Where(c => c.LimiteDiasPrimeraSesion != null || c.LimiteHorasSesionesSiguientes != null)
+            .Select(c => new { c.Codigo, c.LimiteDiasPrimeraSesion, c.LimiteHorasSesionesSiguientes })
+            .ToListAsync(ct))
+            .GroupBy(c => c.Codigo.ToUpperInvariant())
+            .ToDictionary(
+                g => g.Key,
+                g => (Dias: g.First().LimiteDiasPrimeraSesion, Horas: g.First().LimiteHorasSesionesSiguientes));
+
+        // Fechas de atencion ya registradas por asignacion (para medir las HORAS entre
+        // sesiones). Preferimos la hora de cierre de la HC (precisa); si no, la fecha de
+        // atencion a medianoche local. Listas ordenadas asc por asignacion.
+        var localOffset = DateTimeOffset.Now.Offset;
+        DateTimeOffset FechaAMomento(DateOnly d) => new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), localOffset);
+        var turnoAAsig = turnos.ToDictionary(t => t.Id, t => t.AsignacionId);
+        var atencionesPorAsig = new Dictionary<Guid, List<DateTimeOffset>>();
+        if (limitesPorTipo.Count > 0)
+        {
+            foreach (var se in sesiones)
+            {
+                if (!turnoAAsig.TryGetValue(se.AsignacionTurnoId, out var aid)) { continue; }
+                var when = horaCierrePorSesion.TryGetValue(se.Id, out var hcc) ? hcc : FechaAMomento(se.FechaAtencion);
+                if (!atencionesPorAsig.TryGetValue(aid, out var lst)) { lst = atencionesPorAsig[aid] = new List<DateTimeOffset>(); }
+                lst.Add(when);
+            }
+            foreach (var lst in atencionesPorAsig.Values) { lst.Sort(); }
+        }
 
         // Ids de las HC vinculadas a cada sesion (via el mismo pivote, pero sin
         // filtrar por FechaCierre: sirve tambien para HCs Abiertas). Solo se usa
@@ -532,6 +557,66 @@ public sealed class AtencionProfesionalService(
                 string? nombreFormatoEfectivo = !string.IsNullOrWhiteSpace(formatoEfectivo)
                     && nombrePorFormato.TryGetValue(formatoEfectivo.Trim(), out var nfe) ? nfe : null;
 
+                // ── Oportunidad de atencion (dato informativo por fila) ──────────────
+                string? opUnidad = null; int? opTotal = null; int? opTrans = null;
+                bool opVenc = false; DateTimeOffset? opLimite = null; DateTimeOffset? opDesde = null;
+                if (limitesPorTipo.Count > 0)
+                {
+                    (int? Dias, int? Horas)? lim = null;
+                    foreach (var code in new[] { a.TipoServicio, a.Modulo })
+                    {
+                        if (!string.IsNullOrWhiteSpace(code)
+                            && limitesPorTipo.TryGetValue(code.Trim().ToUpperInvariant(), out var lv))
+                        { lim = lv; break; }
+                    }
+                    if (lim is { } limVal)
+                    {
+                        // Momento final del conteo: si ya se atendio, cuando se atendio; si no, ahora.
+                        DateTimeOffset? ownWhen = null;
+                        if (completado)
+                        {
+                            ownWhen = horaCierre ?? (sesion is not null ? FechaAMomento(sesion.FechaAtencion) : (DateTimeOffset?)null);
+                        }
+                        var endRef = ownWhen ?? DateTimeOffset.Now;
+
+                        if (nGlobal <= 1)
+                        {
+                            // Primera sesion: DIAS desde la coordinacion del turno (CreatedAt).
+                            if (limVal.Dias is int dd)
+                            {
+                                opUnidad = "dias"; opTotal = dd;
+                                opDesde = t.CreatedAt; opLimite = t.CreatedAt.AddDays(dd);
+                                opTrans = (int)Math.Floor(Math.Max(0, (endRef - t.CreatedAt).TotalDays));
+                                opVenc = endRef > opLimite;
+                            }
+                        }
+                        else if (limVal.Horas is int hh)
+                        {
+                            // Siguientes sesiones: HORAS desde la ultima atencion de la asignacion.
+                            DateTimeOffset? start = null;
+                            if (atencionesPorAsig.TryGetValue(a.Id, out var lst) && lst.Count > 0)
+                            {
+                                if (completado && ownWhen is DateTimeOffset ow)
+                                {
+                                    // La atencion inmediatamente anterior a esta sesion (lista ordenada asc).
+                                    for (int k = lst.Count - 1; k >= 0; k--)
+                                    {
+                                        if (lst[k] < ow) { start = lst[k]; break; }
+                                    }
+                                }
+                                else { start = lst[lst.Count - 1]; } // pendiente: desde la ultima atencion
+                            }
+                            if (start is DateTimeOffset st)
+                            {
+                                opUnidad = "horas"; opTotal = hh;
+                                opDesde = st; opLimite = st.AddHours(hh);
+                                opTrans = (int)Math.Floor(Math.Max(0, (endRef - st).TotalHours));
+                                opVenc = endRef > opLimite;
+                            }
+                        }
+                    }
+                }
+
                 result.Add(new MiServicioAsignadoDto(
                     t.Id, a.Id,
                     n, t.Cantidad,
@@ -569,10 +654,17 @@ public sealed class AtencionProfesionalService(
                     t.HoraInicio,
                     t.LlegoEn != null,
                     nombreFormatoEfectivo,
-                    ConsecutivoLoteDe(a.Id),
+                    ConsecutivoAsignacionDe(a.Id),
                     a.AnioServicio,
                     a.MesVigencia,
-                    a.MesFinal));
+                    a.MesFinal,
+                    opUnidad,
+                    opTotal,
+                    opTrans,
+                    opVenc,
+                    opLimite,
+                    opDesde,
+                    t.CreatedAt));
             }
         }
         return result;

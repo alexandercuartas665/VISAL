@@ -6,7 +6,9 @@ public sealed record CatalogoTipoServicioDto(
     string Nombre,
     int Orden,
     bool Activo,
-    string? TipoArchivoRips);
+    string? TipoArchivoRips,
+    int? LimiteDiasPrimeraSesion = null,
+    int? LimiteHorasSesionesSiguientes = null);
 
 public sealed record GuardarTipoServicioRequest(
     Guid? Id,
@@ -14,7 +16,9 @@ public sealed record GuardarTipoServicioRequest(
     string Nombre,
     int Orden,
     bool Activo,
-    string? TipoArchivoRips);
+    string? TipoArchivoRips,
+    int? LimiteDiasPrimeraSesion = null,
+    int? LimiteHorasSesionesSiguientes = null);
 
 /// <summary>
 /// Catalogo dinamico de modulos / tipos de servicio contratado. Es la fuente

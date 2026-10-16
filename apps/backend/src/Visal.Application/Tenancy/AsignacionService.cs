@@ -239,11 +239,9 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<AsignacionMiniDto>> UltimasAsignacionesAsync(Guid pacienteId, int n, CancellationToken ct = default)
     {
         if (n <= 0) { n = 10; }
-        // Left-join al lote para traer su Consecutivo (codigo publico AS-xxxxxx),
-        // igual que el Listado. DefaultIfEmpty por si una asignacion no tiene lote.
+        // El codigo publico AS-xxxxxx sale del consecutivo POR SERVICIO (asignacion),
+        // no del lote: cada servicio tiene el suyo.
         var q = from a in db.Asignaciones.AsNoTracking()
-                join lo in db.AsignacionLotes.AsNoTracking() on a.LoteId equals lo.Id into loj
-                from lo in loj.DefaultIfEmpty()
                 where a.PacienteId == pacienteId
                 orderby a.CreatedAt descending
                 select new AsignacionMiniDto(
@@ -251,7 +249,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                     a.FechaInicio, a.FechaFinal, a.Estado.ToString(), a.ContratoCodigo, a.CreatedAt,
                     a.CodigoAutorizacion, a.AnioServicio, a.MesVigencia, a.MesFinal, a.Observaciones,
                     a.ServicioId, a.Modulo,
-                    (long?)(lo != null ? lo.Consecutivo : (long?)null));
+                    (long?)a.Consecutivo);
         return await q.Take(n).ToListAsync(ct);
     }
 
@@ -435,10 +433,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Where(p => p.Id == a.PacienteId)
             .Select(p => new { p.NombreCompleto, p.NumeroDocumento })
             .FirstOrDefaultAsync(ct);
-        var cons = await db.AsignacionLotes.AsNoTracking()
-            .Where(l => l.Id == a.LoteId)
-            .Select(l => (long?)l.Consecutivo)
-            .FirstOrDefaultAsync(ct);
+        long? cons = a.Consecutivo;   // consecutivo por SERVICIO (AS-xxxxxx)
         audit.Write(
             actorUserId: actor,
             actionName: "Asignacion.Eliminada",
@@ -597,14 +592,12 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             from a in q
             join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id into pj
             from p in pj.DefaultIfEmpty()
-            join l in db.AsignacionLotes.AsNoTracking() on a.LoteId equals l.Id into lj
-            from l in lj.DefaultIfEmpty()
             select new
             {
                 a.PdfAutorizacionHash,
                 a.CodigoAutorizacion,
                 PacienteNombre = p != null ? p.NombreCompleto : null,
-                Consecutivo = (long?)(l != null ? l.Consecutivo : 0)
+                Consecutivo = (long?)a.Consecutivo
             }).ToListAsync(ct);
 
         var porHash = hash is null ? null : rows.FirstOrDefault(r => r.PdfAutorizacionHash == hash);
@@ -713,12 +706,10 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default)
     {
         // Join principal: asignaciones + paciente (in-tenant por query filter global).
-        // + lote (left join) para traer el consecutivo publico "AS-000045".
+        // El consecutivo publico "AS-000045" sale del propio servicio (a.Consecutivo).
         var q = from a in db.Asignaciones.AsNoTracking()
                 join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
-                join lo in db.AsignacionLotes.AsNoTracking() on a.LoteId equals lo.Id into loj
-                from lo in loj.DefaultIfEmpty()
-                select new { a, p, lo };
+                select new { a, p };
 
         if (filtro.FechaInicial is DateOnly fi) { q = q.Where(x => x.a.FechaInicio >= fi); }
         if (filtro.FechaFinal is DateOnly ff) { q = q.Where(x => x.a.FechaInicio <= ff); }
@@ -802,7 +793,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 x.a.Sucursal,
                 x.a.AutorizacionPendiente,
                 x.a.PdfAutorizacionUrl,
-                Consecutivo = (long?)(x.lo != null ? x.lo.Consecutivo : (long?)null)
+                Consecutivo = (long?)x.a.Consecutivo
             })
             .ToListAsync(ct);
 
@@ -1905,16 +1896,13 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                           && a.Paciente.Aseguradora.Nombre == asg);
         }
         if (fechaAsignacion is DateOnly fa) { q = q.Where(a => a.FechaInicio == fa); }
-        // Filtro por codigo de asignacion (consecutivo del lote). Se toman solo los
+        // Filtro por codigo de asignacion (consecutivo POR SERVICIO). Se toman solo los
         // digitos del texto ("AS-000045"/"45" -> 45). Sin digitos validos no hay match.
         if (!string.IsNullOrWhiteSpace(idAsignacion))
         {
             var digs = new string(idAsignacion.Where(char.IsDigit).ToArray());
             if (!long.TryParse(digs, out var consFiltro)) { return Array.Empty<CoordinacionEliminableDto>(); }
-            var loteIdsFiltro = db.AsignacionLotes.AsNoTracking()
-                .Where(l => l.Consecutivo == consFiltro)
-                .Select(l => l.Id);
-            q = q.Where(a => loteIdsFiltro.Contains(a.LoteId));
+            q = q.Where(a => a.Consecutivo == consFiltro);
         }
 
         var asigs = await q
@@ -1932,13 +1920,6 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .Where(p => pacIds.Contains(p.Id))
             .Select(p => new { p.Id, p.NumeroDocumento, p.NombreCompleto })
             .ToDictionaryAsync(p => p.Id, p => p, ct);
-
-        // Consecutivo del lote (codigo AS-xxxxxx) por asignacion, para mostrarlo en la fila.
-        var loteIds = asigs.Select(a => a.LoteId).Distinct().ToList();
-        var loteCons = await db.AsignacionLotes.AsNoTracking()
-            .Where(l => loteIds.Contains(l.Id))
-            .Select(l => new { l.Id, l.Consecutivo })
-            .ToDictionaryAsync(x => x.Id, x => (long?)x.Consecutivo, ct);
 
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => asigIds.Contains(t.AsignacionId))
@@ -2007,7 +1988,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 FechaAsignacion: a.FechaInicio,
                 SesionesCompletadas: completadasPorAsig.TryGetValue(a.Id, out var cc) ? cc : 0,
                 TieneAtencion: atencionAsigs.Contains(a.Id),
-                Consecutivo: loteCons.TryGetValue(a.LoteId, out var cns) ? cns : null));
+                Consecutivo: a.Consecutivo));
         }
         return result;
     }

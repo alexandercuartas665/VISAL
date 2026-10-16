@@ -18,6 +18,16 @@ public class Asignacion : TenantEntity
     public Guid LoteId { get; set; }
     public AsignacionLote? Lote { get; set; }
 
+    /// <summary>
+    /// Consecutivo publico UNICO por SERVICIO (se muestra "AS-000045"). Secuencia global
+    /// <c>asignacion_item_consecutivo_seq</c>, asignado por la BD (ValueGeneratedOnAdd) para
+    /// que cualquier insercion quede numerada sin depender del codigo. Reemplaza al consecutivo
+    /// del LOTE como fuente del numero visible: antes todos los servicios de un lote compartian
+    /// el AS del lote (se veian como "la misma asignacion"); ahora cada servicio tiene el suyo.
+    /// El lote (<see cref="AsignacionLote.Consecutivo"/>) se conserva como agrupador interno.
+    /// </summary>
+    public long Consecutivo { get; set; }
+
     public Guid PacienteId { get; set; }
     public Paciente? Paciente { get; set; }
 

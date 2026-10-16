@@ -569,6 +569,8 @@ else
     .at-row-llego td:first-child { box-shadow: inset 3px 0 0 #22c55e; }
     .at-pill-done { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .at-pill-no { background: #fef3c7; color: #92400e; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .at-op-chip { background: #eff6ff; color: #1e40af; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: help; }
+    .at-op-venc { background: #fee2e2; color: #b91c1c; }
     .at-no-prof { padding: 30px; }
     .at-no-prof code { background:#f1f5f9; padding:1px 6px; border-radius:3px; }
     .asg-ro { background: #f1f5f9; }
@@ -1146,6 +1148,12 @@ else
         new ColDef("pkg_cod",       "PaqueteCod",      "Paquete<br/>Cod",                        11),
         new ColDef("pkg_nom",       "PaqueteNombre",   "Paquete<br/>Nombre",                     12),
         new ColDef("session_no",    "SessionNo",       "Sesion",                                 13),
+        // Fecha en que se coordino el turno (AsignacionTurno.CreatedAt). Es la referencia
+        // desde la que se mide la oportunidad de la 1a sesion.
+        new ColDef("fec_coord",     "FechaCoord",      "Fecha<br/>Coordinacion",                  14),
+        // Oportunidad de atencion: tiempo que lleva / total disponible segun el limite del
+        // tipo de servicio (1a sesion en dias desde coordinacion; siguientes en horas).
+        new ColDef("oportunidad",   "Oportunidad",     "Oportu-<br/>nidad",                       14),
         new ColDef("completado",    "Completado",     "Completado",                              14),
         new ColDef("tipo_doc_pac",  "TipoDocPac",      "Tipo<br/>DocPac",                        15),
         new ColDef("no_doc_pac",    "NoDocPac",        "NoDocPac",                                16),
@@ -1339,6 +1347,57 @@ else
                 __b.AddContent(seq++, s.NumeroSesionMostrar);
                 __b.CloseElement();
                 break;
+            case "fec_coord":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                if (s.FechaCoordinacion is DateTimeOffset fcoord)
+                {
+                    __b.AddAttribute(seq++, "title", "Fecha y hora en que se coordino el turno.");
+                    __b.AddContent(seq++, fcoord.LocalDateTime.ToString("dd/MM/yyyy HH:mm"));
+                }
+                else
+                {
+                    __b.AddAttribute(seq++, "class", "text-muted");
+                    __b.AddContent(seq++, "—");
+                }
+                __b.CloseElement();
+                break;
+            case "oportunidad":
+            {
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                __b.AddAttribute(seq++, "class", "text-center");
+                if (string.IsNullOrEmpty(s.OportunidadUnidad) || s.OportunidadTotal is null)
+                {
+                    // El tipo de servicio no tiene limite configurado (o no aplica a esta fila).
+                    __b.OpenElement(seq++, "span");
+                    __b.AddAttribute(seq++, "class", "text-muted");
+                    __b.AddAttribute(seq++, "title", "Este tipo de servicio no tiene limite de oportunidad configurado.");
+                    __b.AddContent(seq++, "—");
+                    __b.CloseElement();
+                }
+                else
+                {
+                    var esHoras = s.OportunidadUnidad == "horas";
+                    var unidadCorta = esHoras ? "h" : "d";
+                    var unidadLarga = esHoras ? "horas" : "dias";
+                    var refTxt = esHoras ? "la ultima atencion" : "la coordinacion";
+                    var trans = s.OportunidadTranscurrido ?? 0;
+                    var tot = s.OportunidadTotal.Value;
+                    var fmt = esHoras ? "dd/MM HH:mm" : "dd/MM/yyyy";
+                    var desdeTxt = s.OportunidadDesde?.LocalDateTime.ToString(fmt) ?? "";
+                    var limTxt = s.OportunidadLimite?.LocalDateTime.ToString(fmt) ?? "";
+                    var tip = $"Lleva {trans} de {tot} {unidadLarga} desde {refTxt} ({desdeTxt}). "
+                            + $"Limite: {limTxt}." + (s.OportunidadVencida ? " FUERA DE OPORTUNIDAD." : "");
+                    __b.OpenElement(seq++, "span");
+                    __b.AddAttribute(seq++, "class", s.OportunidadVencida ? "at-op-chip at-op-venc" : "at-op-chip");
+                    __b.AddAttribute(seq++, "title", tip);
+                    __b.AddContent(seq++, $"{trans} de {tot} {unidadCorta}");
+                    __b.CloseElement();
+                }
+                __b.CloseElement();
+                break;
+            }
             case "completado":
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "data-label", label);

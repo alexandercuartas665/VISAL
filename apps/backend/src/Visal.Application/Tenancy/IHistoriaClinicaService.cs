@@ -1,5 +1,15 @@
 namespace Visal.Application.Tenancy;
 
+/// <summary>Resultado de evaluar el control de fecha de atencion de una HC.</summary>
+/// <param name="RequiereToken">True si la fecha excede el limite y la HC no esta autorizada para esa fecha.</param>
+/// <param name="Unidad">"dias" (1a sesion) u "horas" (siguientes); null si no aplica.</param>
+/// <param name="Detalle">Texto legible del motivo (para el modal de token).</param>
+public sealed record ControlFechaAtencionDto(
+    bool RequiereToken, string? Unidad, string? Detalle, Guid? AsignacionId, DateTimeOffset? FechaAtencion);
+
+/// <summary>Resultado de intentar autorizar una fecha con un token.</summary>
+public sealed record AutorizarFechaResult(bool Ok, string? Mensaje);
+
 /// <summary>Resumen de una historia clinica para la lista lateral del modulo.</summary>
 public sealed record HistoriaClinicaResumenDto(
     Guid Id,
@@ -182,8 +192,19 @@ public interface IHistoriaClinicaService
     /// no existe.</summary>
     Task<bool> EsAbiertaAsync(Guid historiaClinicaId, CancellationToken ct = default);
 
-    /// <summary>Cambia el estado a Cerrada y registra FechaCierre. Persiste los valores que llegan.</summary>
+    /// <summary>Cambia el estado a Cerrada y registra FechaCierre. Persiste los valores que llegan.
+    /// Lanza <see cref="CierreRequiereAutorizacionException"/> si la fecha de atencion excede el
+    /// limite del tipo de servicio y la HC no tiene autorizacion (token) para esa fecha.</summary>
     Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Evalua el control de fecha de atencion de la HC (lee su FechaAtencion persistida).
+    /// Lo llama la UI tras cada autoguardado para pedir el token cuando la fecha se sale del limite.</summary>
+    Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, CancellationToken ct = default);
+
+    /// <summary>Valida/consume un token de autorizacion y marca la HC como autorizada para su
+    /// fecha de atencion actual (habilita el cierre). Atomico (token + HC en una transaccion).</summary>
+    Task<AutorizarFechaResult> AutorizarFechaConTokenAsync(
+        Guid hcId, string codigo, string motivo, string? actorNombre, Guid actor, CancellationToken ct = default);
 
     /// <summary>Reabre una HC previamente Cerrada volviendo su estado a Abierta y
     /// limpiando FechaCierre. Solo se permite si estaba Cerrada (no aplica a

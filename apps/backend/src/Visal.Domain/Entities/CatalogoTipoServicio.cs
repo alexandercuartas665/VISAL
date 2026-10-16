@@ -40,4 +40,19 @@ public class CatalogoTipoServicio : TenantEntity
     /// tipos futuros sin migracion de enum. Null = sin clasificar.
     /// </summary>
     public string? TipoArchivoRips { get; set; }
+
+    /// <summary>
+    /// Tiempo maximo (en DIAS) que puede transcurrir entre la fecha de coordinacion
+    /// y la fecha de atencion de la PRIMERA sesion de una asignacion de este tipo.
+    /// Null = sin limite configurado (no se controla). Ej: 4 => la primera atencion
+    /// debe quedar a mas tardar 4 dias despues de coordinada.
+    /// </summary>
+    public int? LimiteDiasPrimeraSesion { get; set; }
+
+    /// <summary>
+    /// Tiempo maximo (en HORAS) que puede transcurrir entre una sesion y la siguiente
+    /// (de la segunda sesion en adelante) para asignaciones de este tipo.
+    /// Null = sin limite configurado (no se controla).
+    /// </summary>
+    public int? LimiteHorasSesionesSiguientes { get; set; }
 }

@@ -113,7 +113,29 @@ public sealed record MiServicioAsignadoDto(
     /// <summary>Mes inicial de vigencia (Asignacion.MesVigencia, 1..12).</summary>
     short MesVigencia = 0,
     /// <summary>Mes final de vigencia (Asignacion.MesFinal). Null = igual a MesVigencia (un solo mes).</summary>
-    short? MesFinal = null);
+    short? MesFinal = null,
+    // ── Oportunidad de atencion (limite de tiempo por tipo de servicio) ──────────
+    // Dato INFORMATIVO (consulta) que se muestra por fila en Atencion. El limite se
+    // configura por tipo en /config/tipos-servicio: la PRIMERA sesion se mide en DIAS
+    // desde la coordinacion del turno; las SIGUIENTES en HORAS desde la ultima atencion
+    // de esa asignacion. Todos null cuando el tipo no tiene limite configurado o no aplica.
+    /// <summary>Unidad del limite aplicable a esta fila: "dias" (1a sesion) u "horas" (siguientes). Null = sin limite.</summary>
+    string? OportunidadUnidad = null,
+    /// <summary>Tiempo total disponible (en OportunidadUnidad) segun el catalogo de tipos de servicio.</summary>
+    int? OportunidadTotal = null,
+    /// <summary>Tiempo transcurrido (misma unidad) desde la referencia: para sesiones completadas es
+    /// lo que tomo; para pendientes, lo corrido hasta ahora. Null cuando no aplica.</summary>
+    int? OportunidadTranscurrido = null,
+    /// <summary>True si lo transcurrido supera el total disponible (fuera de oportunidad).</summary>
+    bool OportunidadVencida = false,
+    /// <summary>Fecha/hora limite (referencia + total). Solo para tooltip. Null si no aplica.</summary>
+    DateTimeOffset? OportunidadLimite = null,
+    /// <summary>Momento de referencia del conteo (coordinacion o ultima atencion). Solo tooltip.</summary>
+    DateTimeOffset? OportunidadDesde = null,
+    /// <summary>Fecha/hora en que se coordino el turno (AsignacionTurno.CreatedAt). Es la
+    /// referencia desde la que se mide la oportunidad de la 1a sesion. Se muestra como
+    /// columna "Fecha coordinacion" en la parrilla de Atencion.</summary>
+    DateTimeOffset? FechaCoordinacion = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

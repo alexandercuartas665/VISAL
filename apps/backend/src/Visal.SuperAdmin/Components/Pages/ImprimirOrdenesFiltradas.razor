@@ -253,18 +253,36 @@ else
             {
                 todas = todas.Where(x => x.AsignacionId == servId).ToList();
             }
-            // Orden del paquete impreso: PACIENTE -> COD. ASIGNACION -> SESION.
-            // Asi cada paciente sale agrupado, y dentro de cada asignacion (lote)
-            // los documentos salen en orden de sesion ascendente (#1, #2, #3, ...),
-            // que es el orden clinico de lectura. Ordenar por AsignacionLoteId
-            // equivale a ordenar por el "Cod. asignacion" visible (sus primeros 8
-            // hex). Las HC sin sesion/lote (legacy) caen al final de su grupo.
-            // Se toma la fecha como desempate final para un orden estable.
+            // Orden del paquete impreso: PACIENTE -> COD. ASIGNACION -> (dentro de cada
+            // asignacion) segun el TIPO de formato:
+            //  - Si TODAS las HC de la asignacion son del MISMO formato exacto (mismo
+            //    FormatoCodigo), salen en orden CRONOLOGICO por fecha de atencion. Caso
+            //    tipico: 90 notas de enfermeria (un solo formato) cuyo numero_sesion rigido
+            //    quedo desalineado con la fecha real -> por sesion se veria desordenado.
+            //  - Si la asignacion tiene 2+ formatos distintos, se mantiene el orden por
+            //    numero de sesion RIGIDO (#1, #2, ...), el orden clinico de lectura para
+            //    una secuencia base/evolucion de tipos mezclados.
+            // Ordenar por AsignacionLoteId equivale a ordenar por el "Cod. asignacion"
+            // visible (sus primeros 8 hex). Las HC sin sesion/lote (legacy) caen al final
+            // de su grupo. La fecha es el desempate final para un orden estable.
             todas = todas
-                .OrderBy(x => x.PacienteNombre, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(x => x.AsignacionLoteId)
-                .ThenBy(x => x.SesionNumero ?? int.MaxValue)
-                .ThenBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura)
+                .GroupBy(x => (Pac: x.PacienteNombre ?? "", Lote: x.AsignacionLoteId))
+                .OrderBy(g => g.Key.Pac, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(g => g.Key.Lote)
+                .SelectMany(g =>
+                {
+                    // "Mismo formato exacto" se detecta por FormatoNombre (unico por
+                    // FormDefinition, incluye el codigo, p.ej. "PP-FO-84 NOTAS DE ENFERMERIA").
+                    var unSoloFormato = g
+                        .Select(x => x.FormatoNombre)
+                        .Where(c => !string.IsNullOrWhiteSpace(c))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Count() <= 1;
+                    return unSoloFormato
+                        ? g.OrderBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura)
+                        : g.OrderBy(x => x.SesionNumero ?? int.MaxValue)
+                           .ThenBy(x => x.FechaAtencion ?? x.FechaCierre ?? x.FechaApertura);
+                })
                 .ToList();
 
             // Evita duplicados en modo terapia: las HC de evolucion ligadas a una HC

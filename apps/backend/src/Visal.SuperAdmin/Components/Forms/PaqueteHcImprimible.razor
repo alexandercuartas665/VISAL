@@ -651,7 +651,8 @@ else
     private sealed record EvoImprimible(
         Guid Id, string? SchemaJson, string? ValoresJson,
         string FormatoNombre, DateTimeOffset FechaApertura, string? EspecialistaNombre,
-        DateTimeOffset? FechaAtencion, int? SesionNumero, long Consecutivo);
+        DateTimeOffset? FechaAtencion, int? SesionNumero, long Consecutivo,
+        string? FormatoCodigo = null);
     private List<EvoImprimible> _evolucionesUnificadas = new();
 
     // HC: schema + valores
@@ -1047,7 +1048,8 @@ else
             evosMerge.Add(new EvoImprimible(
                 evo.Historia.Id, evo.Historia.SchemaJson, evo.Historia.ValoresJson,
                 evo.Historia.FormatoNombre, evo.Historia.FechaApertura, evo.Historia.EspecialistaNombre,
-                evo.Historia.FechaAtencion, evo.SesionNumero, evo.Historia.Consecutivo));
+                evo.Historia.FechaAtencion, evo.SesionNumero, evo.Historia.Consecutivo,
+                evo.Historia.FormatoCodigo));
         }
         foreach (var doc in _evoDetails)
         {
@@ -1066,14 +1068,30 @@ else
             evosMerge.Add(new EvoImprimible(
                 doc.Id, doc.SchemaJson, doc.ValoresJson,
                 doc.FormatoNombre, doc.FechaApertura, doc.EspecialistaNombre,
-                faDoc, sesDoc, doc.Consecutivo));
+                faDoc, sesDoc, doc.Consecutivo,
+                doc.FormatoCodigo));
         }
-        // Orden por el numero de sesion RIGIDO (no por fecha de digitacion/apertura,
-        // que puede venir desordenada). Desempate por fecha de atencion. Las que no
-        // tienen sesion rigida (documentos de evolucion) van al final por su fecha.
-        _evolucionesUnificadas = evosMerge
-            .OrderBy(e => e.SesionNumero ?? int.MaxValue)
-            .ThenBy(e => e.FechaAtencion ?? e.FechaApertura)
+        // Orden del paquete segun el TIPO de formato (codigo exacto) del hilo:
+        //  - Si TODOS los documentos son del MISMO formato (mismo FormatoCodigo, contando
+        //    la HC base), el expediente sale CRONOLOGICO por fecha de atencion. Caso tipico:
+        //    una terapia con 90 notas del mismo formato cuyo numero_sesion rigido quedo
+        //    desalineado con la fecha real -> por sesion se veria desordenado por fecha.
+        //  - Si hay 2+ formatos distintos, se mantiene el orden por numero de sesion RIGIDO
+        //    (desempate por fecha) para no desordenar una secuencia de tipos mezclados.
+        // La HC base se sigue imprimiendo PRIMERO (bloque DOCUMENTO 1) en ambos casos; esto
+        // solo ordena las evoluciones que van debajo. El numero "Sesion N" del encabezado no
+        // cambia (sigue siendo el rigido): solo cambia el ORDEN de impresion.
+        var _codigosFormato = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(_hc.FormatoCodigo)) { _codigosFormato.Add(_hc.FormatoCodigo); }
+        foreach (var e in evosMerge)
+        {
+            if (!string.IsNullOrWhiteSpace(e.FormatoCodigo)) { _codigosFormato.Add(e.FormatoCodigo!); }
+        }
+        var _unSoloFormato = _codigosFormato.Count <= 1;
+        _evolucionesUnificadas = (_unSoloFormato
+                ? evosMerge.OrderBy(e => e.FechaAtencion ?? e.FechaApertura)
+                : evosMerge.OrderBy(e => e.SesionNumero ?? int.MaxValue)
+                           .ThenBy(e => e.FechaAtencion ?? e.FechaApertura))
             .ToList();
 
         // Auto-print: cuando la pagina host lo pide (boton "Imprimir" del listado

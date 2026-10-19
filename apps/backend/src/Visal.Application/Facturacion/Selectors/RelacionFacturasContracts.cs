@@ -86,4 +86,7 @@ public sealed record RelacionFacturasHecho(
     Guid? AsignacionLoteId = null,
     /// <summary>Consecutivo publico del lote/asignacion (AS-000045) para la trazabilidad
     /// del snapshot. Se resuelve en el selector desde AsignacionLote.Consecutivo.</summary>
-    long? AsignacionConsecutivo = null);
+    long? AsignacionConsecutivo = null,
+    /// <summary>Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo).
+    /// Null cuando la asignacion no nacio de aplicar un paquete en /asignacion.</summary>
+    string? PaqueteCodigo = null);

@@ -72,7 +72,8 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         // para no alterar el orden validado por la EPS. Muestran los codigos cortos
         // (primeros 8 hex) para conciliar contra el modulo Ordenes.
         "HC N°",                                      // 43  Id de la Historia Clinica (8 hex)
-        "Cód. Asignación"                             // 44  LoteId de la asignacion (8 hex)
+        "Cód. Asignación",                            // 44  LoteId de la asignacion (8 hex)
+        "Cód. Paquete"                                // 45  Codigo del paquete con el que se presto el servicio
     };
 
     /// <summary>
@@ -113,6 +114,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Correo electrónico"]                      = "Correo de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
         ["HC N°"]                                   = "Consecutivo publico de la Historia Clinica (HC-000123). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
         ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
+        ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo). Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -193,6 +195,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["HC N°"] = CodigoPublico.Hc(h.Hc.Consecutivo),                    // 43 — consecutivo de la HC
             ["Cód. Asignación"] = h.AsignacionConsecutivo is long _ac         // 44 — consecutivo por servicio
                 ? CodigoPublico.Asignacion(_ac) : null,
+            ["Cód. Paquete"] = h.PaqueteCodigo,                               // 45 — codigo del paquete con el que se presto el servicio
         };
     }
 

@@ -434,7 +434,9 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 asigRelevante?.LoteId,
                 // AS-000045 POR SERVICIO (asignacion.Consecutivo); el lote se conserva solo
                 // como agrupador interno (AsignacionLoteId) para filtros de facturacion.
-                AsignacionConsecutivo: asigRelevante?.Consecutivo));
+                AsignacionConsecutivo: asigRelevante?.Consecutivo,
+                // Codigo del paquete con el que se presto el servicio (null si no vino de un paquete).
+                PaqueteCodigo: asigRelevante?.PaqueteCodigo));
         }
 
         return hechos;

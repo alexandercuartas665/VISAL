@@ -690,7 +690,7 @@
                                                 {
                                                     <button type="button" class="btn btn-sm sn-tip-dl" @onclick="() => IniciarZip(a)"
                                                             title="@zu.Error">
-                                                        &#8635; Reintentar ZIP
+                                                        &#8635; Reintentar @(a.PdfUnico ? "PDF" : "ZIP")
                                                     </button>
                                                 }
                                                 else
@@ -698,8 +698,8 @@
                                                     <button type="button" class="btn btn-sm sn-tip-dl @(con == 0 ? "off" : "")"
                                                             disabled="@(con == 0)"
                                                             @onclick="() => IniciarZip(a)"
-                                                            title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : "Generar y descargar ZIP: un PDF por paciente con contenido, nombrado con el patron")">
-                                                        &#11015; Descargar ZIP@(con > 0 ? $" ({con})" : "")
+                                                            title="@(con == 0 ? "Ningun paciente tiene contenido para este archivo" : (a.PdfUnico ? "Generar y descargar UN PDF unico con todos los pacientes con contenido" : "Generar y descargar ZIP: un PDF por paciente con contenido, nombrado con el patron"))">
+                                                        &#11015; Descargar @(a.PdfUnico ? "PDF" : "ZIP")@(con > 0 ? $" ({con})" : "")
                                                     </button>
                                                 }
                                             </div>
@@ -844,13 +844,13 @@
                             else if (zm is { Error: not null })
                             {
                                 <button class="btn btn-success btn-sm" @onclick="() => IniciarZip(_archModal!)" title="@zm.Error">
-                                    &#8635; Reintentar ZIP
+                                    &#8635; Reintentar @(_archModal?.PdfUnico == true ? "PDF" : "ZIP")
                                 </button>
                             }
                             else
                             {
                                 <button class="btn btn-success btn-sm" disabled="@(cm == 0)" @onclick="() => IniciarZip(_archModal!)">
-                                    &#11015; Descargar ZIP (@cm con contenido)
+                                    &#11015; Descargar @(_archModal?.PdfUnico == true ? "PDF" : "ZIP") (@cm con contenido)
                                 </button>
                             }
                             <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivoModal">Cerrar</button>

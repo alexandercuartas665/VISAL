@@ -45,7 +45,10 @@ public sealed record InformeItemDto(
     IReadOnlyList<InformeContenidoDto> Contenidos,
     // Orden multinivel de las Historias medicas (Formulario por tipo). Vacio =
     // cronologico ascendente (historico).
-    IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null);
+    IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null,
+    // True = el archivo se baja como UN solo PDF unificado (todos los pacientes en uno)
+    // en vez del ZIP con un PDF por paciente. Default false (historico).
+    bool PdfUnico = false);
 
 /// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
 public sealed record InformeContenidoDto(
@@ -66,7 +69,8 @@ public sealed record GuardarItemRequest(
     string? PatronNombre,
     bool Obligatorio,
     IReadOnlyList<GuardarContenidoDto> Contenidos,
-    IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null);
+    IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null,
+    bool PdfUnico = false);
 
 /// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
 /// todos en cada guardado).</summary>

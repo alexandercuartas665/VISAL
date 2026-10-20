@@ -978,6 +978,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("patron_nombre");
 
+                    b.Property<bool>("PdfUnico")
+                        .HasColumnType("boolean")
+                        .HasColumnName("pdf_unico");
+
                     b.Property<string>("Seccion")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)")

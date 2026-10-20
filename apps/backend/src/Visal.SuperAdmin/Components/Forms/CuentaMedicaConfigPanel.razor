@@ -239,6 +239,10 @@ else
                         <input type="checkbox" class="form-check-input" @bind="_itemEdit.Obligatorio" />
                         <span>Obligatorio (el generador reportara si falta)</span>
                     </label>
+                    <label class="cm-flag" style="margin-top:2px;">
+                        <input type="checkbox" class="form-check-input" @bind="_itemEdit.PdfUnico" />
+                        <span>PDF unico (un solo PDF con todos los pacientes, en vez de un ZIP con un PDF por paciente)</span>
+                    </label>
 
                     @* ===== Contenidos del archivo ===== *@
                     <div class="cm-cont-head">
@@ -701,6 +705,7 @@ else
             Seccion = it.Seccion,
             PatronNombre = it.PatronNombre,
             Obligatorio = it.Obligatorio,
+            PdfUnico = it.PdfUnico,
             Contenidos = it.Contenidos
                 .OrderBy(c => c.Orden)
                 .Select(c => new ContenidoEditModel
@@ -786,7 +791,7 @@ else
             await Svc.GuardarItemAsync(new GuardarItemRequest(
                 _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
                 _itemEdit.Descripcion, _itemEdit.PatronNombre, _itemEdit.Obligatorio,
-                contenidos, ordenNiveles),
+                contenidos, ordenNiveles, _itemEdit.PdfUnico),
                 Guid.Empty);
             CerrarItemModal();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
@@ -896,6 +901,7 @@ else
         public string? Descripcion { get; set; }
         public string? PatronNombre { get; set; }
         public bool Obligatorio { get; set; }
+        public bool PdfUnico { get; set; }
         public List<ContenidoEditModel> Contenidos { get; set; } = new();
         // Orden multinivel de Historias medicas (Formulario por tipo). Vacio = cronologico.
         public List<OrdenNivelEditModel> OrdenNiveles { get; set; } = new();

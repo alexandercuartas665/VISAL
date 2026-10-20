@@ -65,4 +65,9 @@ public class AseguradoraInformeItem : TenantEntity
     /// <c>[{"campo":"cup|fecha","desc":false}, ...]</c> aplicados en secuencia.
     /// Null/vacio = orden cronologico ascendente (comportamiento historico).</summary>
     public string? OrdenJson { get; set; }
+
+    /// <summary>Si true, este archivo se genera como UN SOLO PDF unificado con todos
+    /// los pacientes concatenados (en el orden del snapshot), en vez del ZIP con un PDF
+    /// por paciente (comportamiento historico, false).</summary>
+    public bool PdfUnico { get; set; }
 }

@@ -126,12 +126,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
         }
         progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
 
-        using var zipMs = new MemoryStream();
-        var incluidos = 0;
-        using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
+        // --- Pase 2: ensambla el PDF de CADA paciente con sus partes resueltas/renderizadas. ---
+        var salidas = new List<(string Name, byte[] Pdf)>();
         {
             var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            // --- Pase 2: ensambla cada PDF con las partes ya resueltas/renderizadas. ---
             foreach (var (pac, partes) in planes)
             {
                 ct.ThrowIfCancellationRequested();
@@ -152,24 +150,42 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 // Evita colisiones de nombre (dos pacientes con mismo patron).
                 var n = 2;
                 while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
+                salidas.Add((name, pdf));
+            }
+        }
 
+        var notaSinContenido =
+            $"Archivo: {(string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion)}\n\n" +
+            $"Ninguno de los {pacientes.Count} paciente(s) de este snapshot tiene contenido " +
+            "disponible para este archivo.";
+
+        // --- PDF UNICO: todos los pacientes concatenados en un solo PDF (config del archivo). ---
+        if (archivo.PdfUnico)
+        {
+            var unico = salidas.Count == 0
+                ? PaginaNota(notaSinContenido)
+                : FusionarPdfs(salidas.Select(s => s.Pdf).ToList());
+            var nombrePdf = SanitizarNombre($"{archivo.Alias}_{detalle.Metadata.Nombre}") + ".pdf";
+            return new ArchivoExportado(unico, "application/pdf", nombrePdf);
+        }
+
+        // --- ZIP: un PDF por paciente (comportamiento historico). ---
+        using var zipMs = new MemoryStream();
+        using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, pdf) in salidas)
+            {
                 var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
                 await using var es = entry.Open();
                 await es.WriteAsync(pdf, ct);
-                incluidos++;
             }
-
             // Si ningun paciente tenia contenido, dejamos una unica nota resumen para
             // que el ZIP no baje totalmente vacio y quede claro el porque.
-            if (incluidos == 0)
+            if (salidas.Count == 0)
             {
-                var nota = PaginaNota(
-                    $"Archivo: {(string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion)}\n\n" +
-                    $"Ninguno de los {pacientes.Count} paciente(s) de este snapshot tiene contenido " +
-                    "disponible para este archivo, por lo que no se genero ningun PDF.");
                 var entry = zip.CreateEntry("_SIN_CONTENIDO.pdf", CompressionLevel.Optimal);
                 await using var es = entry.Open();
-                await es.WriteAsync(nota, ct);
+                await es.WriteAsync(PaginaNota(notaSinContenido), ct);
             }
         }
 

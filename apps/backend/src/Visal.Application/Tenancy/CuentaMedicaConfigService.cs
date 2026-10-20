@@ -111,7 +111,8 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                     c.TipologiaArchivoId is Guid tg && tipNombres.TryGetValue(tg, out var nm) ? nm : null,
                     c.SoloUltimo, c.FormularioTipo))
                 .ToList(),
-            ParseOrdenNiveles(i.OrdenJson)))
+            ParseOrdenNiveles(i.OrdenJson),
+            i.PdfUnico))
             .ToList();
     }
 
@@ -199,6 +200,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         item.PatronNombre = NullIfBlank(req.PatronNombre);
         item.Obligatorio = req.Obligatorio;
         item.OrdenJson = SerializeOrdenNiveles(req.OrdenNiveles);
+        item.PdfUnico = req.PdfUnico;
         // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
         // compatibilidad; la fuente de verdad es la tabla de contenidos.
         var primero = contenidos[0];
@@ -336,6 +338,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 PatronNombre = src.PatronNombre,
                 Obligatorio = src.Obligatorio,
                 SoloUltimo = src.SoloUltimo,
+                PdfUnico = src.PdfUnico,
             };
             if (contPorItem.TryGetValue(src.Id, out var cs))
             {

@@ -1406,7 +1406,11 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/zip
 {
     var r = jobs.TomarResultado(jobId);
     if (r is null) { return Results.NotFound(); }
-    return Results.File(r.Value.Bytes, "application/zip", r.Value.Nombre);
+    // El nombre ya trae la extension correcta (.pdf cuando el archivo es "PDF unico",
+    // .zip cuando es un PDF por paciente); inferimos el content-type de ahi.
+    var mime = r.Value.Nombre.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+        ? "application/pdf" : "application/zip";
+    return Results.File(r.Value.Bytes, mime, r.Value.Nombre);
 }).RequireAuthorization();
 
 // Excel (.xlsx) de pacientes del snapshot para los que un archivo/tipologia de la cuenta

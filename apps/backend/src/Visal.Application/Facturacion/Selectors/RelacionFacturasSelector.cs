@@ -57,8 +57,13 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         //    La HC sigue teniendo que estar Cerrada (tiene fecha_cierre not null).
         //    Comparacion por instante UTC contra los limites del rango (simple y
         //    estable), igual criterio que antes.
-        var inicio = new DateTimeOffset(filtros.FechaInicio.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        var fin = new DateTimeOffset(filtros.FechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        // Limites del periodo en hora LOCAL de Colombia (UTC-5), no en UTC: la fecha de
+        // atencion se guarda/muestra en hora local, asi que una atencion de 19:00-23:59
+        // local cae en el dia UTC siguiente. Con limites UTC, una atencion de fin de mes
+        // (p.ej. 30-sep 22:00 local = 01-oct 03:00 UTC) se contaria en el mes siguiente.
+        var bogota = TimeSpan.FromHours(-5);
+        var inicio = new DateTimeOffset(filtros.FechaInicio.ToDateTime(TimeOnly.MinValue), bogota);
+        var fin = new DateTimeOffset(filtros.FechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue), bogota);
         var hcs = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Estado == HistoriaClinicaEstado.Cerrada
                      && h.FechaCierre != null

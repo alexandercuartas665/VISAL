@@ -45,14 +45,18 @@ public sealed class HistoriaClinicaService(
             q = q.Where(h => hcIdsDeAsig.Contains(h.Id));
         }
 
+        // Limites del rango en hora LOCAL de Colombia (UTC-5), no en UTC: las fechas se
+        // muestran en local, asi que una del rango 19:00-23:59 local cae en el dia UTC
+        // siguiente y se filtraria un dia corrido si los limites fueran UTC.
+        var bogota = TimeSpan.FromHours(-5);
         if (desde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
             q = q.Where(h => h.FechaApertura >= dStart);
         }
         if (hasta is DateOnly h2)
         {
-            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota);
             q = q.Where(h => h.FechaApertura <= dEnd);
         }
         if (formDefinitionId is Guid fid)

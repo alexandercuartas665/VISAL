@@ -64,14 +64,17 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
                 var esp = filtro.EspecialistaNombre.Trim();
                 q = q.Where(h => h.EspecialistaNombre == esp);
             }
+            // Limites en hora LOCAL de Colombia (UTC-5), no UTC (si no, fechas de
+            // 19:00-23:59 local se filtran un dia corrido).
+            var bogota = TimeSpan.FromHours(-5);
             if (filtro.FechaDesde is DateOnly d)
             {
-                var desde = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+                var desde = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
                 q = q.Where(h => h.FechaApertura >= desde);
             }
             if (filtro.FechaHasta is DateOnly h2)
             {
-                var hasta = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+                var hasta = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota);
                 q = q.Where(h => h.FechaApertura <= hasta);
             }
         }
@@ -273,14 +276,17 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         {
             q = q.Where(r => r.EstadoAgregado == sabor);
         }
+        // Limites en hora LOCAL de Colombia (UTC-5), no UTC (si no, fechas de
+        // 19:00-23:59 local se filtran un dia corrido).
+        var bogota = TimeSpan.FromHours(-5);
         if (filtro.FechaDesde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
             q = q.Where(r => r.UltimaAccionEn >= dStart);
         }
         if (filtro.FechaHasta is DateOnly h)
         {
-            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota);
             q = q.Where(r => r.UltimaAccionEn <= dEnd);
         }
 
@@ -378,14 +384,17 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         {
             q = q.Where(r => r.EstadoAgregado == sabor);
         }
+        // Limites en hora LOCAL de Colombia (UTC-5), no UTC (si no, fechas de
+        // 19:00-23:59 local se filtran un dia corrido).
+        var bogota = TimeSpan.FromHours(-5);
         if (filtro.FechaDesde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
             q = q.Where(r => r.UltimaAccionEn >= dStart);
         }
         if (filtro.FechaHasta is DateOnly h)
         {
-            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota);
             q = q.Where(r => r.UltimaAccionEn <= dEnd);
         }
 

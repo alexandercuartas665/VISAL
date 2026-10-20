@@ -78,7 +78,9 @@ public sealed record TaskCardSummaryDto(
     DateTimeOffset? CreadoEn = null,
     /// <summary>Momento en que la tarjeta entro a la columna actual (para "cuanto lleva
     /// en esta columna"). Si null, la UI usa CreadoEn.</summary>
-    DateTimeOffset? EnColumnaDesde = null);
+    DateTimeOffset? EnColumnaDesde = null,
+    /// <summary>Fecha de inicio de la tarea (rango inicio->fin / Gantt). Null = sin inicio.</summary>
+    DateTimeOffset? StartAt = null);
 
 public sealed record TaskCardDetailDto(
     TaskCardSummaryDto Card,
@@ -88,9 +90,9 @@ public sealed record TaskCardDetailDto(
 
 public sealed record CreateTaskCardRequest(
     Guid BoardId, Guid ColumnId, string Title, string? Description,
-    string? Color = null, DateTimeOffset? DueAt = null);
+    string? Color = null, DateTimeOffset? DueAt = null, DateTimeOffset? StartAt = null);
 
-public sealed record UpdateTaskCardRequest(string Title, string? Description, DateTimeOffset? DueAt, string? Color = null);
+public sealed record UpdateTaskCardRequest(string Title, string? Description, DateTimeOffset? DueAt, string? Color = null, DateTimeOffset? StartAt = null);
 
 /// <summary>Movimiento de la tarjeta a otra columna y/o posicion vertical.</summary>
 public sealed record MoveTaskCardRequest(Guid ColumnId, int SortOrder);

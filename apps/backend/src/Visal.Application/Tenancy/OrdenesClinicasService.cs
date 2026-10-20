@@ -25,14 +25,19 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         // El rango Desde/Hasta aplica sobre la FECHA DE ATENCION (lo que el profesional
         // capturo en el schema), con fallback a cierre/apertura solo cuando la HC no tiene
         // fecha de atencion. Misma semantica que el orden "Fecha de atencion" del toolbar.
+        // Los limites del rango se construyen en hora LOCAL de Colombia (UTC-5), no en UTC:
+        // la fecha de atencion se guarda/muestra en hora local, asi que una atencion de
+        // 19:00-23:59 local cae en el dia UTC siguiente. Si los limites fueran UTC, esa
+        // atencion se filtraria un dia corrido respecto a lo que ve el usuario.
+        var bogota = TimeSpan.FromHours(-5);
         if (filtro.Desde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
             q = q.Where(h => (h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura) >= dStart);
         }
         if (filtro.Hasta is DateOnly h2)
         {
-            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota);
             q = q.Where(h => (h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura) <= dEnd);
         }
         if (!string.IsNullOrWhiteSpace(filtro.Especialista))

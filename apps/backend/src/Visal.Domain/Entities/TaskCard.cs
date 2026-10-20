@@ -20,7 +20,11 @@ public class TaskCard : TenantEntity
     /// <summary>Descripcion detallada (markdown libre).</summary>
     public string? Description { get; set; }
 
-    /// <summary>Fecha de vencimiento. Si pasa y la tarjeta no esta en columna IsDone, se marca atrasada.</summary>
+    /// <summary>Fecha de inicio de la tarea (para el rango inicio->fin y la vista Gantt).
+    /// Null = sin inicio definido.</summary>
+    public DateTimeOffset? StartAt { get; set; }
+
+    /// <summary>Fecha de vencimiento (fin). Si pasa y la tarjeta no esta en columna IsDone, se marca atrasada.</summary>
     public DateTimeOffset? DueAt { get; set; }
 
     /// <summary>Orden vertical dentro de la columna (0 arriba).</summary>

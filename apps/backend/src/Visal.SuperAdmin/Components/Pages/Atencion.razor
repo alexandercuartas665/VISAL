@@ -1128,7 +1128,6 @@ else
     {
         new ColDef("chk",           "",                "",                                       1),
         new ColDef("historia",      "Historia Medica", "Historia<br/>Medica",                     2),
-        new ColDef("notas",         "Notas",           "Notas",                                   3),
         new ColDef("cod_int",       "CodInt",          "CodInt",                                  4),
         // Codigo del formato de historia EJECUTADO: el de la HC realmente creada para
         // la sesion (no el configurado hoy). Util para auditar cuando la config del
@@ -1222,27 +1221,6 @@ else
                 __b.AddAttribute(seq++, "title", bloqueoHc ?? "Abrir Historias Clinicas del paciente");
                 if (bloqueoHc is not null) { __b.AddAttribute(seq++, "disabled", true); }
                 __b.AddAttribute(seq++, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => AbrirHistoria(s)));
-                __b.AddMarkupContent(seq++, "&#9998;");
-                __b.CloseElement();
-                __b.CloseElement();
-                break;
-            }
-            case "notas":
-            {
-                // Doble motivo posible: ya completada (HC Cerrada existente) o
-                // sesion anterior pendiente. El primero manda: si la sesion ya
-                // esta cerrada no tiene sentido mostrar orden. El escape del
-                // permiso NO desbloquea "completada", solo el orden.
-                var bloqueoNotas = s.Completado
-                    ? "Esta sesion ya tiene HC Cerrada vinculada."
-                    : (_puedeSaltarOrden ? null : MotivoBloqueoOrden(s));
-                __b.OpenElement(seq++, "td");
-                __b.AddAttribute(seq++, "data-label", label);
-                __b.OpenElement(seq++, "button");
-                __b.AddAttribute(seq++, "class", "btn btn-outline-primary btn-sm");
-                __b.AddAttribute(seq++, "title", bloqueoNotas ?? "Abrir Notas Medicas (registrar atencion)");
-                if (bloqueoNotas is not null) { __b.AddAttribute(seq++, "disabled", true); }
-                __b.AddAttribute(seq++, "onclick", Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => AbrirNotas(s)));
                 __b.AddMarkupContent(seq++, "&#9998;");
                 __b.CloseElement();
                 __b.CloseElement();

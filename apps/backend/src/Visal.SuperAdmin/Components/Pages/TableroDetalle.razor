@@ -54,6 +54,7 @@ else
                 <div class="td-vista-toggle">
                     <button class="td-vista-btn @(_vista == Vista.Kanban ? "active" : "")" @onclick="@(() => _vista = Vista.Kanban)" title="Vista Kanban">▤ Kanban</button>
                     <button class="td-vista-btn @(_vista == Vista.Tabla ? "active" : "")" @onclick="@(() => _vista = Vista.Tabla)" title="Vista Tabla">☰ Tabla</button>
+                    <button class="td-vista-btn @(_vista == Vista.Gantt ? "active" : "")" @onclick="@(() => _vista = Vista.Gantt)" title="Vista Gantt (linea de tiempo por fecha inicio/fin)">📊 Gantt</button>
                 </div>
                 @if (_vista == Vista.Tabla)
                 {
@@ -104,13 +105,14 @@ else
                         <div class="td-col-count">@col.CardCount</div>
                     </div>
                     <div class="td-col-body">
-                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).Where(CardVisible).OrderBy(c => c.SortOrder))
+                        @foreach (var card in _cards.Where(c => c.ColumnId == col.Id).Where(CardVisible).OrderBy(c => c.SortOrder).ThenByDescending(c => c.CreadoEn))
                         {
-                            <div class="td-card @(card.Color is null ? "" : "td-card-colored")"
+                            <div class="td-card @(card.Color is null ? "" : "td-card-colored") @(_draggingCardId is not null && _dropTargetCardId == card.Id && _draggingCardId != card.Id ? "td-card-droptarget" : "")"
                                  style="@(card.Color is null ? "" : $"border-left:3px solid {card.Color};")"
                                  draggable="true"
                                  @ondragstart="@(() => _draggingCardId = card.Id)"
-                                 @ondragend="@(() => _draggingCardId = null)"
+                                 @ondragend="@(() => { _draggingCardId = null; _dropTargetCardId = null; })"
+                                 @ondragover:preventDefault @ondragover:stopPropagation="true" @ondragover="@(() => _dropTargetCardId = card.Id)"
                                  @onclick="@(() => OpenCardAsync(card.Id))">
                                 <div class="td-card-top">
                                     <div class="td-card-title">@card.Title</div>
@@ -131,9 +133,9 @@ else
                                     </div>
                                 }
                                 <div class="td-card-meta">
-                                    @if (card.DueAt is DateTimeOffset due)
+                                    @if (card.StartAt is not null || card.DueAt is not null)
                                     {
-                                        <span class="td-meta-item" title="Fecha limite">📅 @due.ToLocalTime().ToString("dd/MM")</span>
+                                        <span class="td-meta-item" title="Inicio → Fin">📅 @FmtRangoCorto(card.StartAt, card.DueAt)</span>
                                     }
                                     @if (card.ChecklistTotal > 0)
                                     {
@@ -191,7 +193,7 @@ else
             }
         </div>
         }
-        else
+        else if (_vista == Vista.Tabla)
         {
             @* ===== Vista Tabla ===== *@
             var visibles = _tableCols.Where(c => c.Visible).OrderBy(c => c.Orden).ToList();
@@ -232,6 +234,47 @@ else
                                             var ecol = _columns.FirstOrDefault(c => c.Id == card.ColumnId);
                                             <td><span class="td-tabla-chip" style="border-color:@(ecol?.Color ?? "#cbd5e1");">@(ecol?.Name ?? "-")</span></td>
                                         }
+                                        else if (tc.Key == "__inicio__")
+                                        {
+                                            <td class="td-tabla-cell">@(card.StartAt is DateTimeOffset s ? s.ToLocalTime().ToString("dd/MM/yy") : "")</td>
+                                        }
+                                        else if (tc.Key == "__fin__")
+                                        {
+                                            <td class="td-tabla-cell">@(card.DueAt is DateTimeOffset d ? d.ToLocalTime().ToString("dd/MM/yy") : "")</td>
+                                        }
+                                        else if (tc.Key == "__miembros__")
+                                        {
+                                            <td class="td-tabla-cell" title="@string.Join(", ", card.Members.Select(m => m.DisplayName))">@(card.Members.Count == 0 ? "" : string.Join(", ", card.Members.Select(m => m.DisplayName)))</td>
+                                        }
+                                        else if (tc.Key == "__etiquetas__")
+                                        {
+                                            <td class="td-tabla-cell">
+                                                @foreach (var tg in card.Tags)
+                                                {
+                                                    <span class="td-tag" style="background:@(tg.Color ?? "#e2e8f0"); margin-right:3px;">@tg.Name</span>
+                                                }
+                                            </td>
+                                        }
+                                        else if (tc.Key == "__checklist__")
+                                        {
+                                            <td class="td-tabla-cell">@(card.ChecklistTotal > 0 ? $"{card.ChecklistDone}/{card.ChecklistTotal}" : "")</td>
+                                        }
+                                        else if (tc.Key == "__comentarios__")
+                                        {
+                                            <td class="td-tabla-cell">@(card.CommentsCount > 0 ? card.CommentsCount.ToString() : "")</td>
+                                        }
+                                        else if (tc.Key == "__adjuntos__")
+                                        {
+                                            <td class="td-tabla-cell">@(card.AttachmentsCount > 0 ? card.AttachmentsCount.ToString() : "")</td>
+                                        }
+                                        else if (tc.Key == "__creador__")
+                                        {
+                                            <td class="td-tabla-cell" title="@card.CreadorNombre">@(card.CreadorNombre ?? "")</td>
+                                        }
+                                        else if (tc.Key == "__encolumna__")
+                                        {
+                                            <td class="td-tabla-cell">@TiempoRelativo(card.EnColumnaDesde ?? card.CreadoEn)</td>
+                                        }
                                         else
                                         {
                                             var val = card.FieldValues is not null && card.FieldValues.TryGetValue(tc.Key, out var v) ? v : null;
@@ -266,6 +309,78 @@ else
                         <button class="td-pager-btn" disabled="@(_tablaPage >= totalPaginas)" @onclick="@(() => _tablaPage = totalPaginas)" title="Ultima">»</button>
                     </div>
                 </div>
+            }
+        }
+        else
+        {
+            @* ===== Vista Gantt ===== *@
+            var gcards = TableCards().Where(c => c.StartAt is not null || c.DueAt is not null).ToList();
+            var sinFecha = TableCards().Where(c => c.StartAt is null && c.DueAt is null).ToList();
+            if (gcards.Count == 0)
+            {
+                <p class="td-tabla-empty">Ninguna tarjeta tiene fechas. Agrega Inicio y/o Fin a las tarjetas para verlas en el Gantt.</p>
+            }
+            else
+            {
+                var min = gcards.Min(GanttIni);
+                var max = gcards.Max(GanttFin);
+                if (max < min) { max = min; }
+                var totalDias = (int)(max - min).TotalDays + 1;
+                var pxDia = totalDias <= 31 ? 30 : (totalDias <= 120 ? 12 : 5);
+                var anchoTl = totalDias * pxDia;
+                var hoy = DateTime.Today;
+                <div class="td-gantt-wrap">
+                    <div class="td-gantt">
+                        <div class="td-gantt-row td-gantt-head">
+                            <div class="td-gantt-left">Tarea</div>
+                            <div class="td-gantt-tl" style="width:@(anchoTl)px;">
+                                @for (var d = 0; d < totalDias; d++)
+                                {
+                                    var dia = min.AddDays(d);
+                                    var marca = pxDia >= 12 || dia.DayOfWeek == DayOfWeek.Monday || d == 0;
+                                    if (marca)
+                                    {
+                                        <div class="td-gantt-tick @(dia == hoy ? "hoy" : "")" style="left:@(d * pxDia)px;">
+                                            @(pxDia >= 30 ? dia.ToString("dd") : dia.ToString("dd/MM"))
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        </div>
+                        @foreach (var c in gcards)
+                        {
+                            var s = GanttIni(c); var e = GanttFin(c);
+                            var off = (int)(s - min).TotalDays * pxDia;
+                            var w = Math.Max(pxDia, ((int)(e - s).TotalDays + 1) * pxDia);
+                            var ecol = _columns.FirstOrDefault(x => x.Id == c.ColumnId);
+                            var barColor = c.Color ?? ecol?.Color ?? "#3b82f6";
+                            <div class="td-gantt-row" @onclick="@(() => OpenCardAsync(c.Id))">
+                                <div class="td-gantt-left" title="@c.Title">
+                                    <span class="td-tabla-dot" style="background:@barColor;"></span>@c.Title
+                                </div>
+                                <div class="td-gantt-tl" style="width:@(anchoTl)px;">
+                                    @if (hoy >= min && hoy <= max)
+                                    {
+                                        <div class="td-gantt-today" style="left:@((int)(hoy - min).TotalDays * pxDia + pxDia / 2)px;"></div>
+                                    }
+                                    <div class="td-gantt-bar" style="left:@(off)px; width:@(w)px; background:@barColor;" title="@FmtRangoLargo(c.StartAt, c.DueAt)">
+                                        <span class="td-gantt-bar-lbl">@c.Title</span>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                @if (sinFecha.Count > 0)
+                {
+                    <div class="td-gantt-sinfecha">
+                        <span class="td-gantt-sinfecha-lbl">Sin fechas (@sinFecha.Count):</span>
+                        @foreach (var c in sinFecha.Take(40))
+                        {
+                            <button class="td-gantt-chip" @onclick="@(() => OpenCardAsync(c.Id))">@c.Title</button>
+                        }
+                    </div>
+                }
             }
         }
     </div>
@@ -329,7 +444,7 @@ else
                 <div class="td-modal-main">
 
                     @* --- Row inline: Miembros + Etiquetas + Fecha (chips arriba) --- *@
-                    @if (detail.Card.Members.Count > 0 || detail.Card.Tags.Count > 0 || detail.Card.DueAt.HasValue)
+                    @if (detail.Card.Members.Count > 0 || detail.Card.Tags.Count > 0 || detail.Card.DueAt.HasValue || detail.Card.StartAt.HasValue)
                     {
                         <div class="td-modal-inline">
                             @if (detail.Card.Members.Count > 0)
@@ -359,11 +474,11 @@ else
                                     </div>
                                 </div>
                             }
-                            @if (detail.Card.DueAt is DateTimeOffset dueChip)
+                            @if (detail.Card.StartAt is not null || detail.Card.DueAt is not null)
                             {
                                 <div>
-                                    <h4 class="td-modal-mini">Fecha limite</h4>
-                                    <span class="td-modal-due-chip" @onclick="@(() => TogglePopover("date"))">📅 @dueChip.ToLocalTime().ToString("dd MMM yyyy")</span>
+                                    <h4 class="td-modal-mini">Fechas (inicio → fin)</h4>
+                                    <span class="td-modal-due-chip" @onclick="@(() => TogglePopover("date"))">📅 @FmtRangoLargo(detail.Card.StartAt, detail.Card.DueAt)</span>
                                 </div>
                             }
                         </div>
@@ -779,14 +894,19 @@ else
                 {
                     <div class="td-pop" style="top:210px;" @onclick:stopPropagation="true">
                         <div class="td-pop-head">
-                            <span>Fecha de vencimiento</span>
+                            <span>Fechas de la tarea</span>
                             <button class="td-modal-x" style="width:22px; height:22px; font-size:16px;" @onclick="@(() => _showDatePop = false)">×</button>
                         </div>
                         <div style="display:flex; flex-direction:column; gap:10px;">
-                            <input type="date" class="form-control" @bind="_editCardDueDate" />
+                            <label style="font-size:12px; color:#475569; display:flex; flex-direction:column; gap:3px;">Inicio
+                                <input type="date" class="form-control" @bind="_editCardStartDate" />
+                            </label>
+                            <label style="font-size:12px; color:#475569; display:flex; flex-direction:column; gap:3px;">Fin (vencimiento)
+                                <input type="date" class="form-control" @bind="_editCardDueDate" />
+                            </label>
                             <div style="display:flex; gap:6px;">
-                                <button class="btn btn-primary btn-sm" @onclick="SaveDueDateAsync">Guardar</button>
-                                <button class="btn btn-outline-secondary btn-sm" @onclick="ClearDueDateAsync">Quitar</button>
+                                <button class="btn btn-primary btn-sm" @onclick="SaveDatesAsync">Guardar</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="ClearDatesAsync">Quitar</button>
                             </div>
                         </div>
                     </div>
@@ -1231,6 +1351,28 @@ else
     .td-col-body { padding:8px; flex:1; display:flex; flex-direction:column; gap:6px; }
     .td-card { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px; cursor:pointer; transition:box-shadow 0.1s; }
     .td-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.06); }
+    .td-card-droptarget { box-shadow:0 -3px 0 0 #3b82f6; }
+
+    /* ===== Vista Gantt ===== */
+    .td-gantt-wrap { overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+    .td-gantt { min-width:max-content; font-size:12px; }
+    .td-gantt-row { display:flex; align-items:stretch; border-bottom:1px solid #f1f5f9; cursor:pointer; }
+    .td-gantt-row:hover:not(.td-gantt-head) { background:#f8fafc; }
+    .td-gantt-head { position:sticky; top:0; background:#f8fafc; z-index:2; font-weight:600; color:#475569; }
+    .td-gantt-left { width:230px; min-width:230px; max-width:230px; padding:7px 10px; border-right:1px solid #e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:sticky; left:0; background:inherit; z-index:1; }
+    .td-gantt-head .td-gantt-left { background:#f8fafc; }
+    .td-gantt-row:not(.td-gantt-head) .td-gantt-left { background:#fff; }
+    .td-gantt-row:not(.td-gantt-head):hover .td-gantt-left { background:#f8fafc; }
+    .td-gantt-tl { position:relative; height:30px; }
+    .td-gantt-tick { position:absolute; top:0; bottom:0; border-left:1px solid #eef2f7; padding-left:2px; font-size:10px; color:#94a3b8; }
+    .td-gantt-tick.hoy { border-left:2px solid #ef4444; color:#ef4444; font-weight:700; }
+    .td-gantt-today { position:absolute; top:0; bottom:0; width:2px; background:rgba(239,68,68,0.5); z-index:0; }
+    .td-gantt-bar { position:absolute; top:5px; height:20px; border-radius:4px; display:flex; align-items:center; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.15); z-index:1; }
+    .td-gantt-bar-lbl { color:#fff; font-size:11px; font-weight:600; padding:0 6px; white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,0.25); }
+    .td-gantt-sinfecha { margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .td-gantt-sinfecha-lbl { font-size:12px; color:#94a3b8; }
+    .td-gantt-chip { font-size:12px; border:1px solid #e2e8f0; background:#fff; border-radius:12px; padding:2px 10px; cursor:pointer; color:#475569; }
+    .td-gantt-chip:hover { background:#f1f5f9; }
     .td-card-title { font-weight:600; color:#0f172a; font-size:13px; line-height:1.3; }
     .td-card-top { display:flex; align-items:flex-start; gap:6px; }
     .td-card-top .td-card-title { flex:1; }
@@ -1547,7 +1689,7 @@ else
     private const string HmDocsPaquete = "HC,MED,SRV,INS,REM,RXEXT,LABEXT,INSEXT,SRVEXT,INC,CERT,ESC,EVO,CON";
 
     // ---- Vista tabla + columnas por usuario ----
-    private enum Vista { Kanban, Tabla }
+    private enum Vista { Kanban, Tabla, Gantt }
     private Vista _vista = Vista.Kanban;
 
     // Buscador del tablero (filtra tarjetas en Kanban y Tabla).
@@ -1606,6 +1748,8 @@ else
     // Drag&drop
     private Guid? _draggingCardId;
     private Guid? _dragOverColumnId;
+    // Tarjeta sobre la que se esta soltando (para insertar en esa posicion, no al final).
+    private Guid? _dropTargetCardId;
 
     // Modal card
     private bool _cardModalOpen;
@@ -1614,6 +1758,7 @@ else
     private string? _editCardDescription;
     private string? _editCardColor;
     private DateTime? _editCardDueDate;
+    private DateTime? _editCardStartDate;
     // Trello-like modal state (title/description inline edit + popovers)
     private bool _editingTitle;
     private string _editTitle = "";
@@ -1721,10 +1866,22 @@ else
     /// preferencia del usuario (visible/alias/orden/ancho). Las columnas sin preferencia usan default.</summary>
     private async Task BuildTableColsAsync()
     {
+        // Columnas fijas: titulo + estado + TODAS las propiedades de la tarjeta (el
+        // usuario puede ocultar las que no quiera con "Columnas"). Luego los campos
+        // dinamicos del tablero.
         var cols = new List<TableCol>
         {
             new() { Key = "__titulo__", DefaultLabel = "Titulo" },
             new() { Key = "__estado__", DefaultLabel = "Estado" },
+            new() { Key = "__inicio__", DefaultLabel = "Inicio" },
+            new() { Key = "__fin__", DefaultLabel = "Fin" },
+            new() { Key = "__miembros__", DefaultLabel = "Miembros" },
+            new() { Key = "__etiquetas__", DefaultLabel = "Etiquetas" },
+            new() { Key = "__checklist__", DefaultLabel = "Checklist" },
+            new() { Key = "__comentarios__", DefaultLabel = "Comentarios" },
+            new() { Key = "__adjuntos__", DefaultLabel = "Adjuntos" },
+            new() { Key = "__creador__", DefaultLabel = "Creador" },
+            new() { Key = "__encolumna__", DefaultLabel = "En columna" },
         };
         foreach (var f in _boardFields.OrderBy(f => f.SortOrder).ThenBy(f => f.Label))
         {
@@ -1996,16 +2153,55 @@ else
         return "recien";
     }
 
+    // ---- Fechas (rango inicio -> fin) y Gantt ----
+
+    /// <summary>Rango compacto "dd/MM → dd/MM" (o solo uno si falta el otro).</summary>
+    private static string FmtRangoCorto(DateTimeOffset? start, DateTimeOffset? due)
+    {
+        var s = start?.ToLocalTime().ToString("dd/MM");
+        var d = due?.ToLocalTime().ToString("dd/MM");
+        if (s is not null && d is not null) { return s == d ? s : $"{s} → {d}"; }
+        return s is not null ? $"{s} →" : (d is not null ? $"→ {d}" : "");
+    }
+
+    /// <summary>Rango legible "dd MMM yyyy → dd MMM yyyy".</summary>
+    private static string FmtRangoLargo(DateTimeOffset? start, DateTimeOffset? due)
+    {
+        var s = start?.ToLocalTime().ToString("dd MMM yyyy");
+        var d = due?.ToLocalTime().ToString("dd MMM yyyy");
+        if (s is not null && d is not null) { return s == d ? s : $"{s}  →  {d}"; }
+        return s is not null ? $"Inicio: {s}" : (d is not null ? $"Fin: {d}" : "");
+    }
+
+    /// <summary>Fecha de inicio para el Gantt (StartAt, o DueAt si no hay inicio), como fecha local sin hora.</summary>
+    private static DateTime GanttIni(TaskCardSummaryDto c) => (c.StartAt ?? c.DueAt)!.Value.ToLocalTime().Date;
+
+    /// <summary>Fecha de fin para el Gantt (DueAt, o StartAt si no hay fin), como fecha local sin hora.</summary>
+    private static DateTime GanttFin(TaskCardSummaryDto c) => (c.DueAt ?? c.StartAt)!.Value.ToLocalTime().Date;
+
     // ---- Drag&drop ----
 
-    private void OnDragOver(Guid columnId) { _dragOverColumnId = columnId; }
+    // Dragover sobre el area vacia de la columna (no sobre una tarjeta): soltar = al final.
+    private void OnDragOver(Guid columnId) { _dragOverColumnId = columnId; _dropTargetCardId = null; }
 
     private async Task OnDropAsync(Guid columnId)
     {
         if (_draggingCardId is not Guid cid) { return; }
-        var newOrder = _cards.Count(c => c.ColumnId == columnId);
-        await BoardsSvc.MoveCardAsync(cid, new MoveTaskCardRequest(columnId, newOrder), _actorId, _actorDisplayName);
+        // Tarjetas de la columna destino en el orden visible, SIN la que arrastramos.
+        var destCards = _cards
+            .Where(c => c.ColumnId == columnId && c.Id != cid)
+            .OrderBy(c => c.SortOrder).ThenByDescending(c => c.CreadoEn)
+            .ToList();
+        // Si se solto sobre una tarjeta, se inserta ANTES de ella; si no, al final.
+        int index = destCards.Count;
+        if (_dropTargetCardId is Guid target && target != cid)
+        {
+            var ti = destCards.FindIndex(c => c.Id == target);
+            if (ti >= 0) { index = ti; }
+        }
+        _dropTargetCardId = null;
         _draggingCardId = null;
+        await BoardsSvc.MoveCardAsync(cid, new MoveTaskCardRequest(columnId, index), _actorId, _actorDisplayName);
         await ReloadAllAsync();
     }
 
@@ -2190,6 +2386,7 @@ else
         _editCardDescription = _cardDetail.Card.Description;
         _editCardColor = _cardDetail.Card.Color ?? "#3b82f6";
         _editCardDueDate = _cardDetail.Card.DueAt?.LocalDateTime;
+        _editCardStartDate = _cardDetail.Card.StartAt?.LocalDateTime;
         _cardModalOpen = true;
         _newChecklistText = "";
         _newCommentText = "";
@@ -2293,8 +2490,9 @@ else
     {
         if (_cardDetail is null) { return; }
         DateTimeOffset? due = _editCardDueDate is DateTime dt ? new DateTimeOffset(dt) : null;
+        DateTimeOffset? start = _editCardStartDate is DateTime ds ? new DateTimeOffset(ds) : null;
         await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
-            new UpdateTaskCardRequest(_editCardTitle, _editCardDescription, due, _editCardColor),
+            new UpdateTaskCardRequest(_editCardTitle, _editCardDescription, due, _editCardColor, StartAt: start),
             _actorId, _actorDisplayName);
         await RefreshCardAndListAsync();
     }
@@ -2484,7 +2682,7 @@ else
         if (_cardDetail is null || string.IsNullOrWhiteSpace(_editTitle)) { return; }
         var due = _cardDetail.Card.DueAt;
         await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
-            new UpdateTaskCardRequest(_editTitle, _cardDetail.Card.Description, due, _cardDetail.Card.Color),
+            new UpdateTaskCardRequest(_editTitle, _cardDetail.Card.Description, due, _cardDetail.Card.Color, StartAt: _cardDetail.Card.StartAt),
             _actorId, _actorDisplayName);
         _editingTitle = false;
         await RefreshCardAndListAsync();
@@ -2495,30 +2693,32 @@ else
         if (_cardDetail is null) { return; }
         var due = _cardDetail.Card.DueAt;
         await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
-            new UpdateTaskCardRequest(_cardDetail.Card.Title, _editDescription, due, _cardDetail.Card.Color),
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _editDescription, due, _cardDetail.Card.Color, StartAt: _cardDetail.Card.StartAt),
             _actorId, _actorDisplayName);
         _editingDesc = false;
         await RefreshCardAndListAsync();
     }
 
-    private async Task SaveDueDateAsync()
+    private async Task SaveDatesAsync()
     {
         if (_cardDetail is null) { return; }
         DateTimeOffset? due = _editCardDueDate is DateTime dt ? new DateTimeOffset(dt) : null;
+        DateTimeOffset? start = _editCardStartDate is DateTime ds ? new DateTimeOffset(ds) : null;
         await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
-            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, due, _cardDetail.Card.Color),
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, due, _cardDetail.Card.Color, StartAt: start),
             _actorId, _actorDisplayName);
         _showDatePop = false;
         await RefreshCardAndListAsync();
     }
 
-    private async Task ClearDueDateAsync()
+    private async Task ClearDatesAsync()
     {
         if (_cardDetail is null) { return; }
         await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
-            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, null, _cardDetail.Card.Color),
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, null, _cardDetail.Card.Color, StartAt: null),
             _actorId, _actorDisplayName);
         _editCardDueDate = null;
+        _editCardStartDate = null;
         _showDatePop = false;
         await RefreshCardAndListAsync();
     }
@@ -2527,7 +2727,7 @@ else
     {
         if (_cardDetail is null) { return; }
         await BoardsSvc.UpdateCardAsync(_cardDetail.Card.Id,
-            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, _cardDetail.Card.DueAt, color),
+            new UpdateTaskCardRequest(_cardDetail.Card.Title, _cardDetail.Card.Description, _cardDetail.Card.DueAt, color, StartAt: _cardDetail.Card.StartAt),
             _actorId, _actorDisplayName);
         _showColorPop = false;
         await RefreshCardAndListAsync();

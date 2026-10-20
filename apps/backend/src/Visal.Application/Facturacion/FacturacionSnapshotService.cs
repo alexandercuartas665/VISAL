@@ -226,14 +226,18 @@ public sealed class FacturacionSnapshotService(
         if (tipo is TipoSnapshot t) { q = q.Where(x => x.Tipo == t); }
         if (filtros?.UsuarioId is Guid u) { q = q.Where(x => x.CreatedBy == u); }
         if (filtros?.AseguradoraId is Guid ase) { q = q.Where(x => x.AseguradoraId == ase); }
+        // Limites del rango en hora LOCAL de Colombia (UTC-5), no UTC: el usuario filtra
+        // por fecha local de generacion; con limites UTC un snapshot generado 19:00-23:59
+        // local caeria en el dia siguiente.
+        var bogota = TimeSpan.FromHours(-5);
         if (filtros?.FechaInicio is DateOnly fi)
         {
-            var d = new DateTimeOffset(fi.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var d = new DateTimeOffset(fi.ToDateTime(TimeOnly.MinValue), bogota);
             q = q.Where(x => x.CreatedAt >= d);
         }
         if (filtros?.FechaFin is DateOnly ff)
         {
-            var d = new DateTimeOffset(ff.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+            var d = new DateTimeOffset(ff.ToDateTime(TimeOnly.MaxValue), bogota);
             q = q.Where(x => x.CreatedAt <= d);
         }
         // Lookup en memoria: cargamos los snapshots y luego traducimos

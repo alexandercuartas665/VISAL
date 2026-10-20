@@ -385,7 +385,8 @@ public sealed class TaskBoardService : ITaskBoardService
                 DeserializeFieldValues(c.FieldValuesJson),
                 c.CreatorName,
                 c.CreatedAt,
-                c.ColumnEnteredAt ?? c.CreatedAt);
+                c.ColumnEnteredAt ?? c.CreatedAt,
+                c.StartAt);
         }).ToList();
     }
 
@@ -431,7 +432,7 @@ public sealed class TaskBoardService : ITaskBoardService
             Title = title,
             Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim(),
             Color = string.IsNullOrWhiteSpace(req.Color) ? null : req.Color.Trim(),
-            DueAt = req.DueAt, SortOrder = nextOrder, CreatedBy = actor,
+            DueAt = req.DueAt, StartAt = req.StartAt, SortOrder = nextOrder, CreatedBy = actor,
             CreatorName = actorDisplayName,
             ColumnEnteredAt = DateTimeOffset.UtcNow,
         };
@@ -445,7 +446,9 @@ public sealed class TaskBoardService : ITaskBoardService
         await _db.SaveChangesAsync(ct);
         return new TaskCardSummaryDto(card.Id, card.BoardId, card.ColumnId, card.Title, card.Description,
             card.DueAt, card.SortOrder, card.IsArchived, card.Color,
-            Array.Empty<TaskCardMemberDto>(), Array.Empty<TaskCardTagDto>(), 0, 0, 0, 0);
+            Array.Empty<TaskCardMemberDto>(), Array.Empty<TaskCardTagDto>(), 0, 0, 0, 0,
+            CreadorNombre: card.CreatorName, CreadoEn: card.CreatedAt,
+            EnColumnaDesde: card.ColumnEnteredAt, StartAt: card.StartAt);
     }
 
     public async Task<TaskCardSummaryDto?> UpdateCardAsync(Guid cardId, UpdateTaskCardRequest req, Guid actor, string actorDisplayName, CancellationToken ct = default)
@@ -457,6 +460,7 @@ public sealed class TaskBoardService : ITaskBoardService
         card.Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
         card.Color = string.IsNullOrWhiteSpace(req.Color) ? null : req.Color.Trim();
         card.DueAt = req.DueAt;
+        card.StartAt = req.StartAt;
         card.UpdatedAt = DateTimeOffset.UtcNow;
         card.UpdatedBy = actor;
         if (!string.Equals(titlePrev, card.Title, StringComparison.Ordinal))
@@ -480,15 +484,53 @@ public sealed class TaskBoardService : ITaskBoardService
         // Valida columna del mismo tablero.
         var destCol = await _db.TaskBoardColumns.FirstOrDefaultAsync(c => c.Id == req.ColumnId && c.BoardId == card.BoardId, ct);
         if (destCol is null) { return false; }
+        var ahora = DateTimeOffset.UtcNow;
         var origColId = card.ColumnId;
+        var cambiaColumna = origColId != req.ColumnId;
+
+        // Tarjetas de la columna DESTINO (sin la que movemos), en el orden visible.
+        var destino = await _db.TaskCards
+            .Where(c => c.ColumnId == req.ColumnId && !c.IsArchived && c.Id != cardId)
+            .OrderBy(c => c.SortOrder).ThenByDescending(c => c.CreatedAt)
+            .ToListAsync(ct);
+
+        // Inserta la tarjeta en la posicion PEDIDA (no al final) y re-numera la columna
+        // destino 0..N. Esto arregla el bug "desplazar no funciona / afecta el registro":
+        // antes solo se grababa el SortOrder de la movida (al final) sin normalizar el
+        // resto, dejando huecos/empates y un orden inestable en el Kanban.
         card.ColumnId = req.ColumnId;
-        card.SortOrder = Math.Max(0, req.SortOrder);
-        card.UpdatedAt = DateTimeOffset.UtcNow;
+        var idx = Math.Clamp(req.SortOrder, 0, destino.Count);
+        destino.Insert(idx, card);
+        for (var i = 0; i < destino.Count; i++)
+        {
+            if (destino[i].SortOrder != i)
+            {
+                destino[i].SortOrder = i;
+                destino[i].UpdatedAt = ahora;
+                destino[i].UpdatedBy = actor;
+            }
+        }
+        card.UpdatedAt = ahora;
         card.UpdatedBy = actor;
-        if (origColId != req.ColumnId)
+
+        if (cambiaColumna)
         {
             // Reinicia el cronometro de "tiempo en columna" al cambiar de columna.
-            card.ColumnEnteredAt = DateTimeOffset.UtcNow;
+            card.ColumnEnteredAt = ahora;
+            // Re-numera la columna ORIGEN (quedo con un hueco al salir la tarjeta).
+            var origen = await _db.TaskCards
+                .Where(c => c.ColumnId == origColId && !c.IsArchived && c.Id != cardId)
+                .OrderBy(c => c.SortOrder).ThenByDescending(c => c.CreatedAt)
+                .ToListAsync(ct);
+            for (var i = 0; i < origen.Count; i++)
+            {
+                if (origen[i].SortOrder != i)
+                {
+                    origen[i].SortOrder = i;
+                    origen[i].UpdatedAt = ahora;
+                    origen[i].UpdatedBy = actor;
+                }
+            }
             _db.TaskCardActivities.Add(new TaskCardActivity
             {
                 TenantId = card.TenantId, TaskCardId = card.Id, Type = TaskActivityType.Action,

@@ -124,10 +124,14 @@ public sealed class RelacionFacturasSelectorV3Tests
     {
         var s = await SembrarBaseAsync();
         var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId);
-        // 3 HCs: una antes, una dentro, una despues del rango 2026-07.
-        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 6, 30, 23, 0, 0, TimeSpan.Zero));
+        // 3 HCs: una antes, una dentro, una despues del rango 2026-07. Las fronteras se
+        // eligen inequivocas en hora LOCAL de Colombia (UTC-5), que es como el selector
+        // arma los limites del rango: 2026-06-30 13:00Z = 08:00 local (junio, fuera) y
+        // 2026-08-01 10:00Z = 05:00 local (agosto, fuera). Un instante como
+        // 2026-08-01 00:30Z seria 2026-07-31 19:30 local => SI cae en julio (correcto).
+        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 6, 30, 13, 0, 0, TimeSpan.Zero));
         await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
-        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 8, 1, 0, 30, 0, TimeSpan.Zero));
+        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero));
 
         var sel = new RelacionFacturasSelector(s.Ctx);
         var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));

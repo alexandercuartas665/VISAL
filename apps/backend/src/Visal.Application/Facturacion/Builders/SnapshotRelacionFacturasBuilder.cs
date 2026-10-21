@@ -114,7 +114,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Correo electrónico"]                      = "Correo de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
         ["HC N°"]                                   = "Consecutivo publico de la Historia Clinica (HC-000123). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
         ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
-        ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo). Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. No forma parte del template EPS.",
+        ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo), sin el sufijo de modalidad d/f. Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. Cada paquete agrega ademas una LINEA PRIMARIA (cabecera) con CUPS=codigo de paquete, descripcion=nombre del paquete y valor=valor pactado; sus HC de detalle van con valor 0. No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(

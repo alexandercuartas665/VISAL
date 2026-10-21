@@ -503,6 +503,122 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         Assert.Empty(filas);
     }
 
+    // ---------- Test v3: linea primaria de paquete ----------
+
+    /// <summary>
+    /// Un paquete atendido debe emitir UNA linea primaria (cabecera) antes de sus HC de
+    /// detalle: CUPS y Codigo Externo = codigo de paquete SIN sufijo d/f, Descripcion =
+    /// nombre del paquete, Valor = valor pactado del paquete. Las HC de detalle van con
+    /// valor 0 (el paquete se factura una sola vez). Usa el selector v3 REAL contra EF
+    /// InMemory (no el FakeSelector). La asignacion de cada HC se resuelve por la
+    /// heuristica paciente+contrato+fecha (sin cadena de sesiones), suficiente para que
+    /// ambas HC queden clasificadas como detalle del paquete.
+    /// </summary>
+    [Fact]
+    public async Task Paquete_EmiteLineaPrimariaYDetalleEnCero()
+    {
+        var (ctx, _) = Db();
+        var aseg = new Aseguradora
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Codigo = "NEPS", Tipo = "EPS", Nombre = "NUEVA EPS", Nit = "900156264"
+        };
+        var contrato = new ContratoAseguradora
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            AseguradoraId = aseg.Id, CodigoContrato = "NEPS-01", Estado = "ACTIVO"
+        };
+        var suc = new Sucursal
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Codigo = "SED", Nombre = "SEDE", Activo = true, CodigoHabilitacion = "X"
+        };
+        var paciente = new Paciente
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            TipoDocumento = "CC", NumeroDocumento = "5191817",
+            PrimerNombre = "ARTURO", PrimerApellido = "NARVAEZ",
+            NombreCompleto = "ARTURO NARVAEZ", Sexo = "M", Regimen = "CONTRIBUTIVO"
+        };
+        var prof = new Profesional
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            TipoDocumento = "CC", NumeroDocumento = "123", NombreCompleto = "PROF TEST"
+        };
+        var pacCon = new PacienteContrato
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            PacienteId = paciente.Id, ContratoAseguradoraId = contrato.Id, Orden = 1
+        };
+        var paquete = new Paquete
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Codigo = "E100d", Nombre = "PAQUETE TEST NEUROLOGICO", Precio = 500000m, Activo = true
+        };
+        // Dos asignaciones del mismo paquete (misma instancia); solo la ancla trae el pactado.
+        var inst = Guid.NewGuid();
+        Asignacion AsigPaq(decimal? pactado, DateOnly fecha) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(),
+            PacienteId = paciente.Id, Sucursal = "SED",
+            ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV DETALLE",
+            TipoServicio = "TERAPIA", Cantidad = 1, ContratoCodigo = "NEPS-01",
+            FechaInicio = fecha, MesVigencia = (short)fecha.Month,
+            Estado = AsignacionEstado.Asignado,
+            PaqueteInstanciaId = inst, PaqueteCodigo = "E100d", PaqueteValorPactado = pactado
+        };
+        ctx.Asignaciones.Add(AsigPaq(500000m, new DateOnly(2026, 9, 10)));
+        ctx.Asignaciones.Add(AsigPaq(null, new DateOnly(2026, 9, 12)));
+
+        HistoriaClinica Hc(DateTimeOffset fechaAtencion) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            PacienteId = paciente.Id, ProfesionalId = prof.Id,
+            FormDefinitionId = Guid.Empty, ValoresJson = "{}",
+            FechaApertura = fechaAtencion, FechaAtencion = fechaAtencion,
+            FechaCierre = fechaAtencion.AddHours(2),
+            Estado = HistoriaClinicaEstado.Cerrada
+        };
+        ctx.HistoriasClinicas.Add(Hc(new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero)));
+        ctx.HistoriasClinicas.Add(Hc(new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero)));
+
+        ctx.Aseguradoras.Add(aseg);
+        ctx.ContratosAseguradora.Add(contrato);
+        ctx.Sucursales.Add(suc);
+        ctx.Pacientes.Add(paciente);
+        ctx.Profesionales.Add(prof);
+        ctx.PacienteContratos.Add(pacCon);
+        ctx.Paquetes.Add(paquete);
+        await ctx.SaveChangesAsync();
+
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var filas = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var f in builder.ConstruirAsync(
+            FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
+        {
+            filas.Add(f);
+        }
+
+        // 1 linea primaria + 2 de detalle.
+        Assert.Equal(3, filas.Count);
+
+        var primaria = filas[0];
+        Assert.Equal("E100", primaria["CUPS"]);                               // E100d -> E100 (sin sufijo)
+        Assert.Equal("E100", primaria["Codigo Externo (Factura)"]);
+        Assert.Equal("PAQUETE TEST NEUROLOGICO", primaria["Descripción del procedimiento (Factura)"]);
+        Assert.Equal(500000m, primaria["Valor Unitario"]);
+        Assert.Equal(500000m, primaria["Valor Total"]);
+        Assert.Equal(1, primaria["Cantidad"]);
+        Assert.Equal("E100", primaria["Cód. Paquete"]);
+
+        foreach (var detalle in filas.Skip(1))
+        {
+            Assert.Equal(0m, detalle["Valor Unitario"]);                      // detalle de paquete => 0
+            Assert.Equal(0m, detalle["Valor Total"]);
+            Assert.Equal("E100", detalle["Cód. Paquete"]);
+        }
+    }
+
     // ---- Fake ITenantContext ----
 
     private sealed class FakeTenantContext : ITenantContext

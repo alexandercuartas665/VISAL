@@ -289,6 +289,10 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
             .Where(p => paisIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Nombre, ct);
 
         // 7) Construccion de hechos finales.
+        // Para cada instancia de paquete presente guardamos su codigo CRUDO (con sufijo d/f),
+        // que es como lo guarda el catalogo `paquetes.codigo`, para resolver el nombre del
+        // paquete mas abajo al armar la linea primaria.
+        var instanciaCodigoCrudo = new Dictionary<Guid, string>();
         var hechos = new List<RelacionFacturasHecho>(hechosPrefiltrados.Count);
         foreach (var (hc, paciente, contrato, sucursal) in hechosPrefiltrados)
         {
@@ -429,6 +433,23 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 }
             }
 
+            // Paquete: si la asignacion de la HC nacio de un paquete, esta HC es una LINEA
+            // DE DETALLE del paquete. Sus valores van en 0 (el monto del paquete se factura
+            // una sola vez, en la linea primaria que se arma abajo); asi el total del snapshot
+            // no cuenta el paquete dos veces. Los servicios sueltos no cambian.
+            Guid? paqueteInstancia = asigRelevante?.PaqueteInstanciaId;
+            if (paqueteInstancia is Guid inst)
+            {
+                if (!string.IsNullOrWhiteSpace(asigRelevante?.PaqueteCodigo))
+                {
+                    instanciaCodigoCrudo[inst] = asigRelevante!.PaqueteCodigo!;
+                }
+                valorUnitario = 0m;
+                valorTotal = 0m;
+                cuotaModeradora = null; // detalle de paquete => sin valores (decision: detalle = 0)
+                copago = null;
+            }
+
             hechos.Add(new RelacionFacturasHecho(
                 hc, paciente, contrato, aseguradora, sucursal, profesional,
                 cupsCodigo, cupsDescripcion,
@@ -440,11 +461,84 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 // AS-000045 POR SERVICIO (asignacion.Consecutivo); el lote se conserva solo
                 // como agrupador interno (AsignacionLoteId) para filtros de facturacion.
                 AsignacionConsecutivo: asigRelevante?.Consecutivo,
-                // Codigo del paquete con el que se presto el servicio (null si no vino de un paquete).
-                PaqueteCodigo: asigRelevante?.PaqueteCodigo));
+                // Codigo del paquete SIN sufijo de modalidad d/f (listo para mostrar/CUPS).
+                PaqueteCodigo: ServicioCodigo.Base(asigRelevante?.PaqueteCodigo),
+                PaqueteInstanciaId: paqueteInstancia));
         }
 
-        return hechos;
+        // ── Lineas primarias de paquete ────────────────────────────────────────────────
+        // Por cada instancia de paquete presente insertamos UNA linea primaria (cabecera)
+        // justo antes de sus lineas de detalle: CUPS y codigo externo = codigo de paquete
+        // (sin sufijo), descripcion = nombre del paquete, valor = valor pactado del paquete;
+        // el resto de campos se clona de la PRIMERA HC del paquete (la de fecha de atencion
+        // mas temprana, ya que `hechos` viene ordenado por fecha). Las lineas de detalle
+        // quedan contiguas debajo de su primaria, en orden de fecha.
+        var instanciasPresentes = hechos
+            .Where(h => h.PaqueteInstanciaId is Guid)
+            .Select(h => h.PaqueteInstanciaId!.Value)
+            .Distinct()
+            .ToList();
+        if (instanciasPresentes.Count == 0) { return hechos; }
+
+        // Nombre del paquete por codigo CRUDO (el catalogo guarda el codigo CON el sufijo d/f).
+        var codigosCrudos = instanciaCodigoCrudo.Values.Distinct().ToList();
+        var nombrePorCodigoCrudo = codigosCrudos.Count == 0
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : await db.Paquetes.AsNoTracking()
+                .Where(p => codigosCrudos.Contains(p.Codigo))
+                .ToDictionaryAsync(p => p.Codigo, p => p.Nombre, StringComparer.OrdinalIgnoreCase, ct);
+
+        // Valor pactado por instancia: SOLO la asignacion ancla del paquete lo lleva; lo
+        // buscamos entre las asignaciones ya cargadas del paciente (asignacionesPorPac).
+        var pactadoPorInstancia = asignacionesPorPac.Values
+            .SelectMany(l => l)
+            .Where(a => a.PaqueteInstanciaId is Guid && a.PaqueteValorPactado is decimal)
+            .GroupBy(a => a.PaqueteInstanciaId!.Value)
+            .ToDictionary(g => g.Key, g => g.First().PaqueteValorPactado);
+
+        // Detalle agrupado por instancia, preservando el orden por fecha de `hechos`.
+        var detallePorInstancia = hechos
+            .Where(h => h.PaqueteInstanciaId is Guid)
+            .GroupBy(h => h.PaqueteInstanciaId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var ordenado = new List<RelacionFacturasHecho>(hechos.Count + instanciasPresentes.Count);
+        var instanciasEmitidas = new HashSet<Guid>();
+        foreach (var h in hechos)
+        {
+            if (h.PaqueteInstanciaId is Guid inst)
+            {
+                if (!instanciasEmitidas.Add(inst)) { continue; } // ya emitida con su grupo
+                var detalles = detallePorInstancia[inst];
+                var primera = detalles[0];
+                decimal? pactado = pactadoPorInstancia.GetValueOrDefault(inst);
+                string? nombrePaquete = instanciaCodigoCrudo.TryGetValue(inst, out var crudo)
+                    ? nombrePorCodigoCrudo.GetValueOrDefault(crudo)
+                    : null;
+                var primaria = primera with
+                {
+                    EsLineaPaquetePrimaria = true,
+                    // CUPS + Codigo Externo (ambos mapean de CupsCodigo) = codigo de paquete sin sufijo.
+                    CupsCodigo = primera.PaqueteCodigo,
+                    // Descripcion del procedimiento (mapea de NombreServicio ?? CupsDescripcion).
+                    NombreServicio = nombrePaquete,
+                    CupsDescripcion = nombrePaquete,
+                    // Valor del paquete (una sola vez); cuota/copago no aplican a la cabecera.
+                    ValorUnitario = pactado,
+                    ValorTotal = pactado,
+                    ValorCuotaModeradora = 0m,
+                    ValorCopago = 0m,
+                };
+                ordenado.Add(primaria);
+                ordenado.AddRange(detalles);
+            }
+            else
+            {
+                ordenado.Add(h);
+            }
+        }
+
+        return ordenado;
     }
 
     /// <summary>

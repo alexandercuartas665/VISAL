@@ -87,6 +87,16 @@ public sealed record RelacionFacturasHecho(
     /// <summary>Consecutivo publico del lote/asignacion (AS-000045) para la trazabilidad
     /// del snapshot. Se resuelve en el selector desde AsignacionLote.Consecutivo.</summary>
     long? AsignacionConsecutivo = null,
-    /// <summary>Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo).
-    /// Null cuando la asignacion no nacio de aplicar un paquete en /asignacion.</summary>
-    string? PaqueteCodigo = null);
+    /// <summary>Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo),
+    /// SIN el sufijo de modalidad d/f (listo para mostrar y para CUPS). Null cuando la
+    /// asignacion no nacio de aplicar un paquete en /asignacion.</summary>
+    string? PaqueteCodigo = null,
+    /// <summary>Id de la instancia del paquete (Asignacion.PaqueteInstanciaId): agrupa las
+    /// asignaciones de una misma aplicacion de paquete. Se usa para agrupar las lineas de
+    /// detalle bajo su linea primaria. Null cuando el servicio no nacio de un paquete.</summary>
+    Guid? PaqueteInstanciaId = null,
+    /// <summary>True si este hecho es la LINEA PRIMARIA (cabecera) de un paquete: su CUPS y
+    /// codigo externo = codigo del paquete (sin sufijo), la descripcion = nombre del paquete
+    /// y el valor = valor pactado del paquete; el resto de campos se clona de la primera HC
+    /// del paquete. Las lineas de detalle (las HC individuales) van con valor 0.</summary>
+    bool EsLineaPaquetePrimaria = false);

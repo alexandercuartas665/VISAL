@@ -181,6 +181,12 @@
                                 <button class="btn btn-outline-primary btn-sm"
                                         disabled="@(s.Estado != EstadoSnapshot.Vigente && s.Estado != EstadoSnapshot.Archivado)"
                                         @onclick="() => AbrirVer(s.Id)" title="Ver contenido del snapshot">Ver</button>
+                                <button class="btn btn-outline-warning btn-sm ms-1"
+                                        disabled="@(_regenerandoId is not null)"
+                                        @onclick="() => Regenerar(s.Id)"
+                                        title="Crea un snapshot NUEVO con los MISMOS parametros (EPS, fechas, sucursales, pacientes y opciones) de este. Util para recoger cambios recientes sin volver a digitar los filtros. No modifica este snapshot.">
+                                    @(_regenerandoId == s.Id ? "Regenerando..." : "Regenerar")
+                                </button>
                                 @if (s.Estado == EstadoSnapshot.Vigente || s.Estado == EstadoSnapshot.Archivado)
                                 {
                                     <a class="btn btn-outline-success btn-sm ms-1"
@@ -1610,6 +1616,45 @@
         }
         catch (Exception ex) { _error = "Error al completar códigos: " + ex.Message; }
         finally { _completandoId = null; }
+    }
+
+    // Snapshot que se esta regenerando (muestra "Regenerando..." en su fila). Null = ninguno.
+    private Guid? _regenerandoId;
+
+    /// <summary>Crea un snapshot NUEVO reusando los MISMOS parametros (tipo + filtros + nombre)
+    /// de uno existente. Asi el usuario no tiene que volver a digitar EPS, fechas, sucursales y
+    /// pacientes para recoger cambios recientes. No modifica el snapshot de origen.</summary>
+    private async Task Regenerar(Guid snapshotId)
+    {
+        if (_regenerandoId is not null) { return; }
+        _error = null; _ok = null;
+        _regenerandoId = snapshotId;
+        try
+        {
+            // El snapshot guarda todo lo necesario para reproducirlo: Tipo + FiltrosJson + Nombre.
+            var det = await Svc.ObtenerAsync(snapshotId);
+            if (det is null) { _error = "No se encontro el snapshot a regenerar."; return; }
+
+            var cmd = new GenerarSnapshotCmd(
+                det.Metadata.Tipo,
+                det.Metadata.Nombre,   // mismo nombre; se distingue por fecha/version de ejecucion
+                det.FiltrosJson,
+                Visal.SuperAdmin.AppVersion.Current);
+            var nuevoId = await Svc.GenerarAsync(cmd, _actorId);
+
+            await CargarLista();
+            if (nuevoId == Guid.Empty)
+            {
+                _ok = $"Se regenero '{det.Metadata.Nombre}' pero no hubo datos para esos filtros ahora (no se guardo).";
+            }
+            else
+            {
+                _ok = $"Snapshot regenerado: '{det.Metadata.Nombre}'.";
+                await AbrirVer(nuevoId);
+            }
+        }
+        catch (Exception ex) { _error = "Error al regenerar: " + ex.Message; }
+        finally { _regenerandoId = null; }
     }
 
     protected override async Task OnInitializedAsync()

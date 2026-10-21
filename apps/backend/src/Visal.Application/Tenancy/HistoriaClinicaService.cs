@@ -51,12 +51,12 @@ public sealed class HistoriaClinicaService(
         var bogota = TimeSpan.FromHours(-5);
         if (desde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
             q = q.Where(h => h.FechaApertura >= dStart);
         }
         if (hasta is DateOnly h2)
         {
-            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota);
+            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
             q = q.Where(h => h.FechaApertura <= dEnd);
         }
         if (formDefinitionId is Guid fid)

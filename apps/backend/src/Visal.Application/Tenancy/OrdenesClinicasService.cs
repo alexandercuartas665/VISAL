@@ -29,15 +29,17 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         // la fecha de atencion se guarda/muestra en hora local, asi que una atencion de
         // 19:00-23:59 local cae en el dia UTC siguiente. Si los limites fueran UTC, esa
         // atencion se filtraria un dia corrido respecto a lo que ve el usuario.
+        // Se convierte a UTC (.ToUniversalTime()) porque Npgsql solo acepta DateTimeOffset
+        // con offset 0 al escribir a 'timestamp with time zone'; el instante no cambia.
         var bogota = TimeSpan.FromHours(-5);
         if (filtro.Desde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
             q = q.Where(h => (h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura) >= dStart);
         }
         if (filtro.Hasta is DateOnly h2)
         {
-            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota);
+            var dEnd = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
             q = q.Where(h => (h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura) <= dEnd);
         }
         if (!string.IsNullOrWhiteSpace(filtro.Especialista))

@@ -232,12 +232,12 @@ public sealed class FacturacionSnapshotService(
         var bogota = TimeSpan.FromHours(-5);
         if (filtros?.FechaInicio is DateOnly fi)
         {
-            var d = new DateTimeOffset(fi.ToDateTime(TimeOnly.MinValue), bogota);
+            var d = new DateTimeOffset(fi.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
             q = q.Where(x => x.CreatedAt >= d);
         }
         if (filtros?.FechaFin is DateOnly ff)
         {
-            var d = new DateTimeOffset(ff.ToDateTime(TimeOnly.MaxValue), bogota);
+            var d = new DateTimeOffset(ff.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
             q = q.Where(x => x.CreatedAt <= d);
         }
         // Lookup en memoria: cargamos los snapshots y luego traducimos

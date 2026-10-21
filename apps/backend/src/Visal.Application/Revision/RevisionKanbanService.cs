@@ -69,12 +69,12 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
             var bogota = TimeSpan.FromHours(-5);
             if (filtro.FechaDesde is DateOnly d)
             {
-                var desde = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
+                var desde = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
                 q = q.Where(h => h.FechaApertura >= desde);
             }
             if (filtro.FechaHasta is DateOnly h2)
             {
-                var hasta = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota);
+                var hasta = new DateTimeOffset(h2.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
                 q = q.Where(h => h.FechaApertura <= hasta);
             }
         }
@@ -281,12 +281,12 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         var bogota = TimeSpan.FromHours(-5);
         if (filtro.FechaDesde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
             q = q.Where(r => r.UltimaAccionEn >= dStart);
         }
         if (filtro.FechaHasta is DateOnly h)
         {
-            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota);
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
             q = q.Where(r => r.UltimaAccionEn <= dEnd);
         }
 
@@ -389,12 +389,12 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         var bogota = TimeSpan.FromHours(-5);
         if (filtro.FechaDesde is DateOnly d)
         {
-            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota);
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
             q = q.Where(r => r.UltimaAccionEn >= dStart);
         }
         if (filtro.FechaHasta is DateOnly h)
         {
-            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota);
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
             q = q.Where(r => r.UltimaAccionEn <= dEnd);
         }
 

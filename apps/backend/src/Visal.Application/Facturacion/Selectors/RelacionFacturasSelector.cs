@@ -62,8 +62,8 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         // local cae en el dia UTC siguiente. Con limites UTC, una atencion de fin de mes
         // (p.ej. 30-sep 22:00 local = 01-oct 03:00 UTC) se contaria en el mes siguiente.
         var bogota = TimeSpan.FromHours(-5);
-        var inicio = new DateTimeOffset(filtros.FechaInicio.ToDateTime(TimeOnly.MinValue), bogota);
-        var fin = new DateTimeOffset(filtros.FechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue), bogota);
+        var inicio = new DateTimeOffset(filtros.FechaInicio.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
+        var fin = new DateTimeOffset(filtros.FechaFin.AddDays(1).ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
         var hcs = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Estado == HistoriaClinicaEstado.Cerrada
                      && h.FechaCierre != null

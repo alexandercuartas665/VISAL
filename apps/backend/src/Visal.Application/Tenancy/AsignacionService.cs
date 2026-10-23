@@ -2000,8 +2000,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         // delete (guarda contra carreras entre lista y borrado).
         async Task<string?> ValidarAsync()
         {
+            // Solo las HC Abierta/Cerrada bloquean: una Inactiva (descartada) la limpia
+            // el guard central de BorrarTurnosConCascadaAsync sin dejar huerfanas.
             var tieneHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
-                .AnyAsync(pv => pv.Sesion!.AsignacionTurno!.AsignacionId == asignacionId, ct);
+                .AnyAsync(pv => pv.Sesion!.AsignacionTurno!.AsignacionId == asignacionId
+                             && pv.HistoriaClinica!.Estado != HistoriaClinicaEstado.Inactiva, ct);
             if (tieneHc) { return "No se puede eliminar: alguna sesion de esta coordinacion ya tiene historia clinica registrada."; }
 
             var turnoIdsLocal = await db.AsignacionTurnos.AsNoTracking()
@@ -2059,65 +2062,60 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     }
 
     /// <summary>
-    /// Borra un conjunto de turnos con toda su cascada: sesiones y, cuando
-    /// <paramref name="forzar"/> es true, los artefactos clinicos downstream
-    /// (HC + sus hijos RESTRICT revisiones/rda/ordenes, pivotes sesion-HC y notas
-    /// medicas). NO borra la asignacion ni llama a SaveChanges: el caller compone
-    /// la transaccion. Usado por el borrado de coordinacion completa y por el
-    /// borrado de un solo profesional dentro de la coordinacion.
+    /// Borra un conjunto de turnos con su cascada (sesiones -> turnos) de forma SEGURA:
+    /// nunca deja una HC huerfana (Refuerzo 5).
+    ///
+    /// - Sin <paramref name="forzar"/>: si alguna sesion de estos turnos tiene una HC
+    ///   Abierta o Cerrada ligada, LANZA (no se puede desligar una atencion real). Si las
+    ///   unicas HC ligadas son Inactivas (descartadas), las limpia (pivote + HC) para no
+    ///   violar la FK RESTRICT del pivote ni dejar basura.
+    /// - Con <paramref name="forzar"/>: barre los artefactos clinicos de TODAS las HC
+    ///   ligadas (ruta explicita que si borra HC) + las notas por turno.
+    ///
+    /// Siempre borra el pivote sesion-HC ANTES que la sesion (la FK sesion_id del pivote
+    /// es ON DELETE RESTRICT). NO llama a SaveChanges: el caller compone la transaccion.
     /// </summary>
     private async Task BorrarTurnosConCascadaAsync(
         IReadOnlyList<Guid> turnoIds, bool forzar, CancellationToken ct)
     {
         if (turnoIds.Count == 0) { return; }
 
-        // Modo forzar: barrer artefactos clinicos ANTES de sesiones/turnos,
-        // respetando las FK RESTRICT que cuelgan de historias_clinicas
-        // (revisiones_clinica, rda_eventos, ordenes_medicamentos_publicas).
-        if (forzar)
+        // HC ligadas a las sesiones de estos turnos (via pivote), con su estado.
+        var hcsLigadas = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId))
+            .Select(pv => new { pv.HistoriaClinicaId, pv.HistoriaClinica!.Estado })
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (!forzar)
         {
-            var hcIds = await db.AsignacionTurnoSesionHcs.AsNoTracking()
-                .Where(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId))
-                .Select(pv => pv.HistoriaClinicaId)
-                .Distinct()
-                .ToListAsync(ct);
-
-            if (hcIds.Count > 0)
+            // Guard CENTRAL: ninguna HC Abierta/Cerrada puede perder su enlace -> se bloquea.
+            var bloqueantes = hcsLigadas.Count(x => x.Estado != HistoriaClinicaEstado.Inactiva);
+            if (bloqueantes > 0)
             {
-                var revIds = await db.RevisionesClinica.AsNoTracking()
-                    .Where(r => hcIds.Contains(r.HistoriaClinicaId))
-                    .Select(r => r.Id)
-                    .ToListAsync(ct);
-                if (revIds.Count > 0)
-                {
-                    await db.RevisionClinicaEventos
-                        .Where(e => revIds.Contains(e.RevisionClinicaId))
-                        .ExecuteDeleteAsync(ct);
-                    await db.RevisionesClinica
-                        .Where(r => revIds.Contains(r.Id))
-                        .ExecuteDeleteAsync(ct);
-                }
-                await db.RdaEventos
-                    .Where(e => hcIds.Contains(e.HistoriaClinicaId))
-                    .ExecuteDeleteAsync(ct);
-                await db.OrdenesMedicamentosPublicas
-                    .Where(o => hcIds.Contains(o.HistoriaClinicaId))
-                    .ExecuteDeleteAsync(ct);
-
-                await db.AsignacionTurnoSesionHcs
-                    .Where(pv => hcIds.Contains(pv.HistoriaClinicaId))
-                    .ExecuteDeleteAsync(ct);
-                await db.HistoriasClinicas
-                    .Where(h => hcIds.Contains(h.Id))
-                    .ExecuteDeleteAsync(ct);
+                throw new InvalidOperationException(
+                    $"No se puede eliminar: hay {bloqueantes} historia(s) clinica(s) ligada(s). " +
+                    "Descartelas/inactivelas o reasigne primero.");
             }
 
-            await db.NotasMedicas
+            // Solo quedan Inactivas (o ninguna): limpiarlas (pivote + HC) para no violar la
+            // FK RESTRICT al borrar la sesion ni dejar huerfanas.
+            var inactivasIds = hcsLigadas.Select(x => x.HistoriaClinicaId).Distinct().ToList();
+            await ArtefactosClinicosCleanup.BorrarHcsAsync(db, inactivasIds, ct);
+        }
+        else
+        {
+            // Forzar: barrer artefactos clinicos de TODAS las HC ligadas + notas por turno.
+            var hcIds = hcsLigadas.Select(x => x.HistoriaClinicaId).Distinct().ToList();
+            await ArtefactosClinicosCleanup.BorrarHcsAsync(db, hcIds, ct);
+
+            var notas = await db.NotasMedicas
                 .Where(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId!.Value))
-                .ExecuteDeleteAsync(ct);
+                .ToListAsync(ct);
+            db.NotasMedicas.RemoveRange(notas);
         }
 
-        // Cascada base: sesiones -> turnos.
+        // Cascada base: sesiones -> turnos (ya sin pivotes que violen RESTRICT).
         var sesiones = await db.AsignacionTurnoSesiones
             .Where(s => turnoIds.Contains(s.AsignacionTurnoId))
             .ToListAsync(ct);
@@ -2205,7 +2203,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (!forzar)
         {
             var tieneHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
-                .AnyAsync(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId), ct);
+                .AnyAsync(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId)
+                             && pv.HistoriaClinica!.Estado != HistoriaClinicaEstado.Inactiva, ct);
             if (tieneHc) { throw new InvalidOperationException("No se puede eliminar: este profesional ya tiene historias clinicas en la coordinacion."); }
             var tieneNota = await db.NotasMedicas.AsNoTracking()
                 .AnyAsync(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId!.Value), ct);
@@ -2248,7 +2247,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         if (!forzar)
         {
             var tieneHc = await db.AsignacionTurnoSesionHcs.AsNoTracking()
-                .AnyAsync(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId), ct);
+                .AnyAsync(pv => turnoIds.Contains(pv.Sesion!.AsignacionTurnoId)
+                             && pv.HistoriaClinica!.Estado != HistoriaClinicaEstado.Inactiva, ct);
             if (tieneHc) { throw new InvalidOperationException("No se puede eliminar: alguno de los profesionales seleccionados ya tiene historias clinicas en la coordinacion."); }
             var tieneNota = await db.NotasMedicas.AsNoTracking()
                 .AnyAsync(n => n.AsignacionTurnoId != null && turnoIds.Contains(n.AsignacionTurnoId!.Value), ct);

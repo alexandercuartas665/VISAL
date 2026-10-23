@@ -12788,7 +12788,7 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.HasOne("Visal.Domain.Entities.AsignacionTurnoSesion", "Sesion")
                         .WithMany()
                         .HasForeignKey("SesionId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_asignacion_turno_sesion_hcs_asignacion_turno_sesiones_sesio");
 

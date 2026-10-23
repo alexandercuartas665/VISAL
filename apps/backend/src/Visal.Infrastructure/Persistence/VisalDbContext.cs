@@ -1709,7 +1709,12 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<AsignacionTurnoSesionHc>(b =>
         {
-            b.HasOne(x => x.Sesion).WithMany().HasForeignKey(x => x.SesionId).OnDelete(DeleteBehavior.Cascade);
+            // Refuerzo 5: sesion_id en RESTRICT (antes CASCADE). Borrar una sesion que aun
+            // tiene una HC ligada queda PROHIBIDO a nivel BD -> imposible orfanar una HC en
+            // silencio. Todo borrado de sesion/turno debe limpiar el pivote explicito antes
+            // (ver ArtefactosClinicosCleanup + BorrarTurnosConCascadaAsync). La FK hacia la
+            // HC se queda en CASCADE: borrar una HC si debe arrastrar su pivote.
+            b.HasOne(x => x.Sesion).WithMany().HasForeignKey(x => x.SesionId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId).OnDelete(DeleteBehavior.Cascade);
             // Una fila por (sesion, HC): evita duplicados si el HC service se
             // dispara dos veces por race (Blazor circuit + auto-save concurrente).

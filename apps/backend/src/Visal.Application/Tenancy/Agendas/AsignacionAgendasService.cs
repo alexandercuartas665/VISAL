@@ -451,6 +451,17 @@ public sealed class AsignacionAgendasService(
                 "Si la atencion fue un error, descarta/inactiva la historia clinica primero.");
         }
 
+        // Aqui solo pueden quedar HC Inactivas (descartadas) ligadas: las Abierta/Cerrada
+        // ya bloquearon arriba. Con la FK sesion_id del pivote en RESTRICT (Refuerzo 5),
+        // hay que limpiarlas (pivote + HC) ANTES de borrar el turno, que cascada la sesion;
+        // si no, el delete chocaria con RESTRICT. Asi queda sin huerfanas ni basura.
+        var inactivasIds = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(pv => pv.Sesion!.AsignacionTurnoId == asignacionTurnoId)
+            .Select(pv => pv.HistoriaClinicaId)
+            .Distinct()
+            .ToListAsync(ct);
+        await ArtefactosClinicosCleanup.BorrarHcsAsync(db, inactivasIds, ct);
+
         var asigId = turno.AsignacionId;
         db.AsignacionTurnos.Remove(turno);
         await db.SaveChangesAsync(ct);

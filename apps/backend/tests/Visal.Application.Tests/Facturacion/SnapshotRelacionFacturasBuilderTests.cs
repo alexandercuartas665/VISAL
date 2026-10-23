@@ -619,6 +619,116 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         }
     }
 
+    /// <summary>
+    /// Un paciente con VARIAS instancias del MISMO codigo de paquete en el periodo (p.ej. un
+    /// paquete diario aplicado muchas veces) debe emitir UNA sola linea primaria (no una por
+    /// instancia), con todas las HC de detalle debajo. Regresion del caso reportado.
+    /// </summary>
+    [Fact]
+    public async Task Paquete_VariasInstancias_MismoCodigo_UnaSolaPrimaria()
+    {
+        var (ctx, _) = Db();
+        var aseg = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "NEPS", Tipo = "EPS", Nombre = "NUEVA EPS", Nit = "900156264" };
+        var contrato = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = aseg.Id, CodigoContrato = "NEPS-01", Estado = "ACTIVO" };
+        var suc = new Sucursal { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "SED", Nombre = "SEDE", Activo = true, CodigoHabilitacion = "X" };
+        var paciente = new Paciente { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "999", PrimerNombre = "PACI", PrimerApellido = "ENTE", NombreCompleto = "PACI ENTE", Sexo = "M", Regimen = "CONTRIBUTIVO" };
+        var prof = new Profesional { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "123", NombreCompleto = "PROF" };
+        var pacCon = new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ContratoAseguradoraId = contrato.Id, Orden = 1 };
+        var paquete = new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "E890179", Nombre = "PAQUETE DIARIO VENTILACION", Precio = 650000m, Activo = true };
+
+        // 3 instancias DISTINTAS del MISMO codigo, cada una con pactado y su propia HC.
+        void Seed(DateTimeOffset fecha)
+        {
+            ctx.Asignaciones.Add(new Asignacion
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(), PacienteId = paciente.Id,
+                Sucursal = "SED", ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV", TipoServicio = "ENFERMERIA",
+                Cantidad = 1, ContratoCodigo = "NEPS-01", FechaInicio = DateOnly.FromDateTime(fecha.DateTime), MesVigencia = (short)fecha.Month,
+                Estado = AsignacionEstado.Asignado, PaqueteInstanciaId = Guid.NewGuid(), PaqueteCodigo = "E890179", PaqueteValorPactado = 650000m
+            });
+            ctx.HistoriasClinicas.Add(new HistoriaClinica
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ProfesionalId = prof.Id,
+                FormDefinitionId = Guid.Empty, ValoresJson = "{}", FechaApertura = fecha, FechaAtencion = fecha,
+                FechaCierre = fecha.AddHours(2), Estado = HistoriaClinicaEstado.Cerrada
+            });
+        }
+        Seed(new DateTimeOffset(2026, 9, 3, 12, 0, 0, TimeSpan.Zero));
+        Seed(new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero));
+        Seed(new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero));
+
+        ctx.Aseguradoras.Add(aseg); ctx.ContratosAseguradora.Add(contrato); ctx.Sucursales.Add(suc);
+        ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon); ctx.Paquetes.Add(paquete);
+        await ctx.SaveChangesAsync();
+
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var filas = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var f in builder.ConstruirAsync(FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
+        {
+            filas.Add(f);
+        }
+
+        // UNA sola primaria + 3 detalles (no una primaria por instancia).
+        var primarias = filas.Where(f => Equals(f["CUPS"], "E890179")).ToList();
+        Assert.Single(primarias);
+        Assert.Equal(650000m, primarias[0]["Valor Unitario"]);   // pactado una sola vez
+        Assert.Equal(650000m, primarias[0]["Valor Total"]);
+        Assert.Equal(1, primarias[0]["Cantidad"]);
+        Assert.Equal("PAQUETE DIARIO VENTILACION", primarias[0]["Descripción del procedimiento (Factura)"]);
+        Assert.Equal(4, filas.Count);                            // 1 primaria + 3 detalle
+        Assert.Equal(3, filas.Count(f => Equals(f["Cód. Paquete"], "E890179") && Equals(f["Valor Total"], 0m)));
+    }
+
+    /// <summary>Dos codigos de paquete distintos para el mismo paciente -> DOS primarias.</summary>
+    [Fact]
+    public async Task Paquete_DosCodigos_DosPrimarias()
+    {
+        var (ctx, _) = Db();
+        var aseg = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "NEPS", Tipo = "EPS", Nombre = "NUEVA EPS", Nit = "900156264" };
+        var contrato = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = aseg.Id, CodigoContrato = "NEPS-01", Estado = "ACTIVO" };
+        var suc = new Sucursal { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "SED", Nombre = "SEDE", Activo = true, CodigoHabilitacion = "X" };
+        var paciente = new Paciente { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "888", PrimerNombre = "PACI", PrimerApellido = "DOS", NombreCompleto = "PACI DOS", Sexo = "F", Regimen = "CONTRIBUTIVO" };
+        var prof = new Profesional { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "123", NombreCompleto = "PROF" };
+        var pacCon = new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ContratoAseguradoraId = contrato.Id, Orden = 1 };
+        ctx.Paquetes.Add(new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "CPF1109", Nombre = "PAQ CRONICO", Precio = 100000m, Activo = true });
+        ctx.Paquetes.Add(new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "CPF1111", Nombre = "PAQ HERIDAS", Precio = 200000m, Activo = true });
+
+        void Seed(string codigo, decimal pactado, DateTimeOffset fecha)
+        {
+            ctx.Asignaciones.Add(new Asignacion
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(), PacienteId = paciente.Id,
+                Sucursal = "SED", ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV", TipoServicio = "ENFERMERIA",
+                Cantidad = 1, ContratoCodigo = "NEPS-01", FechaInicio = DateOnly.FromDateTime(fecha.DateTime), MesVigencia = (short)fecha.Month,
+                Estado = AsignacionEstado.Asignado, PaqueteInstanciaId = Guid.NewGuid(), PaqueteCodigo = codigo, PaqueteValorPactado = pactado
+            });
+            ctx.HistoriasClinicas.Add(new HistoriaClinica
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ProfesionalId = prof.Id,
+                FormDefinitionId = Guid.Empty, ValoresJson = "{}", FechaApertura = fecha, FechaAtencion = fecha,
+                FechaCierre = fecha.AddHours(2), Estado = HistoriaClinicaEstado.Cerrada
+            });
+        }
+        Seed("CPF1109", 100000m, new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero));
+        Seed("CPF1111", 200000m, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero));
+
+        ctx.Aseguradoras.Add(aseg); ctx.ContratosAseguradora.Add(contrato); ctx.Sucursales.Add(suc);
+        ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon);
+        await ctx.SaveChangesAsync();
+
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var filas = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var f in builder.ConstruirAsync(FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
+        {
+            filas.Add(f);
+        }
+
+        // Dos primarias (una por codigo), cada una con su detalle: 4 filas.
+        Assert.Equal(4, filas.Count);
+        Assert.Contains(filas, f => Equals(f["CUPS"], "CPF1109") && Equals(f["Valor Total"], 100000m));
+        Assert.Contains(filas, f => Equals(f["CUPS"], "CPF1111") && Equals(f["Valor Total"], 200000m));
+    }
+
     // ---- Fake ITenantContext ----
 
     private sealed class FakeTenantContext : ITenantContext

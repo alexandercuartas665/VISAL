@@ -459,63 +459,68 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────
-        // UNA linea primaria (cabecera) por PACIENTE + CODIGO DE PAQUETE (NO por instancia: los
-        // paquetes diarios/frecuentes generan muchas instancias del mismo codigo en el mes, y
-        // debe salir UN solo registro del paquete). Va justo antes de sus lineas de detalle
-        // (todas las HC de ese paciente+paquete, de todas las instancias), contiguas en orden de
-        // fecha. CUPS/codigo externo = codigo de paquete (sin sufijo), descripcion = nombre del
-        // paquete, Cantidad = 1 y Valor = valor pactado UNA sola vez; el resto de campos se clona
-        // de la PRIMERA HC (la de fecha de atencion mas temprana).
-        var paquetesHechos = hechos.Where(h => h.PaqueteInstanciaId is Guid).ToList();
+        // UN registro de paquete por LOTE: el lote (= una aplicacion del paquete = instancia,
+        // relacion 1:1) agrupa el GRUPO DE SERVICIOS prestados bajo ese paquete. Cada lote emite
+        // UNA linea primaria (cabecera) con las HC de sus servicios de detalle (valor 0) debajo.
+        // CUPS/codigo externo = codigo de paquete (sin sufijo), descripcion = nombre del paquete,
+        // Cantidad = 1, Valor = pactado del lote. El Cod. Asignacion del registro de paquete = el
+        // Consecutivo del LOTE (id del grupo); las HC de detalle conservan su propio Cod. Asignacion
+        // (AS por servicio). El resto de campos se clona de la PRIMERA HC del lote.
+        var paquetesHechos = hechos
+            .Where(h => h.PaqueteInstanciaId is Guid && h.AsignacionLoteId is Guid)
+            .ToList();
         if (paquetesHechos.Count == 0) { return hechos; }
 
-        // Clave de grupo: (paciente, codigo de paquete SIN sufijo = el que se muestra). Dos
-        // modalidades del mismo codigo (d/f) colapsan en una sola cabecera (mismo nombre).
-        static (Guid Pac, string Cod) Clave(RelacionFacturasHecho h) => (h.Paciente.Id, h.PaqueteCodigo ?? "");
-
-        // Codigo CRUDO (con sufijo, como lo guarda paquetes.codigo) por grupo, para el nombre.
-        var crudoPorGrupo = asignacionesPorPac
-            .SelectMany(kv => kv.Value, (kv, a) => (Pac: kv.Key, Asig: a))
-            .Where(x => x.Asig.PaqueteInstanciaId is Guid && !string.IsNullOrWhiteSpace(x.Asig.PaqueteCodigo))
-            .GroupBy(x => (x.Pac, Cod: ServicioCodigo.Base(x.Asig.PaqueteCodigo) ?? ""))
-            .ToDictionary(g => g.Key, g => g.First().Asig.PaqueteCodigo!);
-
-        // Nombre del paquete por codigo CRUDO (el catalogo guarda el codigo CON el sufijo d/f).
-        var codigosCrudos = crudoPorGrupo.Values.Distinct().ToList();
+        // Nombre del paquete: via el codigo CRUDO (con sufijo d/f, como lo guarda paquetes.codigo)
+        // indexado por el codigo SIN sufijo (el que se muestra).
+        var crudoPorStripped = asignacionesPorPac.Values
+            .SelectMany(l => l)
+            .Where(a => a.PaqueteInstanciaId is Guid && !string.IsNullOrWhiteSpace(a.PaqueteCodigo))
+            .GroupBy(a => ServicioCodigo.Base(a.PaqueteCodigo) ?? "")
+            .ToDictionary(g => g.Key, g => g.First().PaqueteCodigo!);
+        var codigosCrudos = crudoPorStripped.Values.Distinct().ToList();
         var nombrePorCodigoCrudo = codigosCrudos.Count == 0
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : await db.Paquetes.AsNoTracking()
                 .Where(p => codigosCrudos.Contains(p.Codigo))
                 .ToDictionaryAsync(p => p.Codigo, p => p.Nombre, StringComparer.OrdinalIgnoreCase, ct);
 
-        // Valor pactado por grupo (paciente+codigo): se factura UNA sola vez (Cantidad=1), asi
-        // que tomamos el pactado de una instancia (son iguales; si varian, el mayor).
-        var pactadoPorGrupo = asignacionesPorPac
-            .SelectMany(kv => kv.Value, (kv, a) => (Pac: kv.Key, Asig: a))
-            .Where(x => x.Asig.PaqueteInstanciaId is Guid && x.Asig.PaqueteValorPactado is decimal
-                        && !string.IsNullOrWhiteSpace(x.Asig.PaqueteCodigo))
-            .GroupBy(x => (x.Pac, Cod: ServicioCodigo.Base(x.Asig.PaqueteCodigo) ?? ""))
-            .ToDictionary(g => g.Key, g => g.Max(x => x.Asig.PaqueteValorPactado));
+        // Pactado por LOTE (lo trae la asignacion ancla del lote; una vez por lote).
+        var pactadoPorLote = asignacionesPorPac.Values
+            .SelectMany(l => l)
+            .Where(a => a.PaqueteInstanciaId is Guid && a.PaqueteValorPactado is decimal)
+            .GroupBy(a => a.LoteId)
+            .ToDictionary(g => g.Key, g => g.Max(a => a.PaqueteValorPactado));
 
-        // Detalle agrupado por (paciente, codigo), preservando el orden por fecha de `hechos`.
-        var detallePorGrupo = paquetesHechos
-            .GroupBy(Clave)
+        // Detalle agrupado por LOTE, preservando el orden por fecha de `hechos`.
+        var detallePorLote = paquetesHechos
+            .GroupBy(h => h.AsignacionLoteId!.Value)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        var ordenado = new List<RelacionFacturasHecho>(hechos.Count + detallePorGrupo.Count);
-        var gruposEmitidos = new HashSet<(Guid, string)>();
+        // Consecutivo publico del LOTE (id del grupo) para el Cod. Asignacion del registro de paquete.
+        var loteIds = detallePorLote.Keys.ToList();
+        var consecutivoPorLote = loteIds.Count == 0
+            ? new Dictionary<Guid, long>()
+            : await db.AsignacionLotes.AsNoTracking()
+                .Where(l => loteIds.Contains(l.Id))
+                .ToDictionaryAsync(l => l.Id, l => l.Consecutivo, ct);
+
+        var ordenado = new List<RelacionFacturasHecho>(hechos.Count + detallePorLote.Count);
+        var lotesEmitidos = new HashSet<Guid>();
         foreach (var h in hechos)
         {
-            if (h.PaqueteInstanciaId is Guid)
+            if (h.PaqueteInstanciaId is Guid && h.AsignacionLoteId is Guid lote)
             {
-                var key = Clave(h);
-                if (!gruposEmitidos.Add(key)) { continue; } // ya emitido con su grupo
-                var detalles = detallePorGrupo[key];
+                if (!lotesEmitidos.Add(lote)) { continue; } // ya emitido con su grupo
+                var detalles = detallePorLote[lote];
                 var primera = detalles[0];
-                decimal? pactado = pactadoPorGrupo.GetValueOrDefault(key);
-                string? nombrePaquete = crudoPorGrupo.TryGetValue(key, out var crudo)
-                    ? nombrePorCodigoCrudo.GetValueOrDefault(crudo)
-                    : null;
+                decimal? valor = pactadoPorLote.GetValueOrDefault(lote);
+                string? nombrePaquete = primera.PaqueteCodigo is string cod
+                    && crudoPorStripped.TryGetValue(cod, out var crudo)
+                        ? nombrePorCodigoCrudo.GetValueOrDefault(crudo)
+                        : null;
+                long? loteCons = consecutivoPorLote.TryGetValue(lote, out var lc) ? lc : null;
+
                 var primaria = primera with
                 {
                     EsLineaPaquetePrimaria = true,
@@ -524,17 +529,20 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                     // Descripcion del procedimiento (mapea de NombreServicio ?? CupsDescripcion).
                     NombreServicio = nombrePaquete,
                     CupsDescripcion = nombrePaquete,
-                    // Valor del paquete UNA sola vez (Cantidad=1 en el builder); cuota/copago no aplican.
-                    ValorUnitario = pactado,
-                    ValorTotal = pactado,
+                    // Valor = pactado del lote; cuota/copago no aplican a la cabecera.
+                    ValorUnitario = valor,
+                    ValorTotal = valor,
                     ValorCuotaModeradora = 0m,
                     ValorCopago = 0m,
+                    // Cod. Asignacion del registro de paquete = Consecutivo del LOTE (id del grupo).
+                    AsignacionConsecutivo = loteCons,
                 };
                 ordenado.Add(primaria);
                 ordenado.AddRange(detalles);
             }
             else
             {
+                // Servicio suelto, o HC de paquete sin lote resoluble (se deja tal cual, ya en 0).
                 ordenado.Add(h);
             }
         }

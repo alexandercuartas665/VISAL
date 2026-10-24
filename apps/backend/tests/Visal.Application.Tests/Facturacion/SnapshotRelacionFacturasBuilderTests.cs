@@ -506,16 +506,13 @@ public sealed class SnapshotRelacionFacturasBuilderTests
     // ---------- Test v3: linea primaria de paquete ----------
 
     /// <summary>
-    /// Un paquete atendido debe emitir UNA linea primaria (cabecera) antes de sus HC de
-    /// detalle: CUPS y Codigo Externo = codigo de paquete SIN sufijo d/f, Descripcion =
-    /// nombre del paquete, Valor = valor pactado del paquete. Las HC de detalle van con
-    /// valor 0 (el paquete se factura una sola vez). Usa el selector v3 REAL contra EF
-    /// InMemory (no el FakeSelector). La asignacion de cada HC se resuelve por la
-    /// heuristica paciente+contrato+fecha (sin cadena de sesiones), suficiente para que
-    /// ambas HC queden clasificadas como detalle del paquete.
+    /// UN registro de paquete por LOTE (grupo de servicios de una aplicacion del paquete): su
+    /// Cod. Asignacion = el Consecutivo del LOTE; las HC de detalle (valor 0) conservan su propio
+    /// Cod. Asignacion por servicio. Valor = pactado del lote. Selector v3 REAL (EF InMemory); la
+    /// asignacion de cada HC se resuelve por heuristica, con Consecutivo explicito (lote y servicios).
     /// </summary>
     [Fact]
-    public async Task Paquete_EmiteLineaPrimariaYDetalleEnCero()
+    public async Task Paquete_UnRegistroPorLote_ConConsecutivoDeLote()
     {
         var (ctx, _) = Db();
         var aseg = new Aseguradora
@@ -555,11 +552,14 @@ public sealed class SnapshotRelacionFacturasBuilderTests
             Id = Guid.NewGuid(), TenantId = TenantId,
             Codigo = "E100d", Nombre = "PAQUETE TEST NEUROLOGICO", Precio = 500000m, Activo = true
         };
-        // Dos asignaciones del mismo paquete (misma instancia); solo la ancla trae el pactado.
+        // Un LOTE (consecutivo 500) con DOS asignaciones (servicios) del mismo paquete: AS 101
+        // ancla con pactado, AS 102 sin pactado. El registro de paquete sale UNO (por lote).
         var inst = Guid.NewGuid();
-        Asignacion AsigPaq(decimal? pactado, DateOnly fecha) => new()
+        var loteId = Guid.NewGuid();
+        ctx.AsignacionLotes.Add(new AsignacionLote { Id = loteId, TenantId = TenantId, Consecutivo = 500, PacienteId = paciente.Id, Sucursal = "SED", ContratoCodigo = "NEPS-01" });
+        Asignacion AsigPaq(long cons, decimal? pactado, DateOnly fecha) => new()
         {
-            Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(),
+            Id = Guid.NewGuid(), TenantId = TenantId, LoteId = loteId, Consecutivo = cons,
             PacienteId = paciente.Id, Sucursal = "SED",
             ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV DETALLE",
             TipoServicio = "TERAPIA", Cantidad = 1, ContratoCodigo = "NEPS-01",
@@ -567,8 +567,8 @@ public sealed class SnapshotRelacionFacturasBuilderTests
             Estado = AsignacionEstado.Asignado,
             PaqueteInstanciaId = inst, PaqueteCodigo = "E100d", PaqueteValorPactado = pactado
         };
-        ctx.Asignaciones.Add(AsigPaq(500000m, new DateOnly(2026, 9, 10)));
-        ctx.Asignaciones.Add(AsigPaq(null, new DateOnly(2026, 9, 12)));
+        ctx.Asignaciones.Add(AsigPaq(101, 500000m, new DateOnly(2026, 9, 10)));
+        ctx.Asignaciones.Add(AsigPaq(102, null, new DateOnly(2026, 9, 12)));
 
         HistoriaClinica Hc(DateTimeOffset fechaAtencion) => new()
         {
@@ -599,33 +599,32 @@ public sealed class SnapshotRelacionFacturasBuilderTests
             filas.Add(f);
         }
 
-        // 1 linea primaria + 2 de detalle.
+        // 1 registro de paquete (por lote) + 2 detalles = 3 filas.
         Assert.Equal(3, filas.Count);
 
-        var primaria = filas[0];
-        Assert.Equal("E100", primaria["CUPS"]);                               // E100d -> E100 (sin sufijo)
-        Assert.Equal("E100", primaria["Codigo Externo (Factura)"]);
-        Assert.Equal("PAQUETE TEST NEUROLOGICO", primaria["Descripción del procedimiento (Factura)"]);
-        Assert.Equal(500000m, primaria["Valor Unitario"]);
-        Assert.Equal(500000m, primaria["Valor Total"]);
-        Assert.Equal(1, primaria["Cantidad"]);
-        Assert.Equal("E100", primaria["Cód. Paquete"]);
+        // Registro de paquete: CUPS = codigo del paquete, Cod. Asignacion = consecutivo del LOTE (AS-000500).
+        var paq = filas.Single(f => Equals(f["CUPS"], "E100"));
+        Assert.Equal("E100", paq["Codigo Externo (Factura)"]);
+        Assert.Equal("PAQUETE TEST NEUROLOGICO", paq["Descripción del procedimiento (Factura)"]);
+        Assert.Equal(500000m, paq["Valor Total"]);
+        Assert.Equal(1, paq["Cantidad"]);
+        Assert.Equal("AS-000500", paq["Cód. Asignación"]);
 
-        foreach (var detalle in filas.Skip(1))
-        {
-            Assert.Equal(0m, detalle["Valor Unitario"]);                      // detalle de paquete => 0
-            Assert.Equal(0m, detalle["Valor Total"]);
-            Assert.Equal("E100", detalle["Cód. Paquete"]);
-        }
+        // Las 2 HC de detalle: valor 0, conservan su propio Cod. Asignacion por servicio.
+        var detalles = filas.Where(f => !Equals(f["CUPS"], "E100")).ToList();
+        Assert.Equal(2, detalles.Count);
+        Assert.All(detalles, d => Assert.Equal(0m, d["Valor Total"]));
+        Assert.Contains(detalles, d => Equals(d["Cód. Asignación"], "AS-000101"));
+        Assert.Contains(detalles, d => Equals(d["Cód. Asignación"], "AS-000102"));
     }
 
     /// <summary>
-    /// Un paciente con VARIAS instancias del MISMO codigo de paquete en el periodo (p.ej. un
-    /// paquete diario aplicado muchas veces) debe emitir UNA sola linea primaria (no una por
-    /// instancia), con todas las HC de detalle debajo. Regresion del caso reportado.
+    /// Un paciente con VARIOS LOTES del MISMO codigo de paquete (varias aplicaciones, p.ej. un
+    /// paquete diario): UN registro de paquete por LOTE, cada uno con su Consecutivo de lote y su
+    /// pactado (650.000). Correcto para facturacion (cada aplicacion es su propio cobro).
     /// </summary>
     [Fact]
-    public async Task Paquete_VariasInstancias_MismoCodigo_UnaSolaPrimaria()
+    public async Task Paquete_VariosLotes_MismoCodigo_UnRegistroPorLote()
     {
         var (ctx, _) = Db();
         var aseg = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "NEPS", Tipo = "EPS", Nombre = "NUEVA EPS", Nit = "900156264" };
@@ -636,12 +635,14 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         var pacCon = new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ContratoAseguradoraId = contrato.Id, Orden = 1 };
         var paquete = new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "E890179", Nombre = "PAQUETE DIARIO VENTILACION", Precio = 650000m, Activo = true };
 
-        // 3 instancias DISTINTAS del MISMO codigo, cada una con pactado y su propia HC.
-        void Seed(DateTimeOffset fecha)
+        // 3 LOTES del MISMO codigo (3 aplicaciones), cada uno con 1 asignacion (AS) y su HC.
+        void Seed(long loteCons, long asigCons, DateTimeOffset fecha)
         {
+            var loteId = Guid.NewGuid();
+            ctx.AsignacionLotes.Add(new AsignacionLote { Id = loteId, TenantId = TenantId, Consecutivo = loteCons, PacienteId = paciente.Id, Sucursal = "SED", ContratoCodigo = "NEPS-01" });
             ctx.Asignaciones.Add(new Asignacion
             {
-                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(), PacienteId = paciente.Id,
+                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = loteId, Consecutivo = asigCons, PacienteId = paciente.Id,
                 Sucursal = "SED", ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV", TipoServicio = "ENFERMERIA",
                 Cantidad = 1, ContratoCodigo = "NEPS-01", FechaInicio = DateOnly.FromDateTime(fecha.DateTime), MesVigencia = (short)fecha.Month,
                 Estado = AsignacionEstado.Asignado, PaqueteInstanciaId = Guid.NewGuid(), PaqueteCodigo = "E890179", PaqueteValorPactado = 650000m
@@ -653,9 +654,9 @@ public sealed class SnapshotRelacionFacturasBuilderTests
                 FechaCierre = fecha.AddHours(2), Estado = HistoriaClinicaEstado.Cerrada
             });
         }
-        Seed(new DateTimeOffset(2026, 9, 3, 12, 0, 0, TimeSpan.Zero));
-        Seed(new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero));
-        Seed(new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero));
+        Seed(601, 201, new DateTimeOffset(2026, 9, 3, 12, 0, 0, TimeSpan.Zero));
+        Seed(602, 202, new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero));
+        Seed(603, 203, new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero));
 
         ctx.Aseguradoras.Add(aseg); ctx.ContratosAseguradora.Add(contrato); ctx.Sucursales.Add(suc);
         ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon); ctx.Paquetes.Add(paquete);
@@ -668,15 +669,22 @@ public sealed class SnapshotRelacionFacturasBuilderTests
             filas.Add(f);
         }
 
-        // UNA sola primaria + 3 detalles (no una primaria por instancia).
+        // 3 registros de paquete (uno por lote) + 3 detalles = 6 filas.
         var primarias = filas.Where(f => Equals(f["CUPS"], "E890179")).ToList();
-        Assert.Single(primarias);
-        Assert.Equal(650000m, primarias[0]["Valor Unitario"]);   // pactado una sola vez
-        Assert.Equal(650000m, primarias[0]["Valor Total"]);
-        Assert.Equal(1, primarias[0]["Cantidad"]);
-        Assert.Equal("PAQUETE DIARIO VENTILACION", primarias[0]["Descripción del procedimiento (Factura)"]);
-        Assert.Equal(4, filas.Count);                            // 1 primaria + 3 detalle
-        Assert.Equal(3, filas.Count(f => Equals(f["Cód. Paquete"], "E890179") && Equals(f["Valor Total"], 0m)));
+        Assert.Equal(3, primarias.Count);
+        Assert.All(primarias, p =>
+        {
+            Assert.Equal(650000m, p["Valor Total"]);             // pactado por lote (uno cada uno)
+            Assert.Equal(1, p["Cantidad"]);
+            Assert.Equal("PAQUETE DIARIO VENTILACION", p["Descripción del procedimiento (Factura)"]);
+        });
+        // Cada registro de paquete lleva el Consecutivo de SU lote (AS-000601/602/603).
+        var codigos = primarias.Select(p => p["Cód. Asignación"]).ToHashSet();
+        Assert.Contains("AS-000601", codigos);
+        Assert.Contains("AS-000602", codigos);
+        Assert.Contains("AS-000603", codigos);
+        Assert.Equal(6, filas.Count);                            // 3 primarias + 3 detalle
+        Assert.Equal(3, filas.Count(f => !Equals(f["CUPS"], "E890179") && Equals(f["Cód. Paquete"], "E890179") && Equals(f["Valor Total"], 0m)));
     }
 
     /// <summary>Dos codigos de paquete distintos para el mismo paciente -> DOS primarias.</summary>
@@ -693,11 +701,13 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         ctx.Paquetes.Add(new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "CPF1109", Nombre = "PAQ CRONICO", Precio = 100000m, Activo = true });
         ctx.Paquetes.Add(new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "CPF1111", Nombre = "PAQ HERIDAS", Precio = 200000m, Activo = true });
 
-        void Seed(string codigo, decimal pactado, DateTimeOffset fecha)
+        void Seed(long loteCons, long asigCons, string codigo, decimal pactado, DateTimeOffset fecha)
         {
+            var loteId = Guid.NewGuid();
+            ctx.AsignacionLotes.Add(new AsignacionLote { Id = loteId, TenantId = TenantId, Consecutivo = loteCons, PacienteId = paciente.Id, Sucursal = "SED", ContratoCodigo = "NEPS-01" });
             ctx.Asignaciones.Add(new Asignacion
             {
-                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(), PacienteId = paciente.Id,
+                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = loteId, Consecutivo = asigCons, PacienteId = paciente.Id,
                 Sucursal = "SED", ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV", TipoServicio = "ENFERMERIA",
                 Cantidad = 1, ContratoCodigo = "NEPS-01", FechaInicio = DateOnly.FromDateTime(fecha.DateTime), MesVigencia = (short)fecha.Month,
                 Estado = AsignacionEstado.Asignado, PaqueteInstanciaId = Guid.NewGuid(), PaqueteCodigo = codigo, PaqueteValorPactado = pactado
@@ -709,8 +719,8 @@ public sealed class SnapshotRelacionFacturasBuilderTests
                 FechaCierre = fecha.AddHours(2), Estado = HistoriaClinicaEstado.Cerrada
             });
         }
-        Seed("CPF1109", 100000m, new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero));
-        Seed("CPF1111", 200000m, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero));
+        Seed(701, 301, "CPF1109", 100000m, new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero));
+        Seed(702, 302, "CPF1111", 200000m, new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero));
 
         ctx.Aseguradoras.Add(aseg); ctx.ContratosAseguradora.Add(contrato); ctx.Sucursales.Add(suc);
         ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon);

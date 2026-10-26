@@ -1,0 +1,318 @@
+@page "/reportes/ingresos"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy.Reportes
+@inject IPacienteIngresoService Ingresos
+
+<PageTitle>Bitacora de Ingresos - Visal</PageTitle>
+
+<div class="bi-page">
+    <div class="bi-head">
+        <div>
+            <div class="bi-eyebrow">CENSO - Ingreso de Pacientes</div>
+            <h1 class="bi-title">Bitacora de Ingresos</h1>
+            <div class="bi-sub">Registra los hitos del ingreso con hora real. El SLA en minutos (comentan -> respuesta) se calcula solo. Alimenta la hoja "Ingreso de Pacientes" del CENSO.</div>
+        </div>
+        @if (!_editando)
+        {
+            <button class="btn-primary" @onclick="Nuevo">+ Registrar ingreso</button>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="bi-error">@_error</div>
+    }
+
+    @if (_editando)
+    {
+        <div class="bi-editor">
+            <div class="bi-field bi-grow">
+                <label>Paciente</label>
+                @if (_pacienteNombre is not null)
+                {
+                    <div class="bi-chip-sel">
+                        <span>@_pacienteNombre @(string.IsNullOrWhiteSpace(_pacienteDoc) ? "" : $"({_pacienteDoc})")</span>
+                        <button class="btn-ghost" @onclick="LimpiarPaciente">Cambiar</button>
+                    </div>
+                }
+                else
+                {
+                    <input type="text" placeholder="Buscar por nombre o documento (min 2)" @oninput="BuscarAsync" />
+                    @if (_busqueda.Count > 0)
+                    {
+                        <div class="bi-busqueda">
+                            @foreach (var p in _busqueda)
+                            {
+                                var pp = p;
+                                <div class="bi-busqueda-item" @onclick="() => ElegirPaciente(pp)">
+                                    @pp.NombreCompleto <span class="bi-muted">@pp.NumeroDocumento</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="bi-row">
+                <div class="bi-field">
+                    <label>Fecha/hora comentan</label>
+                    <input type="datetime-local" @bind="_form.FechaComentan" />
+                </div>
+                <div class="bi-field">
+                    <label>Fecha/hora respuesta</label>
+                    <input type="datetime-local" @bind="_form.FechaRespuesta" />
+                </div>
+                <div class="bi-field">
+                    <label>SLA (min)</label>
+                    <input type="text" value="@SlaPreview()" disabled />
+                </div>
+            </div>
+
+            <div class="bi-row">
+                <div class="bi-field bi-grow">
+                    <label>IPS que comenta</label>
+                    <input type="text" @bind="_form.IpsComenta" placeholder="Nombre de la IPS" />
+                </div>
+                <div class="bi-field bi-grow">
+                    <label>Responsable del ingreso</label>
+                    <input type="text" @bind="_form.ResponsableIngreso" />
+                </div>
+                <div class="bi-field">
+                    <label>Ingreso</label>
+                    <label class="bi-inline"><input type="checkbox" @bind="_form.Ingreso" /> Si ingreso</label>
+                </div>
+            </div>
+
+            @if (!_form.Ingreso)
+            {
+                <div class="bi-field bi-grow">
+                    <label>Motivo de no ingreso</label>
+                    <input type="text" @bind="_form.MotivoNoIngreso" />
+                </div>
+            }
+
+            <div class="bi-field bi-grow">
+                <label>Observaciones</label>
+                <input type="text" @bind="_form.Observaciones" />
+            </div>
+
+            <div class="bi-editor-foot">
+                <button class="btn-primary" disabled="@_trabajando" @onclick="GuardarAsync">Guardar</button>
+                <button class="btn-ghost" @onclick="Cancelar">Cancelar</button>
+            </div>
+        </div>
+    }
+    else if (_lista.Count == 0)
+    {
+        <div class="bi-empty">Aun no hay ingresos registrados. Crea el primero con "Registrar ingreso".</div>
+    }
+    else
+    {
+        <div class="bi-tablewrap">
+            <table class="bi-table">
+                <thead>
+                    <tr>
+                        <th>Paciente</th><th>ID</th><th>Comentan</th><th>Respuesta</th><th>SLA (min)</th>
+                        <th>IPS</th><th>Responsable</th><th>Ingreso</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var i in _lista)
+                    {
+                        var ii = i;
+                        <tr>
+                            <td>@i.PacienteNombre</td>
+                            <td>@i.PacienteDocumento</td>
+                            <td>@Fmt(i.FechaComentan)</td>
+                            <td>@Fmt(i.FechaRespuesta)</td>
+                            <td>@(i.SlaMinutos?.ToString() ?? "")</td>
+                            <td>@i.IpsComenta</td>
+                            <td>@i.ResponsableIngreso</td>
+                            <td>@(i.Ingreso ? "SI" : "NO")</td>
+                            <td class="bi-acciones">
+                                <button class="btn-ghost" @onclick="() => EditarAsync(ii)">Editar</button>
+                                <button class="btn-ghost btn-danger" @onclick="() => EliminarAsync(ii.Id)">Eliminar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<style>
+.bi-page { padding: 1rem 1.25rem; }
+.bi-head { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+.bi-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.bi-title { margin:.15rem 0 0; font-size:1.55rem; color:#0f172a; }
+.bi-sub { color:#64748b; font-size:.85rem; margin-top:.2rem; max-width:720px; }
+.bi-error { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:.6rem .85rem; border-radius:6px; margin-bottom:.75rem; }
+.bi-empty { padding:2rem; text-align:center; color:#94a3b8; }
+.bi-editor { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:1rem 1.15rem; display:flex; flex-direction:column; gap:.75rem; }
+.bi-row { display:flex; gap:1rem; flex-wrap:wrap; }
+.bi-field { display:flex; flex-direction:column; min-width:180px; }
+.bi-field.bi-grow { flex:1; }
+.bi-field label { font-size:.75rem; color:#334155; margin-bottom:.2rem; }
+.bi-field input { padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; }
+.bi-inline { font-size:.85rem; color:#334155; display:inline-flex; align-items:center; gap:.35rem; }
+.bi-chip-sel { display:flex; align-items:center; gap:.6rem; background:#eff6ff; border:1px solid #93c5fd; border-radius:6px; padding:.35rem .6rem; color:#1e3a8a; }
+.bi-busqueda { border:1px solid #e5e7eb; border-radius:6px; margin-top:.25rem; max-height:220px; overflow:auto; background:#fff; }
+.bi-busqueda-item { padding:.4rem .6rem; cursor:pointer; border-bottom:1px solid #f1f5f9; }
+.bi-busqueda-item:hover { background:#f8fafc; }
+.bi-muted { color:#94a3b8; margin-left:.4rem; font-size:.82rem; }
+.bi-editor-foot { display:flex; gap:.5rem; margin-top:.25rem; }
+.bi-tablewrap { border:1px solid #e5e7eb; border-radius:8px; overflow:auto; }
+.bi-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.bi-table thead th { background:#f1f5f9; text-align:left; padding:.45rem .6rem; border-bottom:1px solid #cbd5e1; white-space:nowrap; }
+.bi-table tbody td { padding:.4rem .6rem; border-bottom:1px solid #f1f5f9; color:#0f172a; white-space:nowrap; }
+.bi-acciones { display:flex; gap:.35rem; }
+.btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
+.btn-primary:disabled { opacity:.6; }
+.btn-ghost { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.3rem .65rem; border-radius:6px; cursor:pointer; font-size:.82rem; }
+.btn-ghost:hover { background:#f8fafc; }
+.btn-danger { color:#b91c1c; border-color:#fecaca; }
+</style>
+
+@code {
+    // Colombia (-5). La captura se guarda con este offset; el SLA es una diferencia, asi
+    // que no depende del offset elegido.
+    private static readonly TimeSpan OffsetLocal = TimeSpan.FromHours(-5);
+
+    private List<PacienteIngresoDto> _lista = new();
+    private bool _editando;
+    private bool _trabajando;
+    private string _error = "";
+
+    private Guid? _edId;
+    private Guid _pacienteId;
+    private string? _pacienteNombre;
+    private string? _pacienteDoc;
+    private readonly FormModel _form = new();
+    private List<PacienteBusquedaDto> _busqueda = new();
+
+    protected override async Task OnInitializedAsync() => await RecargarAsync();
+
+    private async Task RecargarAsync() => _lista = (await Ingresos.ListarAsync()).ToList();
+
+    private void Nuevo()
+    {
+        _edId = null;
+        _pacienteId = Guid.Empty;
+        _pacienteNombre = null;
+        _pacienteDoc = null;
+        _form.Reset();
+        _busqueda = new();
+        _error = "";
+        _editando = true;
+    }
+
+    private async Task EditarAsync(PacienteIngresoDto i)
+    {
+        _edId = i.Id;
+        _pacienteId = i.PacienteId;
+        _pacienteNombre = i.PacienteNombre;
+        _pacienteDoc = i.PacienteDocumento;
+        _form.FechaComentan = i.FechaComentan?.DateTime;
+        _form.FechaRespuesta = i.FechaRespuesta?.DateTime;
+        _form.IpsComenta = i.IpsComenta;
+        _form.ResponsableIngreso = i.ResponsableIngreso;
+        _form.Ingreso = i.Ingreso;
+        _form.MotivoNoIngreso = i.MotivoNoIngreso;
+        _form.Observaciones = i.Observaciones;
+        _busqueda = new();
+        _error = "";
+        _editando = true;
+        await Task.CompletedTask;
+    }
+
+    private void Cancelar() => _editando = false;
+
+    private async Task BuscarAsync(ChangeEventArgs e)
+    {
+        var term = e.Value?.ToString() ?? "";
+        _busqueda = (await Ingresos.BuscarPacientesAsync(term)).ToList();
+    }
+
+    private void ElegirPaciente(PacienteBusquedaDto p)
+    {
+        _pacienteId = p.Id;
+        _pacienteNombre = p.NombreCompleto;
+        _pacienteDoc = p.NumeroDocumento;
+        _busqueda = new();
+    }
+
+    private void LimpiarPaciente()
+    {
+        _pacienteId = Guid.Empty;
+        _pacienteNombre = null;
+        _pacienteDoc = null;
+    }
+
+    private string SlaPreview()
+    {
+        if (_form.FechaComentan is DateTime c && _form.FechaRespuesta is DateTime r)
+        {
+            return ((int)Math.Round((r - c).TotalMinutes)).ToString();
+        }
+        return "";
+    }
+
+    private async Task GuardarAsync()
+    {
+        _error = "";
+        if (_pacienteId == Guid.Empty) { _error = "Elige un paciente."; return; }
+        _trabajando = true;
+        try
+        {
+            var req = new GuardarIngresoRequest(
+                _pacienteId,
+                AOffset(_form.FechaComentan),
+                AOffset(_form.FechaRespuesta),
+                _form.IpsComenta,
+                _form.ResponsableIngreso,
+                _form.Ingreso,
+                _form.MotivoNoIngreso,
+                _form.Observaciones);
+            await Ingresos.GuardarAsync(_edId, req);
+            await RecargarAsync();
+            _editando = false;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task EliminarAsync(Guid id)
+    {
+        _error = "";
+        try
+        {
+            await Ingresos.EliminarAsync(id);
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private static DateTimeOffset? AOffset(DateTime? dt) =>
+        dt is DateTime d ? new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Unspecified), OffsetLocal) : null;
+
+    private static string Fmt(DateTimeOffset? v) => v?.ToString("yyyy-MM-dd HH:mm") ?? "";
+
+    private sealed class FormModel
+    {
+        public DateTime? FechaComentan { get; set; }
+        public DateTime? FechaRespuesta { get; set; }
+        public string? IpsComenta { get; set; }
+        public string? ResponsableIngreso { get; set; }
+        public bool Ingreso { get; set; } = true;
+        public string? MotivoNoIngreso { get; set; }
+        public string? Observaciones { get; set; }
+
+        public void Reset()
+        {
+            FechaComentan = null; FechaRespuesta = null; IpsComenta = null;
+            ResponsableIngreso = null; Ingreso = true; MotivoNoIngreso = null; Observaciones = null;
+        }
+    }
+}

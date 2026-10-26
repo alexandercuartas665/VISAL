@@ -1,0 +1,685 @@
+@page "/reportes/constructor"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy.Reportes
+@inject IReporteBuilderService Builder
+@inject Microsoft.JSInterop.IJSRuntime JS
+
+<PageTitle>Constructor de Reportes - Visal</PageTitle>
+
+<div class="rc-page">
+    <div class="rc-head">
+        <div>
+            <div class="rc-eyebrow">Reportes multi-hoja</div>
+            <h1 class="rc-title">Constructor de Reportes</h1>
+            <div class="rc-sub">Arma reportes de varias hojas (tipo CENSO) eligiendo datos, campos y filtros. Sin SQL.</div>
+        </div>
+        <div class="rc-head-actions">
+            <button class="btn-ghost" disabled="@_trabajando" @onclick="NuevoCenso">Plantilla CENSO 2026</button>
+            <button class="btn-primary" @onclick="NuevoReporte">+ Crear nuevo reporte</button>
+        </div>
+    </div>
+
+    @if (!_editando && !string.IsNullOrEmpty(_error))
+    {
+        <div class="rc-error">@_error</div>
+    }
+
+    @if (_plantillas.Count == 0)
+    {
+        <div class="rc-empty">Aun no hay reportes. Crea el primero con "Crear nuevo reporte".</div>
+    }
+    else
+    {
+            <div class="rc-cards">
+                @foreach (var p in _plantillas)
+                {
+                    <div class="rc-card">
+                        <div class="rc-card-body">
+                            <div class="rc-card-title">@p.Nombre</div>
+                            <div class="rc-card-desc">@(string.IsNullOrWhiteSpace(p.Descripcion) ? "(Sin descripcion)" : p.Descripcion)</div>
+                            <div class="rc-card-meta">
+                                @if (!string.IsNullOrWhiteSpace(p.Categoria)) { <span class="rc-tag">@p.Categoria</span> }
+                                <span class="rc-tag rc-tag-soft">@p.Hojas hoja(s)</span>
+                            </div>
+                        </div>
+                        <div class="rc-card-actions">
+                            <button class="btn-export" disabled="@_trabajando" @onclick="() => DescargarAsync(p.Id)">Descargar Excel</button>
+                            <button class="btn-ghost" @onclick="() => EditarAsync(p.Id)">Editar</button>
+                            <button class="btn-ghost btn-danger" @onclick="() => EliminarAsync(p.Id)">Eliminar</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+    @if (_editando)
+    {
+        <div class="rc-modal-backdrop">
+            <div class="rc-modal">
+                <div class="rc-modal-head">
+                    <h2 class="rc-modal-title">@(_edId is null ? "Nuevo reporte" : "Editar reporte")</h2>
+                    <button class="rc-modal-x" @onclick="Cancelar" title="Cerrar">&times;</button>
+                </div>
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div class="rc-error">@_error</div>
+                }
+                <div class="rc-editor">
+            <div class="rc-editor-meta">
+                <div class="rc-field rc-grow">
+                    <label>Nombre del reporte</label>
+                    <input type="text" @bind="_nombre" placeholder="Ej: Censo 2026" />
+                </div>
+                <div class="rc-field">
+                    <label>Categoria</label>
+                    <input type="text" @bind="_categoria" placeholder="Opcional" />
+                </div>
+                <div class="rc-field rc-grow">
+                    <label>Descripcion</label>
+                    <input type="text" @bind="_descripcion" placeholder="Opcional" />
+                </div>
+            </div>
+
+            <div class="rc-editor-meta rc-encabezado">
+                <label class="rc-inline">
+                    <input type="checkbox" @bind="_mostrarEncabezado" />
+                    Cabecera institucional en el Excel (agencia, titulo, codigo/version, fecha)
+                </label>
+                @if (_mostrarEncabezado)
+                {
+                    <div class="rc-field">
+                        <label>Codigo</label>
+                        <input type="text" @bind="_codigo" placeholder="Ej: PP-FO-200" />
+                    </div>
+                    <div class="rc-field">
+                        <label>Version</label>
+                        <input type="text" @bind="_version" placeholder="Ej: 1" />
+                    </div>
+                    <div class="rc-field rc-grow">
+                        <label>Subtitulo / periodo</label>
+                        <input type="text" @bind="_subtitulo" placeholder="Ej: Censo 2026 - I Trimestre" />
+                    </div>
+                }
+            </div>
+
+            <div class="rc-sheets">
+                @for (var hi = 0; hi < _hojas.Count; hi++)
+                {
+                    var hoja = _hojas[hi];
+                    var idx = hi;
+                    <div class="rc-sheet">
+                        <div class="rc-sheet-head">
+                            <div class="rc-field rc-grow">
+                                <label>Nombre de la hoja @(idx + 1)</label>
+                                <input type="text" @bind="hoja.Nombre" placeholder="Ej: Base de Pacientes Valle" />
+                            </div>
+                            <div class="rc-field">
+                                <label>Conjunto de datos</label>
+                                <select value="@hoja.EntidadKey" @onchange="e => CambiarEntidad(hoja, e)">
+                                    <option value="">-- Elegir --</option>
+                                    @foreach (var ent in _entidades)
+                                    {
+                                        <option value="@ent.Key">@ent.Label</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="rc-field">
+                                <label>Modo</label>
+                                <select @bind="hoja.Modo">
+                                    <option value="Detalle">Detalle</option>
+                                    <option value="Agregado">Agregado</option>
+                                </select>
+                            </div>
+                            <button class="btn-ghost btn-danger rc-sheet-del" @onclick="() => QuitarHoja(idx)">Quitar hoja</button>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(hoja.EntidadKey))
+                        {
+                            var campos = CamposDe(hoja.EntidadKey);
+
+                            @if (hoja.Modo == "Detalle")
+                            {
+                                <div class="rc-block">
+                                    <div class="rc-block-title">Columnas</div>
+                                    <div class="rc-chips">
+                                        @foreach (var c in campos)
+                                        {
+                                            var reff = c.Ref;
+                                            <label class="rc-chip @(hoja.Columnas.Any(x => x.Ref == reff) ? "rc-chip-on" : "")">
+                                                <input type="checkbox" checked="@hoja.Columnas.Any(x => x.Ref == reff)"
+                                                       @onchange="() => ToggleCol(hoja.Columnas, reff)" />
+                                                @c.Label
+                                            </label>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="rc-block">
+                                    <div class="rc-block-title">Agrupar por</div>
+                                    <div class="rc-chips">
+                                        @foreach (var c in campos)
+                                        {
+                                            var reff = c.Ref;
+                                            <label class="rc-chip @(hoja.GroupBy.Any(x => x.Ref == reff) ? "rc-chip-on" : "")">
+                                                <input type="checkbox" checked="@hoja.GroupBy.Any(x => x.Ref == reff)"
+                                                       @onchange="() => ToggleCol(hoja.GroupBy, reff)" />
+                                                @c.Label
+                                            </label>
+                                        }
+                                    </div>
+                                    <div class="rc-block-title">Agregados</div>
+                                    @foreach (var ag in hoja.Agregados)
+                                    {
+                                        var agr = ag;
+                                        <div class="rc-row">
+                                            <select @bind="agr.Func">
+                                                @foreach (var f in Enum.GetValues<ReporteAgregadoFunc>())
+                                                {
+                                                    <option value="@f">@FuncLabel(f)</option>
+                                                }
+                                            </select>
+                                            <select @bind="agr.CampoRef">
+                                                <option value="">(todas las filas)</option>
+                                                @foreach (var c in campos)
+                                                {
+                                                    <option value="@c.Ref">@c.Label</option>
+                                                }
+                                            </select>
+                                            <input type="text" @bind="agr.Titulo" placeholder="Titulo (ej: Cant Px's)" />
+                                            <button class="btn-ghost btn-danger" @onclick="() => hoja.Agregados.Remove(agr)">x</button>
+                                        </div>
+                                    }
+                                    <button class="btn-ghost" @onclick="() => hoja.Agregados.Add(new AggEdit())">+ Agregado</button>
+
+                                    <div class="rc-pivote">
+                                        <label class="rc-inline">
+                                            <input type="checkbox" @bind="hoja.PivotOn" />
+                                            Pivotear (abrir un campo en columnas, tipo Consolidado Encuesta)
+                                        </label>
+                                        @if (hoja.PivotOn)
+                                        {
+                                            <div class="rc-pivote-help">
+                                                Requiere <b>exactamente 2</b> campos en "Agrupar por". La celda usa el <b>primer agregado</b>.
+                                            </div>
+                                            <div class="rc-row">
+                                                <span class="rc-inline">Filas:</span>
+                                                <select @bind="hoja.PivotFila">
+                                                    <option value="">-- Campo --</option>
+                                                    @foreach (var g in hoja.GroupBy)
+                                                    {
+                                                        <option value="@g.Ref">@LabelRef(hoja.EntidadKey, g.Ref)</option>
+                                                    }
+                                                </select>
+                                                <span class="rc-inline">Columnas:</span>
+                                                <select @bind="hoja.PivotColumna">
+                                                    <option value="">-- Campo --</option>
+                                                    @foreach (var g in hoja.GroupBy)
+                                                    {
+                                                        <option value="@g.Ref">@LabelRef(hoja.EntidadKey, g.Ref)</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="rc-block">
+                                <div class="rc-block-title">Filtros</div>
+                                @foreach (var fi in hoja.Filtros)
+                                {
+                                    var fil = fi;
+                                    <div class="rc-row">
+                                        <select @bind="fil.CampoRef">
+                                            <option value="">-- Campo --</option>
+                                            @foreach (var c in campos)
+                                            {
+                                                <option value="@c.Ref">@c.Label</option>
+                                            }
+                                        </select>
+                                        <select @bind="fil.Op">
+                                            @foreach (var op in Enum.GetValues<ReporteFiltroOp>())
+                                            {
+                                                <option value="@op">@op</option>
+                                            }
+                                        </select>
+                                        <input type="text" @bind="fil.Valor" placeholder="Valor (coma para varios)" />
+                                        <button class="btn-ghost btn-danger" @onclick="() => hoja.Filtros.Remove(fil)">x</button>
+                                    </div>
+                                }
+                                <button class="btn-ghost" @onclick="() => hoja.Filtros.Add(new FiltroEdit())">+ Filtro</button>
+                            </div>
+
+                            <div class="rc-block rc-order">
+                                <div class="rc-block-title">Orden</div>
+                                <div class="rc-row">
+                                    <select @bind="hoja.OrdenRef">
+                                        <option value="">(sin orden)</option>
+                                        @foreach (var c in campos)
+                                        {
+                                            <option value="@c.Ref">@c.Label</option>
+                                        }
+                                        @foreach (var ag in hoja.Agregados.Where(a => !string.IsNullOrWhiteSpace(a.Titulo)))
+                                        {
+                                            <option value="@ag.Titulo">@ag.Titulo (agregado)</option>
+                                        }
+                                    </select>
+                                    <label class="rc-inline"><input type="checkbox" @bind="hoja.OrdenDesc" /> Descendente</label>
+                                </div>
+                            </div>
+
+                            <div class="rc-sheet-foot">
+                                <button class="btn-ghost" disabled="@_trabajando" @onclick="() => PreviewAsync(hoja)">Vista previa</button>
+                                @if (_preview is not null && _previewHoja == idx)
+                                {
+                                    <span class="rc-preview-meta">@_preview.TotalFilas fila(s)</span>
+                                }
+                            </div>
+
+                            @if (_preview is not null && _previewHoja == idx)
+                            {
+                                <div class="rc-preview">
+                                    <table class="rc-table">
+                                        <thead><tr>@foreach (var col in _preview.Columnas) { <th>@col</th> }</tr></thead>
+                                        <tbody>
+                                            @foreach (var row in _preview.Filas)
+                                            {
+                                                <tr>
+                                                    @for (var i = 0; i < _preview.Columnas.Count; i++)
+                                                    {
+                                                        <td>@(i < row.Count ? row[i]?.ToString() : "")</td>
+                                                    }
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+                <button class="btn-dashed" @onclick="AgregarHoja">+ Agregar hoja</button>
+            </div>
+
+            <div class="rc-editor-foot">
+                <button class="btn-primary" disabled="@_trabajando" @onclick="GuardarAsync">Guardar reporte</button>
+                <button class="btn-ghost" @onclick="Cancelar">Cancelar</button>
+            </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+.rc-page { padding: 1rem 1.25rem; }
+.rc-head { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+.rc-head-actions { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+.rc-eyebrow { color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+.rc-title { margin:.15rem 0 0; font-size:1.55rem; color:#0f172a; }
+.rc-sub { color:#64748b; font-size:.85rem; margin-top:.2rem; max-width:640px; }
+.rc-error { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:.6rem .85rem; border-radius:6px; margin-bottom:.75rem; }
+.rc-empty { padding:2rem; text-align:center; color:#94a3b8; }
+
+.rc-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:.85rem; }
+.rc-card { display:flex; flex-direction:column; justify-content:space-between; background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:.9rem 1rem; }
+.rc-card-title { font-weight:600; color:#0f172a; }
+.rc-card-desc { color:#64748b; font-size:.82rem; margin:.2rem 0 .4rem; }
+.rc-card-meta { display:flex; gap:.35rem; flex-wrap:wrap; margin-bottom:.6rem; }
+.rc-tag { background:#eff6ff; color:#1e3a8a; font-size:.7rem; padding:.1rem .5rem; border-radius:99px; }
+.rc-tag-soft { background:#f1f5f9; color:#475569; }
+.rc-card-actions { display:flex; gap:.4rem; flex-wrap:wrap; }
+
+.rc-editor { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:1rem 1.15rem; }
+
+.rc-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex; align-items:flex-start; justify-content:center; padding:2.5vh 1rem; z-index:1000; overflow:auto; }
+.rc-modal { background:#fff; border-radius:12px; width:min(980px,100%); max-height:95vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+.rc-modal-head { display:flex; align-items:center; justify-content:space-between; padding:.85rem 1.15rem; border-bottom:1px solid #e5e7eb; position:sticky; top:0; background:#fff; border-radius:12px 12px 0 0; z-index:1; }
+.rc-modal-title { margin:0; font-size:1.1rem; color:#0f172a; }
+.rc-modal-x { background:transparent; border:none; font-size:1.5rem; line-height:1; color:#64748b; cursor:pointer; padding:0 .25rem; }
+.rc-modal-x:hover { color:#0f172a; }
+.rc-modal .rc-error { margin:.75rem 1.15rem 0; }
+.rc-modal .rc-editor { border:none; border-radius:0; padding:1rem 1.15rem; overflow:auto; flex:1 1 auto; }
+.rc-editor-meta { display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; align-items:flex-end; }
+.rc-encabezado { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .75rem; }
+.rc-encabezado > .rc-inline { width:100%; font-weight:600; color:#334155; }
+.rc-field { display:flex; flex-direction:column; min-width:180px; }
+.rc-field.rc-grow { flex:1; }
+.rc-field label { font-size:.75rem; color:#334155; margin-bottom:.2rem; }
+.rc-field input, .rc-field select, .rc-row select, .rc-row input { padding:.4rem .55rem; border:1px solid #cbd5e1; border-radius:6px; }
+
+.rc-sheets { display:flex; flex-direction:column; gap:.85rem; }
+.rc-sheet { border:1px solid #e2e8f0; border-radius:10px; padding:.85rem; background:#f8fafc; }
+.rc-sheet-head { display:flex; gap:.75rem; align-items:flex-end; flex-wrap:wrap; }
+.rc-sheet-del { margin-left:auto; }
+.rc-block { margin-top:.75rem; }
+.rc-block-title { font-size:.78rem; font-weight:600; color:#334155; margin:.4rem 0 .35rem; text-transform:uppercase; letter-spacing:.04em; }
+.rc-chips { display:flex; flex-wrap:wrap; gap:.35rem; }
+.rc-chip { display:inline-flex; align-items:center; gap:.3rem; background:#fff; border:1px solid #cbd5e1; border-radius:99px; padding:.2rem .6rem; font-size:.8rem; cursor:pointer; }
+.rc-chip-on { background:#eff6ff; border-color:#93c5fd; color:#1e3a8a; }
+.rc-row { display:flex; gap:.45rem; align-items:center; margin-bottom:.4rem; flex-wrap:wrap; }
+.rc-inline { font-size:.82rem; color:#334155; display:inline-flex; align-items:center; gap:.3rem; }
+.rc-pivote { margin-top:.6rem; padding:.55rem .65rem; border:1px dashed #cbd5e1; border-radius:8px; background:#fff; }
+.rc-pivote .rc-inline { font-weight:600; color:#334155; }
+.rc-pivote-help { font-size:.75rem; color:#64748b; margin:.3rem 0; }
+.rc-sheet-foot { margin-top:.75rem; display:flex; align-items:center; gap:.6rem; }
+.rc-preview-meta { color:#475569; font-size:.8rem; }
+.rc-preview { margin-top:.5rem; border:1px solid #e5e7eb; border-radius:8px; overflow:auto; max-height:320px; }
+.rc-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+.rc-table thead th { position:sticky; top:0; background:#f1f5f9; text-align:left; padding:.4rem .55rem; border-bottom:1px solid #cbd5e1; white-space:nowrap; }
+.rc-table tbody td { padding:.35rem .55rem; border-bottom:1px solid #f1f5f9; color:#0f172a; white-space:nowrap; }
+
+.rc-editor-foot { margin-top:1rem; display:flex; gap:.5rem; }
+.btn-primary { background:#2563eb; color:#fff; border:none; padding:.45rem .95rem; border-radius:6px; cursor:pointer; }
+.btn-primary:disabled { opacity:.6; }
+.btn-ghost { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.35rem .7rem; border-radius:6px; cursor:pointer; font-size:.82rem; }
+.btn-ghost:hover { background:#f8fafc; }
+.btn-danger { color:#b91c1c; border-color:#fecaca; }
+.btn-export { background:#0f766e; color:#fff; border:none; padding:.35rem .7rem; border-radius:6px; cursor:pointer; font-size:.82rem; }
+.btn-export:disabled { opacity:.6; }
+.btn-dashed { background:#fff; color:#2563eb; border:1px dashed #93c5fd; padding:.5rem; border-radius:8px; cursor:pointer; }
+</style>
+
+@code {
+    private List<ReportePlantillaDto> _plantillas = new();
+    private IReadOnlyList<EntidadReportableDto> _entidades = new List<EntidadReportableDto>();
+    private bool _editando;
+    private bool _trabajando;
+    private string _error = "";
+
+    private Guid? _edId;
+    private string _nombre = "";
+    private string? _descripcion;
+    private string? _categoria;
+    private bool _mostrarEncabezado = true;
+    private string? _codigo;
+    private string? _version;
+    private string? _subtitulo;
+    private List<HojaEdit> _hojas = new();
+
+    private ReporteHojaResultado? _preview;
+    private int _previewHoja = -1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _entidades = Builder.ListarEntidades();
+        await RecargarAsync();
+    }
+
+    private async Task RecargarAsync()
+    {
+        _plantillas = (await Builder.ListarAsync()).ToList();
+    }
+
+    private void NuevoReporte()
+    {
+        _edId = null;
+        _nombre = "";
+        _descripcion = null;
+        _categoria = null;
+        _mostrarEncabezado = true;
+        _codigo = null;
+        _version = null;
+        _subtitulo = null;
+        _hojas = new() { new HojaEdit { Nombre = "Hoja 1" } };
+        _preview = null; _previewHoja = -1;
+        _error = "";
+        _editando = true;
+    }
+
+    private async Task NuevoCenso()
+    {
+        _error = "";
+        _trabajando = true;
+        try
+        {
+            var id = await Builder.CrearCensoAsync();
+            await RecargarAsync();
+            await EditarAsync(id);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task EditarAsync(Guid id)
+    {
+        var d = await Builder.ObtenerAsync(id);
+        if (d is null) { return; }
+        _edId = d.Id;
+        _nombre = d.Nombre;
+        _descripcion = d.Descripcion;
+        _categoria = d.Categoria;
+        _mostrarEncabezado = d.MostrarEncabezado;
+        _codigo = d.Codigo;
+        _version = d.Version;
+        _subtitulo = d.Subtitulo;
+        _hojas = d.Hojas.Select(HojaEdit.Desde).ToList();
+        if (_hojas.Count == 0) { _hojas.Add(new HojaEdit { Nombre = "Hoja 1" }); }
+        _preview = null; _previewHoja = -1;
+        _error = "";
+        _editando = true;
+    }
+
+    private void Cancelar()
+    {
+        _editando = false;
+        _preview = null; _previewHoja = -1;
+    }
+
+    private void AgregarHoja() => _hojas.Add(new HojaEdit { Nombre = $"Hoja {_hojas.Count + 1}" });
+    private void QuitarHoja(int idx)
+    {
+        _hojas.RemoveAt(idx);
+        _preview = null; _previewHoja = -1;
+    }
+
+    private void CambiarEntidad(HojaEdit hoja, ChangeEventArgs e)
+    {
+        hoja.EntidadKey = e.Value?.ToString() ?? "";
+        hoja.Columnas.Clear();
+        hoja.GroupBy.Clear();
+        hoja.Agregados.Clear();
+        hoja.Filtros.Clear();
+        hoja.OrdenRef = "";
+        _preview = null; _previewHoja = -1;
+    }
+
+    private static void ToggleCol(List<ColSel> lista, string reff)
+    {
+        var existe = lista.FirstOrDefault(x => x.Ref == reff);
+        if (existe is not null) { lista.Remove(existe); }
+        else { lista.Add(new ColSel { Ref = reff }); }
+    }
+
+    private static string FuncLabel(ReporteAgregadoFunc f) => f switch
+    {
+        ReporteAgregadoFunc.Count => "Conteo",
+        ReporteAgregadoFunc.CountDistinct => "Conteo distinto",
+        ReporteAgregadoFunc.Sum => "Suma",
+        ReporteAgregadoFunc.Avg => "Promedio",
+        ReporteAgregadoFunc.Min => "Minimo",
+        ReporteAgregadoFunc.Max => "Maximo",
+        ReporteAgregadoFunc.PctTotal => "% del total (indice)",
+        _ => f.ToString()
+    };
+
+    private string LabelRef(string entidadKey, string reff) =>
+        CamposDe(entidadKey).FirstOrDefault(c => c.Ref == reff).Label ?? reff;
+
+    private List<(string Ref, string Label, string Kind)> CamposDe(string entidadKey)
+    {
+        var ent = _entidades.FirstOrDefault(x => x.Key == entidadKey);
+        var res = new List<(string, string, string)>();
+        if (ent is null) { return res; }
+        foreach (var c in ent.Campos) { res.Add((c.Key, c.Label, c.Kind)); }
+        foreach (var r in ent.Relaciones)
+        {
+            foreach (var c in r.Campos)
+            {
+                res.Add(($"{r.Key}.{c.Key}", $"{r.Label}: {c.Label}", c.Kind));
+            }
+        }
+        return res;
+    }
+
+    private ReporteHojaDef ADef(HojaEdit h)
+    {
+        var filtros = h.Filtros
+            .Where(f => !string.IsNullOrWhiteSpace(f.CampoRef))
+            .Select(f => new ReporteFiltroDef(f.CampoRef, f.Op,
+                (f.Op is ReporteFiltroOp.IsNull or ReporteFiltroOp.NotNull)
+                    ? null
+                    : (f.Valor ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList()))
+            .ToList();
+
+        var orden = string.IsNullOrWhiteSpace(h.OrdenRef)
+            ? new List<ReporteOrdenDef>()
+            : new List<ReporteOrdenDef> { new(h.OrdenRef!, h.OrdenDesc) };
+
+        if (h.Modo == "Agregado")
+        {
+            var groupBy = h.GroupBy.Select(c => new ReporteColumnaDef(c.Ref)).ToList();
+            var agg = h.Agregados
+                .Select(a => new ReporteAgregadoDef(a.Func, string.IsNullOrWhiteSpace(a.CampoRef) ? null : a.CampoRef,
+                    string.IsNullOrWhiteSpace(a.Titulo) ? null : a.Titulo))
+                .ToList();
+            ReportePivoteDef? pivote =
+                h.PivotOn && !string.IsNullOrWhiteSpace(h.PivotFila) && !string.IsNullOrWhiteSpace(h.PivotColumna)
+                    ? new ReportePivoteDef(h.PivotFila!, h.PivotColumna!)
+                    : null;
+            return ReporteHojaDef.Agregado(h.Nombre, h.EntidadKey, groupBy, agg, filtros, orden, pivote: pivote);
+        }
+
+        var cols = h.Columnas.Select(c => new ReporteColumnaDef(c.Ref)).ToList();
+        return ReporteHojaDef.Detalle(h.Nombre, h.EntidadKey, cols, filtros, orden);
+    }
+
+    private async Task PreviewAsync(HojaEdit h)
+    {
+        _error = "";
+        _trabajando = true;
+        try
+        {
+            _preview = await Builder.PreviewAsync(ADef(h), 50);
+            _previewHoja = _hojas.IndexOf(h);
+        }
+        catch (Exception ex) { _error = ex.Message; _preview = null; _previewHoja = -1; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task GuardarAsync()
+    {
+        _error = "";
+        if (string.IsNullOrWhiteSpace(_nombre)) { _error = "El reporte necesita un nombre."; return; }
+        _trabajando = true;
+        try
+        {
+            var req = new GuardarPlantillaRequest(
+                _nombre, _descripcion, _categoria, 0, true,
+                _hojas.Select(ADef).ToList(),
+                _mostrarEncabezado, _codigo, _version, _subtitulo);
+            await Builder.GuardarAsync(_edId, req);
+            await RecargarAsync();
+            _editando = false;
+            _preview = null; _previewHoja = -1;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task EliminarAsync(Guid id)
+    {
+        _error = "";
+        try
+        {
+            await Builder.EliminarAsync(id);
+            await RecargarAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task DescargarAsync(Guid id)
+    {
+        _error = "";
+        _trabajando = true;
+        try
+        {
+            var bytes = await Builder.GenerarExcelAsync(id);
+            var nombre = _plantillas.FirstOrDefault(p => p.Id == id)?.Nombre ?? "reporte";
+            var safe = new string(nombre.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+            if (string.IsNullOrWhiteSpace(safe)) { safe = "reporte"; }
+            await Descargar($"{safe}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task Descargar(string fileName, string mime, byte[] bytes)
+    {
+        var base64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("eval", $@"
+            (function(){{
+                try {{
+                    var bin = atob('{base64}');
+                    var len = bin.length;
+                    var arr = new Uint8Array(len);
+                    for (var i = 0; i < len; i++) {{ arr[i] = bin.charCodeAt(i); }}
+                    var blob = new Blob([arr], {{ type: '{mime}' }});
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url; a.download = '{fileName}';
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(function(){{ URL.revokeObjectURL(url); }}, 1500);
+                }} catch (e) {{ console.error('descarga reporte', e); }}
+            }})();");
+    }
+
+    // ===== view models del editor =====
+
+    private sealed class HojaEdit
+    {
+        public string Nombre { get; set; } = "";
+        public string EntidadKey { get; set; } = "";
+        public string Modo { get; set; } = "Detalle";
+        public List<ColSel> Columnas { get; set; } = new();
+        public List<ColSel> GroupBy { get; set; } = new();
+        public List<AggEdit> Agregados { get; set; } = new();
+        public List<FiltroEdit> Filtros { get; set; } = new();
+        public string? OrdenRef { get; set; } = "";
+        public bool OrdenDesc { get; set; }
+        public bool PivotOn { get; set; }
+        public string? PivotFila { get; set; } = "";
+        public string? PivotColumna { get; set; } = "";
+
+        public static HojaEdit Desde(ReporteHojaDef d)
+        {
+            var h = new HojaEdit
+            {
+                Nombre = d.Nombre,
+                EntidadKey = d.EntidadKey,
+                Modo = d.Modo.ToString(),
+                Columnas = d.Columnas.Select(c => new ColSel { Ref = c.CampoRef }).ToList(),
+                GroupBy = d.GroupBy.Select(c => new ColSel { Ref = c.CampoRef }).ToList(),
+                Agregados = d.Agregados.Select(a => new AggEdit { Func = a.Func, CampoRef = a.CampoRef ?? "", Titulo = a.Titulo ?? "" }).ToList(),
+                Filtros = d.Filtros.Select(f => new FiltroEdit { CampoRef = f.CampoRef, Op = f.Op, Valor = f.Valores is null ? "" : string.Join(", ", f.Valores) }).ToList(),
+            };
+            var o = d.Orden.FirstOrDefault();
+            if (o is not null) { h.OrdenRef = o.CampoRef; h.OrdenDesc = o.Desc; }
+            if (d.Pivote is not null)
+            {
+                h.PivotOn = true;
+                h.PivotFila = d.Pivote.FilaCampoRef;
+                h.PivotColumna = d.Pivote.ColumnaCampoRef;
+            }
+            return h;
+        }
+    }
+
+    private sealed class ColSel { public string Ref { get; set; } = ""; }
+    private sealed class FiltroEdit { public string CampoRef { get; set; } = ""; public ReporteFiltroOp Op { get; set; } = ReporteFiltroOp.Eq; public string? Valor { get; set; } = ""; }
+    private sealed class AggEdit { public ReporteAgregadoFunc Func { get; set; } = ReporteAgregadoFunc.Count; public string CampoRef { get; set; } = ""; public string Titulo { get; set; } = ""; }
+}

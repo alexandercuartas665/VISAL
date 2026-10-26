@@ -138,6 +138,11 @@ public interface IApplicationDbContext
     DbSet<ReporteTenantActivacion> ReporteTenantActivaciones { get; }
     DbSet<ReporteUsuario> ReporteUsuarios { get; }
 
+    // Constructor de reportes multi-hoja (Capa 13): plantillas + hojas, tenant-scoped.
+    DbSet<ReportePlantilla> ReportePlantillas { get; }
+    DbSet<ReporteHoja> ReporteHojas { get; }
+    DbSet<PacienteIngreso> PacienteIngresos { get; }
+
     // Modulo Tableros (Kanban colaborativo)
     DbSet<TaskBoard> TaskBoards { get; }
     DbSet<TaskBoardMember> TaskBoardMembers { get; }

@@ -72,6 +72,11 @@ public class Paciente : TenantEntity
     public string? Cie10Codigo { get; set; }
     public string? DiagnosticoPrincipal { get; set; }
 
+    /// <summary>Codigo CIE-10/CIE-11 del diagnostico secundario (CENSO). Texto libre.</summary>
+    public string? Cie10Codigo2 { get; set; }
+    /// <summary>Descripcion del diagnostico secundario (CENSO).</summary>
+    public string? DiagnosticoSecundario { get; set; }
+
     // ===== Tutela =====
     public string? Tutela { get; set; }
     /// <summary>FK a catalogos_paciente (tipo=TipoTutela).</summary>
@@ -110,6 +115,16 @@ public class Paciente : TenantEntity
     /// se sincroniza con los 3 campos legacy de arriba para no romper consumidores
     /// que esperan un solo contacto.</summary>
     public List<PacienteContactoEmergencia> ContactosEmergencia { get; set; } = new();
+
+    // ===== Reingreso / Hospitalizacion / Observaciones (CENSO - Ola 4) =====
+    /// <summary>Fecha de reingreso del paciente al programa (CENSO).</summary>
+    public DateOnly? FechaReingreso { get; set; }
+    public string? ObservacionReingreso { get; set; }
+    /// <summary>Fecha de hospitalizacion del paciente (CENSO).</summary>
+    public DateOnly? FechaHospitalizacion { get; set; }
+    public string? ObservacionesHospitalizacion { get; set; }
+    /// <summary>Observaciones generales del paciente (notas libres a nivel paciente, CENSO).</summary>
+    public string? Observaciones { get; set; }
 
     // ===== Estado del registro =====
     public bool Activo { get; set; } = true;

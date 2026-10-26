@@ -67,6 +67,8 @@ public static class NavMenuCatalog
         new("mi-formacion", "Mis capacitaciones", "mi-formacion", "libro", null, "Operacion Clinica"),
         new("seguimiento", "Seguimiento", "seguimiento", "telefono", null, "Operacion Clinica"),
         new("reportes", "Reportes", "reportes", "tabla", null, "Operacion Clinica"),
+        new("reportes-constructor", "Constructor de Reportes", "reportes/constructor", "tabla", null, "Operacion Clinica", Gate: NavGate.AdminAgency),
+        new("reportes-ingresos", "Bitacora de Ingresos", "reportes/ingresos", "portapapeles", null, "Operacion Clinica", Gate: NavGate.AdminAgency),
         new("tableros", "Tableros", "tableros", "kanban", null, "Operacion Clinica"),
         new("formularios", "Formularios", "formularios", "documento", "formularios", "Operacion Clinica"),
 

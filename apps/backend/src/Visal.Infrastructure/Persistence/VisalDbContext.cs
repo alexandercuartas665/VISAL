@@ -81,6 +81,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<ReporteCatalogo> ReporteCatalogos => Set<ReporteCatalogo>();
     public DbSet<ReporteTenantActivacion> ReporteTenantActivaciones => Set<ReporteTenantActivacion>();
     public DbSet<ReporteUsuario> ReporteUsuarios => Set<ReporteUsuario>();
+    public DbSet<ReportePlantilla> ReportePlantillas => Set<ReportePlantilla>();
+    public DbSet<ReporteHoja> ReporteHojas => Set<ReporteHoja>();
+    public DbSet<PacienteIngreso> PacienteIngresos => Set<PacienteIngreso>();
     public DbSet<SqlConsoleLog> SqlConsoleLogs => Set<SqlConsoleLog>();
     public DbSet<TenantEmailIngestConfig> TenantEmailIngestConfigs => Set<TenantEmailIngestConfig>();
     public DbSet<EmailIngestLog> EmailIngestLogs => Set<EmailIngestLog>();
@@ -2147,6 +2150,33 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.RespuestasJson).HasColumnType("jsonb");
             b.HasOne(x => x.Cuestionario).WithMany().HasForeignKey(x => x.CuestionarioId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.CuestionarioId, x.UsuarioId });
+        });
+
+        // Constructor de reportes multi-hoja (Capa 13).
+        modelBuilder.Entity<ReportePlantilla>(b =>
+        {
+            b.Property(x => x.Nombre).IsRequired();
+            b.Property(x => x.MostrarEncabezado).HasDefaultValue(true);
+            b.HasIndex(x => new { x.TenantId, x.Orden });
+        });
+        modelBuilder.Entity<ReporteHoja>(b =>
+        {
+            b.Property(x => x.Nombre).IsRequired();
+            b.Property(x => x.EntidadKey).IsRequired();
+            b.Property(x => x.Modo).IsRequired();
+            b.Property(x => x.DefinicionJson).HasColumnType("jsonb").IsRequired();
+            b.HasOne(x => x.ReportePlantilla).WithMany(p => p.Hojas)
+                .HasForeignKey(x => x.ReportePlantillaId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.ReportePlantillaId, x.Orden });
+        });
+
+        // Bitacora de ingreso con SLA (Capa 13 - Ola 4b).
+        modelBuilder.Entity<PacienteIngreso>(b =>
+        {
+            b.HasOne(x => x.Paciente).WithMany()
+                .HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.TenantId, x.PacienteId });
+            b.HasIndex(x => new { x.TenantId, x.FechaComentan });
         });
     }
 

@@ -131,6 +131,13 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.ISuministroMedicamentoService, Tenancy.SuministroMedicamentoService>();
         services.AddScoped<Tenancy.ISeguimientoService, Tenancy.SeguimientoService>();
         services.AddScoped<Tenancy.IReporteService, Tenancy.ReporteService>();
+        // Constructor de reportes multi-hoja (Capa 13, Ola 1): modelo semantico curado +
+        // generador de SQL con aislamiento por tenant + ejecutor multi-hoja.
+        services.AddSingleton<Tenancy.Reportes.IReportSemanticModel, Tenancy.Reportes.ReportSemanticModel>();
+        services.AddScoped<Tenancy.Reportes.IReporteSqlGenerator, Tenancy.Reportes.ReporteSqlGenerator>();
+        services.AddScoped<Tenancy.Reportes.IReportePackService, Tenancy.Reportes.ReportePackService>();
+        services.AddScoped<Tenancy.Reportes.IReporteBuilderService, Tenancy.Reportes.ReporteBuilderService>();
+        services.AddScoped<Tenancy.Reportes.IPacienteIngresoService, Tenancy.Reportes.PacienteIngresoService>();
         services.AddScoped<Tenancy.IIncapacidadService, Tenancy.IncapacidadService>();
         services.AddScoped<Tenancy.ICertificacionService, Tenancy.CertificacionService>();
         services.AddScoped<Tenancy.IRemisionService, Tenancy.RemisionService>();

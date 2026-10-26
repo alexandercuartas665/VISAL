@@ -6659,6 +6659,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("ruta_archivo");
 
+                    b.Property<string>("Subcategoria")
+                        .HasColumnType("text")
+                        .HasColumnName("subcategoria");
+
                     b.Property<long>("Tamano")
                         .HasColumnType("bigint")
                         .HasColumnName("tamano");
@@ -12238,6 +12242,63 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("tipologia_archivos", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.TipologiaArchivoSubcategoria", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("nombre");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TipologiaArchivoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tipologia_archivo_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tipologia_archivo_subcategorias");
+
+                    b.HasIndex("TipologiaArchivoId")
+                        .HasDatabaseName("ix_tipologia_archivo_subcategorias_tipologia_archivo_id");
+
+                    b.HasIndex("TenantId", "TipologiaArchivoId", "Activo")
+                        .HasDatabaseName("ix_tipologia_archivo_subcategorias_tenant_id_tipologia_archivo");
+
+                    b.HasIndex("TenantId", "TipologiaArchivoId", "Nombre")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tipologia_archivo_subcategorias_tenant_id_tipologia_archivo1");
+
+                    b.ToTable("tipologia_archivo_subcategorias", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.TurnoProgramacion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -13866,6 +13927,18 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_tenant_whats_app_template_bindings_whats_app_lines_line_id");
 
                     b.Navigation("Line");
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.TipologiaArchivoSubcategoria", b =>
+                {
+                    b.HasOne("Visal.Domain.Entities.TipologiaArchivo", "TipologiaArchivo")
+                        .WithMany()
+                        .HasForeignKey("TipologiaArchivoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tipologia_archivo_subcategorias_tipologia_archivos_tipologi");
+
+                    b.Navigation("TipologiaArchivo");
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.TurnoProgramacionSucursal", b =>

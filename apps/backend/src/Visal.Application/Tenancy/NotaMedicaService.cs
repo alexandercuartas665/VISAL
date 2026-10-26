@@ -264,7 +264,8 @@ public sealed class NotaMedicaService(
             .Select(d => new NotaDocumentoDto(
                 d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
                 d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
-                d.Anotaciones, d.CreatedAt))
+                d.Anotaciones, d.CreatedAt, d.Subcategoria,
+                db.PlatformUsers.Where(u => u.Id == d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault()))
             .ToListAsync(ct);
     }
 
@@ -287,8 +288,9 @@ public sealed class NotaMedicaService(
                         (x, n) => new
                         {
                             x.d.Id, x.d.NotaMedicaId, x.d.HistoriaClinicaId, x.d.NombreOriginal, x.d.RutaArchivo,
-                            x.d.TipoMime, x.d.Tamano, x.d.Categoria, x.d.TipoTerapia, x.d.Mes,
+                            x.d.TipoMime, x.d.Tamano, x.d.Categoria, x.d.Subcategoria, x.d.TipoTerapia, x.d.Mes,
                             x.d.Anotaciones, x.d.CreatedAt,
+                            SubidoPor = db.PlatformUsers.Where(u => u.Id == x.d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault(),
                             FechaNota = (DateOnly?)(n != null ? n.FechaNota : null),
                             CodigoUnico = n != null ? n.CodigoUnico : null,
                             EstadoNota = n != null ? (int?)n.Estado : null
@@ -307,7 +309,9 @@ public sealed class NotaMedicaService(
                 // (subidos desde Admision o firmas del paciente) y los documentos externos
                 // de una HC (p.ej. scans que llegan por WhatsApp). Los anexos de una nota
                 // medica (NotaMedicaId != null) NO se reclasifican aqui.
-                EsLibre: x.NotaMedicaId is null))
+                EsLibre: x.NotaMedicaId is null,
+                Subcategoria: x.Subcategoria,
+                SubidoPor: x.SubidoPor))
             .ToList();
     }
 
@@ -353,7 +357,9 @@ public sealed class NotaMedicaService(
             .Select(d => new NotaDocumentoDto(
                 d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
                 d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
-                d.Anotaciones, d.CreatedAt))
+                d.Anotaciones, d.CreatedAt, d.Subcategoria,
+                // Nombre del usuario que subio el archivo (CreatedBy = PlatformUser.Id).
+                db.PlatformUsers.Where(u => u.Id == d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault()))
             .ToListAsync(ct);
     }
 
@@ -378,14 +384,19 @@ public sealed class NotaMedicaService(
             TipoMime = req.TipoMime,
             Tamano = req.Tamano,
             Categoria = req.Categoria,
+            Subcategoria = string.IsNullOrWhiteSpace(req.Subcategoria) ? null : req.Subcategoria.Trim(),
             Anotaciones = req.Anotaciones
         };
         db.NotaMedicaDocumentos.Add(entity);
         await db.SaveChangesAsync(ct);
+        // El interceptor estampa CreatedBy = usuario actual; resolvemos su nombre para la card.
+        var subidoPor = entity.CreatedBy is Guid cb
+            ? await db.PlatformUsers.AsNoTracking().Where(u => u.Id == cb).Select(u => u.DisplayName).FirstOrDefaultAsync(ct)
+            : null;
         return new NotaDocumentoDto(
             entity.Id, entity.NotaMedicaId, entity.NombreOriginal, entity.RutaArchivo,
             entity.TipoMime, entity.Tamano, entity.Categoria, entity.TipoTerapia, entity.Mes,
-            entity.Anotaciones, entity.CreatedAt);
+            entity.Anotaciones, entity.CreatedAt, entity.Subcategoria, subidoPor);
     }
 
     public async Task<NotaDocumentoDto> AdjuntarDocumentoPacienteAsync(
@@ -438,6 +449,27 @@ public sealed class NotaMedicaService(
         var nueva = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();
         if (e.Categoria == nueva) { return true; }
         e.Categoria = nueva;
+        // La subcategoria pertenece a la tipologia: al cambiar de tipologia la subcategoria
+        // anterior deja de ser valida, asi que se limpia.
+        e.Subcategoria = null;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> ActualizarSubcategoriaDocumentoAsync(
+        Guid documentoId, string? subcategoria, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
+        if (e is null) { return false; }
+        // Mismo gate que la categoria: solo documentos no atados a una nota medica.
+        if (e.NotaMedicaId is not null)
+        {
+            throw new InvalidOperationException(
+                "Solo se puede cambiar la subcategoria de documentos directos o externos de una historia clinica, no de los anexos de una nota medica.");
+        }
+        var nueva = string.IsNullOrWhiteSpace(subcategoria) ? null : subcategoria.Trim();
+        if (e.Subcategoria == nueva) { return true; }
+        e.Subcategoria = nueva;
         await db.SaveChangesAsync(ct);
         return true;
     }

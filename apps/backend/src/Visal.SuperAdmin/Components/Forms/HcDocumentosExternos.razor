@@ -40,13 +40,23 @@ else
     @if (_error is not null) { <div class="ase-alert">@_error</div> }
 
     <div class="hc-dxe-cats">
-        <select class="form-select form-select-sm hc-dxe-cat-input" @bind="_categoria" title="Tipologia del proximo archivo">
+        <select class="form-select form-select-sm hc-dxe-cat-input" value="@_categoria" @onchange="OnCategoriaChanged" title="Tipologia del proximo archivo">
             <option value="">-- Tipologia (opcional) --</option>
             @foreach (var t in _tipologias)
             {
                 <option value="@t.Nombre">@t.Nombre</option>
             }
         </select>
+        @if (SubcatsDe(_categoria).Count > 0)
+        {
+            <select class="form-select form-select-sm hc-dxe-cat-input" @bind="_subcategoria" title="Subcategoria del proximo archivo">
+                <option value="">-- Subcategoria (opcional) --</option>
+                @foreach (var s in SubcatsDe(_categoria))
+                {
+                    <option value="@s.Nombre">@s.Nombre</option>
+                }
+            </select>
+        }
         @if (_tipologias.Count == 0)
         {
             <small class="text-muted" style="align-self:center;">
@@ -106,9 +116,12 @@ else
     .hc-dxe-thumb { width: 100%; max-height: 100px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0; }
     .hc-dxe-nombre { font-weight: 700; color: #0f172a; font-size: 13px; word-break: break-word; }
     .hc-dxe-meta { font-size: 11px; color: #64748b; }
+    .hc-dxe-user { display: flex; align-items: center; gap: 4px; font-weight: 600; color: #475569; }
     .hc-dxe-cat { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #eef2ff; color: #4338ca; text-transform: uppercase; letter-spacing: .04em; align-self: flex-start; }
     .hc-dxe-cat-empty { background: #f1f5f9; color: #94a3b8; font-style: italic; text-transform: none; letter-spacing: 0; }
-    .hc-dxe-tip-row { display: flex; align-items: center; gap: 4px; }
+    .hc-dxe-subcat { background: #f0fdf4; color: #15803d; }
+    .hc-dxe-subcat-edit { margin-top: 4px; }
+    .hc-dxe-tip-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .hc-dxe-tip-btn { padding: 0 4px; color: #64748b; }
     .hc-dxe-tip-btn:hover { color: #2563eb; }
     .hc-dxe-tip-edit { display: flex; gap: 4px; align-items: center; }
@@ -132,6 +145,7 @@ else
     private string? _msg;
     private string? _error;
     private string? _categoria;
+    private string? _subcategoria;
     private string? _anotaciones;
     private string _ultimoKey = "";
 
@@ -139,6 +153,28 @@ else
     // card correspondiente muestra el select en vez del badge estatico.
     private Guid? _editDocId;
     private string? _editTip;
+    private string? _editSubcat;
+
+    /// <summary>Subcategorias activas de una tipologia por su nombre. Vacio si la
+    /// tipologia no existe o no tiene subcategorias.</summary>
+    private IReadOnlyList<SubcategoriaArchivoDto> SubcatsDe(string? tipNombre)
+    {
+        if (string.IsNullOrWhiteSpace(tipNombre)) { return Array.Empty<SubcategoriaArchivoDto>(); }
+        var t = _tipologias.FirstOrDefault(x => x.Nombre == tipNombre);
+        return t?.Subcategorias ?? (IReadOnlyList<SubcategoriaArchivoDto>)Array.Empty<SubcategoriaArchivoDto>();
+    }
+
+    private void OnCategoriaChanged(ChangeEventArgs e)
+    {
+        _categoria = e.Value?.ToString() ?? "";
+        _subcategoria = ""; // al cambiar la tipologia, la subcategoria anterior ya no aplica
+    }
+
+    private void OnEditTipChanged(ChangeEventArgs e)
+    {
+        _editTip = e.Value?.ToString() ?? "";
+        _editSubcat = ""; // idem en el edit inline
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -206,35 +242,42 @@ else
             var dto = await NotaSvc.AdjuntarDocumentoHcAsync(new AdjuntarDocumentoHcRequest(
                 hid, pid, f.Name, rutaWeb, f.ContentType, f.Size,
                 string.IsNullOrWhiteSpace(_categoria) ? null : _categoria,
-                string.IsNullOrWhiteSpace(_anotaciones) ? null : _anotaciones), Guid.Empty);
+                string.IsNullOrWhiteSpace(_anotaciones) ? null : _anotaciones,
+                string.IsNullOrWhiteSpace(_subcategoria) ? null : _subcategoria), Guid.Empty);
             _msg = $"'{dto.NombreOriginal}' subido.";
-            _categoria = ""; _anotaciones = "";
+            _categoria = ""; _subcategoria = ""; _anotaciones = "";
             await RecargarAsync();
         }
         catch (Exception ex) { _error = "No se pudo subir el archivo: " + ex.Message; }
         finally { _subiendo = false; }
     }
 
-    private void AbrirEditTipInline(Guid docId, string? actual)
+    private void AbrirEditTipInline(Guid docId, string? actual, string? subcatActual)
     {
         _editDocId = docId;
         _editTip = actual ?? "";
+        _editSubcat = subcatActual ?? "";
     }
 
     private void CancelarEditTipInline()
     {
         _editDocId = null;
         _editTip = null;
+        _editSubcat = null;
     }
 
     private async Task GuardarTipInlineAsync(Guid docId)
     {
         try
         {
+            // Primero la tipologia (si cambia, el backend limpia la subcategoria),
+            // despues fijamos la subcategoria elegida.
             await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _editTip, Guid.Empty);
+            await NotaSvc.ActualizarSubcategoriaDocumentoAsync(docId, _editSubcat, Guid.Empty);
             _msg = "Tipologia actualizada.";
             _editDocId = null;
             _editTip = null;
+            _editSubcat = null;
             await RecargarAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -271,10 +314,13 @@ else
             <div class="hc-dxe-meta">
                 @FormatoTamano(d.Tamano) &middot; @(d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))
             </div>
+            <div class="hc-dxe-meta hc-dxe-user" title="Usuario que cargo el archivo">
+                &#128100; @(string.IsNullOrWhiteSpace(d.SubidoPor) ? "(sin registro de usuario)" : d.SubidoPor)
+            </div>
             @if (_editDocId == d.Id)
             {
                 <div class="hc-dxe-tip-edit">
-                    <select class="form-select form-select-sm" @bind="_editTip">
+                    <select class="form-select form-select-sm" value="@_editTip" @onchange="OnEditTipChanged">
                         <option value="">(sin tipologia)</option>
                         @foreach (var t in _tipologias)
                         {
@@ -284,6 +330,16 @@ else
                     <button class="btn btn-primary btn-sm" @onclick="() => GuardarTipInlineAsync(d.Id)" title="Guardar">&#10003;</button>
                     <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarEditTipInline" title="Cancelar">&#10005;</button>
                 </div>
+                @if (SubcatsDe(_editTip).Count > 0)
+                {
+                    <select class="form-select form-select-sm hc-dxe-subcat-edit" @bind="_editSubcat" title="Subcategoria">
+                        <option value="">(sin subcategoria)</option>
+                        @foreach (var s in SubcatsDe(_editTip))
+                        {
+                            <option value="@s.Nombre">@s.Nombre</option>
+                        }
+                    </select>
+                }
             }
             else
             {
@@ -296,9 +352,13 @@ else
                     {
                         <span class="hc-dxe-cat hc-dxe-cat-empty">(sin tipologia)</span>
                     }
+                    @if (!string.IsNullOrWhiteSpace(d.Subcategoria))
+                    {
+                        <span class="hc-dxe-cat hc-dxe-subcat">@d.Subcategoria</span>
+                    }
                     @if (esHc && HcAbierta)
                     {
-                        <button class="btn btn-link btn-sm hc-dxe-tip-btn" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria)" title="Editar tipologia">&#9998;</button>
+                        <button class="btn btn-link btn-sm hc-dxe-tip-btn" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria, d.Subcategoria)" title="Editar tipologia">&#9998;</button>
                     }
                 </div>
             }
@@ -316,7 +376,8 @@ else
     private RenderFragment RenderCard(DocumentoPacienteDto d, bool esHc) => __builder =>
     {
         var proxy = new NotaDocumentoDto(d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
-            d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt);
+            d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt,
+            d.Subcategoria, d.SubidoPor);
         @RenderCard(proxy, esHc)
     };
 

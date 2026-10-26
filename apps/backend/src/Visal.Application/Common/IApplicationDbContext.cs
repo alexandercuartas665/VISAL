@@ -113,6 +113,7 @@ public interface IApplicationDbContext
     DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados { get; }
     DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }
     DbSet<TipologiaArchivo> TipologiaArchivos { get; }
+    DbSet<TipologiaArchivoSubcategoria> TipologiaArchivoSubcategorias { get; }
     DbSet<Cie11Config> Cie11Configs { get; }
     DbSet<Pais> Paises { get; }
     DbSet<Departamento> Departamentos { get; }

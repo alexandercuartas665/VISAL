@@ -40,8 +40,13 @@ public class NotaMedicaDocumento : TenantEntity
     /// <summary>Tamano en bytes.</summary>
     public long Tamano { get; set; }
 
-    /// <summary>Categoria libre: "Lista de firmas", "Escala", "Formato", etc.</summary>
+    /// <summary>Categoria libre (tipologia): "Lista de firmas", "Escala", "Formato", etc.</summary>
     public string? Categoria { get; set; }
+
+    /// <summary>Subcategoria (segundo nivel) dentro de la <see cref="Categoria"/>/tipologia.
+    /// Nombre libre tomado del catalogo de subcategorias de la tipologia. Null si la tipologia
+    /// no tiene subcategorias o no se eligio.</summary>
+    public string? Subcategoria { get; set; }
 
     /// <summary>Tipo de terapia (snapshot del modulo).</summary>
     public string? TipoTerapia { get; set; }

@@ -57,7 +57,12 @@ public sealed record NotaDocumentoDto(
     string? TipoTerapia,
     string? Mes,
     string? Anotaciones,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    // Segundo nivel de la tipologia (opcional) y nombre del usuario que subio el
+    // archivo (resuelto desde CreatedBy). Opcionales para no romper constructores
+    // existentes que no los informan.
+    string? Subcategoria = null,
+    string? SubidoPor = null);
 
 /// <summary>Documento extendido con datos de la nota a la que pertenece. Lo usa el
 /// tab "Documentos" de Admision para mostrar contexto de cada adjunto (fecha y
@@ -82,7 +87,10 @@ public sealed record DocumentoPacienteDto(
     // Documento NO atado a una nota medica: adjunto "Directo" (subido desde Admision o
     // firma del paciente) o documento externo de una HC (p.ej. scan de WhatsApp). Solo
     // estos permiten editar su categoria/tipologia; los anexos de una nota medica no.
-    bool EsLibre = false);
+    bool EsLibre = false,
+    // Segundo nivel de la tipologia (opcional) y usuario que subio el archivo.
+    string? Subcategoria = null,
+    string? SubidoPor = null);
 
 public sealed record AdjuntarDocumentoRequest(
     Guid NotaMedicaId,
@@ -109,7 +117,8 @@ public sealed record AdjuntarDocumentoHcRequest(
     string? TipoMime,
     long Tamano,
     string? Categoria,
-    string? Anotaciones);
+    string? Anotaciones,
+    string? Subcategoria = null);
 
 /// <summary>
 /// Request para subir un documento "libre" al paciente desde el tab Documentos
@@ -215,9 +224,15 @@ public interface INotaMedicaService
         AdjuntarDocumentoPacienteRequest req, Guid actorUserId, CancellationToken ct = default);
 
     /// <summary>Actualiza la categoria (tipologia) de un documento existente.
-    /// null o vacio borra la categoria. Task ADM3.</summary>
+    /// null o vacio borra la categoria. Task ADM3. Como la subcategoria pertenece a la
+    /// tipologia, al cambiar la categoria a un valor distinto se limpia la subcategoria.</summary>
     Task<bool> ActualizarCategoriaDocumentoAsync(
         Guid documentoId, string? categoria, Guid actorUserId, CancellationToken ct = default);
+
+    /// <summary>Actualiza solo la subcategoria (segundo nivel) de un documento. null/vacio
+    /// la borra. Mismo gate que la categoria: solo documentos no atados a una nota medica.</summary>
+    Task<bool> ActualizarSubcategoriaDocumentoAsync(
+        Guid documentoId, string? subcategoria, Guid actorUserId, CancellationToken ct = default);
 
     Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actorUserId, CancellationToken ct = default);
 }

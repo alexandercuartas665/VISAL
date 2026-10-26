@@ -132,6 +132,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
     public DbSet<TipologiaArchivo> TipologiaArchivos => Set<TipologiaArchivo>();
+    public DbSet<TipologiaArchivoSubcategoria> TipologiaArchivoSubcategorias => Set<TipologiaArchivoSubcategoria>();
     public DbSet<Aseguradora> Aseguradoras => Set<Aseguradora>();
     public DbSet<ContratoAseguradora> ContratosAseguradora => Set<ContratoAseguradora>();
     public DbSet<ContratoSucursal> ContratoSucursales => Set<ContratoSucursal>();
@@ -1183,6 +1184,17 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Color).HasMaxLength(20).IsRequired();
             b.HasIndex(x => new { x.TenantId, x.Nombre }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.Activo });
+        });
+
+        modelBuilder.Entity<TipologiaArchivoSubcategoria>(b =>
+        {
+            b.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            b.HasOne(x => x.TipologiaArchivo).WithMany()
+                .HasForeignKey(x => x.TipologiaArchivoId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Unica por (tenant, tipologia, nombre): no repetir subcategoria dentro de la misma tipologia.
+            b.HasIndex(x => new { x.TenantId, x.TipologiaArchivoId, x.Nombre }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.TipologiaArchivoId, x.Activo });
         });
 
         // Secuencias globales para los consecutivos publicos (HC-000123 / AS-000045).

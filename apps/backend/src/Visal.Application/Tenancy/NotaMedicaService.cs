@@ -265,7 +265,8 @@ public sealed class NotaMedicaService(
                 d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
                 d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
                 d.Anotaciones, d.CreatedAt, d.Subcategoria,
-                db.PlatformUsers.Where(u => u.Id == d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault()))
+                db.PlatformUsers.Where(u => u.Id == d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault(),
+                d.FechaDocumento))
             .ToListAsync(ct);
     }
 
@@ -289,7 +290,7 @@ public sealed class NotaMedicaService(
                         {
                             x.d.Id, x.d.NotaMedicaId, x.d.HistoriaClinicaId, x.d.NombreOriginal, x.d.RutaArchivo,
                             x.d.TipoMime, x.d.Tamano, x.d.Categoria, x.d.Subcategoria, x.d.TipoTerapia, x.d.Mes,
-                            x.d.Anotaciones, x.d.CreatedAt,
+                            x.d.Anotaciones, x.d.CreatedAt, x.d.FechaDocumento,
                             SubidoPor = db.PlatformUsers.Where(u => u.Id == x.d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault(),
                             FechaNota = (DateOnly?)(n != null ? n.FechaNota : null),
                             CodigoUnico = n != null ? n.CodigoUnico : null,
@@ -311,7 +312,8 @@ public sealed class NotaMedicaService(
                 // medica (NotaMedicaId != null) NO se reclasifican aqui.
                 EsLibre: x.NotaMedicaId is null,
                 Subcategoria: x.Subcategoria,
-                SubidoPor: x.SubidoPor))
+                SubidoPor: x.SubidoPor,
+                FechaDocumento: x.FechaDocumento))
             .ToList();
     }
 
@@ -359,7 +361,8 @@ public sealed class NotaMedicaService(
                 d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes,
                 d.Anotaciones, d.CreatedAt, d.Subcategoria,
                 // Nombre del usuario que subio el archivo (CreatedBy = PlatformUser.Id).
-                db.PlatformUsers.Where(u => u.Id == d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault()))
+                db.PlatformUsers.Where(u => u.Id == d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault(),
+                d.FechaDocumento))
             .ToListAsync(ct);
     }
 
@@ -370,9 +373,11 @@ public sealed class NotaMedicaService(
         // Valida que la HC exista y pertenezca al paciente. La validacion cruzada
         // evita que un actor con acceso al tenant pueda enlazar un documento a una
         // HC de otro paciente pasando IDs arbitrarios.
-        var hcExiste = await db.HistoriasClinicas.AsNoTracking()
-            .AnyAsync(h => h.Id == req.HistoriaClinicaId && h.PacienteId == req.PacienteId, ct);
-        if (!hcExiste) { throw new InvalidOperationException("Historia clinica no encontrada o no coincide con el paciente."); }
+        var hc = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == req.HistoriaClinicaId && h.PacienteId == req.PacienteId)
+            .Select(h => new { h.FechaAtencion })
+            .FirstOrDefaultAsync(ct);
+        if (hc is null) { throw new InvalidOperationException("Historia clinica no encontrada o no coincide con el paciente."); }
         var entity = new NotaMedicaDocumento
         {
             TenantId = tid,
@@ -385,7 +390,10 @@ public sealed class NotaMedicaService(
             Tamano = req.Tamano,
             Categoria = req.Categoria,
             Subcategoria = string.IsNullOrWhiteSpace(req.Subcategoria) ? null : req.Subcategoria.Trim(),
-            Anotaciones = req.Anotaciones
+            Anotaciones = req.Anotaciones,
+            // Fecha del documento: la que mande la UI, si no la fecha de atencion de la HC,
+            // y como ultimo recurso el momento de la carga.
+            FechaDocumento = (req.FechaDocumento ?? hc.FechaAtencion ?? DateTimeOffset.UtcNow).ToUniversalTime()
         };
         db.NotaMedicaDocumentos.Add(entity);
         await db.SaveChangesAsync(ct);
@@ -396,7 +404,7 @@ public sealed class NotaMedicaService(
         return new NotaDocumentoDto(
             entity.Id, entity.NotaMedicaId, entity.NombreOriginal, entity.RutaArchivo,
             entity.TipoMime, entity.Tamano, entity.Categoria, entity.TipoTerapia, entity.Mes,
-            entity.Anotaciones, entity.CreatedAt, entity.Subcategoria, subidoPor);
+            entity.Anotaciones, entity.CreatedAt, entity.Subcategoria, subidoPor, entity.FechaDocumento);
     }
 
     public async Task<NotaDocumentoDto> AdjuntarDocumentoPacienteAsync(
@@ -419,14 +427,20 @@ public sealed class NotaMedicaService(
             TipoMime = req.TipoMime,
             Tamano = req.Tamano,
             Categoria = req.Categoria,
-            Anotaciones = req.Anotaciones
+            Anotaciones = req.Anotaciones,
+            // Sin HC de origen: la fecha del documento arranca en la que mande la UI,
+            // o el momento de la carga.
+            FechaDocumento = (req.FechaDocumento ?? DateTimeOffset.UtcNow).ToUniversalTime()
         };
         db.NotaMedicaDocumentos.Add(entity);
         await db.SaveChangesAsync(ct);
+        var subidoPor = entity.CreatedBy is Guid cb
+            ? await db.PlatformUsers.AsNoTracking().Where(u => u.Id == cb).Select(u => u.DisplayName).FirstOrDefaultAsync(ct)
+            : null;
         return new NotaDocumentoDto(
             entity.Id, entity.NotaMedicaId, entity.NombreOriginal, entity.RutaArchivo,
             entity.TipoMime, entity.Tamano, entity.Categoria, entity.TipoTerapia, entity.Mes,
-            entity.Anotaciones, entity.CreatedAt);
+            entity.Anotaciones, entity.CreatedAt, entity.Subcategoria, subidoPor, entity.FechaDocumento);
     }
 
     public async Task<bool> ActualizarCategoriaDocumentoAsync(
@@ -470,6 +484,26 @@ public sealed class NotaMedicaService(
         var nueva = string.IsNullOrWhiteSpace(subcategoria) ? null : subcategoria.Trim();
         if (e.Subcategoria == nueva) { return true; }
         e.Subcategoria = nueva;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> ActualizarDocumentoEditableAsync(
+        Guid documentoId, string? categoria, string? subcategoria, string? anotaciones,
+        DateTimeOffset? fechaDocumento, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
+        if (e is null) { return false; }
+        if (e.NotaMedicaId is not null)
+        {
+            throw new InvalidOperationException(
+                "Solo se pueden editar los metadatos de documentos directos o externos de una historia clinica, no de los anexos de una nota medica.");
+        }
+        e.Categoria = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();
+        e.Subcategoria = string.IsNullOrWhiteSpace(subcategoria) ? null : subcategoria.Trim();
+        e.Anotaciones = string.IsNullOrWhiteSpace(anotaciones) ? null : anotaciones.Trim();
+        // Npgsql exige offset 0 (UTC) para timestamptz; la UI construye la fecha en Bogota (-5).
+        e.FechaDocumento = fechaDocumento?.ToUniversalTime();
         await db.SaveChangesAsync(ct);
         return true;
     }

@@ -120,7 +120,11 @@ else
     .hc-dxe-cat { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #eef2ff; color: #4338ca; text-transform: uppercase; letter-spacing: .04em; align-self: flex-start; }
     .hc-dxe-cat-empty { background: #f1f5f9; color: #94a3b8; font-style: italic; text-transform: none; letter-spacing: 0; }
     .hc-dxe-subcat { background: #f0fdf4; color: #15803d; }
-    .hc-dxe-subcat-edit { margin-top: 4px; }
+    .hc-dxe-fechadoc { display: flex; align-items: center; gap: 4px; font-weight: 600; color: #475569; }
+    .hc-dxe-obs { font-size: 11px; color: #334155; background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 4px 8px; border-radius: 4px; word-break: break-word; }
+    .hc-dxe-edit { display: flex; flex-direction: column; gap: 3px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
+    .hc-dxe-edit-lbl { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; margin: 2px 0 0; }
+    .hc-dxe-edit-acts { display: flex; gap: 6px; margin-top: 6px; }
     .hc-dxe-tip-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .hc-dxe-tip-btn { padding: 0 4px; color: #64748b; }
     .hc-dxe-tip-btn:hover { color: #2563eb; }
@@ -154,6 +158,10 @@ else
     private Guid? _editDocId;
     private string? _editTip;
     private string? _editSubcat;
+    private string? _editObs;
+    private DateOnly? _editFecha; // enlazado al <input type="date">
+
+    private static readonly TimeSpan Bog = TimeSpan.FromHours(-5);
 
     /// <summary>Subcategorias activas de una tipologia por su nombre. Vacio si la
     /// tipologia no existe o no tiene subcategorias.</summary>
@@ -252,35 +260,40 @@ else
         finally { _subiendo = false; }
     }
 
-    private void AbrirEditTipInline(Guid docId, string? actual, string? subcatActual)
+    private void AbrirEditInline(NotaDocumentoDto d)
     {
-        _editDocId = docId;
-        _editTip = actual ?? "";
-        _editSubcat = subcatActual ?? "";
+        _editDocId = d.Id;
+        _editTip = d.Categoria ?? "";
+        _editSubcat = d.Subcategoria ?? "";
+        _editObs = d.Anotaciones ?? "";
+        _editFecha = d.FechaDocumento is DateTimeOffset fd ? DateOnly.FromDateTime(fd.ToOffset(Bog).DateTime) : null;
     }
 
-    private void CancelarEditTipInline()
+    private void CancelarEditInline()
     {
         _editDocId = null;
-        _editTip = null;
-        _editSubcat = null;
+        _editTip = _editSubcat = _editObs = null;
+        _editFecha = null;
     }
 
-    private async Task GuardarTipInlineAsync(Guid docId)
+    private async Task GuardarEdicionAsync(Guid docId)
     {
         try
         {
-            // Primero la tipologia (si cambia, el backend limpia la subcategoria),
-            // despues fijamos la subcategoria elegida.
-            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _editTip, Guid.Empty);
-            await NotaSvc.ActualizarSubcategoriaDocumentoAsync(docId, _editSubcat, Guid.Empty);
-            _msg = "Tipologia actualizada.";
-            _editDocId = null;
-            _editTip = null;
-            _editSubcat = null;
+            await NotaSvc.ActualizarDocumentoEditableAsync(
+                docId, _editTip, _editSubcat, _editObs, ParseFechaDoc(_editFecha), Guid.Empty);
+            _msg = "Datos del archivo actualizados.";
+            CancelarEditInline();
             await RecargarAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
+    }
+
+    /// <summary>Fecha (dia) -> DateTimeOffset a mediodia Bogota (evita saltos de dia por zona).</summary>
+    private static DateTimeOffset? ParseFechaDoc(DateOnly? d)
+    {
+        if (d is not DateOnly v) { return null; }
+        return new DateTimeOffset(v.Year, v.Month, v.Day, 12, 0, 0, Bog);
     }
 
     private async Task EliminarAsync(Guid docId, string nombre)
@@ -319,7 +332,8 @@ else
             </div>
             @if (_editDocId == d.Id)
             {
-                <div class="hc-dxe-tip-edit">
+                <div class="hc-dxe-edit">
+                    <label class="hc-dxe-edit-lbl">Tipologia</label>
                     <select class="form-select form-select-sm" value="@_editTip" @onchange="OnEditTipChanged">
                         <option value="">(sin tipologia)</option>
                         @foreach (var t in _tipologias)
@@ -327,19 +341,27 @@ else
                             <option value="@t.Nombre">@t.Nombre</option>
                         }
                     </select>
-                    <button class="btn btn-primary btn-sm" @onclick="() => GuardarTipInlineAsync(d.Id)" title="Guardar">&#10003;</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarEditTipInline" title="Cancelar">&#10005;</button>
+                    @if (SubcatsDe(_editTip).Count > 0)
+                    {
+                        <label class="hc-dxe-edit-lbl">Subcategoria</label>
+                        <select class="form-select form-select-sm" @bind="_editSubcat">
+                            <option value="">(sin subcategoria)</option>
+                            @foreach (var s in SubcatsDe(_editTip))
+                            {
+                                <option value="@s.Nombre">@s.Nombre</option>
+                            }
+                        </select>
+                    }
+                    <label class="hc-dxe-edit-lbl">Fecha del documento</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_editFecha" />
+                    <label class="hc-dxe-edit-lbl">Observacion</label>
+                    <input type="text" class="form-control form-control-sm" @bind="_editObs"
+                           placeholder="Observacion del archivo" maxlength="500" />
+                    <div class="hc-dxe-edit-acts">
+                        <button class="btn btn-primary btn-sm" @onclick="() => GuardarEdicionAsync(d.Id)" title="Guardar">&#10003; Guardar</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarEditInline" title="Cancelar">&#10005;</button>
+                    </div>
                 </div>
-                @if (SubcatsDe(_editTip).Count > 0)
-                {
-                    <select class="form-select form-select-sm hc-dxe-subcat-edit" @bind="_editSubcat" title="Subcategoria">
-                        <option value="">(sin subcategoria)</option>
-                        @foreach (var s in SubcatsDe(_editTip))
-                        {
-                            <option value="@s.Nombre">@s.Nombre</option>
-                        }
-                    </select>
-                }
             }
             else
             {
@@ -358,9 +380,19 @@ else
                     }
                     @if (esHc && HcAbierta)
                     {
-                        <button class="btn btn-link btn-sm hc-dxe-tip-btn" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria, d.Subcategoria)" title="Editar tipologia">&#9998;</button>
+                        <button class="btn btn-link btn-sm hc-dxe-tip-btn" @onclick="() => AbrirEditInline(d)" title="Editar datos del archivo">&#9998;</button>
                     }
                 </div>
+                @if (d.FechaDocumento is DateTimeOffset fd)
+                {
+                    <div class="hc-dxe-meta hc-dxe-fechadoc" title="Fecha del documento (editable)">
+                        &#128197; @fd.ToOffset(Bog).ToString("dd/MM/yyyy")
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                {
+                    <div class="hc-dxe-obs" title="Observacion">&#128221; @d.Anotaciones</div>
+                }
             }
             <div class="hc-dxe-acts">
                 <a class="btn btn-outline-primary btn-sm" href="@d.RutaArchivo" target="_blank" rel="noopener">Abrir</a>
@@ -377,7 +409,7 @@ else
     {
         var proxy = new NotaDocumentoDto(d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo,
             d.TipoMime, d.Tamano, d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt,
-            d.Subcategoria, d.SubidoPor);
+            d.Subcategoria, d.SubidoPor, d.FechaDocumento);
         @RenderCard(proxy, esHc)
     };
 

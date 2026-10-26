@@ -62,7 +62,9 @@ public sealed record NotaDocumentoDto(
     // archivo (resuelto desde CreatedBy). Opcionales para no romper constructores
     // existentes que no los informan.
     string? Subcategoria = null,
-    string? SubidoPor = null);
+    string? SubidoPor = null,
+    // Fecha efectiva (editable) del documento. Distinta de CreatedAt (carga).
+    DateTimeOffset? FechaDocumento = null);
 
 /// <summary>Documento extendido con datos de la nota a la que pertenece. Lo usa el
 /// tab "Documentos" de Admision para mostrar contexto de cada adjunto (fecha y
@@ -90,7 +92,9 @@ public sealed record DocumentoPacienteDto(
     bool EsLibre = false,
     // Segundo nivel de la tipologia (opcional) y usuario que subio el archivo.
     string? Subcategoria = null,
-    string? SubidoPor = null);
+    string? SubidoPor = null,
+    // Fecha efectiva (editable) del documento. Distinta de CreatedAt (carga).
+    DateTimeOffset? FechaDocumento = null);
 
 public sealed record AdjuntarDocumentoRequest(
     Guid NotaMedicaId,
@@ -118,7 +122,8 @@ public sealed record AdjuntarDocumentoHcRequest(
     long Tamano,
     string? Categoria,
     string? Anotaciones,
-    string? Subcategoria = null);
+    string? Subcategoria = null,
+    DateTimeOffset? FechaDocumento = null);
 
 /// <summary>
 /// Request para subir un documento "libre" al paciente desde el tab Documentos
@@ -135,7 +140,8 @@ public sealed record AdjuntarDocumentoPacienteRequest(
     string? TipoMime,
     long Tamano,
     string? Categoria,
-    string? Anotaciones);
+    string? Anotaciones,
+    DateTimeOffset? FechaDocumento = null);
 
 /// <summary>
 /// Resultado de la validacion previa antes de abrir el modulo de notas.
@@ -233,6 +239,15 @@ public interface INotaMedicaService
     /// la borra. Mismo gate que la categoria: solo documentos no atados a una nota medica.</summary>
     Task<bool> ActualizarSubcategoriaDocumentoAsync(
         Guid documentoId, string? subcategoria, Guid actorUserId, CancellationToken ct = default);
+
+    /// <summary>Edicion combinada de los metadatos de un documento externo/libre en una sola
+    /// operacion atomica: tipologia (categoria), subcategoria, anotaciones (observacion) y fecha
+    /// del documento. Si la categoria cambia a un valor distinto, la subcategoria queda la que se
+    /// pase en <paramref name="subcategoria"/> (coherente con el select dependiente de la UI).
+    /// Mismo gate: solo documentos no atados a una nota medica.</summary>
+    Task<bool> ActualizarDocumentoEditableAsync(
+        Guid documentoId, string? categoria, string? subcategoria, string? anotaciones,
+        DateTimeOffset? fechaDocumento, Guid actorUserId, CancellationToken ct = default);
 
     Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actorUserId, CancellationToken ct = default);
 }

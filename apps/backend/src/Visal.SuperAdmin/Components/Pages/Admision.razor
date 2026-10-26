@@ -564,42 +564,38 @@
                                             }
                                         </div>
                                         <div class="pac-doc-card-body">
-                                            @* Categoria editable inline SOLO en documentos libres (Admision / firma
-                                               del paciente). stopPropagation para que editar no abra el visor. *@
-                                            @if (d.EsLibre && _docEditandoTipId == d.Id)
-                                            {
-                                                <div class="pac-doc-cat-edit" @onclick:stopPropagation="true">
-                                                    <select class="form-select form-select-sm" @bind="_docEditandoTipValor">
-                                                        <option value="">(sin tipologia)</option>
-                                                        @foreach (var t in _tipologiasArchivo)
-                                                        {
-                                                            <option value="@t.Nombre">@t.Nombre</option>
-                                                        }
-                                                    </select>
-                                                    <button class="btn btn-success btn-sm" title="Guardar" @onclick="() => GuardarTipInlineAsync(d.Id)" @onclick:stopPropagation="true">&#10004;</button>
-                                                    <button class="btn btn-outline-secondary btn-sm" title="Cancelar" @onclick="CancelarTipInline" @onclick:stopPropagation="true">&#10008;</button>
-                                                </div>
-                                            }
-                                            else
-                                            {
-                                                <div class="pac-doc-cat-row">
-                                                    @if (!string.IsNullOrWhiteSpace(d.Categoria))
-                                                    {
-                                                        <span class="pac-doc-cat">@d.Categoria</span>
-                                                    }
-                                                    else if (d.EsLibre)
-                                                    {
-                                                        <span class="pac-doc-cat pac-doc-cat-empty">Sin categoría</span>
-                                                    }
-                                                    @if (d.EsLibre)
-                                                    {
-                                                        <button class="btn btn-link btn-sm p-0 pac-doc-cat-edit-btn" title="Cambiar tipología"
-                                                                @onclick="() => AbrirEditTipInline(d)" @onclick:stopPropagation="true">&#9998;</button>
-                                                    }
-                                                </div>
-                                            }
+                                            @* Categoria/subcategoria + lapiz que abre el modal de edicion. Editable
+                                               SOLO en documentos libres (Admision / firma del paciente).
+                                               stopPropagation para que el lapiz no abra el visor. *@
+                                            <div class="pac-doc-cat-row">
+                                                @if (!string.IsNullOrWhiteSpace(d.Categoria))
+                                                {
+                                                    <span class="pac-doc-cat">@d.Categoria</span>
+                                                }
+                                                else if (d.EsLibre)
+                                                {
+                                                    <span class="pac-doc-cat pac-doc-cat-empty">Sin categoría</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(d.Subcategoria))
+                                                {
+                                                    <span class="pac-doc-cat pac-doc-subcat">@d.Subcategoria</span>
+                                                }
+                                                @if (d.EsLibre)
+                                                {
+                                                    <button class="btn btn-link btn-sm p-0 pac-doc-cat-edit-btn" title="Editar datos del archivo"
+                                                            @onclick="() => AbrirEditDoc(d)" @onclick:stopPropagation="true">&#9998;</button>
+                                                }
+                                            </div>
                                             <div class="pac-doc-card-name" title="@d.NombreOriginal">@d.NombreOriginal</div>
                                             <div class="pac-doc-card-meta">@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm") &middot; @FormatTam(d.Tamano)</div>
+                                            @if (d.FechaDocumento is DateTimeOffset fd)
+                                            {
+                                                <div class="pac-doc-card-meta">&#128197; @fd.ToOffset(Bog).ToString("dd/MM/yyyy")</div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                                            {
+                                                <div class="pac-doc-obs" title="Observacion">&#128221; @d.Anotaciones</div>
+                                            }
                                         </div>
                                     </div>
                                 }
@@ -615,6 +611,7 @@
                                             <th>Nombre del archivo</th>
                                             <th>Nota</th>
                                             <th>Fecha nota</th>
+                                            <th>Fecha doc</th>
                                             <th>Subido</th>
                                             <th>Tamano</th>
                                             <th style="width:160px;">Acciones</th>
@@ -625,39 +622,30 @@
                                         {
                                             <tr>
                                                 <td>
-                                                    @if (d.EsLibre && _docEditandoTipId == d.Id)
-                                                    {
-                                                        <div style="display:flex;gap:4px;align-items:center;">
-                                                            <select class="form-select form-select-sm" style="min-width:140px;" @bind="_docEditandoTipValor">
-                                                                <option value="">(sin tipologia)</option>
-                                                                @foreach (var t in _tipologiasArchivo)
-                                                                {
-                                                                    <option value="@t.Nombre">@t.Nombre</option>
-                                                                }
-                                                            </select>
-                                                            <button class="btn btn-success btn-sm" title="Guardar" @onclick="() => GuardarTipInlineAsync(d.Id)">&#10004;</button>
-                                                            <button class="btn btn-outline-secondary btn-sm" title="Cancelar" @onclick="CancelarTipInline">&#10008;</button>
-                                                        </div>
-                                                    }
-                                                    else
-                                                    {
-                                                        <span style="display:inline-flex;align-items:center;gap:6px;">
-                                                            @if (!string.IsNullOrWhiteSpace(d.Categoria))
-                                                            {
-                                                                <span class="pac-doc-cat">@d.Categoria</span>
-                                                            }
-                                                            else { <span class="text-muted">-</span> }
-                                                            @* Editable solo en documentos libres (Admision / firma del paciente); los
-                                                               anexos de historias clinicas o notas no se reclasifican. *@
-                                                            @if (d.EsLibre)
-                                                            {
-                                                                <button class="btn btn-link btn-sm p-0" title="Cambiar tipologia" @onclick="() => AbrirEditTipInline(d)">&#9998;</button>
-                                                            }
-                                                        </span>
-                                                    }
+                                                    <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                                                        @if (!string.IsNullOrWhiteSpace(d.Categoria))
+                                                        {
+                                                            <span class="pac-doc-cat">@d.Categoria</span>
+                                                        }
+                                                        else { <span class="text-muted">-</span> }
+                                                        @if (!string.IsNullOrWhiteSpace(d.Subcategoria))
+                                                        {
+                                                            <span class="pac-doc-cat pac-doc-subcat">@d.Subcategoria</span>
+                                                        }
+                                                        @* Editable solo en documentos libres (Admision / firma del paciente); los
+                                                           anexos de historias clinicas o notas no se reclasifican. *@
+                                                        @if (d.EsLibre)
+                                                        {
+                                                            <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo" @onclick="() => AbrirEditDoc(d)">&#9998;</button>
+                                                        }
+                                                    </span>
                                                 </td>
-                                                <td title="@d.Anotaciones">
+                                                <td>
                                                     <button class="btn btn-link p-0" style="text-align:left;" @onclick="() => AbrirVisorAsync(d)" title="Abrir visor">@d.NombreOriginal</button>
+                                                    @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                                                    {
+                                                        <div class="text-muted" style="font-size:11px;" title="Observacion">&#128221; @d.Anotaciones</div>
+                                                    }
                                                 </td>
                                                 <td>
                                                     @if (!string.IsNullOrWhiteSpace(d.CodigoNota))
@@ -674,6 +662,7 @@
                                                     }
                                                 </td>
                                                 <td>@(d.FechaNota?.ToString("dd/MM/yyyy") ?? "-")</td>
+                                                <td>@(d.FechaDocumento is DateTimeOffset fdoc ? fdoc.ToOffset(Bog).ToString("dd/MM/yyyy") : "-")</td>
                                                 <td>@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
                                                 <td>@FormatTam(d.Tamano)</td>
                                                 <td>
@@ -877,6 +866,53 @@
     </div>
 }
 
+@* ===== Modal de edicion de datos de un documento libre (tipologia, subcategoria, fecha, observacion) ===== *@
+@if (_docEdit is not null)
+{
+    <div class="doc-edit-backdrop" @onclick="CerrarEditDoc"></div>
+    <div class="doc-edit">
+        <div class="doc-edit-head">
+            <strong>Editar datos del archivo</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEditDoc">&times;</button>
+        </div>
+        <div class="doc-edit-name" title="@_docEdit.NombreOriginal">@_docEdit.NombreOriginal</div>
+        <div class="doc-edit-body">
+            <label class="doc-edit-lbl">Tipologia</label>
+            <select class="form-select form-select-sm" value="@_edTip" @onchange="OnEdTipChanged">
+                <option value="">(sin tipologia)</option>
+                @foreach (var t in _tipologiasArchivo)
+                {
+                    <option value="@t.Nombre">@t.Nombre</option>
+                }
+            </select>
+            @if (SubcatsDe(_edTip).Count > 0)
+            {
+                <label class="doc-edit-lbl">Subcategoria</label>
+                <select class="form-select form-select-sm" @bind="_edSubcat">
+                    <option value="">(sin subcategoria)</option>
+                    @foreach (var s in SubcatsDe(_edTip))
+                    {
+                        <option value="@s.Nombre">@s.Nombre</option>
+                    }
+                </select>
+            }
+            <label class="doc-edit-lbl">Fecha del documento</label>
+            <input type="date" class="form-control form-control-sm" @bind="_edFecha" />
+            <label class="doc-edit-lbl">Observacion</label>
+            <input type="text" class="form-control form-control-sm" @bind="_edObs"
+                   placeholder="Observacion del archivo" maxlength="500" />
+            @if (_docEditError is not null)
+            {
+                <div class="ase-alert" style="margin-top:8px;">@_docEditError</div>
+            }
+        </div>
+        <div class="doc-edit-acts">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEditDoc">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarEditDocAsync">Guardar</button>
+        </div>
+    </div>
+}
+
 <style>
     .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
     .pac-tab:disabled { opacity: .5; cursor: not-allowed; }
@@ -898,6 +934,15 @@
     .pac-docs-tbl { font-size: 12.5px; }
     .pac-docs-tbl thead th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; background: #f1f5f9; }
     .pac-doc-cat { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }
+    .pac-doc-subcat { background: #eef2ff; color: #4338ca; }
+    .pac-doc-obs { font-size: 11px; color: #334155; background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 3px 6px; border-radius: 4px; margin-top: 4px; word-break: break-word; }
+    .doc-edit-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1060; }
+    .doc-edit { position: fixed; z-index: 1061; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(460px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 16px 18px; }
+    .doc-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .doc-edit-name { font-size: 12.5px; font-weight: 600; color: #0f172a; word-break: break-word; margin-bottom: 10px; }
+    .doc-edit-body { display: flex; flex-direction: column; gap: 4px; }
+    .doc-edit-lbl { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; margin: 6px 0 0; }
+    .doc-edit-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .pac-doc-upload { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:14px; }
     /* Toolbar filtros + toggle Lista/Galeria (ADM4) */
     .pac-doc-toolbar { display:flex; justify-content:space-between; align-items:end; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
@@ -1207,8 +1252,12 @@
     private string _docFiltroTip = "";
     private DateTime? _docFiltroDesde;
     private DateTime? _docFiltroHasta;
-    private Guid? _docEditandoTipId;
-    private string _docEditandoTipValor = "";
+    // Modal de edicion de datos de un documento libre.
+    private DocumentoPacienteDto? _docEdit;
+    private string _edTip = "", _edSubcat = "", _edObs = "";
+    private DateOnly? _edFecha;
+    private string? _docEditError;
+    private static readonly TimeSpan Bog = TimeSpan.FromHours(-5);
 
     private List<DocumentoPacienteDto> FiltrarDocs(List<DocumentoPacienteDto> src)
     {
@@ -1238,28 +1287,56 @@
         _docFiltroHasta = null;
     }
 
-    private void AbrirEditTipInline(DocumentoPacienteDto d)
+    private void AbrirEditDoc(DocumentoPacienteDto d)
     {
-        _docEditandoTipId = d.Id;
-        _docEditandoTipValor = d.Categoria ?? "";
+        _docEdit = d;
+        _docEditError = null;
+        _edTip = d.Categoria ?? "";
+        _edSubcat = d.Subcategoria ?? "";
+        _edObs = d.Anotaciones ?? "";
+        _edFecha = d.FechaDocumento is DateTimeOffset fd ? DateOnly.FromDateTime(fd.ToOffset(Bog).DateTime) : null;
     }
 
-    private void CancelarTipInline()
+    private void CerrarEditDoc()
     {
-        _docEditandoTipId = null;
-        _docEditandoTipValor = "";
+        _docEdit = null;
+        _docEditError = null;
+        _edTip = _edSubcat = _edObs = "";
+        _edFecha = null;
     }
 
-    private async Task GuardarTipInlineAsync(Guid docId)
+    private void OnEdTipChanged(ChangeEventArgs e)
     {
+        _edTip = e.Value?.ToString() ?? "";
+        _edSubcat = ""; // al cambiar la tipologia, la subcategoria anterior ya no aplica
+    }
+
+    private IReadOnlyList<SubcategoriaArchivoDto> SubcatsDe(string? tipNombre)
+    {
+        if (string.IsNullOrWhiteSpace(tipNombre)) { return Array.Empty<SubcategoriaArchivoDto>(); }
+        var t = _tipologiasArchivo.FirstOrDefault(x => x.Nombre == tipNombre);
+        return t?.Subcategorias ?? (IReadOnlyList<SubcategoriaArchivoDto>)Array.Empty<SubcategoriaArchivoDto>();
+    }
+
+    private async Task GuardarEditDocAsync()
+    {
+        if (_docEdit is null) { return; }
+        _docEditError = null;
         try
         {
-            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _docEditandoTipValor, Guid.Empty);
-            _docEditandoTipId = null;
-            _docEditandoTipValor = "";
+            await NotaSvc.ActualizarDocumentoEditableAsync(
+                _docEdit.Id, _edTip, _edSubcat, _edObs, ParseFechaDoc(_edFecha), Guid.Empty);
+            CerrarEditDoc();
             await RecargarDocsPacienteAsync();
         }
-        catch (Exception ex) { _docUpError = "No se pudo cambiar la tipologia: " + ex.Message; }
+        catch (Exception ex) { _docEditError = ex.Message; }
+    }
+
+    /// <summary>Fecha (dia) -> DateTimeOffset a mediodia Bogota (evita saltos de dia por zona).</summary>
+    private static DateTimeOffset? ParseFechaDoc(DateOnly? d)
+    {
+        if (d is not DateOnly v) { return null; }
+        return new DateTimeOffset(v.Year, v.Month, v.Day, 12, 0, 0, Bog);
     }
 
     // ---- Helpers de tipo de archivo (visor + galeria) ----

@@ -48,6 +48,12 @@ public class NotaMedicaDocumento : TenantEntity
     /// no tiene subcategorias o no se eligio.</summary>
     public string? Subcategoria { get; set; }
 
+    /// <summary>Fecha efectiva del documento (editable). Se inicializa con la fecha de
+    /// atencion de la HC a la que pertenece (o la fecha de carga si no tiene HC) y el
+    /// operador puede corregirla. Distinta de <see cref="Visal.Domain.Common.BaseEntity.CreatedAt"/>,
+    /// que es el timestamp inmutable de carga.</summary>
+    public DateTimeOffset? FechaDocumento { get; set; }
+
     /// <summary>Tipo de terapia (snapshot del modulo).</summary>
     public string? TipoTerapia { get; set; }
 

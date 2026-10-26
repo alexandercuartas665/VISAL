@@ -6630,6 +6630,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
 
+                    b.Property<DateTimeOffset?>("FechaDocumento")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_documento");
+
                     b.Property<Guid?>("HistoriaClinicaId")
                         .HasColumnType("uuid")
                         .HasColumnName("historia_clinica_id");

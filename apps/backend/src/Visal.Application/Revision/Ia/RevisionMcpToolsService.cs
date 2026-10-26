@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
@@ -104,6 +105,10 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
                 Estado = h.Estado.ToString(),
                 h.FechaApertura,
                 h.FechaCierre,
+                // FechaAtencion = fecha REAL del servicio (sale del header "Ciudad y Fecha"); puede
+                // diferir de apertura/cierre, que son marcas administrativas. Es la fecha contra la
+                // que el agente debe validar la congruencia temporal (no contra apertura/cierre).
+                h.FechaAtencion,
                 h.EspecialistaNombre,
                 h.RipsViaIngresoCodigo,
                 h.RipsViaIngresoNombre,
@@ -266,7 +271,12 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
                 a.TipoServicio,
                 a.NombreServicio,
                 a.CodigoAutorizacion,
+                // CreatedAt = cuando se COORDINO/asigno el servicio; FechaInicio = inicio programado de
+                // la asignacion; MesVigencia = mes de vigencia. Sirven para la congruencia temporal:
+                // que la FechaAtencion de la HC caiga dentro de la vigencia/autorizacion del servicio.
                 a.CreatedAt,
+                a.FechaInicio,
+                a.MesVigencia,
                 a.FormatoHistoria,
                 a.PaqueteCodigo,
             })
@@ -300,23 +310,138 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         return JsonSerializer.Serialize(docs, JsonOpts);
     }
 
+    /// <summary>
+    /// Devuelve las CAPACIDADES del formato: su metadata + el CATALOGO DE CAMPOS que el formato
+    /// define, YA CRUZADO con los valores de esta HC (requerido + estado lleno/vacio + valor). Antes
+    /// se enviaba el SchemaJson crudo (verboso) y el agente tenia que cruzarlo el mismo con los
+    /// valores, lo que lo hacia exigir campos que el formato ni siquiera tiene. Ahora el alcance de
+    /// la auditoria de COMPLETITUD queda explicito y objetivo: estos y solo estos son los campos que
+    /// el formato captura.
+    /// </summary>
     private async Task<string?> GetFormDefinitionAsync(Guid hcId, CancellationToken ct)
     {
-        var fdId = await _db.HistoriasClinicas.AsNoTracking()
-            .Where(h => h.Id == hcId).Select(h => (Guid?)h.FormDefinitionId).FirstOrDefaultAsync(ct);
-        if (fdId is null) { return null; }
-        var fd = await _db.FormDefinitions.AsNoTracking()
-            .Where(f => f.Id == fdId)
-            .Select(f => new
-            {
-                f.Id,
-                f.Codigo,
-                f.Nombre,
-                f.Tipo,
-                f.Version,
-                f.SchemaJson,
-            })
+        var hc = await _db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == hcId)
+            .Select(h => new { h.FormDefinitionId, h.ValoresJson })
             .FirstOrDefaultAsync(ct);
-        return fd is null ? null : JsonSerializer.Serialize(fd, JsonOpts);
+        if (hc is null) { return null; }
+        var fd = await _db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Id == hc.FormDefinitionId)
+            .Select(f => new { f.Codigo, f.Nombre, f.Tipo, f.Version, f.SchemaJson })
+            .FirstOrDefaultAsync(ct);
+        if (fd is null) { return null; }
+
+        var cat = BuildCatalogo(fd.SchemaJson, hc.ValoresJson);
+        var requeridos = cat.Campos.Count(c => c.Requerido);
+        var requeridosVacios = cat.Campos.Count(c => c.Requerido && c.Estado == "vacio");
+        var llenos = cat.Campos.Count(c => c.Estado == "lleno");
+
+        var payload = new
+        {
+            formato = new { fd.Codigo, fd.Nombre, fd.Tipo, fd.Version },
+            nota = "Este formato captura EXACTAMENTE los campos listados en 'campos'. Evalua la "
+                 + "completitud SOLO contra estos campos; NO exijas datos que el formato no define.",
+            resumen = new
+            {
+                total = cat.Campos.Count,
+                requeridos,
+                requeridos_vacios = requeridosVacios,
+                llenos,
+                vacios = cat.Campos.Count - llenos,
+            },
+            // Fechas de atencion para el chequeo de congruencia temporal: la del HEADER ("Ciudad y
+            // Fecha") contra la(s) reportada(s) como atencion en el CUERPO (campos IsFechaAtencion).
+            fechas_atencion = new
+            {
+                nota = "Compara 'header' (fecha de atencion del encabezado 'Ciudad y Fecha') contra "
+                     + "'cuerpo' (fechas marcadas como fecha de atencion dentro de la HC). DEBEN "
+                     + "COINCIDIR; si difieren es un hallazgo de congruencia temporal. "
+                     + "FechaApertura/FechaCierre NO son la fecha de atencion.",
+                header = cat.HeaderFechas,
+                cuerpo = cat.CuerpoFechas,
+            },
+            campos = cat.Campos,
+        };
+        return JsonSerializer.Serialize(payload, JsonOpts);
+    }
+
+    private sealed record CampoCatalogo(string Campo, string? Name, string Tipo, bool Requerido, string Estado, string? Valor);
+    private sealed record FechaAtencionCampo(string Campo, string? Name, string? Valor);
+    private sealed record CatalogoResult(List<CampoCatalogo> Campos, List<FechaAtencionCampo> HeaderFechas, List<FechaAtencionCampo> CuerpoFechas);
+
+    /// <summary>Cataloga los campos de CAPTURA del formato (header + cuerpo, recursando secciones;
+    /// excluye bloques de texto estatico) cruzados con <paramref name="valoresJson"/> (lleno/vacio +
+    /// valor), y aparte identifica las FECHAS DE ATENCION: las del header (campo de cabecera cuyo
+    /// label contiene "fecha", mismo criterio que FechaAtencionHelper) y las del cuerpo (campos con
+    /// IsFechaAtencion=true), para que el agente las contraste. Firmas base64 colapsadas, valores
+    /// largos truncados.</summary>
+    private static CatalogoResult BuildCatalogo(string? schemaJson, string? valoresJson)
+    {
+        var campos = new List<CampoCatalogo>();
+        var headerFechas = new List<FechaAtencionCampo>();
+        var cuerpoFechas = new List<FechaAtencionCampo>();
+
+        Dictionary<string, string?> valores;
+        try
+        {
+            valores = string.IsNullOrWhiteSpace(valoresJson)
+                ? new Dictionary<string, string?>()
+                : (JsonSerializer.Deserialize<Dictionary<string, string?>>(valoresJson!) ?? new());
+        }
+        catch { valores = new Dictionary<string, string?>(); }
+
+        string? ValorDe(string key)
+        {
+            if (!valores.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw)) { return null; }
+            if (key.Contains("firma", StringComparison.OrdinalIgnoreCase)) { return "(firma registrada)"; }
+            var s = raw.Trim();
+            return s.Length > 300 ? s[..300] + "..." : s;
+        }
+
+        var schema = FormSchema.FromJson(schemaJson);
+
+        // Campos de cabecera (clave en valores = "hdr:{id}").
+        if (schema.Header?.Campos is { Count: > 0 } hcampos)
+        {
+            foreach (var c in hcampos)
+            {
+                if (string.IsNullOrWhiteSpace(c.Label)) { continue; }
+                var val = ValorDe("hdr:" + c.Id);
+                campos.Add(new CampoCatalogo(
+                    c.Label!, "hdr:" + c.Id, string.IsNullOrWhiteSpace(c.Tipo) ? "texto" : c.Tipo!,
+                    false, val is null ? "vacio" : "lleno", val));
+                // Fecha de atencion del header: campo de cabecera cuyo label contiene "fecha".
+                if (c.Label!.IndexOf("fecha", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    headerFechas.Add(new FechaAtencionCampo(c.Label!, "hdr:" + c.Id, val));
+                }
+            }
+        }
+
+        // Campos del cuerpo (recursando secciones; los bloques "text" son estaticos, no son campos).
+        void Recurse(IEnumerable<FormNode>? nodes)
+        {
+            if (nodes is null) { return; }
+            foreach (var n in nodes)
+            {
+                if (n.IsSection) { Recurse(n.Children); continue; }
+                if (n.IsText) { continue; }
+                if (string.IsNullOrWhiteSpace(n.Name)) { continue; }
+                var val = ValorDe(n.Name!);
+                var label = string.IsNullOrWhiteSpace(n.Label) ? n.Name! : n.Label!;
+                campos.Add(new CampoCatalogo(
+                    label, n.Name,
+                    string.IsNullOrWhiteSpace(n.FieldType) ? "text" : n.FieldType!,
+                    n.Required, val is null ? "vacio" : "lleno", val));
+                // Fecha de atencion reportada en el cuerpo: campos marcados IsFechaAtencion.
+                if (n.IsFechaAtencion)
+                {
+                    cuerpoFechas.Add(new FechaAtencionCampo(label, n.Name, val));
+                }
+            }
+        }
+        Recurse(schema.Children);
+
+        return new CatalogoResult(campos, headerFechas, cuerpoFechas);
     }
 }

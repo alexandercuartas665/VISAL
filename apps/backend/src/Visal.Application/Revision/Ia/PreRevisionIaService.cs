@@ -289,6 +289,24 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  y el problema puntual. Si Apruebas, puedes listar lo que validaste. Ordena los mas graves primero.");
         sb.AppendLine("- Se especifico y evita frases de relleno. La nota debe permitirle a un auditor humano entender");
         sb.AppendLine("  tu decision sin volver a leer toda la HC.");
+        sb.AppendLine("- ALCANCE SEGUN EL FORMATO (PRIORIDAD MAXIMA): la tool get_form_definition te entrega el");
+        sb.AppendLine("  CATALOGO DE CAMPOS que ESTE formato captura (con 'requerido' y 'estado' lleno/vacio). Evalua la");
+        sb.AppendLine("  COMPLETITUD unica y exclusivamente contra esos campos. NO exijas, NO reportes como faltante ni");
+        sb.AppendLine("  glosa ningun dato que el formato NO define como campo (por ejemplo, NO reclames signos vitales,");
+        sb.AppendLine("  antecedentes u otros datos si el formato no tiene ese campo). Cada formato define su propio alcance.");
+        sb.AppendLine("- Un campo ausente es hallazgo SOLO si el formato lo define y su 'estado' es 'vacio'; prioriza los");
+        sb.AppendLine("  campos marcados como 'requerido' que esten vacios. Un campo opcional vacio es, a lo sumo, una");
+        sb.AppendLine("  observacion menor, nunca un Rechazo por si solo.");
+        sb.AppendLine("- La coherencia/congruencia (entre diagnostico, ordenes, fechas y los datos que la HC SI tiene) se");
+        sb.AppendLine("  evalua normalmente. El formato acota la auditoria de COMPLETITUD, no la de congruencia.");
+        sb.AppendLine("- FECHAS DE ATENCION (chequeo temporal clave): compara la FECHA DE ATENCION DEL HEADER (campo");
+        sb.AppendLine("  'Ciudad y Fecha') contra la(s) FECHA(S) reportada(s) como atencion DENTRO del cuerpo de la HC.");
+        sb.AppendLine("  Las tienes YA SEPARADAS en get_form_definition -> 'fechas_atencion' ('header' vs 'cuerpo'). DEBEN");
+        sb.AppendLine("  COINCIDIR (misma fecha, y hora si ambas la traen). Si el header y el cuerpo reportan fechas de");
+        sb.AppendLine("  atencion DISTINTAS, es un HALLAZGO de congruencia temporal (no se puede determinar cuando se");
+        sb.AppendLine("  presto el servicio); si coinciden (o el cuerpo no tiene campo de fecha de atencion y solo esta la");
+        sb.AppendLine("  del header), NO es hallazgo. 'FechaApertura'/'FechaCierre' son marcas ADMINISTRATIVAS, NO la fecha");
+        sb.AppendLine("  de atencion, y NO se usan para este chequeo: que difieran de la fecha de atencion no es incongruencia.");
         sb.AppendLine("- Devuelve JSON puro. Nada de markdown, ni prefijos, ni sufijos, ni ```json```.");
         return sb.ToString();
     }

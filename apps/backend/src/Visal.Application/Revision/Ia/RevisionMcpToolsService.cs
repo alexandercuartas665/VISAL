@@ -105,9 +105,6 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
                 Estado = h.Estado.ToString(),
                 h.FechaApertura,
                 h.FechaCierre,
-                // FechaAtencion = fecha REAL del servicio (sale del header "Ciudad y Fecha"); puede
-                // diferir de apertura/cierre, que son marcas administrativas. Es la fecha contra la
-                // que el agente debe validar la congruencia temporal (no contra apertura/cierre).
                 h.FechaAtencion,
                 h.EspecialistaNombre,
                 h.RipsViaIngresoCodigo,
@@ -120,7 +117,34 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
             })
             .FirstOrDefaultAsync(ct);
         if (hc is null) { return null; }
-        return JsonSerializer.Serialize(hc, JsonOpts);
+
+        // Fechas con nombres AUTO-EXPLICATIVOS para que el agente NO confunda la fecha del servicio
+        // con las administrativas: la fecha de la atencion es SIEMPRE fecha_atencion_servicio;
+        // apertura/cierre son solo marcas del registro y NO son la fecha del servicio.
+        var payload = new
+        {
+            hc.Id,
+            hc.PacienteId,
+            hc.FormDefinitionId,
+            hc.Estado,
+            fechas = new
+            {
+                fecha_atencion_servicio = hc.FechaAtencion,   // LA fecha del servicio (usar SIEMPRE esta)
+                apertura_registro_admin = hc.FechaApertura,   // administrativa, NO es la atencion
+                cierre_registro_admin = hc.FechaCierre,       // administrativa, NO es la atencion
+                nota = "La fecha de la atencion/servicio es fecha_atencion_servicio. apertura/cierre son "
+                     + "marcas administrativas del registro, NO la fecha del servicio.",
+            },
+            hc.EspecialistaNombre,
+            hc.RipsViaIngresoCodigo,
+            hc.RipsViaIngresoNombre,
+            hc.RipsFinalidadCodigo,
+            hc.RipsFinalidadNombre,
+            hc.RipsCausaExternaCodigo,
+            hc.RipsCausaExternaNombre,
+            hc.ValoresJson,
+        };
+        return JsonSerializer.Serialize(payload, JsonOpts);
     }
 
     private async Task<string?> GetPacienteAsync(Guid hcId, CancellationToken ct)

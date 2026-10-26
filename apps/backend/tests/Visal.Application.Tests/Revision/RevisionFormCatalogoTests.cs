@@ -143,4 +143,47 @@ public sealed class RevisionFormCatalogoTests
         Assert.Equal("Fecha de atencion", cuerpo[0].GetProperty("Campo").GetString());
         Assert.Equal("2026-10-05", cuerpo[0].GetProperty("Valor").GetString());
     }
+
+    /// <summary>
+    /// get_historia_clinica debe entregar las fechas con nombres auto-explicativos: la del servicio
+    /// como 'fecha_atencion_servicio' (dentro de 'fechas') y apertura/cierre marcadas como
+    /// administrativas, para que el agente NO use el cierre como fecha del servicio.
+    /// </summary>
+    [Fact]
+    public async Task GetHistoriaClinica_FechasAutoExplicativas()
+    {
+        var opts = new DbContextOptionsBuilder<VisalDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var db = new VisalDbContext(opts, new FakeTenantContext { TenantId = Tenant });
+
+        var form = new FormDefinition { TenantId = Tenant, Codigo = "PP-FO-85_O", Nombre = "Evol", Tipo = "HC", SchemaJson = "{}" };
+        var paciente = new Paciente { TenantId = Tenant, NombreCompleto = "PAC", TipoDocumento = "CC", NumeroDocumento = "3" };
+        var hc = new HistoriaClinica
+        {
+            TenantId = Tenant, PacienteId = paciente.Id, FormDefinitionId = form.Id,
+            Estado = HistoriaClinicaEstado.Cerrada, ValoresJson = "{}",
+            FechaAtencion = new DateTimeOffset(2026, 9, 30, 8, 0, 0, TimeSpan.Zero),
+            FechaApertura = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero),
+            FechaCierre = new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero),
+        };
+        db.FormDefinitions.Add(form);
+        db.Pacientes.Add(paciente);
+        db.HistoriasClinicas.Add(hc);
+        await db.SaveChangesAsync();
+
+        var svc = new RevisionMcpToolsService(db);
+        var r = await svc.EjecutarToolAsync(RevisionMcpToolNames.GetHistoriaClinica, hc.Id, RevisionMcpToolNames.Todas, 30);
+        Assert.True(r.Ok);
+
+        using var doc = JsonDocument.Parse(r.JsonPayload!);
+        var root = doc.RootElement;
+        // No hay fechas hermanas crudas que confundan al modelo.
+        Assert.False(root.TryGetProperty("FechaAtencion", out _));
+        Assert.False(root.TryGetProperty("FechaCierre", out _));
+
+        var fechas = root.GetProperty("fechas");
+        Assert.Contains("2026-09-30", fechas.GetProperty("fecha_atencion_servicio").GetString());
+        Assert.Contains("2026-10-20", fechas.GetProperty("cierre_registro_admin").GetString());
+        Assert.Contains("2026-10-01", fechas.GetProperty("apertura_registro_admin").GetString());
+    }
 }

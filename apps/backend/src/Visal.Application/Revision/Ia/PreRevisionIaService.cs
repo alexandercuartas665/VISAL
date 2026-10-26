@@ -299,14 +299,17 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  observacion menor, nunca un Rechazo por si solo.");
         sb.AppendLine("- La coherencia/congruencia (entre diagnostico, ordenes, fechas y los datos que la HC SI tiene) se");
         sb.AppendLine("  evalua normalmente. El formato acota la auditoria de COMPLETITUD, no la de congruencia.");
-        sb.AppendLine("- FECHAS DE ATENCION (chequeo temporal clave): compara la FECHA DE ATENCION DEL HEADER (campo");
-        sb.AppendLine("  'Ciudad y Fecha') contra la(s) FECHA(S) reportada(s) como atencion DENTRO del cuerpo de la HC.");
-        sb.AppendLine("  Las tienes YA SEPARADAS en get_form_definition -> 'fechas_atencion' ('header' vs 'cuerpo'). DEBEN");
-        sb.AppendLine("  COINCIDIR (misma fecha, y hora si ambas la traen). Si el header y el cuerpo reportan fechas de");
-        sb.AppendLine("  atencion DISTINTAS, es un HALLAZGO de congruencia temporal (no se puede determinar cuando se");
-        sb.AppendLine("  presto el servicio); si coinciden (o el cuerpo no tiene campo de fecha de atencion y solo esta la");
-        sb.AppendLine("  del header), NO es hallazgo. 'FechaApertura'/'FechaCierre' son marcas ADMINISTRATIVAS, NO la fecha");
-        sb.AppendLine("  de atencion, y NO se usan para este chequeo: que difieran de la fecha de atencion no es incongruencia.");
+        sb.AppendLine("- FECHA DEL SERVICIO (regla dura): la fecha en que se presto el servicio es SIEMPRE");
+        sb.AppendLine("  'fechas.fecha_atencion_servicio' de get_historia_clinica (ya resuelta por el sistema). NUNCA uses");
+        sb.AppendLine("  'apertura_registro_admin' ni 'cierre_registro_admin' como fecha del servicio/atencion: son marcas");
+        sb.AppendLine("  administrativas del registro. Toda referencia a 'cuando se atendio / se presto el servicio' usa");
+        sb.AppendLine("  fecha_atencion_servicio, AUNQUE el cierre sea posterior o haya dias de diferencia (eso NO cambia");
+        sb.AppendLine("  la fecha del servicio, a lo sumo es una observacion administrativa).");
+        sb.AppendLine("- FECHAS DE ATENCION (chequeo de congruencia): compara la fecha de atencion del HEADER ('Ciudad y");
+        sb.AppendLine("  Fecha') contra la(s) reportada(s) como atencion en el CUERPO (campos marcados como fecha de");
+        sb.AppendLine("  atencion). Las tienes YA SEPARADAS en get_form_definition -> 'fechas_atencion' ('header' vs");
+        sb.AppendLine("  'cuerpo'). DEBEN COINCIDIR; si difieren es un HALLAZGO de congruencia temporal. Si coinciden (o");
+        sb.AppendLine("  el cuerpo no tiene campo de fecha de atencion), NO es hallazgo.");
         sb.AppendLine("- Devuelve JSON puro. Nada de markdown, ni prefijos, ni sufijos, ni ```json```.");
         return sb.ToString();
     }

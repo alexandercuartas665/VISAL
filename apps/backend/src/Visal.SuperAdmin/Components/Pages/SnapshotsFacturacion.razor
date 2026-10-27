@@ -111,6 +111,16 @@
             </select>
         </div>
         <div class="sn-f">
+            <label>Sede</label>
+            <select class="form-select form-select-sm" @bind="_filtroSede" @bind:after="CargarLista">
+                <option value="">(Todas)</option>
+                @foreach (var se in _sedesFiltro)
+                {
+                    <option value="@se.Id">@se.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="sn-f">
             <label>Fecha desde</label>
             <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" @bind:after="CargarLista" />
         </div>
@@ -141,6 +151,7 @@
                         <th>Nombre</th>
                         <th>Aseguradora</th>
                         <th>Usuario</th>
+                        <th>Sede</th>
                         <th>Tipo</th>
                         <th>Estado</th>
                         <th>Inicio</th>
@@ -172,6 +183,7 @@
                             </td>
                             <td>@(s.AseguradoraNombre ?? "-")</td>
                             <td class="sn-truncate" title="@s.CreadoPorNombre">@(s.CreadoPorNombre ?? "-")</td>
+                            <td class="sn-truncate" title="@s.SedeDetalle">@(s.SedeNombre ?? "-")</td>
                             <td><span class="sn-tag">@s.Tipo</span></td>
                             <td>
                                 <span class="sn-estado sn-estado-@(s.Estado.ToString().ToLower())">@s.Estado</span>
@@ -190,41 +202,10 @@
                                 <td class="sn-mono">@(s.FechaArchivado?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
                             }
                             <td class="sn-td-acc">
-                                <button class="btn btn-outline-primary btn-sm"
-                                        disabled="@(s.Estado != EstadoSnapshot.Vigente && s.Estado != EstadoSnapshot.Archivado && s.Estado != EstadoSnapshot.Facturado)"
-                                        @onclick="() => AbrirVer(s.Id)" title="Ver contenido del snapshot">Ver</button>
-                                <button class="btn btn-outline-warning btn-sm ms-1"
-                                        disabled="@(_regenerandoId is not null)"
-                                        @onclick="() => Regenerar(s.Id)"
-                                        title="Crea un snapshot NUEVO con los MISMOS parametros (EPS, fechas, sucursales, pacientes y opciones) de este. Util para recoger cambios recientes sin volver a digitar los filtros. No modifica este snapshot.">
-                                    @(_regenerandoId == s.Id ? "Regenerando..." : "Regenerar")
+                                <button class="btn btn-outline-secondary btn-sm sn-menu-btn"
+                                        @onclick="(e) => ToggleMenu(s.Id, e)" title="Acciones del snapshot">
+                                    Acciones <span class="sn-caret">&#9662;</span>
                                 </button>
-                                @if (s.Estado == EstadoSnapshot.Vigente || s.Estado == EstadoSnapshot.Archivado || s.Estado == EstadoSnapshot.Facturado)
-                                {
-                                    <a class="btn btn-outline-success btn-sm ms-1"
-                                       href="@($"/facturacion-clinica/snapshots/{s.Id}/download?formato=xlsx")"
-                                       target="_blank" rel="noopener"
-                                       title="Descargar Excel">xlsx</a>
-                                    <a class="btn btn-outline-secondary btn-sm ms-1"
-                                       href="@($"/facturacion-clinica/snapshots/{s.Id}/download?formato=csv")"
-                                       target="_blank" rel="noopener"
-                                       title="Descargar CSV">csv</a>
-                                }
-                                @if (_tab == Tab.Vigentes && s.Estado == EstadoSnapshot.Vigente)
-                                {
-                                    <button class="btn btn-outline-info btn-sm ms-1"
-                                            disabled="@(_completandoId == s.Id)"
-                                            @onclick="() => CompletarCodigos(s.Id)"
-                                            title="Completa las columnas HC N° y Cod. Asignacion en snapshots generados antes de que existieran (reconstruye con los mismos filtros y verifica fila por fila).">
-                                        @(_completandoId == s.Id ? "Completando..." : "Completar códigos")
-                                    </button>
-                                }
-                                @if (_tab == Tab.Vigentes && s.Estado == EstadoSnapshot.Vigente && _puedeArchivar)
-                                {
-                                    <button class="btn btn-outline-danger btn-sm ms-1"
-                                            @onclick="() => AbrirArchivar(s.Id, s.Nombre)"
-                                            title="Archivar con motivo">Archivar</button>
-                                }
                             </td>
                         </tr>
                     }
@@ -233,6 +214,60 @@
         </div>
     }
 </div>
+
+@* Menu de acciones por fila. Se renderiza UNA sola vez a nivel de pagina con
+   position:fixed anclado a las coordenadas del clic, para que NO lo recorte el
+   overflow:auto de la tabla. _menuAbiertoId define la fila; buscamos su DTO en _lista. *@
+@if (_menuAbiertoId is Guid menuId)
+{
+    var sm = _lista.FirstOrDefault(x => x.Id == menuId);
+    if (sm is not null)
+    {
+        // Ancla el menu a la izquierda del clic (su ancho = 220) y 6px abajo, sin
+        // usar transform (que promueve a capa de compositor y a veces no entra en capturas).
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var leftPx = Math.Max(8d, _menuX - 220d);
+        var topPx = _menuY + 6d;
+        <div class="sn-menu-backdrop" @onclick="CerrarMenu"></div>
+        <div class="sn-menu" style="@($"left:{leftPx.ToString(ci)}px; top:{topPx.ToString(ci)}px;")">
+            <button class="sn-menu-item"
+                    disabled="@(sm.Estado != EstadoSnapshot.Vigente && sm.Estado != EstadoSnapshot.Archivado && sm.Estado != EstadoSnapshot.Facturado)"
+                    @onclick="async () => { CerrarMenu(); await AbrirVer(sm.Id); }">Ver contenido</button>
+            <button class="sn-menu-item"
+                    disabled="@(_regenerandoId is not null)"
+                    title="Crea un snapshot NUEVO con los MISMOS parametros (EPS, fechas, sucursales, pacientes y opciones) de este. Util para recoger cambios recientes sin volver a digitar los filtros. No modifica este snapshot."
+                    @onclick="async () => { CerrarMenu(); await Regenerar(sm.Id); }">
+                @(_regenerandoId == sm.Id ? "Regenerando..." : "Regenerar")
+            </button>
+            @if (sm.Estado == EstadoSnapshot.Vigente || sm.Estado == EstadoSnapshot.Archivado || sm.Estado == EstadoSnapshot.Facturado)
+            {
+                <a class="sn-menu-item"
+                   href="@($"/facturacion-clinica/snapshots/{sm.Id}/download?formato=xlsx")"
+                   target="_blank" rel="noopener"
+                   @onclick="CerrarMenu">Descargar Excel (xlsx)</a>
+                <a class="sn-menu-item"
+                   href="@($"/facturacion-clinica/snapshots/{sm.Id}/download?formato=csv")"
+                   target="_blank" rel="noopener"
+                   @onclick="CerrarMenu">Descargar CSV</a>
+            }
+            @if (_tab == Tab.Vigentes && sm.Estado == EstadoSnapshot.Vigente)
+            {
+                <button class="sn-menu-item"
+                        disabled="@(_completandoId == sm.Id)"
+                        title="Completa las columnas HC N° y Cod. Asignacion en snapshots generados antes de que existieran (reconstruye con los mismos filtros y verifica fila por fila)."
+                        @onclick="async () => { CerrarMenu(); await CompletarCodigos(sm.Id); }">
+                    @(_completandoId == sm.Id ? "Completando..." : "Completar códigos")
+                </button>
+            }
+            @if (_tab == Tab.Vigentes && sm.Estado == EstadoSnapshot.Vigente && _puedeArchivar)
+            {
+                <div class="sn-menu-sep"></div>
+                <button class="sn-menu-item sn-menu-item-danger"
+                        @onclick="() => { CerrarMenu(); AbrirArchivar(sm.Id, sm.Nombre); }">Archivar o facturar</button>
+            }
+        </div>
+    }
+}
 
 @* ============ Modal + Nuevo snapshot ============ *@
 @if (_showNuevo)
@@ -1176,6 +1211,24 @@
     .sn-radio { display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer; padding:6px 8px; border:1px solid #e2e8f0; border-radius:8px; }
     .sn-radio input { margin-top:2px; }
 
+    /* Menu de acciones por fila (kebab/dropdown). Reemplaza la botonera inline.
+       Se posiciona fixed en las coordenadas del clic y crece hacia la izquierda/abajo
+       (transform) para no salirse por el borde derecho ni recortarse por el overflow. */
+    .sn-menu-btn { white-space:nowrap; }
+    .sn-caret { font-size:10px; margin-left:2px; }
+    .sn-menu-backdrop { position:fixed; inset:0; z-index:1040; background:transparent; }
+    .sn-menu { position:fixed; z-index:1050; width:220px;
+               background:#fff; border:1px solid #e2e8f0; border-radius:10px;
+               box-shadow:0 8px 24px rgba(15,23,42,.14); padding:6px; display:flex; flex-direction:column; }
+    .sn-menu-item { display:block; width:100%; text-align:left; background:transparent; border:0;
+                    padding:8px 10px; border-radius:6px; font-size:13px; color:#1e293b; cursor:pointer;
+                    text-decoration:none; white-space:nowrap; }
+    .sn-menu-item:hover:not([disabled]) { background:#f1f5f9; }
+    .sn-menu-item[disabled] { color:#cbd5e1; cursor:not-allowed; }
+    .sn-menu-item-danger { color:#b91c1c; }
+    .sn-menu-item-danger:hover:not([disabled]) { background:#fef2f2; }
+    .sn-menu-sep { height:1px; background:#e2e8f0; margin:4px 2px; }
+
     /* Modal */
     .sn-modal-back { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:1050; display:flex; align-items:center; justify-content:center; padding:16px; }
     .sn-modal { background:white; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,0.3); display:flex; flex-direction:column; width:100%; overflow:hidden; }
@@ -1426,11 +1479,29 @@
     private string _filtroTipo = "";
     private string _filtroAseguradora = "";
     private string _filtroUsuario = "";
+    private string _filtroSede = "";
     private DateOnly? _filtroDesde;
     private DateOnly? _filtroHasta;
     // Usuarios creadores (distinct) para el dropdown de filtro. Se arma de la lista
     // completa (vigentes + archivados) en CargarLista.
     private List<(Guid Id, string Nombre)> _usuariosFiltro = new();
+    // Sedes (sucursales) para el dropdown de filtro. Se cargan una sola vez.
+    private List<SucursalDto> _sedesFiltro = new();
+    // Fila cuyo menu de acciones esta abierto (null = ninguno). Solo uno a la vez.
+    // El menu se posiciona fixed en estas coordenadas (del clic en el boton) para
+    // escapar del overflow:auto de la tabla.
+    private Guid? _menuAbiertoId;
+    private double _menuX;
+    private double _menuY;
+
+    private void ToggleMenu(Guid id, Microsoft.AspNetCore.Components.Web.MouseEventArgs e)
+    {
+        if (_menuAbiertoId == id) { _menuAbiertoId = null; return; }
+        _menuX = e.ClientX;
+        _menuY = e.ClientY;
+        _menuAbiertoId = id;
+    }
+    private void CerrarMenu() => _menuAbiertoId = null;
 
     // Modal Nuevo.
     private bool _showNuevo;
@@ -1742,7 +1813,15 @@
             if (!string.IsNullOrWhiteSpace(_filtroAseguradora) && Guid.TryParse(_filtroAseguradora, out var af)) { asegFiltro = af; }
             Guid? usuarioFiltro = null;
             if (!string.IsNullOrWhiteSpace(_filtroUsuario) && Guid.TryParse(_filtroUsuario, out var uf)) { usuarioFiltro = uf; }
-            var filtros = new FiltrosListaSnapshotDto(usuarioFiltro, _filtroDesde, _filtroHasta, asegFiltro);
+            Guid? sedeFiltro = null;
+            if (!string.IsNullOrWhiteSpace(_filtroSede) && Guid.TryParse(_filtroSede, out var sf)) { sedeFiltro = sf; }
+            // Catalogo de sedes para el dropdown (una sola vez; incluye inactivas por si
+            // algun snapshot referencia una sede ya desactivada).
+            if (_sedesFiltro.Count == 0)
+            {
+                _sedesFiltro = (await SucSvc.ListAsync(soloActivas: false)).OrderBy(s => s.Nombre).ToList();
+            }
+            var filtros = new FiltrosListaSnapshotDto(usuarioFiltro, _filtroDesde, _filtroHasta, asegFiltro, sedeFiltro);
             _lista = (await Svc.ListarAsync(estado, tipo, filtros)).ToList();
 
             // Refrescamos los contadores de los tres tabs.

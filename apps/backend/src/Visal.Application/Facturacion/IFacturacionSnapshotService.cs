@@ -19,7 +19,12 @@ public sealed record FiltrosListaSnapshotDto(
     Guid? UsuarioId = null,
     DateOnly? FechaInicio = null,
     DateOnly? FechaFin = null,
-    Guid? AseguradoraId = null);
+    Guid? AseguradoraId = null,
+    // Sede (sucursal) por la que se filtra. Como la sede del snapshot es derivada
+    // de FiltrosJson.sucursalIds (no una columna), el filtro se aplica en memoria:
+    // pasan los snapshots cuyas sucursales incluyen esta, y tambien los de "Todas"
+    // (sin sucursales, que cubren cualquier sede).
+    Guid? SucursalId = null);
 
 /// <summary>Fila del listado.</summary>
 public sealed record FacturacionSnapshotDto(
@@ -41,7 +46,12 @@ public sealed record FacturacionSnapshotDto(
     string? VersionApp = null,
     // Nombre/email del usuario que creo el snapshot (resuelto de CreadoPor via
     // tenant_users). Null si no se pudo resolver.
-    string? CreadoPorNombre = null);
+    string? CreadoPorNombre = null,
+    // Sede(s) del snapshot, derivadas de FiltrosJson.sucursalIds. SedeNombre = texto
+    // corto para la columna ("Todas" / nombre unico / "Varias (N)"); SedeDetalle =
+    // lista completa de nombres para el tooltip.
+    string? SedeNombre = null,
+    string? SedeDetalle = null);
 
 /// <summary>Vista detallada de un snapshot (metadata + columnas del builder).</summary>
 public sealed record FacturacionSnapshotDetalleDto(

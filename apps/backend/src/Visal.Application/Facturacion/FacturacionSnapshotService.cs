@@ -264,10 +264,36 @@ public sealed class FacturacionSnapshotService(
                 creadores[pu.Id] = NombreUsuario(pu.DisplayName, pu.PrimerNombre, pu.SegundoNombre, pu.PrimerApellido, pu.SegundoApellido, pu.Username, pu.Email);
             }
         }
-        return rows.Select(r => Map(
-            r,
-            r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null,
-            r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var em) ? em : null)).ToList();
+        // SEDE(S) del snapshot: derivadas de FiltrosJson.sucursalIds (las sucursales
+        // que se eligieron al generar). Vacio = "Todas". Se resuelven los nombres en
+        // bloque desde db.Sucursales (incluye inactivas, por si una sede quedo desactivada).
+        var sedeIdsPorRow = rows.ToDictionary(r => r.Id, r => ExtraerSucursalIdsDeFiltros(r.FiltrosJson));
+        var allSedeIds = sedeIdsPorRow.Values.SelectMany(x => x).Distinct().ToList();
+        var sedeNombres = allSedeIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Sucursales.AsNoTracking()
+                .Where(su => allSedeIds.Contains(su.Id))
+                .ToDictionaryAsync(su => su.Id, su => su.Nombre, ct);
+
+        // Filtro por sede (derivado, en memoria): pasan los snapshots que incluyen esa
+        // sede; los de "Todas" (sin sucursales) cubren cualquier sede y tambien pasan.
+        if (filtros?.SucursalId is Guid sedeFiltro)
+        {
+            rows = rows.Where(r =>
+            {
+                var ids = sedeIdsPorRow[r.Id];
+                return ids.Count == 0 || ids.Contains(sedeFiltro);
+            }).ToList();
+        }
+        return rows.Select(r =>
+        {
+            var (sedeNom, sedeDet) = DescribirSedes(sedeIdsPorRow[r.Id], sedeNombres);
+            return Map(
+                r,
+                r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null,
+                r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var em) ? em : null,
+                sedeNom, sedeDet);
+        }).ToList();
     }
 
     public async Task<FacturacionSnapshotDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
@@ -696,11 +722,46 @@ public sealed class FacturacionSnapshotService(
             .ToListAsync(ct);
     }
 
-    private static FacturacionSnapshotDto Map(FacturacionSnapshot x, string? aseguradoraNombre = null, string? creadoPorNombre = null) => new(
+    private static FacturacionSnapshotDto Map(FacturacionSnapshot x, string? aseguradoraNombre = null, string? creadoPorNombre = null, string? sedeNombre = null, string? sedeDetalle = null) => new(
         x.Id, x.Nombre, x.Tipo, x.Estado,
         x.FechaEjecucionInicio, x.FechaEjecucionFin, x.DuracionMs, x.TotalFilas,
         x.CreatedBy, x.ArchivadoPor, x.MotivoArchivado, x.FechaArchivado, x.ErrorMensaje,
-        x.AseguradoraId, aseguradoraNombre, x.VersionApp, creadoPorNombre);
+        x.AseguradoraId, aseguradoraNombre, x.VersionApp, creadoPorNombre, sedeNombre, sedeDetalle);
+
+    /// <summary>
+    /// Extrae la lista de <c>sucursalIds</c> del JSON de filtros. Lista vacia si el
+    /// filtro no trae el campo, esta vacio o no es parseable (= "Todas las sedes").
+    /// </summary>
+    private static List<Guid> ExtraerSucursalIdsDeFiltros(string? filtrosJson)
+    {
+        var res = new List<Guid>();
+        if (string.IsNullOrWhiteSpace(filtrosJson)) { return res; }
+        try
+        {
+            using var doc = JsonDocument.Parse(filtrosJson);
+            if (doc.RootElement.TryGetProperty("sucursalIds", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray())
+                {
+                    if (el.ValueKind == JsonValueKind.String && Guid.TryParse(el.GetString(), out var g)) { res.Add(g); }
+                }
+            }
+        }
+        catch { /* filtros mal formados -> lista vacia (= Todas) */ }
+        return res;
+    }
+
+    /// <summary>
+    /// Texto para la columna/tooltip de Sede: sin sedes = "Todas"; una = su nombre;
+    /// varias = "Varias (N)" con el detalle completo para el tooltip.
+    /// </summary>
+    private static (string nombre, string detalle) DescribirSedes(IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, string> nombres)
+    {
+        if (ids.Count == 0) { return ("Todas", "Todas las sedes"); }
+        var resueltos = ids.Select(id => nombres.TryGetValue(id, out var n) ? n : "(sede desconocida)").ToList();
+        if (ids.Count == 1) { return (resueltos[0], resueltos[0]); }
+        return ($"Varias ({ids.Count})", string.Join(", ", resueltos));
+    }
 
     /// <summary>
     /// Extrae <c>aseguradoraId</c> del JSON de filtros para poder guardarlo en

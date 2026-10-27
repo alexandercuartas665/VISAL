@@ -73,7 +73,8 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         // (primeros 8 hex) para conciliar contra el modulo Ordenes.
         "HC N°",                                      // 43  Id de la Historia Clinica (8 hex)
         "Cód. Asignación",                            // 44  LoteId de la asignacion (8 hex)
-        "Cód. Paquete"                                // 45  Codigo del paquete con el que se presto el servicio
+        "Cód. Paquete",                               // 45  Codigo del paquete con el que se presto el servicio
+        "Autorizacion con archivo"                    // 46  SI/NO: el numero de autorizacion tiene PDF guardado
     };
 
     /// <summary>
@@ -115,6 +116,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["HC N°"]                                   = "Consecutivo publico de la Historia Clinica (HC-000123). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
         ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
         ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo), sin el sufijo de modalidad d/f. Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. Cada paquete agrega ademas una LINEA PRIMARIA (cabecera) con CUPS=codigo de paquete, descripcion=nombre del paquete y valor=valor pactado; sus HC de detalle van con valor 0. No forma parte del template EPS.",
+        ["Autorizacion con archivo"]                = "SI/NO: indica si el numero de autorizacion de la fila tiene un PDF de autorizacion guardado en la asignacion (Asignacion.PdfAutorizacionUrl). Es la MISMA condicion que usa el archivo AUTOTIZACIONES de Cuenta Medica: SI => ese numero aportara un PDF al ZIP; NO => no hay archivo cargado para esa autorizacion. Vacio cuando la fila no trae numero de autorizacion. No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -196,6 +198,12 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Cód. Asignación"] = h.AsignacionConsecutivo is long _ac         // 44 — consecutivo por servicio
                 ? CodigoPublico.Asignacion(_ac) : null,
             ["Cód. Paquete"] = h.PaqueteCodigo,                               // 45 — codigo del paquete con el que se presto el servicio
+            // 46 — SI/NO si el numero de autorizacion tiene PDF guardado. Vacio si la fila
+            // no trae numero de autorizacion (nada que respaldar). Predice si ese numero
+            // aportara un archivo al ZIP de AUTOTIZACIONES de Cuenta Medica.
+            ["Autorizacion con archivo"] = NormalizarAutorizacion(h.CodigoAutorizacion) is null
+                ? null
+                : (h.AutorizacionTieneArchivo ? "SI" : "NO"),
         };
     }
 

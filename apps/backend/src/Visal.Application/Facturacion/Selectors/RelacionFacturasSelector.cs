@@ -455,7 +455,10 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 AsignacionConsecutivo: asigRelevante?.Consecutivo,
                 // Codigo del paquete SIN sufijo de modalidad d/f (listo para mostrar/CUPS).
                 PaqueteCodigo: ServicioCodigo.Base(asigRelevante?.PaqueteCodigo),
-                PaqueteInstanciaId: paqueteInstancia));
+                PaqueteInstanciaId: paqueteInstancia,
+                // SI/NO si el numero de autorizacion tiene PDF guardado en la asignacion
+                // (misma condicion que usa el ZIP de AUTOTIZACIONES para incluir el archivo).
+                AutorizacionTieneArchivo: !string.IsNullOrWhiteSpace(asigRelevante?.PdfAutorizacionUrl)));
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────

@@ -99,4 +99,10 @@ public sealed record RelacionFacturasHecho(
     /// codigo externo = codigo del paquete (sin sufijo), la descripcion = nombre del paquete
     /// y el valor = valor pactado del paquete; el resto de campos se clona de la primera HC
     /// del paquete. Las lineas de detalle (las HC individuales) van con valor 0.</summary>
-    bool EsLineaPaquetePrimaria = false);
+    bool EsLineaPaquetePrimaria = false,
+    /// <summary>True si la asignacion de este hecho tiene un PDF de autorizacion guardado
+    /// (Asignacion.PdfAutorizacionUrl no vacio). Refleja exactamente la condicion que usa el
+    /// generador del archivo AUTOTIZACIONES de Cuenta Medica: predice si ese numero de
+    /// autorizacion aportara un PDF al ZIP. Se muestra como SI/NO en la columna
+    /// "Autorizacion con archivo"; vacio cuando la fila no tiene numero de autorizacion.</summary>
+    bool AutorizacionTieneArchivo = false);

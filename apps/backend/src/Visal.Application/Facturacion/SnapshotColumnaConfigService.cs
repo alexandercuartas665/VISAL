@@ -153,6 +153,34 @@ public sealed class SnapshotColumnaConfigService(
         return salida;
     }
 
+    public async Task<IReadOnlyList<string>> ObtenerOrdenAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default)
+    {
+        if (columnasCanonicas.Count == 0) { return columnasCanonicas; }
+
+        var overrides = await db.FacturacionSnapshotColumnaConfigs.AsNoTracking()
+            .Where(c => c.Tipo == tipo)
+            .ToDictionaryAsync(c => c.ColumnaOriginal, ct);
+
+        // Sin config del tenant -> orden natural del builder (sin cambios).
+        if (overrides.Count == 0) { return columnasCanonicas; }
+
+        // Mismo criterio de orden que el export (ObtenerParaExportAsync), PERO
+        // sin ocultar ni renombrar: el "Ver" muestra todas las columnas con su
+        // nombre canonico. Overrides por Orden; columnas sin override al final.
+        var conOverride = new List<(string Col, int Orden)>();
+        var sinOverride = new List<string>();
+        foreach (var col in columnasCanonicas)
+        {
+            if (overrides.TryGetValue(col, out var ov)) { conOverride.Add((col, ov.Orden)); }
+            else { sinOverride.Add(col); }
+        }
+
+        var salida = new List<string>(columnasCanonicas.Count);
+        salida.AddRange(conOverride.OrderBy(x => x.Orden).Select(x => x.Col));
+        salida.AddRange(sinOverride);
+        return salida;
+    }
+
     private IReadOnlyList<string> ColumnasCanonicas(TipoSnapshot tipo)
     {
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == tipo);

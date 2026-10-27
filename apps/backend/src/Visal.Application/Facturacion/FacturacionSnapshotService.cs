@@ -272,7 +272,11 @@ public sealed class FacturacionSnapshotService(
         var snap = await db.FacturacionSnapshots.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (snap is null) { return null; }
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == snap.Tipo);
-        var columnas = builder?.Columnas ?? Array.Empty<string>();
+        // El "Ver" muestra las columnas en el MISMO orden configurado por el
+        // tenant en "Configurar columnas" (igual que el archivo exportado). Sin
+        // config, queda el orden natural del builder.
+        var columnasCanonicas = builder?.Columnas ?? Array.Empty<string>();
+        var columnas = await columnaConfig.ObtenerOrdenAsync(snap.Tipo, columnasCanonicas, ct);
         string? asegNombre = null;
         if (snap.AseguradoraId is Guid aid)
         {

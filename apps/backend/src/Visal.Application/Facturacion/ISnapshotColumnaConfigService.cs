@@ -40,6 +40,17 @@ public interface ISnapshotColumnaConfigService
     /// original). Optimiza el caso comun de descarga sin cargar entities.
     /// </summary>
     Task<IReadOnlyList<ColumnaExportInfo>> ObtenerParaExportAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default);
+
+    /// <summary>
+    /// Devuelve las columnas canonicas REORDENADAS segun la preferencia del
+    /// tenant (mismo criterio que el export: overrides por Orden ascendente,
+    /// columnas sin override al final en orden natural del builder). A
+    /// diferencia del export, NO oculta columnas ni aplica alias: la vista
+    /// "Ver" es la grilla de trabajo y necesita todas las columnas con su
+    /// nombre canonico (se usa como clave de los datos). Si el tenant no
+    /// configuro nada, devuelve <paramref name="columnasCanonicas"/> tal cual.
+    /// </summary>
+    Task<IReadOnlyList<string>> ObtenerOrdenAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default);
 }
 
 /// <summary>DTO expuesto a la UI para editar y persistir el override del tenant.</summary>

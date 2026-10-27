@@ -49,6 +49,8 @@ public sealed class FacturacionSnapshotServiceTests
         public Task ResetAsync(TipoSnapshot tipo, Guid actorUserId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<ColumnaExportInfo>> ObtenerParaExportAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ColumnaExportInfo>>(columnasCanonicas.Select(c => new ColumnaExportInfo(c, c)).ToArray());
+        public Task<IReadOnlyList<string>> ObtenerOrdenAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default)
+            => Task.FromResult(columnasCanonicas);
     }
 
     [Fact]

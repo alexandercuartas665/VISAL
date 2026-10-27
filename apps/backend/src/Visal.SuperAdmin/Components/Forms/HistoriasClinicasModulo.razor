@@ -253,8 +253,14 @@
         <div class="ase-card">
             <div class="hc-actions">
                 <button class="btn btn-primary btn-sm" @onclick="IniciarHistoria"
-                        disabled="@(_formatoForzadoId is null && string.IsNullOrEmpty(_filFormato))"
-                        title="@(_formatoForzadoId is not null ? $"Inicia historia con formato {_formatoForzadoNombre}" : "Selecciona un formato del filtro o abre desde un servicio asignado")">
+                        disabled="@(EnContextoServicio ? _formatoForzadoId is null : string.IsNullOrEmpty(_filFormato))"
+                        title="@(EnContextoServicio
+                            ? (_formatoForzadoId is not null
+                                ? $"Inicia historia con el formato del servicio: {_formatoForzadoNombre}"
+                                : "El servicio no tiene un formato de historia valido configurado")
+                            : (string.IsNullOrEmpty(_filFormato)
+                                ? "Selecciona un formato del filtro"
+                                : "Inicia historia con el formato seleccionado en el filtro"))">
                     &#128221; Iniciar historia medica
                 </button>
                 <button class="btn btn-outline-success btn-sm" disabled="@(_schemaActual is null)" @onclick="Imprimir" title="Abrir vista documento en nueva pestana para imprimir o guardar PDF">&#128424; Imprimir</button>
@@ -1230,6 +1236,15 @@
     private Guid? _formatoForzadoId;
     private string? _formatoForzadoNombre;
     private string _busqueda = "";
+
+    // El modal se abrio desde un servicio/sesion de /atencion (no el historial
+    // generico) sii nos pasaron el contexto de sesion o un codigo de formato de
+    // servicio. En ese contexto el formato lo define SIEMPRE el servicio (formato
+    // forzado): el dropdown de formato es solo para NAVEGAR el historial y en
+    // ningun caso define que formato se crea. Fuera de este contexto (historial
+    // generico, sin sesion) el filtro gobierna.
+    private bool EnContextoServicio
+        => AsignacionTurnoId is not null || !string.IsNullOrWhiteSpace(FormatoForzadoCodigo);
 
     private readonly string[] _tabs = new[] {
         "Historial", "Escalas", "Evoluciones", "Consentimientos", "Atenciones",
@@ -2323,15 +2338,30 @@
 
     private async Task IniciarHistoria()
     {
-        // Prioridad: 1) si el usuario eligio EXPLICITAMENTE un formato en el
-        //               filtro (dropdown), ese gana. Permite aplicar escalas o
-        //               formatos secundarios sobre el mismo servicio.
-        //            2) si no, el formato forzado por el servicio asignado
-        //               (Atencion).
-        // Si no hay ninguno, nada que iniciar.
+        // Regla de formato al CREAR una HC:
+        //  - En contexto de servicio (/atencion): el formato FORZADO del servicio
+        //    gana SIEMPRE (ya trae resuelta la evolucion/puente). El dropdown de
+        //    formato es solo navegacion del historial; en ningun caso define el
+        //    formato a crear. Si el servicio no resolvio un formato valido, NO se
+        //    crea (no se cae al filtro): hay que corregir la config del servicio.
+        //    Esto evita que, teniendo otro formato seleccionado en el filtro, se
+        //    cree y vincule a la sesion una HC de un formato ajeno al servicio.
+        //  - Fuera de contexto de servicio (historial generico, sin sesion): el
+        //    formato elegido en el filtro gobierna.
         Guid fid;
-        if (Guid.TryParse(_filFormato, out var fidFiltro)) { fid = fidFiltro; }
-        else if (_formatoForzadoId is Guid forzado) { fid = forzado; }
+        if (EnContextoServicio)
+        {
+            if (_formatoForzadoId is not Guid forzado)
+            {
+                await JS.InvokeVoidAsync("alert",
+                    "Este servicio no tiene un formato de historia valido configurado, "
+                    + "asi que no se puede iniciar la historia desde aqui. Revisa el "
+                    + "formato de historia del servicio en su configuracion.");
+                return;
+            }
+            fid = forzado;
+        }
+        else if (Guid.TryParse(_filFormato, out var fidFiltro)) { fid = fidFiltro; }
         else { return; }
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
 

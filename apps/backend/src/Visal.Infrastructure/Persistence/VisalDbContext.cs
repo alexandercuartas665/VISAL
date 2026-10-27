@@ -1244,7 +1244,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
 
         modelBuilder.Entity<ContratoAseguradora>(b =>
         {
-            b.Property(x => x.CodigoContrato).HasMaxLength(60).IsRequired();
+            b.Property(x => x.CodigoContrato).HasMaxLength(250).IsRequired();
             b.Property(x => x.Estado).HasMaxLength(20).IsRequired();
             b.Property(x => x.Cucon).HasMaxLength(256);
             b.Property(x => x.TipoContrato).HasConversion<string?>().HasMaxLength(20);

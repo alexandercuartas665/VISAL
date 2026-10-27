@@ -2434,8 +2434,8 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("CodigoContrato")
                         .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)")
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)")
                         .HasColumnName("codigo_contrato");
 
                     b.Property<DateTimeOffset>("CreatedAt")

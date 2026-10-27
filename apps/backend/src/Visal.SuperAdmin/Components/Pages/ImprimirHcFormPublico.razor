@@ -79,11 +79,12 @@
 else if (_tenantId is Guid)
 {
     <div class="pack">
-        @* Docs clinicos completos (HC + evoluciones-documento + escalas + consentimientos).
-           Sin esto (solo "HC") los documentos de evolucion/escala/consentimiento no se
-           cargaban en el render de Snapshots. NO se incluyen ordenes (MED/SRV/...), que
-           van en archivos aparte de Cuenta Medica. *@
-        <PaqueteHcImprimible HcId="HcId" Docs="HC,EVO,ESC,CON" AutoEmitir="false" AutoPrint="false" />
+        @* Que docs renderizar lo decide el generador de Cuenta Medica via ?docs= segun los
+           tipos configurados en el archivo (content-driven): siempre HC, y ESC/CON/EVO solo
+           si el archivo tiene ese tipo. Asi "Formulario por tipo" no arrastra escalas/
+           consentimientos no pedidos. Sin ?docs= (compat) cae al set completo historico.
+           NO se incluyen ordenes (MED/SRV/...), que van en archivos aparte. *@
+        <PaqueteHcImprimible HcId="HcId" Docs="@_docs" AutoEmitir="false" AutoPrint="false" />
     </div>
     @* Marcador de render listo para que Puppeteer (o un wait) sepa que termino. *@
     <div id="hc-form-ready" style="display:none">ok</div>
@@ -95,11 +96,17 @@ else if (_tenantId is Guid)
     private Guid? _tenantId;
     private string? _error;
     private IDisposable? _scope;
+    // Set de docs a renderizar. Default historico (set completo) si no viene ?docs=.
+    private string _docs = "HC,EVO,ESC,CON";
 
     protected override void OnInitialized()
     {
         var query = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
         var token = query.TryGetValue("t", out var v) ? v.ToString() : null;
+        if (query.TryGetValue("docs", out var d) && !string.IsNullOrWhiteSpace(d.ToString()))
+        {
+            _docs = d.ToString();
+        }
         var data = Tokens.Consume(token ?? "");
         if (data is not (Guid hc, Guid tenant) || hc != HcId)
         {

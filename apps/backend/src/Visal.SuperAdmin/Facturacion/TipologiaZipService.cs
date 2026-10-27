@@ -574,6 +574,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .FirstOrDefaultAsync(ct);
         if (pid is not Guid pacienteId) { return null; }
 
+        // Que adjuntos (escalas/consentimientos/docs de evolucion) puede renderizar
+        // /p/hc-form para ESTE archivo: depende de los tipos configurados (content-driven).
+        var docsRender = CalcularDocsRender(archivo);
+
         var partes = new List<PartePlan>();
         foreach (var c in archivo.Contenidos)
         {
@@ -593,7 +597,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, ct))
+                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct))
                     {
                         partes.Add(new PartePlan(null, allUrls.Count));
                         allUrls.Add(url);
@@ -820,9 +824,29 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// pacientes y se rinden en lote (un solo navegador, en paralelo). SoloUltimo = solo la
     /// HC mas reciente (por fecha de atencion). <paramref name="ordenNiveles"/> define el
     /// orden multinivel (cup/fecha); vacio = cronologico ascendente (historico).</summary>
+    /// <summary>Calcula que "docs" debe renderizar <c>/p/hc-form</c> para este archivo, segun
+    /// los tipos de formulario configurados (content-driven). Siempre incluye el formulario
+    /// base (<c>HC</c>); agrega adjuntos SOLO si el archivo tiene un contenido de ese tipo, para
+    /// que "Formulario por tipo" no arrastre escalas/consentimientos que el usuario no pidio.
+    /// Mapeo: ESCALAS-&gt;ESC, CONSENTIMIENTO-&gt;CON, EVOLUCION-&gt;EVO.</summary>
+    private static string CalcularDocsRender(InformeItemDto archivo)
+    {
+        var tipos = archivo.Contenidos
+            .Where(c => c.Origen == OrigenInformeItem.FormularioPorTipo
+                        && !string.IsNullOrWhiteSpace(c.FormularioTipo))
+            .Select(c => c.FormularioTipo!.Trim().ToUpperInvariant())
+            .ToHashSet();
+
+        var docs = new List<string> { "HC" };
+        if (tipos.Any(t => t.StartsWith("ESCALA", StringComparison.Ordinal))) { docs.Add("ESC"); }
+        if (tipos.Any(t => t.StartsWith("CONSENTIMIENTO", StringComparison.Ordinal))) { docs.Add("CON"); }
+        if (tipos.Any(t => t.StartsWith("EVOLUCION", StringComparison.Ordinal))) { docs.Add("EVO"); }
+        return string.Join(",", docs);
+    }
+
     private async Task<List<string>> ResolverUrlsFormularioPorTipoAsync(
         Guid pacienteId, string? tipo, bool soloUltimo,
-        IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, CancellationToken ct)
+        IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, string docsRender, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
 
@@ -887,7 +911,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         }
 
         var baseUrl = BaseUrlInterna();
-        return filas.Select(f => $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}").ToList();
+        return filas.Select(f => $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}").ToList();
     }
 
     /// <summary>URL base interna del propio servidor para que Puppeteer navegue a las

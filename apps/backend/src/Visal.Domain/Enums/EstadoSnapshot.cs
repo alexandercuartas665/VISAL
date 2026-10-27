@@ -16,5 +16,9 @@ public enum EstadoSnapshot
     Archivado = 3,
 
     /// <summary>La generacion aborto con error. La fila metadata guarda el mensaje.</summary>
-    Fallido = 4
+    Fallido = 4,
+
+    /// <summary>Enviado a facturacion (radicado/facturado). Igual que Vigente sigue
+    /// consultable; se lista en su propia tab. No exige motivo (a diferencia de Archivado).</summary>
+    Facturado = 5
 }

@@ -71,6 +71,9 @@
         <button class="sn-tab @(_tab == Tab.Vigentes ? "sel" : "")" @onclick="() => CambiarTab(Tab.Vigentes)">
             Vigentes @if (_conteoVigentes >= 0) { <span class="sn-tab-count">(@_conteoVigentes)</span> }
         </button>
+        <button class="sn-tab @(_tab == Tab.Facturados ? "sel" : "")" @onclick="() => CambiarTab(Tab.Facturados)">
+            Facturados @if (_conteoFacturados >= 0) { <span class="sn-tab-count">(@_conteoFacturados)</span> }
+        </button>
         <button class="sn-tab @(_tab == Tab.Archivados ? "sel" : "")" @onclick="() => CambiarTab(Tab.Archivados)">
             Archivados @if (_conteoArchivados >= 0) { <span class="sn-tab-count">(@_conteoArchivados)</span> }
         </button>
@@ -125,6 +128,7 @@
     {
         <div class="sn-empty">
             @if (_tab == Tab.Vigentes) { <span>No hay snapshots vigentes.</span> }
+            else if (_tab == Tab.Facturados) { <span>No hay snapshots facturados.</span> }
             else { <span>No hay snapshots archivados.</span> }
         </div>
     }
@@ -147,6 +151,10 @@
                         {
                             <th>Motivo archivado</th>
                             <th>Fecha archivo</th>
+                        }
+                        @if (_tab == Tab.Facturados)
+                        {
+                            <th>Fecha facturado</th>
                         }
                         <th class="sn-th-acc">Acciones</th>
                     </tr>
@@ -177,9 +185,13 @@
                                 <td class="sn-truncate" title="@s.MotivoArchivado">@Truncar(s.MotivoArchivado, 60)</td>
                                 <td class="sn-mono">@(s.FechaArchivado?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
                             }
+                            @if (_tab == Tab.Facturados)
+                            {
+                                <td class="sn-mono">@(s.FechaArchivado?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                            }
                             <td class="sn-td-acc">
                                 <button class="btn btn-outline-primary btn-sm"
-                                        disabled="@(s.Estado != EstadoSnapshot.Vigente && s.Estado != EstadoSnapshot.Archivado)"
+                                        disabled="@(s.Estado != EstadoSnapshot.Vigente && s.Estado != EstadoSnapshot.Archivado && s.Estado != EstadoSnapshot.Facturado)"
                                         @onclick="() => AbrirVer(s.Id)" title="Ver contenido del snapshot">Ver</button>
                                 <button class="btn btn-outline-warning btn-sm ms-1"
                                         disabled="@(_regenerandoId is not null)"
@@ -187,7 +199,7 @@
                                         title="Crea un snapshot NUEVO con los MISMOS parametros (EPS, fechas, sucursales, pacientes y opciones) de este. Util para recoger cambios recientes sin volver a digitar los filtros. No modifica este snapshot.">
                                     @(_regenerandoId == s.Id ? "Regenerando..." : "Regenerar")
                                 </button>
-                                @if (s.Estado == EstadoSnapshot.Vigente || s.Estado == EstadoSnapshot.Archivado)
+                                @if (s.Estado == EstadoSnapshot.Vigente || s.Estado == EstadoSnapshot.Archivado || s.Estado == EstadoSnapshot.Facturado)
                                 {
                                     <a class="btn btn-outline-success btn-sm ms-1"
                                        href="@($"/facturacion-clinica/snapshots/{s.Id}/download?formato=xlsx")"
@@ -898,29 +910,52 @@
         <div class="sn-modal sn-modal-sm" @onclick:stopPropagation>
             <div class="sn-modal-h">
                 <div>
-                    <div class="sn-modal-eyebrow">Archivar</div>
+                    <div class="sn-modal-eyebrow">Archivar o facturar</div>
                     <h3>@_archivarNombre</h3>
                 </div>
                 <button class="sn-modal-x" @onclick="CerrarArchivar">&times;</button>
             </div>
             <div class="sn-modal-b">
                 @if (_archivarErr is not null) { <div class="ase-alert">@_archivarErr</div> }
-                <p style="font-size:13px;">
-                    El snapshot queda archivado pero <b>no se elimina</b>. Sigue consultable
-                    en la tab Archivados con el motivo capturado.
-                </p>
-                <div class="ase-f">
-                    <label>Motivo del archivado * <small class="text-muted">(min 10 caracteres)</small></label>
-                    <textarea class="form-control form-control-sm" rows="4"
-                              @bind="_archivarMotivo"
-                              placeholder="Ej: Se regenero con filtros corregidos y este quedo obsoleto..."></textarea>
+                <p style="font-size:13px;">¿Qué deseas hacer con este snapshot?</p>
+                <div class="ase-f" style="gap:6px;">
+                    <label class="sn-radio">
+                        <input type="radio" name="sn-accion" value="facturar"
+                               checked="@(_archivarAccion == "facturar")"
+                               @onchange="@(() => _archivarAccion = "facturar")" />
+                        <span><b>Enviar a Facturado</b> — pasa a la tab Facturados. No pide motivo.</span>
+                    </label>
+                    <label class="sn-radio">
+                        <input type="radio" name="sn-accion" value="archivar"
+                               checked="@(_archivarAccion == "archivar")"
+                               @onchange="@(() => _archivarAccion = "archivar")" />
+                        <span><b>Archivar</b> — pasa a la tab Archivados con un motivo. No se elimina.</span>
+                    </label>
                 </div>
+                @if (_archivarAccion == "archivar")
+                {
+                    <div class="ase-f">
+                        <label>Motivo del archivado * <small class="text-muted">(min 10 caracteres)</small></label>
+                        <textarea class="form-control form-control-sm" rows="4"
+                                  @bind="_archivarMotivo"
+                                  placeholder="Ej: Se regenero con filtros corregidos y este quedo obsoleto..."></textarea>
+                    </div>
+                }
             </div>
             <div class="sn-modal-f">
                 <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarArchivar">Cancelar</button>
-                <button class="btn btn-danger btn-sm" @onclick="ConfirmarArchivar" disabled="@_archivando">
-                    @(_archivando ? "Archivando..." : "Archivar")
-                </button>
+                @if (_archivarAccion == "facturar")
+                {
+                    <button class="btn btn-success btn-sm" @onclick="ConfirmarArchivar" disabled="@_archivando">
+                        @(_archivando ? "Enviando..." : "Enviar a Facturado")
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-danger btn-sm" @onclick="ConfirmarArchivar" disabled="@_archivando">
+                        @(_archivando ? "Archivando..." : "Archivar")
+                    </button>
+                }
             </div>
         </div>
     </div>
@@ -1136,7 +1171,10 @@
     .sn-estado-ejecutando { background:#fef3c7; color:#92400e; }
     .sn-estado-vigente { background:#dcfce7; color:#166534; }
     .sn-estado-archivado { background:#e2e8f0; color:#475569; }
+    .sn-estado-facturado { background:#dbeafe; color:#1e40af; }
     .sn-estado-fallido { background:#fee2e2; color:#991b1b; }
+    .sn-radio { display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer; padding:6px 8px; border:1px solid #e2e8f0; border-radius:8px; }
+    .sn-radio input { margin-top:2px; }
 
     /* Modal */
     .sn-modal-back { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:1050; display:flex; align-items:center; justify-content:center; padding:16px; }
@@ -1358,7 +1396,7 @@
 </script>
 
 @code {
-    private enum Tab { Vigentes, Archivados }
+    private enum Tab { Vigentes, Facturados, Archivados }
 
     // --- Estado de generacion de ZIP por archivo (job en background + descarga) ---
     private sealed class ZipUi
@@ -1379,6 +1417,7 @@
     private string? _ok;
     private List<FacturacionSnapshotDto> _lista = new();
     private int _conteoVigentes = -1;
+    private int _conteoFacturados = -1;
     private int _conteoArchivados = -1;
     private List<TipoSnapshot> _tiposDisponibles = new();
     private bool _puedeArchivar;
@@ -1580,11 +1619,13 @@
     // Checkbox: generar JSON RIPS aunque falle la validacion (modo depuracion).
     private bool _ripsIgnorarValidacion;
 
-    // Modal Archivar.
+    // Modal Archivar / Facturar.
     private bool _showArchivar;
     private Guid _archivarId;
     private string _archivarNombre = "";
     private string _archivarMotivo = "";
+    // Accion elegida en el modal: "facturar" (default) o "archivar".
+    private string _archivarAccion = "facturar";
     private bool _archivando;
     private string? _archivarErr;
 
@@ -1689,7 +1730,12 @@
         _cargando = true; _error = null; _ok = null;
         try
         {
-            var estado = _tab == Tab.Vigentes ? EstadoSnapshot.Vigente : EstadoSnapshot.Archivado;
+            var estado = _tab switch
+            {
+                Tab.Vigentes => EstadoSnapshot.Vigente,
+                Tab.Facturados => EstadoSnapshot.Facturado,
+                _ => EstadoSnapshot.Archivado
+            };
             TipoSnapshot? tipo = null;
             if (!string.IsNullOrWhiteSpace(_filtroTipo) && Enum.TryParse<TipoSnapshot>(_filtroTipo, out var t)) { tipo = t; }
             Guid? asegFiltro = null;
@@ -1699,13 +1745,15 @@
             var filtros = new FiltrosListaSnapshotDto(usuarioFiltro, _filtroDesde, _filtroHasta, asegFiltro);
             _lista = (await Svc.ListarAsync(estado, tipo, filtros)).ToList();
 
-            // Refrescamos ambos contadores en paralelo para el tab.
+            // Refrescamos los contadores de los tres tabs.
             var vigCount = await Svc.ListarAsync(EstadoSnapshot.Vigente, null, null);
+            var facCount = await Svc.ListarAsync(EstadoSnapshot.Facturado, null, null);
             var arcCount = await Svc.ListarAsync(EstadoSnapshot.Archivado, null, null);
             _conteoVigentes = vigCount.Count;
+            _conteoFacturados = facCount.Count;
             _conteoArchivados = arcCount.Count;
-            // Dropdown de usuarios: distinct creadores de toda la lista (vig + arch).
-            _usuariosFiltro = vigCount.Concat(arcCount)
+            // Dropdown de usuarios: distinct creadores de toda la lista (vig + fac + arch).
+            _usuariosFiltro = vigCount.Concat(facCount).Concat(arcCount)
                 .Where(s => s.CreadoPor is not null && !string.IsNullOrWhiteSpace(s.CreadoPorNombre))
                 .GroupBy(s => s.CreadoPor!.Value)
                 .Select(g => (Id: g.Key, Nombre: g.First().CreadoPorNombre!))
@@ -2236,6 +2284,7 @@
         _archivarId = id;
         _archivarNombre = nombre;
         _archivarMotivo = "";
+        _archivarAccion = "facturar";
         _archivarErr = null;
         _showArchivar = true;
     }
@@ -2252,9 +2301,17 @@
         _archivando = true;
         try
         {
-            await Svc.ArchivarAsync(_archivarId, _archivarMotivo, _actorId);
+            if (_archivarAccion == "facturar")
+            {
+                await Svc.FacturarAsync(_archivarId, _actorId);
+                _ok = $"Snapshot '{_archivarNombre}' enviado a Facturado.";
+            }
+            else
+            {
+                await Svc.ArchivarAsync(_archivarId, _archivarMotivo, _actorId);
+                _ok = $"Snapshot '{_archivarNombre}' archivado.";
+            }
             _showArchivar = false;
-            _ok = $"Snapshot '{_archivarNombre}' archivado.";
             await CargarLista();
         }
         catch (Exception ex) { _archivarErr = ex.Message; }

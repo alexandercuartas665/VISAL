@@ -250,16 +250,19 @@ public sealed class FacturacionSnapshotService(
             : await db.Aseguradoras.AsNoTracking()
                 .Where(a => asegIds.Contains(a.Id))
                 .ToDictionaryAsync(a => a.Id, a => a.Nombre, ct);
-        // Nombre del usuario creador (email del tenant_user) por CreatedBy (platform_user_id).
+        // NOMBRE del usuario creador (no el correo) por CreatedBy (platform_user_id).
         var creadorIds = rows.Where(r => r.CreatedBy is not null).Select(r => r.CreatedBy!.Value).Distinct().ToList();
         var creadores = new Dictionary<Guid, string>();
         if (creadorIds.Count > 0)
         {
-            var tus = await db.TenantUsers.AsNoTracking()
-                .Where(tu => creadorIds.Contains(tu.PlatformUserId))
-                .Select(tu => new { tu.PlatformUserId, tu.Email })
+            var pus = await db.PlatformUsers.AsNoTracking()
+                .Where(u => creadorIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email })
                 .ToListAsync(ct);
-            foreach (var tu in tus) { creadores[tu.PlatformUserId] = tu.Email; }
+            foreach (var pu in pus)
+            {
+                creadores[pu.Id] = NombreUsuario(pu.DisplayName, pu.PrimerNombre, pu.SegundoNombre, pu.PrimerApellido, pu.SegundoApellido, pu.Username, pu.Email);
+            }
         }
         return rows.Select(r => Map(
             r,
@@ -286,8 +289,14 @@ public sealed class FacturacionSnapshotService(
         string? creadoPorNombre = null;
         if (snap.CreatedBy is Guid cb)
         {
-            creadoPorNombre = await db.TenantUsers.AsNoTracking()
-                .Where(u => u.PlatformUserId == cb).Select(u => u.Email).FirstOrDefaultAsync(ct);
+            var pu = await db.PlatformUsers.AsNoTracking()
+                .Where(u => u.Id == cb)
+                .Select(u => new { u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email })
+                .FirstOrDefaultAsync(ct);
+            if (pu is not null)
+            {
+                creadoPorNombre = NombreUsuario(pu.DisplayName, pu.PrimerNombre, pu.SegundoNombre, pu.PrimerApellido, pu.SegundoApellido, pu.Username, pu.Email);
+            }
         }
         return new FacturacionSnapshotDetalleDto(Map(snap, asegNombre), columnas, snap.FiltrosJson, creadoPorNombre);
     }
@@ -433,6 +442,41 @@ public sealed class FacturacionSnapshotService(
         snap.ArchivadoPor = actor;
         snap.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task FacturarAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new InvalidOperationException("Snapshot no encontrado.");
+
+        if (snap.Estado != EstadoSnapshot.Vigente)
+        {
+            throw new InvalidOperationException(
+                $"Solo se pueden enviar a facturado snapshots en estado Vigente. Estado actual: {snap.Estado}.");
+        }
+
+        snap.Estado = EstadoSnapshot.Facturado;
+        // Reutilizamos FechaArchivado/ArchivadoPor como "fecha/usuario del cambio de estado"
+        // (sirve para archivar y para facturar). Facturar NO exige motivo -> queda null.
+        snap.FechaArchivado = DateTimeOffset.UtcNow;
+        snap.ArchivadoPor = actor;
+        snap.MotivoArchivado = null;
+        snap.UpdatedBy = actor;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Nombre legible del usuario para la UI (no el correo): DisplayName,
+    /// si no la concatenacion de nombres/apellidos, si no el username, y por ultimo el correo.</summary>
+    private static string NombreUsuario(
+        string? displayName, string? primerNombre, string? segundoNombre,
+        string? primerApellido, string? segundoApellido, string? username, string email)
+    {
+        if (!string.IsNullOrWhiteSpace(displayName)) { return displayName.Trim(); }
+        var full = string.Join(" ", new[] { primerNombre, segundoNombre, primerApellido, segundoApellido }
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()));
+        if (!string.IsNullOrWhiteSpace(full)) { return full; }
+        if (!string.IsNullOrWhiteSpace(username)) { return username.Trim(); }
+        return email;
     }
 
     public async Task<bool> ActualizarValorCeldaAsync(

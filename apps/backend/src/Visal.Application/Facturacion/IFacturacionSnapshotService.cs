@@ -147,6 +147,12 @@ public interface IFacturacionSnapshotService
     Task ArchivarAsync(Guid id, string motivo, Guid actor, CancellationToken ct = default);
 
     /// <summary>
+    /// Mueve el snapshot a Facturado (enviado a facturacion). NO requiere motivo.
+    /// Falla si el snapshot no esta Vigente.
+    /// </summary>
+    Task FacturarAsync(Guid id, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
     /// Exporta el snapshot en xlsx. Los headers respetan EXACTAMENTE los nombres del
     /// builder (incluyendo tildes rotas del template original). Devuelve null si el
     /// snapshot no existe o no es del tenant activo.

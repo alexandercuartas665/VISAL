@@ -48,7 +48,11 @@ public sealed record InformeItemDto(
     IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null,
     // True = el archivo se baja como UN solo PDF unificado (todos los pacientes en uno)
     // en vez del ZIP con un PDF por paciente. Default false (historico).
-    bool PdfUnico = false);
+    bool PdfUnico = false,
+    // True = genera un PDF por CADA autorizacion del paciente (ZIP con un archivo por
+    // autorizacion, nombrado con el numero de autorizacion). Default false (historico:
+    // todas las autorizaciones fusionadas en un PDF por paciente).
+    bool UnoPorAutorizacion = false);
 
 /// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
 public sealed record InformeContenidoDto(
@@ -70,7 +74,8 @@ public sealed record GuardarItemRequest(
     bool Obligatorio,
     IReadOnlyList<GuardarContenidoDto> Contenidos,
     IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null,
-    bool PdfUnico = false);
+    bool PdfUnico = false,
+    bool UnoPorAutorizacion = false);
 
 /// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
 /// todos en cada guardado).</summary>

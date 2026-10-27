@@ -999,6 +999,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tipologia_archivo_id");
 
+                    b.Property<bool>("UnoPorAutorizacion")
+                        .HasColumnType("boolean")
+                        .HasColumnName("uno_por_autorizacion");
+
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");

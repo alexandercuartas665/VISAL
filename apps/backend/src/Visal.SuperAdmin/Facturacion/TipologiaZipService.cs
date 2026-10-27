@@ -97,6 +97,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
+        // --- MODO "un archivo por autorizacion": un PDF por CADA autorizacion del
+        // paciente (no uno fusionado por paciente), nombrado con su numero de autorizacion.
+        // Pensado para archivos de solo autorizaciones; ignora otros contenidos. ---
+        if (archivo.UnoPorAutorizacion)
+        {
+            return await GenerarZipPorAutorizacionAsync(archivo, cfg, detalle, pacientes, patron, nitIps, progreso, ct);
+        }
+
         // --- Pase 1: plan por paciente + junta TODAS las URLs de formularios-por-tipo.
         // En vez de lanzar un Chrome por paciente y rendir en serie, juntamos todas las
         // URLs de todos los pacientes para rendirlas de una sola vez (un navegador, en
@@ -181,6 +189,82 @@ public sealed class TipologiaZipService : ITipologiaZipService
             }
             // Si ningun paciente tenia contenido, dejamos una unica nota resumen para
             // que el ZIP no baje totalmente vacio y quede claro el porque.
+            if (salidas.Count == 0)
+            {
+                var entry = zip.CreateEntry("_SIN_CONTENIDO.pdf", CompressionLevel.Optimal);
+                await using var es = entry.Open();
+                await es.WriteAsync(PaginaNota(notaSinContenido), ct);
+            }
+        }
+
+        var nombreZip = SanitizarNombre($"{archivo.Alias}_{detalle.Metadata.Nombre}") + ".zip";
+        return new ArchivoExportado(zipMs.ToArray(), "application/zip", nombreZip);
+    }
+
+    /// <summary>Genera el ZIP del modo "un archivo por autorizacion": por cada paciente y
+    /// cada autorizacion del snapshot, un PDF independiente nombrado con el numero de
+    /// autorizacion. Solo considera el contenido de origen Autorizacion; otros contenidos
+    /// del archivo se ignoran en este modo. Si el patron no incluye <c>{autorizacion}</c>,
+    /// el codigo se anexa al nombre para evitar colisiones.</summary>
+    private async Task<ArchivoExportado?> GenerarZipPorAutorizacionAsync(
+        InformeItemDto archivo, CuentaMedicaConfigDto cfg,
+        FacturacionSnapshotDetalleDto detalle, IReadOnlyList<PacienteSnapshotDto> pacientes,
+        string patron, string nitIps, IProgress<ZipProgreso>? progreso, CancellationToken ct)
+    {
+        _ = cfg;
+        // SoloUltimo del contenido de autorizacion (si existe); si el archivo no tiene
+        // contenido de autorizacion, se toman todas (comportamiento neutro).
+        var contAut = archivo.Contenidos
+            .FirstOrDefault(c => c.Origen == OrigenInformeItem.AutorizacionAsignacion);
+        var soloUltimo = contAut?.SoloUltimo ?? false;
+        var incluyeTokenAut = patron.Contains("{autorizacion}", StringComparison.OrdinalIgnoreCase);
+
+        var salidas = new List<(string Name, byte[] Pdf)>();
+        var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var i = 0;
+        foreach (var pac in pacientes)
+        {
+            ct.ThrowIfCancellationRequested();
+            progreso?.Report(new ZipProgreso("Armando PDFs", i++, pacientes.Count));
+
+            var pid = await _db.Pacientes.AsNoTracking()
+                .Where(p => p.NumeroDocumento == pac.Documento)
+                .Select(p => (Guid?)p.Id)
+                .FirstOrDefaultAsync(ct);
+            if (pid is not Guid pacienteId) { continue; }
+
+            var autorizaciones = await CargarAutorizacionesConCodigoAsync(
+                pacienteId, pac.Autorizaciones, soloUltimo, ct);
+            foreach (var (codigo, pdf) in autorizaciones)
+            {
+                var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac, nitIps, codigo));
+                // Si el patron no trae el token de autorizacion, anexamos el codigo para
+                // que dos autorizaciones del mismo paciente no colisionen de nombre.
+                if (!incluyeTokenAut)
+                {
+                    baseName = SanitizarNombre(baseName + "_" + codigo);
+                }
+                var name = baseName + ".pdf";
+                var n = 2;
+                while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
+                salidas.Add((name, pdf));
+            }
+        }
+
+        var notaSinContenido =
+            $"Archivo: {(string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion)}\n\n" +
+            $"Ninguno de los {pacientes.Count} paciente(s) de este snapshot tiene autorizaciones " +
+            "con archivo disponible para este snapshot.";
+
+        using var zipMs = new MemoryStream();
+        using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, pdf) in salidas)
+            {
+                var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
+                await using var es = entry.Open();
+                await es.WriteAsync(pdf, ct);
+            }
             if (salidas.Count == 0)
             {
                 var entry = zip.CreateEntry("_SIN_CONTENIDO.pdf", CompressionLevel.Optimal);
@@ -581,6 +665,45 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return res;
     }
 
+    /// <summary>Igual que <see cref="CargarAutorizacionesAsync"/> pero conserva el CODIGO
+    /// de cada autorizacion junto al PDF, para el modo "un archivo por autorizacion"
+    /// (cada archivo se nombra con su numero de autorizacion).</summary>
+    private async Task<List<(string Codigo, byte[] Pdf)>> CargarAutorizacionesConCodigoAsync(
+        Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct)
+    {
+        var codSet = codigosSnapshot
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (codSet.Count == 0) { return new List<(string, byte[])>(); }
+
+        var filas = (await _db.Asignaciones.AsNoTracking()
+            .Where(a => a.PacienteId == pacienteId
+                        && a.PdfAutorizacionUrl != null
+                        && a.CodigoAutorizacion != null)
+            .Select(a => new { a.CodigoAutorizacion, a.PdfAutorizacionUrl, a.CreatedAt })
+            .ToListAsync(ct))
+            .Where(x => codSet.Contains(x.CodigoAutorizacion!.Trim()))
+            .ToList();
+
+        var porCodigo = filas
+            .GroupBy(x => x.CodigoAutorizacion!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(x => x.CreatedAt).First());
+        var ordenadas = soloUltimo
+            ? porCodigo.OrderByDescending(x => x.CreatedAt).Take(1).ToList()
+            : porCodigo.OrderBy(x => x.CreatedAt).ToList();
+
+        var res = new List<(string Codigo, byte[] Pdf)>();
+        var urlsVistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in ordenadas)
+        {
+            if (!urlsVistas.Add(f.PdfAutorizacionUrl!)) { continue; }  // mismo PDF compartido por 2 codigos
+            var pdf = LeerArchivoComoPdf(f.PdfAutorizacionUrl!);
+            if (pdf is not null) { res.Add((f.CodigoAutorizacion!.Trim(), pdf)); }
+        }
+        return res;
+    }
+
     private async Task<List<byte[]>> CargarFirmasAsync(Guid pacienteId, bool soloUltimo, CancellationToken ct)
     {
         // La firma del paciente puede estar en dos lugares:
@@ -920,10 +1043,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     // ---- Nombre de archivo (mismos tokens que el resumen del tab) ----
 
-    private static string ResolverNombre(string patron, InformeItemDto a, PacienteSnapshotDto p, string? nitIps = null)
+    private static string ResolverNombre(string patron, InformeItemDto a, PacienteSnapshotDto p, string? nitIps = null, string? codigoAutorizacion = null)
     {
         var hoy = DateTimeOffset.Now.ToLocalTime();
-        var aut = p.Autorizaciones.Count > 0 ? p.Autorizaciones[0] : "";
+        // En modo "un archivo por autorizacion" el codigo viene explicito (cada archivo es
+        // de UNA autorizacion); si no, se cae al primero del paciente (historico).
+        var aut = !string.IsNullOrWhiteSpace(codigoAutorizacion)
+            ? codigoAutorizacion!
+            : (p.Autorizaciones.Count > 0 ? p.Autorizaciones[0] : "");
         var nombre = (p.Nombre ?? "").Replace(' ', '_');
         var res = patron
             .Replace("{sigla}", a.Alias ?? "")

@@ -112,7 +112,8 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                     c.SoloUltimo, c.FormularioTipo))
                 .ToList(),
             ParseOrdenNiveles(i.OrdenJson),
-            i.PdfUnico))
+            i.PdfUnico,
+            i.UnoPorAutorizacion))
             .ToList();
     }
 
@@ -201,6 +202,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         item.Obligatorio = req.Obligatorio;
         item.OrdenJson = SerializeOrdenNiveles(req.OrdenNiveles);
         item.PdfUnico = req.PdfUnico;
+        item.UnoPorAutorizacion = req.UnoPorAutorizacion;
         // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
         // compatibilidad; la fuente de verdad es la tabla de contenidos.
         var primero = contenidos[0];

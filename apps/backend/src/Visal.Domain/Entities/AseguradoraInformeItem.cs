@@ -70,4 +70,10 @@ public class AseguradoraInformeItem : TenantEntity
     /// los pacientes concatenados (en el orden del snapshot), en vez del ZIP con un PDF
     /// por paciente (comportamiento historico, false).</summary>
     public bool PdfUnico { get; set; }
+
+    /// <summary>Si true, el archivo genera un PDF por CADA autorizacion del paciente
+    /// (no uno fusionado por paciente): el ZIP trae un archivo por autorizacion, nombrado
+    /// con el numero de autorizacion. Pensado para archivos de solo autorizaciones.
+    /// Default false (comportamiento historico: todas las autorizaciones en un PDF).</summary>
+    public bool UnoPorAutorizacion { get; set; }
 }

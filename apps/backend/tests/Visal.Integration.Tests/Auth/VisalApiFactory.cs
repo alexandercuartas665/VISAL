@@ -4,6 +4,7 @@ using Visal.Domain.Enums;
 using Visal.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
@@ -33,6 +34,15 @@ public sealed class VisalApiFactory : WebApplicationFactory<Program>, IAsyncLife
         builder.UseSetting("ConnectionStrings:Default", _db.GetConnectionString());
         builder.UseSetting("Jwt:SigningKey", SigningKey);
         builder.UseSetting("Database:AutoMigrate", "false");
+
+        // IUploadStorage lo implementa el host web (WwwRootUploadStorage, depende de
+        // wwwroot/IWebHostEnvironment) y varios servicios de Application lo consumen.
+        // En el host de integracion lo sustituimos por un no-op para que el contenedor
+        // DI (ValidateOnBuild en Development) pueda construir esos servicios.
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddSingleton<Visal.Application.Common.IUploadStorage, FakeUploadStorage>();
+        });
     }
 
     public async Task InitializeAsync()

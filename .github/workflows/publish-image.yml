@@ -1,13 +1,23 @@
 name: Build & publish Visal image
 
-# Publica la imagen Docker del Visal SuperAdmin a GitHub Container Registry (GHCR)
-# en cada push a main, y al crear tags semver (vX.Y.Z) tambien la etiqueta como release.
+# CI + publicacion de la imagen Docker del Visal SuperAdmin a GitHub Container
+# Registry (GHCR).
+#
+# Flujo:
+#   - En pull_request a main: solo corre el gate de tests (no publica).
+#   - En push a main: corre tests y, SOLO si pasan, publica la imagen :latest.
+#   - En tags semver (vX.Y.Z): corre tests y publica la imagen etiquetada.
 # El servidor de produccion solo necesita hacer `docker compose pull && up`.
+#
+# El job de tests es un GATE: build-and-push depende de el (needs: tests), de modo
+# que un esquema o codigo roto nunca llega a GHCR ni, por lo tanto, a produccion.
 
 on:
   push:
     branches: [main]
     tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:  # tambien permite disparar manualmente desde la UI
 
 env:
@@ -16,7 +26,33 @@ env:
   IMAGE_NAME: alexandercuartas665/visal/superadmin
 
 jobs:
+  tests:
+    name: Tests (unit + integration)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        run: dotnet restore apps/backend/Visal.sln
+
+      - name: Build
+        run: dotnet build apps/backend/Visal.sln -c Release --no-restore
+
+      # Las pruebas de integracion usan Testcontainers (postgres:16-alpine); el runner
+      # ubuntu-latest trae Docker, asi que no se necesita servicio aparte ni secretos.
+      - name: Test
+        run: dotnet test apps/backend/Visal.sln -c Release --no-build --verbosity normal
+
   build-and-push:
+    name: Build & push image
+    needs: tests
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

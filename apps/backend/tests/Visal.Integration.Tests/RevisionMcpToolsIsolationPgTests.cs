@@ -62,6 +62,13 @@ public sealed class RevisionMcpToolsIsolationPgTests : IAsyncLifetime
                 FechaApertura = DateTimeOffset.UtcNow.AddDays(-1),
                 FechaCierre = DateTimeOffset.UtcNow,
             };
+            // fk_asignaciones_asignacion_lotes_lote_id: toda asignacion cuelga de un lote.
+            var lote = new AsignacionLote
+            {
+                PacienteId = paciente.Id,
+                Sucursal = "SEDE-ALPHA",
+                ContratoCodigo = "CT-ALPHA",
+            };
             var asignacion = new Asignacion
             {
                 PacienteId = paciente.Id,
@@ -70,8 +77,11 @@ public sealed class RevisionMcpToolsIsolationPgTests : IAsyncLifetime
                 NombreServicio = "SERV-ALPHA",
                 TipoServicio = "TIPO-ALPHA",
                 Sucursal = "SEDE-ALPHA",
+                Cantidad = 1, // ck_asignaciones_cantidad: cantidad > 0
+                Lote = lote,  // fixup de FK (no depende de como se genere el Id)
             };
             a.HistoriasClinicas.Add(hc);
+            a.AsignacionLotes.Add(lote);
             a.Asignaciones.Add(asignacion);
             await a.SaveChangesAsync();
 

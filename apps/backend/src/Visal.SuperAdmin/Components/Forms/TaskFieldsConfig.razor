@@ -1,6 +1,8 @@
 @using Visal.Application.Tenancy
 @using Visal.Domain.Entities
 @inject ITaskFieldService FieldSvc
+@inject IJSRuntime JS
+@implements IDisposable
 
 @* Disenador de campos dinamicos de un tablero (portado del modal "Configurar embudo" de
    CUBOT.travels). Lista/crea/edita/ordena/borra definiciones de campo del tablero. *@
@@ -21,7 +23,7 @@
             <div class="tfc-msg">@_msg</div>
         }
 
-        <div class="tfc-list">
+        <div class="tfc-list" data-sortable="taskfields" data-sortowner="@_sortOwner">
             @if (_fields.Count == 0)
             {
                 <div class="tfc-empty">Aun no hay campos. Agrega el primero abajo.</div>
@@ -30,8 +32,9 @@
             {
                 var f = _fields[i];
                 var idx = i;
-                <div class="tfc-row @(_editId == f.Id ? "is-editing" : "")">
+                <div class="tfc-row @(_editId == f.Id ? "is-editing" : "")" @key="f.Id" data-sortitem="@idx">
                     <div class="tfc-ord">
+                        <span class="vs-grip" title="Arrastra para reordenar" draggable="true"></span>
                         <button class="tfc-ordbtn" title="Subir" disabled="@(idx == 0)" @onclick="() => MoveAsync(idx, -1)">&uarr;</button>
                         <button class="tfc-ordbtn" title="Bajar" disabled="@(idx == _fields.Count - 1)" @onclick="() => MoveAsync(idx, 1)">&darr;</button>
                     </div>
@@ -204,6 +207,42 @@
         if (_editId == f.Id) { ResetForm(); }
         await RecargarAsync();
         await OnChanged.InvokeAsync();
+    }
+
+    private readonly string _sortOwner = Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<TaskFieldsConfig>? _sortRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _sortRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("visalSortable.register", _sortOwner, _sortRef); }
+            catch { /* JS aun no cargado: ignorar */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_sortRef is not null) { try { JS.InvokeVoidAsync("visalSortable.unregister", _sortOwner); } catch { } }
+        _sortRef?.Dispose();
+    }
+
+    // Arrastrar y soltar de campos del tablero (persiste con el mismo ReorderFieldsAsync).
+    [JSInvokable]
+    public async Task SortableMove(string group, int from, int to)
+    {
+        if (group != "taskfields") { return; }
+        if (from < 0 || from >= _fields.Count || to < 0 || to >= _fields.Count || from == to) { return; }
+        var item = _fields[from];
+        _fields.RemoveAt(from);
+        if (to > from) { to--; }
+        if (to < 0) { to = 0; }
+        if (to > _fields.Count) { to = _fields.Count; }
+        _fields.Insert(to, item);
+        await FieldSvc.ReorderFieldsAsync(BoardId, _fields.Select(f => f.Id).ToList(), Actor);
+        await OnChanged.InvokeAsync();
+        StateHasChanged();
     }
 
     private async Task MoveAsync(int index, int dir)

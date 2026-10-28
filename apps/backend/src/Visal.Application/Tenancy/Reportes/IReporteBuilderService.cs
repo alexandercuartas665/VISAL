@@ -39,7 +39,8 @@ public sealed record ReportePlantillaDetalleDto(
     bool MostrarEncabezado = true,
     string? Codigo = null,
     string? Version = null,
-    string? Subtitulo = null);
+    string? Subtitulo = null,
+    IReadOnlyList<ReporteParametroDef>? Parametros = null);
 
 public sealed record GuardarPlantillaRequest(
     string Nombre,
@@ -51,7 +52,11 @@ public sealed record GuardarPlantillaRequest(
     bool MostrarEncabezado = true,
     string? Codigo = null,
     string? Version = null,
-    string? Subtitulo = null);
+    string? Subtitulo = null,
+    IReadOnlyList<ReporteParametroDef>? Parametros = null);
+
+/// <summary>Opcion de sede para poblar un parametro de ejecucion tipo lista de sedes.</summary>
+public sealed record SedeOpcionDto(Guid Id, string Nombre);
 
 /// <summary>
 /// Servicio del constructor de reportes multi-hoja (self-service del tenant). Expone el
@@ -60,8 +65,11 @@ public sealed record GuardarPlantillaRequest(
 /// </summary>
 public interface IReporteBuilderService
 {
-    /// <summary>Entidades reportables (con campos y cruces) que ofrece el asistente.</summary>
-    IReadOnlyList<EntidadReportableDto> ListarEntidades();
+    /// <summary>
+    /// Entidades reportables (con campos y cruces) que ofrece el asistente, incluidos los
+    /// campos dinamicos del tenant fusionados en la entidad paciente.
+    /// </summary>
+    Task<IReadOnlyList<EntidadReportableDto>> ListarEntidadesAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<ReportePlantillaDto>> ListarAsync(CancellationToken ct = default);
     Task<ReportePlantillaDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default);
@@ -77,6 +85,16 @@ public interface IReporteBuilderService
     /// <summary>Ejecuta UNA hoja con un limite pequeno, para la vista previa del asistente.</summary>
     Task<ReporteHojaResultado> PreviewAsync(ReporteHojaDef hoja, int limite = 50, CancellationToken ct = default);
 
-    /// <summary>Genera el Excel multi-hoja de una plantilla guardada.</summary>
-    Task<byte[]> GenerarExcelAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// Genera el Excel multi-hoja de una plantilla guardada. <paramref name="parametros"/> trae
+    /// los valores de los parametros de ejecucion (clave -&gt; valores) elegidos al descargar;
+    /// los filtros enlazados a un parametro sin valor se omiten en esa corrida.
+    /// </summary>
+    Task<byte[]> GenerarExcelAsync(
+        Guid id,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? parametros = null,
+        CancellationToken ct = default);
+
+    /// <summary>Sedes (sucursales) del tenant, para poblar parametros de ejecucion tipo lista de sedes.</summary>
+    Task<IReadOnlyList<SedeOpcionDto>> ListarSedesAsync(CancellationToken ct = default);
 }

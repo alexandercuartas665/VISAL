@@ -158,6 +158,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<Sucursal> Sucursales => Set<Sucursal>();
     public DbSet<TenantUserSucursal> TenantUserSucursales => Set<TenantUserSucursal>();
     public DbSet<Paciente> Pacientes => Set<Paciente>();
+    public DbSet<PacienteFichaDef> PacienteFichaDefs => Set<PacienteFichaDef>();
+    public DbSet<PacienteCampoDef> PacienteCampoDefs => Set<PacienteCampoDef>();
+    public DbSet<PacienteCampoRigidoDef> PacienteCampoRigidoDefs => Set<PacienteCampoRigidoDef>();
     public DbSet<PacienteContrato> PacienteContratos => Set<PacienteContrato>();
     public DbSet<PacienteContactoEmergencia> PacienteContactosEmergencia => Set<PacienteContactoEmergencia>();
     public DbSet<CatalogoPaciente> CatalogosPaciente => Set<CatalogoPaciente>();
@@ -255,6 +258,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         // DayOfWeek (BCL) como texto ("Monday"...) para las agendas: legible y estable.
         configurationBuilder.Properties<DayOfWeek>().HaveConversion<string>().HaveMaxLength(12);
         configurationBuilder.Properties<TipoNovedadProfesional>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<PacienteCampoTipo>().HaveConversion<string>().HaveMaxLength(40);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1502,6 +1506,8 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
             b.Property(x => x.Cie10Codigo).HasMaxLength(30);
+            // Campos dinamicos (gestor de campos del tenant): jsonb plano campoKey->valor.
+            b.Property(x => x.CamposDinamicosJson).HasColumnType("jsonb");
             // Geografia
             b.Property(x => x.Direccion).HasMaxLength(300);
             b.Property(x => x.Barrio).HasMaxLength(120);
@@ -2158,6 +2164,36 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Nombre).IsRequired();
             b.Property(x => x.MostrarEncabezado).HasDefaultValue(true);
             b.HasIndex(x => new { x.TenantId, x.Orden });
+        });
+
+        // Gestor de campos dinamicos de la ficha de paciente (tabs + definiciones de campo).
+        modelBuilder.Entity<PacienteFichaDef>(b =>
+        {
+            b.Property(x => x.TabKey).HasMaxLength(40).IsRequired();
+            b.Property(x => x.Titulo).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Descripcion).HasMaxLength(300);
+            b.Property(x => x.Color).HasMaxLength(20);
+            b.HasIndex(x => new { x.TenantId, x.TabKey }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.Orden });
+        });
+        modelBuilder.Entity<PacienteCampoDef>(b =>
+        {
+            b.Property(x => x.TabKey).HasMaxLength(40).IsRequired();
+            b.Property(x => x.CampoKey).HasMaxLength(80).IsRequired();
+            b.Property(x => x.Label).HasMaxLength(150).IsRequired();
+            b.Property(x => x.Opciones).HasMaxLength(2000);
+            b.Property(x => x.Descripcion).HasMaxLength(600);
+            // CampoKey UNICO por tenant: es la clave del jsonb y la referencia del CENSO.
+            b.HasIndex(x => new { x.TenantId, x.CampoKey }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.TabKey, x.Orden });
+        });
+        // Colocacion por tenant de los campos FIJOS de la ficha (tab/orden/ancho/oculto).
+        modelBuilder.Entity<PacienteCampoRigidoDef>(b =>
+        {
+            b.Property(x => x.CampoKey).HasMaxLength(80).IsRequired();
+            b.Property(x => x.TabKey).HasMaxLength(40).IsRequired();
+            b.HasIndex(x => new { x.TenantId, x.CampoKey }).IsUnique();
+            b.HasIndex(x => new { x.TenantId, x.TabKey, x.Orden });
         });
         modelBuilder.Entity<ReporteHoja>(b =>
         {

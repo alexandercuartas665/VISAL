@@ -6895,6 +6895,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("barrio");
 
+                    b.Property<string>("CamposDinamicosJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("campos_dinamicos_json");
+
                     b.Property<string>("Cie10Codigo")
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)")
@@ -7202,6 +7206,164 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("pacientes", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.PacienteCampoDef", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Activo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("activo");
+
+                    b.Property<int>("Ancho")
+                        .HasColumnType("integer")
+                        .HasColumnName("ancho");
+
+                    b.Property<string>("CampoKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("campo_key");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Descripcion")
+                        .HasMaxLength(600)
+                        .HasColumnType("character varying(600)")
+                        .HasColumnName("descripcion");
+
+                    b.Property<bool>("EsSistema")
+                        .HasColumnType("boolean")
+                        .HasColumnName("es_sistema");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("label");
+
+                    b.Property<string>("Opciones")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("opciones");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<bool>("Requerido")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requerido");
+
+                    b.Property<string>("TabKey")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("tab_key");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("tipo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_paciente_campo_defs");
+
+                    b.HasIndex("TenantId", "CampoKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_paciente_campo_defs_tenant_id_campo_key");
+
+                    b.HasIndex("TenantId", "TabKey", "Orden")
+                        .HasDatabaseName("ix_paciente_campo_defs_tenant_id_tab_key_orden");
+
+                    b.ToTable("paciente_campo_defs", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.PacienteCampoRigidoDef", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Ancho")
+                        .HasColumnType("integer")
+                        .HasColumnName("ancho");
+
+                    b.Property<string>("CampoKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("campo_key");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<bool>("Oculto")
+                        .HasColumnType("boolean")
+                        .HasColumnName("oculto");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<string>("TabKey")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("tab_key");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_paciente_campo_rigido_defs");
+
+                    b.HasIndex("TenantId", "CampoKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_paciente_campo_rigido_defs_tenant_id_campo_key");
+
+                    b.HasIndex("TenantId", "TabKey", "Orden")
+                        .HasDatabaseName("ix_paciente_campo_rigido_defs_tenant_id_tab_key_orden");
+
+                    b.ToTable("paciente_campo_rigido_defs", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.PacienteContactoEmergencia", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7328,6 +7490,80 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_paciente_contratos_tenant_id_paciente_id_orden");
 
                     b.ToTable("paciente_contratos", (string)null);
+                });
+
+            modelBuilder.Entity("Visal.Domain.Entities.PacienteFichaDef", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("color");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Descripcion")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("descripcion");
+
+                    b.Property<bool>("EsSistema")
+                        .HasColumnType("boolean")
+                        .HasColumnName("es_sistema");
+
+                    b.Property<bool>("Oculto")
+                        .HasColumnType("boolean")
+                        .HasColumnName("oculto");
+
+                    b.Property<int>("Orden")
+                        .HasColumnType("integer")
+                        .HasColumnName("orden");
+
+                    b.Property<string>("TabKey")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("tab_key");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Titulo")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("titulo");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_paciente_ficha_defs");
+
+                    b.HasIndex("TenantId", "Orden")
+                        .HasDatabaseName("ix_paciente_ficha_defs_tenant_id_orden");
+
+                    b.HasIndex("TenantId", "TabKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_paciente_ficha_defs_tenant_id_tab_key");
+
+                    b.ToTable("paciente_ficha_defs", (string)null);
                 });
 
             modelBuilder.Entity("Visal.Domain.Entities.PacienteIngreso", b =>
@@ -8994,6 +9230,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<int>("Orden")
                         .HasColumnType("integer")
                         .HasColumnName("orden");
+
+                    b.Property<string>("ParametrosJson")
+                        .HasColumnType("text")
+                        .HasColumnName("parametros_json");
 
                     b.Property<string>("Subtitulo")
                         .HasColumnType("text")

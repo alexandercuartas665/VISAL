@@ -104,6 +104,15 @@ public class Paciente : TenantEntity
     public Guid? SedeAtencionId { get; set; }
     public Sucursal? SedeAtencion { get; set; }
 
+    // ===== Campos dinamicos (gestor de campos del tenant) =====
+    /// <summary>
+    /// Valores de los campos dinamicos definidos por el tenant para la ficha de
+    /// admision. jsonb PLANO: { "campoKey": "valor-string" } (no anidado por tab, para
+    /// que mover un campo de tab no huerfane el valor y que el CENSO lo lea por clave).
+    /// La definicion de cada campo vive en paciente_campo_defs.
+    /// </summary>
+    public string? CamposDinamicosJson { get; set; }
+
     // ===== Contacto de emergencia (legacy — primer contacto) =====
     /// <summary>Nombre del contacto principal. Se mantiene por compat: la lista
     /// completa vive en <see cref="ContactosEmergencia"/>.</summary>

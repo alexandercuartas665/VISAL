@@ -1,0 +1,193 @@
+@using Visal.Application.Tenancy.CamposDinamicos
+@using Visal.Domain.Enums
+
+@* Renderer de los campos dinamicos de un tab de la ficha de paciente. Los valores viven
+   en un diccionario plano clave(CampoKey)->valor(string) que se serializa a
+   Paciente.CamposDinamicosJson. El padre (Admision) pasa el mismo diccionario por
+   referencia y lo persiste al guardar. *@
+
+@if (Campos.Count == 0)
+{
+    @if (!BareCells)
+    {
+        <div class="text-muted" style="padding:18px;font-size:12px;">Este tab no tiene campos configurados.</div>
+    }
+}
+else if (BareCells)
+{
+    @* Modo celdas sueltas: emite cada campo como un item para la grilla del padre
+       (la .ase-form de 4 columnas de la ficha), sin su propia grilla. *@
+    @foreach (var c in Campos)
+    {
+        @if (c.Tipo == PacienteCampoTipo.Separador)
+        {
+            <div class="cdp-sep" style="grid-column: 1 / -1;"><span>@c.Label</span></div>
+        }
+        else
+        {
+            <div class="ase-f" style="grid-column: span @Span(c.Ancho);">
+                <label>
+                    @c.Label
+                    @if (c.Requerido) { <span class="text-danger">*</span> }
+                </label>
+                @RenderInput(c)
+                @if (!string.IsNullOrWhiteSpace(c.Descripcion))
+                {
+                    <div class="cdp-help">@c.Descripcion</div>
+                }
+            </div>
+        }
+    }
+}
+else
+{
+    <div class="cdp-grid">
+        @foreach (var c in Campos)
+        {
+            @if (c.Tipo == PacienteCampoTipo.Separador)
+            {
+                <div class="cdp-sep">
+                    <span>@c.Label</span>
+                </div>
+            }
+            else
+            {
+                <div class="cdp-f" style="grid-column: span @(Math.Clamp(c.Ancho, 1, 3));">
+                    <label>
+                        @c.Label
+                        @if (c.Requerido) { <span class="text-danger">*</span> }
+                    </label>
+                    @RenderInput(c)
+                    @if (!string.IsNullOrWhiteSpace(c.Descripcion))
+                    {
+                        <div class="cdp-help">@c.Descripcion</div>
+                    }
+                </div>
+            }
+        }
+    </div>
+}
+
+<style>
+    .cdp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 14px; }
+    @@media (max-width: 760px) { .cdp-grid { grid-template-columns: 1fr; } .cdp-f { grid-column: span 1 !important; } }
+    .cdp-f { display: flex; flex-direction: column; gap: 4px; }
+    .cdp-f label { font-size: 12px; font-weight: 600; color: #334155; }
+    .cdp-help { font-size: 11px; color: #94a3b8; }
+    .cdp-sep { grid-column: 1 / -1; border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 6px; font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .03em; }
+    .cdp-check { flex-direction: row; align-items: center; gap: 8px; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<PacienteCampoDto> Campos { get; set; } = Array.Empty<PacienteCampoDto>();
+
+    /// <summary>Diccionario plano CampoKey -&gt; valor (string). Se muta en sitio.</summary>
+    [Parameter, EditorRequired] public Dictionary<string, string> Valores { get; set; } = new();
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// Celdas sueltas: renderiza los campos como items directos de la grilla del padre
+    /// (la .ase-form de 4 columnas de la ficha), en vez de envolverlos en su propia grilla.
+    /// </summary>
+    [Parameter] public bool BareCells { get; set; }
+
+    /// <summary>Se dispara cuando cambia cualquier valor (para marcar el formulario sucio).</summary>
+    [Parameter] public EventCallback OnCambio { get; set; }
+
+    /// <summary>Ancho 1..3 -&gt; span sobre la grilla de 4 columnas de la ficha (1, 2, completo).</summary>
+    private static int Span(int ancho) => ancho >= 3 ? 4 : Math.Clamp(ancho, 1, 2);
+
+    private string Get(PacienteCampoDto c)
+        => Valores.TryGetValue(c.CampoKey, out var v) ? v ?? "" : "";
+
+    private async Task Set(PacienteCampoDto c, string? valor)
+    {
+        if (string.IsNullOrEmpty(valor)) { Valores.Remove(c.CampoKey); }
+        else { Valores[c.CampoKey] = valor; }
+        if (OnCambio.HasDelegate) { await OnCambio.InvokeAsync(); }
+    }
+
+    private RenderFragment RenderInput(PacienteCampoDto c) => builder =>
+    {
+        var val = Get(c);
+        switch (c.Tipo)
+        {
+            case PacienteCampoTipo.TextoLargo:
+                builder.OpenElement(0, "textarea");
+                builder.AddAttribute(1, "class", "form-control form-control-sm");
+                builder.AddAttribute(2, "rows", "2");
+                builder.AddAttribute(3, "disabled", Disabled);
+                builder.AddAttribute(4, "value", val);
+                builder.AddAttribute(5, "onchange", EventCallback.Factory.Create(this, (ChangeEventArgs e) => Set(c, e.Value?.ToString())));
+                builder.CloseElement();
+                break;
+
+            case PacienteCampoTipo.Seleccion:
+                builder.OpenElement(10, "select");
+                builder.AddAttribute(11, "class", "form-select form-select-sm");
+                builder.AddAttribute(12, "disabled", Disabled);
+                builder.AddAttribute(13, "value", val);
+                builder.AddAttribute(14, "onchange", EventCallback.Factory.Create(this, (ChangeEventArgs e) => Set(c, e.Value?.ToString())));
+                builder.OpenElement(15, "option");
+                builder.AddAttribute(16, "value", "");
+                builder.AddContent(17, "(seleccione)");
+                builder.CloseElement();
+                foreach (var op in Opciones(c))
+                {
+                    builder.OpenElement(18, "option");
+                    builder.AddAttribute(19, "value", op);
+                    builder.AddAttribute(20, "selected", op == val);
+                    builder.AddContent(21, op);
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+                break;
+
+            case PacienteCampoTipo.Booleano:
+                builder.OpenElement(30, "label");
+                builder.AddAttribute(31, "class", "cdp-check");
+                builder.OpenElement(32, "input");
+                builder.AddAttribute(33, "type", "checkbox");
+                builder.AddAttribute(34, "class", "form-check-input");
+                builder.AddAttribute(35, "disabled", Disabled);
+                builder.AddAttribute(36, "checked", string.Equals(val, "true", StringComparison.OrdinalIgnoreCase));
+                builder.AddAttribute(37, "onchange", EventCallback.Factory.Create(this, (ChangeEventArgs e) => Set(c, (e.Value is bool b && b) ? "true" : null)));
+                builder.CloseElement();
+                builder.AddContent(38, string.Equals(val, "true", StringComparison.OrdinalIgnoreCase) ? "Si" : "No");
+                builder.CloseElement();
+                break;
+
+            default:
+                builder.OpenElement(50, "input");
+                builder.AddAttribute(51, "class", "form-control form-control-sm");
+                builder.AddAttribute(52, "type", InputType(c.Tipo));
+                builder.AddAttribute(53, "disabled", Disabled);
+                if (c.Tipo is PacienteCampoTipo.Numero or PacienteCampoTipo.Decimal or PacienteCampoTipo.Moneda)
+                {
+                    builder.AddAttribute(54, "step", c.Tipo == PacienteCampoTipo.Numero ? "1" : "any");
+                }
+                builder.AddAttribute(55, "value", val);
+                builder.AddAttribute(56, "onchange", EventCallback.Factory.Create(this, (ChangeEventArgs e) => Set(c, e.Value?.ToString())));
+                builder.CloseElement();
+                break;
+        }
+    };
+
+    private static string InputType(PacienteCampoTipo t) => t switch
+    {
+        PacienteCampoTipo.Numero => "number",
+        PacienteCampoTipo.Decimal => "number",
+        PacienteCampoTipo.Moneda => "number",
+        PacienteCampoTipo.Fecha => "date",
+        PacienteCampoTipo.FechaHora => "datetime-local",
+        PacienteCampoTipo.Telefono => "tel",
+        PacienteCampoTipo.Email => "email",
+        _ => "text"
+    };
+
+    private static IEnumerable<string> Opciones(PacienteCampoDto c)
+        => string.IsNullOrWhiteSpace(c.Opciones)
+            ? Array.Empty<string>()
+            : c.Opciones.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}

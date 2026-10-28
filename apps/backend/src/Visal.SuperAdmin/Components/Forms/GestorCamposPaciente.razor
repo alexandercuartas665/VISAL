@@ -1,0 +1,626 @@
+@using Visal.Application.Tenancy.CamposDinamicos
+@using Visal.Domain.Enums
+@inject IPacienteFichaService Fichas
+@inject IPacienteCampoService Campos
+@inject IPacienteCampoRigidoService Rigidos
+@inject Microsoft.JSInterop.IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Gestor de campos dinamicos de la ficha de paciente. Se usa embebido en un modal dentro
+   de /admision (lo abre el admin del tenant). Administra tabs y campos; los valores por
+   paciente se capturan en la ficha (ver CamposDinamicosPaciente). *@
+
+<div class="cat-head" style="margin-top:0;">
+    <div>
+        <div class="cat-eyebrow">Ficha de Admision</div>
+        <h1 class="cat-title" style="font-size:20px;">Campos Dinamicos del Paciente</h1>
+        <p class="cat-sub">Define campos propios de la agencia para la ficha de admision, organizados en tabs.
+            Cada campo tiene su tab, orden y ancho. Estos campos tambien quedan disponibles como columnas y
+            filtros en el constructor de reportes (CENSO).</p>
+    </div>
+    @if (OnCerrar.HasDelegate)
+    {
+        <button class="btn btn-outline-secondary btn-sm" @onclick="OnCerrar">Cerrar</button>
+    }
+</div>
+
+@if (_error is not null) { <div class="cat-alert">@_error</div> }
+@if (_ok is not null) { <div class="cat-ok">@_ok</div> }
+
+<div class="cd-wrap">
+    @* ===== Columna izquierda: TABS ===== *@
+    <div class="cat-card cd-col-tabs">
+        <div class="cd-col-h">
+            <span>Tabs</span>
+            <button class="btn btn-primary btn-sm" @onclick="AbrirNuevoTab">+ Tab</button>
+        </div>
+
+        @if (_nuevoTab)
+        {
+            <div class="cd-newtab">
+                <input class="form-control form-control-sm" placeholder="Titulo del tab" @bind="_nuevoTitulo" maxlength="80" />
+                <div class="cd-newtab-row">
+                    <input type="color" @bind="_nuevoColor" title="Color" />
+                    <button class="btn btn-primary btn-sm" @onclick="CrearTabAsync">Crear</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _nuevoTab = false">Cancelar</button>
+                </div>
+            </div>
+        }
+
+        <div class="cd-tablist">
+            @foreach (var (f, i) in _fichas.Select((f, i) => (f, i)))
+            {
+                <div class="cd-tabitem @(_selTab == f.TabKey ? "sel" : "")" @onclick="() => SeleccionarTab(f.TabKey)">
+                    <span class="cd-dot" style="background:@(f.Color ?? "#64748b")"></span>
+                    <span class="cd-tabname">@f.Titulo</span>
+                    @if (f.EsSistema) { <span class="cd-badge">sistema</span> }
+                    @if (f.Oculto) { <span class="cd-badge cd-badge-off">oculto</span> }
+                    <span class="cd-tabcount">@(_conteos.TryGetValue(f.TabKey, out var n) ? n : 0)</span>
+                    <span class="cd-tabactions" @onclick:stopPropagation="true">
+                        <button class="btn btn-link btn-sm p-0" title="Subir" disabled="@(i == 0)" @onclick="() => ReordenarTabAsync(f.Id, true)">&#9650;</button>
+                        <button class="btn btn-link btn-sm p-0" title="Bajar" disabled="@(i == _fichas.Count - 1)" @onclick="() => ReordenarTabAsync(f.Id, false)">&#9660;</button>
+                        <button class="btn btn-link btn-sm p-0" title="Editar" @onclick="() => EditarTab(f)">&#9998;</button>
+                        @if (!f.EsSistema)
+                        {
+                            <button class="btn btn-link btn-sm p-0 text-danger" title="Eliminar" @onclick="() => EliminarTabAsync(f)">&times;</button>
+                        }
+                    </span>
+                </div>
+            }
+            @if (_fichas.Count == 0)
+            {
+                <div class="text-muted" style="padding:14px;font-size:12px;">Aun no hay tabs.</div>
+            }
+        </div>
+    </div>
+
+    @* ===== Columna derecha: CAMPOS del tab ===== *@
+    <div class="cat-card cd-col-campos">
+        @if (_selTab is null)
+        {
+            <div class="text-muted" style="padding:28px;text-align:center;">Elige un tab a la izquierda para ver sus campos.</div>
+        }
+        else
+        {
+            <div class="cd-col-h">
+                <span>Campos de "@(_fichas.FirstOrDefault(x => x.TabKey == _selTab)?.Titulo ?? _selTab)"</span>
+                @if (_selTab != "documentos")
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="() => NuevoCampo(_selTab)">+ Campo</button>
+                }
+            </div>
+
+            @if (_selTab == "documentos")
+            {
+                <div class="text-muted" style="padding:16px;font-size:12px;">El tab Documentos muestra los archivos del paciente; no admite campos.</div>
+            }
+            else if (_filas.Count == 0)
+            {
+                <div class="text-muted" style="padding:20px;font-size:12px;">Este tab no tiene campos. Usa "+ Campo" o mueve campos fijos aqui desde otro tab.</div>
+            }
+            else
+            {
+                <table class="table table-sm align-middle cd-campos-tbl" data-cdcampos>
+                    <thead>
+                        <tr>
+                            <th style="width:92px">Orden</th>
+                            <th>Campo</th>
+                            <th style="width:120px">Tipo</th>
+                            <th style="width:90px">Ancho</th>
+                            <th style="width:90px">Estado</th>
+                            <th style="width:150px">Mover a tab</th>
+                            <th style="width:90px"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (f, i) in _filas.Select((f, i) => (f, i)))
+                        {
+                            <tr class="@(f.Oculto ? "cd-row-off" : "")" @key="f.Key" data-row="@i">
+                                <td class="cd-ord">
+                                    <span class="cd-grip" title="Arrastra para reordenar" draggable="true"></span>
+                                    <button class="btn btn-link btn-sm p-0" title="Subir" disabled="@(i == 0)" @onclick="() => MoverFilaAsync(i, true)">&#9650;</button>
+                                    <button class="btn btn-link btn-sm p-0" title="Bajar" disabled="@(i == _filas.Count - 1)" @onclick="() => MoverFilaAsync(i, false)">&#9660;</button>
+                                </td>
+                                <td>
+                                    <div class="cd-campo-label">
+                                        @f.Label
+                                        @if (f.Requerido) { <span class="text-danger">*</span> }
+                                        @if (f.EsRigido) { <span class="cd-badge">fijo</span> }
+                                    </div>
+                                    <div class="cd-campo-key">@f.Key</div>
+                                </td>
+                                <td>@f.TipoLabel</td>
+                                <td>
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                            title="@(f.Compuesto ? "Bloque compuesto: ancho completo fijo" : "Cambiar ancho")"
+                                            disabled="@f.Compuesto" @onclick="() => CicloAnchoFilaAsync(f)">@AnchoLabel(f.Ancho)</button>
+                                </td>
+                                <td>
+                                    @if (f.EsRigido)
+                                    {
+                                        <button class="btn btn-sm @(f.Oculto ? "btn-outline-secondary" : "btn-outline-success")"
+                                                title="@(f.Ocultable ? (f.Oculto ? "Mostrar en la ficha" : "Ocultar de la ficha") : "Campo obligatorio: no se puede ocultar")"
+                                                disabled="@(!f.Ocultable)" @onclick="() => ToggleOcultoFilaAsync(f)">@(f.Oculto ? "Oculto" : "Visible")</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="cd-pill @(f.Oculto ? "off" : "on")">@(f.Oculto ? "No" : "Si")</span>
+                                    }
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm" value="@f.TabKey" @onchange="e => MoverFilaATabAsync(f, e.Value?.ToString())">
+                                        @foreach (var tb in _fichas.Where(x => x.TabKey != "documentos"))
+                                        {
+                                            <option value="@tb.TabKey" selected="@(tb.TabKey == f.TabKey)">@tb.Titulo</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td class="cat-actions">
+                                    @if (f.EsRigido)
+                                    {
+                                        <span class="text-muted" style="font-size:11px;">en codigo</span>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-outline-secondary btn-sm" title="Editar" @onclick="() => EditarCampo(f.Din!)">&#9998;</button>
+                                        <button class="btn btn-outline-danger btn-sm" title="Eliminar" @onclick="() => EliminarCampoAsync(f.Din!)">&times;</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+    </div>
+</div>
+
+@* Leyenda: los campos "fijos" viven en el codigo (no se crean ni se borran), pero su tab,
+   orden, ancho y visibilidad SI se configuran aqui igual que los dinamicos. *@
+<div class="cd-legend">
+    <span class="cd-badge">fijo</span> = campo del sistema: puedes moverlo de tab, reordenarlo,
+    cambiar su ancho y ocultarlo (salvo los obligatorios), pero no eliminarlo ni editar su tipo.
+    Los bloques compuestos (contratos, telefonos, contactos de emergencia, CIE10) se mueven y
+    reordenan pero su ancho es completo.
+</div>
+
+@* ===== Modal editar/crear TAB ===== *@
+@if (_editTab is not null)
+{
+    <div class="cd-modal-back" @onclick="() => _editTab = null">
+        <div class="cd-modal" @onclick:stopPropagation="true">
+            <h3>@(_editTab.Id == Guid.Empty ? "Nuevo tab" : "Editar tab")</h3>
+            <div class="ase-f"><label>Titulo *</label><input class="form-control form-control-sm" @bind="_editTab.Titulo" maxlength="80" /></div>
+            <div class="ase-f"><label>Color</label><input type="color" @bind="_editTab.Color" /></div>
+            <div class="ase-f"><label>Descripcion</label><textarea class="form-control form-control-sm" rows="2" @bind="_editTab.Descripcion" maxlength="300"></textarea></div>
+            <div class="ase-f"><label class="cd-check"><input type="checkbox" @bind="_editTab.Oculto" /> Oculto en la ficha</label></div>
+            <div class="cd-modal-actions">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _editTab = null">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="GuardarTabAsync">Guardar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ===== Modal editar/crear CAMPO ===== *@
+@if (_editCampo is not null)
+{
+    <div class="cd-modal-back" @onclick="() => _editCampo = null">
+        <div class="cd-modal" @onclick:stopPropagation="true">
+            <h3>@(_editCampo.Id == Guid.Empty ? "Nuevo campo" : "Editar campo")</h3>
+            <div class="ase-f"><label>Etiqueta *</label><input class="form-control form-control-sm" @bind="_editCampo.Label" maxlength="150" /></div>
+            <div class="ase-f"><label>Tipo</label>
+                <select class="form-select form-select-sm" @bind="_editCampo.Tipo">
+                    @foreach (var t in Enum.GetValues<PacienteCampoTipo>())
+                    {
+                        <option value="@t">@TipoLabel(t)</option>
+                    }
+                </select>
+            </div>
+            @if (_editCampo.Tipo == PacienteCampoTipo.Seleccion)
+            {
+                <div class="ase-f"><label>Opciones (una por linea)</label>
+                    <textarea class="form-control form-control-sm" rows="4" @bind="_editCampo.Opciones" maxlength="2000"></textarea></div>
+            }
+            <div class="ase-f"><label>Ancho</label>
+                <select class="form-select form-select-sm" @bind="_editCampo.Ancho">
+                    <option value="1">Angosto</option>
+                    <option value="2">Medio</option>
+                    <option value="3">Completo</option>
+                </select>
+            </div>
+            <div class="ase-f"><label>Descripcion / ayuda</label><textarea class="form-control form-control-sm" rows="2" @bind="_editCampo.Descripcion" maxlength="600"></textarea></div>
+            <div class="ase-f"><label class="cd-check"><input type="checkbox" @bind="_editCampo.Requerido" /> Requerido</label></div>
+            <div class="ase-f"><label class="cd-check"><input type="checkbox" @bind="_editCampo.Activo" /> Activo</label></div>
+            @if (_editCampo.Id != Guid.Empty)
+            {
+                <div class="cd-campo-key">Clave: @_editCampo.CampoKey (no se puede cambiar)</div>
+            }
+            <div class="cd-modal-actions">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _editCampo = null">Cancelar</button>
+                <button class="btn btn-primary btn-sm" @onclick="GuardarCampoAsync">Guardar</button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .cd-wrap { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    @@media (max-width: 900px) { .cd-wrap { grid-template-columns: 1fr; } }
+    .cd-col-h { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 10px; }
+    .cd-newtab { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .cd-newtab-row { display: flex; gap: 6px; align-items: center; }
+    .cd-tablist { display: flex; flex-direction: column; gap: 4px; }
+    .cd-tabitem { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+    .cd-tabitem:hover { background: #f1f5f9; }
+    .cd-tabitem.sel { background: #eff6ff; border-color: #bfdbfe; }
+    .cd-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+    .cd-tabname { font-weight: 600; font-size: 13px; }
+    .cd-badge { font-size: 9px; text-transform: uppercase; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 1px 6px; font-weight: 700; }
+    .cd-badge-off { background: #fee2e2; color: #b91c1c; }
+    .cd-tabcount { margin-left: auto; font-size: 11px; color: #64748b; background: #f1f5f9; border-radius: 999px; padding: 1px 8px; }
+    .cd-tabactions { display: flex; gap: 2px; }
+    .cd-tabactions .btn { line-height: 1; }
+    .cd-campos-tbl td { vertical-align: middle; }
+    .cd-ord { white-space: nowrap; }
+    .cd-ord .btn { line-height: 1; }
+    .cd-grip { display: inline-block; vertical-align: middle; width: .95rem; height: 1.2rem; margin-right: 4px; cursor: grab; border-radius: 4px; background-image: radial-gradient(#94a3b8 1px, transparent 1px); background-size: 4px 4px; background-position: center; background-repeat: space; opacity: .6; }
+    .cd-grip:hover { opacity: 1; background-color: #eef2ff; }
+    .cd-grip:active { cursor: grabbing; }
+    tr.cd-row-dragging { opacity: .45; }
+    tr.cd-drop-hint td { box-shadow: inset 0 2px 0 #6366f1; }
+    .cd-campo-label { font-weight: 600; font-size: 13px; }
+    .cd-campo-key { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 10px; color: #94a3b8; }
+    .cd-row-off { opacity: .55; }
+    .cd-pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; }
+    .cd-pill.on { background: #dcfce7; color: #166534; }
+    .cd-pill.off { background: #f1f5f9; color: #64748b; }
+    .cd-legend { margin-top: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; font-size: 12px; color: #475569; line-height: 1.5; }
+    .cd-rigidos { margin-top: 16px; }
+    .cd-rigid-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .cd-rigid-tab { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; }
+    .cd-rigid-tab-h { font-weight: 700; font-size: 12px; color: #334155; margin-bottom: 6px; }
+    .cd-rigid-tab ul { margin: 0; padding-left: 16px; }
+    .cd-rigid-tab li { font-size: 12px; color: #64748b; }
+    .cd-modal-back { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; z-index: 1060; }
+    .cd-modal { background: #fff; border-radius: 10px; padding: 20px; width: 460px; max-width: 94vw; max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+    .cd-modal h3 { font-size: 16px; margin: 0 0 14px; }
+    .cd-modal .ase-f { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+    .cd-modal .ase-f label { font-size: 12px; font-weight: 600; color: #334155; }
+    .cd-check { flex-direction: row !important; align-items: center; gap: 6px; }
+    .cd-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+</style>
+
+@code {
+    /// <summary>Se invoca cuando el usuario cierra el gestor (boton Cerrar).</summary>
+    [Parameter] public EventCallback OnCerrar { get; set; }
+
+    private List<PacienteFichaDto> _fichas = new();
+    private List<PacienteCampoDto> _campos = new();
+    private List<PacienteCampoRigidoDto> _rigidTab = new();
+    private List<FilaCampo> _filas = new();
+    private Dictionary<string, int> _conteos = new();
+    private string? _selTab;
+    private string? _error, _ok;
+
+    // Alta rapida de tab
+    private bool _nuevoTab;
+    private string _nuevoTitulo = "";
+    private string _nuevoColor = "#2563eb";
+
+    // Modales
+    private TabEdit? _editTab;
+    private CampoEdit? _editCampo;
+
+    private DotNetObjectReference<GestorCamposPaciente>? _dnetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Fichas.EnsureDefaultsAsync();
+        await Rigidos.EnsureDefaultsAsync();
+        await RecargarAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dnetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("visalCamposDnd.init", _dnetRef);
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _dnetRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    // Arrastrar y soltar de filas (fijas + dinamicas). El DnD vive en JS a nivel document
+    // (campos-dnd.js) porque el DnD nativo no funciona con los @ondragover de Blazor Server.
+    // Al soltar, reordena _filas y persiste con el MISMO camino que las flechas (ReordenarTabAsync).
+    [JSInvokable]
+    public async Task MoverFilaFromJs(int from, int to)
+    {
+        if (_selTab is null) { return; }
+        if (from < 0 || from >= _filas.Count || to < 0 || to >= _filas.Count || from == to) { return; }
+        _error = _ok = null;
+        var item = _filas[from];
+        _filas.RemoveAt(from);
+        if (to > from) { to--; } // al remover, el destino por debajo del origen se corre uno
+        if (to < 0) { to = 0; }
+        if (to > _filas.Count) { to = _filas.Count; }
+        _filas.Insert(to, item);
+        var items = _filas
+            .Select(f => new ItemColocacion(f.EsRigido, f.EsRigido ? (Guid?)null : f.DinId, f.EsRigido ? f.Key : null))
+            .ToList();
+        try { await Rigidos.ReordenarTabAsync(_selTab, items); await CargarCamposAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        StateHasChanged();
+    }
+
+    private async Task RecargarAsync()
+    {
+        _fichas = (await Fichas.ListAsync()).ToList();
+        var din = await Campos.ListAsync();
+        var rig = await Rigidos.ListAsync();
+        _conteos = _fichas.ToDictionary(
+            f => f.TabKey,
+            f => din.Count(c => c.TabKey == f.TabKey) + rig.Count(r => r.TabKey == f.TabKey));
+        if (_selTab is null || _fichas.All(f => f.TabKey != _selTab))
+        {
+            _selTab = _fichas.FirstOrDefault()?.TabKey;
+        }
+        await CargarCamposAsync();
+    }
+
+    private async Task CargarCamposAsync()
+    {
+        if (_selTab is null) { _campos = new(); _rigidTab = new(); _filas = new(); return; }
+        _campos = (await Campos.ListByTabAsync(_selTab)).ToList();
+        _rigidTab = (await Rigidos.ListByTabAsync(_selTab)).ToList();
+        _filas = ConstruirFilas();
+    }
+
+    /// <summary>Fusiona campos fijos y dinamicos del tab en un solo orden para la tabla.</summary>
+    private List<FilaCampo> ConstruirFilas()
+    {
+        var rig = _rigidTab.Select(r => new FilaCampo
+        {
+            EsRigido = true, Key = r.CampoKey, Label = r.Label, TabKey = r.TabKey, Orden = r.Orden,
+            Ancho = r.Ancho, TipoLabel = r.Compuesto ? "Bloque fijo" : "Campo fijo",
+            Requerido = !r.Ocultable, Compuesto = r.Compuesto, Ocultable = r.Ocultable, Oculto = r.Oculto,
+        });
+        var din = _campos.Select(c => new FilaCampo
+        {
+            EsRigido = false, Key = c.CampoKey, DinId = c.Id, Din = c, Label = c.Label, TabKey = c.TabKey,
+            Orden = c.Orden, Ancho = c.Ancho, TipoLabel = TipoLabel(c.Tipo), Requerido = c.Requerido,
+            Compuesto = false, Ocultable = true, Oculto = !c.Activo,
+        });
+        return rig.Concat(din).OrderBy(f => f.Orden).ToList();
+    }
+
+    // ---- Fila unificada (fijo o dinamico) ----
+
+    private async Task MoverFilaAsync(int index, bool up)
+    {
+        _error = _ok = null;
+        var destino = up ? index - 1 : index + 1;
+        if (destino < 0 || destino >= _filas.Count || _selTab is null) { return; }
+        (_filas[index], _filas[destino]) = (_filas[destino], _filas[index]);
+        var items = _filas
+            .Select(f => new ItemColocacion(f.EsRigido, f.EsRigido ? (Guid?)null : f.DinId, f.EsRigido ? f.Key : null))
+            .ToList();
+        try { await Rigidos.ReordenarTabAsync(_selTab, items); await CargarCamposAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task CicloAnchoFilaAsync(FilaCampo f)
+    {
+        _error = _ok = null;
+        try
+        {
+            if (f.EsRigido) { await Rigidos.CicloAnchoAsync(f.Key); }
+            else { await Campos.CicloAnchoAsync(f.DinId); }
+            await CargarCamposAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task ToggleOcultoFilaAsync(FilaCampo f)
+    {
+        if (!f.EsRigido) { return; }
+        _error = _ok = null;
+        try { await Rigidos.SetOcultoAsync(f.Key, !f.Oculto); await CargarCamposAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task MoverFilaATabAsync(FilaCampo f, string? tabKey)
+    {
+        if (string.IsNullOrWhiteSpace(tabKey) || tabKey == f.TabKey) { return; }
+        _error = _ok = null;
+        try
+        {
+            if (f.EsRigido) { await Rigidos.MoverATabAsync(f.Key, tabKey); }
+            else { await Campos.MoverATabAsync(f.DinId, tabKey); }
+            await RecargarAsync();
+            _ok = "Campo movido.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task SeleccionarTab(string tabKey)
+    {
+        _selTab = tabKey;
+        await CargarCamposAsync();
+    }
+
+    // ---- Tabs ----
+
+    private void AbrirNuevoTab()
+    {
+        _nuevoTab = true;
+        _nuevoTitulo = "";
+        _nuevoColor = "#2563eb";
+    }
+
+    private async Task CrearTabAsync()
+    {
+        _error = _ok = null;
+        if (string.IsNullOrWhiteSpace(_nuevoTitulo)) { _error = "El tab necesita un titulo."; return; }
+        try
+        {
+            var f = await Fichas.CreateAsync(new CrearFichaRequest(_nuevoTitulo.Trim(), _nuevoColor, null));
+            _nuevoTab = false;
+            await RecargarAsync();
+            _selTab = f.TabKey;
+            await CargarCamposAsync();
+            _ok = "Tab creado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void EditarTab(PacienteFichaDto f)
+        => _editTab = new TabEdit { Id = f.Id, Titulo = f.Titulo, Color = f.Color ?? "#2563eb", Descripcion = f.Descripcion, Oculto = f.Oculto };
+
+    private async Task GuardarTabAsync()
+    {
+        if (_editTab is null) { return; }
+        _error = _ok = null;
+        if (string.IsNullOrWhiteSpace(_editTab.Titulo)) { _error = "El tab necesita un titulo."; return; }
+        try
+        {
+            await Fichas.UpdateAsync(_editTab.Id, new ActualizarFichaRequest(_editTab.Titulo.Trim(), _editTab.Color, _editTab.Descripcion, _editTab.Oculto));
+            _editTab = null;
+            await RecargarAsync();
+            _ok = "Tab actualizado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task ReordenarTabAsync(Guid id, bool up)
+    {
+        _error = _ok = null;
+        try { await Fichas.ReorderAsync(id, up); await RecargarAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task EliminarTabAsync(PacienteFichaDto f)
+    {
+        _error = _ok = null;
+        try
+        {
+            await Fichas.DeleteAsync(f.Id);
+            if (_selTab == f.TabKey) { _selTab = null; }
+            await RecargarAsync();
+            _ok = "Tab eliminado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // ---- Campos ----
+
+    private void NuevoCampo(string? tabKey)
+    {
+        if (tabKey is null) { return; }
+        _editCampo = new CampoEdit { Id = Guid.Empty, TabKey = tabKey, Label = "", Tipo = PacienteCampoTipo.Texto, Ancho = 1, Activo = true };
+    }
+
+    private void EditarCampo(PacienteCampoDto c)
+        => _editCampo = new CampoEdit { Id = c.Id, TabKey = c.TabKey, CampoKey = c.CampoKey, Label = c.Label, Tipo = c.Tipo, Opciones = c.Opciones, Ancho = c.Ancho, Descripcion = c.Descripcion, Requerido = c.Requerido, Activo = c.Activo };
+
+    private async Task GuardarCampoAsync()
+    {
+        if (_editCampo is null) { return; }
+        _error = _ok = null;
+        if (string.IsNullOrWhiteSpace(_editCampo.Label)) { _error = "El campo necesita una etiqueta."; return; }
+        try
+        {
+            if (_editCampo.Id == Guid.Empty)
+            {
+                await Campos.CreateAsync(new CrearCampoRequest(
+                    _editCampo.TabKey, _editCampo.Label.Trim(), _editCampo.Tipo, _editCampo.Opciones,
+                    _editCampo.Ancho, _editCampo.Descripcion, _editCampo.Requerido));
+            }
+            else
+            {
+                await Campos.UpdateAsync(_editCampo.Id, new ActualizarCampoRequest(
+                    _editCampo.Label.Trim(), _editCampo.Tipo, _editCampo.Opciones, _editCampo.Ancho,
+                    _editCampo.Descripcion, _editCampo.Requerido, _editCampo.Activo));
+            }
+            _editCampo = null;
+            await RecargarAsync();
+            _ok = "Campo guardado.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task EliminarCampoAsync(PacienteCampoDto c)
+    {
+        _error = _ok = null;
+        try { await Campos.DeleteAsync(c.Id); await RecargarAsync(); _ok = "Campo eliminado."; }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // ---- helpers ----
+
+    private static string TipoLabel(PacienteCampoTipo t) => t switch
+    {
+        PacienteCampoTipo.Texto => "Texto",
+        PacienteCampoTipo.TextoLargo => "Texto largo",
+        PacienteCampoTipo.Numero => "Numero",
+        PacienteCampoTipo.Decimal => "Decimal",
+        PacienteCampoTipo.Moneda => "Moneda",
+        PacienteCampoTipo.Fecha => "Fecha",
+        PacienteCampoTipo.FechaHora => "Fecha y hora",
+        PacienteCampoTipo.Seleccion => "Seleccion",
+        PacienteCampoTipo.Booleano => "Si / No",
+        PacienteCampoTipo.Telefono => "Telefono",
+        PacienteCampoTipo.Email => "Correo",
+        PacienteCampoTipo.Separador => "Separador",
+        _ => t.ToString()
+    };
+
+    private static string AnchoLabel(int a) => a switch { 2 => "Medio", 3 => "Completo", _ => "Angosto" };
+
+    /// <summary>Fila de la tabla del tab: representa un campo fijo o uno dinamico.</summary>
+    private sealed class FilaCampo
+    {
+        public bool EsRigido { get; set; }
+        public string Key { get; set; } = "";
+        public Guid DinId { get; set; }
+        public PacienteCampoDto? Din { get; set; }
+        public string Label { get; set; } = "";
+        public string TabKey { get; set; } = "";
+        public int Orden { get; set; }
+        public int Ancho { get; set; }
+        public string TipoLabel { get; set; } = "";
+        public bool Requerido { get; set; }
+        public bool Compuesto { get; set; }
+        public bool Ocultable { get; set; }
+        public bool Oculto { get; set; }
+    }
+
+    private sealed class TabEdit
+    {
+        public Guid Id { get; set; }
+        public string Titulo { get; set; } = "";
+        public string? Color { get; set; }
+        public string? Descripcion { get; set; }
+        public bool Oculto { get; set; }
+    }
+
+    private sealed class CampoEdit
+    {
+        public Guid Id { get; set; }
+        public string TabKey { get; set; } = "";
+        public string CampoKey { get; set; } = "";
+        public string Label { get; set; } = "";
+        public PacienteCampoTipo Tipo { get; set; }
+        public string? Opciones { get; set; }
+        public int Ancho { get; set; } = 1;
+        public string? Descripcion { get; set; }
+        public bool Requerido { get; set; }
+        public bool Activo { get; set; } = true;
+    }
+}

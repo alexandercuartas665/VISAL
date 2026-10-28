@@ -13,6 +13,7 @@
 @inject IAtencionColumnaConfigService ColSvc
 @inject ICatalogoTipoServicioService TipoSvcCat
 @inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>Mis Servicios Asignados - Visal</PageTitle>
 
@@ -367,13 +368,14 @@ else
                         <th style="width:200px;">Alias (opcional)</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-sortable="atencion-cols" data-sortowner="@_sortOwner">
                     @for (var i = 0; i < _cfgEdicion.Count; i++)
                     {
                         var idx = i;
                         var row = _cfgEdicion[idx];
-                        <tr>
+                        <tr @key="row.Key" data-sortitem="@idx">
                             <td class="text-center at-mov-cell">
+                                <span class="vs-grip" title="Arrastra para reordenar" draggable="true"></span>
                                 <button type="button" class="btn btn-sm at-mov-btn" title="Subir"
                                         disabled="@(idx == 0)" @onclick="() => MoverArriba(idx)">&#9650;</button>
                                 <button type="button" class="btn btn-sm at-mov-btn" title="Bajar"
@@ -1526,6 +1528,40 @@ else
     private void CerrarConfigColumnas()
     {
         _showConfigCols = false;
+    }
+
+    private readonly string _sortOwner = Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<Atencion>? _sortRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _sortRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("visalSortable.register", _sortOwner, _sortRef); }
+            catch { /* JS aun no cargado: ignorar */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_sortRef is not null) { try { JS.InvokeVoidAsync("visalSortable.unregister", _sortOwner); } catch { } }
+        _sortRef?.Dispose();
+    }
+
+    // Arrastrar y soltar de "Configurar columnas" (orden en memoria; se persiste al Guardar).
+    [JSInvokable]
+    public void SortableMove(string group, int from, int to)
+    {
+        if (group != "atencion-cols") { return; }
+        if (from < 0 || from >= _cfgEdicion.Count || to < 0 || to >= _cfgEdicion.Count || from == to) { return; }
+        var item = _cfgEdicion[from];
+        _cfgEdicion.RemoveAt(from);
+        if (to > from) { to--; }
+        if (to < 0) { to = 0; }
+        if (to > _cfgEdicion.Count) { to = _cfgEdicion.Count; }
+        _cfgEdicion.Insert(to, item);
+        StateHasChanged();
     }
 
     private void MoverArriba(int idx)

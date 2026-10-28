@@ -3,7 +3,11 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
 @using Visal.Application.Tenancy
+@using Visal.Application.Tenancy.CamposDinamicos
 @inject IPacienteService Svc
+@inject IPacienteFichaService FichaDinSvc
+@inject IPacienteCampoService CampoDinSvc
+@inject IPacienteCampoRigidoService CampoRigSvc
 @inject IAseguradoraService AseSvc
 @inject ISucursalService SucSvc
 @inject ICatalogoPacienteService CatSvc
@@ -24,10 +28,27 @@
         <h1 class="ase-title">Admision de Pacientes</h1>
     </div>
     <div style="display:flex; gap:8px;">
+        @if (_esAdminTenant)
+        {
+            <button class="btn btn-outline-secondary btn-sm" @onclick="AbrirGestorCampos" title="Configurar los campos dinamicos de la ficha de paciente">&#9881; Configurar campos</button>
+        }
         <button class="btn btn-outline-primary btn-sm" @onclick="OpenImport" title="Importar pacientes desde Excel">&#128229; Importar Excel</button>
         <button class="btn btn-primary btn-sm" @onclick="New">+ Nuevo paciente</button>
     </div>
 </div>
+
+@if (_showGestorCampos)
+{
+    <div class="gcp-modal-back" @onclick="CerrarGestorCamposAsync">
+        <div class="gcp-modal" @onclick:stopPropagation="true">
+            <GestorCamposPaciente OnCerrar="CerrarGestorCamposAsync" />
+        </div>
+    </div>
+    <style>
+        .gcp-modal-back { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: flex-start; justify-content: center; z-index: 1040; padding: 24px 16px; overflow: auto; }
+        .gcp-modal { background: #fff; border-radius: 10px; width: 1100px; max-width: 96vw; box-shadow: 0 24px 60px rgba(0,0,0,.3); padding: 20px 22px; }
+    </style>
+}
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
@@ -67,109 +88,94 @@
                 </div>
             }
             <div class="ase-card @(EsCerrado ? "ase-locked" : "")">
-                <div class="pac-tabs">
-                    <button class="pac-tab @(_tab == "generales" ? "active" : "")" @onclick="@(() => _tab = "generales")">Datos Generales</button>
-                    <button class="pac-tab @(_tab == "adicionales" ? "active" : "")" @onclick="@(() => _tab = "adicionales")">Datos Adicionales</button>
-                    <button class="pac-tab @(_tab == "detalle" ? "active" : "")" @onclick="@(() => _tab = "detalle")">Detalle</button>
-                    <button class="pac-tab @(_tab == "documentos" ? "active" : "")" @onclick="OnAbrirDocumentosTab" disabled="@(_id is null)">Documentos@(_docs.Count > 0 ? $" ({_docs.Count})" : "")</button>
-                </div>
+                @* Cada campo FIJO se define una vez como RenderFragment nombrado; la ficha los
+                   coloca por tab/orden/ancho segun la configuracion del tenant (ver ChunksDelTab). *@
+                @{
+                    if (_rigidFrag is null)
+                    {
+                        _rigidFrag = new Dictionary<string, RenderFragment>();
 
-                @* ===== TAB DATOS GENERALES ===== *@
-                @if (_tab == "generales")
-                {
-                    <div class="ase-card-h">Identificacion</div>
-                    <div class="ase-form">
-                        <div class="ase-f"><label>Numero Documento *</label><input class="form-control form-control-sm" @bind="_doc" /></div>
-                        <div class="ase-f"><label>Tipo Documento</label>
+                        _rigidFrag["numero_documento"] = @<div class="ase-f"><label>Numero Documento *</label><input class="form-control form-control-sm" @bind="_doc" /></div>;
+                        _rigidFrag["tipo_documento"] = @<div class="ase-f"><label>Tipo Documento</label>
                             @{
                                 var tiposDoc = CatItems(CatalogoPacienteTipo.TipoDocumento).ToList();
                             }
                             <select class="form-select form-select-sm" @bind="_tipoDoc">
                                 @if (tiposDoc.Count == 0)
                                 {
-                                    @* Fallback a los estandar mientras el tenant no configure los suyos
-                                       en /cfg-pacientes. El seeder normalmente ya los siembra. *@
                                     <option>CC</option><option>CE</option><option>TI</option><option>RC</option><option>PA</option><option>MS</option>
                                 }
                                 else
                                 {
-                                    @* Valor = Codigo (lo que se guarda en Paciente.TipoDocumento, string). *@
                                     @foreach (var c in tiposDoc)
                                     {
                                         <option value="@c.Codigo">@c.Codigo@(string.IsNullOrWhiteSpace(c.Nombre) || c.Nombre == c.Codigo ? "" : $" - {c.Nombre}")</option>
                                     }
                                 }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="_pNombre" /></div>
-                        <div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="_sNombre" /></div>
-                        <div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="_pApellido" /></div>
-                        <div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="_sApellido" /></div>
-                        <div class="ase-f"><label>Fecha Nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" @bind:after="RecalcularEdad" /></div>
-                        <div class="ase-f"><label>Edad <small class="text-muted">(auto)</small></label><input type="number" class="form-control form-control-sm" @bind="_edad" readonly /></div>
-                    </div>
+                        </div>;
+                        _rigidFrag["primer_nombre"] = @<div class="ase-f"><label>Primer Nombre</label><input class="form-control form-control-sm" @bind="_pNombre" /></div>;
+                        _rigidFrag["segundo_nombre"] = @<div class="ase-f"><label>Segundo Nombre</label><input class="form-control form-control-sm" @bind="_sNombre" /></div>;
+                        _rigidFrag["primer_apellido"] = @<div class="ase-f"><label>Primer Apellido</label><input class="form-control form-control-sm" @bind="_pApellido" /></div>;
+                        _rigidFrag["segundo_apellido"] = @<div class="ase-f"><label>Segundo Apellido</label><input class="form-control form-control-sm" @bind="_sApellido" /></div>;
+                        _rigidFrag["fecha_nacimiento"] = @<div class="ase-f"><label>Fecha Nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" @bind:after="RecalcularEdad" /></div>;
+                        _rigidFrag["edad"] = @<div class="ase-f"><label>Edad <small class="text-muted">(auto)</small></label><input type="number" class="form-control form-control-sm" @bind="_edad" readonly /></div>;
 
-                    <div class="ase-card-h" style="margin-top:14px;">Datos administrativos PAD</div>
-                    <div class="ase-form">
-                        <div class="ase-f"><label>IPS Que Comenta</label>
+                        _rigidFrag["ips_comenta"] = @<div class="ase-f"><label>IPS Que Comenta</label>
                             <select class="form-select form-select-sm" value="@_ipsComenta" @onchange="OnIpsComentaChanged">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var a in _aseguradorasTodas) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>
-                        <div class="ase-f"><label>Fecha Comentan</label><input type="date" class="form-control form-control-sm" @bind="_fComenta" /></div>
-                        <div class="ase-f"><label>Entidad Aseguradora</label>
+                        </div>;
+                        _rigidFrag["codigo_aceptacion"] = @<div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>;
+                        _rigidFrag["fecha_comentan"] = @<div class="ase-f"><label>Fecha Comentan</label><input type="date" class="form-control form-control-sm" @bind="_fComenta" /></div>;
+                        _rigidFrag["entidad_aseguradora"] = @<div class="ase-f"><label>Entidad Aseguradora</label>
                             <select class="form-select form-select-sm" @bind="_aseId">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var a in _aseguradorasTodas) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>FECHA INGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fIngreso" /></div>
-                        <div class="ase-f"><label>FECHA EGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fEgreso" /></div>
-                        <div class="ase-f"><label>Dias Estancia</label><input type="number" class="form-control form-control-sm" @bind="_diasEst" /></div>
-                        <div class="ase-f"><label>Op. de Ingreso (dias)</label><input type="number" class="form-control form-control-sm" @bind="_opIngreso" /></div>
-                    </div>
+                        </div>;
+                        _rigidFrag["fecha_ingreso_pad"] = @<div class="ase-f"><label>FECHA INGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fIngreso" /></div>;
+                        _rigidFrag["fecha_egreso_pad"] = @<div class="ase-f"><label>FECHA EGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fEgreso" /></div>;
+                        _rigidFrag["dias_estancia"] = @<div class="ase-f"><label>Dias Estancia</label><input type="number" class="form-control form-control-sm" @bind="_diasEst" /></div>;
+                        _rigidFrag["op_ingreso"] = @<div class="ase-f"><label>Op. de Ingreso (dias)</label><input type="number" class="form-control form-control-sm" @bind="_opIngreso" /></div>;
 
-                    <div class="ase-card-h" style="margin-top:14px;">Clasificacion</div>
-                    <div class="ase-form">
-                        <div class="ase-f"><label>Incapacidad</label>
+                        _rigidFrag["incapacidad"] = @<div class="ase-f"><label>Incapacidad</label>
                             <select class="form-select form-select-sm" @bind="_incapacidad">
                                 <option value="">--</option><option>SI</option><option>NO</option>
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Grupo RH</label>
+                        </div>;
+                        _rigidFrag["grupo_rh"] = @<div class="ase-f"><label>Grupo RH</label>
                             <select class="form-select form-select-sm" @bind="_grupoRh">
                                 <option value="">--</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option>
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Tipo Usuario</label>
+                        </div>;
+                        _rigidFrag["tipo_usuario"] = @<div class="ase-f"><label>Tipo Usuario</label>
                             <select class="form-select form-select-sm" @bind="_tipoUsuario">
                                 <option value="">--</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.TipoUsuario)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Estado</label>
+                        </div>;
+                        _rigidFrag["estado"] = @<div class="ase-f"><label>Estado</label>
                             <select class="form-select form-select-sm" @bind="_estado">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.Estado)) { <option value="@c.Nombre">@c.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Clasificacion Paciente</label>
+                        </div>;
+                        _rigidFrag["clasif_paciente"] = @<div class="ase-f"><label>Clasificacion Paciente</label>
                             <select class="form-select form-select-sm" @bind="_clasifPaciente">
                                 <option value="">--</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.ClasificacionPaciente)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Clasificacion Grupo de Patologia</label>
+                        </div>;
+                        _rigidFrag["clasif_grupo_patologia"] = @<div class="ase-f"><label>Clasificacion Grupo de Patologia</label>
                             <select class="form-select form-select-sm" @bind="_clasifGrupo">
                                 <option value="">--</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.ClasificacionGrupoPatologia)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f" style="grid-column: 1 / -1;">
+                        </div>;
+                        _rigidFrag["contratos"] = @<div class="ase-f" style="grid-column: 1 / -1;">
                             <label>Contratos del paciente <span class="text-muted small">(N contratos, pueden ser de EPS distintas)</span></label>
-                            @* Contenedor limitado a 7/12 de ancho; grid interno de 7 cols (# 1 / Ase 3 / Con 2 / Acc 1). *@
                             <div class="pac-contratos-wrap">
                             <div class="pac-contratos-grid">
                                 <div class="pac-contratos-h">#</div>
@@ -213,83 +219,77 @@
                             </div>
                             <button type="button" class="btn btn-outline-primary btn-sm mt-1 w-100" @onclick="AddContratoRow">+ Agregar contrato</button>
                             </div>
-                        </div>
-                        <div class="ase-f"><label>Estrato Social</label>
+                        </div>;
+                        _rigidFrag["estrato"] = @<div class="ase-f"><label>Estrato Social</label>
                             <select class="form-select form-select-sm" @bind="_estrato">
                                 <option value="">--</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>NO REFIERE</option>
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Sexo</label>
+                        </div>;
+                        _rigidFrag["sexo"] = @<div class="ase-f"><label>Sexo</label>
                             <select class="form-select form-select-sm" @bind="_sexo">
                                 <option value="">--</option><option>MASCULINO</option><option>FEMENINO</option><option>INDETERMINADO</option>
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Zona</label>
+                        </div>;
+                        _rigidFrag["zona"] = @<div class="ase-f"><label>Zona</label>
                             <select class="form-select form-select-sm" @bind="_zona">
                                 <option value="">--</option><option>URBANA</option><option>RURAL</option>
                             </select>
-                        </div>
-                    </div>
+                        </div>;
 
-                    <div class="ase-card-h" style="margin-top:14px;">Diagnostico</div>
-                    <div class="ase-form">
-                        <div class="ase-f">
+                        _rigidFrag["cie10"] = @<div class="ase-f">
                             <label>CIE10 / CIE-11</label>
                             <div class="cie-input-row">
                                 <input class="form-control form-control-sm mono" @bind="_cie10Codigo" placeholder="Codigo" />
                                 <button class="btn btn-danger btn-sm" title="Buscar diagnostico" @onclick="OpenCieModal">Buscar</button>
                             </div>
-                        </div>
-                        <div class="ase-f ase-f-wide"><label>Diagnostico Principal</label><input class="form-control form-control-sm" @bind="_dxPrincipal" /></div>
-                        <div class="ase-f"><label>Tutela</label>
+                        </div>;
+                        _rigidFrag["dx_principal"] = @<div class="ase-f"><label>Diagnostico Principal</label><input class="form-control form-control-sm" @bind="_dxPrincipal" /></div>;
+                        _rigidFrag["tutela"] = @<div class="ase-f"><label>Tutela</label>
                             <select class="form-select form-select-sm" @bind="_tutela">
                                 <option value="">--</option><option>SI</option><option>NO</option>
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Tipo Tutela</label>
+                        </div>;
+                        _rigidFrag["tipo_tutela"] = @<div class="ase-f"><label>Tipo Tutela</label>
                             <select class="form-select form-select-sm" @bind="_tipoTutela">
                                 <option value="">--</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.TipoTutela)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Med Contratado</label>
+                        </div>;
+                        _rigidFrag["med_contratado"] = @<div class="ase-f"><label>Med Contratado</label>
                             <select class="form-select form-select-sm" @bind="_medContratado">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.MedContratado)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
-                        </div>
-                    </div>
+                        </div>;
 
-                    <div class="ase-card-h" style="margin-top:14px;">Geografia y contacto</div>
-                    <div class="ase-form">
-                        <div class="ase-f"><label>Pais Residencia</label>
+                        _rigidFrag["pais_residencia"] = @<div class="ase-f"><label>Pais Residencia</label>
                             <select class="form-select form-select-sm" value="@_paisResidencia" @onchange="OnPaisResidenciaChanged">
                                 <option value="">--</option>
                                 @foreach (var p in _paises) { <option value="@p.Id">@p.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Pais Origen</label>
+                        </div>;
+                        _rigidFrag["pais_origen"] = @<div class="ase-f"><label>Pais Origen</label>
                             <select class="form-select form-select-sm" @bind="_paisOrigen">
                                 <option value="">--</option>
                                 @foreach (var p in _paises) { <option value="@p.Id">@p.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Departamento</label>
+                        </div>;
+                        _rigidFrag["departamento"] = @<div class="ase-f"><label>Departamento</label>
                             <select class="form-select form-select-sm" value="@_departamento" @onchange="OnDepartamentoChanged" disabled="@(_departamentos.Count == 0)">
                                 <option value="">--</option>
                                 @foreach (var d in _departamentos) { <option value="@d.Id">@d.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f"><label>Municipio</label>
+                        </div>;
+                        _rigidFrag["municipio"] = @<div class="ase-f"><label>Municipio</label>
                             <select class="form-select form-select-sm" @bind="_municipio" disabled="@(_municipios.Count == 0)">
                                 <option value="">--</option>
                                 @foreach (var m in _municipios) { <option value="@m.Id">@m.Nombre</option> }
                             </select>
-                        </div>
-                        <div class="ase-f ase-f-wide"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>
-                        <div class="ase-f"><label>Barrio</label><input class="form-control form-control-sm" @bind="_barrio" /></div>
-                        <div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>
-                        <div class="ase-f"><label>Telefonos <span class="text-muted" style="font-weight:normal;font-size:11px;">(varios permitidos)</span></label>
+                        </div>;
+                        _rigidFrag["direccion"] = @<div class="ase-f"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>;
+                        _rigidFrag["barrio"] = @<div class="ase-f"><label>Barrio</label><input class="form-control form-control-sm" @bind="_barrio" /></div>;
+                        _rigidFrag["ciudad"] = @<div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>;
+                        _rigidFrag["telefonos"] = @<div class="ase-f"><label>Telefonos <span class="text-muted" style="font-weight:normal;font-size:11px;">(varios permitidos)</span></label>
                             <div style="display:flex;gap:6px;align-items:flex-start;">
                                 <select class="form-select form-select-sm" style="max-width:110px;" @bind="_codPaisTel">
                                     @foreach (var cp in _codigosPais) { <option value="@cp.Codigo">@cp.Codigo @cp.Pais</option> }
@@ -311,122 +311,160 @@
                                             @onclick="AgregarTelefono">+ Agregar telefono</button>
                                 </div>
                             </div>
-                        </div>
-                        <div class="ase-f"><label>Correo Electronico</label><input class="form-control form-control-sm" @bind="_email" /></div>
-                        <div class="ase-f"><label>Sede Atencion</label>
+                        </div>;
+                        _rigidFrag["email"] = @<div class="ase-f"><label>Correo Electronico</label><input class="form-control form-control-sm" @bind="_email" /></div>;
+                        _rigidFrag["sede_atencion"] = @<div class="ase-f"><label>Sede Atencion</label>
                             <select class="form-select form-select-sm" @bind="_sedeId">
                                 <option value="">--</option>
                                 @foreach (var s in _sedes) { <option value="@s.Id">@s.Nombre</option> }
                             </select>
-                        </div>
-                    </div>
-                }
+                        </div>;
 
-                @* ===== TAB DATOS ADICIONALES ===== *@
-                @if (_tab == "adicionales")
-                {
-                    <div class="ase-card-h">Estado civil, ocupacion, regimen</div>
-                    <div class="ase-form">
-                        <div class="ase-f"><label>Estado civil</label>
+                        _rigidFrag["estado_civil"] = @<div class="ase-f"><label>Estado civil</label>
                             <select class="form-select form-select-sm" @bind="_estadoCivil"><option value="">--</option><option>SOLTERO</option><option>CASADO</option><option>UNION LIBRE</option><option>VIUDO</option><option>DIVORCIADO</option><option>NO REFIERE</option></select>
-                        </div>
-                        <div class="ase-f"><label>Ocupacion</label>
+                        </div>;
+                        _rigidFrag["ocupacion"] = @<div class="ase-f"><label>Ocupacion</label>
                             <input class="form-control form-control-sm" @bind="_ocupacion" list="ocupaciones-sug" placeholder="Escribe o selecciona..." />
                             <datalist id="ocupaciones-sug">
                                 <option value="NO APLICA"></option>
                                 <option value="NO REFIERE"></option>
                             </datalist>
-                        </div>
-                        <div class="ase-f"><label>Regimen</label>
+                        </div>;
+                        _rigidFrag["regimen"] = @<div class="ase-f"><label>Regimen</label>
                             <select class="form-select form-select-sm" @bind="_regimen">
                                 <option value="">--</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.Regimen)) { <option value="@c.Nombre">@c.Nombre</option> }
                             </select>
-                        </div>
-                    </div>
-
-                    <div class="ase-card-h" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;">
-                        <span>Contactos de emergencia</span>
-                        <button type="button" class="btn btn-outline-primary btn-sm" @onclick="AgregarContactoEmergencia">+ Agregar contacto</button>
-                    </div>
-                    @if (_contactos.Count == 0)
-                    {
-                        <div class="ase-empty" style="padding:14px;">Sin contactos. Pulsa "+ Agregar contacto" para registrar uno.</div>
-                    }
-                    @for (var i = 0; i < _contactos.Count; i++)
-                    {
-                        var idx = i;
-                        var c = _contactos[idx];
-                        var canvasId = $"ase-firma-canvas-{idx}";
-                        <div class="ase-form" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;">
-                            <div class="ase-f ase-f-wide"><label>Nombre (#@(idx + 1))</label>
-                                <input class="form-control form-control-sm" @bind="c.Nombre" />
+                        </div>;
+                        _rigidFrag["contactos_emergencia"] = @<div style="grid-column: 1 / -1;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                                <span style="font-weight:700;">Contactos de emergencia</span>
+                                <button type="button" class="btn btn-outline-primary btn-sm" @onclick="AgregarContactoEmergencia">+ Agregar contacto</button>
                             </div>
-                            <div class="ase-f"><label>Parentesco</label>
-                                <input class="form-control form-control-sm" @bind="c.Parentesco" placeholder="Madre, padre, conyuge..." />
-                            </div>
-                            <div class="ase-f ase-f-wide"><label>Telefono</label>
-                                <div style="display:flex;gap:6px;">
-                                    <select class="form-select form-select-sm" style="max-width:110px;" @bind="c.CodigoPais">
-                                        @foreach (var cp in _codigosPais) { <option value="@cp.Codigo">@cp.Codigo @cp.Pais</option> }
-                                    </select>
-                                    <input class="form-control form-control-sm" @bind="c.Telefono" placeholder="Solo numero" />
-                                </div>
-                            </div>
-                            <button type="button" class="btn btn-link text-danger btn-sm" style="align-self:end;" @onclick="() => QuitarContactoEmergencia(idx)" title="Quitar contacto">&#128465; Quitar</button>
-
-                            @* ===== Firma del acompañante ===== *@
-                            <div style="grid-column:1/-1; margin-top:6px; padding-top:8px; border-top:1px dashed #e2e8f0;">
-                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                                    <strong style="font-size:12px; color:#334155;">Firma del acompañante</strong>
-                                    @if (!string.IsNullOrEmpty(c.FirmaUrl))
-                                    {
-                                        <span style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;">&#10003; Firmada</span>
-                                    }
-                                    else
-                                    {
-                                        <span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;">Sin firma</span>
-                                    }
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ToggleFirma(idx)">
-                                        @(c.FirmaAbierta ? "Cerrar panel" : (string.IsNullOrEmpty(c.FirmaUrl) ? "Capturar firma" : "Recapturar firma"))
-                                    </button>
-                                    @if (!string.IsNullOrEmpty(c.FirmaUrl))
-                                    {
-                                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => LimpiarFirmaGuardada(idx)">Quitar firma</button>
-                                    }
-                                </div>
-                                @if (!string.IsNullOrEmpty(c.FirmaUrl) && !c.FirmaAbierta)
-                                {
-                                    <div style="margin-top:8px;">
-                                        <img src="@c.FirmaUrl" alt="Firma acompañante" style="max-height:80px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; padding:2px;" />
+                            @if (_contactos.Count == 0)
+                            {
+                                <div class="ase-empty" style="padding:14px;">Sin contactos. Pulsa "+ Agregar contacto" para registrar uno.</div>
+                            }
+                            @for (var i = 0; i < _contactos.Count; i++)
+                            {
+                                var idx = i;
+                                var c = _contactos[idx];
+                                var canvasId = $"ase-firma-canvas-{idx}";
+                                <div class="ase-form" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;">
+                                    <div class="ase-f ase-f-wide"><label>Nombre (#@(idx + 1))</label>
+                                        <input class="form-control form-control-sm" @bind="c.Nombre" />
                                     </div>
-                                }
-                                @if (c.FirmaAbierta)
-                                {
-                                    <div style="margin-top:8px;">
-                                        <div style="font-size:11px; color:#64748b; margin-bottom:4px;">Firma con el dedo (movil) o el mouse (escritorio).</div>
-                                        <canvas id="@canvasId" style="width:100%; max-width:420px; height:130px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; touch-action:none;"></canvas>
-                                        <div style="display:flex; gap:8px; margin-top:6px;">
-                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => LimpiarCanvasAsync(canvasId)">&#129529; Limpiar</button>
-                                            <button type="button" class="btn btn-primary btn-sm" @onclick="() => GuardarFirmaCanvasAsync(idx, canvasId)">&#128190; Guardar firma</button>
+                                    <div class="ase-f"><label>Parentesco</label>
+                                        <input class="form-control form-control-sm" @bind="c.Parentesco" placeholder="Madre, padre, conyuge..." />
+                                    </div>
+                                    <div class="ase-f ase-f-wide"><label>Telefono</label>
+                                        <div style="display:flex;gap:6px;">
+                                            <select class="form-select form-select-sm" style="max-width:110px;" @bind="c.CodigoPais">
+                                                @foreach (var cp in _codigosPais) { <option value="@cp.Codigo">@cp.Codigo @cp.Pais</option> }
+                                            </select>
+                                            <input class="form-control form-control-sm" @bind="c.Telefono" placeholder="Solo numero" />
                                         </div>
                                     </div>
+                                    <button type="button" class="btn btn-link text-danger btn-sm" style="align-self:end;" @onclick="() => QuitarContactoEmergencia(idx)" title="Quitar contacto">&#128465; Quitar</button>
+
+                                    <div style="grid-column:1/-1; margin-top:6px; padding-top:8px; border-top:1px dashed #e2e8f0;">
+                                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                            <strong style="font-size:12px; color:#334155;">Firma del acompañante</strong>
+                                            @if (!string.IsNullOrEmpty(c.FirmaUrl))
+                                            {
+                                                <span style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;">&#10003; Firmada</span>
+                                            }
+                                            else
+                                            {
+                                                <span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700;">Sin firma</span>
+                                            }
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => ToggleFirma(idx)">
+                                                @(c.FirmaAbierta ? "Cerrar panel" : (string.IsNullOrEmpty(c.FirmaUrl) ? "Capturar firma" : "Recapturar firma"))
+                                            </button>
+                                            @if (!string.IsNullOrEmpty(c.FirmaUrl))
+                                            {
+                                                <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => LimpiarFirmaGuardada(idx)">Quitar firma</button>
+                                            }
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(c.FirmaUrl) && !c.FirmaAbierta)
+                                        {
+                                            <div style="margin-top:8px;">
+                                                <img src="@c.FirmaUrl" alt="Firma acompañante" style="max-height:80px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; padding:2px;" />
+                                            </div>
+                                        }
+                                        @if (c.FirmaAbierta)
+                                        {
+                                            <div style="margin-top:8px;">
+                                                <div style="font-size:11px; color:#64748b; margin-bottom:4px;">Firma con el dedo (movil) o el mouse (escritorio).</div>
+                                                <canvas id="@canvasId" style="width:100%; max-width:420px; height:130px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; touch-action:none;"></canvas>
+                                                <div style="display:flex; gap:8px; margin-top:6px;">
+                                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => LimpiarCanvasAsync(canvasId)">&#129529; Limpiar</button>
+                                                    <button type="button" class="btn btn-primary btn-sm" @onclick="() => GuardarFirmaCanvasAsync(idx, canvasId)">&#128190; Guardar firma</button>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>;
+                        _rigidFrag["activo"] = @<label class="ase-chk"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>;
+                    }
+                    _chunks = ChunksDelTab(_tab);
+                }
+                <div class="pac-tabs">
+                    @foreach (var ft in _tabs)
+                    {
+                        @if (ft.TabKey == "documentos")
+                        {
+                            <button class="pac-tab @(_tab == "documentos" ? "active" : "")" @onclick="OnAbrirDocumentosTab" disabled="@(_id is null)">@ft.Titulo@(_docs.Count > 0 ? $" ({_docs.Count})" : "")</button>
+                        }
+                        else
+                        {
+                            <button class="pac-tab @(_tab == ft.TabKey ? "active" : "")" @onclick="@(() => _tab = ft.TabKey)">@ft.Titulo</button>
+                        }
+                    }
+                </div>
+
+                @* ===== Cuerpo del tab (no-documentos): campos fijos + dinamicos colocados por el tenant ===== *@
+                @if (_tab != "documentos")
+                {
+                    @foreach (var ch in _chunks)
+                    {
+                        @if (!string.IsNullOrEmpty(ch.Titulo))
+                        {
+                            <div class="ase-card-h" style="margin-top:14px;">@ch.Titulo</div>
+                        }
+                        <div class="ase-form">
+                            @if (ch.EsRigido)
+                            {
+                                @foreach (var it in ch.Items)
+                                {
+                                    <div class="ase-cell" style="grid-column: span @Span(it.Ancho);">
+                                        @(_rigidFrag!.TryGetValue(it.Key, out var fr) ? fr : null)
+                                    </div>
                                 }
-                            </div>
+                            }
+                            else
+                            {
+                                <CamposDinamicosPaciente BareCells="true"
+                                                         Campos="@ch.Dinamicos"
+                                                         Valores="_camposDinValores"
+                                                         Disabled="@EsCerrado" />
+                            }
                         </div>
                     }
-
-                    <label class="ase-chk" style="margin-top:8px;"><input type="checkbox" @bind="_activo" /> <span>Activo</span></label>
-                }
-
-                @* ===== TAB DETALLE ===== *@
-                @if (_tab == "detalle")
-                {
-                    <div class="ase-card-h">Detalle clinico (proximo modulo)</div>
-                    <div class="ase-empty">
-                        Aqui ira la HC del paciente, historial de ingresos, ordenes clinicas, notas medicas y formularios diligenciados.
-                        Por ahora se reservan los cimientos del paciente.
-                    </div>
+                    @if (_chunks.Count == 0 && _tab == "detalle")
+                    {
+                        <div class="ase-card-h">Detalle clinico (proximo modulo)</div>
+                        <div class="ase-empty">
+                            Aqui ira la HC del paciente, historial de ingresos, ordenes clinicas, notas medicas y formularios diligenciados.
+                            Por ahora se reservan los cimientos del paciente.
+                        </div>
+                    }
+                    else if (_chunks.Count == 0)
+                    {
+                        <div class="ase-empty">Este tab no tiene campos. Usa "Configurar campos" para agregarlos o mover otros aqui.</div>
+                    }
                 }
 
                 @* ===== TAB DOCUMENTOS DEL PACIENTE ===== *@
@@ -998,6 +1036,8 @@
     .pac-doc-upload-f-wide { min-width:0; }
     @@media (max-width: 900px) { .pac-doc-upload-row { grid-template-columns: 1fr; } }
     .ase-table-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+    /* Celda contenedora de un campo fijo en la ficha: item de grilla cuyo span define el ancho. */
+    .ase-cell { min-width: 0; }
     .pac-tab { background: none; border: none; padding: 10px 18px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; transition: all .15s; }
     .pac-tab:hover { color: #1565c0; }
     .pac-tab.active { color: #1565c0; border-bottom-color: #1565c0; }
@@ -1797,7 +1837,110 @@
         _catalogos = (await CatSvc.ListAsync(null)).ToList();
         _paises = (await GeoSvc.ListPaisesAsync()).ToList();
         await ResolverPuedeReabrirAsync();
+        await CargarCamposDinamicosAsync();
         await LoadLista();
+    }
+
+    // ================= Campos dinamicos (ficha configurable del tenant) =================
+
+    // Tabs unificados (fijos + dinamicos), campos dinamicos activos y colocacion de los fijos.
+    private List<PacienteFichaDto> _tabs = new();
+    private List<PacienteCampoDto> _camposDin = new();
+    private List<PacienteCampoRigidoDto> _rigidPlac = new();
+    private Dictionary<string, RenderFragment>? _rigidFrag;
+    private List<FichaChunk> _chunks = new();
+    private Dictionary<string, string> _camposDinValores = new();
+    private bool _esAdminTenant;
+    private bool _showGestorCampos;
+
+    private void AbrirGestorCampos() => _showGestorCampos = true;
+
+    private async Task CerrarGestorCamposAsync()
+    {
+        _showGestorCampos = false;
+        // Al volver, recarga tabs/campos por si el admin agrego, movio, redimensiono u oculto algo.
+        await CargarCamposDinamicosAsync();
+        // Si el tab activo ya no existe (oculto/eliminado), vuelve a Generales.
+        if (_tabs.All(f => f.TabKey != _tab)) { _tab = "generales"; }
+    }
+
+    /// <summary>Carga tabs visibles, campos dinamicos activos y la colocacion de los campos fijos.</summary>
+    private async Task CargarCamposDinamicosAsync()
+    {
+        await FichaDinSvc.EnsureDefaultsAsync();
+        await CampoRigSvc.EnsureDefaultsAsync();
+        _tabs = (await FichaDinSvc.ListAsync()).Where(f => !f.Oculto).ToList();
+        _camposDin = (await CampoDinSvc.ListActivosAsync()).ToList();
+        _rigidPlac = (await CampoRigSvc.ListAsync()).ToList();
+    }
+
+    /// <summary>Ancho 1..3 -&gt; span sobre la grilla .ase-form de 4 columnas (1, 2, completo).</summary>
+    private static int Span(int ancho) => ancho >= 3 ? 4 : Math.Clamp(ancho, 1, 2);
+
+    /// <summary>
+    /// Fusiona campos fijos (visibles) y dinamicos del tab en un solo orden y los agrupa en
+    /// bloques consecutivos del mismo tipo: cada bloque fijo lleva su subcabecera (grupo) y los
+    /// dinamicos van juntos. Preserva el orden configurado por el tenant.
+    /// </summary>
+    private List<FichaChunk> ChunksDelTab(string tab)
+    {
+        var merged = _rigidPlac
+            .Where(r => r.TabKey == tab && !r.Oculto)
+            .Select(r => (r.Orden, EsRig: true, Grupo: (string?)r.Grupo, r.CampoKey, r.Ancho, Din: (PacienteCampoDto?)null))
+            .Concat(_camposDin
+                .Where(c => c.TabKey == tab)
+                .Select(c => (c.Orden, EsRig: false, Grupo: (string?)null, c.CampoKey, c.Ancho, Din: (PacienteCampoDto?)c)))
+            .OrderBy(x => x.Orden)
+            .ToList();
+
+        var chunks = new List<FichaChunk>();
+        string? curKey = null;
+        FichaChunk? cur = null;
+        foreach (var it in merged)
+        {
+            var key = it.EsRig ? "R:" + (it.Grupo ?? "") : "D";
+            if (cur is null || key != curKey)
+            {
+                cur = new FichaChunk { EsRigido = it.EsRig, Titulo = it.EsRig ? it.Grupo : null };
+                chunks.Add(cur);
+                curKey = key;
+            }
+            if (it.EsRig) { cur.Items.Add(new RigidItem(it.CampoKey, it.Ancho)); }
+            else if (it.Din is not null) { cur.Dinamicos.Add(it.Din); }
+        }
+        return chunks;
+    }
+
+    private sealed class FichaChunk
+    {
+        public string? Titulo { get; set; }
+        public bool EsRigido { get; set; }
+        public List<RigidItem> Items { get; } = new();
+        public List<PacienteCampoDto> Dinamicos { get; } = new();
+    }
+
+    private sealed record RigidItem(string Key, int Ancho);
+
+    /// <summary>Hidrata los valores dinamicos del paciente abierto desde el JSON plano.</summary>
+    private void CargarValoresDinamicos(string? json)
+    {
+        _camposDinValores = new();
+        if (string.IsNullOrWhiteSpace(json)) { return; }
+        try
+        {
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            if (dict is not null) { _camposDinValores = dict; }
+        }
+        catch (System.Text.Json.JsonException) { /* json invalido -> ficha vacia */ }
+    }
+
+    /// <summary>Serializa los valores dinamicos no vacios para persistir en el paciente.</summary>
+    private string? SerializarValoresDinamicos()
+    {
+        var limpio = _camposDinValores
+            .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+        return limpio.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(limpio);
     }
 
     /// <summary>
@@ -1821,6 +1964,9 @@
                 && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
                         .Any(p => string.Equals(p.Trim(), "historias.reabrir", StringComparison.OrdinalIgnoreCase));
             _puedeReabrir = esAdminTenant || esSuperAdmin || tienePermiso;
+            // Solo el admin del tenant (o super admin) puede editar las definiciones de
+            // campos dinamicos desde Admision.
+            _esAdminTenant = esAdminTenant || esSuperAdmin;
         }
         catch { _puedeReabrir = false; }
     }
@@ -2000,6 +2146,7 @@
         _departamentos = new(); _municipios = new();
         _emerNombre = _emerParentesco = _emerTel = null; _activo = true;
         _contactos = new();
+        _camposDinValores = new();
         _showForm = true; _tab = "generales"; _error = _ok = null;
     }
 
@@ -2090,6 +2237,7 @@
                 Orden = 1
             });
         }
+        CargarValoresDinamicos(d.CamposDinamicosJson);
         _showForm = true; _tab = "generales"; _error = _ok = null;
     }
 
@@ -2133,7 +2281,8 @@
                         c.Orden > 0 ? c.Orden : i + 1,
                         c.FirmaUrl))
                     .ToList(),
-                _activo);
+                _activo,
+                SerializarValoresDinamicos());
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";

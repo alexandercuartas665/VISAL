@@ -1095,14 +1095,15 @@
                             <th class="fcc-c-fmt">Formato de salida</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody data-sortable="colconfig" data-sortowner="@_sortOwner">
                         @for (var i = 0; i < _colConfigItems.Count; i++)
                         {
                             var idx = i;
                             var it = _colConfigItems[idx];
-                            <tr class="@(it.Visible ? "" : "fcc-off") @(it.EnError ? "fcc-err" : "")">
+                            <tr class="@(it.Visible ? "" : "fcc-off") @(it.EnError ? "fcc-err" : "")" @key="it.ColumnaOriginal" data-sortitem="@idx">
                                 <td class="fcc-c-move">
                                     <div class="fcc-move">
+                                        <span class="vs-grip" title="Arrastra para reordenar" draggable="true"></span>
                                         <button class="fcc-arr" title="Subir" disabled="@(idx == 0)" @onclick="() => SubirColConfig(idx)">^</button>
                                         <button class="fcc-arr" title="Bajar" disabled="@(idx == _colConfigItems.Count - 1)" @onclick="() => BajarColConfig(idx)">v</button>
                                     </div>
@@ -1675,7 +1676,12 @@
         return (t, u, s);
     }
 
-    public void Dispose() => _disposed = true;
+    public void Dispose()
+    {
+        _disposed = true;
+        if (_sortRef is not null) { try { JS.InvokeVoidAsync("visalSortable.unregister", _sortOwner); } catch { } }
+        _sortRef?.Dispose();
+    }
 
     // Origenes cuyo contenido real ya genera el ZIP (ola 1). El resto (formularios
     // de HC) queda pendiente y en el PDF sale una pagina-nota.
@@ -2181,13 +2187,37 @@
     // Cablea (idempotente) la barra de scroll superior sincronizada con la tabla
     // del modal Ver. Corre en cada render mientras el modal muestra filas para
     // refrescar el ancho tras paginacion / cambio de columnas.
+    private readonly string _sortOwner = Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<SnapshotsFacturacion>? _sortRef;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _sortRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("visalSortable.register", _sortOwner, _sortRef); }
+            catch { /* JS aun no cargado: ignorar */ }
+        }
         if (_showVer && _verFilas.Count > 0)
         {
             try { await JS.InvokeVoidAsync("snDualScroll.wire", "snVerTop", "snVerWrap"); }
             catch { /* JS aun no cargado o modal cerrandose: ignorar */ }
         }
+    }
+
+    // Arrastrar y soltar de "Configurar columnas" (orden en memoria; se persiste al Guardar).
+    [JSInvokable]
+    public void SortableMove(string group, int from, int to)
+    {
+        if (group != "colconfig") { return; }
+        if (from < 0 || from >= _colConfigItems.Count || to < 0 || to >= _colConfigItems.Count || from == to) { return; }
+        var item = _colConfigItems[from];
+        _colConfigItems.RemoveAt(from);
+        if (to > from) { to--; }
+        if (to < 0) { to = 0; }
+        if (to > _colConfigItems.Count) { to = _colConfigItems.Count; }
+        _colConfigItems.Insert(to, item);
+        StateHasChanged();
     }
 
     private async Task AplicarFacturaAlLote()

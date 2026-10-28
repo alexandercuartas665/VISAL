@@ -63,7 +63,9 @@ public sealed record PacienteDetailDto(
     bool Activo,
     // Estado de admision: "Abierto" (default) o "Cerrado". Un paciente Cerrado
     // pasa validacion de campos obligatorios y ya se puede usar en /asignacion.
-    string EstadoAdmision = "Abierto");
+    string EstadoAdmision = "Abierto",
+    // Valores de los campos dinamicos del tenant (jsonb plano campoKey->valor).
+    string? CamposDinamicosJson = null);
 
 public sealed record SavePacienteRequest(
     Guid? Id,
@@ -98,7 +100,9 @@ public sealed record SavePacienteRequest(
     string? ContactoEmergencia, string? Parentesco, string? TelefonoEmergencia,
     // Lista completa de contactos de emergencia (la UI envia 0..N)
     IReadOnlyList<PacienteContactoEmergenciaDto> ContactosEmergencia,
-    bool Activo);
+    bool Activo,
+    // Valores de los campos dinamicos del tenant (jsonb plano campoKey->valor).
+    string? CamposDinamicosJson = null);
 
 public interface IPacienteService
 {

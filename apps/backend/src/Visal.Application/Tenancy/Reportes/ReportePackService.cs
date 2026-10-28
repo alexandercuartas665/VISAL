@@ -23,7 +23,8 @@ public interface IReportePackService
 public sealed class ReportePackService(
     IApplicationDbContext db,
     ITenantContext tenant,
-    IReporteSqlGenerator generador) : IReportePackService
+    IReporteSqlGenerator generador,
+    IReporteCamposDinamicos dinamicos) : IReportePackService
 {
     // Tope de lectura por hoja (ademas del LIMIT que ya pone el generador).
     private const int MaxFilasPorHoja = 50000;
@@ -34,6 +35,10 @@ public sealed class ReportePackService(
         {
             throw new InvalidOperationException("Sin tenant activo.");
         }
+
+        // Precarga los campos dinamicos del tenant: el generador (sincrono) los lee del cache
+        // al resolver refs de paciente que no estan en el catalogo estatico.
+        await dinamicos.CargarAsync(ct);
 
         // Conexion DEDICADA (no la del DbContext scoped): el lector crudo mantiene la
         // conexion ocupada mientras transmite filas; reusar la del DbContext chocaria
@@ -56,6 +61,11 @@ public sealed class ReportePackService(
             if (hoja.Pivote is not null)
             {
                 resultado = ReportePivote.Aplicar(hoja, resultado);
+            }
+            // Formato por columna: solo en detalle, alineado 1:1 al orden de salida.
+            else if (hoja.Modo == ReporteHojaModo.Detalle)
+            {
+                resultado = resultado with { Formatos = hoja.Columnas.Select(c => FormatoExcel(c.Formato)).ToList() };
             }
             hojas.Add(resultado);
         }
@@ -132,6 +142,19 @@ public sealed class ReportePackService(
                     ws.Cell(filaHeader + 1 + r, c + 1).Value = ToCell(v);
                 }
             }
+            // Formato de celda por columna (el que eligio el usuario en el constructor).
+            if (hoja.Formatos is { } fmts && hoja.Filas.Count > 0)
+            {
+                for (var c = 0; c < hoja.Columnas.Count; c++)
+                {
+                    var fmt = c < fmts.Count ? fmts[c] : null;
+                    if (!string.IsNullOrEmpty(fmt))
+                    {
+                        ws.Range(filaHeader + 1, c + 1, filaHeader + hoja.Filas.Count, c + 1)
+                          .Style.NumberFormat.Format = fmt;
+                    }
+                }
+            }
             ws.Columns().AdjustToContents();
         }
         using var ms = new MemoryStream();
@@ -161,6 +184,20 @@ public sealed class ReportePackService(
     // Para esos casos degradamos a celda vacia en vez de reventar la descarga.
     private static XLCellValue FechaCell(DateTime dt)
         => dt.Year is >= 1900 and <= 9999 ? XLCellValue.FromObject(dt) : XLCellValue.FromObject(null);
+
+    // Traduce el formato elegido en el constructor a un formato de celda de ClosedXML.
+    // Porcentaje usa "%" literal (no multiplica x100): el dato ya viene como porcentaje.
+    private static string? FormatoExcel(ReporteColumnaFormato f) => f switch
+    {
+        ReporteColumnaFormato.Texto => "@",
+        ReporteColumnaFormato.Entero => "#,##0",
+        ReporteColumnaFormato.Decimal => "#,##0.00",
+        ReporteColumnaFormato.Moneda => "\"$\"#,##0",
+        ReporteColumnaFormato.Porcentaje => "0.0\"%\"",
+        ReporteColumnaFormato.Fecha => "dd/mm/yyyy",
+        ReporteColumnaFormato.FechaHora => "dd/mm/yyyy hh:mm",
+        _ => null
+    };
 
     // Pinta la cabecera institucional arriba de la hoja y devuelve la fila donde va el
     // encabezado de la TABLA (1 si no hay cabecera). Agencia + titulo/subtitulo + linea de

@@ -28,11 +28,17 @@ public enum ReportFieldKind
 /// <param name="Label">Etiqueta por defecto para la cabecera de columna.</param>
 /// <param name="PropertyName">Nombre de la propiedad CLR en la entidad.</param>
 /// <param name="Kind">Tipo logico para formatear filtros.</param>
+/// <param name="JsonKey">
+/// Si no es null, el campo NO es una columna CLR directa: su valor vive dentro de una
+/// columna jsonb (la que resuelve <paramref name="PropertyName"/>) bajo esta clave. El
+/// generador emite <c>col -&gt;&gt; 'JsonKey'</c>. Lo usan los campos dinamicos del tenant.
+/// </param>
 public sealed record ReportableFieldDef(
     string Key,
     string Label,
     string PropertyName,
-    ReportFieldKind Kind);
+    ReportFieldKind Kind,
+    string? JsonKey = null);
 
 /// <summary>
 /// Un cruce PERMITIDO entre una entidad reportable y otra (join declarado por la
@@ -130,6 +136,11 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("observaciones_paciente", "Observaciones", nameof(Paciente.Observaciones), ReportFieldKind.Text),
                 new("estado_admision", "Estado Admision", nameof(Paciente.EstadoAdmision), ReportFieldKind.Text),
                 new("activo", "Activo", nameof(Paciente.Activo), ReportFieldKind.Bool),
+                new("sede_id", "Sede (ID)", nameof(Paciente.SedeAtencionId), ReportFieldKind.Guid),
+            ],
+            Relations =
+            [
+                new("sede", "Sede de atencion", "sede", nameof(Paciente.SedeAtencionId)),
             ],
         };
 
@@ -195,7 +206,20 @@ public sealed class ReportSemanticModel : IReportSemanticModel
             ],
         };
 
-        Entities = [paciente, encuesta, diagnostico, ingreso];
+        // Sede (sucursal) como entidad destino de cruce, para mostrar/filtrar por nombre de sede.
+        // Es TenantEntity, asi que el join hereda el filtro por tenant.
+        var sede = new ReportableEntityDef
+        {
+            Key = "sede",
+            Label = "Sedes (sucursales)",
+            ClrType = typeof(Sucursal),
+            Fields =
+            [
+                new("nombre", "Sede", nameof(Sucursal.Nombre), ReportFieldKind.Text),
+            ],
+        };
+
+        Entities = [paciente, encuesta, diagnostico, ingreso, sede];
     }
 
     public ReportableEntityDef? Find(string key) =>

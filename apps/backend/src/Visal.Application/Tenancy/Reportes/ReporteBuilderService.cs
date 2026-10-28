@@ -10,7 +10,8 @@ public sealed class ReporteBuilderService(
     IApplicationDbContext db,
     ITenantContext tenant,
     IReportSemanticModel semantic,
-    IReportePackService pack) : IReporteBuilderService
+    IReportePackService pack,
+    IReporteCamposDinamicos dinamicos) : IReporteBuilderService
 {
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -20,17 +21,30 @@ public sealed class ReporteBuilderService(
 
     // ==================== modelo semantico ====================
 
-    public IReadOnlyList<EntidadReportableDto> ListarEntidades()
+    private const string EntidadPaciente = "paciente";
+
+    public async Task<IReadOnlyList<EntidadReportableDto>> ListarEntidadesAsync(CancellationToken ct = default)
     {
+        // Campos dinamicos del tenant: se ofrecen como columnas/filtros dentro de la entidad
+        // paciente (y de cualquier cruce que apunte a paciente).
+        var din = await dinamicos.CargarAsync(ct);
+        var dinDtos = din.Select(f => new CampoReportableDto(f.Key, f.Label, f.Kind.ToString())).ToList();
+
+        List<CampoReportableDto> CamposDe(ReportableEntityDef e)
+        {
+            var lista = e.Fields.Select(f => new CampoReportableDto(f.Key, f.Label, f.Kind.ToString())).ToList();
+            if (string.Equals(e.Key, EntidadPaciente, StringComparison.OrdinalIgnoreCase)) { lista.AddRange(dinDtos); }
+            return lista;
+        }
+
         return semantic.Entities.Select(e => new EntidadReportableDto(
             e.Key,
             e.Label,
-            e.Fields.Select(f => new CampoReportableDto(f.Key, f.Label, f.Kind.ToString())).ToList(),
+            CamposDe(e),
             e.Relations.Select(r =>
             {
                 var target = semantic.Find(r.TargetEntityKey);
-                var campos = target?.Fields.Select(f => new CampoReportableDto(f.Key, f.Label, f.Kind.ToString())).ToList()
-                             ?? [];
+                var campos = target is null ? new List<CampoReportableDto>() : CamposDe(target);
                 return new RelacionReportableDto(r.Key, r.Label, r.TargetEntityKey, target?.Label ?? r.TargetEntityKey, campos);
             }).ToList()
         )).ToList();
@@ -61,7 +75,7 @@ public sealed class ReporteBuilderService(
         var defs = hojas.Select(DeserializarHoja).ToList();
         return new ReportePlantillaDetalleDto(
             p.Id, p.Nombre, p.Descripcion, p.Categoria, p.Orden, p.Activo, defs,
-            p.MostrarEncabezado, p.Codigo, p.Version, p.Subtitulo);
+            p.MostrarEncabezado, p.Codigo, p.Version, p.Subtitulo, DeserializarParametros(p.ParametrosJson));
     }
 
     public async Task<Guid> CrearCensoAsync(CancellationToken ct = default)
@@ -111,6 +125,9 @@ public sealed class ReporteBuilderService(
         plantilla.Codigo = Limpio(req.Codigo);
         plantilla.Version = Limpio(req.Version);
         plantilla.Subtitulo = Limpio(req.Subtitulo);
+        plantilla.ParametrosJson = (req.Parametros is { Count: > 0 })
+            ? JsonSerializer.Serialize(req.Parametros, Json)
+            : null;
 
         var orden = 0;
         foreach (var hoja in req.Hojas)
@@ -150,7 +167,10 @@ public sealed class ReporteBuilderService(
         return res.Hojas[0];
     }
 
-    public async Task<byte[]> GenerarExcelAsync(Guid id, CancellationToken ct = default)
+    public async Task<byte[]> GenerarExcelAsync(
+        Guid id,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? parametros = null,
+        CancellationToken ct = default)
     {
         var p = await db.ReportePlantillas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new InvalidOperationException("Reporte no encontrado.");
@@ -164,7 +184,10 @@ public sealed class ReporteBuilderService(
         }
 
         var defs = hojas.Select(DeserializarHoja).ToList();
-        var resultado = await pack.EjecutarAsync(new ReportePackDef(p.Nombre, defs), ct);
+        // Resuelve los parametros de ejecucion (globales) antes de generar el SQL: los filtros
+        // enlazados a un parametro toman el valor pedido al descargar; sin valor, se descartan.
+        var packDef = ReporteParametros.Resolver(new ReportePackDef(p.Nombre, defs), parametros);
+        var resultado = await pack.EjecutarAsync(packDef, ct);
 
         if (p.MostrarEncabezado)
         {
@@ -179,7 +202,29 @@ public sealed class ReporteBuilderService(
         return pack.ExportarExcel(resultado);
     }
 
+    public async Task<IReadOnlyList<SedeOpcionDto>> ListarSedesAsync(CancellationToken ct = default)
+    {
+        // El query filter de tenant limita las sucursales al tenant actual.
+        return await db.Sucursales.AsNoTracking()
+            .OrderBy(s => s.Nombre)
+            .Select(s => new SedeOpcionDto(s.Id, s.Nombre))
+            .ToListAsync(ct);
+    }
+
     // ==================== helpers ====================
+
+    private static IReadOnlyList<ReporteParametroDef> DeserializarParametros(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return []; }
+        try
+        {
+            return JsonSerializer.Deserialize<List<ReporteParametroDef>>(json, Json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     private static ReporteHojaDef DeserializarHoja(ReporteHoja h)
     {

@@ -40,17 +40,73 @@ public enum ReporteAgregadoFunc
 }
 
 /// <summary>
+/// Formato de presentacion de una columna en el Excel. Se traduce a un formato de celda
+/// de ClosedXML al exportar; <see cref="Auto"/> deja que Excel decida (sin formato explicito).
+/// </summary>
+public enum ReporteColumnaFormato
+{
+    Auto,
+    Texto,
+    Entero,
+    Decimal,
+    Moneda,
+    Porcentaje,
+    Fecha,
+    FechaHora
+}
+
+/// <summary>
 /// Referencia a un campo dentro de una hoja. Es "campoKey" para un campo de la
 /// entidad base, o "relacionKey.campoKey" para un campo traido por un cruce
-/// declarado. El generador valida que exista en el modelo semantico.
+/// declarado. El generador valida que exista en el modelo semantico. El ORDEN en la
+/// lista de columnas de la hoja es el orden de salida; <see cref="Formato"/> fija el
+/// formato de la celda en el Excel.
 /// </summary>
-public sealed record ReporteColumnaDef(string CampoRef, string? Titulo = null);
+public sealed record ReporteColumnaDef(
+    string CampoRef,
+    string? Titulo = null,
+    ReporteColumnaFormato Formato = ReporteColumnaFormato.Auto);
 
-/// <summary>Filtro de hoja. Los valores van SIEMPRE como parametros de comando.</summary>
+/// <summary>
+/// Filtro de hoja. Los valores van SIEMPRE como parametros de comando. Si
+/// <see cref="ParamClave"/> esta seteada, el VALOR del filtro no es fijo: se pide al
+/// ejecutar (parametro global del reporte) y se resuelve antes de generar el SQL. Si al
+/// ejecutar ese parametro viene vacio, el filtro se descarta (esa hoja no se filtra por el).
+/// </summary>
 public sealed record ReporteFiltroDef(
     string CampoRef,
     ReporteFiltroOp Op,
-    IReadOnlyList<string>? Valores = null);
+    IReadOnlyList<string>? Valores = null,
+    string? ParamClave = null);
+
+/// <summary>Tipo de un parametro de ejecucion (define como se pide el valor al descargar).</summary>
+public enum ReporteParametroTipo
+{
+    Texto,
+    Numero,
+    Fecha,
+    FechaHora,
+    RangoFecha,
+    Lista
+}
+
+/// <summary>Fuente de opciones para un parametro tipo lista (para ofrecer un desplegable).</summary>
+public enum ReporteParametroFuente
+{
+    Ninguna,
+    Sedes
+}
+
+/// <summary>
+/// Parametro de ejecucion del reporte (global). Se declara una vez en el pack y se enlaza
+/// desde los filtros de las hojas por <see cref="Clave"/>. Al descargar, la UI pide un valor
+/// por parametro y lo aplica a TODAS las hojas cuyos filtros lo referencian.
+/// </summary>
+public sealed record ReporteParametroDef(
+    string Clave,
+    string Etiqueta,
+    ReporteParametroTipo Tipo,
+    ReporteParametroFuente Fuente = ReporteParametroFuente.Ninguna);
 
 /// <summary>Orden de salida de una hoja.</summary>
 public sealed record ReporteOrdenDef(string CampoRef, bool Desc = false);
@@ -112,11 +168,16 @@ public sealed record ReportePackDef(string Nombre, IReadOnlyList<ReporteHojaDef>
 
 // ---- Resultados ----------------------------------------------------------------
 
-/// <summary>Resultado de ejecutar una hoja: columnas + filas.</summary>
+/// <summary>
+/// Resultado de ejecutar una hoja: columnas + filas. <see cref="Formatos"/> (opcional) trae,
+/// alineado 1:1 con <see cref="Columnas"/>, el formato de celda Excel por columna (null = sin
+/// formato); el export lo aplica. Solo se llena en hojas de detalle.
+/// </summary>
 public sealed record ReporteHojaResultado(
     string Nombre,
     IReadOnlyList<string> Columnas,
-    IReadOnlyList<IReadOnlyList<object?>> Filas)
+    IReadOnlyList<IReadOnlyList<object?>> Filas,
+    IReadOnlyList<string?>? Formatos = null)
 {
     public int TotalFilas => Filas.Count;
 }

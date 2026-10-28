@@ -155,8 +155,9 @@ public sealed class ReportePackIsolationPgTests : IAsyncLifetime
     private async Task<ReportePackResultado> EjecutarComo(Guid tenantId, ReportePackDef pack)
     {
         var ctx = CreateContext(tenantId);
-        var gen = new ReporteSqlGenerator(ctx, new ReportSemanticModel());
-        var svc = new ReportePackService(ctx, new FixedTenantContext(tenantId), gen);
+        var dinamicos = new ReporteCamposDinamicos(ctx);
+        var gen = new ReporteSqlGenerator(ctx, new ReportSemanticModel(), dinamicos);
+        var svc = new ReportePackService(ctx, new FixedTenantContext(tenantId), gen, dinamicos);
         try
         {
             return await svc.EjecutarAsync(pack);

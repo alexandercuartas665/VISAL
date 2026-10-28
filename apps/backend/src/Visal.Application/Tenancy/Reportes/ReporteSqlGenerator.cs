@@ -36,8 +36,13 @@ public interface IReporteSqlGenerator
 /// valores de filtro van siempre como parametros. El filtro por <c>tenant_id</c> es
 /// obligatorio sobre la tabla base (regla bloqueante multi-tenant).
 /// </summary>
-public sealed class ReporteSqlGenerator(IApplicationDbContext db, IReportSemanticModel semantic) : IReporteSqlGenerator
+public sealed class ReporteSqlGenerator(
+    IApplicationDbContext db,
+    IReportSemanticModel semantic,
+    IReporteCamposDinamicos dinamicos) : IReporteSqlGenerator
 {
+    private const string EntidadPaciente = "paciente";
+
     // Salvaguardas: igual que el motor de reportes de 1 hoja.
     private const int DefaultLimite = 10000;
     private const int HardCapLimite = 50000;
@@ -171,10 +176,9 @@ public sealed class ReporteSqlGenerator(IApplicationDbContext db, IReportSemanti
         var (relKey, fieldKey) = PartirRef(campoRef);
         if (relKey is null)
         {
-            var field = baseEntity.FindField(fieldKey)
+            var field = FindFieldAug(baseEntity, fieldKey)
                 ?? throw new InvalidOperationException($"Campo desconocido '{fieldKey}' en la entidad '{baseEntity.Key}'.");
-            var col = Col(Et(baseEntity.ClrType), field.PropertyName);
-            return new Resuelto($"t0.{Q(col)}", field, true);
+            return new Resuelto(Expr("t0", baseEntity.ClrType, field), field, true);
         }
         else
         {
@@ -182,12 +186,36 @@ public sealed class ReporteSqlGenerator(IApplicationDbContext db, IReportSemanti
                 ?? throw new InvalidOperationException($"Cruce desconocido '{relKey}' en la entidad '{baseEntity.Key}'.");
             var target = semantic.Find(rel.TargetEntityKey)
                 ?? throw new InvalidOperationException($"El cruce '{relKey}' apunta a una entidad desconocida.");
-            var field = target.FindField(fieldKey)
+            var field = FindFieldAug(target, fieldKey)
                 ?? throw new InvalidOperationException($"Campo desconocido '{fieldKey}' en el cruce '{relKey}'.");
             var alias = relAliases[relKey];
-            var col = Col(Et(target.ClrType), field.PropertyName);
-            return new Resuelto($"{alias}.{Q(col)}", field, false);
+            return new Resuelto(Expr(alias, target.ClrType, field), field, false);
         }
+    }
+
+    // Busca un campo en la entidad; si es la entidad paciente y no esta en el catalogo
+    // estatico, lo busca en los campos dinamicos del tenant (ruta jsonb).
+    private ReportableFieldDef? FindFieldAug(ReportableEntityDef entity, string fieldKey)
+    {
+        var field = entity.FindField(fieldKey);
+        if (field is not null) { return field; }
+        if (string.Equals(entity.Key, EntidadPaciente, StringComparison.OrdinalIgnoreCase))
+        {
+            return dinamicos.CamposPaciente.FirstOrDefault(
+                c => string.Equals(c.Key, fieldKey, StringComparison.OrdinalIgnoreCase));
+        }
+        return null;
+    }
+
+    // Expresion SQL de un campo: columna CLR directa, o lectura por clave si es jsonb.
+    private string Expr(string alias, Type clrType, ReportableFieldDef field)
+    {
+        var col = Col(Et(clrType), field.PropertyName);
+        if (field.JsonKey is { } jk)
+        {
+            return $"({alias}.{Q(col)} ->> '{jk.Replace("'", "''")}')";
+        }
+        return $"{alias}.{Q(col)}";
     }
 
     private (string Expr, string TituloDefault) ExprAgregado(

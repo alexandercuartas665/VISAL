@@ -4,6 +4,7 @@
 @using Visal.Application.Tenancy.Reportes
 @inject IReporteBuilderService Builder
 @inject Microsoft.JSInterop.IJSRuntime JS
+@implements IAsyncDisposable
 
 <PageTitle>Constructor de Reportes - Visal</PageTitle>
 
@@ -103,6 +104,35 @@
                 }
             </div>
 
+            <div class="rc-params">
+                <div class="rc-block-title">Parametros al ejecutar (filtros globales)</div>
+                <div class="rc-params-help">
+                    Define filtros que se piden al descargar (ej. Fecha, Sede) y enlazalos en los filtros de cada hoja.
+                    Al descargar, lo que dejes en blanco no filtra esa hoja.
+                </div>
+                @foreach (var pa in _parametros)
+                {
+                    var par = pa;
+                    <div class="rc-row rc-param-row">
+                        <input type="text" class="rc-param-et" @bind="par.Etiqueta" placeholder="Etiqueta (ej. Fecha, Sede)" />
+                        <select @bind="par.Tipo">
+                            @foreach (var t in Enum.GetValues<ReporteParametroTipo>())
+                            {
+                                <option value="@t">@ParamTipoLabel(t)</option>
+                            }
+                        </select>
+                        <select @bind="par.Fuente">
+                            @foreach (var fu in Enum.GetValues<ReporteParametroFuente>())
+                            {
+                                <option value="@fu">@ParamFuenteLabel(fu)</option>
+                            }
+                        </select>
+                        <button class="btn-ghost btn-danger" @onclick="() => _parametros.Remove(par)">x</button>
+                    </div>
+                }
+                <button class="btn-ghost" @onclick="AgregarParametro">+ Parametro</button>
+            </div>
+
             <div class="rc-sheets">
                 @for (var hi = 0; hi < _hojas.Count; hi++)
                 {
@@ -141,18 +171,47 @@
                             @if (hoja.Modo == "Detalle")
                             {
                                 <div class="rc-block">
-                                    <div class="rc-block-title">Columnas</div>
-                                    <div class="rc-chips">
-                                        @foreach (var c in campos)
-                                        {
-                                            var reff = c.Ref;
-                                            <label class="rc-chip @(hoja.Columnas.Any(x => x.Ref == reff) ? "rc-chip-on" : "")">
-                                                <input type="checkbox" checked="@hoja.Columnas.Any(x => x.Ref == reff)"
-                                                       @onchange="() => ToggleCol(hoja.Columnas, reff)" />
-                                                @c.Label
-                                            </label>
-                                        }
+                                    <div class="rc-block-title">Columnas (activa, ordena y da formato)</div>
+                                    <div class="rc-selcols-head">
+                                        <select class="rc-addcol" @onchange="e => AgregarCol(hoja.Columnas, e.Value?.ToString())">
+                                            <option value="">+ Agregar campo...</option>
+                                            @foreach (var c in campos.Where(cc => !hoja.Columnas.Any(x => x.Ref == cc.Ref)))
+                                            {
+                                                <option value="@c.Ref">@c.Label</option>
+                                            }
+                                        </select>
+                                        <button type="button" class="rc-selcol-btn rc-addbtn" @onclick="() => AgregarTodasCols(hoja.Columnas, hoja.EntidadKey)">Agregar todas</button>
+                                        <button type="button" class="rc-selcol-btn rc-addbtn" disabled="@(hoja.Columnas.Count == 0)" @onclick="() => hoja.Columnas.Clear()">Quitar todas</button>
                                     </div>
+                                    @if (hoja.Columnas.Count == 0)
+                                    {
+                                        <div class="rc-hint">Agrega campos para armar las columnas de esta hoja.</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="rc-selcols" data-rcsort="col" data-hoja="@hi">
+                                            @for (var ci = 0; ci < hoja.Columnas.Count; ci++)
+                                            {
+                                                var col = hoja.Columnas[ci];
+                                                var colIdx = ci;
+                                                <div class="rc-selcol" @key="col" data-rcidx="@colIdx">
+                                                    <span class="rc-grip" title="Arrastra para reordenar" draggable="true"></span>
+                                                    <span class="rc-selcol-pos">@(ci + 1)</span>
+                                                    <span class="rc-selcol-name" title="@col.Ref">@LabelRef(hoja.EntidadKey, col.Ref)</span>
+                                                    <input class="rc-selcol-title" type="text" @bind="col.Titulo" placeholder="Renombrar (opcional)" />
+                                                    <select class="rc-selcol-fmt" @bind="col.Formato">
+                                                        @foreach (var f in FormatosColumna)
+                                                        {
+                                                            <option value="@f.Val">@f.Label</option>
+                                                        }
+                                                    </select>
+                                                    <button class="rc-selcol-btn" title="Subir" disabled="@(colIdx == 0)" @onclick="() => MoverCol(hoja.Columnas, colIdx, -1)">&uarr;</button>
+                                                    <button class="rc-selcol-btn" title="Bajar" disabled="@(colIdx == hoja.Columnas.Count - 1)" @onclick="() => MoverCol(hoja.Columnas, colIdx, 1)">&darr;</button>
+                                                    <button class="rc-selcol-btn rc-selcol-x" title="Quitar" @onclick="() => ToggleCol(hoja.Columnas, col.Ref)">&times;</button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
                                 </div>
                             }
                             else
@@ -170,28 +229,53 @@
                                             </label>
                                         }
                                     </div>
-                                    <div class="rc-block-title">Agregados</div>
-                                    @foreach (var ag in hoja.Agregados)
+                                    @if (hoja.GroupBy.Count > 0)
                                     {
-                                        var agr = ag;
-                                        <div class="rc-row">
-                                            <select @bind="agr.Func">
-                                                @foreach (var f in Enum.GetValues<ReporteAgregadoFunc>())
-                                                {
-                                                    <option value="@f">@FuncLabel(f)</option>
-                                                }
-                                            </select>
-                                            <select @bind="agr.CampoRef">
-                                                <option value="">(todas las filas)</option>
-                                                @foreach (var c in campos)
-                                                {
-                                                    <option value="@c.Ref">@c.Label</option>
-                                                }
-                                            </select>
-                                            <input type="text" @bind="agr.Titulo" placeholder="Titulo (ej: Cant Px's)" />
-                                            <button class="btn-ghost btn-danger" @onclick="() => hoja.Agregados.Remove(agr)">x</button>
+                                        <div class="rc-hint">Orden de agrupacion (arrastra o usa las flechas):</div>
+                                        <div class="rc-selcols" data-rcsort="grp" data-hoja="@hi">
+                                            @for (var gi = 0; gi < hoja.GroupBy.Count; gi++)
+                                            {
+                                                var g = hoja.GroupBy[gi];
+                                                var grpIdx = gi;
+                                                <div class="rc-selcol" @key="g" data-rcidx="@grpIdx">
+                                                    <span class="rc-grip" title="Arrastra para reordenar" draggable="true"></span>
+                                                    <span class="rc-selcol-pos">@(gi + 1)</span>
+                                                    <span class="rc-selcol-name" title="@g.Ref">@LabelRef(hoja.EntidadKey, g.Ref)</span>
+                                                    <button class="rc-selcol-btn" title="Subir" disabled="@(grpIdx == 0)" @onclick="() => MoverDelta(hoja.GroupBy, grpIdx, -1)">&uarr;</button>
+                                                    <button class="rc-selcol-btn" title="Bajar" disabled="@(grpIdx == hoja.GroupBy.Count - 1)" @onclick="() => MoverDelta(hoja.GroupBy, grpIdx, 1)">&darr;</button>
+                                                    <button class="rc-selcol-btn rc-selcol-x" title="Quitar" @onclick="() => ToggleCol(hoja.GroupBy, g.Ref)">&times;</button>
+                                                </div>
+                                            }
                                         </div>
                                     }
+                                    <div class="rc-block-title">Agregados</div>
+                                    <div class="rc-selcols" data-rcsort="agg" data-hoja="@hi">
+                                        @for (var ai = 0; ai < hoja.Agregados.Count; ai++)
+                                        {
+                                            var agr = hoja.Agregados[ai];
+                                            var aggIdx = ai;
+                                            <div class="rc-row" @key="agr" data-rcidx="@aggIdx">
+                                                <span class="rc-grip" title="Arrastra para reordenar" draggable="true"></span>
+                                                <select @bind="agr.Func">
+                                                    @foreach (var f in Enum.GetValues<ReporteAgregadoFunc>())
+                                                    {
+                                                        <option value="@f">@FuncLabel(f)</option>
+                                                    }
+                                                </select>
+                                                <select @bind="agr.CampoRef">
+                                                    <option value="">(todas las filas)</option>
+                                                    @foreach (var c in campos)
+                                                    {
+                                                        <option value="@c.Ref">@c.Label</option>
+                                                    }
+                                                </select>
+                                                <input type="text" @bind="agr.Titulo" placeholder="Titulo (ej: Cant Px's)" />
+                                                <button class="rc-selcol-btn" title="Subir" disabled="@(aggIdx == 0)" @onclick="() => MoverDelta(hoja.Agregados, aggIdx, -1)">&uarr;</button>
+                                                <button class="rc-selcol-btn" title="Bajar" disabled="@(aggIdx == hoja.Agregados.Count - 1)" @onclick="() => MoverDelta(hoja.Agregados, aggIdx, 1)">&darr;</button>
+                                                <button class="btn-ghost btn-danger" @onclick="() => hoja.Agregados.Remove(agr)">x</button>
+                                            </div>
+                                        }
+                                    </div>
                                     <button class="btn-ghost" @onclick="() => hoja.Agregados.Add(new AggEdit())">+ Agregado</button>
 
                                     <div class="rc-pivote">
@@ -246,7 +330,24 @@
                                                 <option value="@op">@op</option>
                                             }
                                         </select>
-                                        <input type="text" @bind="fil.Valor" placeholder="Valor (coma para varios)" />
+                                        @if (_parametros.Count > 0)
+                                        {
+                                            <select @bind="fil.ParamClave" title="Valor fijo o parametro al ejecutar">
+                                                <option value="">(valor fijo)</option>
+                                                @foreach (var pa in _parametros)
+                                                {
+                                                    <option value="@pa.Clave">@(string.IsNullOrWhiteSpace(pa.Etiqueta) ? pa.Clave : pa.Etiqueta)</option>
+                                                }
+                                            </select>
+                                        }
+                                        @if (string.IsNullOrWhiteSpace(fil.ParamClave))
+                                        {
+                                            <input type="text" @bind="fil.Valor" placeholder="Valor (coma para varios)" />
+                                        }
+                                        else
+                                        {
+                                            <span class="rc-param-pill">se pide al ejecutar</span>
+                                        }
                                         <button class="btn-ghost btn-danger" @onclick="() => hoja.Filtros.Remove(fil)">x</button>
                                     </div>
                                 }
@@ -312,6 +413,67 @@
             </div>
         </div>
     }
+
+    @if (_runAbierto)
+    {
+        <div class="rc-modal-backdrop">
+            <div class="rc-modal rc-modal-sm">
+                <div class="rc-modal-head">
+                    <h2 class="rc-modal-title">Filtros para: @_runNombre</h2>
+                    <button class="rc-modal-x" @onclick="() => _runAbierto = false" title="Cerrar">&times;</button>
+                </div>
+                <div class="rc-editor">
+                    <div class="rc-params-help">Deja en blanco lo que no quieras filtrar.</div>
+                    @foreach (var rp in _runParams)
+                    {
+                        var par = rp;
+                        <div class="rc-field rc-grow">
+                            <label>@(string.IsNullOrWhiteSpace(par.Etiqueta) ? par.Clave : par.Etiqueta)</label>
+                            @if (par.Tipo == ReporteParametroTipo.RangoFecha)
+                            {
+                                <div class="rc-row rc-run-rango">
+                                    <input type="date" value="@par.Valor1" @onchange="e => par.Valor1 = e.Value?.ToString()" />
+                                    <span>a</span>
+                                    <input type="date" value="@par.Valor2" @onchange="e => par.Valor2 = e.Value?.ToString()" />
+                                </div>
+                            }
+                            else if (par.Fuente == ReporteParametroFuente.Sedes)
+                            {
+                                <select @bind="par.Valor1">
+                                    <option value="">(todas)</option>
+                                    @foreach (var s in _runSedes)
+                                    {
+                                        <option value="@s.Id">@s.Nombre</option>
+                                    }
+                                </select>
+                            }
+                            else if (par.Tipo == ReporteParametroTipo.Fecha)
+                            {
+                                <input type="date" value="@par.Valor1" @onchange="e => par.Valor1 = e.Value?.ToString()" />
+                            }
+                            else if (par.Tipo == ReporteParametroTipo.FechaHora)
+                            {
+                                <input type="datetime-local" value="@par.Valor1" @onchange="e => par.Valor1 = e.Value?.ToString()" />
+                            }
+                            else if (par.Tipo == ReporteParametroTipo.Numero)
+                            {
+                                <input type="number" @bind="par.Valor1" />
+                            }
+                            else
+                            {
+                                <input type="text" @bind="par.Valor1"
+                                       placeholder="@(par.Tipo == ReporteParametroTipo.Lista ? "Coma para varios" : "")" />
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="rc-editor-foot">
+                    <button class="btn-primary" disabled="@_trabajando" @onclick="EjecutarRunAsync">Descargar Excel</button>
+                    <button class="btn-ghost" @onclick="() => _runAbierto = false">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    }
 </div>
 
 <style>
@@ -343,6 +505,27 @@
 .rc-modal-x:hover { color:#0f172a; }
 .rc-modal .rc-error { margin:.75rem 1.15rem 0; }
 .rc-modal .rc-editor { border:none; border-radius:0; padding:1rem 1.15rem; overflow:auto; flex:1 1 auto; }
+
+.rc-selcols-head { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem; margin-bottom:.45rem; }
+.rc-addcol { flex:1 1 200px; min-width:160px; border:1px solid #93c5fd; background:#eff6ff; border-radius:8px; padding:.3rem .45rem; font-size:.82rem; color:#1e3a8a; cursor:pointer; }
+.rc-addbtn { padding:.3rem .55rem; font-size:.78rem; }
+.rc-hint { font-size:.8rem; color:#64748b; padding:.3rem .1rem; }
+.rc-selcols { display:flex; flex-direction:column; gap:.35rem; }
+.rc-selcol { display:flex; align-items:center; gap:.4rem; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:.3rem .45rem; }
+.rc-dragging { opacity:.45; outline:2px dashed #6366f1; outline-offset:-2px; }
+.rc-drop-hint { outline:2px solid #6366f1; outline-offset:-2px; background:#eef2ff; }
+.rc-grip { flex:0 0 auto; width:.95rem; height:1.2rem; cursor:grab; border-radius:4px; background-image:radial-gradient(#94a3b8 1px, transparent 1px); background-size:4px 4px; background-position:center; background-repeat:space; opacity:.65; }
+.rc-grip:hover { opacity:1; background-color:#eef2ff; }
+.rc-grip:active { cursor:grabbing; }
+.rc-selcol-pos { flex:0 0 auto; width:1.4rem; text-align:center; font-size:.72rem; color:#64748b; background:#eef2ff; border-radius:99px; padding:.05rem 0; }
+.rc-selcol-name { flex:1 1 160px; min-width:120px; font-size:.82rem; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rc-selcol-title { flex:1 1 150px; min-width:110px; border:1px solid #cbd5e1; border-radius:6px; padding:.25rem .4rem; font-size:.8rem; }
+.rc-selcol-fmt { flex:0 0 auto; border:1px solid #cbd5e1; border-radius:6px; padding:.25rem .3rem; font-size:.8rem; background:#fff; }
+.rc-selcol-btn { flex:0 0 auto; border:1px solid #cbd5e1; background:#fff; border-radius:6px; min-width:1.8rem; padding:.2rem .35rem; cursor:pointer; color:#334155; font-size:.9rem; line-height:1; }
+.rc-selcol-btn:hover:not(:disabled) { background:#eef2ff; }
+.rc-selcol-btn:disabled { opacity:.35; cursor:default; }
+.rc-selcol-x { color:#b91c1c; border-color:#fecaca; }
+.rc-selcol-x:hover { background:#fef2f2; }
 .rc-editor-meta { display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; align-items:flex-end; }
 .rc-encabezado { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:.6rem .75rem; }
 .rc-encabezado > .rc-inline { width:100%; font-weight:600; color:#334155; }
@@ -355,6 +538,13 @@
 .rc-sheet { border:1px solid #e2e8f0; border-radius:10px; padding:.85rem; background:#f8fafc; }
 .rc-sheet-head { display:flex; gap:.75rem; align-items:flex-end; flex-wrap:wrap; }
 .rc-sheet-del { margin-left:auto; }
+.rc-params { margin:.85rem 0; padding:.75rem .85rem; background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; }
+.rc-params-help { font-size:.78rem; color:#64748b; margin:.1rem 0 .5rem; }
+.rc-param-row { align-items:center; }
+.rc-param-et { flex:1 1 180px; min-width:140px; }
+.rc-param-pill { font-size:.76rem; color:#1e3a8a; background:#eff6ff; border:1px solid #bfdbfe; border-radius:99px; padding:.2rem .55rem; white-space:nowrap; }
+.rc-modal-sm { width:min(520px,100%); }
+.rc-run-rango { align-items:center; gap:.4rem; }
 .rc-block { margin-top:.75rem; }
 .rc-block-title { font-size:.78rem; font-weight:600; color:#334155; margin:.4rem 0 .35rem; text-transform:uppercase; letter-spacing:.04em; }
 .rc-chips { display:flex; flex-wrap:wrap; gap:.35rem; }
@@ -399,14 +589,39 @@
     private string? _version;
     private string? _subtitulo;
     private List<HojaEdit> _hojas = new();
+    private List<ParamEdit> _parametros = new();
 
     private ReporteHojaResultado? _preview;
     private int _previewHoja = -1;
 
+    // Dialogo de parametros al descargar.
+    private bool _runAbierto;
+    private Guid _runId;
+    private string _runNombre = "";
+    private List<RunParam> _runParams = new();
+    private List<SedeOpcionDto> _runSedes = new();
+
+    private DotNetObjectReference<ReportesConstructor>? _dnetRef;
+
     protected override async Task OnInitializedAsync()
     {
-        _entidades = Builder.ListarEntidades();
+        _entidades = await Builder.ListarEntidadesAsync();
         await RecargarAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dnetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("visalReportesDnd.init", _dnetRef);
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _dnetRef?.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     private async Task RecargarAsync()
@@ -425,6 +640,7 @@
         _version = null;
         _subtitulo = null;
         _hojas = new() { new HojaEdit { Nombre = "Hoja 1" } };
+        _parametros = new();
         _preview = null; _previewHoja = -1;
         _error = "";
         _editando = true;
@@ -458,6 +674,9 @@
         _subtitulo = d.Subtitulo;
         _hojas = d.Hojas.Select(HojaEdit.Desde).ToList();
         if (_hojas.Count == 0) { _hojas.Add(new HojaEdit { Nombre = "Hoja 1" }); }
+        _parametros = (d.Parametros ?? [])
+            .Select(p => new ParamEdit { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente })
+            .ToList();
         _preview = null; _previewHoja = -1;
         _error = "";
         _editando = true;
@@ -494,6 +713,82 @@
         else { lista.Add(new ColSel { Ref = reff }); }
     }
 
+    // Activa un campo (lo agrega al final del orden) desde el selector "+ Agregar campo".
+    private static void AgregarCol(List<ColSel> lista, string? reff)
+    {
+        if (string.IsNullOrEmpty(reff)) { return; }
+        if (lista.Any(x => x.Ref == reff)) { return; }
+        lista.Add(new ColSel { Ref = reff });
+    }
+
+    // Activa todos los campos de la entidad que falten, respetando el orden del catalogo.
+    private void AgregarTodasCols(List<ColSel> lista, string entidadKey)
+    {
+        foreach (var c in CamposDe(entidadKey))
+        {
+            if (!lista.Any(x => x.Ref == c.Ref)) { lista.Add(new ColSel { Ref = c.Ref }); }
+        }
+    }
+
+    // Reordena una columna dentro de la lista (el orden de la lista es el orden de salida).
+    private static void MoverCol(List<ColSel> lista, int idx, int delta)
+    {
+        var destino = idx + delta;
+        if (idx < 0 || idx >= lista.Count || destino < 0 || destino >= lista.Count) { return; }
+        (lista[idx], lista[destino]) = (lista[destino], lista[idx]);
+    }
+
+    // Reordena un item con las flechas (intercambio con el vecino). Generico: sirve para
+    // GroupBy (ColSel) y Agregados (AggEdit).
+    private static void MoverDelta<T>(List<T> lista, int idx, int delta)
+    {
+        var destino = idx + delta;
+        if (idx < 0 || idx >= lista.Count || destino < 0 || destino >= lista.Count) { return; }
+        (lista[idx], lista[destino]) = (lista[destino], lista[idx]);
+    }
+
+    // Arrastrar y soltar de las listas ordenables del editor (columnas, agrupar por, agregados).
+    // Complementa a las flechas. El DnD vive en JS a nivel document (reportes-dnd.js) porque el
+    // DnD nativo no funciona con los @ondragover de Blazor Server; JS devuelve aqui el movimiento.
+    // Solo reordena dentro de la misma lista y hoja.
+    [JSInvokable]
+    public void MoverItemFromJs(int hojaIdx, string kind, int from, int to)
+    {
+        if (hojaIdx < 0 || hojaIdx >= _hojas.Count) { return; }
+        var hoja = _hojas[hojaIdx];
+        switch (kind)
+        {
+            case "col": MoverPorDnd(hoja.Columnas, from, to); break;
+            case "grp": MoverPorDnd(hoja.GroupBy, from, to); break;
+            case "agg": MoverPorDnd(hoja.Agregados, from, to); break;
+            default: return;
+        }
+        StateHasChanged();
+    }
+
+    private static void MoverPorDnd<T>(List<T> lista, int from, int to)
+    {
+        if (from < 0 || from >= lista.Count || to < 0 || to >= lista.Count || from == to) { return; }
+        var item = lista[from];
+        lista.RemoveAt(from);
+        if (to > from) { to--; } // al remover, el destino por debajo del origen se corre uno
+        if (to < 0) { to = 0; }
+        if (to > lista.Count) { to = lista.Count; }
+        lista.Insert(to, item);
+    }
+
+    private static readonly (ReporteColumnaFormato Val, string Label)[] FormatosColumna =
+    {
+        (ReporteColumnaFormato.Auto, "Automatico"),
+        (ReporteColumnaFormato.Texto, "Texto"),
+        (ReporteColumnaFormato.Entero, "Numero entero"),
+        (ReporteColumnaFormato.Decimal, "Decimal (2)"),
+        (ReporteColumnaFormato.Moneda, "Moneda ($)"),
+        (ReporteColumnaFormato.Porcentaje, "Porcentaje"),
+        (ReporteColumnaFormato.Fecha, "Fecha"),
+        (ReporteColumnaFormato.FechaHora, "Fecha y hora"),
+    };
+
     private static string FuncLabel(ReporteAgregadoFunc f) => f switch
     {
         ReporteAgregadoFunc.Count => "Conteo",
@@ -529,10 +824,12 @@
     {
         var filtros = h.Filtros
             .Where(f => !string.IsNullOrWhiteSpace(f.CampoRef))
-            .Select(f => new ReporteFiltroDef(f.CampoRef, f.Op,
-                (f.Op is ReporteFiltroOp.IsNull or ReporteFiltroOp.NotNull)
-                    ? null
-                    : (f.Valor ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList()))
+            .Select(f => string.IsNullOrWhiteSpace(f.ParamClave)
+                ? new ReporteFiltroDef(f.CampoRef, f.Op,
+                    (f.Op is ReporteFiltroOp.IsNull or ReporteFiltroOp.NotNull)
+                        ? null
+                        : (f.Valor ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList())
+                : new ReporteFiltroDef(f.CampoRef, f.Op, null, f.ParamClave))
             .ToList();
 
         var orden = string.IsNullOrWhiteSpace(h.OrdenRef)
@@ -553,7 +850,10 @@
             return ReporteHojaDef.Agregado(h.Nombre, h.EntidadKey, groupBy, agg, filtros, orden, pivote: pivote);
         }
 
-        var cols = h.Columnas.Select(c => new ReporteColumnaDef(c.Ref)).ToList();
+        var cols = h.Columnas.Select(c => new ReporteColumnaDef(
+            c.Ref,
+            string.IsNullOrWhiteSpace(c.Titulo) ? null : c.Titulo.Trim(),
+            c.Formato)).ToList();
         return ReporteHojaDef.Detalle(h.Nombre, h.EntidadKey, cols, filtros, orden);
     }
 
@@ -577,10 +877,14 @@
         _trabajando = true;
         try
         {
+            var parametros = _parametros
+                .Where(p => !string.IsNullOrWhiteSpace(p.Etiqueta))
+                .Select(p => new ReporteParametroDef(p.Clave, p.Etiqueta.Trim(), p.Tipo, p.Fuente))
+                .ToList();
             var req = new GuardarPlantillaRequest(
                 _nombre, _descripcion, _categoria, 0, true,
                 _hojas.Select(ADef).ToList(),
-                _mostrarEncabezado, _codigo, _version, _subtitulo);
+                _mostrarEncabezado, _codigo, _version, _subtitulo, parametros);
             await Builder.GuardarAsync(_edId, req);
             await RecargarAsync();
             _editando = false;
@@ -607,16 +911,78 @@
         _trabajando = true;
         try
         {
-            var bytes = await Builder.GenerarExcelAsync(id);
-            var nombre = _plantillas.FirstOrDefault(p => p.Id == id)?.Nombre ?? "reporte";
-            var safe = new string(nombre.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
-            if (string.IsNullOrWhiteSpace(safe)) { safe = "reporte"; }
-            await Descargar($"{safe}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+            // Si el reporte declara parametros de ejecucion, abre el dialogo para pedirlos;
+            // si no, descarga directo.
+            var d = await Builder.ObtenerAsync(id);
+            var pars = d?.Parametros ?? [];
+            if (pars.Count == 0)
+            {
+                await GenerarYDescargarAsync(id, null);
+                return;
+            }
+            _runId = id;
+            _runNombre = d!.Nombre;
+            _runParams = pars
+                .Select(p => new RunParam { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente })
+                .ToList();
+            _runSedes = pars.Any(p => p.Fuente == ReporteParametroFuente.Sedes)
+                ? (await Builder.ListarSedesAsync()).ToList()
+                : new();
+            _runAbierto = true;
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _trabajando = false; }
     }
+
+    private async Task EjecutarRunAsync()
+    {
+        _error = "";
+        _trabajando = true;
+        try
+        {
+            var dict = new Dictionary<string, IReadOnlyList<string>>();
+            foreach (var rp in _runParams)
+            {
+                var vals = rp.Valores();
+                if (vals.Count > 0) { dict[rp.Clave] = vals; }
+            }
+            _runAbierto = false;
+            await GenerarYDescargarAsync(_runId, dict);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task GenerarYDescargarAsync(Guid id, IReadOnlyDictionary<string, IReadOnlyList<string>>? parametros)
+    {
+        var bytes = await Builder.GenerarExcelAsync(id, parametros);
+        var nombre = _plantillas.FirstOrDefault(p => p.Id == id)?.Nombre ?? "reporte";
+        var safe = new string(nombre.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+        if (string.IsNullOrWhiteSpace(safe)) { safe = "reporte"; }
+        await Descargar($"{safe}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+    }
+
+    private void AgregarParametro() =>
+        _parametros.Add(new ParamEdit { Clave = "param_" + Guid.NewGuid().ToString("N")[..6] });
+
+    private static string ParamTipoLabel(ReporteParametroTipo t) => t switch
+    {
+        ReporteParametroTipo.Texto => "Texto",
+        ReporteParametroTipo.Numero => "Numero",
+        ReporteParametroTipo.Fecha => "Fecha",
+        ReporteParametroTipo.FechaHora => "Fecha y hora",
+        ReporteParametroTipo.RangoFecha => "Rango de fechas",
+        ReporteParametroTipo.Lista => "Lista",
+        _ => t.ToString()
+    };
+
+    private static string ParamFuenteLabel(ReporteParametroFuente f) => f switch
+    {
+        ReporteParametroFuente.Ninguna => "Sin lista",
+        ReporteParametroFuente.Sedes => "Lista de sedes",
+        _ => f.ToString()
+    };
 
     private async Task Descargar(string fileName, string mime, byte[] bytes)
     {
@@ -662,10 +1028,10 @@
                 Nombre = d.Nombre,
                 EntidadKey = d.EntidadKey,
                 Modo = d.Modo.ToString(),
-                Columnas = d.Columnas.Select(c => new ColSel { Ref = c.CampoRef }).ToList(),
+                Columnas = d.Columnas.Select(c => new ColSel { Ref = c.CampoRef, Titulo = c.Titulo ?? "", Formato = c.Formato }).ToList(),
                 GroupBy = d.GroupBy.Select(c => new ColSel { Ref = c.CampoRef }).ToList(),
                 Agregados = d.Agregados.Select(a => new AggEdit { Func = a.Func, CampoRef = a.CampoRef ?? "", Titulo = a.Titulo ?? "" }).ToList(),
-                Filtros = d.Filtros.Select(f => new FiltroEdit { CampoRef = f.CampoRef, Op = f.Op, Valor = f.Valores is null ? "" : string.Join(", ", f.Valores) }).ToList(),
+                Filtros = d.Filtros.Select(f => new FiltroEdit { CampoRef = f.CampoRef, Op = f.Op, Valor = f.Valores is null ? "" : string.Join(", ", f.Valores), ParamClave = f.ParamClave ?? "" }).ToList(),
             };
             var o = d.Orden.FirstOrDefault();
             if (o is not null) { h.OrdenRef = o.CampoRef; h.OrdenDesc = o.Desc; }
@@ -679,7 +1045,43 @@
         }
     }
 
-    private sealed class ColSel { public string Ref { get; set; } = ""; }
-    private sealed class FiltroEdit { public string CampoRef { get; set; } = ""; public ReporteFiltroOp Op { get; set; } = ReporteFiltroOp.Eq; public string? Valor { get; set; } = ""; }
+    private sealed class ColSel { public string Ref { get; set; } = ""; public string Titulo { get; set; } = ""; public ReporteColumnaFormato Formato { get; set; } = ReporteColumnaFormato.Auto; }
+    private sealed class FiltroEdit { public string CampoRef { get; set; } = ""; public ReporteFiltroOp Op { get; set; } = ReporteFiltroOp.Eq; public string? Valor { get; set; } = ""; public string ParamClave { get; set; } = ""; }
     private sealed class AggEdit { public ReporteAgregadoFunc Func { get; set; } = ReporteAgregadoFunc.Count; public string CampoRef { get; set; } = ""; public string Titulo { get; set; } = ""; }
+
+    // Parametro de ejecucion en el editor (global del reporte). La Clave es estable (se genera
+    // al crearlo) para que el enlace desde los filtros no se rompa aunque cambien la Etiqueta.
+    private sealed class ParamEdit
+    {
+        public string Clave { get; set; } = "";
+        public string Etiqueta { get; set; } = "";
+        public ReporteParametroTipo Tipo { get; set; } = ReporteParametroTipo.RangoFecha;
+        public ReporteParametroFuente Fuente { get; set; } = ReporteParametroFuente.Ninguna;
+    }
+
+    // Parametro que se captura en el dialogo de descarga.
+    private sealed class RunParam
+    {
+        public string Clave { get; set; } = "";
+        public string Etiqueta { get; set; } = "";
+        public ReporteParametroTipo Tipo { get; set; }
+        public ReporteParametroFuente Fuente { get; set; }
+        public string? Valor1 { get; set; }
+        public string? Valor2 { get; set; }
+
+        // Valores a enviar (vacio = no filtrar por este parametro en esta corrida).
+        public IReadOnlyList<string> Valores()
+        {
+            if (Tipo == ReporteParametroTipo.RangoFecha)
+            {
+                return (!string.IsNullOrWhiteSpace(Valor1) && !string.IsNullOrWhiteSpace(Valor2))
+                    ? new[] { Valor1!, Valor2! } : Array.Empty<string>();
+            }
+            if (Tipo == ReporteParametroTipo.Lista && Fuente == ReporteParametroFuente.Ninguna)
+            {
+                return (Valor1 ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            }
+            return string.IsNullOrWhiteSpace(Valor1) ? Array.Empty<string>() : new[] { Valor1! };
+        }
+    }
 }

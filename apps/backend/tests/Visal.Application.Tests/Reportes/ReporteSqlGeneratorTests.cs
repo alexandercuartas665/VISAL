@@ -14,14 +14,14 @@ namespace Visal.Application.Tests.Reportes;
 /// </summary>
 public sealed class ReporteSqlGeneratorTests
 {
-    private static ReporteSqlGenerator Crear()
+    private static ReporteSqlGenerator Crear(IReadOnlyList<ReportableFieldDef>? dinamicos = null)
     {
         var opts = new DbContextOptionsBuilder<VisalDbContext>()
             .UseNpgsql("Host=localhost;Database=visal_test;Username=x;Password=y")
             .UseSnakeCaseNamingConvention()
             .Options;
         var db = new VisalDbContext(opts, new FakeTenantContext { TenantId = Guid.NewGuid() });
-        return new ReporteSqlGenerator(db, new ReportSemanticModel());
+        return new ReporteSqlGenerator(db, new ReportSemanticModel(), new FakeReporteCamposDinamicos(dinamicos));
     }
 
     [Fact]
@@ -135,6 +135,39 @@ public sealed class ReporteSqlGeneratorTests
     {
         Assert.Throws<InvalidOperationException>(() =>
             Crear().Generar(ReporteHojaDef.Detalle("X", "paciente", [new ReporteColumnaDef("relacion_mala.campo")])));
+    }
+
+    [Fact]
+    public void Campo_dinamico_se_resuelve_como_ruta_jsonb_y_conserva_filtro_de_tenant()
+    {
+        var dinamicos = new[]
+        {
+            new ReportableFieldDef("peso", "Peso", "CamposDinamicosJson", ReportFieldKind.Text, JsonKey: "peso"),
+        };
+        var q = Crear(dinamicos).Generar(ReporteHojaDef.Detalle("Base", "paciente",
+            [new ReporteColumnaDef("peso", "Peso")]));
+
+        // Lee la clave dentro del jsonb (nombre fisico resuelto por el metamodelo de EF).
+        Assert.Contains("(t0.\"campos_dinamicos_json\" ->> 'peso')", q.Sql);
+        Assert.Contains("AS \"Peso\"", q.Sql);
+        // El aislamiento por tenant nunca se pierde.
+        Assert.Contains("t0.\"tenant_id\" = @_tenantId", q.Sql);
+    }
+
+    [Fact]
+    public void Filtro_sobre_campo_dinamico_va_parametrizado_sobre_la_ruta_jsonb()
+    {
+        var dinamicos = new[]
+        {
+            new ReportableFieldDef("peso", "Peso", "CamposDinamicosJson", ReportFieldKind.Text, JsonKey: "peso"),
+        };
+        var q = Crear(dinamicos).Generar(ReporteHojaDef.Detalle("Base", "paciente",
+            [new ReporteColumnaDef("numero_documento")],
+            filtros: [new ReporteFiltroDef("peso", ReporteFiltroOp.Eq, ["80"])]));
+
+        Assert.Contains("(t0.\"campos_dinamicos_json\" ->> 'peso') = @p0", q.Sql);
+        Assert.DoesNotContain("80", q.Sql);              // el valor nunca entra al SQL
+        Assert.Equal("80", Assert.Single(q.Parametros).Value);
     }
 
     private sealed class FakeTenantContext : ITenantContext

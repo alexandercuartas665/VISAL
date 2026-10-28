@@ -76,7 +76,8 @@ public sealed class PacienteService : IPacienteService
             p.ContactoEmergencia, p.Parentesco, p.TelefonoEmergencia,
             contactos,
             p.Activo,
-            p.EstadoAdmision);
+            p.EstadoAdmision,
+            p.CamposDinamicosJson);
     }
 
     public async Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default)
@@ -167,6 +168,9 @@ public sealed class PacienteService : IPacienteService
 
         // Sede
         p.SedeAtencionId = req.SedeAtencionId;
+
+        // Campos dinamicos del tenant (jsonb plano). La UI envia el documento ya serializado.
+        p.CamposDinamicosJson = string.IsNullOrWhiteSpace(req.CamposDinamicosJson) ? null : req.CamposDinamicosJson;
 
         // Emergencia (campos legacy: el primer contacto de la lista pisa estos)
         var primero = req.ContactosEmergencia.FirstOrDefault();

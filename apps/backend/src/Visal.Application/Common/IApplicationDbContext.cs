@@ -140,6 +140,9 @@ public interface IApplicationDbContext
 
     // Constructor de reportes multi-hoja (Capa 13): plantillas + hojas, tenant-scoped.
     DbSet<ReportePlantilla> ReportePlantillas { get; }
+    DbSet<PacienteFichaDef> PacienteFichaDefs { get; }
+    DbSet<PacienteCampoDef> PacienteCampoDefs { get; }
+    DbSet<PacienteCampoRigidoDef> PacienteCampoRigidoDefs { get; }
     DbSet<ReporteHoja> ReporteHojas { get; }
     DbSet<PacienteIngreso> PacienteIngresos { get; }
 

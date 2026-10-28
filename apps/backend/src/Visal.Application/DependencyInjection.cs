@@ -138,6 +138,11 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.Reportes.IReportePackService, Tenancy.Reportes.ReportePackService>();
         services.AddScoped<Tenancy.Reportes.IReporteBuilderService, Tenancy.Reportes.ReporteBuilderService>();
         services.AddScoped<Tenancy.Reportes.IPacienteIngresoService, Tenancy.Reportes.PacienteIngresoService>();
+        // Gestor de campos dinamicos de la ficha de paciente (tabs + campos) + su exposicion al CENSO.
+        services.AddScoped<Tenancy.CamposDinamicos.IPacienteFichaService, Tenancy.CamposDinamicos.PacienteFichaService>();
+        services.AddScoped<Tenancy.CamposDinamicos.IPacienteCampoService, Tenancy.CamposDinamicos.PacienteCampoService>();
+        services.AddScoped<Tenancy.CamposDinamicos.IPacienteCampoRigidoService, Tenancy.CamposDinamicos.PacienteCampoRigidoService>();
+        services.AddScoped<Tenancy.Reportes.IReporteCamposDinamicos, Tenancy.Reportes.ReporteCamposDinamicos>();
         services.AddScoped<Tenancy.IIncapacidadService, Tenancy.IncapacidadService>();
         services.AddScoped<Tenancy.ICertificacionService, Tenancy.CertificacionService>();
         services.AddScoped<Tenancy.IRemisionService, Tenancy.RemisionService>();

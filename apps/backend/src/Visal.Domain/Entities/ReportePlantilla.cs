@@ -32,6 +32,13 @@ public class ReportePlantilla : TenantEntity
     /// <summary>Subtitulo / periodo del reporte, p.ej. "Censo 2026 - I Trimestre".</summary>
     public string? Subtitulo { get; set; }
 
+    /// <summary>
+    /// Parametros de ejecucion (globales) del reporte, serializados como JSON
+    /// (lista de ReporteParametroDef). Se piden al descargar y se aplican a las hojas
+    /// cuyos filtros los referencian. Null / vacio = el reporte no pide parametros.
+    /// </summary>
+    public string? ParametrosJson { get; set; }
+
     public List<ReporteHoja> Hojas { get; set; } = new();
 }
 

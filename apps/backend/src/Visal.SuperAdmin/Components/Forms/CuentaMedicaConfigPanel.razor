@@ -6,6 +6,7 @@
 @inject IFormDefinitionService FormSvc
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
+@implements IDisposable
 
 @*
    Panel "Cuenta medica" (paquete de soporte exigido por la aseguradora).
@@ -63,11 +64,12 @@ else
     }
     else
     {
-        <div class="cm-cards">
+        <div class="cm-cards" data-sortable="cmitems" data-sortowner="@_sortOwner">
             @foreach (var (it, idx) in _items.Select((v,i) => (v,i)))
             {
-                <div class="cm-card @(it.Obligatorio ? "cm-card-obl" : "")">
+                <div class="cm-card @(it.Obligatorio ? "cm-card-obl" : "")" @key="it.Id" data-sortitem="@idx">
                     <div class="cm-card-order">
+                        <span class="vs-grip" title="Arrastra para reordenar" draggable="true"></span>
                         <button class="cm-card-arrow" @onclick="() => MoverAsync(idx, idx - 1)" disabled="@(idx == 0 || _busy)" title="Subir">&#9650;</button>
                         <span class="cm-card-num">@(it.Orden + 1)</span>
                         <button class="cm-card-arrow" @onclick="() => MoverAsync(idx, idx + 1)" disabled="@(idx == _items.Count - 1 || _busy)" title="Bajar">&#9660;</button>
@@ -262,11 +264,11 @@ else
                     }
                     else
                     {
-                        <div class="cm-cont-list">
+                        <div class="cm-cont-list" data-sortable="cmcont" data-sortowner="@_sortOwner">
                             @foreach (var (c, ci) in _itemEdit.Contenidos.Select((v, i) => (v, i)))
                             {
-                                <div class="cm-cont-row">
-                                    <div class="cm-cont-idx">@(ci + 1)</div>
+                                <div class="cm-cont-row" @key="c" data-sortitem="@ci">
+                                    <div class="cm-cont-idx"><span class="vs-grip" title="Arrastra para reordenar" draggable="true"></span>@(ci + 1)</div>
                                     <div class="cm-cont-fields">
                                         <div class="cm-f">
                                             <label>Origen *</label>
@@ -334,10 +336,11 @@ else
                         }
                         else
                         {
-                            <div class="cm-cont-list">
+                            <div class="cm-cont-list" data-sortable="cmniveles" data-sortowner="@_sortOwner">
                                 @foreach (var (n, ni) in _itemEdit.OrdenNiveles.Select((v, i) => (v, i)))
                                 {
-                                    <div class="cm-cont-card" style="display:flex;align-items:flex-end;gap:10px;">
+                                    <div class="cm-cont-card" style="display:flex;align-items:flex-end;gap:10px;" @key="n" data-sortitem="@ni">
+                                        <span class="vs-grip" title="Arrastra para reordenar" draggable="true" style="margin-bottom:6px;"></span>
                                         <span class="badge bg-secondary" style="margin-bottom:6px;">@(ni + 1)</span>
                                         <div class="cm-f" style="min-width:160px;">
                                             <label>Campo</label>
@@ -820,6 +823,71 @@ else
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private readonly string _sortOwner = Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<CuentaMedicaConfigPanel>? _sortRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _sortRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("visalSortable.register", _sortOwner, _sortRef); }
+            catch { /* JS aun no cargado: ignorar */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_sortRef is not null) { try { JS.InvokeVoidAsync("visalSortable.unregister", _sortOwner); } catch { } }
+        _sortRef?.Dispose();
+    }
+
+    // Arrastrar y soltar de las 3 listas del panel: archivos (persiste), contenidos y niveles
+    // de orden (en memoria, se persisten al Guardar el archivo). Mismo camino que las flechas.
+    [JSInvokable]
+    public async Task SortableMove(string group, int from, int to)
+    {
+        switch (group)
+        {
+            case "cmitems":
+                if (AseguradoraId is not Guid aid) { return; }
+                if (from < 0 || from >= _items.Count || to < 0 || to >= _items.Count || from == to) { return; }
+                var lista = _items.ToList();
+                var it = lista[from];
+                lista.RemoveAt(from);
+                if (to > from) { to--; }
+                if (to < 0) { to = 0; }
+                if (to > lista.Count) { to = lista.Count; }
+                lista.Insert(to, it);
+                _busy = true; _error = null;
+                try { await Svc.ReordenarItemsAsync(aid, lista.Select(x => x.Id).ToList(), Guid.Empty); _items = (await Svc.ListarItemsAsync(aid)).ToList(); }
+                catch (Exception ex) { _error = ex.Message; }
+                finally { _busy = false; }
+                break;
+            case "cmcont":
+                MoverEnMemoria(_itemEdit?.Contenidos, from, to);
+                break;
+            case "cmniveles":
+                MoverEnMemoria(_itemEdit?.OrdenNiveles, from, to);
+                break;
+            default:
+                return;
+        }
+        StateHasChanged();
+    }
+
+    private static void MoverEnMemoria<T>(List<T>? lista, int from, int to)
+    {
+        if (lista is null) { return; }
+        if (from < 0 || from >= lista.Count || to < 0 || to >= lista.Count || from == to) { return; }
+        var item = lista[from];
+        lista.RemoveAt(from);
+        if (to > from) { to--; }
+        if (to < 0) { to = 0; }
+        if (to > lista.Count) { to = lista.Count; }
+        lista.Insert(to, item);
     }
 
     private async Task MoverAsync(int desde, int hacia)

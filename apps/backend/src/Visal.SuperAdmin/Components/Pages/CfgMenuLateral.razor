@@ -6,6 +6,8 @@
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Forms
 @inject INavMenuConfigService Svc
+@inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>Menu lateral - Visal</PageTitle>
 
@@ -52,12 +54,14 @@
         }
         else
         {
+            <div class="ml-groups" data-sortable="mlgroups" data-sortowner="@_sortOwner">
             @for (var gi = 0; gi < _tree.Groups.Count; gi++)
             {
                 var g = _tree.Groups[gi];
                 var gIndex = gi;
-                <div class="ml-group">
+                <div class="ml-group" @key="g.Id" data-sortitem="@gIndex">
                     <div class="ml-group-h">
+                        <span class="vs-grip" title="Arrastra para reordenar el grupo" draggable="true"></span>
                         <span class="ml-ico" title="Icono del grupo">@((MarkupString)MenuIcons.Svg(g.IconKey))</span>
                         <input class="form-control form-control-sm ml-group-name" @bind="g.Label" @bind:event="oninput"
                                placeholder="Nombre del grupo" />
@@ -86,13 +90,14 @@
                     {
                         <div class="table-responsive">
                             <table class="table table-sm align-middle ml-tabla">
-                                <tbody>
+                                <tbody data-sortable="mlitems:@g.Id" data-sortowner="@_sortOwner">
                                     @for (var ii = 0; ii < g.Items.Count; ii++)
                                     {
                                         var it = g.Items[ii];
                                         var iIndex = ii;
-                                        <tr class="@(it.Hidden ? "ml-hidden" : "")">
+                                        <tr class="@(it.Hidden ? "ml-hidden" : "")" @key="it" data-sortitem="@iIndex">
                                             <td class="ml-move">
+                                                <span class="vs-grip" title="Arrastra para reordenar" draggable="true"></span>
                                                 <button class="btn btn-light btn-xs" title="Subir"
                                                         @onclick="() => MoverItem(g, iIndex, -1)" disabled="@(iIndex == 0)">&uarr;</button>
                                                 <button class="btn btn-light btn-xs" title="Bajar"
@@ -162,6 +167,7 @@
                     }
                 </div>
             }
+            </div>
 
             <div class="ml-add">
                 <button class="btn btn-outline-secondary btn-sm" @onclick="NuevoGrupo">+ Nuevo grupo</button>
@@ -321,6 +327,57 @@
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private readonly string _sortOwner = Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<CfgMenuLateral>? _sortRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _sortRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("visalSortable.register", _sortOwner, _sortRef); }
+            catch { /* JS aun no cargado: ignorar */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_sortRef is not null) { try { JS.InvokeVoidAsync("visalSortable.unregister", _sortOwner); } catch { } }
+        _sortRef?.Dispose();
+    }
+
+    // Arrastrar y soltar de grupos ("mlgroups") y de opciones dentro de un grupo
+    // ("mlitems:<idGrupo>"). Orden en memoria; se persiste al "Guardar cambios".
+    [JSInvokable]
+    public void SortableMove(string group, int from, int to)
+    {
+        if (_tree is null) { return; }
+        if (group == "mlgroups")
+        {
+            MoverEnMemoria(_tree.Groups, from, to);
+        }
+        else if (group.StartsWith("mlitems:", StringComparison.Ordinal))
+        {
+            var gid = group.Substring("mlitems:".Length);
+            var g = _tree.Groups.FirstOrDefault(x => x.Id == gid);
+            if (g is null) { return; }
+            MoverEnMemoria(g.Items, from, to);
+        }
+        else { return; }
+        StateHasChanged();
+    }
+
+    private static void MoverEnMemoria<T>(IList<T> lista, int from, int to)
+    {
+        if (from < 0 || from >= lista.Count || to < 0 || to >= lista.Count || from == to) { return; }
+        var item = lista[from];
+        lista.RemoveAt(from);
+        if (to > from) { to--; }
+        if (to < 0) { to = 0; }
+        if (to > lista.Count) { to = lista.Count; }
+        lista.Insert(to, item);
     }
 
     private void MoverGrupo(int index, int dir)

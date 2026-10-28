@@ -20,7 +20,7 @@ public sealed class CensoBlueprintTests
             .UseSnakeCaseNamingConvention()
             .Options;
         var db = new VisalDbContext(opts, new FakeTenant { TenantId = Guid.NewGuid() });
-        return new ReporteSqlGenerator(db, new ReportSemanticModel());
+        return new ReporteSqlGenerator(db, new ReportSemanticModel(), new FakeReporteCamposDinamicos());
     }
 
     [Fact]

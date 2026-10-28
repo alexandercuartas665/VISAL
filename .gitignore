@@ -80,8 +80,9 @@ prod-dump/
 # Archivos subidos en tiempo de ejecucion (logos, avatares, media de chat/agentes)
 apps/backend/src/Visal.SuperAdmin/wwwroot/uploads/
 
-# Runtime artifacts del start-visal.ps1 - no versionar
+# Runtime artifacts del start-visal.ps1 / start-visal-wt.ps1 - no versionar
 .visal.pid
+.visal-wt.pid
 logs/
 
 # Binarios/herramientas locales (cloudflared para el tunel de desarrollo)

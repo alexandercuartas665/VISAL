@@ -47,7 +47,28 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
                 EsSistema = true,
             });
         }
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Carrera de siembra: en Blazor Server el pase de prerender y el interactivo usan
+            // contextos distintos y pueden pasar el chequeo de arriba con la tabla vacia y sembrar
+            // casi a la vez; el segundo choca con ix_paciente_ficha_defs_tenant_id_tab_key (23505).
+            // Si los tabs ya quedaron lo damos por bueno y descartamos los cambios no persistidos,
+            // para no dejar entidades Added colgando en el DbContext compartido del circuito.
+            DescartarPendientes();
+        }
+    }
+
+    private void DescartarPendientes()
+    {
+        foreach (var entry in db.ChangeTracker.Entries<PacienteFichaDef>()
+                     .Where(e => e.State is EntityState.Added or EntityState.Modified).ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     public async Task<PacienteFichaDto> CreateAsync(CrearFichaRequest req, CancellationToken ct = default)

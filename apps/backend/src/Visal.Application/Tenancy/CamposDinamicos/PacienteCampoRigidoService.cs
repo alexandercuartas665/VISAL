@@ -28,7 +28,22 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
                 Oculto = false,
             });
         }
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Carrera de siembra (prerender + interactivo de Blazor con contextos distintos): si
+            // otro pase concurrente ya sembro, el INSERT choca con ix_..._tenant_id_campo_key
+            // (23505). Lo damos por bueno y descartamos los Added para no dejarlos colgando en el
+            // DbContext compartido del circuito (reintentarian el INSERT en el proximo SaveChanges).
+            foreach (var entry in db.ChangeTracker.Entries<PacienteCampoRigidoDef>()
+                         .Where(e => e.State is EntityState.Added).ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
     }
 
     public async Task<IReadOnlyList<PacienteCampoRigidoDto>> ListAsync(CancellationToken ct = default)

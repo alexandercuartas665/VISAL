@@ -1,5 +1,6 @@
 using Visal.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Visal.Application.Common;
@@ -200,6 +201,13 @@ public interface IApplicationDbContext
     /// servicio de limpieza de pacientes de prueba, que borra en varias tablas
     /// (algunas sin DbSet) dentro de una sola transaccion.</summary>
     DatabaseFacade Database { get; }
+
+    /// <summary>Rastreador de cambios del contexto. Lo usan las siembras idempotentes
+    /// (EnsureDefaults) para descartar las entidades Added que quedan colgando cuando una
+    /// ejecucion concurrente (prerender + interactivo de Blazor Server) ya sembro y el guardado
+    /// choca con un indice unico, evitando que el DbContext compartido del circuito reintente
+    /// el INSERT en el proximo SaveChanges.</summary>
+    ChangeTracker ChangeTracker { get; }
 
     /// <summary>Refresca una entidad rastreada con los valores actuales de la BD. El
     /// DbContext es scoped (compartido por el circuito Blazor Server); si la entidad venia

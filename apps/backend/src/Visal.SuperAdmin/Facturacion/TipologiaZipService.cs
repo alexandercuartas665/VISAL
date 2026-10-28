@@ -203,58 +203,117 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     /// <summary>Genera el ZIP del modo "un archivo por autorizacion": por cada paciente y
     /// cada autorizacion del snapshot, un PDF independiente nombrado con el numero de
-    /// autorizacion. Solo considera el contenido de origen Autorizacion; otros contenidos
-    /// del archivo se ignoran en este modo. Si el patron no incluye <c>{autorizacion}</c>,
-    /// el codigo se anexa al nombre para evitar colisiones.</summary>
+    /// autorizacion. El PDF trae el CONTENIDO CONFIGURADO del archivo (firmas, historias
+    /// por tipo, adjuntos, la propia autorizacion...) pero filtrado a lo que pertenece a esa
+    /// autorizacion (via el mapa HC-&gt;autorizacion). Si el patron no incluye
+    /// <c>{autorizacion}</c>, el codigo se anexa al nombre para evitar colisiones.
+    ///
+    /// Nota: el contenido se atribuye a la autorizacion por la HC de la que cuelga (cadena
+    /// sesion-&gt;turno-&gt;asignacion-&gt;codigo). Los adjuntos y firmas "libres" (sin HC) no se
+    /// pueden atribuir a una autorizacion y no entran en este modo.</summary>
     private async Task<ArchivoExportado?> GenerarZipPorAutorizacionAsync(
         InformeItemDto archivo, CuentaMedicaConfigDto cfg,
         FacturacionSnapshotDetalleDto detalle, IReadOnlyList<PacienteSnapshotDto> pacientes,
         string patron, string nitIps, IProgress<ZipProgreso>? progreso, CancellationToken ct)
     {
         _ = cfg;
-        // SoloUltimo del contenido de autorizacion (si existe); si el archivo no tiene
-        // contenido de autorizacion, se toman todas (comportamiento neutro).
-        var contAut = archivo.Contenidos
-            .FirstOrDefault(c => c.Origen == OrigenInformeItem.AutorizacionAsignacion);
-        var soloUltimo = contAut?.SoloUltimo ?? false;
         var incluyeTokenAut = patron.Contains("{autorizacion}", StringComparison.OrdinalIgnoreCase);
+        var docsRender = CalcularDocsRender(archivo);
 
-        var salidas = new List<(string Name, byte[] Pdf)>();
-        var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // doc -> pacienteId (los del snapshot que existen en el sistema).
+        var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
+        var pacs = await _db.Pacientes.AsNoTracking()
+            .Where(p => docs.Contains(p.NumeroDocumento))
+            .Select(p => new { p.Id, p.NumeroDocumento })
+            .ToListAsync(ct);
+        var docToId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in pacs) { docToId[p.NumeroDocumento] = p.Id; }
+
+        // Mapa HC -> autorizacion (una sola consulta para todos los pacientes del snapshot).
+        var hcAut = await ConstruirMapaHcAutorizacionAsync(docToId.Values.ToHashSet(), ct);
+
+        // --- Pase 1: una "unidad" por (paciente, autorizacion). Junta todas las URLs de
+        // formulario-por-tipo para rendirlas de una sola vez (un navegador, en paralelo). ---
+        var allUrls = new List<string>();
+        var unidades = new List<(PacienteSnapshotDto Pac, string Codigo, List<PartePlan> Partes)>();
         var i = 0;
         foreach (var pac in pacientes)
         {
             ct.ThrowIfCancellationRequested();
-            progreso?.Report(new ZipProgreso("Armando PDFs", i++, pacientes.Count));
+            progreso?.Report(new ZipProgreso("Preparando PDFs", i++, pacientes.Count));
+            if (!docToId.TryGetValue(pac.Documento, out var pacienteId)) { continue; }
 
-            var pid = await _db.Pacientes.AsNoTracking()
-                .Where(p => p.NumeroDocumento == pac.Documento)
-                .Select(p => (Guid?)p.Id)
-                .FirstOrDefaultAsync(ct);
-            if (pid is not Guid pacienteId) { continue; }
-
-            var autorizaciones = await CargarAutorizacionesConCodigoAsync(
-                pacienteId, pac.Autorizaciones, soloUltimo, ct);
-            foreach (var (codigo, pdf) in autorizaciones)
+            var codigos = pac.Autorizaciones
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var codigo in codigos)
             {
-                var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac, nitIps, codigo));
-                // Si el patron no trae el token de autorizacion, anexamos el codigo para
-                // que dos autorizaciones del mismo paciente no colisionen de nombre.
-                if (!incluyeTokenAut)
-                {
-                    baseName = SanitizarNombre(baseName + "_" + codigo);
-                }
-                var name = baseName + ".pdf";
-                var n = 2;
-                while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
-                salidas.Add((name, pdf));
+                var partes = await ConstruirPlanAutorizacionAsync(archivo, pacienteId, codigo, hcAut, docsRender, allUrls, ct);
+                if (partes.Count == 0) { continue; }
+                unidades.Add((pac, codigo, partes));
             }
+        }
+
+        // --- Render en lote: UN solo Chrome, hasta MaxRenderConcurrency paginas a la vez. ---
+        IReadOnlyList<byte[]> rendered;
+        if (allUrls.Count > 0)
+        {
+            progreso?.Report(new ZipProgreso("Renderizando formularios", 0, allUrls.Count));
+            var onEach = progreso is null ? null
+                : new Progress<int>(n => progreso.Report(new ZipProgreso("Renderizando formularios", n, allUrls.Count)));
+            rendered = await _pdfRenderer.RenderUrlsToPdfAsync(allUrls, ".pack-doc", MaxRenderConcurrency, onEach, ct);
+        }
+        else
+        {
+            rendered = Array.Empty<byte[]>();
+        }
+        progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
+
+        // --- Pase 2: ensambla el PDF de cada (paciente, autorizacion). ---
+        var salidas = new List<(string Name, byte[] Pdf)>();
+        var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (pac, codigo, partes) in unidades)
+        {
+            ct.ThrowIfCancellationRequested();
+            var bytesPartes = new List<byte[]>(partes.Count);
+            foreach (var p in partes)
+            {
+                if (p.Inline is { Length: > 0 }) { bytesPartes.Add(p.Inline); }
+                else if (p.RenderIdx >= 0 && p.RenderIdx < rendered.Count
+                         && rendered[p.RenderIdx] is { Length: > 0 } b) { bytesPartes.Add(b); }
+            }
+            if (bytesPartes.Count == 0) { continue; }
+
+            var pdf = FusionarPdfs(bytesPartes);
+            var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac, nitIps, codigo));
+            // Si el patron no trae el token de autorizacion, anexamos el codigo para
+            // que dos autorizaciones del mismo paciente no colisionen de nombre.
+            if (!incluyeTokenAut)
+            {
+                baseName = SanitizarNombre(baseName + "_" + codigo);
+            }
+            var name = baseName + ".pdf";
+            var n = 2;
+            while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
+            salidas.Add((name, pdf));
         }
 
         var notaSinContenido =
             $"Archivo: {(string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion)}\n\n" +
-            $"Ninguno de los {pacientes.Count} paciente(s) de este snapshot tiene autorizaciones " +
-            "con archivo disponible para este snapshot.";
+            $"Ninguno de los {pacientes.Count} paciente(s) de este snapshot tiene contenido " +
+            "atribuible a una autorizacion para este archivo.";
+
+        // --- PDF UNICO: todas las autorizaciones concatenadas en un solo PDF. ---
+        if (archivo.PdfUnico)
+        {
+            var unico = salidas.Count == 0
+                ? PaginaNota(notaSinContenido)
+                : FusionarPdfs(salidas.Select(s => s.Pdf).ToList());
+            var nombrePdf = SanitizarNombre($"{archivo.Alias}_{detalle.Metadata.Nombre}") + ".pdf";
+            return new ArchivoExportado(unico, "application/pdf", nombrePdf);
+        }
 
         using var zipMs = new MemoryStream();
         using (var zip = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
@@ -669,46 +728,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return res;
     }
 
-    /// <summary>Igual que <see cref="CargarAutorizacionesAsync"/> pero conserva el CODIGO
-    /// de cada autorizacion junto al PDF, para el modo "un archivo por autorizacion"
-    /// (cada archivo se nombra con su numero de autorizacion).</summary>
-    private async Task<List<(string Codigo, byte[] Pdf)>> CargarAutorizacionesConCodigoAsync(
-        Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct)
-    {
-        var codSet = codigosSnapshot
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (codSet.Count == 0) { return new List<(string, byte[])>(); }
-
-        var filas = (await _db.Asignaciones.AsNoTracking()
-            .Where(a => a.PacienteId == pacienteId
-                        && a.PdfAutorizacionUrl != null
-                        && a.CodigoAutorizacion != null)
-            .Select(a => new { a.CodigoAutorizacion, a.PdfAutorizacionUrl, a.CreatedAt })
-            .ToListAsync(ct))
-            .Where(x => codSet.Contains(x.CodigoAutorizacion!.Trim()))
-            .ToList();
-
-        var porCodigo = filas
-            .GroupBy(x => x.CodigoAutorizacion!, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.OrderByDescending(x => x.CreatedAt).First());
-        var ordenadas = soloUltimo
-            ? porCodigo.OrderByDescending(x => x.CreatedAt).Take(1).ToList()
-            : porCodigo.OrderBy(x => x.CreatedAt).ToList();
-
-        var res = new List<(string Codigo, byte[] Pdf)>();
-        var urlsVistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in ordenadas)
-        {
-            if (!urlsVistas.Add(f.PdfAutorizacionUrl!)) { continue; }  // mismo PDF compartido por 2 codigos
-            var pdf = LeerArchivoComoPdf(f.PdfAutorizacionUrl!);
-            if (pdf is not null) { res.Add((f.CodigoAutorizacion!.Trim(), pdf)); }
-        }
-        return res;
-    }
-
-    private async Task<List<byte[]>> CargarFirmasAsync(Guid pacienteId, bool soloUltimo, CancellationToken ct)
+    private async Task<List<byte[]>> CargarFirmasAsync(
+        Guid pacienteId, bool soloUltimo, CancellationToken ct,
+        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null)
     {
         // La firma del paciente puede estar en dos lugares:
         //  1) NotaMedica.FirmaPacienteDataUrl (cuando la firma se pidio ligada a una nota).
@@ -717,14 +739,34 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Unimos ambas fuentes, ordenadas por fecha, y aplicamos SoloUltimo sobre el total.
         var deNotas = await _db.NotasMedicas.AsNoTracking()
             .Where(n => n.PacienteId == pacienteId && n.FirmaPacienteDataUrl != null)
-            .Select(n => new { Fecha = n.CreatedAt, Url = n.FirmaPacienteDataUrl! })
-            .ToListAsync(ct);
-        var deRequests = await _db.FirmaPacienteRequests.AsNoTracking()
-            .Where(r => r.PacienteId == pacienteId && r.ImageDataUrl != null)
-            .Select(r => new { Fecha = r.CompletedAt ?? r.CreatedAt, Url = r.ImageDataUrl! })
+            .Select(n => new { Fecha = n.CreatedAt, Url = n.FirmaPacienteDataUrl!, Hc = n.HistoriaClinicaId })
             .ToListAsync(ct);
 
-        var todas = deNotas.Concat(deRequests).OrderByDescending(x => x.Fecha).ToList();
+        var todas = new List<(DateTimeOffset Fecha, string Url)>();
+        if (filtroAutorizacion is string fa && hcAut is not null)
+        {
+            // Modo "un archivo por autorizacion": solo firmas de notas atadas a una HC de
+            // esta autorizacion. Las firmas "libres" (requests, sin HC) no se atribuyen a
+            // una autorizacion, asi que no entran en el split.
+            foreach (var n in deNotas)
+            {
+                if (n.Hc is Guid hid && hcAut.TryGetValue(hid, out var set) && set.Contains(fa))
+                {
+                    todas.Add((n.Fecha, n.Url));
+                }
+            }
+        }
+        else
+        {
+            foreach (var n in deNotas) { todas.Add((n.Fecha, n.Url)); }
+            var deRequests = await _db.FirmaPacienteRequests.AsNoTracking()
+                .Where(r => r.PacienteId == pacienteId && r.ImageDataUrl != null)
+                .Select(r => new { Fecha = r.CompletedAt ?? r.CreatedAt, Url = r.ImageDataUrl! })
+                .ToListAsync(ct);
+            foreach (var r in deRequests) { todas.Add((r.Fecha, r.Url)); }
+        }
+
+        todas = todas.OrderByDescending(x => x.Fecha).ToList();
         if (todas.Count == 0) { return new List<byte[]>(); }
         var seleccion = soloUltimo ? todas.Take(1) : todas.AsEnumerable().Reverse();
 
@@ -737,13 +779,100 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return res;
     }
 
+    /// <summary>Construye, para los pacientes del snapshot, el mapa
+    /// <c>HistoriaClinicaId -&gt; codigos de autorizacion</c> siguiendo la cadena
+    /// pivote sesion-&gt;turno-&gt;asignacion (misma cadena que usa el orden por CUP). Lo
+    /// usa el modo "un archivo por autorizacion" para atribuir cada HC/adjunto/firma a su
+    /// autorizacion. Una HC puede colgar de mas de una autorizacion (set).</summary>
+    private async Task<Dictionary<Guid, HashSet<string>>> ConstruirMapaHcAutorizacionAsync(
+        IReadOnlyCollection<Guid> pacienteIds, CancellationToken ct)
+    {
+        var map = new Dictionary<Guid, HashSet<string>>();
+        if (pacienteIds.Count == 0) { return map; }
+
+        var filas = await (
+            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            where pacienteIds.Contains(a.PacienteId) && a.CodigoAutorizacion != null
+            select new { p.HistoriaClinicaId, a.CodigoAutorizacion })
+            .ToListAsync(ct);
+
+        foreach (var r in filas)
+        {
+            var code = r.CodigoAutorizacion!.Trim();
+            if (code.Length == 0) { continue; }
+            if (!map.TryGetValue(r.HistoriaClinicaId, out var set))
+            {
+                map[r.HistoriaClinicaId] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+            set.Add(code);
+        }
+        return map;
+    }
+
+    /// <summary>Pase 1 del modo "un archivo por autorizacion": arma el plan de partes de
+    /// UNA autorizacion de un paciente, recorriendo los contenidos configurados del archivo
+    /// pero filtrando cada origen a lo que pertenece a esa autorizacion. Las URLs de
+    /// formulario-por-tipo se agregan al lote global para rendirse juntas.</summary>
+    private async Task<List<PartePlan>> ConstruirPlanAutorizacionAsync(
+        InformeItemDto archivo, Guid pacienteId, string codigo,
+        IReadOnlyDictionary<Guid, HashSet<string>> hcAut, string docsRender,
+        List<string> allUrls, CancellationToken ct)
+    {
+        var unoCodigo = new[] { codigo };
+        var partes = new List<PartePlan>();
+        foreach (var c in archivo.Contenidos)
+        {
+            ct.ThrowIfCancellationRequested();
+            switch (c.Origen)
+            {
+                case OrigenInformeItem.AutorizacionAsignacion:
+                    // Solo el PDF de ESTA autorizacion.
+                    foreach (var b in await CargarAutorizacionesAsync(pacienteId, unoCodigo, c.SoloUltimo, ct))
+                    {
+                        partes.Add(new PartePlan(b, -1));
+                    }
+                    break;
+                case OrigenInformeItem.FirmaPaciente:
+                    foreach (var b in await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct, codigo, hcAut))
+                    {
+                        partes.Add(new PartePlan(b, -1));
+                    }
+                    break;
+                case OrigenInformeItem.FormularioPorTipo:
+                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(
+                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, codigo, hcAut))
+                    {
+                        partes.Add(new PartePlan(null, allUrls.Count));
+                        allUrls.Add(url);
+                    }
+                    break;
+                case OrigenInformeItem.DocumentoHc:
+                case OrigenInformeItem.DocumentoPacienteLibre:
+                case OrigenInformeItem.DocumentoNota:
+                    foreach (var b in await CargarDocumentosExternosAsync(
+                        pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut))
+                    {
+                        partes.Add(new PartePlan(b, -1));
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+        return partes;
+    }
+
     /// <summary>Origenes de documentos externos (DocumentoHc / DocumentoPacienteLibre /
     /// DocumentoNota): recupera los adjuntos del paciente en <c>nota_medica_documentos</c>
     /// (binario en wwwroot/uploads/notas), filtrando por "ambito" segun el origen y por
     /// categoria = tipologia elegida (si no se eligio, cualquiera). PDFs pasan tal cual;
     /// imagenes se envuelven en una pagina. SoloUltimo = solo el adjunto mas reciente.</summary>
     private async Task<List<byte[]>> CargarDocumentosExternosAsync(
-        Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct)
+        Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct,
+        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null)
     {
         var q = _db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId);
@@ -768,12 +897,22 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         var rows = await q
             .OrderByDescending(d => d.CreatedAt)
-            .Select(d => d.RutaArchivo)
+            .Select(d => new { d.RutaArchivo, d.HistoriaClinicaId })
             .ToListAsync(ct);
+
+        // Modo "un archivo por autorizacion": solo los adjuntos atados a una HC cuya
+        // asignacion pertenece a ESTA autorizacion. Los adjuntos libres (sin HC) no se
+        // pueden atribuir a una autorizacion, asi que se omiten en el split.
+        if (filtroAutorizacion is string fa && hcAut is not null)
+        {
+            rows = rows.Where(r => r.HistoriaClinicaId is Guid hid
+                                   && hcAut.TryGetValue(hid, out var set) && set.Contains(fa)).ToList();
+        }
         if (rows.Count == 0) { return new List<byte[]>(); }
 
         // SoloUltimo = el mas reciente; si no, todos en orden cronologico ascendente.
-        var seleccion = soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse();
+        var seleccion = (soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse())
+            .Select(r => r.RutaArchivo);
 
         var res = new List<byte[]>();
         foreach (var ruta in seleccion)
@@ -846,7 +985,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     private async Task<List<string>> ResolverUrlsFormularioPorTipoAsync(
         Guid pacienteId, string? tipo, bool soloUltimo,
-        IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, string docsRender, CancellationToken ct)
+        IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, string docsRender, CancellationToken ct,
+        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
 
@@ -861,6 +1001,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .Select(x => new FilaHcOrden(x.Id, x.Fecha))
             .ToList();
         if (filas.Count == 0) { return new(); }
+
+        // Modo "un archivo por autorizacion": solo las HC cuya asignacion pertenece a
+        // ESTA autorizacion (mapa HC -> codigos de autorizacion precalculado). Las HC sin
+        // autorizacion resoluble no entran en el split por autorizacion.
+        if (filtroAutorizacion is string fa && hcAut is not null)
+        {
+            filas = filas.Where(f => hcAut.TryGetValue(f.Id, out var set) && set.Contains(fa)).ToList();
+            if (filas.Count == 0) { return new(); }
+        }
 
         if (soloUltimo)
         {

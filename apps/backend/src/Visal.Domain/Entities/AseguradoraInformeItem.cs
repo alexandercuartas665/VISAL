@@ -73,7 +73,10 @@ public class AseguradoraInformeItem : TenantEntity
 
     /// <summary>Si true, el archivo genera un PDF por CADA autorizacion del paciente
     /// (no uno fusionado por paciente): el ZIP trae un archivo por autorizacion, nombrado
-    /// con el numero de autorizacion. Pensado para archivos de solo autorizaciones.
+    /// con el numero de autorizacion. Cada PDF trae el CONTENIDO configurado del archivo
+    /// (firmas, historias por tipo, adjuntos, la propia autorizacion...) filtrado a lo que
+    /// pertenece a esa autorizacion, atribuido por la HC de la que cuelga (cadena
+    /// sesion-&gt;turno-&gt;asignacion). El contenido "libre" sin HC no entra en este modo.
     /// Default false (comportamiento historico: todas las autorizaciones en un PDF).</summary>
     public bool UnoPorAutorizacion { get; set; }
 }

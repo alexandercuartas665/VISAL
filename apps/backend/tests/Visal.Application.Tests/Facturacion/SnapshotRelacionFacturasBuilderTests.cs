@@ -687,6 +687,75 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         Assert.Equal(3, filas.Count(f => !Equals(f["CUPS"], "E890179") && Equals(f["Cód. Paquete"], "E890179") && Equals(f["Valor Total"], 0m)));
     }
 
+    /// <summary>
+    /// Varios LOTES del mismo paquete bajo la MISMA autorizacion (el coordinador fue asignando el
+    /// paquete "uno por uno" en distintos dias): el paquete se cobra UNA sola vez por autorizacion.
+    /// -> UNA cabecera (valor una vez) + todas las HC de detalle de todos los lotes debajo (valor 0).
+    /// La cabecera muestra "Aut. &lt;num&gt;" en Cod. Asignacion (la columna Cod. Lote ya no existe).
+    /// </summary>
+    [Fact]
+    public async Task Paquete_VariosLotes_MismaAutorizacion_UnaCabeceraPorAutorizacion()
+    {
+        var (ctx, _) = Db();
+        var aseg = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "NEPS", Tipo = "EPS", Nombre = "NUEVA EPS", Nit = "900156264" };
+        var contrato = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = aseg.Id, CodigoContrato = "NEPS-01", Estado = "ACTIVO" };
+        var suc = new Sucursal { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "SED", Nombre = "SEDE", Activo = true, CodigoHabilitacion = "X" };
+        var paciente = new Paciente { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "999", PrimerNombre = "PACI", PrimerApellido = "ENTE", NombreCompleto = "PACI ENTE", Sexo = "M", Regimen = "CONTRIBUTIVO" };
+        var prof = new Profesional { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "123", NombreCompleto = "PROF" };
+        var pacCon = new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ContratoAseguradoraId = contrato.Id, Orden = 1 };
+        var paquete = new Paquete { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "E890179", Nombre = "PAQUETE DIARIO VENTILACION", Precio = 650000m, Activo = true };
+
+        const string AUT = "323787872";
+        // 3 LOTES del MISMO codigo y la MISMA autorizacion (el paquete se fue armando uno por uno).
+        void Seed(long loteCons, long asigCons, decimal? pactado, DateTimeOffset fecha)
+        {
+            var loteId = Guid.NewGuid();
+            ctx.AsignacionLotes.Add(new AsignacionLote { Id = loteId, TenantId = TenantId, Consecutivo = loteCons, PacienteId = paciente.Id, Sucursal = "SED", ContratoCodigo = "NEPS-01" });
+            ctx.Asignaciones.Add(new Asignacion
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = loteId, Consecutivo = asigCons, PacienteId = paciente.Id,
+                Sucursal = "SED", ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV", TipoServicio = "ENFERMERIA",
+                Cantidad = 1, ContratoCodigo = "NEPS-01", FechaInicio = DateOnly.FromDateTime(fecha.DateTime), MesVigencia = (short)fecha.Month,
+                Estado = AsignacionEstado.Asignado, PaqueteInstanciaId = Guid.NewGuid(), PaqueteCodigo = "E890179",
+                PaqueteValorPactado = pactado, CodigoAutorizacion = AUT
+            });
+            ctx.HistoriasClinicas.Add(new HistoriaClinica
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = paciente.Id, ProfesionalId = prof.Id,
+                FormDefinitionId = Guid.Empty, ValoresJson = "{}", FechaApertura = fecha, FechaAtencion = fecha,
+                FechaCierre = fecha.AddHours(2), Estado = HistoriaClinicaEstado.Cerrada
+            });
+        }
+        // El primer lote no trae pactado (como en prod), los otros si: el cobro debe salir UNA vez.
+        Seed(601, 201, null, new DateTimeOffset(2026, 9, 3, 12, 0, 0, TimeSpan.Zero));
+        Seed(602, 202, 650000m, new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero));
+        Seed(603, 203, 650000m, new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero));
+
+        ctx.Aseguradoras.Add(aseg); ctx.ContratosAseguradora.Add(contrato); ctx.Sucursales.Add(suc);
+        ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon); ctx.Paquetes.Add(paquete);
+        await ctx.SaveChangesAsync();
+
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var filas = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var f in builder.ConstruirAsync(FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
+        {
+            filas.Add(f);
+        }
+
+        // UNA sola cabecera de paquete (por autorizacion) + 3 detalles = 4 filas.
+        var primarias = filas.Where(f => Equals(f["CUPS"], "E890179")).ToList();
+        Assert.Single(primarias);
+        var cab = primarias[0];
+        Assert.Equal(650000m, cab["Valor Total"]);               // pactado UNA sola vez
+        Assert.Equal($"Aut. {AUT}", cab["Cód. Asignación"]);     // la cabecera muestra la autorizacion
+        Assert.Equal(4, filas.Count);                            // 1 cabecera + 3 detalle
+
+        // Los 3 detalles: valor 0, cada uno conserva su propio Cod. Asignacion por servicio.
+        var detalles = filas.Where(f => !Equals(f["CUPS"], "E890179")).ToList();
+        Assert.Equal(3, detalles.Count);
+        Assert.All(detalles, d => Assert.Equal(0m, d["Valor Total"]));
+    }
+
     /// <summary>Dos codigos de paquete distintos para el mismo paciente -> DOS primarias.</summary>
     [Fact]
     public async Task Paquete_DosCodigos_DosPrimarias()

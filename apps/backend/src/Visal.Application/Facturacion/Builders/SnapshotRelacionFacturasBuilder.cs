@@ -72,7 +72,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         // para no alterar el orden validado por la EPS. Muestran los codigos cortos
         // (primeros 8 hex) para conciliar contra el modulo Ordenes.
         "HC N°",                                      // 43  Id de la Historia Clinica (8 hex)
-        "Cód. Asignación",                            // 44  LoteId de la asignacion (8 hex)
+        "Cód. Asignación",                            // 44  Consecutivo por SERVICIO (AS-NNNNNN); en cabecera de paquete, la autorizacion
         "Cód. Paquete",                               // 45  Codigo del paquete con el que se presto el servicio
         "Autorizacion con archivo"                    // 46  SI/NO: el numero de autorizacion tiene PDF guardado
     };
@@ -114,7 +114,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Telefono"]                                = "Telefono de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
         ["Correo electrónico"]                      = "Correo de la sede que atendio; o del paciente si al generar se marco 'Usar datos del paciente'",
         ["HC N°"]                                   = "Consecutivo publico de la Historia Clinica (HC-000123). Para conciliar contra el modulo Ordenes. No forma parte del template EPS.",
-        ["Cód. Asignación"]                         = "Codigo interno de la asignacion/lote que agrupa los servicios del paciente (primeros 8 hex del LoteId). Igual al 'codigo de asignacion' de Ordenes. No forma parte del template EPS.",
+        ["Cód. Asignación"]                         = "Consecutivo publico de la asignacion POR SERVICIO (AS-000045) en las lineas de detalle. En la CABECERA de un paquete muestra 'Aut. <numero>' porque el paquete se agrupa y cobra una vez por autorizacion. No forma parte del template EPS.",
         ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo), sin el sufijo de modalidad d/f. Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. Cada paquete agrega ademas una LINEA PRIMARIA (cabecera) con CUPS=codigo de paquete, descripcion=nombre del paquete y valor=valor pactado; sus HC de detalle van con valor 0. No forma parte del template EPS.",
         ["Autorizacion con archivo"]                = "SI/NO: indica si el numero de autorizacion de la fila tiene un PDF de autorizacion guardado en la asignacion (Asignacion.PdfAutorizacionUrl). Es la MISMA condicion que usa el archivo AUTOTIZACIONES de Cuenta Medica: SI => ese numero aportara un PDF al ZIP; NO => no hay archivo cargado para esa autorizacion. Vacio cuando la fila no trae numero de autorizacion. No forma parte del template EPS.",
     };
@@ -195,8 +195,14 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             // legible (HC-000123 / AS-000045). El AS sale POR SERVICIO (asignacion.Consecutivo);
             // null solo si la HC no nacio de una asignacion.
             ["HC N°"] = CodigoPublico.Hc(h.Hc.Consecutivo),                    // 43 — consecutivo de la HC
-            ["Cód. Asignación"] = h.AsignacionConsecutivo is long _ac         // 44 — consecutivo por servicio
-                ? CodigoPublico.Asignacion(_ac) : null,
+            // 44 — Cód. Asignación. Detalle y servicios sueltos: consecutivo por SERVICIO (AS-NNNNNN).
+            // CABECERA de paquete (agrupada por autorizacion): "Aut. <num>" porque agrupa varios
+            // lotes bajo esa autorizacion; si la cabecera no trae autorizacion, cae al consecutivo.
+            ["Cód. Asignación"] = h.EsLineaPaquetePrimaria
+                ? (NormalizarAutorizacion(h.CodigoAutorizacion) is string _aut
+                    ? $"Aut. {_aut}"
+                    : (h.AsignacionConsecutivo is long _acp ? CodigoPublico.Asignacion(_acp) : null))
+                : (h.AsignacionConsecutivo is long _ac ? CodigoPublico.Asignacion(_ac) : null),
             ["Cód. Paquete"] = h.PaqueteCodigo,                               // 45 — codigo del paquete con el que se presto el servicio
             // 46 — SI/NO si el numero de autorizacion tiene PDF guardado. Vacio si la fila
             // no trae numero de autorizacion (nada que respaldar). Predice si ese numero

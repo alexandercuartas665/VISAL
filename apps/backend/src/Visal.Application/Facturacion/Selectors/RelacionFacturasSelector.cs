@@ -462,17 +462,37 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────
-        // UN registro de paquete por LOTE: el lote (= una aplicacion del paquete = instancia,
-        // relacion 1:1) agrupa el GRUPO DE SERVICIOS prestados bajo ese paquete. Cada lote emite
-        // UNA linea primaria (cabecera) con las HC de sus servicios de detalle (valor 0) debajo.
+        // El paquete se cobra UNA vez por AUTORIZACION (no por lote). El coordinador puede ir
+        // asignando el paquete "uno por uno" en varios lotes a lo largo del periodo, todos bajo la
+        // MISMA autorizacion; para facturar se emite UNA cabecera por (autorizacion + codigo de
+        // paquete) con el valor pactado una sola vez, y debajo van las lineas de detalle (valor 0)
+        // de TODOS los lotes de esa autorizacion. Los servicios de paquete SIN autorizacion caen al
+        // comportamiento anterior: una cabecera por LOTE.
         // CUPS/codigo externo = codigo de paquete (sin sufijo), descripcion = nombre del paquete,
-        // Cantidad = 1, Valor = pactado del lote. El Cod. Asignacion del registro de paquete = el
-        // Consecutivo del LOTE (id del grupo); las HC de detalle conservan su propio Cod. Asignacion
-        // (AS por servicio). El resto de campos se clona de la PRIMERA HC del lote.
+        // Cantidad = 1, Valor = pactado (una vez por grupo). El resto de campos se clona de la
+        // PRIMERA HC del grupo; las HC de detalle conservan su propio Cod. Asignacion (AS por
+        // servicio).
         var paquetesHechos = hechos
             .Where(h => h.PaqueteInstanciaId is Guid && h.AsignacionLoteId is Guid)
             .ToList();
         if (paquetesHechos.Count == 0) { return hechos; }
+
+        // Clave de agrupacion de la cabecera: por autorizacion+codigo si hay autorizacion; si no,
+        // por lote (fallback). Se aplica identica a hechos y a asignaciones para que el pactado case.
+        static string? NormAut(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) { return null; }
+            var t = raw.Trim();
+            return (t == "." || t == "-" || t == "0") ? null : t;
+        }
+        static string GrpKeyHecho(RelacionFacturasHecho h) =>
+            NormAut(h.CodigoAutorizacion) is string aut
+                ? $"A|{aut}|{h.PaqueteCodigo}"
+                : $"L|{h.AsignacionLoteId}";
+        static string GrpKeyAsig(Asignacion a) =>
+            NormAut(a.CodigoAutorizacion) is string aut
+                ? $"A|{aut}|{ServicioCodigo.Base(a.PaqueteCodigo)}"
+                : $"L|{a.LoteId}";
 
         // Nombre del paquete: via el codigo CRUDO (con sufijo d/f, como lo guarda paquetes.codigo)
         // indexado por el codigo SIN sufijo (el que se muestra).
@@ -488,41 +508,49 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 .Where(p => codigosCrudos.Contains(p.Codigo))
                 .ToDictionaryAsync(p => p.Codigo, p => p.Nombre, StringComparer.OrdinalIgnoreCase, ct);
 
-        // Pactado por LOTE (lo trae la asignacion ancla del lote; una vez por lote).
-        var pactadoPorLote = asignacionesPorPac.Values
+        // Pactado por GRUPO (una vez por autorizacion+codigo; o por lote si no hay autorizacion).
+        var pactadoPorGrupo = asignacionesPorPac.Values
             .SelectMany(l => l)
             .Where(a => a.PaqueteInstanciaId is Guid && a.PaqueteValorPactado is decimal)
-            .GroupBy(a => a.LoteId)
+            .GroupBy(GrpKeyAsig)
             .ToDictionary(g => g.Key, g => g.Max(a => a.PaqueteValorPactado));
 
-        // Detalle agrupado por LOTE, preservando el orden por fecha de `hechos`.
-        var detallePorLote = paquetesHechos
-            .GroupBy(h => h.AsignacionLoteId!.Value)
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        // Consecutivo publico del LOTE (id del grupo) para el Cod. Asignacion del registro de paquete.
-        var loteIds = detallePorLote.Keys.ToList();
+        // Consecutivo publico del LOTE (para la cabecera cuando el grupo es UN solo lote).
+        var loteIds = paquetesHechos.Select(h => h.AsignacionLoteId!.Value).Distinct().ToList();
         var consecutivoPorLote = loteIds.Count == 0
             ? new Dictionary<Guid, long>()
             : await db.AsignacionLotes.AsNoTracking()
                 .Where(l => loteIds.Contains(l.Id))
                 .ToDictionaryAsync(l => l.Id, l => l.Consecutivo, ct);
 
-        var ordenado = new List<RelacionFacturasHecho>(hechos.Count + detallePorLote.Count);
-        var lotesEmitidos = new HashSet<Guid>();
+        // Detalle agrupado por GRUPO, preservando el orden por fecha de `hechos`.
+        var detallePorGrupo = paquetesHechos
+            .GroupBy(GrpKeyHecho)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var ordenado = new List<RelacionFacturasHecho>(hechos.Count + detallePorGrupo.Count);
+        var gruposEmitidos = new HashSet<string>();
         foreach (var h in hechos)
         {
-            if (h.PaqueteInstanciaId is Guid && h.AsignacionLoteId is Guid lote)
+            if (h.PaqueteInstanciaId is Guid && h.AsignacionLoteId is Guid)
             {
-                if (!lotesEmitidos.Add(lote)) { continue; } // ya emitido con su grupo
-                var detalles = detallePorLote[lote];
+                var key = GrpKeyHecho(h);
+                if (!gruposEmitidos.Add(key)) { continue; } // ya emitido con su grupo
+                var detalles = detallePorGrupo[key];
                 var primera = detalles[0];
-                decimal? valor = pactadoPorLote.GetValueOrDefault(lote);
+                decimal? valor = pactadoPorGrupo.GetValueOrDefault(key);
                 string? nombrePaquete = primera.PaqueteCodigo is string cod
                     && crudoPorStripped.TryGetValue(cod, out var crudo)
                         ? nombrePorCodigoCrudo.GetValueOrDefault(crudo)
                         : null;
-                long? loteCons = consecutivoPorLote.TryGetValue(lote, out var lc) ? lc : null;
+                // Lotes distintos que agrupa la cabecera: si es UNO solo, conserva su consecutivo
+                // (AS-NNNNNN) para el fallback de Cod. Asignacion; si son VARIOS, no hay consecutivo
+                // unico. El Cod. Asignacion de la cabecera lo resuelve el builder: si hay
+                // autorizacion muestra "Aut. <num>"; si no, ese consecutivo del unico lote.
+                var lotesDelGrupo = detalles.Select(d => d.AsignacionLoteId!.Value).Distinct().ToList();
+                Guid? loteCabecera = lotesDelGrupo.Count == 1 ? lotesDelGrupo[0] : (Guid?)null;
+                long? consCabecera = loteCabecera is Guid lcid && consecutivoPorLote.TryGetValue(lcid, out var lc)
+                    ? lc : (long?)null;
 
                 var primaria = primera with
                 {
@@ -532,13 +560,15 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                     // Descripcion del procedimiento (mapea de NombreServicio ?? CupsDescripcion).
                     NombreServicio = nombrePaquete,
                     CupsDescripcion = nombrePaquete,
-                    // Valor = pactado del lote; cuota/copago no aplican a la cabecera.
+                    // Valor = pactado del grupo (una vez por autorizacion); cuota/copago no aplican.
                     ValorUnitario = valor,
                     ValorTotal = valor,
                     ValorCuotaModeradora = 0m,
                     ValorCopago = 0m,
-                    // Cod. Asignacion del registro de paquete = Consecutivo del LOTE (id del grupo).
-                    AsignacionConsecutivo = loteCons,
+                    // Un solo lote -> conserva su id/consecutivo (para el fallback AS-NNNNNN de
+                    // Cod. Asignacion cuando no hay autorizacion); varios -> null.
+                    AsignacionLoteId = loteCabecera,
+                    AsignacionConsecutivo = consCabecera,
                 };
                 ordenado.Add(primaria);
                 ordenado.AddRange(detalles);

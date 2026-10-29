@@ -1560,6 +1560,7 @@
         _verFiltros.Add(new FiltroColumna(_nfCol, _nfVal.Trim()));
         _nfVal = "";
         _verPagina = 1;
+        await GuardarFiltrosVerAsync();
         await CargarPaginaVer();
     }
 
@@ -1568,6 +1569,7 @@
         if (idx < 0 || idx >= _verFiltros.Count) { return; }
         _verFiltros.RemoveAt(idx);
         _verPagina = 1;
+        await GuardarFiltrosVerAsync();
         await CargarPaginaVer();
     }
 
@@ -1575,6 +1577,7 @@
     {
         _verFiltros.Clear();
         _verPagina = 1;
+        await GuardarFiltrosVerAsync();
         await CargarPaginaVer();
     }
 
@@ -1582,6 +1585,7 @@
     {
         _verColorFiltro = color;
         _verPagina = 1;
+        await GuardarFiltrosVerAsync();
         await CargarPaginaVer();
     }
 
@@ -1589,7 +1593,62 @@
     {
         _verObsFiltro = valor;
         _verPagina = 1;
+        await GuardarFiltrosVerAsync();
         await CargarPaginaVer();
+    }
+
+    // ── Persistencia de los filtros del detalle (modal "Ver") ──────────────────────────
+    // Se guardan en localStorage del navegador, por snapshot, para que sobrevivan a cerrar
+    // y reabrir el modulo. Mismo mecanismo (localStorage) que usa el menu lateral. Por
+    // snapshot: reabrir ESE snapshot restaura sus filtros; otro snapshot arranca limpio.
+    private static string VerFiltrosKey(Guid id) => $"visal.snap.verfiltros.{id:N}";
+
+    private sealed record VerFiltrosPersist(List<FiltroColumna> Filtros, string? Color, string? Obs);
+
+    private async Task GuardarFiltrosVerAsync()
+    {
+        if (_verSnapshotId == Guid.Empty) { return; }
+        try
+        {
+            // Si no hay ningun filtro activo, borramos la entrada (no dejamos basura).
+            if (_verFiltros.Count == 0 && _verColorFiltro is null && _verObsFiltro is null)
+            {
+                await JS.InvokeVoidAsync("localStorage.removeItem", VerFiltrosKey(_verSnapshotId));
+                return;
+            }
+            var dto = new VerFiltrosPersist(_verFiltros.ToList(), _verColorFiltro, _verObsFiltro);
+            var json = System.Text.Json.JsonSerializer.Serialize(dto);
+            await JS.InvokeVoidAsync("localStorage.setItem", VerFiltrosKey(_verSnapshotId), json);
+        }
+        catch { /* localStorage no disponible (circuito/prerender): ignorar */ }
+    }
+
+    private async Task CargarFiltrosVerAsync(Guid id)
+    {
+        _verFiltros.Clear();
+        _verColorFiltro = null;
+        _verObsFiltro = null;
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", VerFiltrosKey(id));
+            if (string.IsNullOrWhiteSpace(json)) { return; }
+            var dto = System.Text.Json.JsonSerializer.Deserialize<VerFiltrosPersist>(json);
+            if (dto is null) { return; }
+            if (dto.Filtros is not null)
+            {
+                _verFiltros.AddRange(dto.Filtros.Where(f =>
+                    f is not null && !string.IsNullOrWhiteSpace(f.Columna) && !string.IsNullOrWhiteSpace(f.Valor)));
+            }
+            _verColorFiltro = string.IsNullOrWhiteSpace(dto.Color) ? null : dto.Color;
+            _verObsFiltro = string.IsNullOrWhiteSpace(dto.Obs) ? null : dto.Obs;
+        }
+        catch
+        {
+            // JSON corrupto o localStorage no disponible: arrancamos sin filtros.
+            _verFiltros.Clear();
+            _verColorFiltro = null;
+            _verObsFiltro = null;
+        }
     }
 
     private async Task OnNuevoFiltroKey(KeyboardEventArgs e)
@@ -2045,9 +2104,10 @@
     {
         _verSnapshotId = id;
         _verPagina = 1;
-        _verColorFiltro = null;
-        _verObsFiltro = null;
-        _verFiltros.Clear();
+        // Filtros del detalle (columna/color/nota): se restauran de lo guardado en este
+        // navegador para ESTE snapshot (persisten al cerrar y reabrir). Si no hay nada
+        // guardado, CargarFiltrosVerAsync los deja limpios.
+        await CargarFiltrosVerAsync(id);
         _nfCol = "";
         _nfVal = "";
         _verOrden = null;

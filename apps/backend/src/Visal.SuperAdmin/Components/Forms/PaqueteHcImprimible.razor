@@ -604,6 +604,17 @@ else
     /// uno. El print por-fila (instancia unica) lo deja null y carga sin contencion.</summary>
     [Parameter] public SemaphoreSlim? LoadGate { get; set; }
 
+    /// <summary>Rango OPCIONAL para acotar los sub-documentos anexados (evoluciones
+    /// ligadas, documentos de evolucion, escalas y consentimientos) por su FECHA DE
+    /// ATENCION, con el MISMO criterio y frontera (dia local Bogota UTC-5) que el
+    /// filtro Desde/Hasta del listado de Ordenes. Solo aplica en contexto de PERIODO
+    /// ("Imprimir listado" con rango): sin rango (null) el paquete trae el expediente
+    /// COMPLETO (p.ej. /imprimir-paquete por HC, que debe traer toda la terapia). Las
+    /// ordenes clinicas (medicamentos/servicios/etc.) NO se acotan: cuelgan de la HC
+    /// base, que ya esta dentro del rango por construccion del listado.</summary>
+    [Parameter] public DateOnly? Desde { get; set; }
+    [Parameter] public DateOnly? Hasta { get; set; }
+
     private bool _loading = true;
     private Guid _loadedHcId;  // guarda contra recargas repetidas en el mismo HcId
     private HistoriaClinicaDetailDto? _hc;
@@ -856,6 +867,25 @@ else
             catch { _sesionesPorFecha = new Dictionary<DateOnly, int>(); }
         }
 
+        // ── Acotamiento por rango de las ORDENES del paquete ───────────────────
+        // "Imprimir listado" con rango: las ordenes clinicas (medicamentos, servicios,
+        // insumos, incapacidades, certificados, remisiones y externos) cuelgan del
+        // ENCUENTRO de la HC base y NO tienen fecha de atencion propia -> su fecha es la
+        // de atencion de la base (misma col/criterio que la fila en Ordenes). Si esa
+        // fecha cae FUERA del rango, no se anexa ninguna orden, asi TODO el paquete
+        // queda acotado por la fecha de atencion. A proposito NO se datan por fecha de
+        // EMISION (botaria una orden legitima emitida dias despues de la atencion). Las
+        // evoluciones/escalas/consentimientos ya se acotan arriba por SU propia fecha.
+        // Sin rango no filtra nada; en el listado la base siempre esta en rango (es fila
+        // porque paso el filtro), asi que esto es consistencia + red de seguridad.
+        var faBase = _hc?.FechaAtencion ?? FechaAtencionHelper.Calcular(_hcSchema, _valores)
+                     ?? _hc?.FechaCierre ?? _hc?.FechaApertura;
+        if (!EnRangoImpresion(faBase))
+        {
+            _incluirMed = _incluirSrv = _incluirInc = _incluirCert = _incluirRem = false;
+            _incluirIns = _incluirRxExt = _incluirLabExt = _incluirInsExt = _incluirSrvExt = _incluirRegMed = false;
+        }
+
         // Cada orden clasica se ubica en form_definitions por su "Codigo formulario"
         // (CodigoSecundario), NO por Tipo — asi los 5 formatos semilla pueden
         // seguir con Tipo="FORMATO" para agruparse en el listado, y el usuario
@@ -963,7 +993,13 @@ else
             foreach (var it in items.Where(x => x.Estado == "Cerrada"))
             {
                 var d = await EscSvc.GetAsync(it.Id);
-                if (d is not null) { _escalasDetails.Add(d); }
+                if (d is null) { continue; }
+                // En contexto de periodo, acota por la fecha de atencion de la escala
+                // (del cuerpo, con fallback cierre/apertura), igual que el listado.
+                var faEsc = FechaAtencionHelper.Calcular(TryParseSchema(d.SchemaJson), TryParseValores(d.ValoresJson))
+                            ?? d.FechaCierre ?? d.FechaApertura;
+                if (!EnRangoImpresion(faEsc)) { continue; }
+                _escalasDetails.Add(d);
             }
         }
         if (_incluirEvo)
@@ -973,7 +1009,14 @@ else
             foreach (var it in items.Where(x => x.Estado == "Cerrada"))
             {
                 var d = await DocSvc.GetAsync(it.Id);
-                if (d is not null) { _evoDetails.Add(d); }
+                if (d is null) { continue; }
+                // En contexto de periodo, acota por la fecha de atencion del documento
+                // (del cuerpo, con fallback cierre/apertura). Sin esto, el "Imprimir
+                // listado" de un mes colaba evoluciones de otro mes ligadas a la base.
+                var faDoc = FechaAtencionHelper.Calcular(TryParseSchema(d.SchemaJson), TryParseValores(d.ValoresJson))
+                            ?? d.FechaCierre ?? d.FechaApertura;
+                if (!EnRangoImpresion(faDoc)) { continue; }
+                _evoDetails.Add(d);
             }
         }
         if (_incluirCon)
@@ -994,6 +1037,13 @@ else
             {
                 var d = await DocSvc.GetAsync(it.Id);
                 if (d is null) { continue; }
+                // En contexto de periodo, acota por la fecha de atencion del
+                // consentimiento (del cuerpo, con fallback cierre/apertura). Se evalua
+                // sobre el JSON ORIGINAL, antes de refrescar las firmas (la mutacion de
+                // firma no cambia el campo de fecha).
+                var faCon = FechaAtencionHelper.Calcular(TryParseSchema(d.SchemaJson), TryParseValores(d.ValoresJson))
+                            ?? d.FechaCierre ?? d.FechaApertura;
+                if (!EnRangoImpresion(faCon)) { continue; }
 
                 // Aplicamos el prefill actualizado sobre una copia mutable del JSON.
                 // Solo re-aplicamos firma paciente (que puede haber llegado tarde por
@@ -1045,6 +1095,11 @@ else
         var evosMerge = new List<EvoImprimible>();
         foreach (var evo in _evolucionesTerapia)
         {
+            // En contexto de periodo, acota la evolucion-HC ligada por su fecha de
+            // atencion (col ?? cierre ?? apertura), MISMO criterio que la fila de
+            // Ordenes en BuscarAsync. Sin rango incluye todo (terapia completa).
+            var faEvo = evo.Historia.FechaAtencion ?? evo.Historia.FechaCierre ?? evo.Historia.FechaApertura;
+            if (!EnRangoImpresion(faEvo)) { continue; }
             evosMerge.Add(new EvoImprimible(
                 evo.Historia.Id, evo.Historia.SchemaJson, evo.Historia.ValoresJson,
                 evo.Historia.FormatoNombre, evo.Historia.FechaApertura, evo.Historia.EspecialistaNombre,
@@ -1419,6 +1474,32 @@ else
     /// IsFechaAtencion/header; y de ultimo la apertura dada. Usada por las evoluciones.</summary>
     private static string FechaAtencionLinea(FormSchema? schema, IReadOnlyDictionary<string, string?> valores, DateTimeOffset apertura, DateTimeOffset? fechaAtencion)
         => "Fecha: " + FmtFecha(fechaAtencion ?? FechaAtencionHelper.Calcular(schema, valores) ?? apertura);
+
+    // Gate de rango para los sub-documentos anexados: usa EXACTAMENTE el mismo
+    // criterio y frontera que el filtro Desde/Hasta del listado de Ordenes
+    // (OrdenesClinicasService.BuscarAsync): la fecha de atencion comparada contra
+    // limites construidos en hora LOCAL de Colombia (UTC-5) y convertidos a UTC
+    // (Npgsql solo acepta offset 0; aqui no hay query, pero mantenemos el mismo
+    // instante para que la frontera coincida con la del service al milimetro).
+    // Sin rango (null, null) -> incluye todo (el paquete por HC trae la terapia
+    // completa). Fecha efectiva null -> incluye (no se puede datar, no se descarta).
+    private bool EnRangoImpresion(DateTimeOffset? efectiva)
+    {
+        if (Desde is null && Hasta is null) { return true; }
+        if (efectiva is not DateTimeOffset fa) { return true; }
+        var bogota = TimeSpan.FromHours(-5);
+        if (Desde is DateOnly d)
+        {
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
+            if (fa < dStart) { return false; }
+        }
+        if (Hasta is DateOnly h)
+        {
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
+            if (fa > dEnd) { return false; }
+        }
+        return true;
+    }
 
     /// <summary>Formatea a hora local; omite la hora cuando es medianoche (campos de
     /// fecha sin hora), para no imprimir "00:00".</summary>

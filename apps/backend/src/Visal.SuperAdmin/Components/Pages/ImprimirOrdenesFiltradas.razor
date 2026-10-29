@@ -163,7 +163,7 @@ else
                con el boton de arriba. *@
             @foreach (var item in _items)
             {
-                <PaqueteHcImprimible HcId="item.HistoriaClinicaId" Docs="ALL" AutoEmitir="false" AutoPrint="false" LoadGate="_loadGate" />
+                <PaqueteHcImprimible HcId="item.HistoriaClinicaId" Docs="ALL" AutoEmitir="false" AutoPrint="false" LoadGate="_loadGate" Desde="_desdeFiltro" Hasta="_hastaFiltro" />
             }
         </div>
     }

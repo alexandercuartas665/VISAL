@@ -105,4 +105,9 @@ public sealed record RelacionFacturasHecho(
     /// generador del archivo AUTOTIZACIONES de Cuenta Medica: predice si ese numero de
     /// autorizacion aportara un PDF al ZIP. Se muestra como SI/NO en la columna
     /// "Autorizacion con archivo"; vacio cuando la fila no tiene numero de autorizacion.</summary>
-    bool AutorizacionTieneArchivo = false);
+    bool AutorizacionTieneArchivo = false,
+    /// <summary>Cantidad de archivos con tipologia "Lista de firmas" colgados de ESTA HC
+    /// (nota_medica_documentos.categoria = "Lista de firmas", filtrado por historia_clinica_id).
+    /// Conteo por HISTORIA (no por autorizacion). Se muestra en la columna
+    /// "Historia con listado firmas"; la cabecera de paquete lo deja vacio.</summary>
+    int HistoriaListadoFirmasCount = 0);

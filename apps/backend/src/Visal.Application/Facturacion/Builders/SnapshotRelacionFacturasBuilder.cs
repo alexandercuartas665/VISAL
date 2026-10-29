@@ -74,7 +74,8 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         "HC N°",                                      // 43  Id de la Historia Clinica (8 hex)
         "Cód. Asignación",                            // 44  Consecutivo por SERVICIO (AS-NNNNNN); en cabecera de paquete, la autorizacion
         "Cód. Paquete",                               // 45  Codigo del paquete con el que se presto el servicio
-        "Autorizacion con archivo"                    // 46  SI/NO: el numero de autorizacion tiene PDF guardado
+        "Autorizacion con archivo",                   // 46  SI/NO: el numero de autorizacion tiene PDF guardado
+        "Historia con listado firmas"                 // 47  Cantidad de archivos "Lista de firmas" colgados de la HC
     };
 
     /// <summary>
@@ -117,6 +118,7 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         ["Cód. Asignación"]                         = "Consecutivo publico de la asignacion POR SERVICIO (AS-000045) en las lineas de detalle. En la CABECERA de un paquete muestra 'Aut. <numero>' porque el paquete se agrupa y cobra una vez por autorizacion. No forma parte del template EPS.",
         ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo), sin el sufijo de modalidad d/f. Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. Cada paquete agrega ademas una LINEA PRIMARIA (cabecera) con CUPS=codigo de paquete, descripcion=nombre del paquete y valor=valor pactado; sus HC de detalle van con valor 0. No forma parte del template EPS.",
         ["Autorizacion con archivo"]                = "SI/NO: indica si el numero de autorizacion de la fila tiene un PDF de autorizacion guardado en la asignacion (Asignacion.PdfAutorizacionUrl). Es la MISMA condicion que usa el archivo AUTOTIZACIONES de Cuenta Medica: SI => ese numero aportara un PDF al ZIP; NO => no hay archivo cargado para esa autorizacion. Vacio cuando la fila no trae numero de autorizacion. No forma parte del template EPS.",
+        ["Historia con listado firmas"]             = "Cantidad de archivos con tipologia 'Lista de firmas' colgados de ESTA Historia Clinica (nota_medica_documentos.categoria = 'Lista de firmas', por historia_clinica_id). Conteo por HC: 0 si la historia no tiene ninguno. En la CABECERA de un paquete queda vacio (no es una HC real). No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -210,6 +212,11 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Autorizacion con archivo"] = NormalizarAutorizacion(h.CodigoAutorizacion) is null
                 ? null
                 : (h.AutorizacionTieneArchivo ? "SI" : "NO"),
+            // 47 — cantidad de archivos "Lista de firmas" colgados de ESTA HC (conteo por
+            // historia). 0 si no tiene ninguno. Vacio en la cabecera de paquete (no es una HC real).
+            ["Historia con listado firmas"] = h.EsLineaPaquetePrimaria
+                ? (object?)null
+                : h.HistoriaListadoFirmasCount,
         };
     }
 

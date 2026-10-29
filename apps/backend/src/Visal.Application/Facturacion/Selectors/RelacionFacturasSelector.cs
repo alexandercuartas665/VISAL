@@ -239,6 +239,22 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 .GroupBy(x => x.HistoriaClinicaId)
                 .ToDictionary(g => g.Key, g => g.First().Asig);
 
+        // 6.b.3) Cantidad de archivos "Lista de firmas" por HC (conteo POR HISTORIA, no por
+        //        autorizacion). Son los adjuntos en nota_medica_documentos cuya categoria
+        //        (tipologia) es "Lista de firmas", colgados de esa HC. Alimenta la columna
+        //        "Historia con listado firmas".
+        var listadoFirmasPorHc = hcIdsPrefil.Count == 0
+            ? new Dictionary<Guid, int>()
+            : (await db.NotaMedicaDocumentos.AsNoTracking()
+                .Where(d => d.HistoriaClinicaId != null
+                         && hcIdsPrefil.Contains(d.HistoriaClinicaId.Value)
+                         && d.Categoria != null
+                         && d.Categoria.ToLower() == "lista de firmas")
+                .GroupBy(d => d.HistoriaClinicaId!.Value)
+                .Select(g => new { HcId = g.Key, N = g.Count() })
+                .ToListAsync(ct))
+                .ToDictionary(x => x.HcId, x => x.N);
+
         // 6.c) TipoArchivoRips desde el catalogo de tipos de servicio — mapeamos
         //      por codigo del modulo de la asignacion (CONSULTA/TERAPIA/...).
         var catalogoTipos = await db.CatalogosTipoServicio.AsNoTracking()
@@ -458,7 +474,9 @@ public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelaci
                 PaqueteInstanciaId: paqueteInstancia,
                 // SI/NO si el numero de autorizacion tiene PDF guardado en la asignacion
                 // (misma condicion que usa el ZIP de AUTOTIZACIONES para incluir el archivo).
-                AutorizacionTieneArchivo: !string.IsNullOrWhiteSpace(asigRelevante?.PdfAutorizacionUrl)));
+                AutorizacionTieneArchivo: !string.IsNullOrWhiteSpace(asigRelevante?.PdfAutorizacionUrl),
+                // Cantidad de archivos "Lista de firmas" colgados de ESTA HC (conteo por historia).
+                HistoriaListadoFirmasCount: listadoFirmasPorHc.GetValueOrDefault(hc.Id)));
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────

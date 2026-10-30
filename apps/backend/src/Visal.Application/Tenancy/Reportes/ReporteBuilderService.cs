@@ -19,6 +19,17 @@ public sealed class ReporteBuilderService(
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    // Mismo contrato que Json pero legible: el JSON exportado lo abre/revisa un humano.
+    private static readonly JsonSerializerOptions JsonExport = new()
+    {
+        Converters = { new JsonStringEnumConverter() },
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true,
+    };
+
+    // Marca del sobre portable (para rechazar archivos que no son una plantilla de reporte).
+    private const string FormatoExport = "visal.reporte.plantilla";
+
     // ==================== modelo semantico ====================
 
     private const string EntidadPaciente = "paciente";
@@ -81,13 +92,16 @@ public sealed class ReporteBuilderService(
     public async Task<Guid> CrearCensoAsync(CancellationToken ct = default)
     {
         var req = CensoBlueprint.Crear();
-        // Idempotente: si el tenant ya tiene el CENSO, no lo dupliques (el query filter de
-        // tenant ya limita la busqueda al tenant actual).
+        // Upsert por nombre: si el tenant ya tiene el CENSO, se REGENERA en vez de duplicarlo
+        // (GuardarAsync con el id reemplaza sus hojas por las del blueprint actual). Antes se
+        // devolvia el id sin tocar las hojas, por lo que los cambios del blueprint (columnas o
+        // cruces nuevos) nunca aparecian al volver a pulsar "Plantilla CENSO 2026". El query
+        // filter de tenant ya limita la busqueda al tenant actual.
         var existente = await db.ReportePlantillas.AsNoTracking()
             .Where(p => p.Nombre == req.Nombre)
             .Select(p => (Guid?)p.Id)
             .FirstOrDefaultAsync(ct);
-        return existente ?? await GuardarAsync(null, req, ct);
+        return await GuardarAsync(existente, req, ct);
     }
 
     public async Task<Guid> GuardarAsync(Guid? id, GuardarPlantillaRequest req, CancellationToken ct = default)
@@ -209,6 +223,119 @@ public sealed class ReporteBuilderService(
             .OrderBy(s => s.Nombre)
             .Select(s => new SedeOpcionDto(s.Id, s.Nombre))
             .ToListAsync(ct);
+    }
+
+    // ==================== export / import de plantillas ====================
+
+    public async Task<string> ExportarAsync(Guid id, CancellationToken ct = default)
+    {
+        var d = await ObtenerAsync(id, ct)
+            ?? throw new InvalidOperationException("Reporte no encontrado.");
+        var dto = new ReportePlantillaExportDto(
+            FormatoExport, 1, DateTime.UtcNow,
+            d.Nombre, d.Descripcion, d.Categoria, d.Orden, d.Activo, d.Hojas,
+            d.MostrarEncabezado, d.Codigo, d.Version, d.Subtitulo, d.Parametros);
+        return JsonSerializer.Serialize(dto, JsonExport);
+    }
+
+    public async Task<ImportarPlantillaResultado> ImportarAsync(string json, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new InvalidOperationException("El archivo esta vacio.");
+        }
+
+        ReportePlantillaExportDto? dto;
+        try
+        {
+            dto = JsonSerializer.Deserialize<ReportePlantillaExportDto>(json, Json);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("El archivo no es un JSON valido: " + ex.Message);
+        }
+
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Nombre) || dto.Hojas is null)
+        {
+            throw new InvalidOperationException("El JSON no corresponde a una plantilla de reporte.");
+        }
+        if (!string.IsNullOrWhiteSpace(dto.Formato) &&
+            !string.Equals(dto.Formato, FormatoExport, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Formato de archivo no reconocido ('{dto.Formato}').");
+        }
+
+        // Portabilidad: los campos dinamicos de paciente son datos POR TENANT; no viajan en el JSON.
+        // Si una hoja referencia un campo dinamico que este entorno no tiene, el SQL se romperia al
+        // generar, asi que lo bloqueamos aqui con un mensaje claro.
+        var conocidas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in semantic.Entities)
+        {
+            foreach (var f in e.Fields) { conocidas.Add(f.Key); }
+        }
+        foreach (var f in await dinamicos.CargarAsync(ct)) { conocidas.Add(f.Key); }
+
+        var faltantes = ReferenciasNoResueltas(dto.Hojas, conocidas);
+        if (faltantes.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "No se puede importar: el reporte usa campos que no existen en este entorno: " +
+                string.Join(", ", faltantes) +
+                ". Si son campos dinamicos de la ficha del paciente, crealos en el gestor de campos y vuelve a importar.");
+        }
+
+        var req = new GuardarPlantillaRequest(
+            dto.Nombre, dto.Descripcion, dto.Categoria, dto.Orden, dto.Activo, dto.Hojas,
+            dto.MostrarEncabezado, dto.Codigo, dto.Version, dto.Subtitulo, dto.Parametros);
+
+        // Upsert por nombre (el query filter de tenant limita la busqueda al tenant actual).
+        var nombre = dto.Nombre.Trim();
+        var existente = await db.ReportePlantillas.AsNoTracking()
+            .Where(p => p.Nombre == nombre)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync(ct);
+
+        var id = await GuardarAsync(existente, req, ct);
+        return new ImportarPlantillaResultado(id, nombre, existente is not null);
+    }
+
+    /// <summary>
+    /// Devuelve las claves de campo (hoja a hoja) que NO estan en <paramref name="conocidas"/>
+    /// (union de campos del modelo semantico + campos dinamicos del tenant). Una referencia es
+    /// "rel.campo" o "campo"; se compara por la clave final. NO se validan las referencias de
+    /// ORDEN porque pueden apuntar al titulo/alias de un agregado, no a un campo. Pura (sin BD):
+    /// testeable en aislamiento.
+    /// </summary>
+    public static IReadOnlyList<string> ReferenciasNoResueltas(
+        IReadOnlyList<ReporteHojaDef> hojas, ISet<string> conocidas)
+    {
+        var faltantes = new List<string>();
+        var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bare in hojas.SelectMany(RefsDeHoja).Select(BareKey))
+        {
+            if (string.IsNullOrWhiteSpace(bare)) { continue; }
+            if (conocidas.Contains(bare)) { continue; }
+            if (vistos.Add(bare)) { faltantes.Add(bare); }
+        }
+        return faltantes;
+    }
+
+    private static IEnumerable<string> RefsDeHoja(ReporteHojaDef h)
+    {
+        foreach (var c in h.Columnas) { yield return c.CampoRef; }
+        foreach (var g in h.GroupBy) { yield return g.CampoRef; }
+        foreach (var a in h.Agregados)
+        {
+            if (!string.IsNullOrWhiteSpace(a.CampoRef)) { yield return a.CampoRef!; }
+        }
+        foreach (var f in h.Filtros) { yield return f.CampoRef; }
+    }
+
+    private static string BareKey(string campoRef)
+    {
+        if (string.IsNullOrEmpty(campoRef)) { return ""; }
+        var i = campoRef.LastIndexOf('.');
+        return (i >= 0 ? campoRef[(i + 1)..] : campoRef).Trim();
     }
 
     // ==================== helpers ====================

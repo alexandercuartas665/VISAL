@@ -19,6 +19,25 @@ public enum ReportFieldKind
 }
 
 /// <summary>
+/// Derivacion de un campo reportable a partir de su columna fisica. Permite exponer partes
+/// calculadas de una fecha/hora (mes, hora, minuto) SIN crear columnas nuevas en la base: el
+/// generador envuelve la columna de origen en una expresion segura (la columna se resuelve del
+/// metamodelo de EF, nunca de texto del usuario). El valor DateTimeOffset se convierte a hora
+/// local de Colombia antes de extraer la parte.
+/// </summary>
+public enum ReportDerivacion
+{
+    /// <summary>Sin derivacion: la columna se usa tal cual.</summary>
+    Ninguna = 0,
+    /// <summary>Periodo AAAAMM de una fecha/hora (hora local).</summary>
+    AnioMes,
+    /// <summary>Hora del dia (0..23) de una fecha/hora (hora local).</summary>
+    Hora24,
+    /// <summary>Minuto (0..59) de una fecha/hora (hora local).</summary>
+    Minuto,
+}
+
+/// <summary>
 /// Un campo expuesto al constructor de reportes. Referencia una PROPIEDAD CLR de
 /// la entidad (no una cadena SQL libre): el generador resuelve el nombre fisico
 /// de columna desde el metamodelo de EF, asi nunca entra texto del usuario como
@@ -38,7 +57,8 @@ public sealed record ReportableFieldDef(
     string Label,
     string PropertyName,
     ReportFieldKind Kind,
-    string? JsonKey = null);
+    string? JsonKey = null,
+    ReportDerivacion Derivacion = ReportDerivacion.Ninguna);
 
 /// <summary>
 /// Un cruce PERMITIDO entre una entidad reportable y otra (join declarado por la
@@ -117,6 +137,15 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("sexo", "Sexo", nameof(Paciente.Sexo), ReportFieldKind.Text),
                 new("estado", "Estado Paciente", nameof(Paciente.Estado), ReportFieldKind.Text),
                 new("regimen", "Regimen de Afiliacion", nameof(Paciente.Regimen), ReportFieldKind.Text),
+                new("fecha_comentan", "Fecha Comentan", nameof(Paciente.FechaComentan), ReportFieldKind.DateTime),
+                new("fecha_atencion", "Fecha de Atencion", nameof(Paciente.FechaAtencion), ReportFieldKind.DateTime),
+                // Partes derivadas de las dos fechas (hora local Colombia). No son columnas nuevas:
+                // el generador las calcula desde fecha_comentan / fecha_atencion (hoja Ingreso CENSO).
+                new("mes_comentan", "Mes", nameof(Paciente.FechaComentan), ReportFieldKind.Text, Derivacion: ReportDerivacion.AnioMes),
+                new("comentan_hora", "Comentan (24 H)", nameof(Paciente.FechaComentan), ReportFieldKind.Integer, Derivacion: ReportDerivacion.Hora24),
+                new("comentan_minuto", "Comentan (Minutos)", nameof(Paciente.FechaComentan), ReportFieldKind.Integer, Derivacion: ReportDerivacion.Minuto),
+                new("respuesta_hora", "Respuesta (24 H)", nameof(Paciente.FechaAtencion), ReportFieldKind.Integer, Derivacion: ReportDerivacion.Hora24),
+                new("respuesta_minuto", "Respuesta (Minutos)", nameof(Paciente.FechaAtencion), ReportFieldKind.Integer, Derivacion: ReportDerivacion.Minuto),
                 new("fecha_ingreso", "Fecha Ingreso", nameof(Paciente.FechaIngresoPad), ReportFieldKind.Date),
                 new("fecha_egreso", "Fecha De Egreso", nameof(Paciente.FechaEgresoPad), ReportFieldKind.Date),
                 new("cie10", "CIE10", nameof(Paciente.Cie10Codigo), ReportFieldKind.Text),
@@ -135,12 +164,22 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("observaciones_hospitalizacion", "Observaciones Hospitalizacion", nameof(Paciente.ObservacionesHospitalizacion), ReportFieldKind.Text),
                 new("observaciones_paciente", "Observaciones", nameof(Paciente.Observaciones), ReportFieldKind.Text),
                 new("estado_admision", "Estado Admision", nameof(Paciente.EstadoAdmision), ReportFieldKind.Text),
+                new("ingreso", "Ingreso", nameof(Paciente.Ingreso), ReportFieldKind.Bool),
+                new("motivo_no_ingreso", "Motivo de no ingreso", nameof(Paciente.MotivoNoIngreso), ReportFieldKind.Text),
+                new("usuario_ingreso", "Usuario del ingreso", nameof(Paciente.UsuarioIngresoNombre), ReportFieldKind.Text),
+                new("contrato_principal", "Contrato", nameof(Paciente.ContratoPrincipal), ReportFieldKind.Text),
+                new("condicion", "Condicion", nameof(Paciente.Condicion), ReportFieldKind.Text),
+                new("sla_ingreso_minutos", "Mins (SLA)", nameof(Paciente.SlaIngresoMinutos), ReportFieldKind.Integer),
                 new("activo", "Activo", nameof(Paciente.Activo), ReportFieldKind.Bool),
                 new("sede_id", "Sede (ID)", nameof(Paciente.SedeAtencionId), ReportFieldKind.Guid),
             ],
             Relations =
             [
                 new("sede", "Sede de atencion", "sede", nameof(Paciente.SedeAtencionId)),
+                // Cruces para mostrar/filtrar por NOMBRE los FK del paciente (hoja Ingreso de Pacientes del CENSO).
+                new("ips_comenta", "IPS que comenta", "aseguradora", nameof(Paciente.IpsComentaId)),
+                new("clasif_paciente", "Clasificacion del paciente", "catalogo_paciente", nameof(Paciente.ClasificacionPacienteId)),
+                new("departamento", "Departamento de residencia", "departamento", nameof(Paciente.DepartamentoId)),
             ],
         };
 
@@ -216,10 +255,51 @@ public sealed class ReportSemanticModel : IReportSemanticModel
             Fields =
             [
                 new("nombre", "Sede", nameof(Sucursal.Nombre), ReportFieldKind.Text),
+                new("ciudad", "Ciudad de la sede", nameof(Sucursal.Ciudad), ReportFieldKind.Text),
+                new("departamento", "Departamento (operativo)", nameof(Sucursal.Departamento), ReportFieldKind.Text),
             ],
         };
 
-        Entities = [paciente, encuesta, diagnostico, ingreso, sede];
+        // Aseguradora/IPS como destino de cruce (IPS que comenta + Entidad aseguradora). TenantEntity.
+        var aseguradora = new ReportableEntityDef
+        {
+            Key = "aseguradora",
+            Label = "Aseguradora / IPS",
+            ClrType = typeof(Aseguradora),
+            Fields =
+            [
+                new("nombre", "Nombre", nameof(Aseguradora.Nombre), ReportFieldKind.Text),
+                new("codigo", "Codigo", nameof(Aseguradora.Codigo), ReportFieldKind.Text),
+            ],
+        };
+
+        // Catalogo de paciente como destino de cruce (clasificacion, tipo usuario, etc.). TenantEntity.
+        var catalogoPaciente = new ReportableEntityDef
+        {
+            Key = "catalogo_paciente",
+            Label = "Catalogo de paciente",
+            ClrType = typeof(CatalogoPaciente),
+            Fields =
+            [
+                new("nombre", "Nombre", nameof(CatalogoPaciente.Nombre), ReportFieldKind.Text),
+                new("codigo", "Codigo", nameof(CatalogoPaciente.Codigo), ReportFieldKind.Text),
+            ],
+        };
+
+        // Departamento (geografia) como destino de cruce. Es catalogo GLOBAL (BaseEntity, no tenant):
+        // el generador lo une por PK sin filtro de tenant.
+        var departamento = new ReportableEntityDef
+        {
+            Key = "departamento",
+            Label = "Departamentos",
+            ClrType = typeof(Departamento),
+            Fields =
+            [
+                new("nombre", "Departamento", nameof(Departamento.Nombre), ReportFieldKind.Text),
+            ],
+        };
+
+        Entities = [paciente, encuesta, diagnostico, ingreso, sede, aseguradora, catalogoPaciente, departamento];
     }
 
     public ReportableEntityDef? Find(string key) =>

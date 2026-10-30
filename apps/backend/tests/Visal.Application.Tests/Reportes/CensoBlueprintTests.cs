@@ -40,6 +40,38 @@ public sealed class CensoBlueprintTests
     }
 
     [Fact]
+    public void El_censo_declara_parametros_de_sede_y_rango_de_fechas()
+    {
+        var req = CensoBlueprint.Crear();
+        Assert.NotNull(req.Parametros);
+        Assert.Contains(req.Parametros!, p => p.Clave == "sede" && p.Fuente == ReporteParametroFuente.Sedes);
+        Assert.Contains(req.Parametros!, p => p.Clave == "rango_fecha" && p.Tipo == ReporteParametroTipo.RangoFecha);
+    }
+
+    [Fact]
+    public void Los_filtros_parametrizados_se_omiten_sin_valor_y_aplican_al_resolver()
+    {
+        var req = CensoBlueprint.Crear();
+        var gen = Generador();
+
+        // Sin resolver: los filtros enlazados a parametro se omiten (solo el filtro de tenant).
+        var baseSinParams = req.Hojas.Single(h => h.Nombre == "Base de Pacientes");
+        Assert.DoesNotContain("BETWEEN", gen.Generar(baseSinParams).Sql);
+
+        // Al resolver con valores: aparece el rango (BETWEEN) y la condicion de sede.
+        var valores = new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["sede"] = [Guid.NewGuid().ToString()],
+            ["rango_fecha"] = ["2026-01-01", "2026-01-31"],
+        };
+        var resuelto = ReporteParametros.Resolver(new ReportePackDef(req.Nombre, req.Hojas), valores);
+        var baseConParams = resuelto.Hojas.Single(h => h.Nombre == "Base de Pacientes");
+        var sql = gen.Generar(baseConParams).Sql;
+        Assert.Contains("BETWEEN", sql);
+        Assert.Contains("sede_atencion_id", sql);
+    }
+
+    [Fact]
     public void El_consolidado_lleva_pivote_por_mes()
     {
         var consolidado = CensoBlueprint.Crear().Hojas.Single(h => h.Nombre == "Consolidado Encuesta");

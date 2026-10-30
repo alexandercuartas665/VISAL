@@ -32,7 +32,10 @@ public class Paciente : TenantEntity
     /// <summary>IPS que remite/comenta el paciente. FK a futura tabla ips_externas.</summary>
     public Guid? IpsComentaId { get; set; }
     public string? CodigoAceptacion { get; set; }
-    public DateOnly? FechaComentan { get; set; }
+    /// <summary>Fecha y hora en que la IPS comenta/remite el paciente (CENSO). Se guarda con offset local (-5).</summary>
+    public DateTimeOffset? FechaComentan { get; set; }
+    /// <summary>Fecha y hora de atencion del paciente (CENSO). Se guarda con offset local (-5).</summary>
+    public DateTimeOffset? FechaAtencion { get; set; }
 
     public Guid? AseguradoraId { get; set; }
     public Aseguradora? Aseguradora { get; set; }
@@ -43,6 +46,28 @@ public class Paciente : TenantEntity
     public int? DiasEstancia { get; set; }
     /// <summary>Opcion de ingreso (dias autorizados por la aseguradora).</summary>
     public int? OpIngresoDias { get; set; }
+
+    /// <summary>
+    /// Decision de ingreso al programa (hoja "Ingreso de Pacientes" del CENSO, capturada en
+    /// Admision): true=SI ingresa, false=NO ingresa, null=sin definir.
+    /// </summary>
+    public bool? Ingreso { get; set; }
+    /// <summary>Motivo por el cual el paciente NO ingresa. Solo aplica cuando <see cref="Ingreso"/> es false.</summary>
+    public string? MotivoNoIngreso { get; set; }
+
+    /// <summary>Usuario de la plataforma que registro el ingreso (hoja "Ingreso de Pacientes" del CENSO).
+    /// Referencia al PlatformUser elegido en Admision. Null si no se asigno.</summary>
+    public Guid? UsuarioIngresoId { get; set; }
+    /// <summary>Nombre del usuario del ingreso, desnormalizado al guardar (igual que ResponsableLlamadaNombre
+    /// en la encuesta): hace trivial el reporte por nombre y queda estable aunque el usuario cambie o se desactive.</summary>
+    public string? UsuarioIngresoNombre { get; set; }
+
+    /// <summary>Condicion del paciente (hoja "Ingreso de Pacientes" del CENSO). Valor de una lista fija
+    /// (traqueostomia, gastrotomia, etc.); se almacena como texto.</summary>
+    public string? Condicion { get; set; }
+    /// <summary>SLA del ingreso en minutos: diferencia entre <see cref="FechaComentan"/> (la IPS comenta) y
+    /// <see cref="FechaAtencion"/> (respuesta/atencion). Derivado: se calcula al guardar. Null si falta alguna fecha.</summary>
+    public int? SlaIngresoMinutos { get; set; }
 
     // ===== Clasificaciones (texto libre + FK al modulo Configuracion Pacientes) =====
     public string? Incapacidad { get; set; }
@@ -64,6 +89,12 @@ public class Paciente : TenantEntity
     // ===== Contratos =====
     // (Los slots fijos Contrato1/2/3Id fueron reemplazados por la tabla N:M
     // paciente_contratos en PC-1..PC-4. Ver la entidad PacienteContrato.)
+
+    /// <summary>Nombre de la aseguradora del contrato PRINCIPAL (el de Orden 1 en paciente_contratos),
+    /// desnormalizado al guardar. Es solo-lectura (no se edita; se deriva de la lista de contratos) y
+    /// existe para exponer "Contrato" como una columna unica en el CENSO (la tabla pivote no se puede
+    /// cruzar como un FK). Null si el paciente no tiene contratos.</summary>
+    public string? ContratoPrincipal { get; set; }
 
     // ===== Diagnostico =====
     /// <summary>FK a tabla local cie10_diagnosticos (deprecated: usar Cie10Codigo).</summary>

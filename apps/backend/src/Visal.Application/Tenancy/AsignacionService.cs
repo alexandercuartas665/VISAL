@@ -112,7 +112,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             // Campos ampliados: raw + fechas + FKs resueltos.
             p.Barrio, p.Incapacidad, p.GrupoRh, p.Estado, p.EstratoSocial, p.Tutela,
             p.CodigoAceptacion, p.Cie10Codigo, p.DiagnosticoPrincipal,
-            p.FechaComentan, p.FechaIngresoPad, p.FechaEgresoPad,
+            p.FechaComentan is DateTimeOffset fcDto ? DateOnly.FromDateTime(fcDto.DateTime) : (DateOnly?)null,
+            p.FechaIngresoPad, p.FechaEgresoPad,
             ResolverCatalogo(p.TipoUsuarioId),
             ResolverCatalogo(p.ClasificacionPacienteId),
             ResolverCatalogo(p.ClasificacionGrupoPatologiaId),

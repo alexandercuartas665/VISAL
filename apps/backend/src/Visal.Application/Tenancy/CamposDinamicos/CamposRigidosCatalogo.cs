@@ -36,11 +36,16 @@ public static class CamposRigidosCatalogo
         new("ips_comenta", "IPS Que Comenta", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("codigo_aceptacion", "Codigo de Aceptacion", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("fecha_comentan", "Fecha Comentan", TabGenerales, "Datos administrativos PAD", 1, false, true),
+        new("fecha_atencion", "Fecha de Atencion", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("entidad_aseguradora", "Entidad Aseguradora", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("fecha_ingreso_pad", "FECHA INGRESO PAD", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("fecha_egreso_pad", "FECHA EGRESO PAD", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("dias_estancia", "Dias Estancia", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("op_ingreso", "Op. de Ingreso (dias)", TabGenerales, "Datos administrativos PAD", 1, false, true),
+        new("ingreso", "Ingreso (SI/NO)", TabGenerales, "Datos administrativos PAD", 1, false, true),
+        new("motivo_no_ingreso", "Motivo de no ingreso", TabGenerales, "Datos administrativos PAD", 2, false, true),
+        new("usuario_ingreso", "Usuario del ingreso", TabGenerales, "Datos administrativos PAD", 1, false, true),
+        new("condicion", "Condicion", TabGenerales, "Datos administrativos PAD", 1, false, true),
 
         // ----- generales / Clasificacion -----
         new("incapacidad", "Incapacidad", TabGenerales, "Clasificacion", 1, false, true),

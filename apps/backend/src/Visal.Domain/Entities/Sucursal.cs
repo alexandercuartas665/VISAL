@@ -9,6 +9,14 @@ public class Sucursal : TenantEntity
     public string Nombre { get; set; } = null!;
     public string? Direccion { get; set; }
     public string? Ciudad { get; set; }
+
+    /// <summary>
+    /// Departamento operativo de la sede (region: Valle, Cauca, etc.). Es distinto del
+    /// departamento de RESIDENCIA del paciente. Alimenta la columna "Departamento" (operativa)
+    /// de la hoja "Ingreso de Pacientes" del CENSO, que agrupa la operacion por region/sede.
+    /// </summary>
+    public string? Departamento { get; set; }
+
     public string? Telefono { get; set; }
 
     /// <summary>

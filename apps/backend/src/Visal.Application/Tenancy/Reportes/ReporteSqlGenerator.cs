@@ -135,6 +135,10 @@ public sealed class ReporteSqlGenerator(
         var pIdx = 0;
         foreach (var f in hoja.Filtros)
         {
+            // Un filtro aun enlazado a un parametro (ParamClave) no fue resuelto: se omite
+            // (equivale a parametro sin valor). El flujo real lo resuelve antes via
+            // ReporteParametros.Resolver; esto cubre preview y generacion directa sin valores.
+            if (!string.IsNullOrWhiteSpace(f.ParamClave)) { continue; }
             var r = Resolver(baseEntity, relAliases, f.CampoRef);
             condiciones.Add(Condicion(r, f, ref pIdx, parametros));
         }
@@ -207,15 +211,32 @@ public sealed class ReporteSqlGenerator(
         return null;
     }
 
-    // Expresion SQL de un campo: columna CLR directa, o lectura por clave si es jsonb.
+    // Zona horaria local (Colombia, fija -05, sin DST). Se usa para derivar partes de fechas
+    // almacenadas como timestamptz (DateTimeOffset) a hora de pared local.
+    private const string ZonaLocal = "America/Bogota";
+
+    // Expresion SQL de un campo: columna CLR directa, lectura por clave si es jsonb, o parte
+    // derivada (mes/hora/minuto) de una fecha. La columna siempre sale del metamodelo de EF.
     private string Expr(string alias, Type clrType, ReportableFieldDef field)
     {
         var col = Col(Et(clrType), field.PropertyName);
+        string baseExpr;
         if (field.JsonKey is { } jk)
         {
-            return $"({alias}.{Q(col)} ->> '{jk.Replace("'", "''")}')";
+            baseExpr = $"({alias}.{Q(col)} ->> '{jk.Replace("'", "''")}')";
         }
-        return $"{alias}.{Q(col)}";
+        else
+        {
+            baseExpr = $"{alias}.{Q(col)}";
+        }
+
+        return field.Derivacion switch
+        {
+            ReportDerivacion.AnioMes => $"to_char({baseExpr} AT TIME ZONE '{ZonaLocal}', 'YYYYMM')",
+            ReportDerivacion.Hora24 => $"EXTRACT(HOUR FROM {baseExpr} AT TIME ZONE '{ZonaLocal}')::int",
+            ReportDerivacion.Minuto => $"EXTRACT(MINUTE FROM {baseExpr} AT TIME ZONE '{ZonaLocal}')::int",
+            _ => baseExpr,
+        };
     }
 
     private (string Expr, string TituloDefault) ExprAgregado(

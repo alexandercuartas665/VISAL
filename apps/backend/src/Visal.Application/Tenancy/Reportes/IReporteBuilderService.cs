@@ -59,6 +59,30 @@ public sealed record GuardarPlantillaRequest(
 public sealed record SedeOpcionDto(Guid Id, string Nombre);
 
 /// <summary>
+/// Sobre portable de una plantilla para llevarla de un entorno a otro (dev -&gt; prod). Es la
+/// MISMA definicion declarativa que persiste el constructor, pero SIN Id ni TenantId: el import
+/// la materializa bajo el tenant destino. No incluye SQL; solo referencias al modelo semantico.
+/// </summary>
+public sealed record ReportePlantillaExportDto(
+    string Formato,
+    int FormatoVersion,
+    DateTime ExportadoUtc,
+    string Nombre,
+    string? Descripcion,
+    string? Categoria,
+    int Orden,
+    bool Activo,
+    IReadOnlyList<ReporteHojaDef> Hojas,
+    bool MostrarEncabezado = true,
+    string? Codigo = null,
+    string? Version = null,
+    string? Subtitulo = null,
+    IReadOnlyList<ReporteParametroDef>? Parametros = null);
+
+/// <summary>Resultado de importar una plantilla: id destino y si reemplazo una existente (upsert por nombre).</summary>
+public sealed record ImportarPlantillaResultado(Guid Id, string Nombre, bool Reemplazada);
+
+/// <summary>
 /// Servicio del constructor de reportes multi-hoja (self-service del tenant). Expone el
 /// modelo semantico al asistente, persiste plantillas/hojas (sin SQL), y ejecuta preview /
 /// exportacion reusando el motor con aislamiento por tenant.
@@ -97,4 +121,19 @@ public interface IReporteBuilderService
 
     /// <summary>Sedes (sucursales) del tenant, para poblar parametros de ejecucion tipo lista de sedes.</summary>
     Task<IReadOnlyList<SedeOpcionDto>> ListarSedesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Exporta una plantilla guardada como JSON portable (sin Id/TenantId), listo para importar en
+    /// otro entorno. Lanza si la plantilla no existe.
+    /// </summary>
+    Task<string> ExportarAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Importa una plantilla desde el JSON de <see cref="ExportarAsync"/>. Hace upsert por nombre:
+    /// si el tenant ya tiene una plantilla con ese nombre, la reemplaza; si no, la crea. Antes de
+    /// guardar valida que todos los campos dinamicos de paciente que referencian las hojas existan
+    /// en el tenant destino (son datos por tenant, no viajan en el JSON); si falta alguno, no guarda
+    /// y lanza con la lista de los que faltan.
+    /// </summary>
+    Task<ImportarPlantillaResultado> ImportarAsync(string json, CancellationToken ct = default);
 }

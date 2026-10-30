@@ -6935,10 +6935,18 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(5)")
                         .HasColumnName("codigo_pais_telefono");
 
+                    b.Property<string>("Condicion")
+                        .HasColumnType("text")
+                        .HasColumnName("condicion");
+
                     b.Property<string>("ContactoEmergencia")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("contacto_emergencia");
+
+                    b.Property<string>("ContratoPrincipal")
+                        .HasColumnType("text")
+                        .HasColumnName("contrato_principal");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -7008,12 +7016,16 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("estrato_social");
 
+                    b.Property<DateTimeOffset?>("FechaAtencion")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_atencion");
+
                     b.Property<DateTimeOffset?>("FechaCierreAdmision")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("fecha_cierre_admision");
 
-                    b.Property<DateOnly?>("FechaComentan")
-                        .HasColumnType("date")
+                    b.Property<DateTimeOffset?>("FechaComentan")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("fecha_comentan");
 
                     b.Property<DateOnly?>("FechaEgresoPad")
@@ -7046,6 +7058,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(60)")
                         .HasColumnName("incapacidad");
 
+                    b.Property<bool?>("Ingreso")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ingreso");
+
                     b.Property<Guid?>("IpsComentaId")
                         .HasColumnType("uuid")
                         .HasColumnName("ips_comenta_id");
@@ -7053,6 +7069,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("MedContratadoId")
                         .HasColumnType("uuid")
                         .HasColumnName("med_contratado_id");
+
+                    b.Property<string>("MotivoNoIngreso")
+                        .HasColumnType("text")
+                        .HasColumnName("motivo_no_ingreso");
 
                     b.Property<Guid?>("MunicipioId")
                         .HasColumnType("uuid")
@@ -7138,6 +7158,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("sexo");
 
+                    b.Property<int?>("SlaIngresoMinutos")
+                        .HasColumnType("integer")
+                        .HasColumnName("sla_ingreso_minutos");
+
                     b.Property<string>("Telefono")
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)")
@@ -7178,6 +7202,14 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("updated_by");
+
+                    b.Property<Guid?>("UsuarioIngresoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_ingreso_id");
+
+                    b.Property<string>("UsuarioIngresoNombre")
+                        .HasColumnType("text")
+                        .HasColumnName("usuario_ingreso_nombre");
 
                     b.Property<string>("Zona")
                         .HasMaxLength(120)
@@ -10495,6 +10527,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
+
+                    b.Property<string>("Departamento")
+                        .HasColumnType("text")
+                        .HasColumnName("departamento");
 
                     b.Property<string>("Direccion")
                         .HasMaxLength(300)

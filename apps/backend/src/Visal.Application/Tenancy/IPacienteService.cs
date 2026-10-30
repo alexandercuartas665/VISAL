@@ -35,7 +35,7 @@ public sealed record PacienteDetailDto(
     string? PrimerNombre, string? SegundoNombre, string? PrimerApellido, string? SegundoApellido,
     string NombreCompleto, DateOnly? FechaNacimiento, int? Edad,
     // Admin PAD
-    Guid? IpsComentaId, string? CodigoAceptacion, DateOnly? FechaComentan,
+    Guid? IpsComentaId, string? CodigoAceptacion, DateTimeOffset? FechaComentan,
     Guid? AseguradoraId, DateOnly? FechaIngresoPad, DateOnly? FechaEgresoPad,
     int? DiasEstancia, int? OpIngresoDias,
     // Clasificaciones (FKs a catalogos_paciente)
@@ -65,7 +65,19 @@ public sealed record PacienteDetailDto(
     // pasa validacion de campos obligatorios y ya se puede usar en /asignacion.
     string EstadoAdmision = "Abierto",
     // Valores de los campos dinamicos del tenant (jsonb plano campoKey->valor).
-    string? CamposDinamicosJson = null);
+    string? CamposDinamicosJson = null,
+    // Decision de ingreso (CENSO): true=SI / false=NO / null=sin definir; motivo solo cuando NO.
+    bool? Ingreso = null, string? MotivoNoIngreso = null,
+    // Fecha y hora de atencion del paciente (CENSO), con offset local.
+    DateTimeOffset? FechaAtencion = null,
+    // Usuario del ingreso: FK al PlatformUser elegido + su nombre desnormalizado (solo lectura; lo resuelve el servidor).
+    Guid? UsuarioIngresoId = null, string? UsuarioIngresoNombre = null,
+    // Contrato principal (nombre de aseguradora del contrato de Orden 1), desnormalizado y solo lectura.
+    string? ContratoPrincipal = null,
+    // Condicion del paciente (valor de lista fija).
+    string? Condicion = null,
+    // SLA del ingreso en minutos (Comentan -> Atencion). Solo lectura: lo calcula el servidor.
+    int? SlaIngresoMinutos = null);
 
 public sealed record SavePacienteRequest(
     Guid? Id,
@@ -74,7 +86,7 @@ public sealed record SavePacienteRequest(
     string? PrimerNombre, string? SegundoNombre, string? PrimerApellido, string? SegundoApellido,
     string? NombreCompleto, DateOnly? FechaNacimiento, int? Edad,
     // Admin PAD
-    Guid? IpsComentaId, string? CodigoAceptacion, DateOnly? FechaComentan,
+    Guid? IpsComentaId, string? CodigoAceptacion, DateTimeOffset? FechaComentan,
     Guid? AseguradoraId, DateOnly? FechaIngresoPad, DateOnly? FechaEgresoPad,
     int? DiasEstancia, int? OpIngresoDias,
     // Clasificaciones (FKs)
@@ -102,7 +114,15 @@ public sealed record SavePacienteRequest(
     IReadOnlyList<PacienteContactoEmergenciaDto> ContactosEmergencia,
     bool Activo,
     // Valores de los campos dinamicos del tenant (jsonb plano campoKey->valor).
-    string? CamposDinamicosJson = null);
+    string? CamposDinamicosJson = null,
+    // Decision de ingreso (CENSO): true=SI / false=NO / null=sin definir; motivo solo cuando NO.
+    bool? Ingreso = null, string? MotivoNoIngreso = null,
+    // Fecha y hora de atencion del paciente (CENSO), con offset local.
+    DateTimeOffset? FechaAtencion = null,
+    // Usuario del ingreso: solo se envia el Id del PlatformUser elegido; el servidor resuelve el nombre.
+    Guid? UsuarioIngresoId = null,
+    // Condicion del paciente (valor de lista fija). El SLA NO se envia: lo calcula el servidor.
+    string? Condicion = null);
 
 public interface IPacienteService
 {

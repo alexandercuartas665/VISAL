@@ -31,6 +31,15 @@ public static class CensoBlueprint
             ConsolidadoEncuesta(),
         };
 
+        // Parametros de ejecucion (globales): se piden al descargar y se aplican a TODAS las
+        // hojas via los filtros enlazados por ParamClave. Si se dejan vacios, esa hoja no se
+        // filtra por ese parametro (censo completo).
+        var parametros = new List<ReporteParametroDef>
+        {
+            new("sede", "Sede", ReporteParametroTipo.Lista, ReporteParametroFuente.Sedes),
+            new("rango_fecha", "Rango de fechas (inicial / final)", ReporteParametroTipo.RangoFecha),
+        };
+
         return new GuardarPlantillaRequest(
             Nombre,
             Descripcion: "Censo institucional multi-hoja: base de pacientes, satisfaccion SIAU, indice de morbilidad y consolidado de encuesta.",
@@ -41,8 +50,13 @@ public static class CensoBlueprint
             MostrarEncabezado: true,
             Codigo: "PP-FO-CENSO",
             Version: "1",
-            Subtitulo: "Censo 2026");
+            Subtitulo: "Censo 2026",
+            Parametros: parametros);
     }
+
+    // Claves de los parametros de ejecucion (una sola fuente de verdad para los filtros).
+    private const string ParamSede = "sede";
+    private const string ParamRangoFecha = "rango_fecha";
 
     private static ReporteHojaDef BasePacientes() =>
         ReporteHojaDef.Detalle("Base de Pacientes", "paciente",
@@ -74,22 +88,57 @@ public static class CensoBlueprint
                 new("observaciones_hospitalizacion"),
                 new("observaciones_paciente"),
             ],
+            filtros:
+            [
+                new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_ingreso", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+            ],
             orden: [new("nombre_completo")]);
 
+    // Hoja "Ingreso de Pacientes": sale de la ADMISION (entidad paciente), no de la bitacora.
+    // Mapea 1:1 las columnas del Excel canonico (A..AB) usando los campos del paciente, los cruces
+    // (IPS, clasificacion, departamento de residencia) y campos DERIVADOS de las dos fechas (mes,
+    // hora y minuto de "comentan" y de "respuesta"), que el generador calcula en hora local sin
+    // columnas nuevas. K "Departamento" (operativo: Valle/Cauca) viene del cruce a la sede
+    // (Sucursal.Departamento). Q "Observaciones de Motivo de NO Ingreso" del Excel es el mismo
+    // campo que P en nuestro modelo (un solo motivo/observacion = Paciente.MotivoNoIngreso), por
+    // eso no se duplica como columna aparte.
     private static ReporteHojaDef IngresoPacientes() =>
-        ReporteHojaDef.Detalle("Ingreso de Pacientes", "ingreso_paciente",
+        ReporteHojaDef.Detalle("Ingreso de Pacientes", "paciente",
             columnas:
             [
-                new("paciente.numero_documento", "ID Paciente"),
-                new("paciente.nombre_completo", "Paciente"),
-                new("fecha_comentan"),
-                new("fecha_respuesta"),
-                new("sla_minutos"),
-                new("ips_comenta"),
-                new("responsable"),
-                new("ingreso"),
-                new("motivo_no_ingreso"),
-                new("observaciones"),
+                new("mes_comentan", "Mes"),                       // A
+                new("sla_ingreso_minutos", "Mins"),              // B
+                new("fecha_comentan", "Fecha Comentan Paciente"), // C
+                new("comentan_hora", "Comentan (24 H)"),         // D
+                new("comentan_minuto", "Comentan (Minutos)"),    // E
+                new("fecha_atencion", "Fecha Respuesta"),        // F
+                new("respuesta_hora", "Respuesta (24 H)"),       // G
+                new("respuesta_minuto", "Respuesta (Minutos)"),  // H
+                new("ips_comenta.nombre", "IPS que comenta"),    // I
+                new("usuario_ingreso", "Responsable del Ingreso"), // J
+                new("sede.departamento", "Departamento"),        // K (operativo: Valle/Cauca)
+                new("contrato_principal", "Contrato"),           // L
+                new("clasif_paciente.nombre", "Clasificacion"),  // M
+                new("condicion", "Condicion"),                   // N
+                new("ingreso", "Ingreso"),                       // O
+                new("motivo_no_ingreso", "Motivo de no ingreso"), // P
+                new("tipo_documento", "Tipo ID"),                // R
+                new("numero_documento", "ID"),                   // S
+                new("primer_apellido", "Primer Apellido"),       // T
+                new("segundo_apellido", "Segundo Apellido"),     // U
+                new("primer_nombre", "Primer Nombre"),           // V
+                new("segundo_nombre", "Segundo Nombre"),         // W
+                new("direccion", "Direccion"),                   // X
+                new("barrio", "Barrio"),                         // Y
+                new("telefono", "Telefono Paciente"),            // Z
+                new("departamento.nombre", "Departamento"),      // AA
+                new("ciudad", "Ciudad"),                         // AB
+            ],
+            filtros:
+            [
+                new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_comentan", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
             ],
             orden: [new("fecha_comentan")]);
 
@@ -110,6 +159,11 @@ public static class CensoBlueprint
                 new("persona_atiende"),
                 new("observaciones"),
             ],
+            filtros:
+            [
+                new("paciente.sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_llamada", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+            ],
             orden: [new("mes")]);
 
     private static ReporteHojaDef IndiceMorbilidad() =>
@@ -124,6 +178,11 @@ public static class CensoBlueprint
                 new(ReporteAgregadoFunc.Count, null, "Cant Px's"),
                 new(ReporteAgregadoFunc.PctTotal, null, "% del total"),
             ],
+            filtros:
+            [
+                new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_ingreso", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+            ],
             orden: [new("Cant Px's", Desc: true)]);
 
     private static ReporteHojaDef ConsolidadoEncuesta() =>
@@ -136,6 +195,11 @@ public static class CensoBlueprint
             agregados:
             [
                 new(ReporteAgregadoFunc.Count, null, "Cantidad"),
+            ],
+            filtros:
+            [
+                new("paciente.sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_llamada", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
             ],
             pivote: new ReportePivoteDef("pregunta4", "mes"));
 }

@@ -11,6 +11,7 @@
 @inject IAseguradoraService AseSvc
 @inject ISucursalService SucSvc
 @inject ICatalogoPacienteService CatSvc
+@inject IUsuarioAdminService UsuAdminSvc
 @inject IGeografiaService GeoSvc
 @inject ICie11Service Cie11Svc
 @inject IDiagnosticoService DiagSvc
@@ -128,7 +129,8 @@
                             </select>
                         </div>;
                         _rigidFrag["codigo_aceptacion"] = @<div class="ase-f"><label>Codigo de Aceptacion</label><input class="form-control form-control-sm" @bind="_codAcept" /></div>;
-                        _rigidFrag["fecha_comentan"] = @<div class="ase-f"><label>Fecha Comentan</label><input type="date" class="form-control form-control-sm" @bind="_fComenta" /></div>;
+                        _rigidFrag["fecha_comentan"] = @<div class="ase-f"><label>Fecha Comentan</label><input type="datetime-local" class="form-control form-control-sm" @bind="_fComenta" /></div>;
+                        _rigidFrag["fecha_atencion"] = @<div class="ase-f"><label>Fecha de Atencion</label><input type="datetime-local" class="form-control form-control-sm" @bind="_fAtencion" /></div>;
                         _rigidFrag["entidad_aseguradora"] = @<div class="ase-f"><label>Entidad Aseguradora</label>
                             <select class="form-select form-select-sm" @bind="_aseId">
                                 <option value="">Seleccione Elemento</option>
@@ -139,6 +141,30 @@
                         _rigidFrag["fecha_egreso_pad"] = @<div class="ase-f"><label>FECHA EGRESO PAD</label><input type="date" class="form-control form-control-sm" @bind="_fEgreso" /></div>;
                         _rigidFrag["dias_estancia"] = @<div class="ase-f"><label>Dias Estancia</label><input type="number" class="form-control form-control-sm" @bind="_diasEst" /></div>;
                         _rigidFrag["op_ingreso"] = @<div class="ase-f"><label>Op. de Ingreso (dias)</label><input type="number" class="form-control form-control-sm" @bind="_opIngreso" /></div>;
+                        _rigidFrag["ingreso"] = @<div class="ase-f"><label>Ingreso</label>
+                            <select class="form-select form-select-sm" @bind="_ingreso" @bind:after="OnIngresoChanged">
+                                <option value="">Seleccione</option>
+                                <option value="SI">SI</option>
+                                <option value="NO">NO</option>
+                            </select>
+                        </div>;
+                        _rigidFrag["motivo_no_ingreso"] = @<div class="ase-f"><label>Motivo de no ingreso @(_ingreso == "NO" ? "*" : "")</label>
+                            <textarea class="form-control form-control-sm" rows="2" @bind="_motivoNoIngreso"
+                                      disabled="@(_ingreso != "NO")"
+                                      placeholder="@(_ingreso == "NO" ? "Escriba el motivo por el cual no ingresa" : "Se activa cuando el ingreso es NO")"></textarea>
+                        </div>;
+                        _rigidFrag["usuario_ingreso"] = @<div class="ase-f"><label>Usuario del ingreso</label>
+                            <select class="form-select form-select-sm" @bind="_usuarioIngresoId">
+                                <option value="">Seleccione usuario</option>
+                                @foreach (var u in _usuariosTenant) { <option value="@u.PlatformUserId">@NombreUsr(u)</option> }
+                            </select>
+                        </div>;
+                        _rigidFrag["condicion"] = @<div class="ase-f"><label>Condicion</label>
+                            <select class="form-select form-select-sm" @bind="_condicion">
+                                <option value="">Seleccione</option>
+                                @foreach (var c in _condicionesOpciones) { <option value="@c">@c</option> }
+                            </select>
+                        </div>;
 
                         _rigidFrag["incapacidad"] = @<div class="ase-f"><label>Incapacidad</label>
                             <select class="form-select form-select-sm" @bind="_incapacidad">
@@ -1185,7 +1211,19 @@
     private List<AseguradoraDto> _aseguradorasTodas = new();
     private List<SucursalDto> _sedes = new();
     private List<CatalogoPacienteDto> _catalogos = new();
+    // Usuarios del tenant para el desplegable "Usuario del ingreso" (se muestra el nombre, se guarda el PlatformUserId).
+    private List<UsuarioDto> _usuariosTenant = new();
     private string _filtro = "";
+
+    /// <summary>Nombre a mostrar de un usuario del tenant: DisplayName, o la concatenacion de sus
+    /// nombres/apellidos, o el correo como ultimo recurso.</summary>
+    private static string NombreUsr(UsuarioDto u)
+    {
+        if (!string.IsNullOrWhiteSpace(u.DisplayName)) { return u.DisplayName!.Trim(); }
+        var concat = string.Join(' ', new[] { u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido }
+            .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+        return concat.Length > 0 ? concat : u.Email;
+    }
 
     private IEnumerable<CatalogoPacienteDto> CatItems(Visal.Domain.Enums.CatalogoPacienteTipo tipo)
         => _catalogos.Where(c => c.Tipo == tipo && c.Activo);
@@ -1520,11 +1558,25 @@
     // sucursal_id). Se lleva por defecto al crear un paciente NUEVO. Null si el
     // usuario entra como GLOBAL (sin sede) o la sede no tiene codigo configurado.
     private string? _codAceptSedeLogin;
-    private DateOnly? _fComenta, _fIngreso, _fEgreso;
+    private DateOnly? _fIngreso, _fEgreso;
+    // Fecha Comentan y Fecha de Atencion son fecha-hora (datetime-local); se guardan con offset local (-5).
+    private DateTime? _fComenta, _fAtencion;
     private string _aseId = "";
     private string _ipsComenta = "";
     private List<ContratoDto> _contratosAse = new();
     private int? _diasEst, _opIngreso;
+    // Decision de ingreso (CENSO): "", "SI" o "NO". El motivo solo aplica cuando es "NO".
+    private string _ingreso = "";
+    private string? _motivoNoIngreso;
+    private string _usuarioIngresoId = "";
+    private string? _condicion;
+    // Valores de la lista "Condicion", curados de la hoja "Ingreso De Pacientes" del Excel CENSO
+    // (condiciones recurrentes; la cola de casos unicos del Excel no se incluye). Solo ASCII.
+    private static readonly string[] _condicionesOpciones =
+    {
+        "N/A", "TRAQUEOSTOMIA", "GASTROTOMIA", "TQT-GTO", "SONDA NASOYEYUNAL",
+        "SONDA VESICAL", "COLOSTOMIA", "NEFROSTOMIA", "O2 CANULA NASAL",
+    };
 
     // Clasificacion
     private string? _incapacidad, _grupoRh, _estado;
@@ -1835,6 +1887,7 @@
             }
         }
         _catalogos = (await CatSvc.ListAsync(null)).ToList();
+        _usuariosTenant = (await UsuAdminSvc.ListAsync()).OrderBy(NombreUsr, StringComparer.OrdinalIgnoreCase).ToList();
         _paises = (await GeoSvc.ListPaisesAsync()).ToList();
         await ResolverPuedeReabrirAsync();
         await CargarCamposDinamicosAsync();
@@ -2094,6 +2147,23 @@
         _edad = CalcularEdad(_fnac);
     }
 
+    // Al cambiar "Ingreso": el motivo de no ingreso solo aplica cuando es NO. Si pasa a SI o se
+    // deja sin definir, se limpia el motivo (y la casilla queda deshabilitada en el render).
+    private void OnIngresoChanged()
+    {
+        if (_ingreso != "NO") { _motivoNoIngreso = null; }
+    }
+
+    // Colombia (-5). Las cajas datetime-local capturan hora LOCAL (sin zona); al guardar las
+    // sellamos con este offset (mismo criterio que la bitacora de ingresos). Al hidratar se usa
+    // el .DateTime del DateTimeOffset para volver a hora local en la caja.
+    private static readonly TimeSpan OffsetLocal = TimeSpan.FromHours(-5);
+    private static DateTimeOffset? AOffset(DateTime? dt) =>
+        // La caja datetime-local trae hora LOCAL (Bogota, -05); la sellamos con ese offset y la
+        // convertimos a UTC antes de persistir, porque Npgsql (modo moderno) solo escribe
+        // DateTimeOffset con offset 0 en columnas timestamptz. El instante guardado es correcto.
+        dt is DateTime d ? new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Unspecified), OffsetLocal).ToUniversalTime() : null;
+
     /// <summary>
     /// Calcula edad en anios cumplidos entre fechaNacimiento y hoy. Retorna null
     /// si la fecha es nula, futura, o el resultado esta fuera de rango (0..130).
@@ -2127,9 +2197,10 @@
         _fnac = null; _edad = null;
         // Paciente NUEVO: el codigo de aceptacion se prellena con el de la sede del
         // login (vacio si el usuario entro como GLOBAL). El usuario puede editarlo.
-        _codAcept = _codAceptSedeLogin; _fComenta = _fIngreso = _fEgreso = null; _aseId = "";
+        _codAcept = _codAceptSedeLogin; _fIngreso = _fEgreso = null; _fComenta = _fAtencion = null; _aseId = "";
         _ipsComenta = ""; _contratosAse = new();
         _diasEst = _opIngreso = null;
+        _ingreso = ""; _motivoNoIngreso = null; _usuarioIngresoId = ""; _condicion = null;
         _incapacidad = _grupoRh = _estado = null;
         _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
         _contratosEdit.Clear();
@@ -2162,7 +2233,8 @@
         // vieja (cumpleanos pasado sin re-guardado). Fallback al valor de BD
         // si la fecha no permite calcular.
         _edad = CalcularEdad(_fnac) ?? d.Edad;
-        _codAcept = d.CodigoAceptacion; _fComenta = d.FechaComentan;
+        // Las fechas vienen en UTC (timestamptz); las pasamos a hora Bogota para la caja datetime-local.
+        _codAcept = d.CodigoAceptacion; _fComenta = d.FechaComentan?.ToOffset(Bog).DateTime; _fAtencion = d.FechaAtencion?.ToOffset(Bog).DateTime;
         _fIngreso = d.FechaIngresoPad; _fEgreso = d.FechaEgresoPad;
         _aseId = d.AseguradoraId?.ToString() ?? "";
         _ipsComenta = d.IpsComentaId?.ToString() ?? "";
@@ -2170,6 +2242,10 @@
         if (d.IpsComentaId is Guid iid) { _contratosAse = (await AseSvc.ListContratosAsync(iid)).ToList(); }
         else { _contratosAse = new(); }
         _diasEst = d.DiasEstancia; _opIngreso = d.OpIngresoDias;
+        _ingreso = d.Ingreso is bool bi ? (bi ? "SI" : "NO") : "";
+        _motivoNoIngreso = d.MotivoNoIngreso;
+        _usuarioIngresoId = d.UsuarioIngresoId?.ToString() ?? "";
+        _condicion = d.Condicion;
         _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _estado = d.Estado;
         _tipoUsuario = d.TipoUsuarioId?.ToString() ?? "";
         _clasifPaciente = d.ClasificacionPacienteId?.ToString() ?? "";
@@ -2253,7 +2329,7 @@
                 _id,
                 _doc, _tipoDoc, _pNombre, _sNombre, _pApellido, _sApellido, null,
                 _fnac, _edad,
-                Try(_ipsComenta), _codAcept, _fComenta,
+                Try(_ipsComenta), _codAcept, AOffset(_fComenta),
                 ase, _fIngreso, _fEgreso, _diasEst, _opIngreso,
                 _incapacidad, _grupoRh, Try(_tipoUsuario), _estado,
                 Try(_clasifPaciente), Try(_clasifGrupo),
@@ -2282,7 +2358,12 @@
                         c.FirmaUrl))
                     .ToList(),
                 _activo,
-                SerializarValoresDinamicos());
+                SerializarValoresDinamicos(),
+                Ingreso: _ingreso == "SI" ? true : _ingreso == "NO" ? false : (bool?)null,
+                MotivoNoIngreso: _motivoNoIngreso,
+                FechaAtencion: AOffset(_fAtencion),
+                UsuarioIngresoId: Try(_usuarioIngresoId),
+                Condicion: _condicion);
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";
@@ -2691,7 +2772,9 @@
                         Edad: PickI(edad, prev?.Edad),
                         IpsComentaId: PickG(ipsId, prev?.IpsComentaId),
                         CodigoAceptacion: Trunc(Pick(codAcept, prev?.CodigoAceptacion), 120),
-                        FechaComentan: PickD(fComenta, prev?.FechaComentan),
+                        FechaComentan: fComenta is DateOnly fcImp
+                            ? new DateTimeOffset(fcImp.ToDateTime(TimeOnly.MinValue), OffsetLocal).ToUniversalTime()
+                            : prev?.FechaComentan,
                         AseguradoraId: PickG(aseId, prev?.AseguradoraId),
                         FechaIngresoPad: PickD(fIngreso, prev?.FechaIngresoPad),
                         FechaEgresoPad: PickD(fEgreso, prev?.FechaEgresoPad),
@@ -2737,7 +2820,11 @@
                         ContactosEmergencia: contactosEm.Count > 0
                             ? contactosEm
                             : (prev?.ContactosEmergencia ?? Array.Empty<PacienteContactoEmergenciaDto>()),
-                        Activo: activo);
+                        Activo: activo,
+                        // El Excel no trae fecha de atencion, usuario del ingreso ni condicion: conservamos los que ya tuviera el paciente.
+                        FechaAtencion: prev?.FechaAtencion,
+                        UsuarioIngresoId: prev?.UsuarioIngresoId,
+                        Condicion: prev?.Condicion);
 
                     var saved = await Svc.SaveAsync(req, actor);
                     if (saved is null)

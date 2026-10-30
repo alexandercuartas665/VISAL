@@ -24,7 +24,7 @@
     </div>
     <div class="table-responsive">
         <table class="table table-sm align-middle">
-            <thead><tr><th>Codigo</th><th>Nombre</th><th>Ciudad</th><th>Direccion</th><th>Telefono</th><th title="Correo de la sede. Alimenta el snapshot Relacion de Facturas (columna Correo electronico)">Correo</th><th title="Codigo de habilitacion REPS de la sede (Fase 4 Facturacion, 12 digitos)">Cod. habilitacion</th><th title="Codigo de aceptacion de la sede. Se lleva por defecto al crear un paciente nuevo, segun la sede con la que el usuario inicio sesion (GLOBAL no lleva nada)">Cod. aceptacion</th><th>Activa</th><th title="Exige codigo MIPRES al entregar medicamentos e insumos">MIPRES obligatorio</th><th title="Cuando esta marcado, el snapshot Relacion de Facturas excluye sesiones cuya HC no este Aprobada por revision clinica">HC revisada obligatoria</th><th></th></tr></thead>
+            <thead><tr><th>Codigo</th><th>Nombre</th><th>Ciudad</th><th title="Departamento operativo de la sede (region: Valle, Cauca...). Alimenta la columna Departamento de la hoja Ingreso de Pacientes del CENSO">Departamento</th><th>Direccion</th><th>Telefono</th><th title="Correo de la sede. Alimenta el snapshot Relacion de Facturas (columna Correo electronico)">Correo</th><th title="Codigo de habilitacion REPS de la sede (Fase 4 Facturacion, 12 digitos)">Cod. habilitacion</th><th title="Codigo de aceptacion de la sede. Se lleva por defecto al crear un paciente nuevo, segun la sede con la que el usuario inicio sesion (GLOBAL no lleva nada)">Cod. aceptacion</th><th>Activa</th><th title="Exige codigo MIPRES al entregar medicamentos e insumos">MIPRES obligatorio</th><th title="Cuando esta marcado, el snapshot Relacion de Facturas excluye sesiones cuya HC no este Aprobada por revision clinica">HC revisada obligatoria</th><th></th></tr></thead>
             <tbody>
                 @foreach (var s in _items)
                 {
@@ -32,6 +32,7 @@
                         <td><input class="form-control form-control-sm mono" style="width:110px" @bind="s.Codigo" /></td>
                         <td><input class="form-control form-control-sm" @bind="s.Nombre" /></td>
                         <td><input class="form-control form-control-sm" @bind="s.Ciudad" /></td>
+                        <td><input class="form-control form-control-sm" style="width:130px" @bind="s.Departamento" placeholder="Valle / Cauca" /></td>
                         <td><input class="form-control form-control-sm" @bind="s.Direccion" /></td>
                         <td><input class="form-control form-control-sm" style="width:120px" @bind="s.Telefono" /></td>
                         <td><input class="form-control form-control-sm" style="width:180px" type="email" @bind="s.Email" placeholder="sede@ipsvisalrt.com" /></td>
@@ -265,7 +266,7 @@
         _error = _ok = null;
         try
         {
-            var saved = await Svc.SaveAsync(new SaveSucursalRequest(r.Id, r.Codigo, r.Nombre, r.Direccion, r.Ciudad, r.Telefono, r.Activo, r.MipresObligatorio, r.CodigoHabilitacion, r.ExigirHcRevisadaParaFacturar, r.Email, r.CodigoAceptacion), await Actor());
+            var saved = await Svc.SaveAsync(new SaveSucursalRequest(r.Id, r.Codigo, r.Nombre, r.Direccion, r.Ciudad, r.Telefono, r.Activo, r.MipresObligatorio, r.CodigoHabilitacion, r.ExigirHcRevisadaParaFacturar, r.Email, r.CodigoAceptacion, r.Departamento), await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             r.Id = saved.Id; _ok = "Sucursal guardada.";
         }
@@ -299,6 +300,7 @@
         public string? CodigoHabilitacion { get; set; }
         public bool ExigirHcRevisadaParaFacturar { get; set; }
         public string? CodigoAceptacion { get; set; }
-        public static Row From(SucursalDto d) => new() { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Direccion = d.Direccion, Ciudad = d.Ciudad, Telefono = d.Telefono, Email = d.Email, Activo = d.Activo, MipresObligatorio = d.MipresObligatorio, CodigoHabilitacion = d.CodigoHabilitacion, ExigirHcRevisadaParaFacturar = d.ExigirHcRevisadaParaFacturar, CodigoAceptacion = d.CodigoAceptacion };
+        public string? Departamento { get; set; }
+        public static Row From(SucursalDto d) => new() { Id = d.Id, Codigo = d.Codigo, Nombre = d.Nombre, Direccion = d.Direccion, Ciudad = d.Ciudad, Telefono = d.Telefono, Email = d.Email, Activo = d.Activo, MipresObligatorio = d.MipresObligatorio, CodigoHabilitacion = d.CodigoHabilitacion, ExigirHcRevisadaParaFacturar = d.ExigirHcRevisadaParaFacturar, CodigoAceptacion = d.CodigoAceptacion, Departamento = d.Departamento };
     }
 }

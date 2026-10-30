@@ -10,20 +10,39 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
     public async Task EnsureDefaultsAsync(CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return; }
-        if (await db.PacienteCampoRigidoDefs.AnyAsync(ct)) { return; }
 
-        // Orden por defecto = posicion dentro del tab en el catalogo (replica la ficha actual).
-        var ordenPorTab = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var info in CamposRigidosCatalogo.Todos)
+        // Siembra TOLERANTE A ADICIONES: en vez de "sembrar solo si la tabla esta vacia", sembramos
+        // las claves del catalogo que aun no tienen fila para este tenant. Asi, cuando el catalogo
+        // crece (p.ej. se agrega "ingreso"/"motivo_no_ingreso"), los tenants ya sembrados reciben la
+        // colocacion de los campos nuevos sin perder su personalizacion de los existentes.
+        var existentes = await db.PacienteCampoRigidoDefs
+            .Select(r => r.CampoKey)
+            .ToListAsync(ct);
+        var existentesSet = new HashSet<string>(existentes, StringComparer.Ordinal);
+
+        var faltantes = CamposRigidosCatalogo.Todos.Where(i => !existentesSet.Contains(i.Key)).ToList();
+        if (faltantes.Count == 0) { return; }
+
+        // Orden de los campos nuevos = al final de su tab (detras de lo que ya exista, fijo o dinamico).
+        var maxPorTab = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var info in faltantes)
         {
-            var orden = ordenPorTab.TryGetValue(info.TabDefault, out var n) ? n : 0;
-            ordenPorTab[info.TabDefault] = orden + 1;
+            if (!maxPorTab.TryGetValue(info.TabDefault, out var n))
+            {
+                var maxRig = await db.PacienteCampoRigidoDefs
+                    .Where(r => r.TabKey == info.TabDefault).MaxAsync(r => (int?)r.Orden, ct) ?? -1;
+                var maxDin = await db.PacienteCampoDefs
+                    .Where(c => c.TabKey == info.TabDefault).MaxAsync(c => (int?)c.Orden, ct) ?? -1;
+                n = Math.Max(maxRig, maxDin);
+            }
+            n += 1;
+            maxPorTab[info.TabDefault] = n;
             db.PacienteCampoRigidoDefs.Add(new PacienteCampoRigidoDef
             {
                 TenantId = tid,
                 CampoKey = info.Key,
                 TabKey = info.TabDefault,
-                Orden = orden,
+                Orden = n,
                 Ancho = info.AnchoDefault,
                 Oculto = false,
             });

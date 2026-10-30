@@ -1,7 +1,9 @@
 @page "/reportes/constructor"
 @attribute [Authorize]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.IO
 @using Visal.Application.Tenancy.Reportes
+@using Microsoft.AspNetCore.Components.Forms
 @inject IReporteBuilderService Builder
 @inject Microsoft.JSInterop.IJSRuntime JS
 @implements IAsyncDisposable
@@ -17,6 +19,10 @@
         </div>
         <div class="rc-head-actions">
             <button class="btn-ghost" disabled="@_trabajando" @onclick="NuevoCenso">Plantilla CENSO 2026</button>
+            <label class="btn-ghost rc-importbtn">
+                Importar JSON
+                <InputFile OnChange="ImportarArchivoAsync" accept=".json" disabled="@_trabajando" />
+            </label>
             <button class="btn-primary" @onclick="NuevoReporte">+ Crear nuevo reporte</button>
         </div>
     </div>
@@ -24,6 +30,11 @@
     @if (!_editando && !string.IsNullOrEmpty(_error))
     {
         <div class="rc-error">@_error</div>
+    }
+
+    @if (!_editando && !string.IsNullOrEmpty(_importMsg))
+    {
+        <div class="rc-ok">@_importMsg</div>
     }
 
     @if (_plantillas.Count == 0)
@@ -46,6 +57,7 @@
                         </div>
                         <div class="rc-card-actions">
                             <button class="btn-export" disabled="@_trabajando" @onclick="() => DescargarAsync(p.Id)">Descargar Excel</button>
+                            <button class="btn-ghost" disabled="@_trabajando" @onclick="() => ExportarAsync(p.Id)">Exportar JSON</button>
                             <button class="btn-ghost" @onclick="() => EditarAsync(p.Id)">Editar</button>
                             <button class="btn-ghost btn-danger" @onclick="() => EliminarAsync(p.Id)">Eliminar</button>
                         </div>
@@ -484,6 +496,7 @@
 .rc-title { margin:.15rem 0 0; font-size:1.55rem; color:#0f172a; }
 .rc-sub { color:#64748b; font-size:.85rem; margin-top:.2rem; max-width:640px; }
 .rc-error { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:.6rem .85rem; border-radius:6px; margin-bottom:.75rem; }
+.rc-ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; padding:.6rem .85rem; border-radius:6px; margin-bottom:.75rem; }
 .rc-empty { padding:2rem; text-align:center; color:#94a3b8; }
 
 .rc-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:.85rem; }
@@ -567,6 +580,8 @@
 .btn-primary:disabled { opacity:.6; }
 .btn-ghost { background:#fff; color:#334155; border:1px solid #cbd5e1; padding:.35rem .7rem; border-radius:6px; cursor:pointer; font-size:.82rem; }
 .btn-ghost:hover { background:#f8fafc; }
+.rc-importbtn { display:inline-flex; align-items:center; }
+.rc-importbtn input[type=file] { display:none; }
 .btn-danger { color:#b91c1c; border-color:#fecaca; }
 .btn-export { background:#0f766e; color:#fff; border:none; padding:.35rem .7rem; border-radius:6px; cursor:pointer; font-size:.82rem; }
 .btn-export:disabled { opacity:.6; }
@@ -579,6 +594,7 @@
     private bool _editando;
     private bool _trabajando;
     private string _error = "";
+    private string _importMsg = "";
 
     private Guid? _edId;
     private string _nombre = "";
@@ -929,6 +945,46 @@
                 ? (await Builder.ListarSedesAsync()).ToList()
                 : new();
             _runAbierto = true;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task ExportarAsync(Guid id)
+    {
+        _error = "";
+        _importMsg = "";
+        _trabajando = true;
+        try
+        {
+            var json = await Builder.ExportarAsync(id);
+            var nombre = _plantillas.FirstOrDefault(p => p.Id == id)?.Nombre ?? "reporte";
+            var safe = new string(nombre.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+            if (string.IsNullOrWhiteSpace(safe)) { safe = "reporte"; }
+            var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+            await Descargar($"{safe}-{DateTime.Now:yyyyMMdd-HHmmss}.json", "application/json", bytes);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _trabajando = false; }
+    }
+
+    private async Task ImportarArchivoAsync(InputFileChangeEventArgs e)
+    {
+        _error = "";
+        _importMsg = "";
+        if (e.File is null) { return; }
+        _trabajando = true;
+        try
+        {
+            // 1 MB es de sobra para una definicion de plantilla (es solo texto/JSON).
+            using var stream = e.File.OpenReadStream(1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+            var res = await Builder.ImportarAsync(json);
+            await RecargarAsync();
+            _importMsg = res.Reemplazada
+                ? $"Reporte \"{res.Nombre}\" actualizado desde el archivo."
+                : $"Reporte \"{res.Nombre}\" importado.";
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _trabajando = false; }

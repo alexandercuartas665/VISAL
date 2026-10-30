@@ -77,7 +77,22 @@ public sealed class PacienteService : IPacienteService
             contactos,
             p.Activo,
             p.EstadoAdmision,
-            p.CamposDinamicosJson);
+            p.CamposDinamicosJson,
+            p.Ingreso, p.MotivoNoIngreso,
+            p.FechaAtencion,
+            p.UsuarioIngresoId, p.UsuarioIngresoNombre,
+            p.ContratoPrincipal,
+            p.Condicion, p.SlaIngresoMinutos);
+    }
+
+    /// <summary>Nombre legible de un usuario de plataforma: DisplayName, o la concatenacion de sus
+    /// nombres/apellidos, o el correo como ultimo recurso.</summary>
+    private static string NombreUsuario(PlatformUser u)
+    {
+        if (!string.IsNullOrWhiteSpace(u.DisplayName)) { return u.DisplayName.Trim(); }
+        var concat = string.Join(' ', new[] { u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido }
+            .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+        return concat.Length > 0 ? concat : u.Email;
     }
 
     public async Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default)
@@ -172,6 +187,36 @@ public sealed class PacienteService : IPacienteService
         // Campos dinamicos del tenant (jsonb plano). La UI envia el documento ya serializado.
         p.CamposDinamicosJson = string.IsNullOrWhiteSpace(req.CamposDinamicosJson) ? null : req.CamposDinamicosJson;
 
+        // Decision de ingreso (CENSO). El motivo solo tiene sentido cuando NO ingresa: si ingresa
+        // (true) o esta sin definir (null) se limpia para no dejar un motivo colgando.
+        p.Ingreso = req.Ingreso;
+        p.MotivoNoIngreso = req.Ingreso == false
+            ? (string.IsNullOrWhiteSpace(req.MotivoNoIngreso) ? null : req.MotivoNoIngreso.Trim())
+            : null;
+        p.FechaAtencion = req.FechaAtencion;
+        // Condicion del paciente (CENSO): valor de una lista fija (se guarda el texto elegido).
+        p.Condicion = string.IsNullOrWhiteSpace(req.Condicion) ? null : req.Condicion.Trim();
+        // SLA del ingreso: minutos entre que la IPS comenta y la fecha de atencion/respuesta. Derivado
+        // (no editable). Null si falta alguna fecha; se descartan negativos (datos invertidos) a 0.
+        p.SlaIngresoMinutos = p.FechaComentan is DateTimeOffset fcSla && p.FechaAtencion is DateTimeOffset faSla
+            ? Math.Max(0, (int)Math.Round((faSla - fcSla).TotalMinutes))
+            : null;
+
+        // Usuario del ingreso (CENSO): se guarda el Id del usuario elegido y se desnormaliza su
+        // nombre al momento de guardar (como ResponsableLlamadaNombre en la encuesta), para que el
+        // reporte lo muestre directo y quede estable aunque el usuario cambie de nombre o se desactive.
+        p.UsuarioIngresoId = req.UsuarioIngresoId;
+        if (req.UsuarioIngresoId is Guid uid)
+        {
+            var u = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters()
+                .FirstOrDefaultAsync(x => x.Id == uid, ct);
+            p.UsuarioIngresoNombre = u is null ? null : NombreUsuario(u);
+        }
+        else
+        {
+            p.UsuarioIngresoNombre = null;
+        }
+
         // Emergencia (campos legacy: el primer contacto de la lista pisa estos)
         var primero = req.ContactosEmergencia.FirstOrDefault();
         if (primero is not null && !string.IsNullOrWhiteSpace(primero.Nombre))
@@ -241,6 +286,20 @@ public sealed class PacienteService : IPacienteService
                 .Select(g => g.First())
                 .ToList();
             if (nuevos.Count > 0) { _db.PacienteContratos.AddRange(nuevos); }
+
+            // Contrato principal (CENSO): nombre de la aseguradora del contrato de Orden 1. La tabla
+            // pivote no se puede cruzar como un FK en el constructor, asi que se desnormaliza aqui.
+            var principalId = nuevos
+                .OrderBy(c => c.Orden)
+                .Select(c => (Guid?)c.ContratoAseguradoraId)
+                .FirstOrDefault();
+            p.ContratoPrincipal = principalId is Guid pcid
+                ? await (from c in _db.ContratosAseguradora.AsNoTracking()
+                         join a in _db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
+                         where c.Id == pcid
+                         select a.Nombre).FirstOrDefaultAsync(ct)
+                : null;
+
             await _db.SaveChangesAsync(ct);
         }
 

@@ -24,8 +24,9 @@ public static class CensoBlueprint
     {
         var hojas = new List<ReporteHojaDef>
         {
-            BasePacientes(),
+            // "Ingreso de Pacientes" va primera para coincidir con la primera pestana del Excel.
             IngresoPacientes(),
+            BasePacientes(),
             Satisfaccion(),
             IndiceMorbilidad(),
             ConsolidadoEncuesta(),
@@ -100,9 +101,9 @@ public static class CensoBlueprint
     // (IPS, clasificacion, departamento de residencia) y campos DERIVADOS de las dos fechas (mes,
     // hora y minuto de "comentan" y de "respuesta"), que el generador calcula en hora local sin
     // columnas nuevas. K "Departamento" (operativo: Valle/Cauca) viene del cruce a la sede
-    // (Sucursal.Departamento). Q "Observaciones de Motivo de NO Ingreso" del Excel es el mismo
-    // campo que P en nuestro modelo (un solo motivo/observacion = Paciente.MotivoNoIngreso), por
-    // eso no se duplica como columna aparte.
+    // (Sucursal.Departamento). P "Motivo de no ingreso" y Q "Observaciones de Motivo de NO
+    // Ingreso" apuntan al MISMO campo (Paciente.MotivoNoIngreso = el motivo que se captura cuando
+    // Ingreso=NO); se muestran las dos columnas para igualar el Excel (28 cols A..AB).
     private static ReporteHojaDef IngresoPacientes() =>
         ReporteHojaDef.Detalle("Ingreso de Pacientes", "paciente",
             columnas:
@@ -123,6 +124,7 @@ public static class CensoBlueprint
                 new("condicion", "Condicion"),                   // N
                 new("ingreso", "Ingreso"),                       // O
                 new("motivo_no_ingreso", "Motivo de no ingreso"), // P
+                new("motivo_no_ingreso", "Observaciones de Motivo de NO Ingreso"), // Q (mismo campo)
                 new("tipo_documento", "Tipo ID"),                // R
                 new("numero_documento", "ID"),                   // S
                 new("primer_apellido", "Primer Apellido"),       // T

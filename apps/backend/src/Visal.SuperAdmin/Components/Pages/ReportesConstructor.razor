@@ -10,6 +10,12 @@
 
 <PageTitle>Constructor de Reportes - Visal</PageTitle>
 
+@if (!_puede)
+{
+    <div class="rc-page"><div class="rc-error">No tienes permiso para este modulo. Pide el permiso "Constructor de Reportes" a un administrador.</div></div>
+}
+else
+{
 <div class="rc-page">
     <div class="rc-head">
         <div>
@@ -487,6 +493,7 @@
         </div>
     }
 </div>
+}
 
 <style>
 .rc-page { padding: 1rem 1.25rem; }
@@ -589,6 +596,9 @@
 </style>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private bool _puede;
+
     private List<ReportePlantillaDto> _plantillas = new();
     private IReadOnlyList<EntidadReportableDto> _entidades = new List<EntidadReportableDto>();
     private bool _editando;
@@ -621,13 +631,33 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await ResolverPermisoAsync();
+        if (!_puede) { return; }
         _entidades = await Builder.ListarEntidadesAsync();
         await RecargarAsync();
     }
 
+    private async Task ResolverPermisoAsync()
+    {
+        if (AuthState is null) { _puede = false; return; }
+        var st = await AuthState;
+        var rol = st.User.FindFirst(ClaimTypes.Role)?.Value ?? "";
+        var tenantRole = st.User.FindFirst("tenant_role")?.Value ?? "";
+        var platformRole = st.User.FindFirst("platform_role")?.Value ?? "";
+        var esAdmin = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(rol, "Administrador", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+        var perms = st.User.FindFirst("perms")?.Value;
+        var tienePermiso = !string.IsNullOrEmpty(perms)
+            && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(p => string.Equals(p.Trim(), "reportes-constructor", StringComparison.OrdinalIgnoreCase));
+        _puede = esAdmin || tienePermiso;
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender && _puede)
         {
             _dnetRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("visalReportesDnd.init", _dnetRef);

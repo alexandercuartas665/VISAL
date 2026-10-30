@@ -46,6 +46,7 @@ public static class ModuloCatalogo
         new("autorizaciones", "Autorizaciones (tokens de fecha)", "Operacion Clinica"),
         // Capacitaciones (LMS interno de personal): gestor de cursos + evaluaciones.
         new("capacitaciones", "Capacitaciones", "Operacion Clinica"),
+        new("reportes-constructor", "Constructor de Reportes", "Operacion Clinica"),
         new("cie11", "Configuracion CIE-11", "Configuracion del Sistema"),
         new("formularios", "Motor de Formularios", "Operacion Clinica"),
         new("formularios.versionado", "Formularios - Historial y restaurar versiones", "Operacion Clinica"),

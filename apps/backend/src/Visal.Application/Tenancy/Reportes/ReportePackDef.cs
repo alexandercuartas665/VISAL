@@ -127,6 +127,36 @@ public sealed record ReporteAgregadoDef(
 public sealed record ReportePivoteDef(string FilaCampoRef, string ColumnaCampoRef);
 
 /// <summary>
+/// Un "cubo" de una matriz de encuesta: el valor crudo de la pregunta (1..5) y la etiqueta
+/// con que se muestra en la columna. P.ej. P4 usa (5,"5"); P5 usa (5,"Definitivamente Si").
+/// </summary>
+public sealed record ReporteMatrizCuboDef(int Valor, string Etiqueta);
+
+/// <summary>
+/// Un bloque de preguntas de la matriz de encuesta: un titulo de grupo (cabecera superior,
+/// fusionada) y la lista ordenada de cubos. Cada cubo abre dos columnas: conteo y porcentaje.
+/// </summary>
+public sealed record ReporteMatrizBloqueDef(string Titulo, IReadOnlyList<ReporteMatrizCuboDef> Cubos);
+
+/// <summary>
+/// Matriz fiel del "Consolidado Encuesta" (hoja 5 del Censo): una hoja computada que NO sale de
+/// un pivote generico. Sobre las filas crudas (mes + pregunta4 + pregunta5, ya filtradas a
+/// llamadas efectivas por el filtro de la hoja) arma, por mes, dos bloques de pregunta (conteo +
+/// % por cada respuesta) y el total de llamadas efectivas del mes. El % es conteo/total del mes.
+/// Los indices <see cref="ColMes"/>/<see cref="ColP4"/>/<see cref="ColP5"/> apuntan a las columnas
+/// de la consulta base (en el orden en que se declararon en la hoja).
+/// </summary>
+public sealed record ReporteMatrizEncuestaDef(
+    int ColMes,
+    int ColP4,
+    int ColP5,
+    string TituloEsquina,
+    string TituloMes,
+    ReporteMatrizBloqueDef BloqueP4,
+    ReporteMatrizBloqueDef BloqueP5,
+    string TituloTotal);
+
+/// <summary>
 /// Definicion de UNA hoja del reporte. En modo Detalle se usan <see cref="Columnas"/>;
 /// en modo Agregado se usan <see cref="GroupBy"/> + <see cref="Agregados"/>.
 /// </summary>
@@ -140,7 +170,8 @@ public sealed record ReporteHojaDef(
     IReadOnlyList<ReporteAgregadoDef> Agregados,
     IReadOnlyList<ReporteOrdenDef> Orden,
     int? LimiteFilas = null,
-    ReportePivoteDef? Pivote = null)
+    ReportePivoteDef? Pivote = null,
+    ReporteMatrizEncuestaDef? Matriz = null)
 {
     public static ReporteHojaDef Detalle(
         string nombre,
@@ -166,6 +197,13 @@ public sealed record ReporteHojaDef(
 /// <summary>Un reporte = N hojas.</summary>
 public sealed record ReportePackDef(string Nombre, IReadOnlyList<ReporteHojaDef> Hojas);
 
+/// <summary>
+/// Cabecera de GRUPO (fila superior fusionada) de una hoja: un titulo que abarca
+/// <see cref="Span"/> columnas consecutivas. Solo lo usan las hojas con matriz (dos niveles de
+/// cabecera); el export la pinta arriba de la fila de nombres de columna.
+/// </summary>
+public sealed record ReporteGrupoColumna(string Titulo, int Span);
+
 // ---- Resultados ----------------------------------------------------------------
 
 /// <summary>
@@ -177,7 +215,8 @@ public sealed record ReporteHojaResultado(
     string Nombre,
     IReadOnlyList<string> Columnas,
     IReadOnlyList<IReadOnlyList<object?>> Filas,
-    IReadOnlyList<string?>? Formatos = null)
+    IReadOnlyList<string?>? Formatos = null,
+    IReadOnlyList<ReporteGrupoColumna>? GruposColumna = null)
 {
     public int TotalFilas => Filas.Count;
 }

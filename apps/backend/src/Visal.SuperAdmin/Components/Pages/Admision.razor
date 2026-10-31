@@ -18,6 +18,7 @@
 @inject INotaMedicaService NotaSvc
 @inject ITipologiaArchivoService TipSvc
 @inject IDocumentoNotaService DocNotaSvc
+@inject Visal.Application.Tenancy.Forms.IBarthelDenormalizador BarthelSvc
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 
@@ -286,6 +287,45 @@
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.MedContratado)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
+                        </div>;
+                        _rigidFrag["medicamento_controlado"] = @<div class="ase-f"><label>Medicamento Controlado</label>
+                            <select class="form-select form-select-sm" @bind="_medControlado">
+                                <option value="">--</option><option>SI</option><option>NO</option>
+                            </select>
+                        </div>;
+                        _rigidFrag["barthel"] = @<div class="ase-f bthl-card">
+                            <div class="bthl-head">
+                                <span class="bthl-title">&#129504; Indice de Barthel</span>
+                                @if (_barthelFecha is DateTimeOffset bf)
+                                {
+                                    <span class="bthl-date">Ultima escala: @bf.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                                }
+                            </div>
+                            @if (_barthelTotal is null && _barthelDatos.Count == 0)
+                            {
+                                <div class="bthl-empty">Sin escala Barthel registrada. Cierra una escala Barthel (PP-FO-46) o pulsa "Recalcular Barthel".</div>
+                            }
+                            else
+                            {
+                                <div class="bthl-body">
+                                    <div class="bthl-score">
+                                        <div class="bthl-score-num">@(_barthelTotal?.ToString() ?? "--")<small>/100</small></div>
+                                        <div class="bthl-score-lbl">@(_barthelClasif ?? "Sin clasificar")</div>
+                                    </div>
+                                    <div class="bthl-items">
+                                        @foreach (var it in BarthelItems)
+                                        {
+                                            if (_barthelDatos.TryGetValue(it.Key, out var val) && !string.IsNullOrWhiteSpace(val))
+                                            {
+                                                <div class="bthl-item">
+                                                    <span class="bthl-item-lbl">@it.Label</span>
+                                                    <span class="bthl-item-val">@val</span>
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+                                </div>
+                            }
                         </div>;
 
                         _rigidFrag["pais_residencia"] = @<div class="ase-f"><label>Pais Residencia</label>
@@ -777,6 +817,13 @@
                                     title="Valida los campos obligatorios y cierra el paciente. Solo pacientes Cerrados pueden asignarse en /asignacion.">
                                 &#10004; Cerrar paciente
                             </button>
+                            @if (_esAdminTenant)
+                            {
+                                <button class="btn btn-outline-primary btn-sm" @onclick="RecalcularBarthel" disabled="@_busy"
+                                        title="Recalcula el puntaje y datos Barthel de TODOS los pacientes del tenant desde su ultima escala cerrada.">
+                                    &#8635; Recalcular Barthel
+                                </button>
+                            }
                             <button class="btn btn-outline-secondary btn-sm" @onclick="Desactivar" disabled="@_busy" title="Marcar como inactivo sin borrar el historial clinico">Desactivar</button>
                             <button class="btn btn-outline-danger btn-sm" @onclick="Delete" disabled="@_busy" title="Eliminar definitivamente. Solo se puede si el paciente no tiene HC, notas ni asignaciones.">Eliminar</button>
                         }
@@ -1106,6 +1153,22 @@
     .ase-faltantes-list { list-style:none; padding:0; margin:0; max-height:280px; overflow:auto; }
     .ase-faltantes-list li { padding:6px 12px; background:#fef2f2; border-left:3px solid #ef4444; margin-bottom:4px; font-size:12.5px; color:#991b1b; border-radius:4px; }
     .ase-faltantes-f { padding:12px 18px; border-top:1px solid #e2e8f0; text-align:right; }
+
+    /* Tarjeta Barthel (solo lectura) en la ficha */
+    .bthl-card { border:1px solid #dbeafe; background:#f8fbff; border-radius:10px; padding:12px 14px; }
+    .bthl-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .bthl-title { font-weight:600; font-size:13.5px; color:#1e3a8a; }
+    .bthl-date { font-size:11.5px; color:#64748b; }
+    .bthl-empty { font-size:12.5px; color:#64748b; font-style:italic; }
+    .bthl-body { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+    .bthl-score { min-width:120px; text-align:center; padding:6px 14px; background:#eff6ff; border-radius:8px; }
+    .bthl-score-num { font-size:30px; font-weight:700; color:#1d4ed8; line-height:1; }
+    .bthl-score-num small { font-size:13px; color:#93a3b8; font-weight:500; }
+    .bthl-score-lbl { font-size:12px; color:#334155; margin-top:4px; }
+    .bthl-items { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:8px 18px; flex:1; min-width:240px; }
+    .bthl-item { display:flex; flex-direction:column; gap:2px; font-size:12px; border-bottom:1px dotted #e2e8f0; padding:3px 0 5px; }
+    .bthl-item-lbl { color:#1e40af; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; }
+    .bthl-item-val { color:#334155; line-height:1.3; }
 </style>
 
 @* ===== Modal Importar pacientes desde Excel ===== *@
@@ -1594,7 +1657,29 @@
     private string? _dxPrincipal, _tutela;
     private string _tipoTutela = "";
     private string _medContratado = "";
+    private string? _medControlado;
     private string? _cie10Codigo;
+
+    // Barthel (solo lectura, denormalizado desde la escala PP-FO-46). Se muestra como tarjeta.
+    private int? _barthelTotal;
+    private string? _barthelClasif;
+    private DateTimeOffset? _barthelFecha;
+    private Dictionary<string, string?> _barthelDatos = new();
+    // Items del Indice de Barthel: clave en el snapshot -> etiqueta legible para la tarjeta.
+    private static readonly (string Key, string Label)[] BarthelItems =
+    {
+        ("barthel_comida", "Comida"), ("barthel_lavado", "Lavado (bano)"), ("barthel_vestido", "Vestido"),
+        ("barthel_arreglo", "Arreglo personal"), ("barthel_deposicion", "Deposicion"), ("barthel_miccion", "Miccion"),
+        ("barthel_ir_al_bano", "Ir al bano"), ("barthel_transferencia", "Transferencia"),
+        ("barthel_deambulacion", "Deambulacion"), ("barthel_escaleras", "Escaleras"),
+    };
+
+    private static Dictionary<string, string?> ParseBarthel(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return new(); }
+        try { return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string?>>(json) ?? new(); }
+        catch { return new(); }
+    }
 
     // Modal "Buscar diagnostico". La fuente ahora es la BD local de diagnosticos
     // (IDiagnosticoService), no la WHO ICD-11 API. Mantenemos los mismos nombres
@@ -2208,6 +2293,8 @@
         _dxPrincipal = _tutela = null;
         _tipoTutela = "";
         _medContratado = "";
+        _medControlado = null;
+        _barthelTotal = null; _barthelClasif = null; _barthelFecha = null; _barthelDatos = new();
         _cie10Codigo = null;
         _dir = _barrio = _ciudad = null;
         _codPaisTel = "+57";
@@ -2272,6 +2359,9 @@
         _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela;
         _tipoTutela = d.TipoTutelaId?.ToString() ?? "";
         _medContratado = d.MedContratadoId?.ToString() ?? "";
+        _medControlado = d.MedicamentoControlado;
+        _barthelTotal = d.BarthelTotal; _barthelClasif = d.BarthelClasificacion;
+        _barthelFecha = d.BarthelActualizadoEn; _barthelDatos = ParseBarthel(d.BarthelDatosJson);
         _cie10Codigo = d.Cie10Codigo;
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _codPaisTel = string.IsNullOrWhiteSpace(d.CodigoPaisTelefono) ? "+57" : d.CodigoPaisTelefono!;
@@ -2363,7 +2453,8 @@
                 MotivoNoIngreso: _motivoNoIngreso,
                 FechaAtencion: AOffset(_fAtencion),
                 UsuarioIngresoId: Try(_usuarioIngresoId),
-                Condicion: _condicion);
+                Condicion: _condicion,
+                MedicamentoControlado: _medControlado);
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";
@@ -2413,6 +2504,24 @@
             _activo = false;
         }
         catch (Exception ex) { _error = "No se pudo desactivar: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // Boton de modulo (solo admin del tenant): recalcula Barthel para TODOS los pacientes desde su
+    // ultima escala cerrada. Util para poblar el dato historico o tras arreglar escalas.
+    private async Task RecalcularBarthel()
+    {
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var ok = await JS.InvokeAsync<bool>("confirm",
+                "Recalcular el Barthel de TODOS los pacientes desde su ultima escala cerrada? Esta accion actualiza la ficha y el CENSO.");
+            if (!ok) { return; }
+            var n = await BarthelSvc.RecalcularTodosAsync();
+            _ok = $"Barthel recalculado en {n} paciente(s).";
+            if (_id is Guid) { await Select(_id.Value); }
+        }
+        catch (Exception ex) { _error = "No se pudo recalcular Barthel: " + ex.Message; }
         finally { _busy = false; }
     }
 

@@ -6895,6 +6895,23 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("barrio");
 
+                    b.Property<DateTimeOffset?>("BarthelActualizadoEn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("barthel_actualizado_en");
+
+                    b.Property<string>("BarthelClasificacion")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("barthel_clasificacion");
+
+                    b.Property<string>("BarthelDatosJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("barthel_datos_json");
+
+                    b.Property<int?>("BarthelTotal")
+                        .HasColumnType("integer")
+                        .HasColumnName("barthel_total");
+
                     b.Property<string>("CamposDinamicosJson")
                         .HasColumnType("jsonb")
                         .HasColumnName("campos_dinamicos_json");
@@ -7069,6 +7086,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("MedContratadoId")
                         .HasColumnType("uuid")
                         .HasColumnName("med_contratado_id");
+
+                    b.Property<string>("MedicamentoControlado")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("medicamento_controlado");
 
                     b.Property<string>("MotivoNoIngreso")
                         .HasColumnType("text")

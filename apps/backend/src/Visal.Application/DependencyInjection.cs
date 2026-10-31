@@ -151,6 +151,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.IAsistenteIaService, Tenancy.AsistenteIaService>();
         services.AddScoped<Tenancy.IRelacionFormularioService, Tenancy.RelacionFormularioService>();
         services.AddScoped<Tenancy.Forms.IHistoriaPrefillService, Tenancy.Forms.HistoriaPrefillService>();
+        services.AddScoped<Tenancy.Forms.IBarthelDenormalizador, Tenancy.Forms.BarthelDenormalizador>();
         services.AddScoped<Tenancy.IEscalaService, Tenancy.EscalaService>();
         services.AddScoped<Tenancy.IDocumentoHcService, Tenancy.DocumentoHcService>();
         services.AddScoped<Tenancy.INotaMedicaService, Tenancy.NotaMedicaService>();

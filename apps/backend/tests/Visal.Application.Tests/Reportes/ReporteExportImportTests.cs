@@ -39,10 +39,12 @@ public sealed class ReporteExportImportTests
         Assert.NotNull(vuelto.Parametros);
         Assert.Contains(vuelto.Parametros!, p => p.Clave == "sede" && p.Fuente == ReporteParametroFuente.Sedes);
         Assert.Contains(vuelto.Parametros!, p => p.Clave == "rango_fecha" && p.Tipo == ReporteParametroTipo.RangoFecha);
-        // El pivote y el modo agregado sobreviven la ida y vuelta.
+        // La matriz de encuesta (constructor dedicado) sobrevive la ida y vuelta.
         var consolidado = vuelto.Hojas.Single(h => h.Nombre == "Consolidado Encuesta");
-        Assert.Equal(ReporteHojaModo.Agregado, consolidado.Modo);
-        Assert.NotNull(consolidado.Pivote);
+        Assert.Equal(ReporteHojaModo.Detalle, consolidado.Modo);
+        Assert.NotNull(consolidado.Matriz);
+        Assert.Equal("Llamadas Efectivas", consolidado.Matriz!.TituloTotal);
+        Assert.Equal(5, consolidado.Matriz.BloqueP5.Cubos.Count);
     }
 
     [Fact]

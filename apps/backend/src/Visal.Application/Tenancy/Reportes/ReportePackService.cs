@@ -57,8 +57,13 @@ public sealed class ReportePackService(
         {
             var consulta = generador.Generar(hoja);
             var resultado = await EjecutarHojaAsync(conn, hoja.Nombre, consulta, tid, ct);
+            // Matriz fiel de encuesta (hoja 5 del Censo): reshape dedicado sobre las filas crudas.
+            if (hoja.Matriz is not null)
+            {
+                resultado = ReporteMatrizEncuesta.Aplicar(hoja, resultado);
+            }
             // Pivote (Ola 3b): reshape puro del resultado agregado "largo" a matriz.
-            if (hoja.Pivote is not null)
+            else if (hoja.Pivote is not null)
             {
                 resultado = ReportePivote.Aplicar(hoja, resultado);
             }
@@ -126,6 +131,24 @@ public sealed class ReportePackService(
 
             // Cabecera institucional (Ola 3): ocupa unas filas arriba; la tabla empieza abajo.
             var filaHeader = EscribirEncabezado(ws, resultado.Encabezado, hoja.Nombre, anchoTabla);
+
+            // Cabecera de grupo (nivel 1, fusionada) para hojas tipo matriz: va una fila arriba
+            // de los nombres de columna y empuja la tabla un renglon hacia abajo.
+            if (hoja.GruposColumna is { Count: > 0 } grupos)
+            {
+                var col = 1;
+                foreach (var g in grupos)
+                {
+                    var span = Math.Max(1, g.Span);
+                    ws.Cell(filaHeader, col).Value = g.Titulo;
+                    ws.Cell(filaHeader, col).Style.Font.Bold = true;
+                    ws.Cell(filaHeader, col).Style.Fill.BackgroundColor = XLColor.LightGray;
+                    ws.Cell(filaHeader, col).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                    if (span > 1) { ws.Range(filaHeader, col, filaHeader, col + span - 1).Merge(); }
+                    col += span;
+                }
+                filaHeader++; // los nombres de columna bajan una fila.
+            }
 
             for (var c = 0; c < hoja.Columnas.Count; c++)
             {

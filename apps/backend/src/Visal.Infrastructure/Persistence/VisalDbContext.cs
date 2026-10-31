@@ -1503,11 +1503,15 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Ocupacion).HasMaxLength(120);
             b.Property(x => x.Regimen).HasMaxLength(120);
             b.Property(x => x.Tutela).HasMaxLength(120);
+            b.Property(x => x.MedicamentoControlado).HasMaxLength(10);
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
             b.Property(x => x.Cie10Codigo).HasMaxLength(30);
             // Campos dinamicos (gestor de campos del tenant): jsonb plano campoKey->valor.
             b.Property(x => x.CamposDinamicosJson).HasColumnType("jsonb");
+            // Barthel denormalizado (desde la escala PP-FO-46): snapshot jsonb + columnas clave.
+            b.Property(x => x.BarthelClasificacion).HasMaxLength(120);
+            b.Property(x => x.BarthelDatosJson).HasColumnType("jsonb");
             // Geografia
             b.Property(x => x.Direccion).HasMaxLength(300);
             b.Property(x => x.Barrio).HasMaxLength(120);

@@ -72,12 +72,57 @@ public sealed class CensoBlueprintTests
     }
 
     [Fact]
-    public void El_consolidado_lleva_pivote_por_mes()
+    public void El_consolidado_es_una_matriz_de_encuesta_fiel()
     {
         var consolidado = CensoBlueprint.Crear().Hojas.Single(h => h.Nombre == "Consolidado Encuesta");
-        Assert.NotNull(consolidado.Pivote);
-        Assert.Equal("pregunta4", consolidado.Pivote!.FilaCampoRef);
-        Assert.Equal("mes", consolidado.Pivote.ColumnaCampoRef);
+        Assert.Null(consolidado.Pivote);
+        Assert.NotNull(consolidado.Matriz);
+
+        // La consulta base trae (mes, pregunta4, pregunta5) en ese orden, acotada a llamadas efectivas.
+        Assert.Equal(ReporteHojaModo.Detalle, consolidado.Modo);
+        Assert.Equal(["mes", "pregunta4", "pregunta5"], consolidado.Columnas.Select(c => c.CampoRef));
+        Assert.Contains(consolidado.Filtros, f => f.CampoRef == "estado" && f.Op == ReporteFiltroOp.Eq);
+
+        var m = consolidado.Matriz!;
+        Assert.Equal(0, m.ColMes);
+        Assert.Equal(1, m.ColP4);
+        Assert.Equal(2, m.ColP5);
+        Assert.Equal(5, m.BloqueP4.Cubos.Count);
+        Assert.Equal(5, m.BloqueP5.Cubos.Count);
+        Assert.Equal("Definitivamente Si", m.BloqueP5.Cubos[0].Etiqueta);
+        Assert.Equal("Llamadas Efectivas", m.TituloTotal);
+    }
+
+    [Fact]
+    public void La_matriz_arma_conteo_y_porcentaje_por_mes()
+    {
+        var consolidado = CensoBlueprint.Crear().Hojas.Single(h => h.Nombre == "Consolidado Encuesta");
+        // Marzo 2026 (202603): 3 llamadas -> P4: dos "5" y un "4"; P5: tres "Definitivamente Si" (5).
+        var crudo = new ReporteHojaResultado(
+            "Consolidado Encuesta",
+            ["Mes", "P4", "P5"],
+            new List<IReadOnlyList<object?>>
+            {
+                new object?[] { 202603, 5, 5 },
+                new object?[] { 202603, 5, 5 },
+                new object?[] { 202603, 4, 5 },
+            });
+
+        var r = ReporteMatrizEncuesta.Aplicar(consolidado, crudo);
+
+        // Cabecera de dos niveles: grupo (esquina + 2 bloques + total) y columnas.
+        Assert.NotNull(r.GruposColumna);
+        Assert.Equal(4, r.GruposColumna!.Count);
+        Assert.Equal(10, r.GruposColumna[1].Span); // bloque P4 = 5 cubos * (conteo+%)
+        // Columnas: Mes + 10 (P4) + 10 (P5) + total vacio = 22.
+        Assert.Equal(22, r.Columnas.Count);
+
+        var fila = Assert.Single(r.Filas);
+        Assert.Equal("Marzo 2026", fila[0]);
+        Assert.Equal(2, fila[1]);                 // conteo "5" de P4
+        Assert.Equal(66.7, (double)fila[2]!);     // 2/3
+        Assert.Equal(1, fila[3]);                 // conteo "4" de P4
+        Assert.Equal(3, fila[^1]);                // Llamadas Efectivas
     }
 
     private sealed class FakeTenant : ITenantContext

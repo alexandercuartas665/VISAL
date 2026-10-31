@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
@@ -109,12 +110,16 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // En vez de lanzar un Chrome por paciente y rendir en serie, juntamos todas las
         // URLs de todos los pacientes para rendirlas de una sola vez (un navegador, en
         // paralelo). Las partes de disco/BD (autorizacion, firma) se resuelven aqui. ---
+        // Ventana del snapshot: acota los formularios-por-tipo y sus sub-documentos a su
+        // periodo (fecha de atencion), para no colar HC/evoluciones de otro mes (v0.137.0).
+        var (pDesde, pHasta) = PeriodoDe(detalle.FiltrosJson);
+
         var allUrls = new List<string>();
         var planes = new List<(PacienteSnapshotDto pac, List<PartePlan> partes)>();
         foreach (var pac in pacientes)
         {
             ct.ThrowIfCancellationRequested();
-            var partes = await ConstruirPlanPacienteAsync(archivo, pac, allUrls, ct);
+            var partes = await ConstruirPlanPacienteAsync(archivo, pac, allUrls, pDesde, pHasta, ct);
             if (partes is null) { continue; } // paciente no existe en el sistema
             planes.Add((pac, partes));
         }
@@ -219,6 +224,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         _ = cfg;
         var incluyeTokenAut = patron.Contains("{autorizacion}", StringComparison.OrdinalIgnoreCase);
         var docsRender = CalcularDocsRender(archivo);
+        var (pDesde, pHasta) = PeriodoDe(detalle.FiltrosJson);
 
         // doc -> pacienteId (los del snapshot que existen en el sistema).
         var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
@@ -250,7 +256,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 .ToList();
             foreach (var codigo in codigos)
             {
-                var partes = await ConstruirPlanAutorizacionAsync(archivo, pacienteId, codigo, hcAut, docsRender, allUrls, ct);
+                var partes = await ConstruirPlanAutorizacionAsync(archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
                 if (partes.Count == 0) { continue; }
                 unidades.Add((pac, codigo, partes));
             }
@@ -481,6 +487,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
     {
         var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
         if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return null; }
+        // Mismo recorte de periodo que el ZIP, para que el contador de la tarjeta y el
+        // reporte de faltantes cuadren con lo que realmente se genera.
+        var (pDesde, pHasta) = PeriodoDe(detalle.FiltrosJson);
 
         var archivos = await _cuenta.ListarItemsAsync(aseguradoraId, ct);
         if (archivos.Count == 0) { return null; }
@@ -561,12 +570,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
             var filas = await _db.HistoriasClinicas.AsNoTracking()
                 .Where(h => idSet.Contains(h.PacienteId) && h.Estado == HistoriaClinicaEstado.Cerrada)
                 .Join(_db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id,
-                      (h, f) => new { h.PacienteId, f.Tipo })
+                      (h, f) => new { h.PacienteId, f.Tipo, Fecha = h.FechaAtencion ?? h.FechaCierre ?? h.CreatedAt })
                 .Where(x => x.Tipo != null && tiposReferenciados.Contains(x.Tipo))
-                .Distinct()
                 .ToListAsync(ct);
             foreach (var x in filas)
             {
+                // Mismo recorte por fecha de atencion que el ZIP (sin rango -> todo).
+                if (!EnRango(x.Fecha, pDesde, pHasta)) { continue; }
                 if (!conFormTipo.TryGetValue(x.Tipo!, out var set)) { conFormTipo[x.Tipo!] = set = new(); }
                 set.Add(x.PacienteId);
             }
@@ -625,7 +635,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// indice, para rendirse todas juntas luego (un solo navegador, en paralelo).
     /// Devuelve null si el paciente no existe en el sistema.</summary>
     private async Task<List<PartePlan>?> ConstruirPlanPacienteAsync(
-        InformeItemDto archivo, PacienteSnapshotDto pac, List<string> allUrls, CancellationToken ct)
+        InformeItemDto archivo, PacienteSnapshotDto pac, List<string> allUrls,
+        DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
         var pid = await _db.Pacientes.AsNoTracking()
             .Where(p => p.NumeroDocumento == pac.Documento)
@@ -656,7 +667,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct))
+                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, desde: desde, hasta: hasta))
                     {
                         partes.Add(new PartePlan(null, allUrls.Count));
                         allUrls.Add(url);
@@ -819,7 +830,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<List<PartePlan>> ConstruirPlanAutorizacionAsync(
         InformeItemDto archivo, Guid pacienteId, string codigo,
         IReadOnlyDictionary<Guid, HashSet<string>> hcAut, string docsRender,
-        List<string> allUrls, CancellationToken ct)
+        List<string> allUrls, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
         var unoCodigo = new[] { codigo };
         var partes = new List<PartePlan>();
@@ -843,7 +854,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
                     foreach (var url in await ResolverUrlsFormularioPorTipoAsync(
-                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, codigo, hcAut))
+                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, codigo, hcAut, desde, hasta))
                     {
                         partes.Add(new PartePlan(null, allUrls.Count));
                         allUrls.Add(url);
@@ -986,7 +997,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<List<string>> ResolverUrlsFormularioPorTipoAsync(
         Guid pacienteId, string? tipo, bool soloUltimo,
         IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, string docsRender, CancellationToken ct,
-        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null)
+        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
+        DateOnly? desde = null, DateOnly? hasta = null)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
 
@@ -1001,6 +1013,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .Select(x => new FilaHcOrden(x.Id, x.Fecha))
             .ToList();
         if (filas.Count == 0) { return new(); }
+
+        // Acota al periodo del snapshot por FECHA DE ATENCION (dia Bogota), para no colar
+        // HC/evoluciones de otro mes. Sin rango (null) -> no filtra (expediente completo).
+        if (desde is not null || hasta is not null)
+        {
+            filas = filas.Where(f => EnRango(f.Fecha, desde, hasta)).ToList();
+            if (filas.Count == 0) { return new(); }
+        }
 
         // Modo "un archivo por autorizacion": solo las HC cuya asignacion pertenece a
         // ESTA autorizacion (mapa HC -> codigos de autorizacion precalculado). Las HC sin
@@ -1060,7 +1080,54 @@ public sealed class TipologiaZipService : ITipologiaZipService
         }
 
         var baseUrl = BaseUrlInterna();
-        return filas.Select(f => $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}").ToList();
+        // Pasa el rango a /p/hc-form para que PaqueteHcImprimible acote tambien los
+        // SUB-documentos anexados (evoluciones/escalas/consentimientos) por su fecha propia.
+        var rango = "";
+        if (desde is DateOnly dr) { rango += $"&desde={dr:yyyy-MM-dd}"; }
+        if (hasta is DateOnly hr) { rango += $"&hasta={hr:yyyy-MM-dd}"; }
+        return filas.Select(f => $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}{rango}").ToList();
+    }
+
+    /// <summary>Periodo (fechaInicio/fechaFin) del snapshot desde su FiltrosJson. Se usa
+    /// para acotar los formularios-por-tipo y sus sub-documentos a la ventana del snapshot
+    /// (mismo criterio que el "Imprimir listado" de Ordenes, v0.137.0). Si el snapshot no
+    /// tiene rango, devuelve (null, null) = sin filtro (compat: expediente completo).</summary>
+    private static (DateOnly? Desde, DateOnly? Hasta) PeriodoDe(string? filtrosJson)
+    {
+        if (string.IsNullOrWhiteSpace(filtrosJson)) { return (null, null); }
+        try
+        {
+            using var doc = JsonDocument.Parse(filtrosJson);
+            var root = doc.RootElement;
+            DateOnly? d = null, h = null;
+            if (root.TryGetProperty("fechaInicio", out var di) && di.ValueKind == JsonValueKind.String
+                && DateOnly.TryParse(di.GetString(), out var dd)) { d = dd; }
+            if (root.TryGetProperty("fechaFin", out var hf) && hf.ValueKind == JsonValueKind.String
+                && DateOnly.TryParse(hf.GetString(), out var hh)) { h = hh; }
+            return (d, h);
+        }
+        catch { return (null, null); }
+    }
+
+    /// <summary>True si la fecha efectiva cae dentro del rango, con el MISMO criterio y
+    /// frontera (dia local Bogota UTC-5) que PaqueteHcImprimible.EnRangoImpresion. Sin rango
+    /// (null, null) o fecha null => incluye.</summary>
+    private static bool EnRango(DateTimeOffset? efectiva, DateOnly? desde, DateOnly? hasta)
+    {
+        if (desde is null && hasta is null) { return true; }
+        if (efectiva is not DateTimeOffset fa) { return true; }
+        var bogota = TimeSpan.FromHours(-5);
+        if (desde is DateOnly d)
+        {
+            var dStart = new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), bogota).ToUniversalTime();
+            if (fa < dStart) { return false; }
+        }
+        if (hasta is DateOnly h)
+        {
+            var dEnd = new DateTimeOffset(h.ToDateTime(TimeOnly.MaxValue), bogota).ToUniversalTime();
+            if (fa > dEnd) { return false; }
+        }
+        return true;
     }
 
     /// <summary>URL base interna del propio servidor para que Puppeteer navegue a las

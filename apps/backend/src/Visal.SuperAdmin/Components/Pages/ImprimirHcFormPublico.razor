@@ -84,7 +84,7 @@ else if (_tenantId is Guid)
            si el archivo tiene ese tipo. Asi "Formulario por tipo" no arrastra escalas/
            consentimientos no pedidos. Sin ?docs= (compat) cae al set completo historico.
            NO se incluyen ordenes (MED/SRV/...), que van en archivos aparte. *@
-        <PaqueteHcImprimible HcId="HcId" Docs="@_docs" AutoEmitir="false" AutoPrint="false" />
+        <PaqueteHcImprimible HcId="HcId" Docs="@_docs" Desde="_desde" Hasta="_hasta" AutoEmitir="false" AutoPrint="false" />
     </div>
     @* Marcador de render listo para que Puppeteer (o un wait) sepa que termino. *@
     <div id="hc-form-ready" style="display:none">ok</div>
@@ -98,6 +98,11 @@ else if (_tenantId is Guid)
     private IDisposable? _scope;
     // Set de docs a renderizar. Default historico (set completo) si no viene ?docs=.
     private string _docs = "HC,EVO,ESC,CON";
+    // Rango OPCIONAL (?desde=&hasta=) para acotar los sub-documentos anexados por su
+    // fecha de atencion al periodo del snapshot, igual que el "Imprimir listado" de
+    // Ordenes (v0.137.0). Sin rango -> se renderiza el expediente completo (compat).
+    private DateOnly? _desde;
+    private DateOnly? _hasta;
 
     protected override void OnInitialized()
     {
@@ -107,6 +112,8 @@ else if (_tenantId is Guid)
         {
             _docs = d.ToString();
         }
+        if (query.TryGetValue("desde", out var ds) && DateOnly.TryParse(ds.ToString(), out var dd)) { _desde = dd; }
+        if (query.TryGetValue("hasta", out var hs) && DateOnly.TryParse(hs.ToString(), out var hh)) { _hasta = hh; }
         var data = Tokens.Consume(token ?? "");
         if (data is not (Guid hc, Guid tenant) || hc != HcId)
         {

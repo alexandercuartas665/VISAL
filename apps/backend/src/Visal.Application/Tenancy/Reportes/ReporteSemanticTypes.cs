@@ -180,6 +180,12 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("puntaje_barthel", "Puntaje Barthel", nameof(Paciente.BarthelTotal), ReportFieldKind.Integer),
                 new("barthel_clasificacion", "Barthel - Grado de dependencia", nameof(Paciente.BarthelClasificacion), ReportFieldKind.Text),
                 new("barthel_fecha", "Barthel - Fecha", nameof(Paciente.BarthelActualizadoEn), ReportFieldKind.DateTime),
+                // Fallecimiento / mortalidad: la hoja "Indice de Mortalidad" cuenta por mes de deceso.
+                new("fecha_fallecimiento", "Fecha de fallecimiento", nameof(Paciente.FechaFallecimiento), ReportFieldKind.DateTime),
+                new("mes_fallecimiento", "Mes de fallecimiento", nameof(Paciente.FechaFallecimiento), ReportFieldKind.Text, Derivacion: ReportDerivacion.AnioMes),
+                new("certificado_visal", "Certificado VISAL", nameof(Paciente.CertificadoVisal), ReportFieldKind.Text),
+                new("motivo_fallecimiento", "Motivo del deceso", nameof(Paciente.MotivoFallecimiento), ReportFieldKind.Text),
+                new("fallecimiento_reportado_por", "Deceso reportado por", nameof(Paciente.FallecimientoReportadoPor), ReportFieldKind.Text),
                 new("activo", "Activo", nameof(Paciente.Activo), ReportFieldKind.Bool),
                 new("sede_id", "Sede (ID)", nameof(Paciente.SedeAtencionId), ReportFieldKind.Guid),
             ],

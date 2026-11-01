@@ -29,6 +29,7 @@ public static class CensoBlueprint
             BasePacientes(),
             Satisfaccion(),
             IndiceMorbilidad(),
+            IndiceMortalidad(),
             ConsolidadoEncuesta(),
         };
 
@@ -221,6 +222,27 @@ public static class CensoBlueprint
     // trae las filas crudas (mes, pregunta4, pregunta5) ya acotadas a llamadas EFECTIVAS (Estado
     // "Realizada") y el reshaper arma, por mes, el bloque P4 (calificacion 5..1), el bloque P5
     // (recomendacion, textual) y la columna "Llamadas Efectivas". El % es conteo/total del mes.
+    // Hoja "Indice de Mortalidad": cuantos pacientes fallecen por mes (pregunta del Excel hoja 5).
+    // Agrupa los pacientes con Estado "FALLECIMIENTO" por el mes del deceso (fecha_fallecimiento);
+    // filtrable por Sede y por rango de fecha de fallecimiento via los parametros del censo.
+    private static ReporteHojaDef IndiceMortalidad() =>
+        ReporteHojaDef.Agregado("Indice de Mortalidad", "paciente",
+            groupBy:
+            [
+                new("mes_fallecimiento", "Mes"),
+            ],
+            agregados:
+            [
+                new(ReporteAgregadoFunc.Count, null, "Pacientes Fallecidos"),
+            ],
+            filtros:
+            [
+                new("estado", ReporteFiltroOp.Eq, ["FALLECIMIENTO"]),
+                new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_fallecimiento", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+            ],
+            orden: [new("mes_fallecimiento")]);
+
     private static ReporteHojaDef ConsolidadoEncuesta() =>
         ReporteHojaDef.Detalle("Consolidado Encuesta", "encuesta_satisfaccion",
             columnas:

@@ -484,6 +484,10 @@
                         {
                             <button class="pac-tab @(_tab == "documentos" ? "active" : "")" @onclick="OnAbrirDocumentosTab" disabled="@(_id is null)">@ft.Titulo@(_docs.Count > 0 ? $" ({_docs.Count})" : "")</button>
                         }
+                        else if (ft.TabKey == "mortalidad")
+                        {
+                            <button class="pac-tab @(_tab == "mortalidad" ? "active" : "") @(_fallecido ? "pac-tab-muerte" : "")" @onclick='@(() => _tab = "mortalidad")' disabled="@(_id is null)" title="Registro de deceso del paciente">@ft.Titulo@(_fallecido ? " †" : "")</button>
+                        }
                         else
                         {
                             <button class="pac-tab @(_tab == ft.TabKey ? "active" : "")" @onclick="@(() => _tab = ft.TabKey)">@ft.Titulo</button>
@@ -491,8 +495,8 @@
                     }
                 </div>
 
-                @* ===== Cuerpo del tab (no-documentos): campos fijos + dinamicos colocados por el tenant ===== *@
-                @if (_tab != "documentos")
+                @* ===== Cuerpo del tab (no-documentos / no-mortalidad): campos fijos + dinamicos ===== *@
+                @if (_tab != "documentos" && _tab != "mortalidad")
                 {
                     @foreach (var ch in _chunks)
                     {
@@ -530,6 +534,34 @@
                     else if (_chunks.Count == 0)
                     {
                         <div class="ase-empty">Este tab no tiene campos. Usa "Configurar campos" para agregarlos o mover otros aqui.</div>
+                    }
+                }
+
+                @* ===== TAB MORTALIDAD (registro de deceso) ===== *@
+                @if (_tab == "mortalidad")
+                {
+                    <div class="ase-card-h">Mortalidad &mdash; Registro de deceso</div>
+                    @if (_fallecido)
+                    {
+                        <div class="mort-card">
+                            <div class="mort-row"><span class="mort-lbl">Estado</span><span class="mort-val mort-dead">FALLECIMIENTO</span></div>
+                            <div class="mort-row"><span class="mort-lbl">Fecha y hora</span><span class="mort-val">@(_fFechaFallec?.ToString("dd/MM/yyyy HH:mm") ?? "-")</span></div>
+                            <div class="mort-row"><span class="mort-lbl">Reportado por</span><span class="mort-val">@(string.IsNullOrWhiteSpace(_fReportadoPor) ? "-" : _fReportadoPor)</span></div>
+                            <div class="mort-row"><span class="mort-lbl">Certificado VISAL</span><span class="mort-val">@(_fCertVisal ?? "-")</span></div>
+                            <div class="mort-row"><span class="mort-lbl">Motivo del deceso</span><span class="mort-val" style="font-weight:500;text-align:right;white-space:pre-wrap;">@(string.IsNullOrWhiteSpace(_fMotivo) ? "-" : _fMotivo)</span></div>
+                        </div>
+                        <div class="text-muted" style="font-size:11.5px;margin-top:10px;">
+                            El paciente quedo cerrado por deceso: no se agregan mas servicios. Si el certificado es VISAL, el PDF aparece en el tab <b>Documentos</b> con tipologia "Certificado de Defuncion".
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="ase-empty" style="margin-bottom:14px;">
+                            Registra el fallecimiento del paciente. Al confirmar, el estado clinico pasa a <b>FALLECIMIENTO</b> y el paciente se <b>cierra automaticamente</b> (no se podran agregar mas servicios). Alimenta la hoja "Indice de Mortalidad" del CENSO.
+                        </div>
+                        <button class="btn btn-danger btn-sm" @onclick="AbrirModalDeceso" disabled="@_busy">
+                            &#10013; Registrar deceso
+                        </button>
                     }
                 }
 
@@ -1169,7 +1201,70 @@
     .bthl-item { display:flex; flex-direction:column; gap:2px; font-size:12px; border-bottom:1px dotted #e2e8f0; padding:3px 0 5px; }
     .bthl-item-lbl { color:#1e40af; font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; }
     .bthl-item-val { color:#334155; line-height:1.3; }
+    /* Mortalidad */
+    .pac-tab-muerte { color:#b91c1c; }
+    .mort-card { border:1px solid #fecaca; background:#fef2f2; border-radius:10px; padding:12px 14px; max-width:520px; }
+    .mort-row { display:flex; justify-content:space-between; gap:16px; padding:5px 0; border-bottom:1px dashed #f1d5d5; }
+    .mort-row:last-child { border-bottom:none; }
+    .mort-lbl { color:#64748b; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .mort-val { color:#334155; font-size:13px; font-weight:600; }
+    .mort-val.mort-dead { color:#b91c1c; }
+    .mort-upl-l { display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:4px; }
 </style>
+
+@* ===== Modal Registro de deceso ===== *@
+@if (_mortModal)
+{
+    <div class="cie-backdrop" @onclick="CerrarModalDeceso"></div>
+    <div class="cie-modal" style="width:560px;">
+        <div class="cie-modal-h">
+            <h3>Registrar deceso</h3>
+            <button class="cie-modal-close" @onclick="CerrarModalDeceso">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="text-muted" style="font-size:12px;margin-bottom:14px;">
+                Al confirmar, el estado clinico pasa a <b>FALLECIMIENTO</b> y el paciente se <b>cierra automaticamente</b> (no se podran agregar mas servicios). Alimenta la hoja "Indice de Mortalidad" del CENSO.
+            </div>
+            <div class="ase-form">
+                <div class="ase-f">
+                    <label>Fecha y hora del fallecimiento</label>
+                    <input type="datetime-local" class="form-control form-control-sm" @bind="_mortFecha" />
+                </div>
+                <div class="ase-f">
+                    <label>&iquest;Certificado de defuncion VISAL?</label>
+                    <select class="form-select form-select-sm" @bind="_mortCertVisal">
+                        <option value="NO">NO</option>
+                        <option value="SI">SI (adjuntar PDF)</option>
+                    </select>
+                </div>
+            </div>
+            <div style="margin-top:14px;">
+                <label class="mort-upl-l">Motivo / causa del deceso</label>
+                <textarea class="form-control form-control-sm" rows="3" @bind="_mortMotivo"
+                          placeholder="Describe la causa o motivo del fallecimiento"></textarea>
+            </div>
+            @if (string.Equals(_mortCertVisal, "SI", StringComparison.OrdinalIgnoreCase))
+            {
+                <div style="margin-top:14px;">
+                    <label class="mort-upl-l">PDF del certificado de defuncion</label>
+                    <InputFile class="form-control form-control-sm" accept=".pdf" OnChange="OnCertificadoSelected" />
+                    @if (_mortPdfNombre is not null)
+                    {
+                        <div class="text-muted" style="font-size:11.5px;margin-top:4px;">Seleccionado: @_mortPdfNombre</div>
+                    }
+                </div>
+            }
+            @if (_mortError is not null)
+            {
+                <div class="alert alert-danger" style="margin-top:14px;padding:8px 12px;font-size:12.5px;">@_mortError</div>
+            }
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e2e8f0;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarModalDeceso" disabled="@_busy">Cancelar</button>
+            <button class="btn btn-danger btn-sm" @onclick="RegistrarDeceso" disabled="@_busy">&#10013; Registrar deceso y cerrar</button>
+        </div>
+    </div>
+}
 
 @* ===== Modal Importar pacientes desde Excel ===== *@
 @if (_showImportModal)
@@ -1665,6 +1760,22 @@
     private string? _barthelClasif;
     private DateTimeOffset? _barthelFecha;
     private Dictionary<string, string?> _barthelDatos = new();
+
+    // Mortalidad: estado del deceso ya registrado (solo lectura) + formulario de captura.
+    private bool _fallecido;
+    private DateTime? _fFechaFallec;
+    private string? _fReportadoPor;
+    private string? _fCertVisal;
+    private string? _fMotivo;
+    // Formulario de captura del deceso (en modal).
+    private bool _mortModal;
+    private DateTime? _mortFecha;
+    private string _mortCertVisal = "NO";
+    private string? _mortMotivo;
+    private byte[]? _mortPdfBytes;
+    private string? _mortPdfNombre;
+    private string? _mortPdfContentType;
+    private string? _mortError;
     // Items del Indice de Barthel: clave en el snapshot -> etiqueta legible para la tarjeta.
     private static readonly (string Key, string Label)[] BarthelItems =
     {
@@ -2145,6 +2256,91 @@
         finally { _busy = false; }
     }
 
+    // Abre el modal de registro de deceso con el formulario limpio.
+    private void AbrirModalDeceso()
+    {
+        if (_id is null) { return; }
+        _mortError = null; _mortFecha = null; _mortCertVisal = "NO"; _mortMotivo = null;
+        _mortPdfBytes = null; _mortPdfNombre = null; _mortPdfContentType = null;
+        _mortModal = true;
+    }
+
+    private void CerrarModalDeceso() => _mortModal = false;
+
+    // Lee el PDF del certificado a memoria al seleccionarlo (el stream de IBrowserFile solo es
+    // valido durante el handler). Se persiste a disco al confirmar el deceso.
+    private async Task OnCertificadoSelected(InputFileChangeEventArgs e)
+    {
+        _mortError = null;
+        try
+        {
+            var f = e.File;
+            const long MAX = 20L * 1024 * 1024;
+            if (f.Size > MAX) { _mortError = "El PDF supera 20 MB."; _mortPdfBytes = null; _mortPdfNombre = null; return; }
+            using var ms = new MemoryStream();
+            await using (var rs = f.OpenReadStream(MAX)) { await rs.CopyToAsync(ms); }
+            _mortPdfBytes = ms.ToArray();
+            _mortPdfNombre = f.Name;
+            _mortPdfContentType = string.IsNullOrWhiteSpace(f.ContentType) ? "application/pdf" : f.ContentType;
+        }
+        catch (Exception ex) { _mortError = "No se pudo leer el PDF: " + ex.Message; _mortPdfBytes = null; _mortPdfNombre = null; }
+    }
+
+    /// <summary>Registra el deceso: valida, adjunta el PDF (si certificado VISAL = SI), fija
+    /// Estado FALLECIMIENTO y cierra la admision. Alimenta la hoja de mortalidad del CENSO.</summary>
+    private async Task RegistrarDeceso()
+    {
+        if (_id is not Guid id) { return; }
+        _mortError = null;
+        if (_mortFecha is null) { _mortError = "Indica la fecha y hora del fallecimiento."; return; }
+        var certSi = string.Equals(_mortCertVisal, "SI", StringComparison.OrdinalIgnoreCase);
+        if (certSi && _mortPdfBytes is null) { _mortError = "Adjunta el PDF del certificado o marca 'NO'."; return; }
+
+        _busy = true;
+        try
+        {
+            var actor = await ResolverActorAsync();
+            var nombreRep = _usuariosTenant.FirstOrDefault(u => u.PlatformUserId == actor) is { } u ? NombreUsr(u) : null;
+
+            // Adjunta el PDF del certificado por el mecanismo de documentos del paciente.
+            if (certSi && _mortPdfBytes is not null)
+            {
+                var nombreDisco = $"{Guid.NewGuid()}.pdf";
+                var dir = Path.Combine(Env.WebRootPath, "uploads", "notas");
+                Directory.CreateDirectory(dir);
+                await File.WriteAllBytesAsync(Path.Combine(dir, nombreDisco), _mortPdfBytes);
+                await NotaSvc.AdjuntarDocumentoPacienteAsync(new AdjuntarDocumentoPacienteRequest(
+                    id,
+                    _mortPdfNombre ?? "Certificado de defuncion.pdf",
+                    $"/uploads/notas/{nombreDisco}",
+                    _mortPdfContentType ?? "application/pdf",
+                    _mortPdfBytes.LongLength,
+                    "Certificado de Defuncion",
+                    null), actor);
+            }
+
+            var fecha = AOffset(_mortFecha)!.Value;
+            var ok = await Svc.RegistrarDecesoAsync(new RegistrarDecesoRequest(id, fecha, certSi, actor, nombreRep, _mortMotivo), actor);
+            if (!ok) { _mortError = "No se pudo registrar el deceso."; return; }
+
+            // Refleja el nuevo estado en la ficha sin recargar todo.
+            _estadoAdmision = "Cerrado";
+            _estado = "FALLECIMIENTO";
+            _fallecido = true;
+            _fFechaFallec = _mortFecha;
+            _fReportadoPor = nombreRep;
+            _fCertVisal = certSi ? "SI" : "NO";
+            _fMotivo = string.IsNullOrWhiteSpace(_mortMotivo) ? null : _mortMotivo.Trim();
+            _mortPdfBytes = null; _mortPdfNombre = null; _mortCertVisal = "NO"; _mortMotivo = null;
+            _mortModal = false;
+            _ok = "Deceso registrado. El paciente quedo cerrado.";
+            await LoadLista();
+            await RecargarDocsPacienteAsync();
+        }
+        catch (Exception ex) { _mortError = "No se pudo registrar el deceso: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
     /// <summary>Reabre el paciente. Solo funciona si el usuario tiene permiso.</summary>
     private async Task Reabrir()
     {
@@ -2295,6 +2491,8 @@
         _medContratado = "";
         _medControlado = null;
         _barthelTotal = null; _barthelClasif = null; _barthelFecha = null; _barthelDatos = new();
+        _fallecido = false; _fFechaFallec = null; _fReportadoPor = null; _fCertVisal = null; _fMotivo = null;
+        _mortModal = false; _mortFecha = null; _mortCertVisal = "NO"; _mortMotivo = null; _mortPdfBytes = null; _mortPdfNombre = null; _mortPdfContentType = null; _mortError = null;
         _cie10Codigo = null;
         _dir = _barrio = _ciudad = null;
         _codPaisTel = "+57";
@@ -2362,6 +2560,12 @@
         _medControlado = d.MedicamentoControlado;
         _barthelTotal = d.BarthelTotal; _barthelClasif = d.BarthelClasificacion;
         _barthelFecha = d.BarthelActualizadoEn; _barthelDatos = ParseBarthel(d.BarthelDatosJson);
+        // Mortalidad: datos del deceso ya registrado (solo lectura).
+        _fFechaFallec = d.FechaFallecimiento?.ToOffset(Bog).DateTime;
+        _fReportadoPor = d.FallecimientoReportadoPor; _fCertVisal = d.CertificadoVisal; _fMotivo = d.MotivoFallecimiento;
+        _fallecido = d.FechaFallecimiento is not null;
+        // Reinicia el formulario de captura.
+        _mortModal = false; _mortFecha = null; _mortCertVisal = "NO"; _mortMotivo = null; _mortPdfBytes = null; _mortPdfNombre = null; _mortPdfContentType = null; _mortError = null;
         _cie10Codigo = d.Cie10Codigo;
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
         _codPaisTel = string.IsNullOrWhiteSpace(d.CodigoPaisTelefono) ? "+57" : d.CodigoPaisTelefono!;

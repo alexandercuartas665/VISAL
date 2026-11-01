@@ -84,7 +84,7 @@
         {
             <div class="cd-col-h">
                 <span>Campos de "@(_fichas.FirstOrDefault(x => x.TabKey == _selTab)?.Titulo ?? _selTab)"</span>
-                @if (_selTab != "documentos")
+                @if (_selTab != "documentos" && _selTab != "mortalidad")
                 {
                     <button class="btn btn-primary btn-sm" @onclick="() => NuevoCampo(_selTab)">+ Campo</button>
                 }
@@ -93,6 +93,10 @@
             @if (_selTab == "documentos")
             {
                 <div class="text-muted" style="padding:16px;font-size:12px;">El tab Documentos muestra los archivos del paciente; no admite campos.</div>
+            }
+            else if (_selTab == "mortalidad")
+            {
+                <div class="text-muted" style="padding:16px;font-size:12px;">El tab Mortalidad captura el deceso del paciente; no admite campos.</div>
             }
             else if (_filas.Count == 0)
             {
@@ -149,7 +153,7 @@
                                 </td>
                                 <td>
                                     <select class="form-select form-select-sm" value="@f.TabKey" @onchange="e => MoverFilaATabAsync(f, e.Value?.ToString())">
-                                        @foreach (var tb in _fichas.Where(x => x.TabKey != "documentos"))
+                                        @foreach (var tb in _fichas.Where(x => x.TabKey != "documentos" && x.TabKey != "mortalidad"))
                                         {
                                             <option value="@tb.TabKey" selected="@(tb.TabKey == f.TabKey)">@tb.Titulo</option>
                                         }

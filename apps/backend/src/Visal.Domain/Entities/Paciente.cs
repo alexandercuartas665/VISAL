@@ -184,6 +184,23 @@ public class Paciente : TenantEntity
     /// <summary>Fecha/hora (cierre) de la ultima escala Barthel volcada a este paciente. Null si no hay.</summary>
     public DateTimeOffset? BarthelActualizadoEn { get; set; }
 
+    // ===== Fallecimiento / Mortalidad =====
+    // Se capturan desde la pestana "Mortalidad" de la ficha (Admision). Al registrar el deceso
+    // el Estado clinico pasa a "FALLECIMIENTO" y la admision se cierra automaticamente (no se
+    // agregan mas servicios). Alimentan la hoja "Indice de Mortalidad" del CENSO (conteo por mes).
+    /// <summary>Fecha y hora del fallecimiento reportadas. Null si el paciente no ha fallecido.
+    /// Define el mes de la hoja de mortalidad del CENSO.</summary>
+    public DateTimeOffset? FechaFallecimiento { get; set; }
+    /// <summary>Usuario (id) que reporto el deceso. Se toma de la sesion.</summary>
+    public Guid? FallecimientoReportadoPorId { get; set; }
+    /// <summary>Nombre del usuario que reporto el deceso (denormalizado para el reporte).</summary>
+    public string? FallecimientoReportadoPor { get; set; }
+    /// <summary>Si VISAL emitio el certificado de defuncion (SI/NO). Cuando es "SI" se adjunta el
+    /// PDF por el mecanismo de documentos del paciente (tipologia "Certificado de Defuncion").</summary>
+    public string? CertificadoVisal { get; set; }
+    /// <summary>Motivo / causa del fallecimiento (texto libre multilinea). Columna text.</summary>
+    public string? MotivoFallecimiento { get; set; }
+
     // ===== Estado del registro =====
     public bool Activo { get; set; } = true;
 

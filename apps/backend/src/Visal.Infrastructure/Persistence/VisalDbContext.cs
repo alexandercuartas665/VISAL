@@ -1512,6 +1512,10 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Barthel denormalizado (desde la escala PP-FO-46): snapshot jsonb + columnas clave.
             b.Property(x => x.BarthelClasificacion).HasMaxLength(120);
             b.Property(x => x.BarthelDatosJson).HasColumnType("jsonb");
+            // Fallecimiento / mortalidad (pestana Mortalidad de la ficha).
+            b.Property(x => x.FallecimientoReportadoPor).HasMaxLength(200);
+            b.Property(x => x.CertificadoVisal).HasMaxLength(10);
+            b.Property(x => x.MotivoFallecimiento).HasColumnType("text");
             // Geografia
             b.Property(x => x.Direccion).HasMaxLength(300);
             b.Property(x => x.Barrio).HasMaxLength(120);

@@ -28,7 +28,7 @@ public sealed class CensoBlueprintTests
     {
         var req = CensoBlueprint.Crear();
         Assert.Equal("Censo 2026", req.Nombre);
-        Assert.Equal(5, req.Hojas.Count);
+        Assert.Equal(6, req.Hojas.Count);
 
         var gen = Generador();
         foreach (var hoja in req.Hojas)
@@ -69,6 +69,19 @@ public sealed class CensoBlueprintTests
         var sql = gen.Generar(baseConParams).Sql;
         Assert.Contains("BETWEEN", sql);
         Assert.Contains("sede_atencion_id", sql);
+    }
+
+    [Fact]
+    public void La_hoja_de_mortalidad_cuenta_fallecidos_por_mes()
+    {
+        var hoja = CensoBlueprint.Crear().Hojas.Single(h => h.Nombre == "Indice de Mortalidad");
+        Assert.Equal(ReporteHojaModo.Agregado, hoja.Modo);
+        Assert.Contains(hoja.GroupBy, g => g.CampoRef == "mes_fallecimiento");
+        Assert.Contains(hoja.Agregados, a => a.Func == ReporteAgregadoFunc.Count);
+        Assert.Contains(hoja.Filtros, f => f.CampoRef == "estado" && f.Op == ReporteFiltroOp.Eq);
+        // Genera SQL valido con el filtro de tenant.
+        var sql = Generador().Generar(hoja).Sql;
+        Assert.Contains("@_tenantId", sql);
     }
 
     [Fact]

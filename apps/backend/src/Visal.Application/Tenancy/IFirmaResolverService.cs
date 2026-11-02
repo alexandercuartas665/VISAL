@@ -83,4 +83,10 @@ public sealed record PrefillProfesionalDatosDto(
     string? FirmaUrl,
     string? Ciudad = null,
     string? Celular = null,
-    string? TipoProfesional = null);
+    string? TipoProfesional = null,
+    // Tipo de documento del profesional (CC, CE, ...). Lo usa la impresion de la
+    // Orden de Incapacidad para imprimir "Tipo y numero de identificacion del profesional".
+    string? TipoDocumento = null,
+    // Primera subcategoria asignada al profesional (su "especialidad"). La resuelve el
+    // servicio tomando la mas antigua por fecha de asignacion. Null si no tiene ninguna.
+    string? Especialidad = null);

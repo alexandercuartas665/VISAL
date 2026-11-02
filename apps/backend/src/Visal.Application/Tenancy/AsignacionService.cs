@@ -42,11 +42,19 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         var p = await db.Pacientes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
         if (p is null) { return null; }
 
-        // Sede del paciente (nombre)
-        string? sedeNombre = null;
+        // Sede del paciente: nombre + datos del prestador (NIT, codigo de habilitacion,
+        // ciudad y departamento) que la impresion de la Orden de Incapacidad necesita.
+        string? sedeNombre = null, sedeNit = null, sedeCodHab = null, sedeCiudad = null, sedeDepto = null;
         if (p.SedeAtencionId is Guid sid)
         {
-            sedeNombre = await db.Sucursales.AsNoTracking().Where(s => s.Id == sid).Select(s => s.Nombre).FirstOrDefaultAsync(ct);
+            var sede = await db.Sucursales.AsNoTracking().Where(s => s.Id == sid)
+                .Select(s => new { s.Nombre, s.Nit, s.CodigoHabilitacion, s.Ciudad, s.Departamento })
+                .FirstOrDefaultAsync(ct);
+            if (sede is not null)
+            {
+                sedeNombre = sede.Nombre; sedeNit = sede.Nit; sedeCodHab = sede.CodigoHabilitacion;
+                sedeCiudad = sede.Ciudad; sedeDepto = sede.Departamento;
+            }
         }
 
         // Contratos: unica fuente de verdad es la tabla N:M paciente_contratos
@@ -118,7 +126,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             ResolverCatalogo(p.ClasificacionPacienteId),
             ResolverCatalogo(p.ClasificacionGrupoPatologiaId),
             ResolverCatalogo(p.TipoTutelaId),
-            ResolverCatalogo(p.MedContratadoId));
+            ResolverCatalogo(p.MedContratadoId),
+            sedeNit, sedeCodHab, sedeCiudad, sedeDepto);
     }
 
     public async Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default)

@@ -1,5 +1,7 @@
 @using Visal.Application.Tenancy
+@using Visal.Domain.Enums
 @inject IIncapacidadService IncSvc
+@inject ICatalogoPacienteService CatSvc
 @inject IJSRuntime JS
 
 @*
@@ -50,7 +52,7 @@ else
                 <input type="date" class="form-control form-control-sm"
                        @bind="_borrador.FechaHasta" @bind:event="oninput" />
             </div>
-            <div class="oi-f oi-c-1">
+            <div class="oi-f oi-c-2">
                 <label>Dias</label>
                 <input class="form-control form-control-sm text-center" readonly
                        value="@DiasCalculados(_borrador.FechaDesde, _borrador.FechaHasta)" />
@@ -59,10 +61,30 @@ else
                 <label>Tipo</label>
                 <select class="form-select form-select-sm" @bind="_borrador.Tipo">
                     <option value="">SELECCIONE</option>
-                    <option value="ENFERMEDAD GENERAL">ENFERMEDAD GENERAL</option>
-                    <option value="ACCIDENTE DE TRABAJO">ACCIDENTE DE TRABAJO</option>
+                    @foreach (var t in _tiposIncapacidad)
+                    {
+                        <option value="@t">@t</option>
+                    }
                 </select>
             </div>
+        </div>
+        <div class="oi-row">
+            <div class="oi-f oi-c-4">
+                <label>Inicial / Pr&oacute;rroga</label>
+                <select class="form-select form-select-sm" @bind="_borrador.InicialOProrroga">
+                    <option value="">SELECCIONE</option>
+                    <option value="INICIAL">INICIAL</option>
+                    <option value="PRORROGA">PRORROGA</option>
+                </select>
+            </div>
+            <div class="oi-f oi-c-3">
+                <label>Retroactiva</label>
+                <label class="oi-chk">
+                    <input type="checkbox" class="form-check-input" @bind="_borrador.Retroactiva" />
+                    <span>@(_borrador.Retroactiva ? "SI" : "NO")</span>
+                </label>
+            </div>
+            <div class="oi-f oi-c-4"></div>
             <div class="oi-f oi-c-1 oi-action-col">
                 <button class="btn btn-primary btn-sm oi-action-add" title="Guardar"
                         @onclick="AgregarAsync"
@@ -82,14 +104,16 @@ else
                         <th class="text-center" style="width:110px">Desde</th>
                         <th class="text-center" style="width:110px">Hasta</th>
                         <th class="text-center" style="width:60px">Dias</th>
-                        <th style="width:200px">Tipo</th>
+                        <th style="width:180px">Tipo</th>
+                        <th class="text-center" style="width:100px">Ini/Pro</th>
+                        <th class="text-center" style="width:80px">Retroact.</th>
                         <th class="text-center" style="width:50px"></th>
                     </tr>
                 </thead>
                 <tbody>
                     @if (_items.Count == 0)
                     {
-                        <tr><td colspan="7" class="text-center text-muted oi-empty-row">Sin incapacidades agregadas.</td></tr>
+                        <tr><td colspan="9" class="text-center text-muted oi-empty-row">Sin incapacidades agregadas.</td></tr>
                     }
                     else
                     {
@@ -107,6 +131,8 @@ else
                                         <span class="oi-tipo-pill @(it.Tipo == "ACCIDENTE DE TRABAJO" ? "oi-tipo-trab" : "oi-tipo-gen")">@it.Tipo</span>
                                     }
                                 </td>
+                                <td class="text-center">@(string.IsNullOrWhiteSpace(it.InicialOProrroga) ? "-" : it.InicialOProrroga)</td>
+                                <td class="text-center">@(it.Retroactiva ? "SI" : "NO")</td>
                                 <td class="text-center">
                                     <button class="btn btn-sm btn-link text-danger"
                                             @onclick="() => EliminarAsync(it)"
@@ -130,9 +156,12 @@ else
     .oi-row { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; margin-bottom:12px; align-items:end; }
     .oi-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:4px; display:block; }
     .oi-c-1  { grid-column: span 1; }
+    .oi-c-2  { grid-column: span 2; }
     .oi-c-3  { grid-column: span 3; }
     .oi-c-4  { grid-column: span 4; }
     .oi-c-12 { grid-column: span 12; }
+    .oi-chk { display:flex; align-items:center; gap:8px; height:32px; font-size:13px; font-weight:600; color:#334155; }
+    .oi-chk input { width:18px; height:18px; }
     .oi-action-col { display:flex; align-items:stretch; }
     .oi-action-add { width:100%; align-self:stretch; height:100%; min-height:32px; }
     .oi-grid-wrap { margin-top:14px; border:1px solid #e2e8f0; border-radius:6px; overflow:auto; }
@@ -160,7 +189,26 @@ else
     private List<IncapacidadItemDto> _items = new();
     private bool _agregando;
 
+    // Valores del select "Tipo": catalogo configurable TipoIncapacidad (/cfg-pacientes).
+    // Si el catalogo esta vacio (tenant sin sembrar), se cae a los 2 valores historicos
+    // para que el formulario siga funcionando.
+    private List<string> _tiposIncapacidad = new();
+
     private BorradorInc _borrador = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var cat = await CatSvc.ListAsync(CatalogoPacienteTipo.TipoIncapacidad);
+            _tiposIncapacidad = cat.Where(c => c.Activo).Select(c => c.Nombre).ToList();
+        }
+        catch { _tiposIncapacidad = new(); }
+        if (_tiposIncapacidad.Count == 0)
+        {
+            _tiposIncapacidad = new() { "ENFERMEDAD GENERAL", "ACCIDENTE DE TRABAJO" };
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -204,7 +252,9 @@ else
                 _borrador.FechaDesde,
                 _borrador.FechaHasta,
                 dias,
-                _borrador.Tipo), Guid.Empty);
+                _borrador.Tipo,
+                _borrador.InicialOProrroga,
+                _borrador.Retroactiva), Guid.Empty);
             _items.Add(creado);
             await NotifyCount();
             await NotifyItemsChanged();
@@ -239,5 +289,7 @@ else
         public DateOnly? FechaDesde { get; set; }
         public DateOnly? FechaHasta { get; set; }
         public string? Tipo { get; set; }
+        public string? InicialOProrroga { get; set; }
+        public bool Retroactiva { get; set; }
     }
 }

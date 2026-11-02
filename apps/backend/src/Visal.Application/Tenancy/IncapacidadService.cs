@@ -19,7 +19,8 @@ public sealed class IncapacidadService(
             .ThenBy(x => x.CreatedAt)
             .Select(x => new IncapacidadItemDto(
                 x.Id, x.HistoriaClinicaId, x.Motivo,
-                x.FechaDesde, x.FechaHasta, x.Dias, x.Tipo, x.Orden))
+                x.FechaDesde, x.FechaHasta, x.Dias, x.Tipo, x.Orden,
+                x.InicialOProrroga, x.Retroactiva))
             .ToListAsync(ct);
     }
 
@@ -46,6 +47,8 @@ public sealed class IncapacidadService(
             FechaHasta = req.FechaHasta,
             Dias = req.Dias,
             Tipo = Trim(req.Tipo),
+            InicialOProrroga = Trim(req.InicialOProrroga),
+            Retroactiva = req.Retroactiva,
             Orden = siguiente
         };
         db.HistoriaClinicaIncapacidades.Add(entity);
@@ -54,7 +57,8 @@ public sealed class IncapacidadService(
 
         return new IncapacidadItemDto(
             entity.Id, entity.HistoriaClinicaId, entity.Motivo,
-            entity.FechaDesde, entity.FechaHasta, entity.Dias, entity.Tipo, entity.Orden);
+            entity.FechaDesde, entity.FechaHasta, entity.Dias, entity.Tipo, entity.Orden,
+            entity.InicialOProrroga, entity.Retroactiva);
     }
 
     public async Task<bool> ActualizarAsync(
@@ -72,6 +76,8 @@ public sealed class IncapacidadService(
         entity.FechaHasta = req.FechaHasta;
         entity.Dias = req.Dias;
         entity.Tipo = Trim(req.Tipo);
+        entity.InicialOProrroga = Trim(req.InicialOProrroga);
+        entity.Retroactiva = req.Retroactiva;
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;

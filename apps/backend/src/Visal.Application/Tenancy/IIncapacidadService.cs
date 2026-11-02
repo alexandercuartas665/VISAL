@@ -8,21 +8,27 @@ public sealed record IncapacidadItemDto(
     DateOnly? FechaHasta,
     int? Dias,
     string? Tipo,
-    int Orden);
+    int Orden,
+    string? InicialOProrroga = null,
+    bool Retroactiva = false);
 
 public sealed record AgregarIncapacidadRequest(
     string Motivo,
     DateOnly? FechaDesde,
     DateOnly? FechaHasta,
     int? Dias,
-    string? Tipo);
+    string? Tipo,
+    string? InicialOProrroga = null,
+    bool Retroactiva = false);
 
 public sealed record ActualizarIncapacidadRequest(
     string Motivo,
     DateOnly? FechaDesde,
     DateOnly? FechaHasta,
     int? Dias,
-    string? Tipo);
+    string? Tipo,
+    string? InicialOProrroga = null,
+    bool Retroactiva = false);
 
 public interface IIncapacidadService
 {

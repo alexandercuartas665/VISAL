@@ -44,7 +44,15 @@ public sealed record PacienteAsignacionDto(
     string? ClasificacionPaciente = null,
     string? ClasificacionGrupoPatologia = null,
     string? TipoTutela = null,
-    string? MedContratado = null);
+    string? MedContratado = null,
+    // Datos de la SEDE de atencion del paciente (Sucursal). Los consume la impresion de la
+    // Orden de Incapacidad: NIT y codigo de habilitacion del prestador + lugar de expedicion
+    // (ciudad + departamento de la sede). OJO: `Ciudad` (arriba) es la ciudad de RESIDENCIA
+    // del paciente; `SedeCiudad`/`SedeDepartamento` son de la sede que expide.
+    string? SedeNit = null,
+    string? SedeCodigoHabilitacion = null,
+    string? SedeCiudad = null,
+    string? SedeDepartamento = null);
 
 public sealed record ContratoMiniDto(Guid ContratoId, Guid AseguradoraId, string AseguradoraNombre, string CodigoContrato, string Estado, bool RequierePdfAutorizacion);
 

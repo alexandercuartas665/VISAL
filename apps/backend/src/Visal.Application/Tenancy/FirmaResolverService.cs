@@ -89,7 +89,15 @@ public sealed class FirmaResolverService : IFirmaResolverService
             .Select(pp => new PrefillProfesionalDatosDto(
                 pp.NombreCompleto, pp.NumeroDocumento, pp.RegistroMedico, pp.FirmaUrl,
                 pp.Ciudad, pp.Celular,
-                pp.TipoProfesional != null ? pp.TipoProfesional.Nombre : null))
+                pp.TipoProfesional != null ? pp.TipoProfesional.Nombre : null,
+                pp.TipoDocumento,
+                // "Primera subcategoria asignada": la mas antigua por fecha de asignacion
+                // (CreatedAt del vinculo N:M), desempate por el orden del catalogo.
+                _db.ProfesionalSubCategorias.AsNoTracking()
+                    .Where(ps => ps.ProfesionalId == pp.Id && ps.SubCategoria != null)
+                    .OrderBy(ps => ps.CreatedAt).ThenBy(ps => ps.SubCategoria!.Orden)
+                    .Select(ps => ps.SubCategoria!.Nombre)
+                    .FirstOrDefault()))
             .FirstOrDefaultAsync(ct);
     }
 

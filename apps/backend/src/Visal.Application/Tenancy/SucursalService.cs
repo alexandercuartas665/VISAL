@@ -20,7 +20,7 @@ public sealed class SucursalService : ISucursalService
         var q = _db.Sucursales.AsNoTracking();
         if (soloActivas) { q = q.Where(s => s.Activo); }
         return await q.OrderBy(s => s.Nombre)
-            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio, s.CodigoHabilitacion, s.ExigirHcRevisadaParaFacturar, s.Email, s.CodigoAceptacion, s.Departamento)).ToListAsync(ct);
+            .Select(s => new SucursalDto(s.Id, s.Codigo, s.Nombre, s.Direccion, s.Ciudad, s.Telefono, s.Activo, s.MipresObligatorio, s.CodigoHabilitacion, s.ExigirHcRevisadaParaFacturar, s.Email, s.CodigoAceptacion, s.Departamento, s.Nit)).ToListAsync(ct);
     }
 
     public async Task<SucursalDto?> SaveAsync(SaveSucursalRequest req, Guid actor, CancellationToken ct = default)
@@ -48,8 +48,9 @@ public sealed class SucursalService : ISucursalService
         e.ExigirHcRevisadaParaFacturar = req.ExigirHcRevisadaParaFacturar;
         e.CodigoAceptacion = req.CodigoAceptacion?.Trim();
         e.Departamento = req.Departamento?.Trim();
+        e.Nit = req.Nit?.Trim();
         await _db.SaveChangesAsync(ct);
-        return new SucursalDto(e.Id, e.Codigo, e.Nombre, e.Direccion, e.Ciudad, e.Telefono, e.Activo, e.MipresObligatorio, e.CodigoHabilitacion, e.ExigirHcRevisadaParaFacturar, e.Email, e.CodigoAceptacion, e.Departamento);
+        return new SucursalDto(e.Id, e.Codigo, e.Nombre, e.Direccion, e.Ciudad, e.Telefono, e.Activo, e.MipresObligatorio, e.CodigoHabilitacion, e.ExigirHcRevisadaParaFacturar, e.Email, e.CodigoAceptacion, e.Departamento, e.Nit);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)

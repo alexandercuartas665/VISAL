@@ -31,5 +31,11 @@ public enum CatalogoPacienteTipo
     /// <summary>Tipo de documento de identidad del paciente (CC, CE, TI, RC, PA, MS, y los propios de cada tenant).
     /// Se guarda como Codigo en Paciente.TipoDocumento (string). DEBE ir al final del enum: el discriminador
     /// se persiste como ordinal int, insertarlo en otra posicion renumeraria las filas existentes.</summary>
-    TipoDocumento
+    TipoDocumento,
+    /// <summary>Tipo de incapacidad (ENFERMEDAD GENERAL, ACCIDENTE DE TRABAJO, y los propios de
+    /// cada tenant). Alimenta el select "Tipo" del tab Ordenes de Incapacidad de la HC; se guarda
+    /// el Nombre como snapshot en HistoriaClinicaIncapacidad.Tipo. DEBE ir al final del enum: el
+    /// discriminador se persiste como ordinal int, insertarlo en otra posicion renumeraria las
+    /// filas existentes.</summary>
+    TipoIncapacidad
 }

@@ -477,16 +477,20 @@ else
                     ConsecutivoHc() + "-INC",
                     FechaLineaHc())
                 @{ _pieTipo = "INC"; }
+                <div class="pack-band">Datos de la incapacidad</div>
+                @RenderIncDatos()
                 <div class="pack-band">Detalle de la orden</div>
                 <table class="pack-table">
                     <thead>
                         <tr>
-                            <th style="width:40px">#</th>
+                            <th style="width:30px">#</th>
                             <th>Motivo</th>
-                            <th style="width:90px">Desde</th>
-                            <th style="width:90px">Hasta</th>
-                            <th style="width:50px">Dias</th>
-                            <th style="width:160px">Tipo</th>
+                            <th style="width:80px">Desde</th>
+                            <th style="width:80px">Hasta</th>
+                            <th style="width:40px">Dias</th>
+                            <th style="width:130px">Tipo</th>
+                            <th style="width:80px">Ini/Pro</th>
+                            <th style="width:60px">Retroact.</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -499,6 +503,8 @@ else
                                 <td class="num">@(i.FechaHasta?.ToString("dd/MM/yyyy") ?? "-")</td>
                                 <td class="num">@(i.Dias?.ToString() ?? "-")</td>
                                 <td>@(i.Tipo ?? "-")</td>
+                                <td>@(string.IsNullOrWhiteSpace(i.InicialOProrroga) ? "-" : i.InicialOProrroga)</td>
+                                <td class="num">@(i.Retroactiva ? "SI" : "NO")</td>
                             </tr>
                         }
                     </tbody>
@@ -714,6 +720,11 @@ else
     private string? _pieFirmaUrl;
     private string? _pieProfNombre;
     private string? _pieProfRegistro;
+    // Datos extra del profesional tratante que solo imprime la Orden de Incapacidad
+    // (tipo+numero de documento del medico y su especialidad/primera subcategoria).
+    private string? _profTipoDoc;
+    private string? _profNumDoc;
+    private string? _profEspecialidad;
     private string _pieFecha = "";
     private string _pieUrl = "";
     // Emisiones publicas (QR) por tipo de orden no-medicamento: tipo -> (codigo, PNG data URI).
@@ -1200,6 +1211,9 @@ else
             {
                 if (!string.IsNullOrWhiteSpace(datos.Nombre)) { _pieProfNombre = datos.Nombre; }
                 _pieProfRegistro = datos.RegistroMedico;
+                _profTipoDoc = datos.TipoDocumento;
+                _profNumDoc = datos.Identificacion;
+                _profEspecialidad = datos.Especialidad;
             }
         }
         catch { }
@@ -1593,6 +1607,37 @@ else
                     <span><b>Atiende:</b> @_hc.EspecialistaNombre</span>
                 }
             </div>
+        </div>
+    };
+
+    // Bloque de datos legales de la Orden de Incapacidad: NIT y codigo de habilitacion
+    // del prestador (sede del paciente), lugar de expedicion (ciudad + departamento de la
+    // sede), EPS + edad + sexo del paciente, y tipo/numero de documento + especialidad del
+    // profesional. Se calcula la edad a la fecha de impresion.
+    private RenderFragment RenderIncDatos() => __builder =>
+    {
+        var edad = PacientePrefillHelper.CalcularEdad(_paciente?.FechaNacimiento);
+        var lugar = string.Join(", ", new[] { _paciente?.SedeCiudad, _paciente?.SedeDepartamento }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var profDoc = string.Join(" ", new[] { _profTipoDoc, _profNumDoc }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px 14px;margin:6px 0 10px;font-size:11px;">
+            @IncDato("NIT de la IPS", _paciente?.SedeNit)
+            @IncDato("Codigo de habilitacion", _paciente?.SedeCodigoHabilitacion)
+            @IncDato("Lugar de expedicion", string.IsNullOrWhiteSpace(lugar) ? null : lugar)
+            @IncDato("EPS", _epsOrden ?? _paciente?.Eps)
+            @IncDato("Edad", string.IsNullOrWhiteSpace(edad) ? null : edad + " anos")
+            @IncDato("Sexo", _paciente?.Sexo)
+            @IncDato("Profesional (doc.)", string.IsNullOrWhiteSpace(profDoc) ? null : profDoc)
+            @IncDato("Especialidad", _profEspecialidad)
+        </div>
+    };
+
+    private RenderFragment IncDato(string etiqueta, string? valor) => __builder =>
+    {
+        <div style="display:flex;flex-direction:column;border-bottom:1px solid #e5e7eb;padding:2px 0;">
+            <span style="font-size:9px;text-transform:uppercase;letter-spacing:.3px;color:#64748b;">@etiqueta</span>
+            <b style="font-size:11.5px;color:#0f172a;">@(string.IsNullOrWhiteSpace(valor) ? "-" : valor)</b>
         </div>
     };
 

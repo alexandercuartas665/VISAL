@@ -57,7 +57,7 @@ public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoria
             .OrderBy(i => i.Orden)
             .Select(i => new IncapacidadItemDto(
                 i.Id, i.HistoriaClinicaId, i.Motivo, i.FechaDesde, i.FechaHasta,
-                i.Dias, i.Tipo, i.Orden))
+                i.Dias, i.Tipo, i.Orden, i.InicialOProrroga, i.Retroactiva))
             .ToListAsync(ct);
 
         var cert = await db.HistoriaClinicaCertificaciones

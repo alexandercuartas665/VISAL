@@ -17,8 +17,20 @@ public class HistoriaClinicaIncapacidad : TenantEntity
     /// <summary>Snapshot de los dias calculados (FechaHasta - FechaDesde + 1).
     /// Se guarda persistido para sobrevivir cambios futuros de fechas.</summary>
     public int? Dias { get; set; }
-    /// <summary>"ENFERMEDAD GENERAL" | "ACCIDENTE DE TRABAJO" (texto libre, no enum).</summary>
+    /// <summary>Tipo de incapacidad. Se alimenta del catalogo configurable
+    /// <see cref="Visal.Domain.Enums.CatalogoPacienteTipo.TipoIncapacidad"/> (/cfg-pacientes).
+    /// Se guarda el Nombre del catalogo como snapshot (texto, no FK) para sobrevivir cambios
+    /// posteriores del catalogo. Valores sembrados por defecto: "ENFERMEDAD GENERAL" /
+    /// "ACCIDENTE DE TRABAJO".</summary>
     public string? Tipo { get; set; }
+
+    /// <summary>"INICIAL" | "PRORROGA". Identifica si la incapacidad es la primera o una
+    /// prorroga de una previa. Select fijo en la captura (no catalogo).</summary>
+    public string? InicialOProrroga { get; set; }
+
+    /// <summary>Marca si la incapacidad es retroactiva (su fecha de inicio es anterior a la
+    /// fecha de expedicion). Lo decide el profesional con un Si/No en la captura.</summary>
+    public bool Retroactiva { get; set; }
 
     public int Orden { get; set; }
 }

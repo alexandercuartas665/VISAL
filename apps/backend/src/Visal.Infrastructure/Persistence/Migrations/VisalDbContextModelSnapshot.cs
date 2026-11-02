@@ -4978,6 +4978,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("historia_clinica_id");
 
+                    b.Property<string>("InicialOProrroga")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("inicial_o_prorroga");
+
                     b.Property<string>("Motivo")
                         .IsRequired()
                         .HasColumnType("text")
@@ -4986,6 +4991,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<int>("Orden")
                         .HasColumnType("integer")
                         .HasColumnName("orden");
+
+                    b.Property<bool>("Retroactiva")
+                        .HasColumnType("boolean")
+                        .HasColumnName("retroactiva");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -10549,6 +10558,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<bool>("MipresObligatorio")
                         .HasColumnType("boolean")
                         .HasColumnName("mipres_obligatorio");
+
+                    b.Property<string>("Nit")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("nit");
 
                     b.Property<string>("Nombre")
                         .IsRequired()

@@ -11,6 +11,14 @@ public class Sucursal : TenantEntity
     public string? Ciudad { get; set; }
 
     /// <summary>
+    /// NIT de la sede/prestador. Cada sede puede tener su propio NIT (son prestadores
+    /// distintos ante la aseguradora). Lo alimenta la impresion de la Orden de Incapacidad
+    /// (dato legal de la IPS que expide). Opcional. NO confundir con Tenant.TaxId (NIT de
+    /// la razon social principal del tenant).
+    /// </summary>
+    public string? Nit { get; set; }
+
+    /// <summary>
     /// Departamento operativo de la sede (region: Valle, Cauca, etc.). Es distinto del
     /// departamento de RESIDENCIA del paciente. Alimenta la columna "Departamento" (operativa)
     /// de la hoja "Ingreso de Pacientes" del CENSO, que agrupa la operacion por region/sede.

@@ -296,21 +296,24 @@ else
                 break;
 
             case "INCAPACIDADES":
+                @RenderIncDatos()
                 <table class="doc-table">
                     <thead>
                         <tr>
-                            <th style="width:40px">#</th>
+                            <th style="width:30px">#</th>
                             <th>Motivo</th>
-                            <th style="width:90px">Desde</th>
-                            <th style="width:90px">Hasta</th>
-                            <th style="width:50px">Dias</th>
-                            <th style="width:160px">Tipo</th>
+                            <th style="width:80px">Desde</th>
+                            <th style="width:80px">Hasta</th>
+                            <th style="width:40px">Dias</th>
+                            <th style="width:130px">Tipo</th>
+                            <th style="width:80px">Ini/Pro</th>
+                            <th style="width:60px">Retroact.</th>
                         </tr>
                     </thead>
                     <tbody>
                         @if (_inc.Count == 0)
                         {
-                            <tr><td colspan="6" class="doc-empty-row">No hay incapacidades registradas en esta historia.</td></tr>
+                            <tr><td colspan="8" class="doc-empty-row">No hay incapacidades registradas en esta historia.</td></tr>
                         }
                         else
                         {
@@ -323,6 +326,8 @@ else
                                     <td class="num">@(i.FechaHasta?.ToString("dd/MM/yyyy") ?? "-")</td>
                                     <td class="num">@(i.Dias?.ToString() ?? "-")</td>
                                     <td>@(i.Tipo ?? "-")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(i.InicialOProrroga) ? "-" : i.InicialOProrroga)</td>
+                                    <td class="num">@(i.Retroactiva ? "SI" : "NO")</td>
                                 </tr>
                             }
                         }
@@ -435,6 +440,11 @@ else
     private List<CertificacionItemDto> _cert = new();
     private List<SuministroMedicamentoItemDto> _sumMed = new();
 
+    // Datos del profesional tratante que solo imprime la Orden de Incapacidad.
+    private string? _profTipoDoc;
+    private string? _profNumDoc;
+    private string? _profEspecialidad;
+
     // Emision publica (ORD-MEDI): snapshot congelado + QR.
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
     private OrdenPublicaResumenDto? _emision;
@@ -510,6 +520,7 @@ else
                 break;
             case "INCAPACIDADES":
                 _inc = (await IncSvc.ListarPorHistoriaAsync(HcId)).ToList();
+                await ResolverDatosProfesionalIncAsync();
                 break;
             case "CERTIFICADOS":
                 _cert = (await CertSvc.ListarPorHistoriaAsync(HcId)).ToList();
@@ -524,6 +535,62 @@ else
 
         _loading = false;
     }
+
+    // Resuelve tipo/numero de documento + especialidad del profesional tratante para
+    // la Orden de Incapacidad. Mismo doble camino que el pie clinico: claim profesional_id
+    // directo, o fallback via (platform_user_id, tenant_id).
+    private async Task ResolverDatosProfesionalIncAsync()
+    {
+        _profTipoDoc = _profNumDoc = _profEspecialidad = null;
+        Guid? profId = (_hc?.ProfesionalId is Guid hp && hp != Guid.Empty) ? hp : null;
+        Guid? platformUid = null, tenantId = null;
+        if (AuthState is not null)
+        {
+            var st = await AuthState;
+            if (Guid.TryParse(st.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var puid)) { platformUid = puid; }
+            if (Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid)) { tenantId = tid; }
+        }
+        try
+        {
+            var datos = await FirmaResolverSvc.ResolverDatosProfesionalAsync(
+                profId, profId is null ? platformUid : null, tenantId);
+            if (datos is not null)
+            {
+                _profTipoDoc = datos.TipoDocumento;
+                _profNumDoc = datos.Identificacion;
+                _profEspecialidad = datos.Especialidad;
+            }
+        }
+        catch { }
+    }
+
+    // Bloque de datos legales de la Orden de Incapacidad (ver PaqueteHcImprimible.RenderIncDatos).
+    private RenderFragment RenderIncDatos() => __builder =>
+    {
+        var edad = PacientePrefillHelper.CalcularEdad(_paciente?.FechaNacimiento);
+        var lugar = string.Join(", ", new[] { _paciente?.SedeCiudad, _paciente?.SedeDepartamento }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var profDoc = string.Join(" ", new[] { _profTipoDoc, _profNumDoc }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px 14px;margin:6px 0 10px;font-size:11px;">
+            @IncDato("NIT de la IPS", _paciente?.SedeNit)
+            @IncDato("Codigo de habilitacion", _paciente?.SedeCodigoHabilitacion)
+            @IncDato("Lugar de expedicion", string.IsNullOrWhiteSpace(lugar) ? null : lugar)
+            @IncDato("EPS", _paciente?.Eps)
+            @IncDato("Edad", string.IsNullOrWhiteSpace(edad) ? null : edad + " anos")
+            @IncDato("Sexo", _paciente?.Sexo)
+            @IncDato("Profesional (doc.)", string.IsNullOrWhiteSpace(profDoc) ? null : profDoc)
+            @IncDato("Especialidad", _profEspecialidad)
+        </div>
+    };
+
+    private RenderFragment IncDato(string etiqueta, string? valor) => __builder =>
+    {
+        <div style="display:flex;flex-direction:column;border-bottom:1px solid #e5e7eb;padding:2px 0;">
+            <span style="font-size:9px;text-transform:uppercase;letter-spacing:.3px;color:#64748b;">@etiqueta</span>
+            <b style="font-size:11.5px;color:#0f172a;">@(string.IsNullOrWhiteSpace(valor) ? "-" : valor)</b>
+        </div>
+    };
 
     private async Task PrintAsync() { await JS.InvokeVoidAsync("print"); }
 

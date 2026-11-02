@@ -509,7 +509,14 @@ public sealed class DatabaseSeeder
             (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "INA", "INACTIVO"),
             (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "EGR", "EGRESADO"),
             (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "FAL", "FALLECIDO"),
-            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "RET", "RETIRADO")
+            (Visal.Domain.Enums.CatalogoPacienteTipo.Estado, "RET", "RETIRADO"),
+
+            // ===== TIPO INCAPACIDAD =====
+            // Alimenta el select "Tipo" del tab Ordenes de Incapacidad. Se guarda el Nombre
+            // como snapshot en HistoriaClinicaIncapacidad.Tipo. Cada tenant agrega los suyos
+            // desde /cfg-pacientes.
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoIncapacidad, "EG", "ENFERMEDAD GENERAL"),
+            (Visal.Domain.Enums.CatalogoPacienteTipo.TipoIncapacidad, "AT", "ACCIDENTE DE TRABAJO")
         };
 
         int agregados = 0;

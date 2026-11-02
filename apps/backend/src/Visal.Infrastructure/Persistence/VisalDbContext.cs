@@ -835,6 +835,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         {
             b.Property(x => x.Motivo).HasColumnType("text").IsRequired();
             b.Property(x => x.Tipo).HasMaxLength(60);
+            b.Property(x => x.InicialOProrroga).HasMaxLength(20);
             b.HasOne(x => x.HistoriaClinica).WithMany().HasForeignKey(x => x.HistoriaClinicaId)
                 .OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId, x.Orden });
@@ -1473,6 +1474,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Nombre).HasMaxLength(200).IsRequired();
             b.Property(x => x.Direccion).HasMaxLength(300);
             b.Property(x => x.Ciudad).HasMaxLength(120);
+            b.Property(x => x.Nit).HasMaxLength(30);
             b.Property(x => x.Telefono).HasMaxLength(40);
             b.Property(x => x.Email).HasMaxLength(200);
             b.Property(x => x.CodigoHabilitacion).HasMaxLength(20);

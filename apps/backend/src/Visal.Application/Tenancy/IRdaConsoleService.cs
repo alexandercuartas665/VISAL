@@ -51,6 +51,20 @@ public sealed record RdaConsoleFiltro(
     int? IntentosMin = null,       // intentos de sincronizacion >= N
     bool SoloRechazados = false);  // atajo: solo eventos Rechazado
 
+/// <summary>Item para el reproceso masivo. Un evento del tenant que NO esta Aceptado,
+/// con su HC y tipo, para poder REGENERAR el bundle con el codigo actual (aplicando los
+/// fixes vigentes de los builders) y reenviarlo al IHCE. Trae la Hc porque el bundle
+/// guardado esta congelado: reenviarlo tal cual no aplicaria ningun fix.</summary>
+public sealed record RdaReprocesoItemDto(
+    Guid Id,
+    Guid HistoriaClinicaId,
+    TipoRdaIhce TipoRda,
+    ModalidadRdaIhce Modalidad,
+    EstadoRdaEvento Estado,
+    string PacienteNombre,
+    string PacienteDocumento,
+    bool TieneCredencialSede);
+
 /// <summary>HC candidata a generar RDA (combo del modal Generar).</summary>
 public sealed record HcCandidataRdaDto(
     Guid Id,
@@ -91,6 +105,15 @@ public interface IRdaConsoleService
 
     /// <summary>Lista HCs candidatas para generar RDA (cerradas o abiertas del tenant).</summary>
     Task<IReadOnlyList<HcCandidataRdaDto>> ListarHcCandidatasAsync(string? buscar, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lista los eventos del tenant que NO estan Aceptado (Borrador/Validado/Enviado/
+    /// Rechazado/Error), deduplicados por (HistoriaClinica, Tipo) quedandose con el mas
+    /// reciente, y excluyendo HCs que ya tienen un evento Aceptado de ese mismo tipo (para
+    /// no duplicar RDAs ya confirmados). Alimenta el boton "Reprocesar pendientes", que
+    /// regenera el bundle con el codigo actual y lo reenvia. Ordenado por fecha asc.
+    /// </summary>
+    Task<IReadOnlyList<RdaReprocesoItemDto>> ListarPendientesReprocesoAsync(CancellationToken ct = default);
 
     /// <summary>Borra un evento. Solo permitido en estado Borrador (para evitar romper auditoria).</summary>
     Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default);

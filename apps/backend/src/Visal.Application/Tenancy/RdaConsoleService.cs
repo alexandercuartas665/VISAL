@@ -212,6 +212,50 @@ public sealed class RdaConsoleService(
             r.FechaApertura, r.FechaCierre, r.FormatoCodigo, r.Estado.ToString())).ToList();
     }
 
+    public async Task<IReadOnlyList<RdaReprocesoItemDto>> ListarPendientesReprocesoAsync(CancellationToken ct = default)
+    {
+        // Todos los eventos del tenant que NO estan Aceptado, EXCLUYENDO los de una HC+Tipo
+        // que ya tiene un Aceptado (no reabrir lo confirmado). El LEFT JOIN a credenciales
+        // es el mismo de ListarAsync: sin credencial de sede no se puede enviar.
+        var q = from e in db.RdaEventos.AsNoTracking()
+                join p in db.Pacientes.AsNoTracking() on e.PacienteId equals p.Id
+                join cr in db.InteroperabilidadCredencialesSede.AsNoTracking()
+                    on new { Sid = e.SucursalId, Amb = e.Ambiente } equals new { Sid = cr.SucursalId, Amb = cr.Ambiente } into crGroup
+                from cr in crGroup.DefaultIfEmpty()
+                where e.Estado != EstadoRdaEvento.Aceptado
+                    && !db.RdaEventos.Any(x => x.HistoriaClinicaId == e.HistoriaClinicaId
+                        && x.TipoRda == e.TipoRda
+                        && x.Estado == EstadoRdaEvento.Aceptado)
+                select new
+                {
+                    e.Id,
+                    e.HistoriaClinicaId,
+                    e.TipoRda,
+                    e.Modalidad,
+                    e.Estado,
+                    e.FechaGeneracion,
+                    PacienteNombre = p.NombreCompleto,
+                    PacienteDocumento = p.NumeroDocumento,
+                    TieneCredencialSede = cr != null
+                        && !string.IsNullOrEmpty(cr.ClientId)
+                        && !string.IsNullOrEmpty(cr.ClientSecretCifrado)
+                };
+
+        var rows = await q.ToListAsync(ct);
+
+        // Dedup por (HC, Tipo): quedarse con el evento mas reciente (si hay varios intentos
+        // fallidos de la misma HC, regenerar desde la HC una sola vez ya los cubre a todos).
+        var dedup = rows
+            .GroupBy(r => new { r.HistoriaClinicaId, r.TipoRda })
+            .Select(g => g.OrderByDescending(x => x.FechaGeneracion).First())
+            .OrderBy(r => r.FechaGeneracion)
+            .Select(r => new RdaReprocesoItemDto(
+                r.Id, r.HistoriaClinicaId, r.TipoRda, r.Modalidad, r.Estado,
+                r.PacienteNombre, r.PacienteDocumento, r.TieneCredencialSede))
+            .ToList();
+        return dedup;
+    }
+
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
         var e = await db.RdaEventos.FirstOrDefaultAsync(x => x.Id == id, ct);

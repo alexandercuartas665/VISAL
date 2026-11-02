@@ -25,15 +25,47 @@
         </p>
     </div>
     <div style="display:flex;gap:8px;">
-        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@_cargando">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@(_cargando || _reprocBusy)">
             @if (_cargando) { <span>...</span> } else { <span>Refrescar</span> }
         </button>
-        <button class="btn btn-primary btn-sm" @onclick="AbrirGenerar">+ Generar RDA</button>
+        <button class="btn btn-warning btn-sm" @onclick="ReprocesarPendientes" disabled="@(_reprocBusy || _cargando)"
+                title="Regenera el bundle con el codigo actual (aplica los fixes vigentes) y reenvia al IHCE todos los eventos no aceptados del tenant.">
+            @if (_reprocBusy) { <span>Reprocesando @_reprocHecho/@_reprocTotal…</span> } else { <span>Reprocesar pendientes</span> }
+        </button>
+        <button class="btn btn-primary btn-sm" @onclick="AbrirGenerar" disabled="@_reprocBusy">+ Generar RDA</button>
     </div>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@if (_reprocBusy)
+{
+    <div class="ase-alert" style="background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;">
+        <b>Reprocesando pendientes:</b> @_reprocHecho de @_reprocTotal
+        @if (!string.IsNullOrEmpty(_reprocPaciente)) { <span> &mdash; @_reprocPaciente</span> }
+        <span style="color:#9a3412;"> (regenerar + reenviar; no cierres esta pagina)</span>
+    </div>
+}
+@if (_reprocResumen is RdaReprocResumen rr)
+{
+    <div class="ase-ok" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;">
+        <b>Reproceso terminado.</b>
+        @rr.Total procesados &middot; Aceptados <b>@rr.Aceptados</b>
+        &middot; Rechazados @rr.Rechazados &middot; Error @rr.Errores
+        &middot; Sin credencial @rr.SinCredencial &middot; Omitidos @rr.Omitidos
+        &middot; Fallos @rr.Fallos
+        @if (rr.Detalles.Count > 0)
+        {
+            <details style="margin-top:6px;">
+                <summary style="cursor:pointer;">Ver detalle (@rr.Detalles.Count)</summary>
+                <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;color:#374151;">
+                    @foreach (var d in rr.Detalles) { <li>@d</li> }
+                </ul>
+            </details>
+        }
+    </div>
+}
 
 <div style="background:#f0f9ff;border:1px solid #7dd3fc;padding:10px 14px;border-radius:8px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
     <b style="font-size:13px;">IP publica de salida:</b>
@@ -789,6 +821,17 @@
     private Guid? _enviandoId;
     private EnvioRdaResultado? _envioResult;
 
+    // ----- Reproceso masivo (regenerar + reenviar lo no aceptado) -----
+    private bool _reprocBusy;
+    private int _reprocTotal;
+    private int _reprocHecho;
+    private string? _reprocPaciente;
+    private RdaReprocResumen? _reprocResumen;
+
+    private sealed record RdaReprocResumen(
+        int Total, int Aceptados, int Rechazados, int Errores,
+        int SinCredencial, int Omitidos, int Fallos, List<string> Detalles);
+
     // ----- Diagnostico IP publica -----
     private bool _ipBusy;
     private IpPublicaResult? _ipResult;
@@ -1086,6 +1129,121 @@
     }
 
     private void CerrarEnvio() => _envioResult = null;
+
+    // Reprocesa TODOS los eventos no aceptados del tenant: regenera el bundle con el
+    // codigo actual (asi se aplican los fixes vigentes de los builders — el bundle
+    // guardado esta congelado y reenviarlo tal cual no cambiaria nada) y lo reenvia al
+    // IHCE. Secuencial, con pausa corta entre envios (el sandbox es inestable) y un
+    // resumen al final. Idempotente: re-ejecutarlo no duplica (la idempotencia por
+    // hash del builder devuelve el evento existente y solo se reenvia lo no aceptado).
+    private async Task ReprocesarPendientes()
+    {
+        _menuOpenId = null;
+        _error = null; _ok = null; _reprocResumen = null; _envioResult = null;
+
+        List<RdaReprocesoItemDto> items;
+        await _dbLock.WaitAsync();
+        try { items = (await Svc.ListarPendientesReprocesoAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; return; }
+        finally { _dbLock.Release(); }
+
+        if (items.Count == 0) { _ok = "No hay eventos pendientes por reprocesar (todo esta Aceptado)."; return; }
+
+        var confirmar = await JS.InvokeAsync<bool>("confirm",
+            $"Vas a reprocesar {items.Count} evento(s) no aceptados.\n\n" +
+            "Para cada uno se REGENERA el bundle con el codigo actual (aplicando los fixes vigentes) " +
+            "y se REENVIA al IHCE. Los eventos viejos se conservan para auditoria.\n\nContinuar?");
+        if (!confirmar) { return; }
+
+        var actor = await ActorAsync();
+        _reprocBusy = true;
+        _reprocTotal = items.Count;
+        _reprocHecho = 0;
+        _reprocPaciente = null;
+        int aceptados = 0, rechazados = 0, errores = 0, sinCred = 0, omitidos = 0, fallos = 0;
+        var detalles = new List<string>();
+        void Detalle(string msg) { if (detalles.Count < 200) { detalles.Add(msg); } }
+
+        try
+        {
+            foreach (var item in items)
+            {
+                _reprocPaciente = $"{item.PacienteNombre} ({item.PacienteDocumento})";
+                StateHasChanged();
+
+                if (!item.TieneCredencialSede)
+                {
+                    sinCred++;
+                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: sede sin credencial — omitido");
+                }
+                else
+                {
+                    await _dbLock.WaitAsync();
+                    try
+                    {
+                        var res = item.TipoRda == TipoRdaIhce.Consulta
+                            ? await BuilderConsulta.ConstruirAsync(item.HistoriaClinicaId, actor)
+                            : await Builder.ConstruirAsync(item.HistoriaClinicaId, item.Modalidad, actor);
+
+                        if (res.Omitido)
+                        {
+                            omitidos++;
+                            Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: construccion omitida");
+                        }
+                        else if (res.Estado == EstadoRdaEvento.Aceptado)
+                        {
+                            // El bundle regenerado coincide con uno ya aceptado: nada que enviar.
+                            omitidos++;
+                            Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: bundle ya aceptado — sin reenvio");
+                        }
+                        else
+                        {
+                            var envio = await Sender.EnviarRdaAsync(res.RdaEventoId, actor);
+                            switch (envio.NuevoEstado)
+                            {
+                                case EstadoRdaEvento.Aceptado:
+                                    aceptados++;
+                                    break;
+                                case EstadoRdaEvento.Rechazado:
+                                    rechazados++;
+                                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: Rechazado (HTTP {envio.Call.HttpStatus})");
+                                    break;
+                                case EstadoRdaEvento.Error:
+                                    errores++;
+                                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: Error (HTTP {envio.Call.HttpStatus})");
+                                    break;
+                                default:
+                                    errores++;
+                                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: {envio.NuevoEstado}");
+                                    break;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        fallos++;
+                        var m = ex.Message.Length > 140 ? ex.Message[..140] + "…" : ex.Message;
+                        Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: fallo — {m}");
+                    }
+                    finally { _dbLock.Release(); }
+                }
+
+                _reprocHecho++;
+                StateHasChanged();
+                // Pausa corta: no martillar el APIM sandbox (inestable, da 504s).
+                await Task.Delay(350);
+            }
+        }
+        finally
+        {
+            _reprocBusy = false;
+            _reprocPaciente = null;
+            _reprocResumen = new RdaReprocResumen(
+                items.Count, aceptados, rechazados, errores, sinCred, omitidos, fallos, detalles);
+        }
+
+        await CargarLista();
+    }
 
     private async Task EjecutarProbador()
     {

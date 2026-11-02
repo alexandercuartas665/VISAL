@@ -94,7 +94,20 @@ public sealed class RdaConsultaBuilderService(
             .Where(a => a.PacienteId == hc.PacienteId && a.FormatoHistoria == fdCodigo)
             .OrderByDescending(a => a.FechaInicio)
             .FirstOrDefaultAsync(ct);
-        var cupsEncuentro = asignacionRel?.ServicioId ?? "890201";
+        // El CUPS del encuentro es el CodigoRips (CUPS base sin sufijo d/f) que la
+        // asignacion captura como snapshot. OJO: asignacionRel.ServicioId es el GUID del
+        // ServicioContrato, NO un codigo CUPS -> si se emite tal cual, MinSalud rechaza
+        // con 6007 ("Code '<uuid>' ... does not exist in the value set CUPSConsultationCodes").
+        // Para asignaciones legacy sin CodigoRips se resuelve en vivo del ServicioContrato.
+        var cupsEncuentro = ServicioCodigo.Base(asignacionRel?.CodigoRips);
+        if (string.IsNullOrWhiteSpace(cupsEncuentro)
+            && Guid.TryParse(asignacionRel?.ServicioId, out var srvGid))
+        {
+            var codSrv = await db.ServiciosContrato.AsNoTracking()
+                .Where(s => s.Id == srvGid).Select(s => s.CodigoServicio).FirstOrDefaultAsync(ct);
+            cupsEncuentro = ServicioCodigo.Base(codSrv);
+        }
+        if (string.IsNullOrWhiteSpace(cupsEncuentro)) { cupsEncuentro = "890201"; }
         // serviceType.coding.display es 1..1 y debe coincidir EXACTO con el nombre
         // oficial del CUPS (el validador rechaza con 6006 si difiere). Se resuelve
         // del catalogo de servicios; fallback al nombre oficial del default 890201.
@@ -109,15 +122,19 @@ public sealed class RdaConsultaBuilderService(
                 : cupsEncuentro;
         }
 
-        // Pagador (Aseguradora) desde la asignacion -> contrato -> aseguradora
+        // Pagador (Aseguradora) desde la asignacion -> contrato -> aseguradora.
+        // Tambien capturamos el TipoContrato (regimen) para desambiguar el codigo EAPB.
         Aseguradora? aseguradora = null;
+        TipoContrato? tipoContrato = null;
         if (asignacionRel is not null)
         {
-            aseguradora = await (
+            var cont = await (
                 from c in db.ContratosAseguradora.AsNoTracking()
                 where c.CodigoContrato == asignacionRel.ContratoCodigo
                 join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
-                select a).FirstOrDefaultAsync(ct);
+                select new { Aseg = a, c.TipoContrato }).FirstOrDefaultAsync(ct);
+            aseguradora = cont?.Aseg;
+            tipoContrato = cont?.TipoContrato;
         }
         // Fallback: aseguradora del paciente. Sin esto, una HC sin asignacion
         // relacionada emite pagador "DESCONOCIDO" y MinSalud rechaza con
@@ -179,7 +196,13 @@ public sealed class RdaConsultaBuilderService(
         // Nuestra tabla `aseguradoras.codigo` guarda un codigo interno (ej. 1423,
         // 13-14); si eventualmente MinSalud rechaza por el codigo mismo, hay que
         // cargar el EAPB oficial en una columna dedicada (fuera de scope aqui).
-        var payerOrgId = aseguradora is not null ? aseguradora.Codigo : "DESCONOCIDO";
+        // aseguradoras.codigo a veces trae DOS codigos EAPB pegados (contributivo +
+        // subsidiado, ej "EPS037 - EPSS41") -> MinSalud rechaza con BUNDLE-005 porque
+        // ese valor no existe en su directorio EAPB. Se elige UN solo codigo segun el
+        // regimen del contrato (fallback: regimen de la aseguradora, luego del paciente).
+        var payerOrgId = NormalizarEapb(
+            aseguradora?.Codigo, tipoContrato, aseguradora?.Regimen, hc.Paciente?.Regimen)
+            ?? "DESCONOCIDO";
         var encounterId = "Encounter-0";
         var conditionId = "Condition-0";
         var allergyId = "AllergyIntolerance-0";
@@ -1005,6 +1028,50 @@ public sealed class RdaConsultaBuilderService(
     // Los ids cortos siguen resolviendo contra composition.contained[].
     private static ResourceReference ContainedRef(string id) =>
         new ResourceReference($"#{id}");
+
+    // EAPB del pagador: aseguradoras.codigo puede traer DOS codigos EAPB pegados
+    // (contributivo + subsidiado, ej "EPS037 - EPSS41" / "ESS024 - EPS042"). El RDA
+    // exige UN solo codigo; se elige el del regimen del contrato, con fallback al
+    // regimen de la aseguradora y al del paciente. Sin regimen claro se prefiere el
+    // contributivo (lo mas comun en consulta externa).
+    public static string? NormalizarEapb(string? codigo, TipoContrato? tipoContrato,
+        string? regimenAseguradora, string? regimenPaciente)
+    {
+        if (string.IsNullOrWhiteSpace(codigo)) { return null; }
+        var tokens = codigo.Split(new[] { ' ', '-', '/', ',', ';' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length <= 1) { return codigo.Trim(); }
+        var quiereSubsidiado = ResolverSubsidiado(tipoContrato, regimenAseguradora, regimenPaciente);
+        if (quiereSubsidiado is bool sub)
+        {
+            var elegido = Array.Find(tokens, t => EsEapbSubsidiado(t) == sub);
+            if (elegido is not null) { return elegido; }
+        }
+        return Array.Find(tokens, t => !EsEapbSubsidiado(t)) ?? tokens[0];
+    }
+
+    private static bool EsEapbSubsidiado(string eapb)
+    {
+        var c = eapb.Trim().ToUpperInvariant();
+        return c.StartsWith("EPSS", StringComparison.Ordinal)
+            || c.StartsWith("ESS", StringComparison.Ordinal)
+            || c.StartsWith("CCF", StringComparison.Ordinal);
+    }
+
+    private static bool? ResolverSubsidiado(TipoContrato? tipoContrato,
+        string? regimenAseguradora, string? regimenPaciente)
+    {
+        if (tipoContrato == TipoContrato.Subsidiado) { return true; }
+        if (tipoContrato == TipoContrato.Contributivo) { return false; }
+        foreach (var r in new[] { regimenAseguradora, regimenPaciente })
+        {
+            if (string.IsNullOrWhiteSpace(r)) { continue; }
+            var u = r.Trim().ToUpperInvariant();
+            if (u.StartsWith("SUB", StringComparison.Ordinal)) { return true; }
+            if (u.StartsWith("CON", StringComparison.Ordinal)) { return false; }
+        }
+        return null;
+    }
 
     /// <summary>
     /// Devuelve solo el NIT SIN digito de verificacion. Si el input trae guion

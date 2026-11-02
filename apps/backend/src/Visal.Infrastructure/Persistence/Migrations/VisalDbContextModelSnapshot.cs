@@ -6904,9 +6904,31 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("barrio");
 
+                    b.Property<DateTimeOffset?>("BarthelActualizadoEn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("barthel_actualizado_en");
+
+                    b.Property<string>("BarthelClasificacion")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("barthel_clasificacion");
+
+                    b.Property<string>("BarthelDatosJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("barthel_datos_json");
+
+                    b.Property<int?>("BarthelTotal")
+                        .HasColumnType("integer")
+                        .HasColumnName("barthel_total");
+
                     b.Property<string>("CamposDinamicosJson")
                         .HasColumnType("jsonb")
                         .HasColumnName("campos_dinamicos_json");
+
+                    b.Property<string>("CertificadoVisal")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("certificado_visal");
 
                     b.Property<string>("Cie10Codigo")
                         .HasMaxLength(30)
@@ -7025,6 +7047,15 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("estrato_social");
 
+                    b.Property<string>("FallecimientoReportadoPor")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("fallecimiento_reportado_por");
+
+                    b.Property<Guid?>("FallecimientoReportadoPorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fallecimiento_reportado_por_id");
+
                     b.Property<DateTimeOffset?>("FechaAtencion")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("fecha_atencion");
@@ -7040,6 +7071,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("FechaEgresoPad")
                         .HasColumnType("date")
                         .HasColumnName("fecha_egreso_pad");
+
+                    b.Property<DateTimeOffset?>("FechaFallecimiento")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_fallecimiento");
 
                     b.Property<DateOnly?>("FechaHospitalizacion")
                         .HasColumnType("date")
@@ -7078,6 +7113,15 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("MedContratadoId")
                         .HasColumnType("uuid")
                         .HasColumnName("med_contratado_id");
+
+                    b.Property<string>("MedicamentoControlado")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("medicamento_controlado");
+
+                    b.Property<string>("MotivoFallecimiento")
+                        .HasColumnType("text")
+                        .HasColumnName("motivo_fallecimiento");
 
                     b.Property<string>("MotivoNoIngreso")
                         .HasColumnType("text")

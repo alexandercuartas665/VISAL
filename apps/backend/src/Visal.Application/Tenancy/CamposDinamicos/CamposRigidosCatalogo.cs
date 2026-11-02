@@ -65,6 +65,8 @@ public static class CamposRigidosCatalogo
         new("tutela", "Tutela", TabGenerales, "Diagnostico", 1, false, true),
         new("tipo_tutela", "Tipo Tutela", TabGenerales, "Diagnostico", 1, false, true),
         new("med_contratado", "Med Contratado", TabGenerales, "Diagnostico", 1, false, true),
+        new("medicamento_controlado", "Medicamento Controlado (SI/NO)", TabGenerales, "Diagnostico", 1, false, true),
+        new("barthel", "Barthel (tarjeta, solo lectura)", TabGenerales, "Diagnostico", 3, true, true),
 
         // ----- generales / Geografia y contacto -----
         new("pais_residencia", "Pais Residencia", TabGenerales, "Geografia y contacto", 1, false, true),

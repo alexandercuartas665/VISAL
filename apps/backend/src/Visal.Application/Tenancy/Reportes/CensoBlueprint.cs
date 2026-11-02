@@ -29,6 +29,7 @@ public static class CensoBlueprint
             BasePacientes(),
             Satisfaccion(),
             IndiceMorbilidad(),
+            IndiceMortalidad(),
             ConsolidadoEncuesta(),
         };
 
@@ -59,42 +60,60 @@ public static class CensoBlueprint
     private const string ParamSede = "sede";
     private const string ParamRangoFecha = "rango_fecha";
 
+    // Hoja "Base de Pacientes": mapea 1:1 las 36 columnas del Excel canonico (A..AJ). El Excel la
+    // divide en 3 pestanas por region (Valle/Cauca/Popayan); aqui es UNA sola hoja filtrable por la
+    // Sede (y su Departamento operativo) via el parametro de ejecucion. Columnas derivadas/denormalizadas:
+    //  - C Mes Ingreso = ano-mes de Fecha Ingreso (derivado, hora local, sin columna nueva).
+    //  - Q Puntaje Barthel = BarthelTotal (denormalizado desde la escala PP-FO-46 al cerrarla).
+    //  - V Medicamento Controlado = campo SI/NO de la ficha tecnica.
+    //  - AC Nombre Familiar Responsable = ContactoEmergencia (contacto principal del paciente).
     private static ReporteHojaDef BasePacientes() =>
         ReporteHojaDef.Detalle("Base de Pacientes", "paciente",
             columnas:
             [
-                new("numero_documento", "ID"),
-                new("tipo_documento"),
-                new("nombre_completo"),
-                new("fecha_nacimiento"),
-                new("edad"),
-                new("sexo"),
-                new("estado"),
-                new("regimen"),
-                new("fecha_ingreso"),
-                new("fecha_egreso"),
-                new("cie10"),
-                new("diagnostico_principal"),
-                new("cie10_2"),
-                new("diagnostico_secundario"),
-                new("tutela"),
-                new("direccion"),
-                new("barrio"),
-                new("ciudad"),
-                new("telefono"),
-                new("email"),
-                new("fecha_reingreso"),
-                new("observacion_reingreso"),
-                new("fecha_hospitalizacion"),
-                new("observaciones_hospitalizacion"),
-                new("observaciones_paciente"),
+                new("numero_documento", "ID"),                   // A
+                new("fecha_ingreso", "Fecha Ingreso"),           // B
+                new("mes_ingreso", "Mes Ingreso"),               // C (derivado)
+                new("fecha_egreso", "Fecha De Egreso"),          // D
+                new("estado", "Estado Paciente"),                // E
+                new("contrato_principal", "Contrato"),           // F
+                new("clasif_paciente.nombre", "Clasificacion"),  // G
+                new("condicion", "Condicion"),                   // H
+                new("tipo_documento", "Tipo ID"),                // I
+                new("primer_apellido", "Primer Apellido"),       // J
+                new("segundo_apellido", "Segundo Apellido"),     // K
+                new("primer_nombre", "Primer Nombre"),           // L
+                new("segundo_nombre", "Segundo Nombre"),         // M
+                new("edad", "Edad"),                             // N
+                new("fecha_nacimiento", "Fecha de Nacimiento"),  // O
+                new("sexo", "Sexo"),                             // P
+                new("puntaje_barthel", "Puntaje Barthel"),       // Q (denormalizado)
+                new("cie10", "CIE10"),                           // R
+                new("diagnostico_principal", "Diagnostico principal"), // S
+                new("cie10_2", "CIE10 - 2"),                     // T
+                new("diagnostico_secundario", "Diagnostico Secundario"), // U
+                new("med_controlado", "Medicamento Controlado"), // V
+                new("tutela", "Tutela"),                         // W
+                new("direccion", "Direccion"),                   // X
+                new("barrio", "Barrio"),                         // Y
+                new("telefono", "Telefono Paciente"),            // Z
+                new("departamento.nombre", "Departamento"),      // AA (residencia)
+                new("ciudad", "Ciudad"),                         // AB
+                new("contacto_emergencia", "Nombre Familiar Responsable"), // AC
+                new("email", "Correo Electronico"),              // AD
+                new("regimen", "Regimen de Afiliacion"),         // AE
+                new("fecha_reingreso", "Fecha Reingreso"),       // AF
+                new("observacion_reingreso", "Observacion Reingreso"), // AG
+                new("fecha_hospitalizacion", "Fecha de Hospitalizacion"), // AH
+                new("observaciones_hospitalizacion", "Observaciones Hospitalizacion"), // AI
+                new("observaciones_paciente", "Observaciones"),  // AJ
             ],
             filtros:
             [
                 new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_ingreso", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
             ],
-            orden: [new("nombre_completo")]);
+            orden: [new("primer_apellido"), new("primer_nombre")]);
 
     // Hoja "Ingreso de Pacientes": sale de la ADMISION (entidad paciente), no de la bitacora.
     // Mapea 1:1 las columnas del Excel canonico (A..AB) usando los campos del paciente, los cruces
@@ -144,22 +163,31 @@ public static class CensoBlueprint
             ],
             orden: [new("fecha_comentan")]);
 
+    // Hoja "Satisfaccion de Usuarios" (encuesta SIAU): mapea 1:1 las 18 columnas del Excel (A..R).
+    // Los datos del paciente (A..H) salen del cruce a paciente; la encuesta (I..R) de la propia
+    // entidad. "Mes" es el numero de la encuesta (en el Excel se ve como texto "Marzo 2026").
     private static ReporteHojaDef Satisfaccion() =>
         ReporteHojaDef.Detalle("Satisfaccion de Usuarios", "encuesta_satisfaccion",
             columnas:
             [
-                new("mes"),
-                new("fecha_llamada"),
-                new("responsable_llamada"),
-                new("paciente.numero_documento", "ID Paciente"),
-                new("paciente.nombre_completo", "Paciente"),
-                new("pregunta1"),
-                new("pregunta2"),
-                new("pregunta3"),
-                new("pregunta4"),
-                new("pregunta5"),
-                new("persona_atiende"),
-                new("observaciones"),
+                new("paciente.numero_documento", "ID"),              // A
+                new("paciente.tipo_documento", "Tipo ID"),           // B
+                new("paciente.primer_apellido", "Primer Apellido"),  // C
+                new("paciente.segundo_apellido", "Segundo Apellido"),// D
+                new("paciente.primer_nombre", "Primer Nombre"),      // E
+                new("paciente.segundo_nombre", "Segundo Nombre"),    // F
+                new("paciente.contrato_principal", "Contrato"),      // G
+                new("paciente.telefono", "Telefono Paciente"),       // H
+                new("mes", "Mes"),                                   // I
+                new("fecha_llamada", "FECHA DE LLAMADA SIAU"),       // J
+                new("responsable_llamada", "RESPONSABLE LLAMADA SIAU"), // K
+                new("pregunta1", "1. El profesional se presento oportunamente"), // L
+                new("pregunta2", "2. Los profesionales se presentan de forma adecuada"), // M
+                new("pregunta3", "3. Los profesionales dan indicaciones"), // N
+                new("pregunta4", "4. Como calificaria su experiencia global"), // O
+                new("pregunta5", "5. Recomendaria a VISAL RT S.A.S a un familiar"), // P
+                new("persona_atiende", "PERSONA QUIEN ATIENDE LA LLAMADA"), // Q
+                new("observaciones", "OBSERVACIONES LLAMADA"),       // R
             ],
             filtros:
             [
@@ -168,17 +196,18 @@ public static class CensoBlueprint
             ],
             orden: [new("mes")]);
 
+    // Hoja "Indice Morbilidad": 1:1 con el Excel (3 columnas): CIE10, Diagnostico principal y Cant Px's,
+    // ordenada descendente por conteo. El Excel la divide por region; aqui es una sola, filtrable por Sede.
     private static ReporteHojaDef IndiceMorbilidad() =>
         ReporteHojaDef.Agregado("Indice Morbilidad", "paciente",
             groupBy:
             [
                 new("cie10", "CIE10"),
-                new("diagnostico_principal", "Diagnostico"),
+                new("diagnostico_principal", "Diagnostico principal"),
             ],
             agregados:
             [
                 new(ReporteAgregadoFunc.Count, null, "Cant Px's"),
-                new(ReporteAgregadoFunc.PctTotal, null, "% del total"),
             ],
             filtros:
             [
@@ -187,21 +216,65 @@ public static class CensoBlueprint
             ],
             orden: [new("Cant Px's", Desc: true)]);
 
-    private static ReporteHojaDef ConsolidadoEncuesta() =>
-        ReporteHojaDef.Agregado("Consolidado Encuesta", "encuesta_satisfaccion",
+    // Hoja "Consolidado Encuesta": MATRIZ fiel al Excel canonico (A..V). El pivote generico no puede
+    // expresar dos bloques de pregunta con conteo + % por respuesta mas el total de llamadas efectivas
+    // por mes, asi que esta hoja usa un constructor dedicado (ReporteMatrizEncuesta): la consulta base
+    // trae las filas crudas (mes, pregunta4, pregunta5) ya acotadas a llamadas EFECTIVAS (Estado
+    // "Realizada") y el reshaper arma, por mes, el bloque P4 (calificacion 5..1), el bloque P5
+    // (recomendacion, textual) y la columna "Llamadas Efectivas". El % es conteo/total del mes.
+    // Hoja "Indice de Mortalidad": cuantos pacientes fallecen por mes (pregunta del Excel hoja 5).
+    // Agrupa los pacientes con Estado "FALLECIMIENTO" por el mes del deceso (fecha_fallecimiento);
+    // filtrable por Sede y por rango de fecha de fallecimiento via los parametros del censo.
+    private static ReporteHojaDef IndiceMortalidad() =>
+        ReporteHojaDef.Agregado("Indice de Mortalidad", "paciente",
             groupBy:
             [
-                new("pregunta4", "P4 Experiencia global"),
-                new("mes", "Mes"),
+                new("mes_fallecimiento", "Mes"),
             ],
             agregados:
             [
-                new(ReporteAgregadoFunc.Count, null, "Cantidad"),
+                new(ReporteAgregadoFunc.Count, null, "Pacientes Fallecidos"),
             ],
             filtros:
             [
+                new("estado", ReporteFiltroOp.Eq, ["FALLECIMIENTO"]),
+                new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("fecha_fallecimiento", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+            ],
+            orden: [new("mes_fallecimiento")]);
+
+    private static ReporteHojaDef ConsolidadoEncuesta() =>
+        ReporteHojaDef.Detalle("Consolidado Encuesta", "encuesta_satisfaccion",
+            columnas:
+            [
+                new("mes", "Mes"),                       // idx 0
+                new("pregunta4", "P4"),                  // idx 1
+                new("pregunta5", "P5"),                  // idx 2
+            ],
+            filtros:
+            [
+                new("estado", ReporteFiltroOp.Eq, ["Realizada"]),
                 new("paciente.sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_llamada", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
             ],
-            pivote: new ReportePivoteDef("pregunta4", "mes"));
+            orden: [new("mes")]) with
+        {
+            Matriz = new ReporteMatrizEncuestaDef(
+                ColMes: 0, ColP4: 1, ColP5: 2,
+                TituloEsquina: "Calificacion",
+                TituloMes: "Mes",
+                BloqueP4: new ReporteMatrizBloqueDef(
+                    "4. Como calificaria su experiencia global",
+                    [new(5, "5"), new(4, "4"), new(3, "3"), new(2, "2"), new(1, "1")]),
+                BloqueP5: new ReporteMatrizBloqueDef(
+                    "5. Recomendaria a VISAL RT S.A.S a un familiar",
+                    [
+                        new(5, "Definitivamente Si"),
+                        new(4, "Probablemente Si"),
+                        new(3, "Ni Probable Ni Improbable"),
+                        new(2, "Probablemente No"),
+                        new(1, "Definitivamente NO"),
+                    ]),
+                TituloTotal: "Llamadas Efectivas"),
+        };
 }

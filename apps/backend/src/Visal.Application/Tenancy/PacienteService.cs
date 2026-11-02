@@ -82,7 +82,10 @@ public sealed class PacienteService : IPacienteService
             p.FechaAtencion,
             p.UsuarioIngresoId, p.UsuarioIngresoNombre,
             p.ContratoPrincipal,
-            p.Condicion, p.SlaIngresoMinutos);
+            p.Condicion, p.SlaIngresoMinutos,
+            p.MedicamentoControlado,
+            p.BarthelTotal, p.BarthelClasificacion, p.BarthelDatosJson, p.BarthelActualizadoEn,
+            p.FechaFallecimiento, p.FallecimientoReportadoPor, p.CertificadoVisal, p.MotivoFallecimiento);
     }
 
     /// <summary>Nombre legible de un usuario de plataforma: DisplayName, o la concatenacion de sus
@@ -196,6 +199,8 @@ public sealed class PacienteService : IPacienteService
         p.FechaAtencion = req.FechaAtencion;
         // Condicion del paciente (CENSO): valor de una lista fija (se guarda el texto elegido).
         p.Condicion = string.IsNullOrWhiteSpace(req.Condicion) ? null : req.Condicion.Trim();
+        // Medicamento Controlado (SI/NO) de la ficha tecnica (CENSO col V).
+        p.MedicamentoControlado = string.IsNullOrWhiteSpace(req.MedicamentoControlado) ? null : req.MedicamentoControlado.Trim();
         // SLA del ingreso: minutos entre que la IPS comenta y la fecha de atencion/respuesta. Derivado
         // (no editable). Null si falta alguna fecha; se descartan negativos (datos invertidos) a 0.
         p.SlaIngresoMinutos = p.FechaComentan is DateTimeOffset fcSla && p.FechaAtencion is DateTimeOffset faSla
@@ -503,6 +508,51 @@ public sealed class PacienteService : IPacienteService
         _audit.Write(actor, "paciente.reabrir", nameof(Paciente), p.Id,
             previousValue: new { estadoAdmision = "Cerrado", fechaCierre = fechaCierrePrev },
             newValue: new { estadoAdmision = p.EstadoAdmision, documento = p.NumeroDocumento, nombre = p.NombreCompleto },
+            tenantId: p.TenantId);
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Registra el deceso: fija Estado "FALLECIMIENTO" + datos del fallecimiento y cierra la
+    /// admision automaticamente (sin exigir los obligatorios del cierre normal; el deceso manda).
+    /// El PDF del certificado se adjunta por separado desde la UI (mecanismo de documentos).
+    /// </summary>
+    public async Task<bool> RegistrarDecesoAsync(RegistrarDecesoRequest req, Guid actor, CancellationToken ct = default)
+    {
+        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == req.PacienteId, ct);
+        if (p is null) { return false; }
+
+        var estadoPrev = p.Estado;
+        var estadoAdmPrev = p.EstadoAdmision;
+
+        p.Estado = "FALLECIMIENTO";
+        p.FechaFallecimiento = req.FechaFallecimiento;
+        p.FallecimientoReportadoPorId = req.ReportadoPorId;
+        p.FallecimientoReportadoPor = string.IsNullOrWhiteSpace(req.ReportadoPorNombre) ? null : req.ReportadoPorNombre.Trim();
+        p.CertificadoVisal = req.CertificadoVisal ? "SI" : "NO";
+        p.MotivoFallecimiento = string.IsNullOrWhiteSpace(req.Motivo) ? null : req.Motivo.Trim();
+
+        // Cierre automatico: no se agregan mas servicios. El deceso cierra aunque falten
+        // campos obligatorios del cierre normal.
+        if (!string.Equals(p.EstadoAdmision, "Cerrado", StringComparison.OrdinalIgnoreCase))
+        {
+            p.EstadoAdmision = "Cerrado";
+            p.FechaCierreAdmision = DateTimeOffset.UtcNow;
+        }
+
+        _audit.Write(actor, "paciente.deceso", nameof(Paciente), p.Id,
+            previousValue: new { estado = estadoPrev, estadoAdmision = estadoAdmPrev },
+            newValue: new
+            {
+                estado = p.Estado,
+                estadoAdmision = p.EstadoAdmision,
+                fechaFallecimiento = p.FechaFallecimiento,
+                certificadoVisal = p.CertificadoVisal,
+                reportadoPor = p.FallecimientoReportadoPor,
+                documento = p.NumeroDocumento,
+                nombre = p.NombreCompleto,
+            },
             tenantId: p.TenantId);
         await _db.SaveChangesAsync(ct);
         return true;

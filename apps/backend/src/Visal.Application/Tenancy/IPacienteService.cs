@@ -77,7 +77,15 @@ public sealed record PacienteDetailDto(
     // Condicion del paciente (valor de lista fija).
     string? Condicion = null,
     // SLA del ingreso en minutos (Comentan -> Atencion). Solo lectura: lo calcula el servidor.
-    int? SlaIngresoMinutos = null);
+    int? SlaIngresoMinutos = null,
+    // Medicamento Controlado (SI/NO) de la ficha tecnica (CENSO col V).
+    string? MedicamentoControlado = null,
+    // Barthel denormalizado (solo lectura; lo llena el cierre de escala / el recalculo).
+    int? BarthelTotal = null, string? BarthelClasificacion = null,
+    string? BarthelDatosJson = null, DateTimeOffset? BarthelActualizadoEn = null,
+    // Fallecimiento / mortalidad (solo lectura; lo llena RegistrarDecesoAsync).
+    DateTimeOffset? FechaFallecimiento = null, string? FallecimientoReportadoPor = null,
+    string? CertificadoVisal = null, string? MotivoFallecimiento = null);
 
 public sealed record SavePacienteRequest(
     Guid? Id,
@@ -122,7 +130,9 @@ public sealed record SavePacienteRequest(
     // Usuario del ingreso: solo se envia el Id del PlatformUser elegido; el servidor resuelve el nombre.
     Guid? UsuarioIngresoId = null,
     // Condicion del paciente (valor de lista fija). El SLA NO se envia: lo calcula el servidor.
-    string? Condicion = null);
+    string? Condicion = null,
+    // Medicamento Controlado (SI/NO) de la ficha tecnica (CENSO col V).
+    string? MedicamentoControlado = null);
 
 public interface IPacienteService
 {
@@ -169,7 +179,29 @@ public interface IPacienteService
     /// para reabrir HC).
     /// </summary>
     Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
+    /// Registra el deceso del paciente: fija Estado clinico "FALLECIMIENTO", guarda la fecha/hora,
+    /// el usuario que reporta y si VISAL emitio el certificado (SI/NO), y CIERRA la admision
+    /// automaticamente (EstadoAdmision "Cerrado") para que no se agreguen mas servicios — sin
+    /// exigir los campos obligatorios del cierre normal (el deceso manda). El PDF del certificado
+    /// se adjunta aparte por el mecanismo de documentos del paciente. Auditado.
+    /// </summary>
+    Task<bool> RegistrarDecesoAsync(RegistrarDecesoRequest req, Guid actor, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Datos del deceso capturados en la pestana "Mortalidad" de la ficha. El usuario que reporta
+/// se toma de la sesion (no del formulario). <see cref="CertificadoVisal"/> es true si VISAL
+/// emitio el certificado (entonces la UI adjunta el PDF); false = no hay certificado VISAL.
+/// </summary>
+public sealed record RegistrarDecesoRequest(
+    Guid PacienteId,
+    DateTimeOffset FechaFallecimiento,
+    bool CertificadoVisal,
+    Guid ReportadoPorId,
+    string? ReportadoPorNombre,
+    string? Motivo = null);
 
 /// <summary>
 /// Resultado de intentar cerrar un paciente. Si Ok=true el cierre se aplico;

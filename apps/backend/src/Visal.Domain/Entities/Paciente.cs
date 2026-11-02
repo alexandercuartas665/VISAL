@@ -114,6 +114,9 @@ public class Paciente : TenantEntity
     public Guid? TipoTutelaId { get; set; }
     /// <summary>FK a catalogos_paciente (tipo=MedContratado).</summary>
     public Guid? MedContratadoId { get; set; }
+    /// <summary>Indicador SI/NO de "Medicamento Controlado" de la ficha tecnica (CENSO, columna V de
+    /// "Base de Pacientes"). Texto libre con valores "SI"/"NO" (mismo patron que <see cref="Tutela"/>).</summary>
+    public string? MedicamentoControlado { get; set; }
 
     // ===== Geografia (FKs a futuras tablas catalogo) =====
     public Guid? PaisResidenciaId { get; set; }
@@ -165,6 +168,38 @@ public class Paciente : TenantEntity
     public string? ObservacionesHospitalizacion { get; set; }
     /// <summary>Observaciones generales del paciente (notas libres a nivel paciente, CENSO).</summary>
     public string? Observaciones { get; set; }
+
+    // ===== Barthel (denormalizado desde la escala PP-FO-46 de la HC) =====
+    // Se llenan SOLOS al cerrar una escala Barthel (EscalaService.CerrarAsync) o al
+    // recalcular todo el sistema (BarthelDenormalizador.RecalcularTodosAsync). No se
+    // editan a mano. Gana siempre la escala cerrada mas reciente del paciente.
+    /// <summary>Puntaje total Barthel (0-100), del campo barthel_total de la ultima escala cerrada.
+    /// Columna Q "Puntaje Barthel" de la hoja "Base de Pacientes" del CENSO. Null si no hay escala.</summary>
+    public int? BarthelTotal { get; set; }
+    /// <summary>Grado de dependencia (barthel_clasificacion) de la ultima escala cerrada.</summary>
+    public string? BarthelClasificacion { get; set; }
+    /// <summary>Snapshot jsonb PLANO con TODOS los valores de la ultima escala Barthel cerrada
+    /// ({ "campo": "valor" }), para conservar el detalle completo a nivel paciente.</summary>
+    public string? BarthelDatosJson { get; set; }
+    /// <summary>Fecha/hora (cierre) de la ultima escala Barthel volcada a este paciente. Null si no hay.</summary>
+    public DateTimeOffset? BarthelActualizadoEn { get; set; }
+
+    // ===== Fallecimiento / Mortalidad =====
+    // Se capturan desde la pestana "Mortalidad" de la ficha (Admision). Al registrar el deceso
+    // el Estado clinico pasa a "FALLECIMIENTO" y la admision se cierra automaticamente (no se
+    // agregan mas servicios). Alimentan la hoja "Indice de Mortalidad" del CENSO (conteo por mes).
+    /// <summary>Fecha y hora del fallecimiento reportadas. Null si el paciente no ha fallecido.
+    /// Define el mes de la hoja de mortalidad del CENSO.</summary>
+    public DateTimeOffset? FechaFallecimiento { get; set; }
+    /// <summary>Usuario (id) que reporto el deceso. Se toma de la sesion.</summary>
+    public Guid? FallecimientoReportadoPorId { get; set; }
+    /// <summary>Nombre del usuario que reporto el deceso (denormalizado para el reporte).</summary>
+    public string? FallecimientoReportadoPor { get; set; }
+    /// <summary>Si VISAL emitio el certificado de defuncion (SI/NO). Cuando es "SI" se adjunta el
+    /// PDF por el mecanismo de documentos del paciente (tipologia "Certificado de Defuncion").</summary>
+    public string? CertificadoVisal { get; set; }
+    /// <summary>Motivo / causa del fallecimiento (texto libre multilinea). Columna text.</summary>
+    public string? MotivoFallecimiento { get; set; }
 
     // ===== Estado del registro =====
     public bool Activo { get; set; } = true;

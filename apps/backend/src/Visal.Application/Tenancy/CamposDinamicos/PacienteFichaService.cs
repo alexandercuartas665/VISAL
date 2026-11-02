@@ -28,6 +28,30 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
     public async Task EnsureDefaultsAsync(CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return; }
+        await SembrarSistemaAsync(tid, ct);
+        // Top-up idempotente de tabs de sistema agregados despues (los tenants ya sembrados no
+        // entran al bloque de arriba). "mortalidad": pestana especial de captura de deceso.
+        await EnsureTabAsync(tid, "mortalidad", "Mortalidad", ct);
+    }
+
+    private async Task EnsureTabAsync(Guid tid, string key, string titulo, CancellationToken ct)
+    {
+        if (await db.PacienteFichaDefs.AnyAsync(f => f.TabKey == key, ct)) { return; }
+        var maxOrden = await db.PacienteFichaDefs.MaxAsync(f => (int?)f.Orden, ct) ?? -1;
+        db.PacienteFichaDefs.Add(new PacienteFichaDef
+        {
+            TenantId = tid,
+            TabKey = key,
+            Titulo = titulo,
+            Orden = maxOrden + 1,
+            EsSistema = true,
+        });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException) { DescartarPendientes(); } // carrera de siembra (ver abajo)
+    }
+
+    private async Task SembrarSistemaAsync(Guid tid, CancellationToken ct)
+    {
         // Idempotente: solo siembra si falta el primer tab de sistema.
         if (await db.PacienteFichaDefs.AnyAsync(f => f.TabKey == TabsSistema[0].Key, ct)) { return; }
 

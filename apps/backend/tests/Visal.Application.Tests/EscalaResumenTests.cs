@@ -120,7 +120,8 @@ public sealed class EscalaResumenTests
         var (hcId, escFormId) = await SembrarAsync(ctx, RutaEscalas);
         var escalaId = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "90", "DEPENDENCIA LEVE");
 
-        var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant },
+            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx));
         var ok = await svc.CerrarAsync(escalaId, "", Guid.NewGuid());
 
         Assert.True(ok);
@@ -142,7 +143,8 @@ public sealed class EscalaResumenTests
         var e1 = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "90", "DEPENDENCIA LEVE");
         var e2 = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "40", "DEPENDENCIA MODERADA");
 
-        var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant },
+            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx));
         await svc.CerrarAsync(e1, "", Guid.NewGuid());
         await svc.CerrarAsync(e2, "", Guid.NewGuid());
 
@@ -160,7 +162,8 @@ public sealed class EscalaResumenTests
         var (hcId, escFormId) = await SembrarAsync(ctx, rutaHc: null);
         var escalaId = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "90", "DEPENDENCIA LEVE");
 
-        var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant });
+        var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant },
+            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx));
         await svc.CerrarAsync(escalaId, "", Guid.NewGuid());
 
         Assert.Null(LeerAnalisis(ctx, hcId));   // analisis sigue vacio

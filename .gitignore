@@ -83,6 +83,7 @@ apps/backend/src/Visal.SuperAdmin/wwwroot/uploads/
 # Runtime artifacts del start-visal.ps1 / start-visal-wt.ps1 - no versionar
 .visal.pid
 .visal-wt.pid
+.visal-wt-*.pid
 logs/
 
 # Binarios/herramientas locales (cloudflared para el tunel de desarrollo)

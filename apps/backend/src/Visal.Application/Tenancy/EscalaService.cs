@@ -6,7 +6,7 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenant) : IEscalaService
+public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenant, IBarthelDenormalizador barthel) : IEscalaService
 {
     public async Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosDisponiblesAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -155,6 +155,10 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
         await VolcarResumenAAnalisisAsync(e, ct);
 
         await db.SaveChangesAsync(ct);
+
+        // Si es una escala Barthel, vuelca su puntaje/datos al paciente (denormalizado) para
+        // el CENSO y la ficha. No-op silencioso si no es Barthel o si no es la mas reciente.
+        await barthel.AplicarDesdeEscalaAsync(e.Id, ct);
         return true;
     }
 

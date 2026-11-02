@@ -170,6 +170,22 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("contrato_principal", "Contrato", nameof(Paciente.ContratoPrincipal), ReportFieldKind.Text),
                 new("condicion", "Condicion", nameof(Paciente.Condicion), ReportFieldKind.Text),
                 new("sla_ingreso_minutos", "Mins (SLA)", nameof(Paciente.SlaIngresoMinutos), ReportFieldKind.Integer),
+                // Mes del ingreso (derivado de Fecha Ingreso, hora local): columna C de "Base de Pacientes".
+                new("mes_ingreso", "Mes Ingreso", nameof(Paciente.FechaIngresoPad), ReportFieldKind.Text, Derivacion: ReportDerivacion.AnioMes),
+                // Medicamento Controlado (SI/NO): columna V de "Base de Pacientes".
+                new("med_controlado", "Medicamento Controlado", nameof(Paciente.MedicamentoControlado), ReportFieldKind.Text),
+                // Nombre del familiar/contacto responsable: columna AC de "Base de Pacientes".
+                new("contacto_emergencia", "Nombre Familiar Responsable", nameof(Paciente.ContactoEmergencia), ReportFieldKind.Text),
+                // Barthel denormalizado desde la escala PP-FO-46 (columna Q = puntaje total).
+                new("puntaje_barthel", "Puntaje Barthel", nameof(Paciente.BarthelTotal), ReportFieldKind.Integer),
+                new("barthel_clasificacion", "Barthel - Grado de dependencia", nameof(Paciente.BarthelClasificacion), ReportFieldKind.Text),
+                new("barthel_fecha", "Barthel - Fecha", nameof(Paciente.BarthelActualizadoEn), ReportFieldKind.DateTime),
+                // Fallecimiento / mortalidad: la hoja "Indice de Mortalidad" cuenta por mes de deceso.
+                new("fecha_fallecimiento", "Fecha de fallecimiento", nameof(Paciente.FechaFallecimiento), ReportFieldKind.DateTime),
+                new("mes_fallecimiento", "Mes de fallecimiento", nameof(Paciente.FechaFallecimiento), ReportFieldKind.Text, Derivacion: ReportDerivacion.AnioMes),
+                new("certificado_visal", "Certificado VISAL", nameof(Paciente.CertificadoVisal), ReportFieldKind.Text),
+                new("motivo_fallecimiento", "Motivo del deceso", nameof(Paciente.MotivoFallecimiento), ReportFieldKind.Text),
+                new("fallecimiento_reportado_por", "Deceso reportado por", nameof(Paciente.FallecimientoReportadoPor), ReportFieldKind.Text),
                 new("activo", "Activo", nameof(Paciente.Activo), ReportFieldKind.Bool),
                 new("sede_id", "Sede (ID)", nameof(Paciente.SedeAtencionId), ReportFieldKind.Guid),
             ],

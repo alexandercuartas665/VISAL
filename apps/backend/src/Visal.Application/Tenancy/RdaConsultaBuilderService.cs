@@ -220,8 +220,13 @@ public sealed class RdaConsultaBuilderService(
             locationId, cupsEncuentro, cupsDisplay, condition?.Id, condition?.Code?.Text);
         var allergy = BuildAllergyNkda(allergyId, patientId, encounterId, advertencias);
 
-        var meds = BuildMedicationRequests(medicamentos, patientId, encounterId, practitionerId);
-        var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId);
+        // MedicationRequest se OMITE deliberadamente: MedicationRequestRDA exige datos
+        // estructurados que VISAL no captura (numero de prescripcion + MIPRES, codigo DCI
+        // del ValueSet MipresDCI, via del ValueSet VAD, timing con duracion/unidad/MedicationTime
+        // y dosis UMM/MipresDoseForm). VISAL guarda la medicacion como texto libre (nombre +
+        // posologia). Emitir el recurso = rechazo por binding (1028); se reporta como NARRATIVE
+        // en sectionMedications (la seccion es 0..*). Mismo criterio que ocupacion/riesgo/incapacidad.
+        var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId, advertencias);
         // Ocupacion (PatientOccupationAtEncounterRDA), factores de riesgo (RiskFactorRDA)
         // e incapacidades (AttendanceAllowanceRDA) son entries OPCIONALES en sus secciones
         // y exigen codigos de ValueSets requeridos (CIUO88AC, FactorRiesgo) que Visal aun
@@ -232,7 +237,7 @@ public sealed class RdaConsultaBuilderService(
 
         var composition = BuildComposition(hc, patientId, encounterId, orgId, practitionerId,
             condition?.Id, allergyId, payerOrgId, docRefId,
-            meds.Select(m => m.Id!).ToList(), services.Select(s => s.Id!).ToList());
+            medicamentos, services.Select(s => s.Id!).ToList());
 
         // ---------- Bundle ----------
         var bundle = new Bundle
@@ -270,7 +275,6 @@ public sealed class RdaConsultaBuilderService(
         if (condition is not null) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = condition }); }
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = allergy });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = documentReference });
-        foreach (var m in meds) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = m }); }
         foreach (var s in services) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = s }); }
 
         var serializer = new FhirJsonSerializer(new SerializerSettings { Pretty = true });
@@ -306,7 +310,7 @@ public sealed class RdaConsultaBuilderService(
         await db.SaveChangesAsync(ct);
 
         log.LogInformation("RDA Consulta construido: {Id} HC={HcId} CUPS={Cups} Meds={Meds} Servs={Servs}",
-            evento.Id, hc.Id, cupsEncuentro, meds.Count, services.Count);
+            evento.Id, hc.Id, cupsEncuentro, medicamentos.Count, services.Count);
         return new RdaBuildResult(evento.Id, bundleJson, hash, EstadoRdaEvento.Borrador,
             bundle.Entry.Count, YaExistia: false, advertencias);
     }
@@ -316,7 +320,7 @@ public sealed class RdaConsultaBuilderService(
     private static Composition BuildComposition(HistoriaClinica hc, string patientId, string encounterId,
         string orgId, string practitionerId, string? conditionId, string allergyId,
         string payerOrgId, string docRefId,
-        IReadOnlyList<string> medIds, IReadOnlyList<string> serviceIds)
+        IReadOnlyList<HistoriaClinicaMedicamento> medicamentos, IReadOnlyList<string> serviceIds)
     {
         var fin = (hc.FechaCierre ?? DateTimeOffset.UtcNow).ToOffset(TimeSpan.FromHours(-5));
         var c = new Composition
@@ -377,16 +381,20 @@ public sealed class RdaConsultaBuilderService(
             "nilknown", "Nil Known"));
         c.Section.Add(sInc);
 
-        // 4. sectionMedications (1..1)
+        // 4. sectionMedications (1..1, MedicationRequest 0..*). No emitimos MedicationRequest
+        // (ver comentario en el metodo principal): se reporta la medicacion como narrative
+        // porque VISAL no captura los datos estructurados que exige MedicationRequestRDA.
+        string medNarr = medicamentos.Count > 0
+            ? "Medicamentos prescritos durante la atención:<ul>" +
+              string.Concat(medicamentos.Select(m =>
+                  "<li>" + System.Net.WebUtility.HtmlEncode(m.NombreMedicamento ?? "")
+                  + (string.IsNullOrWhiteSpace(m.Posologia)
+                        ? "" : " — " + System.Net.WebUtility.HtmlEncode(m.Posologia!))
+                  + "</li>")) + "</ul>"
+            : "Sin medicamentos prescritos en esta atención.";
         var sMed = MakeSection("Historial de medicamentos",
-            "10160-0", "History of Medication use Narrative",
-            medIds.Count > 0 ? "Medicamentos prescritos durante la atención."
-                             : "Sin medicamentos prescritos en esta atención.");
-        if (medIds.Count > 0)
-        {
-            foreach (var id in medIds) { sMed.Entry.Add(ContainedRef(id)); }
-        }
-        else
+            "10160-0", "History of Medication use Narrative", medNarr);
+        if (medicamentos.Count == 0)
         {
             sMed.EmptyReason = MakeCC(new Coding(
                 "http://terminology.hl7.org/CodeSystem/list-empty-reason",
@@ -657,44 +665,33 @@ public sealed class RdaConsultaBuilderService(
         return a;
     }
 
-    private static List<MedicationRequest> BuildMedicationRequests(
-        IReadOnlyList<HistoriaClinicaMedicamento> rows, string patientId, string encounterId, string practitionerId)
-    {
-        var list = new List<MedicationRequest>();
-        for (int i = 0; i < rows.Count; i++)
-        {
-            var r = rows[i];
-            var mr = new MedicationRequest
-            {
-                Id = $"MedicationRequest-{i}",
-                Meta = new Meta { Profile = new[] { $"{ProfileBase}/MedicationRequestRDA" } },
-                Status = MedicationRequest.MedicationrequestStatus.Active,
-                Intent = MedicationRequest.MedicationRequestIntent.Order,
-                Subject = ContainedRef(patientId),
-                Encounter = ContainedRef(encounterId),
-                Requester = ContainedRef(practitionerId),
-                AuthoredOnElement = new FhirDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-5)))
-            };
-            mr.Medication = new CodeableConcept { Text = r.NombreMedicamento };
-            if (!string.IsNullOrWhiteSpace(r.Posologia))
-            {
-                mr.DosageInstruction.Add(new Dosage { Text = r.Posologia });
-            }
-            list.Add(mr);
-        }
-        return list;
-    }
+    // CUPS real = 6 digitos. Separa los CUPS validos de los codigos internos de VISAL
+    // (SER-001, E985110, P999326, F890128...) que NO estan en CUPSProcedureCodes.
+    private static readonly System.Text.RegularExpressions.Regex CupsNumerico =
+        new(@"^\d{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private static List<ServiceRequest> BuildServiceRequests(
-        IReadOnlyList<HistoriaClinicaOrdenServicio> rows, string patientId, string encounterId, string practitionerId)
+        IReadOnlyList<HistoriaClinicaOrdenServicio> rows, string patientId, string encounterId,
+        string practitionerId, List<string> advertencias)
     {
         var list = new List<ServiceRequest>();
         for (int i = 0; i < rows.Count; i++)
         {
             var r = rows[i];
+            // ServiceRequestRDA.code exige un CUPS del ValueSet CUPSProcedureCodes (binding
+            // requerido). Si el codigo del servicio no es un CUPS valido (6 digitos) no hay
+            // mapeo disponible -> se OMITE la orden (la seccion es 0..*) en vez de enviar un
+            // codigo que el validador rechaza (1028).
+            var cupsSrv = ServicioCodigo.Base(r.CodigoServicio);
+            if (string.IsNullOrWhiteSpace(cupsSrv) || !CupsNumerico.IsMatch(cupsSrv))
+            {
+                advertencias.Add(
+                    $"Orden de servicio '{r.Descripcion}' con codigo '{r.CodigoServicio}' no es un CUPS valido; se omite del RDA.");
+                continue;
+            }
             var sr = new ServiceRequest
             {
-                Id = $"ServiceRequest-{i}",
+                Id = $"ServiceRequest-{list.Count}",
                 Meta = new Meta { Profile = new[] { $"{ProfileBase}/ServiceRequestRDA" } },
                 Status = RequestStatus.Active,
                 Intent = RequestIntent.Order,
@@ -703,13 +700,17 @@ public sealed class RdaConsultaBuilderService(
                 Requester = ContainedRef(practitionerId),
                 AuthoredOnElement = new FhirDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-5)))
             };
+            // category 1..1: ServiceRequestRDA fija el coding R866 = 01 "Procedimiento en salud".
+            sr.Category.Add(MakeCC(new Coding(
+                $"{CodeSystemBase}/ColombianHealthTechnologyCategory", "01", "Procedimiento en salud")));
             sr.Code = new CodeableConcept { Text = r.Descripcion };
-            // CUPS sin el sufijo de modalidad d/f (RIPS no lo maneja).
-            var cupsSrv = ServicioCodigo.Base(r.CodigoServicio);
-            if (!string.IsNullOrWhiteSpace(cupsSrv))
-            {
-                sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, r.Descripcion));
-            }
+            // display real del CUPS puede diferir de la descripcion local -> solo WARNING, no bloquea.
+            sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, r.Descripcion));
+            // reasonCode 1..1: binding requerido a RIPSFinalidadConsultaVersion2Codigos. VISAL no
+            // captura la finalidad por orden; default 16 TRATAMIENTO (la mas comun de un servicio
+            // ordenado durante la atencion).
+            sr.ReasonCode.Add(MakeCC(new Coding(
+                $"{CodeSystemBase}/RIPSFinalidadConsultaVersion2", "16", "TRATAMIENTO")));
             list.Add(sr);
         }
         return list;

@@ -26,11 +26,18 @@ public static class ReporteParametros
     private static ReporteHojaDef ResolverHoja(
         ReporteHojaDef hoja, IReadOnlyDictionary<string, IReadOnlyList<string>> valores)
     {
-        // Sin filtros parametrizados: nada que reescribir.
-        if (!hoja.Filtros.Any(f => !string.IsNullOrWhiteSpace(f.ParamClave)))
+        var hayFiltroParam = hoja.Filtros.Any(f => !string.IsNullOrWhiteSpace(f.ParamClave));
+        var hayExisteParam = (hoja.Existencias ?? []).Any(e => !string.IsNullOrWhiteSpace(e.ParamClave));
+        // Sin nada parametrizado: nada que reescribir.
+        if (!hayFiltroParam && !hayExisteParam)
         {
             return hoja;
         }
+
+        List<string> Limpios(string clave) =>
+            valores.TryGetValue(clave, out var vals)
+                ? vals.Where(v => !string.IsNullOrWhiteSpace(v)).ToList()
+                : [];
 
         var filtros = new List<ReporteFiltroDef>(hoja.Filtros.Count);
         foreach (var f in hoja.Filtros)
@@ -42,9 +49,7 @@ public static class ReporteParametros
             }
 
             // Filtro enlazado a parametro: solo entra si hay al menos un valor no vacio.
-            var limpios = valores.TryGetValue(f.ParamClave, out var vals)
-                ? vals.Where(v => !string.IsNullOrWhiteSpace(v)).ToList()
-                : [];
+            var limpios = Limpios(f.ParamClave);
             if (limpios.Count == 0)
             {
                 continue; // parametro sin valor -> esta hoja no se filtra por el
@@ -52,6 +57,28 @@ public static class ReporteParametros
             filtros.Add(f with { Valores = limpios, ParamClave = null });
         }
 
-        return hoja with { Filtros = filtros };
+        // Existencias: a diferencia de un filtro, la existencia SIEMPRE se mantiene (es "solo lo
+        // atendido"); lo que depende del parametro es unicamente el acotar por fecha. Sin valor ->
+        // se conserva la existencia pero sin rango (ParamClave y Valores en null).
+        var existencias = hoja.Existencias;
+        if (existencias is { Count: > 0 })
+        {
+            var resueltas = new List<ReporteExisteDef>(existencias.Count);
+            foreach (var e in existencias)
+            {
+                if (string.IsNullOrWhiteSpace(e.ParamClave))
+                {
+                    resueltas.Add(e);
+                    continue;
+                }
+                var limpios = Limpios(e.ParamClave);
+                resueltas.Add(limpios.Count >= 2
+                    ? e with { Valores = limpios, ParamClave = null }
+                    : e with { Valores = null, ParamClave = null });
+            }
+            existencias = resueltas;
+        }
+
+        return hoja with { Filtros = filtros, Existencias = existencias };
     }
 }

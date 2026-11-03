@@ -72,6 +72,39 @@ public sealed class CensoBlueprintTests
     }
 
     [Fact]
+    public void Base_de_pacientes_solo_atendidos_via_existencia_de_historia_clinica()
+    {
+        var req = CensoBlueprint.Crear();
+        var baseHoja = req.Hojas.Single(h => h.Nombre == "Base de Pacientes");
+
+        // Solo atendidos: existencia (EXISTS) hacia la Historia Clinica, acotable por fecha_atencion.
+        var ex = Assert.Single(baseHoja.Existencias!);
+        Assert.Equal("historia", ex.TargetEntityKey);
+        Assert.Equal("fecha_atencion", ex.FechaCampoRef);
+        Assert.Equal("rango_fecha", ex.ParamClave);
+
+        // Ya NO se filtra por fecha_ingreso (ni por un campo de fecha del propio paciente).
+        Assert.DoesNotContain(baseHoja.Filtros, f => f.CampoRef == "fecha_ingreso" && f.Op == ReporteFiltroOp.Between);
+
+        // Sin rango: EXISTS sobre historias_clinicas, sin BETWEEN (todo lo atendido).
+        var sqlSinRango = Generador().Generar(baseHoja).Sql;
+        Assert.Contains("EXISTS", sqlSinRango);
+        Assert.Contains("historias_clinicas", sqlSinRango);
+        Assert.DoesNotContain("BETWEEN", sqlSinRango);
+
+        // Con rango resuelto: el BETWEEN aparece DENTRO del EXISTS (acota por fecha de atencion).
+        var valores = new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["rango_fecha"] = ["2026-01-01", "2026-01-31"],
+        };
+        var resuelto = ReporteParametros.Resolver(new ReportePackDef(req.Nombre, req.Hojas), valores);
+        var baseConRango = resuelto.Hojas.Single(h => h.Nombre == "Base de Pacientes");
+        var sqlConRango = Generador().Generar(baseConRango).Sql;
+        Assert.Contains("EXISTS", sqlConRango);
+        Assert.Contains("BETWEEN", sqlConRango);
+    }
+
+    [Fact]
     public void La_hoja_de_mortalidad_cuenta_fallecidos_por_mes()
     {
         var hoja = CensoBlueprint.Crear().Hojas.Single(h => h.Nombre == "Indice de Mortalidad");

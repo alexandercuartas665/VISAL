@@ -302,6 +302,21 @@ public sealed class ReportSemanticModel : IReportSemanticModel
             ],
         };
 
+        // Historia Clinica como destino de EXISTENCIA (semi-join): se usa para saber si un paciente
+        // fue ATENDIDO (tiene al menos una HC) y para acotar por su fecha de atencion. TenantEntity:
+        // el EXISTS hereda el filtro por tenant. No se expone como cruce (LEFT JOIN) para no duplicar
+        // filas de paciente; entra solo via ReporteExisteDef.
+        var historia = new ReportableEntityDef
+        {
+            Key = "historia",
+            Label = "Historias Clinicas (atenciones)",
+            ClrType = typeof(HistoriaClinica),
+            Fields =
+            [
+                new("fecha_atencion", "Fecha de Atencion", nameof(HistoriaClinica.FechaAtencion), ReportFieldKind.DateTime),
+            ],
+        };
+
         // Departamento (geografia) como destino de cruce. Es catalogo GLOBAL (BaseEntity, no tenant):
         // el generador lo une por PK sin filtro de tenant.
         var departamento = new ReportableEntityDef
@@ -315,7 +330,7 @@ public sealed class ReportSemanticModel : IReportSemanticModel
             ],
         };
 
-        Entities = [paciente, encuesta, diagnostico, ingreso, sede, aseguradora, catalogoPaciente, departamento];
+        Entities = [paciente, encuesta, diagnostico, ingreso, sede, aseguradora, catalogoPaciente, departamento, historia];
     }
 
     public ReportableEntityDef? Find(string key) =>

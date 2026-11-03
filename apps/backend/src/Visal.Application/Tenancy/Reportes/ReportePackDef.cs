@@ -79,6 +79,29 @@ public sealed record ReporteFiltroDef(
     IReadOnlyList<string>? Valores = null,
     string? ParamClave = null);
 
+/// <summary>
+/// Filtro de EXISTENCIA (semi-join / EXISTS) sobre una entidad relacionada: la fila base entra
+/// solo si existe al menos un registro en la entidad destino que la referencia. NO multiplica
+/// filas (a diferencia de un cruce con LEFT JOIN, que duplicaria la base por cada relacionado).
+/// Lo usa la hoja "Base de Pacientes" del CENSO para listar solo pacientes ATENDIDOS (los que
+/// tienen Historia Clinica), acotando opcionalmente por la fecha de atencion de la HC via el
+/// rango de fechas del censo. El rango se resuelve igual que un filtro (ParamClave -&gt; Valores);
+/// si llega vacio, la existencia se mantiene sin acotar por fecha (todo lo atendido).
+/// </summary>
+/// <param name="TargetEntityKey">Entidad reportable destino del EXISTS (p.ej. "historia").</param>
+/// <param name="LocalProperty">Propiedad CLR de la base que empata (p.ej. "Id" del paciente).</param>
+/// <param name="TargetProperty">Propiedad FK en el destino (p.ej. "PacienteId").</param>
+/// <param name="FechaCampoRef">Campo fecha del destino para acotar por rango (p.ej. "fecha_atencion"); null = sin rango.</param>
+/// <param name="ParamClave">Parametro de ejecucion que trae el rango (se resuelve antes de generar).</param>
+/// <param name="Valores">Rango resuelto (2 valores) cuando el parametro trae fechas; null = sin acotar por fecha.</param>
+public sealed record ReporteExisteDef(
+    string TargetEntityKey,
+    string LocalProperty,
+    string TargetProperty,
+    string? FechaCampoRef = null,
+    string? ParamClave = null,
+    IReadOnlyList<string>? Valores = null);
+
 /// <summary>Tipo de un parametro de ejecucion (define como se pide el valor al descargar).</summary>
 public enum ReporteParametroTipo
 {
@@ -171,7 +194,8 @@ public sealed record ReporteHojaDef(
     IReadOnlyList<ReporteOrdenDef> Orden,
     int? LimiteFilas = null,
     ReportePivoteDef? Pivote = null,
-    ReporteMatrizEncuestaDef? Matriz = null)
+    ReporteMatrizEncuestaDef? Matriz = null,
+    IReadOnlyList<ReporteExisteDef>? Existencias = null)
 {
     public static ReporteHojaDef Detalle(
         string nombre,

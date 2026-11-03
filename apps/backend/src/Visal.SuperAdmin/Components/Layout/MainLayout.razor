@@ -1,4 +1,7 @@
 @inherits LayoutComponentBase
+@using Visal.Application.Tenancy
+@inject ISedeSelectorService Sedes
+@inject NavigationManager Nav
 
 <div class="visal-shell">
     <!-- Toggles solo-CSS. Funcionan en cualquier render mode. -->
@@ -31,6 +34,21 @@
 
             <AuthorizeView>
                 <Authorized>
+                    @if (_sedes.Count >= 2)
+                    {
+                        <!-- Selector de sede en linea: permite cambiar de sede sin cerrar sesion.
+                             Form POST plano (SSR) al mismo endpoint del login; vuelve a esta pagina. -->
+                        <form method="post" action="/auth/select-sede" class="visal-sede-form m-0">
+                            <input type="hidden" name="returnUrl" value="@_returnUrl" />
+                            <select name="sucursalId" class="form-select form-select-sm visal-sede-select"
+                                    onchange="this.form.submit()" title="Cambiar de sede" aria-label="Sede activa">
+                                @foreach (var s in _sedes)
+                                {
+                                    <option value="@s.Id" selected="@(s.Id == _sedeActual)">@s.Nombre</option>
+                                }
+                            </select>
+                        </form>
+                    }
                     <span class="visal-user-chip">@(context.User.FindFirst("platform_role") is not null ? "Operador" : "Agencia") · <strong>@context.User.Identity?.Name</strong></span>
                     <form method="post" action="/auth/logout" class="m-0">
                         <button type="submit" class="btn btn-sm btn-outline-secondary">Salir</button>
@@ -128,3 +146,34 @@
         setTimeout(init, 400);
     })();
 </script>
+
+<style>
+    /* Selector de sede en la barra superior: compacto, no invade el ancho del chip de usuario. */
+    .visal-sede-select { width:auto; min-width:120px; max-width:220px; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<SucursalDto> _sedes = new();
+    private Guid _sedeActual = Guid.Empty;
+    private string _returnUrl = "/";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // returnUrl: la pagina actual (ruta local), para volver aca tras cambiar de sede.
+        try { _returnUrl = "/" + Nav.ToBaseRelativePath(Nav.Uri); }
+        catch { _returnUrl = "/"; }
+
+        if (AuthState is null) { return; }
+        var st = await AuthState;
+        // Solo para usuarios de agencia (con tenant); el selector aparece si tienen 2+ sedes.
+        if (Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var uid)
+            && Guid.TryParse(st.User.FindFirst("tenant_id")?.Value, out var tid))
+        {
+            Guid.TryParse(st.User.FindFirst("sucursal_id")?.Value, out _sedeActual);
+            try { _sedes = (await Sedes.GetSedesAsync(uid, tid)).ToList(); }
+            catch { _sedes = new(); }
+        }
+    }
+}

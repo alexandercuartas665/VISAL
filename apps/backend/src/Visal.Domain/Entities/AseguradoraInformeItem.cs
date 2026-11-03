@@ -79,4 +79,13 @@ public class AseguradoraInformeItem : TenantEntity
     /// sesion-&gt;turno-&gt;asignacion). El contenido "libre" sin HC no entra en este modo.
     /// Default false (comportamiento historico: todas las autorizaciones en un PDF).</summary>
     public bool UnoPorAutorizacion { get; set; }
+
+    /// <summary>Si true, dentro del PDF de cada paciente los documentos de historia/servicio
+    /// se agrupan por CUP (CodigoRips de la asignacion) y se inserta una pagina "rotulo"
+    /// separadora (1/4 de carta, con el logo del tenant + codigo CUP + nombre de servicio +
+    /// sede) antes del primer documento de cada CUP. El CUP manda el orden: numericos
+    /// ascendentes y los que empiezan por letra al final; dentro de cada CUP se respeta el
+    /// orden configurado (fecha/sesion). Solo aplica al contenido con CUP (historias);
+    /// autorizaciones, firmas y anexos quedan en su lugar. Default false.</summary>
+    public bool RotuloSeparadorCup { get; set; }
 }

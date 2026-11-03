@@ -982,6 +982,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("pdf_unico");
 
+                    b.Property<bool>("RotuloSeparadorCup")
+                        .HasColumnType("boolean")
+                        .HasColumnName("rotulo_separador_cup");
+
                     b.Property<string>("Seccion")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)")

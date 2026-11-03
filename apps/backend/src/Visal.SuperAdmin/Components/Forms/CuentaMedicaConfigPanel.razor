@@ -249,6 +249,10 @@ else
                         <input type="checkbox" class="form-check-input" @bind="_itemEdit.UnoPorAutorizacion" />
                         <span>Un archivo por autorizacion (rompe el contenido en un PDF por cada autorizacion del paciente, nombrado con el numero de autorizacion; cada PDF trae el contenido configurado arriba filtrado a esa autorizacion)</span>
                     </label>
+                    <label class="cm-flag" style="margin-top:2px;">
+                        <input type="checkbox" class="form-check-input" @bind="_itemEdit.RotuloSeparadorCup" />
+                        <span>Rotulo separador por CUP (agrupa las historias por CUP e inserta una pagina separadora de 1/4 de carta -logo del tenant + codigo CUP + servicio + sede- antes de cada CUP; los numericos van primero y los que empiezan por letra al final)</span>
+                    </label>
 
                     @* ===== Contenidos del archivo ===== *@
                     <div class="cm-cont-head">
@@ -714,6 +718,7 @@ else
             Obligatorio = it.Obligatorio,
             PdfUnico = it.PdfUnico,
             UnoPorAutorizacion = it.UnoPorAutorizacion,
+            RotuloSeparadorCup = it.RotuloSeparadorCup,
             Contenidos = it.Contenidos
                 .OrderBy(c => c.Orden)
                 .Select(c => new ContenidoEditModel
@@ -799,7 +804,8 @@ else
             await Svc.GuardarItemAsync(new GuardarItemRequest(
                 _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
                 _itemEdit.Descripcion, _itemEdit.PatronNombre, _itemEdit.Obligatorio,
-                contenidos, ordenNiveles, _itemEdit.PdfUnico, _itemEdit.UnoPorAutorizacion),
+                contenidos, ordenNiveles, _itemEdit.PdfUnico, _itemEdit.UnoPorAutorizacion,
+                _itemEdit.RotuloSeparadorCup),
                 Guid.Empty);
             CerrarItemModal();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
@@ -976,6 +982,7 @@ else
         public bool Obligatorio { get; set; }
         public bool PdfUnico { get; set; }
         public bool UnoPorAutorizacion { get; set; }
+        public bool RotuloSeparadorCup { get; set; }
         public List<ContenidoEditModel> Contenidos { get; set; } = new();
         // Orden multinivel de Historias medicas (Formulario por tipo). Vacio = cronologico.
         public List<OrdenNivelEditModel> OrdenNiveles { get; set; } = new();

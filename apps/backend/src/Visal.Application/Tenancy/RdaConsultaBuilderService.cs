@@ -108,13 +108,14 @@ public sealed class RdaConsultaBuilderService(
             cupsEncuentro = ServicioCodigo.Base(codSrv);
         }
         if (string.IsNullOrWhiteSpace(cupsEncuentro)) { cupsEncuentro = "890201"; }
-        // serviceType.coding.display es 1..1 y debe coincidir EXACTO con el nombre
-        // oficial del CUPS (el validador rechaza con 6006 si difiere). Se resuelve
-        // del catalogo de servicios; fallback al nombre oficial del default 890201.
-        var cupsDisplay = await db.CatalogosServicioReferencia.AsNoTracking()
+        // serviceType.coding.display es 1..1 y debe coincidir EXACTO con el nombre oficial del
+        // CUPS (el validador rechaza con 6006 si difiere). Prioridad: diccionario curado
+        // (CupsDisplayOficial) -> catalogo de servicios -> fallback del default 890201.
+        var cupsNombreCat = await db.CatalogosServicioReferencia.AsNoTracking()
             .Where(cs => cs.Codigo == cupsEncuentro)
             .Select(cs => cs.Nombre)
             .FirstOrDefaultAsync(ct);
+        var cupsDisplay = ResolveCupsDisplay(cupsEncuentro, cupsNombreCat);
         if (string.IsNullOrWhiteSpace(cupsDisplay))
         {
             cupsDisplay = cupsEncuentro == "890201"
@@ -152,6 +153,20 @@ public sealed class RdaConsultaBuilderService(
             .Where(o => o.HistoriaClinicaId == hc.Id).OrderBy(o => o.Orden).ToListAsync(ct);
         var incapacidades = await db.HistoriaClinicaIncapacidades.AsNoTracking()
             .Where(i => i.HistoriaClinicaId == hc.Id).OrderBy(i => i.Orden).ToListAsync(ct);
+
+        // Nombres oficiales de CUPS de las ordenes (para ServiceRequest.code.display 1..1, 6006).
+        // Un solo query al catalogo con los CUPS validos; el diccionario curado tiene prioridad al
+        // resolver. Lo que no este en ninguno cae al texto libre de la orden (puede dar 6006).
+        var ordenCups = ordenes
+            .Select(o => ServicioCodigo.Base(o.CodigoServicio))
+            .Where(c => !string.IsNullOrWhiteSpace(c) && CupsNumerico.IsMatch(c!))
+            .Distinct()
+            .ToList();
+        var cupsNombreCatalogo = ordenCups.Count == 0
+            ? new Dictionary<string, string>()
+            : await db.CatalogosServicioReferencia.AsNoTracking()
+                .Where(cs => ordenCups.Contains(cs.Codigo) && cs.Nombre != null)
+                .ToDictionaryAsync(cs => cs.Codigo, cs => cs.Nombre, ct);
 
         // ---------- IDs estables ----------
         var patientId = $"{NormalizarTipoDoc(hc.Paciente.TipoDocumento)}-{hc.Paciente.NumeroDocumento}";
@@ -226,7 +241,8 @@ public sealed class RdaConsultaBuilderService(
         // y dosis UMM/MipresDoseForm). VISAL guarda la medicacion como texto libre (nombre +
         // posologia). Emitir el recurso = rechazo por binding (1028); se reporta como NARRATIVE
         // en sectionMedications (la seccion es 0..*). Mismo criterio que ocupacion/riesgo/incapacidad.
-        var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId, advertencias);
+        var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId,
+            cupsNombreCatalogo, advertencias);
         // Ocupacion (PatientOccupationAtEncounterRDA), factores de riesgo (RiskFactorRDA)
         // e incapacidades (AttendanceAllowanceRDA) son entries OPCIONALES en sus secciones
         // y exigen codigos de ValueSets requeridos (CIUO88AC, FactorRiesgo) que Visal aun
@@ -670,9 +686,43 @@ public sealed class RdaConsultaBuilderService(
     private static readonly System.Text.RegularExpressions.Regex CupsNumerico =
         new(@"^\d{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    // 6006: el `display` de una coding CUPS (Encounter.serviceType y ServiceRequest.code,
+    // ambos display 1..1 obligatorio) debe coincidir EXACTO, caracter por caracter, con el
+    // nombre oficial del CUPS. MinSalud lo clasifica como severity=warning pero IGUAL rechaza
+    // el bundle con HTTP 400. El catalogo interno (CatalogosServicioReferencia.Nombre) esta
+    // casi siempre bien pero tiene errores puntuales (ej 890305 le falta un "DE") y las ordenes
+    // guardan texto libre ("... (6 HORAS)", "[VISITA] ... +"); por eso este diccionario curado
+    // con el string TEXTUAL que exige MinSalud tiene prioridad sobre ambos. Fuente: los mensajes
+    // 6006 "should be '...'" de prod (cosechados 2026-11-02); cubre el 100% de los CUPS en uso de
+    // una IPS domiciliaria. Los escapes \u mantienen el archivo en ASCII (los acentos SON
+    // obligatorios en el valor en tiempo de ejecucion; sin ellos reaparece el 6006).
+    private static readonly IReadOnlyDictionary<string, string> CupsDisplayOficial =
+        new Dictionary<string, string>
+        {
+            ["890101"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR MEDICINA GENERAL",
+            ["890105"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR ENFERMERÍA",
+            ["890106"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR NUTRICIÓN Y DIETÉTICA",
+            ["890108"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR PSICOLOGÍA",
+            ["890109"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR TRABAJO SOCIAL",
+            ["890110"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR FONIATRÍA Y FONOAUDIOLOGÍA",
+            ["890111"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR FISIOTERAPIA",
+            ["890112"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR TERAPIA RESPIRATORIA",
+            ["890113"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR TERAPIA OCUPACIONAL",
+            ["890305"] = "CONSULTA DE CONTROL O DE SEGUIMIENTO POR ENFERMERÍA",
+            ["893812"] = "REGISTRO DE OXIMETRÍA CUTÁNEA",
+        };
+
+    // Display oficial de un CUPS: el diccionario curado manda; si no esta, cae al nombre del
+    // catalogo (fallback, puede venir null/vacio) que el llamador resuelve.
+    private static string? ResolveCupsDisplay(string? codigo, string? fallbackCatalogo)
+        => codigo is not null && CupsDisplayOficial.TryGetValue(codigo, out var oficial)
+            ? oficial
+            : fallbackCatalogo;
+
     private static List<ServiceRequest> BuildServiceRequests(
         IReadOnlyList<HistoriaClinicaOrdenServicio> rows, string patientId, string encounterId,
-        string practitionerId, List<string> advertencias)
+        string practitionerId, IReadOnlyDictionary<string, string> cupsNombreCatalogo,
+        List<string> advertencias)
     {
         var list = new List<ServiceRequest>();
         for (int i = 0; i < rows.Count; i++)
@@ -703,9 +753,14 @@ public sealed class RdaConsultaBuilderService(
             // category 1..1: ServiceRequestRDA fija el coding R866 = 01 "Procedimiento en salud".
             sr.Category.Add(MakeCC(new Coding(
                 $"{CodeSystemBase}/ColombianHealthTechnologyCategory", "01", "Procedimiento en salud")));
+            // code.coding.display es 1..1 y el validador EXIGE el nombre oficial del CUPS (6006
+            // -> HTTP 400 aunque lo marque como warning). NO usar r.Descripcion (texto libre de la
+            // orden): se guarda solo como CodeableConcept.text (humano, no validado contra catalogo).
+            // El display viaja por el resolver (diccionario oficial -> catalogo -> texto libre).
+            var displayCups = ResolveCupsDisplay(cupsSrv, cupsNombreCatalogo.GetValueOrDefault(cupsSrv))
+                ?? r.Descripcion;
             sr.Code = new CodeableConcept { Text = r.Descripcion };
-            // display real del CUPS puede diferir de la descripcion local -> solo WARNING, no bloquea.
-            sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, r.Descripcion));
+            sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, displayCups));
             // reasonCode 1..1: binding requerido a RIPSFinalidadConsultaVersion2Codigos. VISAL no
             // captura la finalidad por orden; default 16 TRATAMIENTO (la mas comun de un servicio
             // ordenado durante la atencion).

@@ -1311,25 +1311,31 @@ public sealed class TipologiaZipService : ITipologiaZipService
         {
             doc.Page(page =>
             {
-                page.Size(4.25f, 5.5f, Unit.Inch);
+                // Franja horizontal: ancho de carta (8.5") y alto de 1/4 de carta (2.75").
+                page.Size(8.5f, 2.75f, Unit.Inch);
                 page.Margin(14);
-                page.Content().Border(1.5f).BorderColor("#1565C0").Padding(18).Column(col =>
+                page.Content().Border(1.5f).BorderColor("#1565C0").Padding(16).Row(row =>
                 {
-                    col.Spacing(10);
+                    row.Spacing(18);
                     if (logo is { Length: > 0 })
                     {
-                        try { col.Item().Height(58).Image(logo).FitArea(); } catch { /* logo ilegible */ }
+                        try { row.ConstantItem(150).AlignMiddle().Height(70).Image(logo).FitArea(); }
+                        catch { /* logo ilegible */ }
                     }
-                    col.Item().AlignCenter().Text("SEPARADOR DE SERVICIO").FontSize(9).SemiBold().FontColor("#64748B");
-                    col.Item().AlignCenter().Text(codigo).FontSize(28).Bold().FontColor("#0F172A");
-                    if (!string.IsNullOrWhiteSpace(nombre))
+                    row.RelativeItem().AlignMiddle().Column(col =>
                     {
-                        col.Item().AlignCenter().Text(nombre!.Trim()).FontSize(12).FontColor("#0F172A");
-                    }
-                    if (!string.IsNullOrWhiteSpace(sede))
-                    {
-                        col.Item().AlignCenter().Text($"Sede: {sede!.Trim()}").FontSize(10).FontColor("#64748B");
-                    }
+                        col.Spacing(5);
+                        col.Item().AlignCenter().Text("SEPARADOR DE SERVICIO").FontSize(9).SemiBold().FontColor("#64748B");
+                        col.Item().AlignCenter().Text(codigo).FontSize(26).Bold().FontColor("#0F172A");
+                        if (!string.IsNullOrWhiteSpace(nombre))
+                        {
+                            col.Item().AlignCenter().Text(nombre!.Trim()).FontSize(12).FontColor("#0F172A");
+                        }
+                        if (!string.IsNullOrWhiteSpace(sede))
+                        {
+                            col.Item().AlignCenter().Text($"Sede: {sede!.Trim()}").FontSize(10).FontColor("#64748B");
+                        }
+                    });
                 });
             });
         }).GeneratePdf();

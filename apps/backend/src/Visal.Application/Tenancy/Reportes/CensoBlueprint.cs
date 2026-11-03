@@ -67,6 +67,8 @@ public static class CensoBlueprint
     //  - Q Puntaje Barthel = BarthelTotal (denormalizado desde la escala PP-FO-46 al cerrarla).
     //  - V Medicamento Controlado = campo SI/NO de la ficha tecnica.
     //  - AC Nombre Familiar Responsable = ContactoEmergencia (contacto principal del paciente).
+    // La hoja lista SOLO pacientes atendidos (con Fecha de Atencion); el rango de fechas, si se
+    // pide al descargar, acota por esa misma Fecha de Atencion.
     private static ReporteHojaDef BasePacientes() =>
         ReporteHojaDef.Detalle("Base de Pacientes", "paciente",
             columnas:
@@ -111,9 +113,22 @@ public static class CensoBlueprint
             filtros:
             [
                 new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
-                new("fecha_ingreso", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
             ],
-            orden: [new("primer_apellido"), new("primer_nombre")]);
+            orden: [new("primer_apellido"), new("primer_nombre")]) with
+        {
+            // Solo pacientes ATENDIDOS: deben tener al menos una Historia Clinica (EXISTS, no
+            // multiplica filas). Si el usuario pide rango de fechas, la atencion se acota por la
+            // fecha_atencion de la HC; sin rango = todo lo atendido.
+            Existencias =
+            [
+                new ReporteExisteDef(
+                    TargetEntityKey: "historia",
+                    LocalProperty: nameof(Visal.Domain.Entities.Paciente.Id),
+                    TargetProperty: nameof(Visal.Domain.Entities.HistoriaClinica.PacienteId),
+                    FechaCampoRef: "fecha_atencion",
+                    ParamClave: ParamRangoFecha),
+            ],
+        };
 
     // Hoja "Ingreso de Pacientes": sale de la ADMISION (entidad paciente), no de la bitacora.
     // Mapea 1:1 las columnas del Excel canonico (A..AB) usando los campos del paciente, los cruces

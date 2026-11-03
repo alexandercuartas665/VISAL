@@ -142,6 +142,16 @@ public sealed class ReporteSqlGenerator(
             var r = Resolver(baseEntity, relAliases, f.CampoRef);
             condiciones.Add(Condicion(r, f, ref pIdx, parametros));
         }
+
+        // Filtros de EXISTENCIA (semi-join): "la base tiene al menos un relacionado". No multiplican
+        // filas (el EXISTS no entra al FROM). Un rango aun enlazado a parametro (sin resolver) se
+        // ignora; la existencia en si SIEMPRE se aplica (p.ej. CENSO: solo pacientes atendidos).
+        var exIdx = 0;
+        foreach (var ex in hoja.Existencias ?? [])
+        {
+            condiciones.Add(ConstruirExiste(baseEntity, baseEt, ex, exIdx++, ref pIdx, parametros));
+        }
+
         sb.Append(" WHERE ").Append(string.Join(" AND ", condiciones));
 
         // ---- GROUP BY ----
@@ -302,6 +312,41 @@ public sealed class ReporteSqlGenerator(
             }
         }
         return Resolver(baseEntity, relAliases, campoRef).Expr;
+    }
+
+    // Construye una condicion EXISTS (SELECT 1 FROM target WHERE target.fk = base.local [AND tenant]
+    // [AND target.fecha BETWEEN ...]). La tabla y columnas salen del metamodelo de EF; el alias del
+    // subselect (x0, x1, ...) es local al EXISTS y no choca con los alias de cruce (t0, t1, ...).
+    private string ConstruirExiste(
+        ReportableEntityDef baseEntity, IEntityType baseEt, ReporteExisteDef ex,
+        int exIdx, ref int pIdx, List<ReporteSqlParam> parametros)
+    {
+        var target = semantic.Find(ex.TargetEntityKey)
+            ?? throw new InvalidOperationException($"La existencia apunta a una entidad desconocida: '{ex.TargetEntityKey}'.");
+        var targetEt = Et(target.ClrType);
+        var alias = "x" + exIdx;
+        var fkCol = Col(targetEt, ex.TargetProperty);
+        var localCol = Col(baseEt, ex.LocalProperty);
+
+        var sb = new StringBuilder();
+        sb.Append($"EXISTS (SELECT 1 FROM {TableRef(targetEt)} AS {alias} WHERE {alias}.{Q(fkCol)} = t0.{Q(localCol)}");
+        if (EsTenantScoped(target))
+        {
+            sb.Append($" AND {alias}.{Q(TenantColumn(targetEt))} = {TenantParam}");
+        }
+        // Rango de fecha (opcional): solo si el parametro ya fue resuelto a 2 valores concretos.
+        if (ex.FechaCampoRef is { } fechaRef && string.IsNullOrWhiteSpace(ex.ParamClave)
+            && ex.Valores is { Count: >= 2 } vals)
+        {
+            var field = FindFieldAug(target, fechaRef)
+                ?? throw new InvalidOperationException($"Campo de fecha desconocido '{fechaRef}' en la existencia '{ex.TargetEntityKey}'.");
+            var expr = Expr(alias, target.ClrType, field);
+            var p0 = AddParam(vals, 0, field.Kind, ref pIdx, parametros);
+            var p1 = AddParam(vals, 1, field.Kind, ref pIdx, parametros);
+            sb.Append($" AND {expr} BETWEEN {p0} AND {p1}");
+        }
+        sb.Append(')');
+        return sb.ToString();
     }
 
     private string Condicion(Resuelto r, ReporteFiltroDef f, ref int pIdx, List<ReporteSqlParam> parametros)

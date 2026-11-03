@@ -25,15 +25,47 @@
         </p>
     </div>
     <div style="display:flex;gap:8px;">
-        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@_cargando">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CargarLista" disabled="@(_cargando || _reprocBusy)">
             @if (_cargando) { <span>...</span> } else { <span>Refrescar</span> }
         </button>
-        <button class="btn btn-primary btn-sm" @onclick="AbrirGenerar">+ Generar RDA</button>
+        <button class="btn btn-warning btn-sm" @onclick="ReprocesarPendientes" disabled="@(_reprocBusy || _cargando)"
+                title="Regenera el bundle con el codigo actual (aplica los fixes vigentes) y reenvia al IHCE todos los eventos no aceptados del tenant.">
+            @if (_reprocBusy) { <span>Reprocesando @_reprocHecho/@_reprocTotal…</span> } else { <span>Reprocesar pendientes</span> }
+        </button>
+        <button class="btn btn-primary btn-sm" @onclick="AbrirGenerar" disabled="@_reprocBusy">+ Generar RDA</button>
     </div>
 </div>
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@if (_reprocBusy)
+{
+    <div class="ase-alert" style="background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;">
+        <b>Reprocesando pendientes:</b> @_reprocHecho de @_reprocTotal
+        @if (!string.IsNullOrEmpty(_reprocPaciente)) { <span> &mdash; @_reprocPaciente</span> }
+        <span style="color:#9a3412;"> (regenerar + reenviar; no cierres esta pagina)</span>
+    </div>
+}
+@if (_reprocResumen is RdaReprocResumen rr)
+{
+    <div class="ase-ok" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;">
+        <b>Reproceso terminado.</b>
+        @rr.Total procesados &middot; Aceptados <b>@rr.Aceptados</b>
+        &middot; Rechazados @rr.Rechazados &middot; Error @rr.Errores
+        &middot; Sin credencial @rr.SinCredencial &middot; Omitidos @rr.Omitidos
+        &middot; Fallos @rr.Fallos
+        @if (rr.Detalles.Count > 0)
+        {
+            <details style="margin-top:6px;">
+                <summary style="cursor:pointer;">Ver detalle (@rr.Detalles.Count)</summary>
+                <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;color:#374151;">
+                    @foreach (var d in rr.Detalles) { <li>@d</li> }
+                </ul>
+            </details>
+        }
+    </div>
+}
 
 <div style="background:#f0f9ff;border:1px solid #7dd3fc;padding:10px 14px;border-radius:8px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
     <b style="font-size:13px;">IP publica de salida:</b>
@@ -222,6 +254,9 @@
             <input type="date" class="form-control form-control-sm" @bind="_filtroHasta" />
         </div>
         <div class="ase-f rda-filtros-actions">
+            <label class="rda-check" title="Mostrar solo el evento vigente (el mas reciente) de cada historia. Al reprocesar se crean eventos nuevos sin borrar los viejos; esto evita ver rechazos ya superados.">
+                <input type="checkbox" @bind="_soloVigentes" /> Solo vigentes
+            </label>
             <label class="rda-check" title="Mostrar solo eventos rechazados por MinSalud">
                 <input type="checkbox" @bind="_soloRechazados" /> Solo rechazados
             </label>
@@ -306,15 +341,17 @@
                             {
                                 var sincCls = r.Estado == EstadoRdaEvento.Aceptado ? "bg-success"
                                     : (r.Estado is EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado ? "bg-danger" : "bg-secondary");
-                                <span class="badge @sincCls" title="Intentos de sincronizacion con el IHCE">@r.Intentos intento@(r.Intentos == 1 ? "" : "s")</span>
+                                <button type="button" class="badge rda-badge-btn @sincCls"
+                                        title="Ver historial de reintentos de esta historia"
+                                        @onclick="() => VerHistorial(r.Id)">@r.Intentos intento@(r.Intentos == 1 ? "" : "s")</button>
                                 @if (r.UltimoIntento is DateTimeOffset ui)
                                 {
-                                    <div><small class="mono" style="color:var(--muted)" title="Fecha del ultimo intento">@ui.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></div>
+                                    <div><small class="mono rda-sinc-fecha" title="Fecha del ultimo intento">@ui.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></div>
                                 }
                             }
                             else
                             {
-                                <small style="color:var(--muted)" title="Sin intentos de envio todavia">—</small>
+                                <small class="rda-sinc-vacio" title="Sin intentos de envio todavia">—</small>
                             }
                         </td>
                         <td class="mono"><small>@r.BundleHash.Substring(0, 12)…</small></td>
@@ -326,6 +363,9 @@
                                 <div class="rda-menu" @onclick:stopPropagation="true">
                                     <button class="rda-menu-item" @onclick="() => VerJson(r.Id)">
                                         <span class="rda-mi-ic">🔎</span> Ver JSON
+                                    </button>
+                                    <button class="rda-menu-item" @onclick="() => VerHistorial(r.Id)">
+                                        <span class="rda-mi-ic">🕒</span> Historial de reintentos
                                     </button>
                                     @if (r.Estado is EstadoRdaEvento.Error or EstadoRdaEvento.Rechazado)
                                     {
@@ -693,6 +733,81 @@
     </div>
 }
 
+@* ===================== Modal Historial de reintentos ===================== *@
+@if (_historialAbierto)
+{
+    <div class="ase-modal-bg" @onclick="CerrarHistorial">
+        <div class="ase-modal" @onclick:stopPropagation="true" style="min-width:720px;max-width:960px;max-height:85vh;display:flex;flex-direction:column;">
+            <div class="ase-modal-h">
+                Historial de reintentos de esta historia
+                <small style="color:#64748b;font-weight:400;">@_historial.Count evento(s) en total</small>
+            </div>
+            <div style="padding:14px 18px;overflow:auto;">
+                @if (_historialBusy)
+                {
+                    <div class="ase-empty" style="padding:24px;">Cargando…</div>
+                }
+                else if (_historial.Count == 0)
+                {
+                    <div class="ase-empty" style="padding:24px;">Sin eventos para esta historia.</div>
+                }
+                else
+                {
+                    <p style="font-size:12.5px;color:#475569;margin:0 0 10px;">
+                        Cada vez que se reprocesa o reenvia se crea un evento nuevo (no se borra el viejo).
+                        El <b>vigente</b> es el mas reciente; los anteriores quedan como historico.
+                    </p>
+                    <table class="rda-table align-middle" style="font-size:12.5px;">
+                        <thead>
+                            <tr>
+                                <th>Fecha generado</th>
+                                <th>Estado</th>
+                                <th>Codigo</th>
+                                <th title="Intentos de sincronizacion de ese evento">Sinc.</th>
+                                <th>Hash</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var h in _historial)
+                            {
+                                <tr class="@(h.EsVigente ? "rda-hist-vigente" : "")">
+                                    <td class="mono"><small>@h.FechaGeneracion.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</small></td>
+                                    <td>@RenderEstado(h.Estado)</td>
+                                    <td>
+                                        @if (!string.IsNullOrWhiteSpace(h.CodigoError))
+                                        {
+                                            <span class="badge bg-danger">@h.CodigoError</span>
+                                        }
+                                        else { <small style="color:#94a3b8;">—</small> }
+                                    </td>
+                                    <td class="mono"><small>@h.Intentos</small></td>
+                                    <td class="mono"><small>@h.BundleHash.Substring(0, 10)…</small></td>
+                                    <td style="text-align:right;">
+                                        @if (h.EsVigente)
+                                        {
+                                            <span class="badge bg-success" title="Es el evento vigente de esta historia">vigente</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-light text-muted" title="Superado por un evento mas reciente">superado</span>
+                                        }
+                                        <button class="btn btn-outline-secondary btn-sm ms-1" style="padding:1px 8px;"
+                                                @onclick="() => VerJsonDesdeHistorial(h.Id)" title="Ver el JSON de este intento">JSON</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+            <div class="ase-modal-f">
+                <button class="btn btn-primary btn-sm" @onclick="CerrarHistorial">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .ase-modal-bg { position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000; }
     .ase-modal { background:#fff;border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,0.2); }
@@ -735,6 +850,17 @@
     .rda-menu-item.danger:hover { background:#fef2f2; }
     .rda-mi-ic { width:16px; text-align:center; }
     .rda-menu-sep { height:1px; background:#f1f5f9; margin:4px 2px; }
+
+    /* ---- Columna Sinc. ---- */
+    /* Badge de intentos clickeable (abre el historial). Hereda el color del badge (bg-*). */
+    .rda-badge-btn { border:none; cursor:pointer; padding:.35em .6em; }
+    .rda-badge-btn:hover { filter:brightness(.92); text-decoration:underline; }
+    /* Fecha del ultimo intento: antes iba con --muted (gris casi invisible). Slate-600, legible. */
+    .rda-sinc-fecha { color:#475569; font-size:11px; }
+    .rda-sinc-vacio { color:#94a3b8; }
+    /* Fila vigente en el modal de historial. */
+    .rda-hist-vigente { background:#f0fdf4; }
+    .rda-hist-vigente:hover { background:#e7fbee; }
 </style>
 
 @code {
@@ -753,6 +879,7 @@
     private string? _filtroAmb;
     private int? _filtroIntentosMin;
     private bool _soloRechazados;
+    private bool _soloVigentes = true;   // dedup por historia: default ON (ver RdaConsoleFiltro)
     private DateTime? _filtroDesde;
     private DateTime? _filtroHasta;
     private List<SucursalDto> _sucursales = new();
@@ -785,9 +912,25 @@
     private string _detailTab = "bundle";  // "bundle" | "error" | "cred"
     private readonly HashSet<string> _reveladas = new();
 
+    // ----- Modal Historial de reintentos (colapsa los eventos duplicados de un caso) -----
+    private bool _historialAbierto;
+    private bool _historialBusy;
+    private List<RdaEventoHistorialItemDto> _historial = new();
+
     // ----- Envio al IHCE -----
     private Guid? _enviandoId;
     private EnvioRdaResultado? _envioResult;
+
+    // ----- Reproceso masivo (regenerar + reenviar lo no aceptado) -----
+    private bool _reprocBusy;
+    private int _reprocTotal;
+    private int _reprocHecho;
+    private string? _reprocPaciente;
+    private RdaReprocResumen? _reprocResumen;
+
+    private sealed record RdaReprocResumen(
+        int Total, int Aceptados, int Rechazados, int Errores,
+        int SinCredencial, int Omitidos, int Fallos, List<string> Detalles);
 
     // ----- Diagnostico IP publica -----
     private bool _ipBusy;
@@ -835,7 +978,8 @@
                 Profesional: string.IsNullOrWhiteSpace(_filtroProfesional) ? null : _filtroProfesional,
                 Servicio: string.IsNullOrWhiteSpace(_filtroServicio) ? null : _filtroServicio,
                 IntentosMin: _filtroIntentosMin,
-                SoloRechazados: _soloRechazados);
+                SoloRechazados: _soloRechazados,
+                SoloVigentes: _soloVigentes);
             _rows = (await Svc.ListarAsync(filtro)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -846,6 +990,7 @@
     {
         _filtroPaciente = null; _filtroSucursalId = ""; _filtroProfesional = null; _filtroServicio = null;
         _filtroEstado = null; _filtroAmb = null; _filtroIntentosMin = null; _soloRechazados = false;
+        _soloVigentes = true;
         _filtroDesde = null; _filtroHasta = null;
         await CargarLista();
     }
@@ -922,6 +1067,28 @@
     }
 
     private void CerrarDetalle() { _detail = null; _cred = null; _reveladas.Clear(); }
+
+    private async Task VerHistorial(Guid id)
+    {
+        _menuOpenId = null;
+        _historialAbierto = true;
+        _historialBusy = true;
+        _historial = new();
+        await _dbLock.WaitAsync();
+        try { _historial = (await Svc.ListarHistorialAsync(id)).ToList(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _historialBusy = false; _dbLock.Release(); }
+    }
+
+    private void CerrarHistorial() => _historialAbierto = false;
+
+    // Abre el JSON de un intento desde el modal de historial; cierra el historial antes para
+    // no encimar dos modales (ambos usan .ase-modal-bg con el mismo z-index).
+    private async Task VerJsonDesdeHistorial(Guid id)
+    {
+        _historialAbierto = false;
+        await VerJson(id);
+    }
 
     private void ToggleRevelar(string campo)
     {
@@ -1086,6 +1253,121 @@
     }
 
     private void CerrarEnvio() => _envioResult = null;
+
+    // Reprocesa TODOS los eventos no aceptados del tenant: regenera el bundle con el
+    // codigo actual (asi se aplican los fixes vigentes de los builders — el bundle
+    // guardado esta congelado y reenviarlo tal cual no cambiaria nada) y lo reenvia al
+    // IHCE. Secuencial, con pausa corta entre envios (el sandbox es inestable) y un
+    // resumen al final. Idempotente: re-ejecutarlo no duplica (la idempotencia por
+    // hash del builder devuelve el evento existente y solo se reenvia lo no aceptado).
+    private async Task ReprocesarPendientes()
+    {
+        _menuOpenId = null;
+        _error = null; _ok = null; _reprocResumen = null; _envioResult = null;
+
+        List<RdaReprocesoItemDto> items;
+        await _dbLock.WaitAsync();
+        try { items = (await Svc.ListarPendientesReprocesoAsync()).ToList(); }
+        catch (Exception ex) { _error = ex.Message; return; }
+        finally { _dbLock.Release(); }
+
+        if (items.Count == 0) { _ok = "No hay eventos pendientes por reprocesar (todo esta Aceptado)."; return; }
+
+        var confirmar = await JS.InvokeAsync<bool>("confirm",
+            $"Vas a reprocesar {items.Count} evento(s) no aceptados.\n\n" +
+            "Para cada uno se REGENERA el bundle con el codigo actual (aplicando los fixes vigentes) " +
+            "y se REENVIA al IHCE. Los eventos viejos se conservan para auditoria.\n\nContinuar?");
+        if (!confirmar) { return; }
+
+        var actor = await ActorAsync();
+        _reprocBusy = true;
+        _reprocTotal = items.Count;
+        _reprocHecho = 0;
+        _reprocPaciente = null;
+        int aceptados = 0, rechazados = 0, errores = 0, sinCred = 0, omitidos = 0, fallos = 0;
+        var detalles = new List<string>();
+        void Detalle(string msg) { if (detalles.Count < 200) { detalles.Add(msg); } }
+
+        try
+        {
+            foreach (var item in items)
+            {
+                _reprocPaciente = $"{item.PacienteNombre} ({item.PacienteDocumento})";
+                StateHasChanged();
+
+                if (!item.TieneCredencialSede)
+                {
+                    sinCred++;
+                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: sede sin credencial — omitido");
+                }
+                else
+                {
+                    await _dbLock.WaitAsync();
+                    try
+                    {
+                        var res = item.TipoRda == TipoRdaIhce.Consulta
+                            ? await BuilderConsulta.ConstruirAsync(item.HistoriaClinicaId, actor)
+                            : await Builder.ConstruirAsync(item.HistoriaClinicaId, item.Modalidad, actor);
+
+                        if (res.Omitido)
+                        {
+                            omitidos++;
+                            Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: construccion omitida");
+                        }
+                        else if (res.Estado == EstadoRdaEvento.Aceptado)
+                        {
+                            // El bundle regenerado coincide con uno ya aceptado: nada que enviar.
+                            omitidos++;
+                            Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: bundle ya aceptado — sin reenvio");
+                        }
+                        else
+                        {
+                            var envio = await Sender.EnviarRdaAsync(res.RdaEventoId, actor);
+                            switch (envio.NuevoEstado)
+                            {
+                                case EstadoRdaEvento.Aceptado:
+                                    aceptados++;
+                                    break;
+                                case EstadoRdaEvento.Rechazado:
+                                    rechazados++;
+                                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: Rechazado (HTTP {envio.Call.HttpStatus})");
+                                    break;
+                                case EstadoRdaEvento.Error:
+                                    errores++;
+                                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: Error (HTTP {envio.Call.HttpStatus})");
+                                    break;
+                                default:
+                                    errores++;
+                                    Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: {envio.NuevoEstado}");
+                                    break;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        fallos++;
+                        var m = ex.Message.Length > 140 ? ex.Message[..140] + "…" : ex.Message;
+                        Detalle($"{item.PacienteDocumento} [{item.TipoRda}]: fallo — {m}");
+                    }
+                    finally { _dbLock.Release(); }
+                }
+
+                _reprocHecho++;
+                StateHasChanged();
+                // Pausa corta: no martillar el APIM sandbox (inestable, da 504s).
+                await Task.Delay(350);
+            }
+        }
+        finally
+        {
+            _reprocBusy = false;
+            _reprocPaciente = null;
+            _reprocResumen = new RdaReprocResumen(
+                items.Count, aceptados, rechazados, errores, sinCred, omitidos, fallos, detalles);
+        }
+
+        await CargarLista();
+    }
 
     private async Task EjecutarProbador()
     {

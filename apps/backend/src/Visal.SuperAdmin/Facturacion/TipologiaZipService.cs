@@ -36,12 +36,40 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     /// <summary>Una parte del PDF de un paciente: o bytes ya listos (autorizacion/firma,
     /// leidos de disco/BD) via <see cref="Inline"/>, o una referencia a la URL global
-    /// <see cref="RenderIdx"/> que se renderiza en lote (formulario por tipo).</summary>
-    private readonly record struct PartePlan(byte[]? Inline, int RenderIdx);
+    /// <see cref="RenderIdx"/> que se renderiza en lote (formulario por tipo).
+    /// <see cref="Cup"/> (CodigoRips), <see cref="CupNombre"/> y <see cref="Sede"/> solo se
+    /// llenan en las partes de historia cuando el archivo pide rotulo separador por CUP;
+    /// null = la parte no tiene CUP (autorizacion/firma/anexo) y no dispara separador.</summary>
+    private readonly record struct PartePlan(
+        byte[]? Inline, int RenderIdx, string? Cup = null, string? CupNombre = null, string? Sede = null);
+
+    /// <summary>URL de un documento de historia a renderizar + su CUP, nombre de servicio y
+    /// sede (para el rotulo separador por CUP). Cup null = no se pidio rotulo.</summary>
+    private readonly record struct UrlCup(string Url, string? Cup, string? CupNombre, string? Sede);
 
     /// <summary>Fila de HC para ordenar el contenido "Formulario por tipo": id + fecha
     /// de atencion (para orden cronologico) — el CUP se resuelve aparte por lote.</summary>
     private readonly record struct FilaHcOrden(Guid Id, DateTimeOffset Fecha);
+
+    /// <summary>Clave de orden para CUPS: primero los que empiezan por digito (orden numerico
+    /// ascendente), luego los que empiezan por letra (alfabetico + su parte numerica); vacio
+    /// al final. Asi "9" va antes que "10" y "S123" queda despues de todos los numericos.</summary>
+    private static (int Grupo, string Alfa, decimal Num) CupSortKey(string? cup)
+    {
+        var s = (cup ?? "").Trim().ToUpperInvariant();
+        if (s.Length == 0) { return (2, "", 0m); }
+        if (char.IsDigit(s[0]))
+        {
+            var digs = new string(s.TakeWhile(char.IsDigit).ToArray());
+            decimal.TryParse(digs, out var val);
+            return (0, "", val);
+        }
+        var letras = new string(s.TakeWhile(char.IsLetter).ToArray());
+        var resto = s[letras.Length..];
+        var digs2 = new string(resto.Where(char.IsDigit).ToArray());
+        decimal.TryParse(digs2, out var val2);
+        return (1, letras, val2);
+    }
 
     static TipologiaZipService()
     {
@@ -96,6 +124,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
             : null) ?? "";
         nitIps = new string(nitIps.Where(char.IsDigit).ToArray());
 
+        // Logo del tenant para el rotulo separador por CUP (solo se lee si el archivo lo pide).
+        var logoRotulo = archivo.RotuloSeparadorCup ? await ObtenerLogoTenantBytesAsync(ct) : null;
+
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
         // --- MODO "un archivo por autorizacion": un PDF por CADA autorizacion del
@@ -103,7 +134,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Pensado para archivos de solo autorizaciones; ignora otros contenidos. ---
         if (archivo.UnoPorAutorizacion)
         {
-            return await GenerarZipPorAutorizacionAsync(archivo, cfg, detalle, pacientes, patron, nitIps, progreso, ct);
+            return await GenerarZipPorAutorizacionAsync(archivo, cfg, detalle, pacientes, patron, nitIps, logoRotulo, progreso, ct);
         }
 
         // --- Pase 1: plan por paciente + junta TODAS las URLs de formularios-por-tipo.
@@ -146,13 +177,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             foreach (var (pac, partes) in planes)
             {
                 ct.ThrowIfCancellationRequested();
-                var bytesPartes = new List<byte[]>(partes.Count);
-                foreach (var p in partes)
-                {
-                    if (p.Inline is { Length: > 0 }) { bytesPartes.Add(p.Inline); }
-                    else if (p.RenderIdx >= 0 && p.RenderIdx < rendered.Count
-                             && rendered[p.RenderIdx] is { Length: > 0 } b) { bytesPartes.Add(b); }
-                }
+                var bytesPartes = EnsamblarPartes(partes, rendered, archivo.RotuloSeparadorCup, logoRotulo);
                 // Solo se incluye el paciente si REALMENTE quedo contenido (firma,
                 // autorizacion o formularios renderizados). Los vacios se omiten.
                 if (bytesPartes.Count == 0) { continue; }
@@ -219,7 +244,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<ArchivoExportado?> GenerarZipPorAutorizacionAsync(
         InformeItemDto archivo, CuentaMedicaConfigDto cfg,
         FacturacionSnapshotDetalleDto detalle, IReadOnlyList<PacienteSnapshotDto> pacientes,
-        string patron, string nitIps, IProgress<ZipProgreso>? progreso, CancellationToken ct)
+        string patron, string nitIps, byte[]? logoRotulo, IProgress<ZipProgreso>? progreso, CancellationToken ct)
     {
         _ = cfg;
         var incluyeTokenAut = patron.Contains("{autorizacion}", StringComparison.OrdinalIgnoreCase);
@@ -283,13 +308,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var (pac, codigo, partes) in unidades)
         {
             ct.ThrowIfCancellationRequested();
-            var bytesPartes = new List<byte[]>(partes.Count);
-            foreach (var p in partes)
-            {
-                if (p.Inline is { Length: > 0 }) { bytesPartes.Add(p.Inline); }
-                else if (p.RenderIdx >= 0 && p.RenderIdx < rendered.Count
-                         && rendered[p.RenderIdx] is { Length: > 0 } b) { bytesPartes.Add(b); }
-            }
+            var bytesPartes = EnsamblarPartes(partes, rendered, archivo.RotuloSeparadorCup, logoRotulo);
             if (bytesPartes.Count == 0) { continue; }
 
             var pdf = FusionarPdfs(bytesPartes);
@@ -667,10 +686,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, desde: desde, hasta: hasta))
+                    foreach (var u in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, desde: desde, hasta: hasta, rotuloPorCup: archivo.RotuloSeparadorCup))
                     {
-                        partes.Add(new PartePlan(null, allUrls.Count));
-                        allUrls.Add(url);
+                        partes.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede));
+                        allUrls.Add(u.Url);
                     }
                     break;
                 case OrigenInformeItem.DocumentoHc:
@@ -853,11 +872,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var url in await ResolverUrlsFormularioPorTipoAsync(
-                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, codigo, hcAut, desde, hasta))
+                    foreach (var u in await ResolverUrlsFormularioPorTipoAsync(
+                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, codigo, hcAut, desde, hasta, archivo.RotuloSeparadorCup))
                     {
-                        partes.Add(new PartePlan(null, allUrls.Count));
-                        allUrls.Add(url);
+                        partes.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede));
+                        allUrls.Add(u.Url);
                     }
                     break;
                 case OrigenInformeItem.DocumentoHc:
@@ -994,11 +1013,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return string.Join(",", docs);
     }
 
-    private async Task<List<string>> ResolverUrlsFormularioPorTipoAsync(
+    private async Task<List<UrlCup>> ResolverUrlsFormularioPorTipoAsync(
         Guid pacienteId, string? tipo, bool soloUltimo,
         IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, string docsRender, CancellationToken ct,
         string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
-        DateOnly? desde = null, DateOnly? hasta = null)
+        DateOnly? desde = null, DateOnly? hasta = null, bool rotuloPorCup = false)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
 
@@ -1031,10 +1050,91 @@ public sealed class TipologiaZipService : ITipologiaZipService
             if (filas.Count == 0) { return new(); }
         }
 
+        // CUP (CodigoRips) + nombre de servicio + sede por HC, via pivote sesion->turno->
+        // asignacion. Se consulta si algun nivel ordena por "cup" O si hay que insertar el
+        // rotulo separador por CUP (que ademas necesita nombre de servicio y sede).
+        var cupInfo = new Dictionary<Guid, (string Cup, string Nombre, string Sede)>();
+        var needCup = rotuloPorCup || (ordenNiveles?.Any(n => n.Campo == "cup") ?? false);
+        if (needCup)
+        {
+            var ids = filas.Select(f => f.Id).ToList();
+            var cups = await (
+                from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+                where ids.Contains(p.HistoriaClinicaId)
+                join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                select new { p.HistoriaClinicaId, a.CodigoRips, a.NombreServicio, a.Sucursal, a.ServicioId })
+                .ToListAsync(ct);
+
+            // Primera asignacion por HC (via cadena de sesiones), con su servicio para el
+            // fallback de CUP.
+            var asigPorHc = new Dictionary<Guid, (string? Cup, string? Nombre, string? Sede, string? ServicioId)>();
+            foreach (var r in cups)
+            {
+                if (!asigPorHc.ContainsKey(r.HistoriaClinicaId))
+                {
+                    asigPorHc[r.HistoriaClinicaId] = (r.CodigoRips, r.NombreServicio, r.Sucursal, r.ServicioId);
+                }
+            }
+
+            // Fallback como en RelacionFacturas: si la asignacion no estampo CodigoRips
+            // (legacy), el CUP y el nombre se derivan del ServicioContrato vivo
+            // (codigo base sin sufijo d/f). Asi no quedan "(sin CUP)" cuando el snapshot
+            // si muestra el CUP.
+            var servIds = asigPorHc.Values
+                .Where(v => string.IsNullOrWhiteSpace(v.Cup) && Guid.TryParse(v.ServicioId, out _))
+                .Select(v => Guid.Parse(v.ServicioId!))
+                .Distinct().ToList();
+            var servInfo = servIds.Count == 0
+                ? new Dictionary<Guid, (string? Codigo, string? Descripcion)>()
+                : await _db.ServiciosContrato.AsNoTracking()
+                    .Where(s => servIds.Contains(s.Id))
+                    .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
+                    .ToDictionaryAsync(s => s.Id, s => ((string?)s.CodigoServicio, (string?)s.Descripcion), ct);
+
+            foreach (var kv in asigPorHc)
+            {
+                var (cup, nombre, sede, servicioId) = kv.Value;
+                if (string.IsNullOrWhiteSpace(cup)
+                    && Guid.TryParse(servicioId, out var sid)
+                    && servInfo.TryGetValue(sid, out var sc))
+                {
+                    cup = ServicioCodigo.Base(sc.Item1);
+                    if (string.IsNullOrWhiteSpace(nombre)) { nombre = sc.Item2; }
+                }
+                if (!string.IsNullOrWhiteSpace(cup))
+                {
+                    cupInfo[kv.Key] = (cup!.Trim(), nombre ?? "", sede ?? "");
+                }
+            }
+        }
+        string CupOf(Guid id) => cupInfo.TryGetValue(id, out var ci) ? ci.Cup : "";
+
         if (soloUltimo)
         {
             // SoloUltimo = la HC mas reciente por fecha, independiente del orden configurado.
             filas = new List<FilaHcOrden> { filas.OrderByDescending(f => f.Fecha).First() };
+        }
+        else if (rotuloPorCup)
+        {
+            // El CUP manda: agrupa por CUP (numericos ascendentes; los que empiezan por letra
+            // al final) y, dentro de cada CUP, respeta el orden configurado por fecha (o
+            // cronologico si no hay). Garantiza un solo separador por CUP.
+            var clave = filas.ToDictionary(f => f.Id, f => CupSortKey(CupOf(f.Id)));
+            var ord = filas
+                .OrderBy(f => clave[f.Id].Grupo)
+                .ThenBy(f => clave[f.Id].Alfa, StringComparer.Ordinal)
+                .ThenBy(f => clave[f.Id].Num);
+            var internos = (ordenNiveles ?? Array.Empty<InformeOrdenNivelDto>())
+                .Where(n => n.Campo == "fecha").ToList();
+            if (internos.Count == 0) { internos = new List<InformeOrdenNivelDto> { new("fecha", false) }; }
+            foreach (var n in internos)
+            {
+                Func<FilaHcOrden, IComparable> key = f => f.Fecha;
+                ord = n.Desc ? ord.ThenByDescending(key) : ord.ThenBy(key);
+            }
+            filas = ord.ToList();
         }
         else
         {
@@ -1043,34 +1143,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 ? ordenNiveles
                 : new List<InformeOrdenNivelDto> { new("fecha", false) };
 
-            // CUP (CodigoRips de la asignacion) por HC, via pivote sesion->turno->asignacion.
-            // Solo se consulta si algun nivel ordena por "cup".
-            var cupPorHc = new Dictionary<Guid, string>();
-            if (niveles.Any(n => n.Campo == "cup"))
-            {
-                var ids = filas.Select(f => f.Id).ToList();
-                var cups = await (
-                    from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
-                    where ids.Contains(p.HistoriaClinicaId)
-                    join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-                    join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-                    join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-                    select new { p.HistoriaClinicaId, a.CodigoRips })
-                    .ToListAsync(ct);
-                foreach (var r in cups)
-                {
-                    if (!cupPorHc.ContainsKey(r.HistoriaClinicaId) && !string.IsNullOrWhiteSpace(r.CodigoRips))
-                    {
-                        cupPorHc[r.HistoriaClinicaId] = r.CodigoRips!;
-                    }
-                }
-            }
-
             IOrderedEnumerable<FilaHcOrden>? ordered = null;
             foreach (var n in niveles)
             {
                 Func<FilaHcOrden, IComparable> key = n.Campo == "cup"
-                    ? (f => cupPorHc.TryGetValue(f.Id, out var c) ? c : "")
+                    ? (f => CupOf(f.Id))
                     : (f => f.Fecha);
                 ordered = ordered is null
                     ? (n.Desc ? filas.OrderByDescending(key) : filas.OrderBy(key))
@@ -1085,7 +1162,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var rango = "";
         if (desde is DateOnly dr) { rango += $"&desde={dr:yyyy-MM-dd}"; }
         if (hasta is DateOnly hr) { rango += $"&hasta={hr:yyyy-MM-dd}"; }
-        return filas.Select(f => $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}{rango}").ToList();
+        return filas.Select(f =>
+        {
+            var url = $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}{rango}";
+            if (!rotuloPorCup) { return new UrlCup(url, null, null, null); }
+            var ci = cupInfo.TryGetValue(f.Id, out var c) ? c : ("", "", "");
+            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3);
+        }).ToList();
     }
 
     /// <summary>Periodo (fechaInicio/fechaFin) del snapshot desde su FiltrosJson. Se usa
@@ -1221,6 +1304,94 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 page.Content().Text(texto).FontSize(11);
             });
         }).GeneratePdf();
+    }
+
+    /// <summary>Convierte el plan de partes de un paciente/autorizacion en la lista de PDFs a
+    /// fusionar. Si <paramref name="rotulo"/> esta activo, inserta una pagina separadora
+    /// (rotulo con logo del tenant) cada vez que empieza un CUP distinto entre los documentos
+    /// de historia; las partes sin CUP (autorizacion/firma/anexo) no disparan separador y
+    /// quedan en su lugar. El conteo de CUP arranca de cero en cada paciente.</summary>
+    private List<byte[]> EnsamblarPartes(
+        IReadOnlyList<PartePlan> partes, IReadOnlyList<byte[]> rendered, bool rotulo, byte[]? logo)
+    {
+        var bytes = new List<byte[]>(partes.Count);
+        string? ultimoCup = null;
+        var iniciado = false;
+        foreach (var p in partes)
+        {
+            byte[]? b = p.Inline is { Length: > 0 } ? p.Inline
+                : (p.RenderIdx >= 0 && p.RenderIdx < rendered.Count
+                   && rendered[p.RenderIdx] is { Length: > 0 } rb ? rb : null);
+            if (b is null) { continue; }
+
+            if (rotulo && p.Cup is not null
+                && (!iniciado || !string.Equals(p.Cup, ultimoCup, StringComparison.OrdinalIgnoreCase)))
+            {
+                bytes.Add(PaginaRotuloCup(logo, p.Cup, p.CupNombre, p.Sede));
+                ultimoCup = p.Cup;
+                iniciado = true;
+            }
+            bytes.Add(b);
+        }
+        return bytes;
+    }
+
+    /// <summary>Pagina "rotulo" separadora de 1/4 de carta (4.25 x 5.5 in): tarjeta con el
+    /// logo del tenant, el codigo CUP, el nombre del servicio y la sede. Separa cada grupo de
+    /// CUP dentro del PDF del paciente.</summary>
+    private static byte[] PaginaRotuloCup(byte[]? logo, string? cup, string? nombre, string? sede)
+    {
+        var codigo = string.IsNullOrWhiteSpace(cup) ? "(sin CUP)" : cup!.Trim();
+        return Document.Create(doc =>
+        {
+            doc.Page(page =>
+            {
+                // Franja horizontal: ancho de carta (8.5") y alto de 1/4 de carta (2.75").
+                page.Size(8.5f, 2.75f, Unit.Inch);
+                page.Margin(14);
+                page.Content().Border(1.5f).BorderColor("#1565C0").Padding(16).Row(row =>
+                {
+                    row.Spacing(18);
+                    if (logo is { Length: > 0 })
+                    {
+                        try { row.ConstantItem(150).AlignMiddle().Height(70).Image(logo).FitArea(); }
+                        catch { /* logo ilegible */ }
+                    }
+                    row.RelativeItem().AlignMiddle().Column(col =>
+                    {
+                        col.Spacing(5);
+                        col.Item().AlignCenter().Text("SEPARADOR DE SERVICIO").FontSize(9).SemiBold().FontColor("#64748B");
+                        col.Item().AlignCenter().Text(codigo).FontSize(26).Bold().FontColor("#0F172A");
+                        if (!string.IsNullOrWhiteSpace(nombre))
+                        {
+                            col.Item().AlignCenter().Text(nombre!.Trim()).FontSize(12).FontColor("#0F172A");
+                        }
+                        if (!string.IsNullOrWhiteSpace(sede))
+                        {
+                            col.Item().AlignCenter().Text($"Sede: {sede!.Trim()}").FontSize(10).FontColor("#64748B");
+                        }
+                    });
+                });
+            });
+        }).GeneratePdf();
+    }
+
+    /// <summary>Bytes del logo del tenant activo (<see cref="Tenant.LogoUrl"/>, servido desde
+    /// wwwroot) para el rotulo separador. Null si no hay tenant, no hay logo o no existe en
+    /// disco. No lanza.</summary>
+    private async Task<byte[]?> ObtenerLogoTenantBytesAsync(CancellationToken ct)
+    {
+        if (_tenant.TenantId is not Guid tid) { return null; }
+        var url = await _db.Tenants.AsNoTracking()
+            .Where(t => t.Id == tid).Select(t => t.LogoUrl).FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(url)) { return null; }
+        try
+        {
+            var rel = url.TrimStart('/', '\\').Replace('/', Path.DirectorySeparatorChar);
+            var full = Path.Combine(_env.WebRootPath ?? "", rel);
+            return File.Exists(full) ? await File.ReadAllBytesAsync(full, ct) : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>Fusiona varios PDFs (bytes) en uno solo con PdfSharp. Los que no se

@@ -94,14 +94,28 @@ public sealed class RdaConsultaBuilderService(
             .Where(a => a.PacienteId == hc.PacienteId && a.FormatoHistoria == fdCodigo)
             .OrderByDescending(a => a.FechaInicio)
             .FirstOrDefaultAsync(ct);
-        var cupsEncuentro = asignacionRel?.ServicioId ?? "890201";
-        // serviceType.coding.display es 1..1 y debe coincidir EXACTO con el nombre
-        // oficial del CUPS (el validador rechaza con 6006 si difiere). Se resuelve
-        // del catalogo de servicios; fallback al nombre oficial del default 890201.
-        var cupsDisplay = await db.CatalogosServicioReferencia.AsNoTracking()
+        // El CUPS del encuentro es el CodigoRips (CUPS base sin sufijo d/f) que la
+        // asignacion captura como snapshot. OJO: asignacionRel.ServicioId es el GUID del
+        // ServicioContrato, NO un codigo CUPS -> si se emite tal cual, MinSalud rechaza
+        // con 6007 ("Code '<uuid>' ... does not exist in the value set CUPSConsultationCodes").
+        // Para asignaciones legacy sin CodigoRips se resuelve en vivo del ServicioContrato.
+        var cupsEncuentro = ServicioCodigo.Base(asignacionRel?.CodigoRips);
+        if (string.IsNullOrWhiteSpace(cupsEncuentro)
+            && Guid.TryParse(asignacionRel?.ServicioId, out var srvGid))
+        {
+            var codSrv = await db.ServiciosContrato.AsNoTracking()
+                .Where(s => s.Id == srvGid).Select(s => s.CodigoServicio).FirstOrDefaultAsync(ct);
+            cupsEncuentro = ServicioCodigo.Base(codSrv);
+        }
+        if (string.IsNullOrWhiteSpace(cupsEncuentro)) { cupsEncuentro = "890201"; }
+        // serviceType.coding.display es 1..1 y debe coincidir EXACTO con el nombre oficial del
+        // CUPS (el validador rechaza con 6006 si difiere). Prioridad: diccionario curado
+        // (CupsDisplayOficial) -> catalogo de servicios -> fallback del default 890201.
+        var cupsNombreCat = await db.CatalogosServicioReferencia.AsNoTracking()
             .Where(cs => cs.Codigo == cupsEncuentro)
             .Select(cs => cs.Nombre)
             .FirstOrDefaultAsync(ct);
+        var cupsDisplay = ResolveCupsDisplay(cupsEncuentro, cupsNombreCat);
         if (string.IsNullOrWhiteSpace(cupsDisplay))
         {
             cupsDisplay = cupsEncuentro == "890201"
@@ -109,15 +123,19 @@ public sealed class RdaConsultaBuilderService(
                 : cupsEncuentro;
         }
 
-        // Pagador (Aseguradora) desde la asignacion -> contrato -> aseguradora
+        // Pagador (Aseguradora) desde la asignacion -> contrato -> aseguradora.
+        // Tambien capturamos el TipoContrato (regimen) para desambiguar el codigo EAPB.
         Aseguradora? aseguradora = null;
+        TipoContrato? tipoContrato = null;
         if (asignacionRel is not null)
         {
-            aseguradora = await (
+            var cont = await (
                 from c in db.ContratosAseguradora.AsNoTracking()
                 where c.CodigoContrato == asignacionRel.ContratoCodigo
                 join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
-                select a).FirstOrDefaultAsync(ct);
+                select new { Aseg = a, c.TipoContrato }).FirstOrDefaultAsync(ct);
+            aseguradora = cont?.Aseg;
+            tipoContrato = cont?.TipoContrato;
         }
         // Fallback: aseguradora del paciente. Sin esto, una HC sin asignacion
         // relacionada emite pagador "DESCONOCIDO" y MinSalud rechaza con
@@ -135,6 +153,20 @@ public sealed class RdaConsultaBuilderService(
             .Where(o => o.HistoriaClinicaId == hc.Id).OrderBy(o => o.Orden).ToListAsync(ct);
         var incapacidades = await db.HistoriaClinicaIncapacidades.AsNoTracking()
             .Where(i => i.HistoriaClinicaId == hc.Id).OrderBy(i => i.Orden).ToListAsync(ct);
+
+        // Nombres oficiales de CUPS de las ordenes (para ServiceRequest.code.display 1..1, 6006).
+        // Un solo query al catalogo con los CUPS validos; el diccionario curado tiene prioridad al
+        // resolver. Lo que no este en ninguno cae al texto libre de la orden (puede dar 6006).
+        var ordenCups = ordenes
+            .Select(o => ServicioCodigo.Base(o.CodigoServicio))
+            .Where(c => !string.IsNullOrWhiteSpace(c) && CupsNumerico.IsMatch(c!))
+            .Distinct()
+            .ToList();
+        var cupsNombreCatalogo = ordenCups.Count == 0
+            ? new Dictionary<string, string>()
+            : await db.CatalogosServicioReferencia.AsNoTracking()
+                .Where(cs => ordenCups.Contains(cs.Codigo) && cs.Nombre != null)
+                .ToDictionaryAsync(cs => cs.Codigo, cs => cs.Nombre, ct);
 
         // ---------- IDs estables ----------
         var patientId = $"{NormalizarTipoDoc(hc.Paciente.TipoDocumento)}-{hc.Paciente.NumeroDocumento}";
@@ -179,7 +211,13 @@ public sealed class RdaConsultaBuilderService(
         // Nuestra tabla `aseguradoras.codigo` guarda un codigo interno (ej. 1423,
         // 13-14); si eventualmente MinSalud rechaza por el codigo mismo, hay que
         // cargar el EAPB oficial en una columna dedicada (fuera de scope aqui).
-        var payerOrgId = aseguradora is not null ? aseguradora.Codigo : "DESCONOCIDO";
+        // aseguradoras.codigo a veces trae DOS codigos EAPB pegados (contributivo +
+        // subsidiado, ej "EPS037 - EPSS41") -> MinSalud rechaza con BUNDLE-005 porque
+        // ese valor no existe en su directorio EAPB. Se elige UN solo codigo segun el
+        // regimen del contrato (fallback: regimen de la aseguradora, luego del paciente).
+        var payerOrgId = NormalizarEapb(
+            aseguradora?.Codigo, tipoContrato, aseguradora?.Regimen, hc.Paciente?.Regimen)
+            ?? "DESCONOCIDO";
         var encounterId = "Encounter-0";
         var conditionId = "Condition-0";
         var allergyId = "AllergyIntolerance-0";
@@ -197,8 +235,14 @@ public sealed class RdaConsultaBuilderService(
             locationId, cupsEncuentro, cupsDisplay, condition?.Id, condition?.Code?.Text);
         var allergy = BuildAllergyNkda(allergyId, patientId, encounterId, advertencias);
 
-        var meds = BuildMedicationRequests(medicamentos, patientId, encounterId, practitionerId);
-        var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId);
+        // MedicationRequest se OMITE deliberadamente: MedicationRequestRDA exige datos
+        // estructurados que VISAL no captura (numero de prescripcion + MIPRES, codigo DCI
+        // del ValueSet MipresDCI, via del ValueSet VAD, timing con duracion/unidad/MedicationTime
+        // y dosis UMM/MipresDoseForm). VISAL guarda la medicacion como texto libre (nombre +
+        // posologia). Emitir el recurso = rechazo por binding (1028); se reporta como NARRATIVE
+        // en sectionMedications (la seccion es 0..*). Mismo criterio que ocupacion/riesgo/incapacidad.
+        var services = BuildServiceRequests(ordenes, patientId, encounterId, practitionerId,
+            cupsNombreCatalogo, advertencias);
         // Ocupacion (PatientOccupationAtEncounterRDA), factores de riesgo (RiskFactorRDA)
         // e incapacidades (AttendanceAllowanceRDA) son entries OPCIONALES en sus secciones
         // y exigen codigos de ValueSets requeridos (CIUO88AC, FactorRiesgo) que Visal aun
@@ -209,7 +253,7 @@ public sealed class RdaConsultaBuilderService(
 
         var composition = BuildComposition(hc, patientId, encounterId, orgId, practitionerId,
             condition?.Id, allergyId, payerOrgId, docRefId,
-            meds.Select(m => m.Id!).ToList(), services.Select(s => s.Id!).ToList());
+            medicamentos, services.Select(s => s.Id!).ToList());
 
         // ---------- Bundle ----------
         var bundle = new Bundle
@@ -247,7 +291,6 @@ public sealed class RdaConsultaBuilderService(
         if (condition is not null) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = condition }); }
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = allergy });
         bundle.Entry.Add(new Bundle.EntryComponent { Resource = documentReference });
-        foreach (var m in meds) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = m }); }
         foreach (var s in services) { bundle.Entry.Add(new Bundle.EntryComponent { Resource = s }); }
 
         var serializer = new FhirJsonSerializer(new SerializerSettings { Pretty = true });
@@ -283,7 +326,7 @@ public sealed class RdaConsultaBuilderService(
         await db.SaveChangesAsync(ct);
 
         log.LogInformation("RDA Consulta construido: {Id} HC={HcId} CUPS={Cups} Meds={Meds} Servs={Servs}",
-            evento.Id, hc.Id, cupsEncuentro, meds.Count, services.Count);
+            evento.Id, hc.Id, cupsEncuentro, medicamentos.Count, services.Count);
         return new RdaBuildResult(evento.Id, bundleJson, hash, EstadoRdaEvento.Borrador,
             bundle.Entry.Count, YaExistia: false, advertencias);
     }
@@ -293,7 +336,7 @@ public sealed class RdaConsultaBuilderService(
     private static Composition BuildComposition(HistoriaClinica hc, string patientId, string encounterId,
         string orgId, string practitionerId, string? conditionId, string allergyId,
         string payerOrgId, string docRefId,
-        IReadOnlyList<string> medIds, IReadOnlyList<string> serviceIds)
+        IReadOnlyList<HistoriaClinicaMedicamento> medicamentos, IReadOnlyList<string> serviceIds)
     {
         var fin = (hc.FechaCierre ?? DateTimeOffset.UtcNow).ToOffset(TimeSpan.FromHours(-5));
         var c = new Composition
@@ -354,16 +397,20 @@ public sealed class RdaConsultaBuilderService(
             "nilknown", "Nil Known"));
         c.Section.Add(sInc);
 
-        // 4. sectionMedications (1..1)
+        // 4. sectionMedications (1..1, MedicationRequest 0..*). No emitimos MedicationRequest
+        // (ver comentario en el metodo principal): se reporta la medicacion como narrative
+        // porque VISAL no captura los datos estructurados que exige MedicationRequestRDA.
+        string medNarr = medicamentos.Count > 0
+            ? "Medicamentos prescritos durante la atención:<ul>" +
+              string.Concat(medicamentos.Select(m =>
+                  "<li>" + System.Net.WebUtility.HtmlEncode(m.NombreMedicamento ?? "")
+                  + (string.IsNullOrWhiteSpace(m.Posologia)
+                        ? "" : " — " + System.Net.WebUtility.HtmlEncode(m.Posologia!))
+                  + "</li>")) + "</ul>"
+            : "Sin medicamentos prescritos en esta atención.";
         var sMed = MakeSection("Historial de medicamentos",
-            "10160-0", "History of Medication use Narrative",
-            medIds.Count > 0 ? "Medicamentos prescritos durante la atención."
-                             : "Sin medicamentos prescritos en esta atención.");
-        if (medIds.Count > 0)
-        {
-            foreach (var id in medIds) { sMed.Entry.Add(ContainedRef(id)); }
-        }
-        else
+            "10160-0", "History of Medication use Narrative", medNarr);
+        if (medicamentos.Count == 0)
         {
             sMed.EmptyReason = MakeCC(new Coding(
                 "http://terminology.hl7.org/CodeSystem/list-empty-reason",
@@ -634,44 +681,67 @@ public sealed class RdaConsultaBuilderService(
         return a;
     }
 
-    private static List<MedicationRequest> BuildMedicationRequests(
-        IReadOnlyList<HistoriaClinicaMedicamento> rows, string patientId, string encounterId, string practitionerId)
-    {
-        var list = new List<MedicationRequest>();
-        for (int i = 0; i < rows.Count; i++)
+    // CUPS real = 6 digitos. Separa los CUPS validos de los codigos internos de VISAL
+    // (SER-001, E985110, P999326, F890128...) que NO estan en CUPSProcedureCodes.
+    private static readonly System.Text.RegularExpressions.Regex CupsNumerico =
+        new(@"^\d{6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // 6006: el `display` de una coding CUPS (Encounter.serviceType y ServiceRequest.code,
+    // ambos display 1..1 obligatorio) debe coincidir EXACTO, caracter por caracter, con el
+    // nombre oficial del CUPS. MinSalud lo clasifica como severity=warning pero IGUAL rechaza
+    // el bundle con HTTP 400. El catalogo interno (CatalogosServicioReferencia.Nombre) esta
+    // casi siempre bien pero tiene errores puntuales (ej 890305 le falta un "DE") y las ordenes
+    // guardan texto libre ("... (6 HORAS)", "[VISITA] ... +"); por eso este diccionario curado
+    // con el string TEXTUAL que exige MinSalud tiene prioridad sobre ambos. Fuente: los mensajes
+    // 6006 "should be '...'" de prod (cosechados 2026-11-02); cubre el 100% de los CUPS en uso de
+    // una IPS domiciliaria. Los escapes \u mantienen el archivo en ASCII (los acentos SON
+    // obligatorios en el valor en tiempo de ejecucion; sin ellos reaparece el 6006).
+    private static readonly IReadOnlyDictionary<string, string> CupsDisplayOficial =
+        new Dictionary<string, string>
         {
-            var r = rows[i];
-            var mr = new MedicationRequest
-            {
-                Id = $"MedicationRequest-{i}",
-                Meta = new Meta { Profile = new[] { $"{ProfileBase}/MedicationRequestRDA" } },
-                Status = MedicationRequest.MedicationrequestStatus.Active,
-                Intent = MedicationRequest.MedicationRequestIntent.Order,
-                Subject = ContainedRef(patientId),
-                Encounter = ContainedRef(encounterId),
-                Requester = ContainedRef(practitionerId),
-                AuthoredOnElement = new FhirDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-5)))
-            };
-            mr.Medication = new CodeableConcept { Text = r.NombreMedicamento };
-            if (!string.IsNullOrWhiteSpace(r.Posologia))
-            {
-                mr.DosageInstruction.Add(new Dosage { Text = r.Posologia });
-            }
-            list.Add(mr);
-        }
-        return list;
-    }
+            ["890101"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR MEDICINA GENERAL",
+            ["890105"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR ENFERMERÍA",
+            ["890106"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR NUTRICIÓN Y DIETÉTICA",
+            ["890108"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR PSICOLOGÍA",
+            ["890109"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR TRABAJO SOCIAL",
+            ["890110"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR FONIATRÍA Y FONOAUDIOLOGÍA",
+            ["890111"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR FISIOTERAPIA",
+            ["890112"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR TERAPIA RESPIRATORIA",
+            ["890113"] = "ATENCIÓN (VISITA) DOMICILIARIA- POR TERAPIA OCUPACIONAL",
+            ["890305"] = "CONSULTA DE CONTROL O DE SEGUIMIENTO POR ENFERMERÍA",
+            ["893812"] = "REGISTRO DE OXIMETRÍA CUTÁNEA",
+        };
+
+    // Display oficial de un CUPS: el diccionario curado manda; si no esta, cae al nombre del
+    // catalogo (fallback, puede venir null/vacio) que el llamador resuelve.
+    private static string? ResolveCupsDisplay(string? codigo, string? fallbackCatalogo)
+        => codigo is not null && CupsDisplayOficial.TryGetValue(codigo, out var oficial)
+            ? oficial
+            : fallbackCatalogo;
 
     private static List<ServiceRequest> BuildServiceRequests(
-        IReadOnlyList<HistoriaClinicaOrdenServicio> rows, string patientId, string encounterId, string practitionerId)
+        IReadOnlyList<HistoriaClinicaOrdenServicio> rows, string patientId, string encounterId,
+        string practitionerId, IReadOnlyDictionary<string, string> cupsNombreCatalogo,
+        List<string> advertencias)
     {
         var list = new List<ServiceRequest>();
         for (int i = 0; i < rows.Count; i++)
         {
             var r = rows[i];
+            // ServiceRequestRDA.code exige un CUPS del ValueSet CUPSProcedureCodes (binding
+            // requerido). Si el codigo del servicio no es un CUPS valido (6 digitos) no hay
+            // mapeo disponible -> se OMITE la orden (la seccion es 0..*) en vez de enviar un
+            // codigo que el validador rechaza (1028).
+            var cupsSrv = ServicioCodigo.Base(r.CodigoServicio);
+            if (string.IsNullOrWhiteSpace(cupsSrv) || !CupsNumerico.IsMatch(cupsSrv))
+            {
+                advertencias.Add(
+                    $"Orden de servicio '{r.Descripcion}' con codigo '{r.CodigoServicio}' no es un CUPS valido; se omite del RDA.");
+                continue;
+            }
             var sr = new ServiceRequest
             {
-                Id = $"ServiceRequest-{i}",
+                Id = $"ServiceRequest-{list.Count}",
                 Meta = new Meta { Profile = new[] { $"{ProfileBase}/ServiceRequestRDA" } },
                 Status = RequestStatus.Active,
                 Intent = RequestIntent.Order,
@@ -680,13 +750,22 @@ public sealed class RdaConsultaBuilderService(
                 Requester = ContainedRef(practitionerId),
                 AuthoredOnElement = new FhirDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(-5)))
             };
+            // category 1..1: ServiceRequestRDA fija el coding R866 = 01 "Procedimiento en salud".
+            sr.Category.Add(MakeCC(new Coding(
+                $"{CodeSystemBase}/ColombianHealthTechnologyCategory", "01", "Procedimiento en salud")));
+            // code.coding.display es 1..1 y el validador EXIGE el nombre oficial del CUPS (6006
+            // -> HTTP 400 aunque lo marque como warning). NO usar r.Descripcion (texto libre de la
+            // orden): se guarda solo como CodeableConcept.text (humano, no validado contra catalogo).
+            // El display viaja por el resolver (diccionario oficial -> catalogo -> texto libre).
+            var displayCups = ResolveCupsDisplay(cupsSrv, cupsNombreCatalogo.GetValueOrDefault(cupsSrv))
+                ?? r.Descripcion;
             sr.Code = new CodeableConcept { Text = r.Descripcion };
-            // CUPS sin el sufijo de modalidad d/f (RIPS no lo maneja).
-            var cupsSrv = ServicioCodigo.Base(r.CodigoServicio);
-            if (!string.IsNullOrWhiteSpace(cupsSrv))
-            {
-                sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, r.Descripcion));
-            }
+            sr.Code.Coding.Add(new Coding($"{CodeSystemBase}/CUPS", cupsSrv, displayCups));
+            // reasonCode 1..1: binding requerido a RIPSFinalidadConsultaVersion2Codigos. VISAL no
+            // captura la finalidad por orden; default 16 TRATAMIENTO (la mas comun de un servicio
+            // ordenado durante la atencion).
+            sr.ReasonCode.Add(MakeCC(new Coding(
+                $"{CodeSystemBase}/RIPSFinalidadConsultaVersion2", "16", "TRATAMIENTO")));
             list.Add(sr);
         }
         return list;
@@ -1005,6 +1084,50 @@ public sealed class RdaConsultaBuilderService(
     // Los ids cortos siguen resolviendo contra composition.contained[].
     private static ResourceReference ContainedRef(string id) =>
         new ResourceReference($"#{id}");
+
+    // EAPB del pagador: aseguradoras.codigo puede traer DOS codigos EAPB pegados
+    // (contributivo + subsidiado, ej "EPS037 - EPSS41" / "ESS024 - EPS042"). El RDA
+    // exige UN solo codigo; se elige el del regimen del contrato, con fallback al
+    // regimen de la aseguradora y al del paciente. Sin regimen claro se prefiere el
+    // contributivo (lo mas comun en consulta externa).
+    public static string? NormalizarEapb(string? codigo, TipoContrato? tipoContrato,
+        string? regimenAseguradora, string? regimenPaciente)
+    {
+        if (string.IsNullOrWhiteSpace(codigo)) { return null; }
+        var tokens = codigo.Split(new[] { ' ', '-', '/', ',', ';' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length <= 1) { return codigo.Trim(); }
+        var quiereSubsidiado = ResolverSubsidiado(tipoContrato, regimenAseguradora, regimenPaciente);
+        if (quiereSubsidiado is bool sub)
+        {
+            var elegido = Array.Find(tokens, t => EsEapbSubsidiado(t) == sub);
+            if (elegido is not null) { return elegido; }
+        }
+        return Array.Find(tokens, t => !EsEapbSubsidiado(t)) ?? tokens[0];
+    }
+
+    private static bool EsEapbSubsidiado(string eapb)
+    {
+        var c = eapb.Trim().ToUpperInvariant();
+        return c.StartsWith("EPSS", StringComparison.Ordinal)
+            || c.StartsWith("ESS", StringComparison.Ordinal)
+            || c.StartsWith("CCF", StringComparison.Ordinal);
+    }
+
+    private static bool? ResolverSubsidiado(TipoContrato? tipoContrato,
+        string? regimenAseguradora, string? regimenPaciente)
+    {
+        if (tipoContrato == TipoContrato.Subsidiado) { return true; }
+        if (tipoContrato == TipoContrato.Contributivo) { return false; }
+        foreach (var r in new[] { regimenAseguradora, regimenPaciente })
+        {
+            if (string.IsNullOrWhiteSpace(r)) { continue; }
+            var u = r.Trim().ToUpperInvariant();
+            if (u.StartsWith("SUB", StringComparison.Ordinal)) { return true; }
+            if (u.StartsWith("CON", StringComparison.Ordinal)) { return false; }
+        }
+        return null;
+    }
 
     /// <summary>
     /// Devuelve solo el NIT SIN digito de verificacion. Si el input trae guion

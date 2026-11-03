@@ -113,7 +113,8 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 .ToList(),
             ParseOrdenNiveles(i.OrdenJson),
             i.PdfUnico,
-            i.UnoPorAutorizacion))
+            i.UnoPorAutorizacion,
+            i.RotuloSeparadorCup))
             .ToList();
     }
 
@@ -203,6 +204,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         item.OrdenJson = SerializeOrdenNiveles(req.OrdenNiveles);
         item.PdfUnico = req.PdfUnico;
         item.UnoPorAutorizacion = req.UnoPorAutorizacion;
+        item.RotuloSeparadorCup = req.RotuloSeparadorCup;
         // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
         // compatibilidad; la fuente de verdad es la tabla de contenidos.
         var primero = contenidos[0];
@@ -341,6 +343,11 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 Obligatorio = src.Obligatorio,
                 SoloUltimo = src.SoloUltimo,
                 PdfUnico = src.PdfUnico,
+                // Antes NO se clonaban estos: "Copiar de otra aseguradora" perdia el orden
+                // multinivel y los flags del archivo. Se copian para un clon fiel.
+                OrdenJson = src.OrdenJson,
+                UnoPorAutorizacion = src.UnoPorAutorizacion,
+                RotuloSeparadorCup = src.RotuloSeparadorCup,
             };
             if (contPorItem.TryGetValue(src.Id, out var cs))
             {

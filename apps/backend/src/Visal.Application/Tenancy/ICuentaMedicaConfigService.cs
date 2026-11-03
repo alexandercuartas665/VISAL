@@ -52,7 +52,10 @@ public sealed record InformeItemDto(
     // True = genera un PDF por CADA autorizacion del paciente (ZIP con un archivo por
     // autorizacion, nombrado con el numero de autorizacion). Default false (historico:
     // todas las autorizaciones fusionadas en un PDF por paciente).
-    bool UnoPorAutorizacion = false);
+    bool UnoPorAutorizacion = false,
+    // True = agrupa las historias por CUP e inserta una pagina "rotulo" separadora (logo del
+    // tenant + CUP + servicio + sede) antes de cada CUP. Default false.
+    bool RotuloSeparadorCup = false);
 
 /// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
 public sealed record InformeContenidoDto(
@@ -75,7 +78,8 @@ public sealed record GuardarItemRequest(
     IReadOnlyList<GuardarContenidoDto> Contenidos,
     IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null,
     bool PdfUnico = false,
-    bool UnoPorAutorizacion = false);
+    bool UnoPorAutorizacion = false,
+    bool RotuloSeparadorCup = false);
 
 /// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
 /// todos en cada guardado).</summary>

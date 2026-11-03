@@ -36,18 +36,39 @@
                 <Authorized>
                     @if (_sedes.Count >= 2)
                     {
-                        <!-- Selector de sede en linea: permite cambiar de sede sin cerrar sesion.
-                             Form POST plano (SSR) al mismo endpoint del login; vuelve a esta pagina. -->
-                        <form method="post" action="/auth/select-sede" class="visal-sede-form m-0">
-                            <input type="hidden" name="returnUrl" value="@_returnUrl" />
-                            <select name="sucursalId" class="form-select form-select-sm visal-sede-select"
-                                    onchange="this.form.submit()" title="Cambiar de sede" aria-label="Sede activa">
-                                @foreach (var s in _sedes)
-                                {
-                                    <option value="@s.Id" selected="@(s.Id == _sedeActual)">@s.Nombre</option>
-                                }
-                            </select>
-                        </form>
+                        <!-- Selector de sede centrado: panel con tarjetas + buscador (autocompletado).
+                             Cada tarjeta es un submit al mismo endpoint del login; vuelve a esta pagina.
+                             Apertura y filtrado por JS puro (el topbar es SSR, sin circuito Blazor). -->
+                        <div class="visal-sede" data-sede-root>
+                            <button type="button" class="visal-sede-trigger" data-sede-trigger aria-haspopup="true" aria-expanded="false" title="Cambiar de sede">
+                                <svg class="visal-sede-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                <span class="visal-sede-trigger-label">@_sedeActualNombre</span>
+                                <svg class="visal-sede-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </button>
+                            <div class="visal-sede-panel" data-sede-panel hidden>
+                                <div class="visal-sede-search-wrap">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                                    <input type="search" class="visal-sede-search" data-sede-search placeholder="Buscar sede..." autocomplete="off" />
+                                </div>
+                                <form method="post" action="/auth/select-sede" class="visal-sede-cards" data-sede-cards>
+                                    <input type="hidden" name="returnUrl" value="@_returnUrl" />
+                                    @foreach (var s in _sedes)
+                                    {
+                                        <button type="submit" name="sucursalId" value="@s.Id"
+                                                class="visal-sede-card @(s.Id == _sedeActual ? "is-active" : "")"
+                                                data-sede-card data-sede-text="@($"{s.Nombre} {s.Codigo} {s.Ciudad}".Trim())">
+                                            <span class="visal-sede-card-name">@s.Nombre</span>
+                                            <span class="visal-sede-card-meta">@s.Codigo@(string.IsNullOrWhiteSpace(s.Ciudad) ? "" : " - " + s.Ciudad)</span>
+                                            @if (s.Id == _sedeActual)
+                                            {
+                                                <svg class="visal-sede-card-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                            }
+                                        </button>
+                                    }
+                                    <div class="visal-sede-empty" data-sede-empty hidden>Sin resultados</div>
+                                </form>
+                            </div>
+                        </div>
                     }
                     <span class="visal-user-chip">@(context.User.FindFirst("platform_role") is not null ? "Operador" : "Agencia") · <strong>@context.User.Identity?.Name</strong></span>
                     <form method="post" action="/auth/logout" class="m-0">
@@ -147,9 +168,117 @@
     })();
 </script>
 
+<script>
+    // Selector de sede: abre/cierra el panel y filtra las tarjetas por texto (autocompletado).
+    // JS puro porque el topbar se renderiza estatico (SSR): no hay circuito Blazor aca.
+    // El cambio de sede lo hace el submit nativo de cada tarjeta (POST a /auth/select-sede).
+    (function () {
+        function wire(root) {
+            if (root.__sedeWired) { return; }
+            root.__sedeWired = true;
+            var trigger = root.querySelector('[data-sede-trigger]');
+            var panel = root.querySelector('[data-sede-panel]');
+            var search = root.querySelector('[data-sede-search]');
+            var cards = Array.prototype.slice.call(root.querySelectorAll('[data-sede-card]'));
+            var empty = root.querySelector('[data-sede-empty]');
+            if (!trigger || !panel) { return; }
+
+            function open() {
+                panel.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+                if (search) { setTimeout(function () { try { search.focus(); } catch (e) { } }, 30); }
+            }
+            function close() {
+                panel.hidden = true;
+                trigger.setAttribute('aria-expanded', 'false');
+            }
+            trigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (panel.hidden) { open(); } else { close(); }
+            });
+            // Clicks dentro del panel no lo cierran (salvo el submit de una tarjeta, que navega).
+            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+            document.addEventListener('click', function () { if (!panel.hidden) { close(); } });
+            document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !panel.hidden) { close(); } });
+
+            if (search) {
+                search.addEventListener('input', function () {
+                    var t = (search.value || '').trim().toLowerCase();
+                    var any = false;
+                    cards.forEach(function (c) {
+                        var txt = (c.getAttribute('data-sede-text') || '').toLowerCase();
+                        var show = !t || txt.indexOf(t) !== -1;
+                        c.style.display = show ? '' : 'none';
+                        if (show) { any = true; }
+                    });
+                    if (empty) { empty.hidden = any; }
+                });
+                // Enter: elige la primera sede visible (autocompletado rapido).
+                search.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        var first = cards.filter(function (c) { return c.style.display !== 'none'; })[0];
+                        if (first) { first.click(); }
+                    }
+                });
+            }
+        }
+        function init() { document.querySelectorAll('[data-sede-root]').forEach(wire); }
+        if (document.readyState !== 'loading') { init(); }
+        else { document.addEventListener('DOMContentLoaded', init); }
+        try { if (window.Blazor && Blazor.addEventListener) { Blazor.addEventListener('enhancedload', init); } } catch (e) { }
+        setTimeout(init, 400);
+    })();
+</script>
+
 <style>
-    /* Selector de sede en la barra superior: compacto, no invade el ancho del chip de usuario. */
-    .visal-sede-select { width:auto; min-width:120px; max-width:220px; }
+    /* Selector de sede centrado en la barra superior. */
+    .visal-topbar { position: relative; }
+    .visal-sede { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1000; }
+
+    .visal-sede-trigger {
+        display: inline-flex; align-items: center; gap: 8px;
+        max-width: 260px; padding: 6px 12px;
+        background: #fff; border: 1.5px solid #e2e8f0; border-radius: 999px;
+        color: #0f172a; font-size: 13px; font-weight: 600; line-height: 1.1;
+        cursor: pointer; transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .visal-sede-trigger:hover { border-color: #1565c0; background: #f8fbff; }
+    .visal-sede-trigger[aria-expanded="true"] { border-color: #1565c0; box-shadow: 0 0 0 3px rgba(21,101,192,.12); }
+    .visal-sede-pin { width: 15px; height: 15px; color: #1565c0; flex: 0 0 auto; }
+    .visal-sede-caret { width: 14px; height: 14px; color: #64748b; flex: 0 0 auto; }
+    .visal-sede-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .visal-sede-panel {
+        position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+        width: 300px; max-width: calc(100vw - 24px);
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(15,23,42,.16); padding: 10px; z-index: 1001;
+    }
+    .visal-sede-search-wrap { position: relative; margin-bottom: 8px; }
+    .visal-sede-search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: #94a3b8; pointer-events: none; }
+    .visal-sede-search {
+        width: 100%; padding: 8px 10px 8px 32px;
+        border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13px; color: #0f172a; outline: none;
+    }
+    .visal-sede-search:focus { border-color: #1565c0; box-shadow: 0 0 0 3px rgba(21,101,192,.10); }
+
+    .visal-sede-cards { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+    .visal-sede-card {
+        display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+        position: relative; width: 100%; text-align: left;
+        padding: 9px 34px 9px 12px; border: 1.5px solid #e2e8f0; border-radius: 10px;
+        background: #fff; cursor: pointer; transition: all .12s;
+    }
+    .visal-sede-card:hover { border-color: #1565c0; background: #f8fbff; }
+    .visal-sede-card.is-active { border-color: #1565c0; background: #eff6ff; box-shadow: 0 0 0 2px rgba(21,101,192,.08); }
+    .visal-sede-card-name { font-weight: 600; font-size: 13px; color: #0f172a; }
+    .visal-sede-card-meta { font-size: 11px; color: #64748b; }
+    .visal-sede-card-check { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #1565c0; }
+    .visal-sede-empty { padding: 14px 8px; text-align: center; color: #94a3b8; font-size: 12px; }
+
+    @@media (max-width: 760px) { .visal-sede-trigger { max-width: 170px; } .visal-sede-trigger-label { max-width: 110px; } }
+    @@media (max-width: 560px) { .visal-topbar-brand { display: none; } }
 </style>
 
 @code {
@@ -157,6 +286,7 @@
 
     private List<SucursalDto> _sedes = new();
     private Guid _sedeActual = Guid.Empty;
+    private string _sedeActualNombre = "Selecciona sede";
     private string _returnUrl = "/";
 
     protected override async Task OnInitializedAsync()
@@ -174,6 +304,7 @@
             Guid.TryParse(st.User.FindFirst("sucursal_id")?.Value, out _sedeActual);
             try { _sedes = (await Sedes.GetSedesAsync(uid, tid)).ToList(); }
             catch { _sedes = new(); }
+            _sedeActualNombre = _sedes.FirstOrDefault(s => s.Id == _sedeActual)?.Nombre ?? "Selecciona sede";
         }
     }
 }

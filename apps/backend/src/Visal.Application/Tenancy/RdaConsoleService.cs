@@ -55,6 +55,7 @@ public sealed class RdaConsoleService(
                     e.ReferenciaMinsalud,
                     e.BundleHash,
                     e.TipoRda,
+                    e.HistoriaClinicaId,
                     TieneCredencialSede = cr != null
                         && !string.IsNullOrEmpty(cr.ClientId)
                         && !string.IsNullOrEmpty(cr.ClientSecretCifrado)
@@ -104,6 +105,19 @@ public sealed class RdaConsoleService(
             var dt = hasta.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
             q = q.Where(x => x.FechaGeneracion <= dt);
         }
+        if (filtro.SoloVigentes)
+        {
+            // Dedup al evento vigente de cada (HistoriaClinica, Tipo): deja fuera toda fila que
+            // tenga OTRO evento mas reciente del mismo caso. Asi la parrilla muestra el estado
+            // actual por caso (y el filtro de estado/SoloRechazados actua sobre ese vigente), en
+            // vez de acumular reintentos duplicados y rechazos ya superados. El historial completo
+            // sigue disponible por fila (modal) y apagando este flag. El filtro de tenant de EF
+            // aplica tambien a la subconsulta.
+            q = q.Where(x => !db.RdaEventos.AsNoTracking().Any(e2 =>
+                e2.HistoriaClinicaId == x.HistoriaClinicaId
+                && e2.TipoRda == x.TipoRda
+                && e2.FechaGeneracion > x.FechaGeneracion));
+        }
 
         var rows = await q.OrderByDescending(x => x.FechaGeneracion).Take(500).ToListAsync(ct);
         return rows.Select(r => new RdaEventoRowDto(
@@ -114,8 +128,67 @@ public sealed class RdaConsoleService(
             r.TieneCredencialSede,
             r.TieneCredencialSede
                 ? null
-                : $"La sede {r.SucursalNombre} no tiene credenciales configuradas para el ambiente {r.Ambiente}. Configuralas en Configuracion de Interoperabilidad."
+                : $"La sede {r.SucursalNombre} no tiene credenciales configuradas para el ambiente {r.Ambiente}. Configuralas en Configuracion de Interoperabilidad.",
+            r.HistoriaClinicaId
             )).ToList();
+    }
+
+    public async Task<IReadOnlyList<RdaEventoHistorialItemDto>> ListarHistorialAsync(
+        Guid id, CancellationToken ct = default)
+    {
+        // El caso lo define (HistoriaClinica, Tipo). Resolvemos ese par desde el evento clickeado
+        // y traemos TODOS sus eventos del mas reciente al mas viejo. El vigente es el primero.
+        var clave = await db.RdaEventos.AsNoTracking()
+            .Where(e => e.Id == id)
+            .Select(e => new { e.HistoriaClinicaId, e.TipoRda })
+            .FirstOrDefaultAsync(ct);
+        if (clave is null) { return Array.Empty<RdaEventoHistorialItemDto>(); }
+
+        var eventos = await db.RdaEventos.AsNoTracking()
+            .Where(e => e.HistoriaClinicaId == clave.HistoriaClinicaId && e.TipoRda == clave.TipoRda)
+            .OrderByDescending(e => e.FechaGeneracion)
+            .Select(e => new
+            {
+                e.Id, e.FechaGeneracion, e.Estado, e.Intentos, e.UltimoIntento, e.BundleHash, e.ErroresJson
+            })
+            .ToListAsync(ct);
+
+        return eventos.Select((e, idx) => new RdaEventoHistorialItemDto(
+            e.Id, e.FechaGeneracion, e.Estado, e.Intentos, e.UltimoIntento, e.BundleHash,
+            ExtraerCodigoError(e.ErroresJson),
+            EsVigente: idx == 0)).ToList();
+    }
+
+    /// <summary>Extrae el code MinSalud del primer issue de un errores_json
+    /// ({"body":"&lt;OperationOutcome como string&gt;",...}). Best-effort: null si no parsea.</summary>
+    private static string? ExtraerCodigoError(string? erroresJson)
+    {
+        if (string.IsNullOrWhiteSpace(erroresJson)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(erroresJson);
+            if (!doc.RootElement.TryGetProperty("body", out var bodyEl)) { return null; }
+            var body = bodyEl.ValueKind == System.Text.Json.JsonValueKind.String ? bodyEl.GetString() : null;
+            if (string.IsNullOrWhiteSpace(body) || body![0] != '{') { return null; }
+            using var oo = System.Text.Json.JsonDocument.Parse(body);
+            if (!oo.RootElement.TryGetProperty("issue", out var issues)
+                || issues.ValueKind != System.Text.Json.JsonValueKind.Array
+                || issues.GetArrayLength() == 0)
+            {
+                return null;
+            }
+            var issue0 = issues[0];
+            if (issue0.TryGetProperty("details", out var det)
+                && det.TryGetProperty("coding", out var coding)
+                && coding.ValueKind == System.Text.Json.JsonValueKind.Array
+                && coding.GetArrayLength() > 0
+                && coding[0].TryGetProperty("code", out var codeEl))
+            {
+                return codeEl.GetString();
+            }
+            return issue0.TryGetProperty("code", out var ic) ? ic.GetString() : null;
+        }
+        catch { return null; }
     }
 
     public async Task<RdaEventoDetailDto?> ObtenerAsync(Guid id, CancellationToken ct = default)

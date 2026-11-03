@@ -83,7 +83,6 @@ public sealed class PacienteService : IPacienteService
             p.UsuarioIngresoId, p.UsuarioIngresoNombre,
             p.ContratoPrincipal,
             p.Condicion, p.SlaIngresoMinutos,
-            p.MedicamentoControlado,
             p.BarthelTotal, p.BarthelClasificacion, p.BarthelDatosJson, p.BarthelActualizadoEn,
             p.FechaFallecimiento, p.FallecimientoReportadoPor, p.CertificadoVisal, p.MotivoFallecimiento);
     }
@@ -199,8 +198,6 @@ public sealed class PacienteService : IPacienteService
         p.FechaAtencion = req.FechaAtencion;
         // Condicion del paciente (CENSO): valor de una lista fija (se guarda el texto elegido).
         p.Condicion = string.IsNullOrWhiteSpace(req.Condicion) ? null : req.Condicion.Trim();
-        // Medicamento Controlado (SI/NO) de la ficha tecnica (CENSO col V).
-        p.MedicamentoControlado = string.IsNullOrWhiteSpace(req.MedicamentoControlado) ? null : req.MedicamentoControlado.Trim();
         // SLA del ingreso: minutos entre que la IPS comenta y la fecha de atencion/respuesta. Derivado
         // (no editable). Null si falta alguna fecha; se descartan negativos (datos invertidos) a 0.
         p.SlaIngresoMinutos = p.FechaComentan is DateTimeOffset fcSla && p.FechaAtencion is DateTimeOffset faSla

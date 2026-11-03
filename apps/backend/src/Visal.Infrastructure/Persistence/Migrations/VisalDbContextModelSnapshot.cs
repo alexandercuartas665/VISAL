@@ -7114,11 +7114,6 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("med_contratado_id");
 
-                    b.Property<string>("MedicamentoControlado")
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)")
-                        .HasColumnName("medicamento_controlado");
-
                     b.Property<string>("MotivoFallecimiento")
                         .HasColumnType("text")
                         .HasColumnName("motivo_fallecimiento");

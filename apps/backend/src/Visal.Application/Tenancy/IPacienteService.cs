@@ -78,8 +78,6 @@ public sealed record PacienteDetailDto(
     string? Condicion = null,
     // SLA del ingreso en minutos (Comentan -> Atencion). Solo lectura: lo calcula el servidor.
     int? SlaIngresoMinutos = null,
-    // Medicamento Controlado (SI/NO) de la ficha tecnica (CENSO col V).
-    string? MedicamentoControlado = null,
     // Barthel denormalizado (solo lectura; lo llena el cierre de escala / el recalculo).
     int? BarthelTotal = null, string? BarthelClasificacion = null,
     string? BarthelDatosJson = null, DateTimeOffset? BarthelActualizadoEn = null,
@@ -130,9 +128,7 @@ public sealed record SavePacienteRequest(
     // Usuario del ingreso: solo se envia el Id del PlatformUser elegido; el servidor resuelve el nombre.
     Guid? UsuarioIngresoId = null,
     // Condicion del paciente (valor de lista fija). El SLA NO se envia: lo calcula el servidor.
-    string? Condicion = null,
-    // Medicamento Controlado (SI/NO) de la ficha tecnica (CENSO col V).
-    string? MedicamentoControlado = null);
+    string? Condicion = null);
 
 public interface IPacienteService
 {

@@ -65,7 +65,7 @@ public static class CensoBlueprint
     // Sede (y su Departamento operativo) via el parametro de ejecucion. Columnas derivadas/denormalizadas:
     //  - C Mes Ingreso = ano-mes de Fecha Ingreso (derivado, hora local, sin columna nueva).
     //  - Q Puntaje Barthel = BarthelTotal (denormalizado desde la escala PP-FO-46 al cerrarla).
-    //  - V Medicamento Controlado = campo SI/NO de la ficha tecnica.
+    //  - V Medicamento Controlado = nombre del catalogo "Med Contratado" (SI/NO) de la admision.
     //  - AC Nombre Familiar Responsable = ContactoEmergencia (contacto principal del paciente).
     // La hoja lista SOLO pacientes atendidos (con Fecha de Atencion); el rango de fechas, si se
     // pide al descargar, acota por esa misma Fecha de Atencion.
@@ -94,7 +94,7 @@ public static class CensoBlueprint
                 new("diagnostico_principal", "Diagnostico principal"), // S
                 new("cie10_2", "CIE10 - 2"),                     // T
                 new("diagnostico_secundario", "Diagnostico Secundario"), // U
-                new("med_controlado", "Medicamento Controlado"), // V
+                new("med_contratado.nombre", "Medicamento Controlado"), // V (catalogo Med Contratado SI/NO)
                 new("tutela", "Tutela"),                         // W
                 new("direccion", "Direccion"),                   // X
                 new("barrio", "Barrio"),                         // Y

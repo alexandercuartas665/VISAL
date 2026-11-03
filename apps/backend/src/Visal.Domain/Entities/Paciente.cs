@@ -112,11 +112,10 @@ public class Paciente : TenantEntity
     public string? Tutela { get; set; }
     /// <summary>FK a catalogos_paciente (tipo=TipoTutela).</summary>
     public Guid? TipoTutelaId { get; set; }
-    /// <summary>FK a catalogos_paciente (tipo=MedContratado).</summary>
+    /// <summary>FK a catalogos_paciente (tipo=MedContratado). Es el mismo dato "Medicamento
+    /// Controlado" (SI/NO) de la ficha tecnica: la columna V del CENSO ("Base de Pacientes") se
+    /// resuelve por el NOMBRE de este catalogo (ver ReporteSemanticTypes, relacion "med_contratado").</summary>
     public Guid? MedContratadoId { get; set; }
-    /// <summary>Indicador SI/NO de "Medicamento Controlado" de la ficha tecnica (CENSO, columna V de
-    /// "Base de Pacientes"). Texto libre con valores "SI"/"NO" (mismo patron que <see cref="Tutela"/>).</summary>
-    public string? MedicamentoControlado { get; set; }
 
     // ===== Geografia (FKs a futuras tablas catalogo) =====
     public Guid? PaisResidenciaId { get; set; }

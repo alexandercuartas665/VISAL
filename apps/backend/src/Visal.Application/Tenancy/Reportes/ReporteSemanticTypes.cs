@@ -172,8 +172,6 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("sla_ingreso_minutos", "Mins (SLA)", nameof(Paciente.SlaIngresoMinutos), ReportFieldKind.Integer),
                 // Mes del ingreso (derivado de Fecha Ingreso, hora local): columna C de "Base de Pacientes".
                 new("mes_ingreso", "Mes Ingreso", nameof(Paciente.FechaIngresoPad), ReportFieldKind.Text, Derivacion: ReportDerivacion.AnioMes),
-                // Medicamento Controlado (SI/NO): columna V de "Base de Pacientes".
-                new("med_controlado", "Medicamento Controlado", nameof(Paciente.MedicamentoControlado), ReportFieldKind.Text),
                 // Nombre del familiar/contacto responsable: columna AC de "Base de Pacientes".
                 new("contacto_emergencia", "Nombre Familiar Responsable", nameof(Paciente.ContactoEmergencia), ReportFieldKind.Text),
                 // Barthel denormalizado desde la escala PP-FO-46 (columna Q = puntaje total).
@@ -195,6 +193,9 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 // Cruces para mostrar/filtrar por NOMBRE los FK del paciente (hoja Ingreso de Pacientes del CENSO).
                 new("ips_comenta", "IPS que comenta", "aseguradora", nameof(Paciente.IpsComentaId)),
                 new("clasif_paciente", "Clasificacion del paciente", "catalogo_paciente", nameof(Paciente.ClasificacionPacienteId)),
+                // Medicamento Controlado (SI/NO): columna V del CENSO. Resuelve por NOMBRE el catalogo
+                // "Med Contratado" (tipo=MedContratado, valores SI/NO) que ya captura la admision.
+                new("med_contratado", "Medicamento Controlado (SI/NO)", "catalogo_paciente", nameof(Paciente.MedContratadoId)),
                 new("departamento", "Departamento de residencia", "departamento", nameof(Paciente.DepartamentoId)),
             ],
         };

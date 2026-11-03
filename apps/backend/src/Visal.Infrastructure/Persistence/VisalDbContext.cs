@@ -1505,7 +1505,6 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Ocupacion).HasMaxLength(120);
             b.Property(x => x.Regimen).HasMaxLength(120);
             b.Property(x => x.Tutela).HasMaxLength(120);
-            b.Property(x => x.MedicamentoControlado).HasMaxLength(10);
             // Diagnostico
             b.Property(x => x.DiagnosticoPrincipal).HasMaxLength(500);
             b.Property(x => x.Cie10Codigo).HasMaxLength(30);

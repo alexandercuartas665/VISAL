@@ -288,11 +288,6 @@
                                 @foreach (var c in CatItems(CatalogoPacienteTipo.MedContratado)) { <option value="@c.Id">@c.Nombre</option> }
                             </select>
                         </div>;
-                        _rigidFrag["medicamento_controlado"] = @<div class="ase-f"><label>Medicamento Controlado</label>
-                            <select class="form-select form-select-sm" @bind="_medControlado">
-                                <option value="">--</option><option>SI</option><option>NO</option>
-                            </select>
-                        </div>;
                         _rigidFrag["barthel"] = @<div class="ase-f bthl-card">
                             <div class="bthl-head">
                                 <span class="bthl-title">&#129504; Indice de Barthel</span>
@@ -1752,7 +1747,6 @@
     private string? _dxPrincipal, _tutela;
     private string _tipoTutela = "";
     private string _medContratado = "";
-    private string? _medControlado;
     private string? _cie10Codigo;
 
     // Barthel (solo lectura, denormalizado desde la escala PP-FO-46). Se muestra como tarjeta.
@@ -2489,7 +2483,6 @@
         _dxPrincipal = _tutela = null;
         _tipoTutela = "";
         _medContratado = "";
-        _medControlado = null;
         _barthelTotal = null; _barthelClasif = null; _barthelFecha = null; _barthelDatos = new();
         _fallecido = false; _fFechaFallec = null; _fReportadoPor = null; _fCertVisal = null; _fMotivo = null;
         _mortModal = false; _mortFecha = null; _mortCertVisal = "NO"; _mortMotivo = null; _mortPdfBytes = null; _mortPdfNombre = null; _mortPdfContentType = null; _mortError = null;
@@ -2557,7 +2550,6 @@
         _dxPrincipal = d.DiagnosticoPrincipal; _tutela = d.Tutela;
         _tipoTutela = d.TipoTutelaId?.ToString() ?? "";
         _medContratado = d.MedContratadoId?.ToString() ?? "";
-        _medControlado = d.MedicamentoControlado;
         _barthelTotal = d.BarthelTotal; _barthelClasif = d.BarthelClasificacion;
         _barthelFecha = d.BarthelActualizadoEn; _barthelDatos = ParseBarthel(d.BarthelDatosJson);
         // Mortalidad: datos del deceso ya registrado (solo lectura).
@@ -2657,8 +2649,7 @@
                 MotivoNoIngreso: _motivoNoIngreso,
                 FechaAtencion: AOffset(_fAtencion),
                 UsuarioIngresoId: Try(_usuarioIngresoId),
-                Condicion: _condicion,
-                MedicamentoControlado: _medControlado);
+                Condicion: _condicion);
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";

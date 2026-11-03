@@ -532,6 +532,19 @@ else
                     <input class="form-control form-control-sm mono" placeholder="N° de autorizacion..."
                            @bind="_fAutorizacion" @bind:event="oninput" />
                 </div>
+                <div class="ase-f"><label>Codigo de asignacion</label>
+                    <input class="form-control form-control-sm mono" placeholder="AS-000045 o 45..."
+                           @bind="_fConsecutivo" @bind:event="oninput" />
+                </div>
+                <div class="ase-f"><label>Usuario que asigno</label>
+                    <select class="form-select form-select-sm" @bind="_fCreadoPorId">
+                        <option value="">(todos)</option>
+                        @foreach (var u in _usuariosCreadores)
+                        {
+                            <option value="@u.Id">@u.Nombre</option>
+                        }
+                    </select>
+                </div>
                 <div class="ase-f ase-f-wide">
                     <label class="asg-chk">
                         <input type="checkbox" @bind="_fSoloPendiente" />
@@ -561,6 +574,7 @@ else
                         <tr>
                             <th>Fecha creado</th>
                             <th>Cód.</th>
+                            <th>Asignó</th>
                             <th>Documento</th>
                             <th>Paciente</th>
                             <th>Aseguradora</th>
@@ -579,13 +593,14 @@ else
                     <tbody>
                         @if (_listado.Count == 0)
                         {
-                            <tr><td colspan="15" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
+                            <tr><td colspan="16" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
                         }
                         @foreach (var a in _listado)
                         {
                             <tr>
                                 <td class="mono">@a.CreadoEn.LocalDateTime.ToString("dd/MM/yy HH:mm")</td>
                                 <td class="mono">@(a.Consecutivo is long _c ? CodigoPublico.Asignacion(_c) : "")</td>
+                                <td>@(a.CreadoPorNombre ?? "-")</td>
                                 <td class="mono">@a.PacienteDocumento</td>
                                 <td>@a.PacienteNombre</td>
                                 <td>@(a.AseguradoraNombre ?? "-")</td>
@@ -1255,7 +1270,10 @@ else
     private bool _fSoloPendiente;
     private string _fSede = "";
     private string _fAutorizacion = "";
+    private string _fConsecutivo = "";
+    private string _fCreadoPorId = "";
     private List<string> _sedesFiltro = new();
+    private List<UsuarioCreadorDto> _usuariosCreadores = new();
     private List<AsignacionListadoDto> _listado = new();
     private List<AseguradoraDto> _aseguradorasFiltro = new();
     private bool _listBusy;
@@ -1284,6 +1302,12 @@ else
                 try { _sedesFiltro = (await Svc.ListarSucursalesAsignacionesAsync()).ToList(); }
                 catch { _sedesFiltro = new(); }
             }
+            // Usuarios que han creado asignaciones, para el dropdown "usuario que asigno".
+            if (_usuariosCreadores.Count == 0)
+            {
+                try { _usuariosCreadores = (await Svc.ListarUsuariosCreadoresAsignacionesAsync()).ToList(); }
+                catch { _usuariosCreadores = new(); }
+            }
             await AplicarFiltrosListado();
             _listadoInicializado = true;
         }
@@ -1295,6 +1319,9 @@ else
         try
         {
             Guid? aseId = Guid.TryParse(_fAseId, out var g) ? g : null;
+            // Codigo "AS-000045"/"45"/"000045" -> consecutivo numerico (null si no es consecutivo).
+            long? consec = CodigoPublico.ParseNumero(_fConsecutivo);
+            Guid? creadoPor = Guid.TryParse(_fCreadoPorId, out var cg) ? cg : null;
             var filtro = new AsignacionListadoFiltro(
                 _fFechaIni, _fFechaFin,
                 aseId, null,
@@ -1303,7 +1330,9 @@ else
                 string.IsNullOrWhiteSpace(_fNombreServ) ? null : _fNombreServ,
                 _fSoloPendiente,
                 string.IsNullOrWhiteSpace(_fSede) ? null : _fSede,
-                string.IsNullOrWhiteSpace(_fAutorizacion) ? null : _fAutorizacion);
+                string.IsNullOrWhiteSpace(_fAutorizacion) ? null : _fAutorizacion,
+                consec,
+                creadoPor);
             var lista = await Svc.ListarAsignacionesAsync(filtro);
             // Filtro por documento en memoria (evita joinar en el backend por texto libre).
             if (!string.IsNullOrWhiteSpace(_fDocumento))
@@ -1323,6 +1352,7 @@ else
         _fFechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
         _fFechaFin = DateOnly.FromDateTime(hoy);
         _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = _fSede = _fAutorizacion = "";
+        _fConsecutivo = _fCreadoPorId = "";
         _fSoloPendiente = false;
         await AplicarFiltrosListado();
     }

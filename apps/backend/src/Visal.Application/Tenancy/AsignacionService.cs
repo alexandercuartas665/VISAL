@@ -761,6 +761,16 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             var ca = filtro.CodigoAutorizacionFiltro.Trim().ToLower();
             q = q.Where(x => x.a.CodigoAutorizacion != null && x.a.CodigoAutorizacion.ToLower().Contains(ca));
         }
+        // Filtro por consecutivo del servicio (AS-NNNNNN -> numero). Match exacto.
+        if (filtro.ConsecutivoFiltro is long cns)
+        {
+            q = q.Where(x => x.a.Consecutivo == cns);
+        }
+        // Filtro por usuario que registro la asignacion (CreatedBy). Match exacto por id.
+        if (filtro.CreadoPorUserId is Guid cbu)
+        {
+            q = q.Where(x => x.a.CreatedBy == cbu);
+        }
         if (!string.IsNullOrWhiteSpace(filtro.Sucursal))
         {
             // Sede: Asignacion.Sucursal es el nombre de la sede (string). Las opciones del
@@ -803,7 +813,8 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                 x.a.Sucursal,
                 x.a.AutorizacionPendiente,
                 x.a.PdfAutorizacionUrl,
-                Consecutivo = (long?)x.a.Consecutivo
+                Consecutivo = (long?)x.a.Consecutivo,
+                x.a.CreatedBy
             })
             .ToListAsync(ct);
 
@@ -818,6 +829,22 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             .GroupBy(x => x.CodigoContrato)
             .ToDictionary(g => g.Key, g => g.First().AseguradoraNombre, StringComparer.OrdinalIgnoreCase);
 
+        // NOMBRE del usuario que registro la asignacion (CreatedBy -> platform_user).
+        // Segundo pase como la aseguradora: resuelve los ids distintos en bloque.
+        var creadorIds = rows.Where(r => r.CreatedBy is not null).Select(r => r.CreatedBy!.Value).Distinct().ToList();
+        var creadores = new Dictionary<Guid, string>();
+        if (creadorIds.Count > 0)
+        {
+            var pus = await db.PlatformUsers.AsNoTracking()
+                .Where(u => creadorIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email })
+                .ToListAsync(ct);
+            foreach (var pu in pus)
+            {
+                creadores[pu.Id] = NombreUsuario(pu.DisplayName, pu.PrimerNombre, pu.SegundoNombre, pu.PrimerApellido, pu.SegundoApellido, pu.Username, pu.Email);
+            }
+        }
+
         return rows.Select(r => new AsignacionListadoDto(
             r.Id, r.CreatedAt,
             r.Documento, r.PacienteNombre,
@@ -829,7 +856,46 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             r.CodigoAutorizacion, r.Observaciones,
             r.Sucursal,
             r.AutorizacionPendiente, r.PdfAutorizacionUrl,
-            r.Consecutivo)).ToList();
+            r.Consecutivo,
+            r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var cn) ? cn : null)).ToList();
+    }
+
+    // Construye el nombre visible de un usuario a partir de los campos del PlatformUser
+    // (mismo criterio que FacturacionSnapshotService): DisplayName -> nombres+apellidos
+    // -> Username -> Email.
+    private static string NombreUsuario(
+        string? displayName, string? primerNombre, string? segundoNombre,
+        string? primerApellido, string? segundoApellido, string? username, string email)
+    {
+        if (!string.IsNullOrWhiteSpace(displayName)) { return displayName.Trim(); }
+        var full = string.Join(" ", new[] { primerNombre, segundoNombre, primerApellido, segundoApellido }
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()));
+        if (!string.IsNullOrWhiteSpace(full)) { return full; }
+        if (!string.IsNullOrWhiteSpace(username)) { return username.Trim(); }
+        return email;
+    }
+
+    public async Task<IReadOnlyList<UsuarioCreadorDto>> ListarUsuariosCreadoresAsignacionesAsync(CancellationToken ct = default)
+    {
+        // Ids distintos de usuarios que han creado al menos una asignacion del tenant.
+        var ids = await db.Asignaciones.AsNoTracking()
+            .Where(a => a.CreatedBy != null)
+            .Select(a => a.CreatedBy!.Value)
+            .Distinct()
+            .ToListAsync(ct);
+        if (ids.Count == 0) { return new List<UsuarioCreadorDto>(); }
+
+        var pus = await db.PlatformUsers.AsNoTracking()
+            .Where(u => ids.Contains(u.Id))
+            .Select(u => new { u.Id, u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email })
+            .ToListAsync(ct);
+
+        return pus
+            .Select(pu => new UsuarioCreadorDto(
+                pu.Id,
+                NombreUsuario(pu.DisplayName, pu.PrimerNombre, pu.SegundoNombre, pu.PrimerApellido, pu.SegundoApellido, pu.Username, pu.Email)))
+            .OrderBy(x => x.Nombre, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<string>> ListarSucursalesAsignacionesAsync(CancellationToken ct = default)

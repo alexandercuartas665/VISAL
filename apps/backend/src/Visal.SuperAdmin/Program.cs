@@ -456,6 +456,7 @@ app.MapPost("/auth/select-empresa", async (
 app.MapPost("/auth/select-sede", async (
     HttpContext http,
     [FromForm] Guid sucursalId,
+    [FromForm] string? returnUrl,
     Visal.Application.Tenancy.ISedeSelectorService sedes) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true)
@@ -486,6 +487,13 @@ app.MapPost("/auth/select-sede", async (
     var identity = new ClaimsIdentity(keep, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+    // Si viene un returnUrl local (selector de sede en la barra superior), volver a esa misma
+    // pagina para no interrumpir la tarea; si no (flujo de login), al destino por defecto.
+    if (!string.IsNullOrWhiteSpace(returnUrl)
+        && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//") && !returnUrl.StartsWith("/\\"))
+    {
+        return Results.LocalRedirect(returnUrl);
+    }
     return Results.Redirect("/admision");
 }).DisableAntiforgery();
 

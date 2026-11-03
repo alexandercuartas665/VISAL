@@ -1064,13 +1064,48 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
                 join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
                 join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-                select new { p.HistoriaClinicaId, a.CodigoRips, a.NombreServicio, a.Sucursal })
+                select new { p.HistoriaClinicaId, a.CodigoRips, a.NombreServicio, a.Sucursal, a.ServicioId })
                 .ToListAsync(ct);
+
+            // Primera asignacion por HC (via cadena de sesiones), con su servicio para el
+            // fallback de CUP.
+            var asigPorHc = new Dictionary<Guid, (string? Cup, string? Nombre, string? Sede, string? ServicioId)>();
             foreach (var r in cups)
             {
-                if (!cupInfo.ContainsKey(r.HistoriaClinicaId) && !string.IsNullOrWhiteSpace(r.CodigoRips))
+                if (!asigPorHc.ContainsKey(r.HistoriaClinicaId))
                 {
-                    cupInfo[r.HistoriaClinicaId] = (r.CodigoRips!.Trim(), r.NombreServicio ?? "", r.Sucursal ?? "");
+                    asigPorHc[r.HistoriaClinicaId] = (r.CodigoRips, r.NombreServicio, r.Sucursal, r.ServicioId);
+                }
+            }
+
+            // Fallback como en RelacionFacturas: si la asignacion no estampo CodigoRips
+            // (legacy), el CUP y el nombre se derivan del ServicioContrato vivo
+            // (codigo base sin sufijo d/f). Asi no quedan "(sin CUP)" cuando el snapshot
+            // si muestra el CUP.
+            var servIds = asigPorHc.Values
+                .Where(v => string.IsNullOrWhiteSpace(v.Cup) && Guid.TryParse(v.ServicioId, out _))
+                .Select(v => Guid.Parse(v.ServicioId!))
+                .Distinct().ToList();
+            var servInfo = servIds.Count == 0
+                ? new Dictionary<Guid, (string? Codigo, string? Descripcion)>()
+                : await _db.ServiciosContrato.AsNoTracking()
+                    .Where(s => servIds.Contains(s.Id))
+                    .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
+                    .ToDictionaryAsync(s => s.Id, s => ((string?)s.CodigoServicio, (string?)s.Descripcion), ct);
+
+            foreach (var kv in asigPorHc)
+            {
+                var (cup, nombre, sede, servicioId) = kv.Value;
+                if (string.IsNullOrWhiteSpace(cup)
+                    && Guid.TryParse(servicioId, out var sid)
+                    && servInfo.TryGetValue(sid, out var sc))
+                {
+                    cup = ServicioCodigo.Base(sc.Item1);
+                    if (string.IsNullOrWhiteSpace(nombre)) { nombre = sc.Item2; }
+                }
+                if (!string.IsNullOrWhiteSpace(cup))
+                {
+                    cupInfo[kv.Key] = (cup!.Trim(), nombre ?? "", sede ?? "");
                 }
             }
         }

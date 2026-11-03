@@ -401,7 +401,11 @@ public sealed record AsignacionListadoFiltro(
     // Nombre de sede (Asignacion.Sucursal) para filtrar por sede. Null = todas.
     string? Sucursal = null,
     // Filtra por numero de autorizacion (CONTIENE, case-insensitive). Null = todas.
-    string? CodigoAutorizacionFiltro = null);
+    string? CodigoAutorizacionFiltro = null,
+    // Consecutivo publico del servicio (AS-NNNNNN -> numero). Match EXACTO. Null = todos.
+    long? ConsecutivoFiltro = null,
+    // Usuario que registro la asignacion (CreatedBy). Match EXACTO por id. Null = todos.
+    Guid? CreadoPorUserId = null);
 
 /// <summary>Fila del listado tabular de asignaciones. Incluye todos los datos
 /// relacionados (paciente + aseguradora + contrato + programacion) para que el
@@ -419,7 +423,14 @@ public sealed record AsignacionListadoDto(
     bool AutorizacionPendiente = false,
     string? PdfAutorizacionUrl = null,
     // Consecutivo publico del lote de asignacion (se muestra "AS-000045").
-    long? Consecutivo = null);
+    long? Consecutivo = null,
+    // Nombre del usuario que registro la asignacion (CreatedBy resuelto via PlatformUsers).
+    // Null si CreatedBy es null o no se pudo resolver.
+    string? CreadoPorNombre = null);
+
+/// <summary>Usuario que ha creado asignaciones, para el dropdown del filtro
+/// "usuario que asigno" del Listado. Id = PlatformUser.Id; Nombre = nombre resuelto.</summary>
+public sealed record UsuarioCreadorDto(Guid Id, string Nombre);
 
 /// <summary>Payload para actualizar una asignacion existente (solo si esta Pendiente).
 /// Se persiste sobre el mismo registro sin tocar el lote. Los campos vienen de la
@@ -502,6 +513,11 @@ public interface IAsignacionService
     /// <summary>Nombres de sede (Asignacion.Sucursal) distintos presentes en las
     /// asignaciones del tenant, para poblar el filtro por sede del listado.</summary>
     Task<IReadOnlyList<string>> ListarSucursalesAsignacionesAsync(CancellationToken ct = default);
+
+    /// <summary>Usuarios (CreatedBy) distintos que han registrado asignaciones en el
+    /// tenant, con su nombre resuelto, para poblar el filtro "usuario que asigno"
+    /// del listado. Ordenados por nombre.</summary>
+    Task<IReadOnlyList<UsuarioCreadorDto>> ListarUsuariosCreadoresAsignacionesAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Lista las asignaciones cuyo modulo coincida con uno de los permitidos, filtradas

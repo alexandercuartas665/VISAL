@@ -34,6 +34,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
     // 4 equilibra velocidad y memoria del headless Chrome en el server.
     private const int MaxRenderConcurrency = 4;
 
+    // v0.153.0: el flag del archivo RotuloSeparadorCup sigue ORGANIZANDO el expediente
+    // por CUP (agrupa + ordena; ver ResolverUrlsFormularioPorTipoAsync), pero ya NO se
+    // genera la pagina separadora (rotulo) entre CUPs: el usuario no quiere verla.
+    // Para reactivar la pagina separadora, poner esta bandera en true (un solo punto).
+    private static readonly bool EmitirPaginaRotuloCup = false;
+
     /// <summary>Una parte del PDF de un paciente: o bytes ya listos (autorizacion/firma,
     /// leidos de disco/BD) via <see cref="Inline"/>, o una referencia a la URL global
     /// <see cref="RenderIdx"/> que se renderiza en lote (formulario por tipo).
@@ -124,8 +130,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
             : null) ?? "";
         nitIps = new string(nitIps.Where(char.IsDigit).ToArray());
 
-        // Logo del tenant para el rotulo separador por CUP (solo se lee si el archivo lo pide).
-        var logoRotulo = archivo.RotuloSeparadorCup ? await ObtenerLogoTenantBytesAsync(ct) : null;
+        // Logo del tenant para el rotulo separador por CUP (solo se lee si el archivo lo
+        // pide Y la pagina separadora esta habilitada; hoy esta deshabilitada, ver arriba).
+        var logoRotulo = (EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup)
+            ? await ObtenerLogoTenantBytesAsync(ct) : null;
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
@@ -177,7 +185,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             foreach (var (pac, partes) in planes)
             {
                 ct.ThrowIfCancellationRequested();
-                var bytesPartes = EnsamblarPartes(partes, rendered, archivo.RotuloSeparadorCup, logoRotulo);
+                var bytesPartes = EnsamblarPartes(partes, rendered, EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup, logoRotulo);
                 // Solo se incluye el paciente si REALMENTE quedo contenido (firma,
                 // autorizacion o formularios renderizados). Los vacios se omiten.
                 if (bytesPartes.Count == 0) { continue; }
@@ -308,7 +316,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var (pac, codigo, partes) in unidades)
         {
             ct.ThrowIfCancellationRequested();
-            var bytesPartes = EnsamblarPartes(partes, rendered, archivo.RotuloSeparadorCup, logoRotulo);
+            var bytesPartes = EnsamblarPartes(partes, rendered, EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup, logoRotulo);
             if (bytesPartes.Count == 0) { continue; }
 
             var pdf = FusionarPdfs(bytesPartes);

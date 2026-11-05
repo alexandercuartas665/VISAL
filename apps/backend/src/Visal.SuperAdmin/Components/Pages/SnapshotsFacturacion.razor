@@ -863,6 +863,13 @@
                                         {
                                             <div class="sn-tip-arch-menu">
                                                 <a class="sn-tip-menu-item"
+                                                   href="@($"/facturacion-clinica/snapshots/{_verDetalle!.Metadata.Id}/tipologia/{a.Id}/simulacion.xlsx")"
+                                                   target="_blank" rel="noopener"
+                                                   @onclick="() => _menuArchivoId = null">
+                                                    <span>&#128269; Simular generacion (Excel)</span>
+                                                    <span class="sn-tip-menu-sub">Lista que archivos saldrian + duplicados, sin renderizar</span>
+                                                </a>
+                                                <a class="sn-tip-menu-item"
                                                    href="@($"/facturacion-clinica/snapshots/{_verDetalle!.Metadata.Id}/tipologia/{a.Id}/faltantes.xlsx")"
                                                    target="_blank" rel="noopener"
                                                    @onclick="() => _menuArchivoId = null">

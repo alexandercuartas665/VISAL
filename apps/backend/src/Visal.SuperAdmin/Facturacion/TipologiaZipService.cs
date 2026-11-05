@@ -12,6 +12,7 @@ using QuestPDF.Infrastructure;
 using Visal.Application.Common;
 using Visal.Application.Facturacion;
 using Visal.Application.Tenancy;
+using Visal.Domain.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
 
@@ -471,6 +472,315 @@ public sealed class TipologiaZipService : ITipologiaZipService
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         var nombre = SanitizarNombre($"SIN_{archivo.Alias}_{lookup.SnapshotNombre}") + ".xlsx";
+        return new ArchivoExportado(
+            ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            nombre);
+    }
+
+    /// <summary>Una fila del manifiesto de simulacion: un archivo (PDF) que se generaria, con
+    /// su composicion. HcsConsec son los consecutivos de HC atribuidos a esa unidad (por la
+    /// cadena sesion-&gt;turno-&gt;asignacion), que es la senal que delata los duplicados: una
+    /// misma HC que aparece en mas de un archivo.</summary>
+    private sealed record SimFila(
+        string Nombre, string Paciente, string TipoDoc, string Documento, string Autorizacion,
+        IReadOnlyList<string> HcsConsec, int Partes, string Estado);
+
+    /// <inheritdoc />
+    public async Task<ArchivoExportado?> SimularGeneracionAsync(
+        Guid snapshotId, Guid archivoItemId, CancellationToken ct = default)
+    {
+        var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
+        if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return null; }
+
+        var archivos = await _cuenta.ListarItemsAsync(aseguradoraId, ct);
+        var archivo = archivos.FirstOrDefault(a => a.Id == archivoItemId);
+        if (archivo is null) { return null; }
+        var cfg = await _cuenta.GetOrCreateAsync(aseguradoraId, ct);
+        _ = cfg;
+        var patron = !string.IsNullOrWhiteSpace(archivo.PatronNombre) ? archivo.PatronNombre!
+            : !string.IsNullOrWhiteSpace(cfg.PatronNombreDefault) ? cfg.PatronNombreDefault!
+            : "{sigla}_{cedula}";
+
+        var nitIps = (_tenant.TenantId is Guid tnit
+            ? await _db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
+            : null) ?? "";
+        nitIps = new string(nitIps.Where(char.IsDigit).ToArray());
+
+        var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
+        var (pDesde, pHasta) = PeriodoDe(detalle.FiltrosJson);
+
+        // doc -> pacienteId (los del snapshot que existen en el sistema).
+        var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
+        var pacs = await _db.Pacientes.AsNoTracking()
+            .Where(p => docs.Contains(p.NumeroDocumento))
+            .Select(p => new { p.Id, p.NumeroDocumento })
+            .ToListAsync(ct);
+        var docToId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in pacs) { docToId[p.NumeroDocumento] = p.Id; }
+
+        // HCs atribuidas por la cadena: (pacienteId, codigoAutorizacion) -> consecutivos HC.
+        var hcDetalle = await ConsultarHcPorAutorizacionAsync(docToId.Values.ToHashSet(), ct);
+        var hcPorPacCod = new Dictionary<(Guid, string), SortedSet<long>>();
+        var hcPorPac = new Dictionary<Guid, SortedSet<long>>();
+        foreach (var r in hcDetalle)
+        {
+            var kc = (r.PacienteId, r.Codigo.ToUpperInvariant());
+            if (!hcPorPacCod.TryGetValue(kc, out var sc)) { hcPorPacCod[kc] = sc = new SortedSet<long>(); }
+            sc.Add(r.Consecutivo);
+            if (!hcPorPac.TryGetValue(r.PacienteId, out var sp)) { hcPorPac[r.PacienteId] = sp = new SortedSet<long>(); }
+            sp.Add(r.Consecutivo);
+        }
+
+        var filas = new List<SimFila>();
+        var allUrls = new List<string>();            // acumulador requerido por la planeacion (no se rinde)
+        var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (archivo.UnoPorAutorizacion)
+        {
+            var incluyeTokenAut = patron.Contains("{autorizacion}", StringComparison.OrdinalIgnoreCase);
+            var docsRender = CalcularDocsRender(archivo);
+            var hcAut = await ConstruirMapaHcAutorizacionAsync(docToId.Values.ToHashSet(), ct);
+
+            foreach (var pac in pacientes)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!docToId.TryGetValue(pac.Documento, out var pacienteId))
+                {
+                    filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
+                        pac.Documento ?? "", "", Array.Empty<string>(), 0, "Paciente no existe en el sistema"));
+                    continue;
+                }
+
+                var codigos = pac.Autorizaciones
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var codigo in codigos)
+                {
+                    var partes = await ConstruirPlanAutorizacionAsync(
+                        archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
+
+                    var hcs = hcPorPacCod.TryGetValue((pacienteId, codigo.ToUpperInvariant()), out var set)
+                        ? set.Select(CodigoPublico.Hc).ToList() : new List<string>();
+
+                    if (partes.Count == 0)
+                    {
+                        // El generador real omite las unidades vacias (no produce archivo).
+                        filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
+                            pac.Documento ?? "", codigo, hcs, 0, "Vacio: sin contenido para esta autorizacion"));
+                        continue;
+                    }
+
+                    var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac, nitIps, codigo));
+                    if (!incluyeTokenAut) { baseName = SanitizarNombre(baseName + "_" + codigo); }
+                    var name = baseName + ".pdf";
+                    var n = 2;
+                    while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
+
+                    filas.Add(new SimFila(name, pac.Nombre ?? "", pac.TipoDocumento ?? "",
+                        pac.Documento ?? "", codigo, hcs, partes.Count, "OK"));
+                }
+            }
+        }
+        else
+        {
+            foreach (var pac in pacientes)
+            {
+                ct.ThrowIfCancellationRequested();
+                var partes = await ConstruirPlanPacienteAsync(archivo, pac, allUrls, pDesde, pHasta, ct);
+                if (partes is null)
+                {
+                    filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
+                        pac.Documento ?? "", "", Array.Empty<string>(), 0, "Paciente no existe en el sistema"));
+                    continue;
+                }
+
+                var hcs = docToId.TryGetValue(pac.Documento, out var pid) && hcPorPac.TryGetValue(pid, out var sp)
+                    ? sp.Select(CodigoPublico.Hc).ToList() : new List<string>();
+
+                if (partes.Count == 0)
+                {
+                    filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
+                        pac.Documento ?? "", "", hcs, 0, "Vacio: sin contenido para este paciente"));
+                    continue;
+                }
+
+                var baseName = SanitizarNombre(ResolverNombre(patron, archivo, pac, nitIps));
+                var name = baseName + ".pdf";
+                var n = 2;
+                while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
+
+                filas.Add(new SimFila(name, pac.Nombre ?? "", pac.TipoDocumento ?? "",
+                    pac.Documento ?? "", string.Join(", ", pac.Autorizaciones.Where(x => !string.IsNullOrWhiteSpace(x))),
+                    hcs, partes.Count, "OK"));
+            }
+        }
+
+        return ConstruirExcelSimulacion(detalle.Metadata.Nombre, archivo, filas);
+    }
+
+    /// <summary>Para los pacientes dados, devuelve las filas (pacienteId, codigoAutorizacion,
+    /// hcId, consecutivo) siguiendo la cadena pivote sesion-&gt;turno-&gt;asignacion. Es la version
+    /// con detalle de HC de <see cref="ConstruirMapaHcAutorizacionAsync"/>, para el manifiesto.</summary>
+    private async Task<List<(Guid PacienteId, string Codigo, Guid HcId, long Consecutivo)>> ConsultarHcPorAutorizacionAsync(
+        IReadOnlyCollection<Guid> pacienteIds, CancellationToken ct)
+    {
+        if (pacienteIds.Count == 0) { return new(); }
+        var filas = await (
+            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join h in _db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            where pacienteIds.Contains(a.PacienteId) && a.CodigoAutorizacion != null
+            select new { a.PacienteId, a.CodigoAutorizacion, HcId = h.Id, h.Consecutivo })
+            .ToListAsync(ct);
+
+        var res = new List<(Guid, string, Guid, long)>(filas.Count);
+        foreach (var r in filas)
+        {
+            var code = r.CodigoAutorizacion!.Trim();
+            if (code.Length == 0) { continue; }
+            res.Add((r.PacienteId, code, r.HcId, r.Consecutivo));
+        }
+        return res;
+    }
+
+    /// <summary>Arma el .xlsx del manifiesto de simulacion: hoja "Archivos" (una fila por PDF que
+    /// saldria) y hoja "Duplicados" (HC que aparece en mas de un archivo = contenido repetido).</summary>
+    private static ArchivoExportado ConstruirExcelSimulacion(
+        string snapshotNombre, InformeItemDto archivo, IReadOnlyList<SimFila> filas)
+    {
+        var nombreArchivo = string.IsNullOrWhiteSpace(archivo.Descripcion) ? archivo.Alias : archivo.Descripcion!;
+        var modo = archivo.UnoPorAutorizacion ? "Un archivo por autorizacion" : "Un archivo por paciente";
+        var generados = filas.Count(f => f.Estado == "OK");
+        var vacios = filas.Count(f => f.Estado != "OK");
+
+        using var wb = new XLWorkbook();
+
+        // --- Hoja Archivos ---
+        var ws = wb.Worksheets.Add("Archivos");
+        ws.Cell(1, 1).Value = "Simulacion de generacion de archivos (dry-run, sin renderizar PDFs)";
+        ws.Cell(1, 1).Style.Font.Bold = true;
+        ws.Cell(1, 1).Style.Font.FontSize = 13;
+        ws.Cell(2, 1).Value = $"Archivo: {nombreArchivo} ({archivo.Alias})";
+        ws.Cell(3, 1).Value = $"Modo: {modo}";
+        ws.Cell(4, 1).Value = $"Snapshot: {snapshotNombre}";
+        ws.Cell(5, 1).Value = $"Generado: {DateTimeOffset.Now.ToLocalTime():yyyy-MM-dd HH:mm}";
+        ws.Cell(6, 1).Value = $"Archivos que saldrian: {generados}   |   Unidades vacias/omitidas: {vacios}";
+
+        const int hdr = 8;
+        string[] cols = { "#", "Archivo (nombre)", "Paciente", "Tipo doc", "Documento", "Autorizacion", "#HCs", "HCs incluidas", "#Partes", "Estado" };
+        for (var i = 0; i < cols.Length; i++)
+        {
+            var cell = ws.Cell(hdr, i + 1);
+            cell.Value = cols[i];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1565C0");
+            cell.Style.Font.FontColor = XLColor.White;
+        }
+
+        // HC -> cuantos archivos OK la contienen (para resaltar duplicados en la hoja Archivos).
+        var hcVeces = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in filas.Where(f => f.Estado == "OK"))
+        {
+            foreach (var hc in f.HcsConsec.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                hcVeces[hc] = hcVeces.TryGetValue(hc, out var v) ? v + 1 : 1;
+            }
+        }
+
+        var row = hdr + 1;
+        var nFila = 0;
+        foreach (var f in filas)
+        {
+            nFila++;
+            ws.Cell(row, 1).Value = nFila;
+            ws.Cell(row, 2).Value = f.Nombre;
+            ws.Cell(row, 3).Value = string.IsNullOrWhiteSpace(f.Paciente) ? "-" : f.Paciente;
+            ws.Cell(row, 4).Value = f.TipoDoc;
+            ws.Cell(row, 5).Value = f.Documento;
+            ws.Cell(row, 5).Style.NumberFormat.Format = "@";
+            ws.Cell(row, 6).Value = f.Autorizacion;
+            ws.Cell(row, 6).Style.NumberFormat.Format = "@";
+            ws.Cell(row, 7).Value = f.HcsConsec.Count;
+            ws.Cell(row, 8).Value = string.Join(", ", f.HcsConsec);
+            ws.Cell(row, 9).Value = f.Partes;
+            ws.Cell(row, 10).Value = f.Estado;
+            // Resalta la fila si alguna de sus HC aparece en mas de un archivo.
+            if (f.Estado == "OK" && f.HcsConsec.Any(hc => hcVeces.TryGetValue(hc, out var v) && v > 1))
+            {
+                for (var c = 1; c <= cols.Length; c++)
+                {
+                    ws.Cell(row, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF3CD");
+                }
+            }
+            if (f.Estado != "OK")
+            {
+                ws.Cell(row, 10).Style.Font.FontColor = XLColor.FromHtml("#B00020");
+            }
+            row++;
+        }
+        if (filas.Count == 0)
+        {
+            ws.Cell(hdr + 1, 1).Value = "Este archivo no generaria ningun PDF para el snapshot.";
+        }
+        ws.Columns().AdjustToContents();
+        ws.Column(8).Width = Math.Min(ws.Column(8).Width, 60);
+
+        // --- Hoja Duplicados ---
+        var wd = wb.Worksheets.Add("Duplicados");
+        wd.Cell(1, 1).Value = "HCs que aparecen en mas de un archivo (posible contenido duplicado)";
+        wd.Cell(1, 1).Style.Font.Bold = true;
+        wd.Cell(1, 1).Style.Font.FontSize = 13;
+
+        var hcArchivos = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in filas.Where(f => f.Estado == "OK"))
+        {
+            foreach (var hc in f.HcsConsec.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!hcArchivos.TryGetValue(hc, out var lst)) { hcArchivos[hc] = lst = new List<string>(); }
+                lst.Add(f.Nombre);
+            }
+        }
+        var duplicadas = hcArchivos.Where(kv => kv.Value.Count > 1)
+            .OrderByDescending(kv => kv.Value.Count).ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        const int dhdr = 3;
+        string[] dcols = { "#", "HC", "Veces", "Archivos" };
+        for (var i = 0; i < dcols.Length; i++)
+        {
+            var cell = wd.Cell(dhdr, i + 1);
+            cell.Value = dcols[i];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#B00020");
+            cell.Style.Font.FontColor = XLColor.White;
+        }
+        var drow = dhdr + 1;
+        var dn = 0;
+        foreach (var kv in duplicadas)
+        {
+            dn++;
+            wd.Cell(drow, 1).Value = dn;
+            wd.Cell(drow, 2).Value = kv.Key;
+            wd.Cell(drow, 3).Value = kv.Value.Count;
+            wd.Cell(drow, 4).Value = string.Join("  |  ", kv.Value);
+            drow++;
+        }
+        if (duplicadas.Count == 0)
+        {
+            wd.Cell(dhdr + 1, 1).Value = "Sin duplicados: ninguna HC se repite entre archivos.";
+        }
+        wd.Columns().AdjustToContents();
+        wd.Column(4).Width = Math.Min(wd.Column(4).Width, 80);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var nombre = SanitizarNombre($"SIM_{archivo.Alias}_{snapshotNombre}") + ".xlsx";
         return new ArchivoExportado(
             ms.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

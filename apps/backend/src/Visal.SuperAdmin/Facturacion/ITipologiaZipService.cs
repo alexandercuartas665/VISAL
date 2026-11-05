@@ -48,4 +48,15 @@ public interface ITipologiaZipService
     /// </summary>
     Task<ArchivoExportado?> GenerarExcelFaltantesAsync(
         Guid snapshotId, Guid archivoItemId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Simula la generacion del archivo <paramref name="archivoItemId"/> para el snapshot:
+    /// corre SOLO la fase de planeacion (no renderiza PDFs ni abre Chrome) y devuelve un .xlsx
+    /// con una fila por PDF que saldria (paciente, autorizacion, HCs incluidas, nº de partes) y
+    /// una hoja de "Duplicados" con las HC que aparecen en mas de un archivo. Pensado para
+    /// validar casos de impresion y cazar contenido repetido sin generar nada pesado. Devuelve
+    /// null si el snapshot/archivo no existen o el snapshot no tiene aseguradora.
+    /// </summary>
+    Task<ArchivoExportado?> SimularGeneracionAsync(
+        Guid snapshotId, Guid archivoItemId, CancellationToken ct = default);
 }

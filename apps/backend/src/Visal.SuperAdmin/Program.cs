@@ -1449,6 +1449,20 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/fal
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();
 
+// Simulacion (dry-run) de la generacion de un archivo de cuenta medica: corre solo la
+// planeacion (no renderiza PDFs) y entrega un .xlsx con lo que saldria + hoja de duplicados.
+// Sirve para validar casos de impresion y cazar contenido repetido sin generar nada pesado.
+app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/simulacion.xlsx", async (
+    Guid id,
+    Guid itemId,
+    Visal.SuperAdmin.Facturacion.ITipologiaZipService zipSvc,
+    CancellationToken ct) =>
+{
+    var archivo = await zipSvc.SimularGeneracionAsync(id, itemId, ct);
+    if (archivo is null) { return Results.NotFound(); }
+    return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
+}).RequireAuthorization();
+
 // Export XLSX del detalle de un cierre de periodo (Coordinacion > Historicos de cierres).
 // Trae todos los datos del paciente/servicio (identificacion, EPS, contrato, CUP, profesional,
 // autorizacion, fechas, cantidades). El servicio aplica el global query filter por tenant.

@@ -92,6 +92,10 @@ else
                             <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisorAsync(d.Id)" disabled="@_busy">
                                 &#9998; @(d.Estado == "Cerrada" ? "Ver" : "Diligenciar")
                             </button>
+                            @if (d.Estado == "Cerrada" && PuedeReabrir)
+                            {
+                                <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirAsync(d)" disabled="@_busy" title="Reabrir para editar">&#128275; Reabrir</button>
+                            }
                             <button class="btn btn-link btn-sm text-danger" @onclick="() => EliminarAsync(d)" disabled="@_busy" title="Eliminar">&#128465;</button>
                         </div>
                     </div>
@@ -215,6 +219,10 @@ else
     [Parameter] public PacienteAsignacionDto? Paciente { get; set; }
     [Parameter] public string? EspecialistaNombre { get; set; }
     [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+    /// <summary>Si el usuario tiene permiso administrativo para reabrir documentos
+    /// Cerrados (claim "historias.reabrir" u Owner/Admin/SuperAdmin). Lo calcula el
+    /// modulo padre y se usa para mostrar el candado "Reabrir" en las tarjetas.</summary>
+    [Parameter] public bool PuedeReabrir { get; set; }
 
     /// <summary>Estado de autenticacion del usuario logueado. Lo usamos para
     /// resolver la firma del profesional al iniciar un documento (firma_url del
@@ -623,5 +631,40 @@ else
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    /// <summary>
+    /// Reabre un documento Cerrado para volver a editarlo. Gateado por el permiso
+    /// administrativo (PuedeReabrir), con confirmacion y auditado en el backend.
+    /// Tras reabrir, la tarjeta vuelve a "Diligenciar".
+    /// </summary>
+    private async Task ReabrirAsync(DocumentoHcItemDto d)
+    {
+        if (!PuedeReabrir) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Reabrir {TextoSing.ToLower()} '{d.FormatoNombre}' para editarl{(EsFemenino ? "a" : "o")}? Quedara en estado Abierta y se registrara quien la reabrio.");
+        if (!ok) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            await DocSvc.ReabrirAsync(d.Id, await ResolverActorAsync());
+            await CargarAsync();
+            _msg = $"{TextoSing} reabiert{(EsFemenino ? "a" : "o")}. Ya puedes editarl{(EsFemenino ? "a" : "o")} y volver a marcarl{(EsFemenino ? "a" : "o")} como definitiv{(EsFemenino ? "a" : "o")}.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Resuelve el id del usuario logueado (NameIdentifier) para auditar
+    /// la reapertura. Si no hay sesion, devuelve Guid.Empty.</summary>
+    private async Task<Guid> ResolverActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var state = await AuthState;
+            var idStr = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(idStr, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
     }
 }

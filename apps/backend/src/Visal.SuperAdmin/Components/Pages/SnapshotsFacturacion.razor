@@ -447,12 +447,92 @@
             {
             <div class="sn-modal-controls">
                 <div class="sn-modal-controls-l">
-                    <span class="sn-modal-hint">Usa el <b>pin</b> del encabezado de una columna para fijarla (y las anteriores) al hacer scroll horizontal. Para filtrar, usa <b>Filtrar por columna</b> abajo.</span>
+                    @* ---- Barra: Ordenar (multi) | Agrupar (apilable) ---- *@
+                    <div class="sn-tbar">
+                        @* Ordenar *@
+                        <div class="sn-tbar-item">
+                            <button class="sn-tbtn @(_sorts.Count > 0 ? "on" : "")" @onclick="@(() => ToggleVerMenu("sort"))"
+                                    title="Ordenar por una o varias columnas">
+                                &#8645; Ordenar@(_sorts.Count > 0 ? $" ({_sorts.Count})" : "")
+                            </button>
+                            @if (_openVerMenu == "sort")
+                            {
+                                <div class="sn-tbar-back" @onclick="CerrarVerMenu"></div>
+                                <div class="sn-dd">
+                                    <div class="sn-dd-title">Ordenar por</div>
+                                    @if (_sorts.Count == 0) { <div class="sn-dd-empty">Sin orden. Agrega una o varias columnas (se aplican en cascada).</div> }
+                                    @for (int si = 0; si < _sorts.Count; si++)
+                                    {
+                                        var idx = si;
+                                        <div class="sn-dd-row">
+                                            <span class="sn-dd-n">@(idx + 1)</span>
+                                            <select class="form-select form-select-sm" style="flex:1" @onchange="e => CambiarSortCol(idx, e)">
+                                                @foreach (var col in _verDetalle.Columnas)
+                                                {
+                                                    <option value="@col" selected="@(col == _sorts[idx].Col)">@col</option>
+                                                }
+                                            </select>
+                                            <button class="sn-dd-dir" title="Alternar asc/desc" @onclick="() => ToggleSortDir(idx)">@(_sorts[idx].Desc ? "Z→A" : "A→Z")</button>
+                                            <button class="sn-dd-del" title="Quitar" @onclick="() => QuitarSort(idx)">&times;</button>
+                                        </div>
+                                    }
+                                    @if (_sorts.Count < _verDetalle.Columnas.Count)
+                                    {
+                                        <button class="sn-dd-add" @onclick="AgregarSort">+ Agregar orden</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        @* Agrupar *@
+                        <div class="sn-tbar-item">
+                            <button class="sn-tbtn @(_groups.Count > 0 ? "on" : "")" @onclick="@(() => ToggleVerMenu("group"))"
+                                    title="Agrupar por una o varias columnas (muestra cabecera y cantidad por grupo)">
+                                &#9776; Agrupar@(_groups.Count > 0 ? $" ({_groups.Count})" : "")
+                            </button>
+                            @if (_openVerMenu == "group")
+                            {
+                                <div class="sn-tbar-back" @onclick="CerrarVerMenu"></div>
+                                <div class="sn-dd">
+                                    <div class="sn-dd-title">Agrupar por</div>
+                                    @if (_groups.Count == 0) { <div class="sn-dd-empty">Sin agrupacion. Al agrupar se muestran cabeceras y la cantidad de filas por grupo (sin paginar).</div> }
+                                    @for (int gi = 0; gi < _groups.Count; gi++)
+                                    {
+                                        var idx = gi;
+                                        <div class="sn-dd-row">
+                                            <span class="sn-dd-n">@(idx + 1)</span>
+                                            <select class="form-select form-select-sm" style="flex:1" @onchange="e => CambiarGroupCol(idx, e)">
+                                                @foreach (var col in _verDetalle.Columnas)
+                                                {
+                                                    <option value="@col" selected="@(col == _groups[idx])">@col</option>
+                                                }
+                                            </select>
+                                            <button class="sn-dd-del" title="Quitar" @onclick="() => QuitarGroup(idx)">&times;</button>
+                                        </div>
+                                    }
+                                    @if (_groups.Count < _verDetalle.Columnas.Count)
+                                    {
+                                        <button class="sn-dd-add" @onclick="AgregarGroup">+ Agregar agrupacion</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        @if (VerModoCliente)
+                        {
+                            <button class="sn-tbtn" title="Quitar orden y agrupacion" @onclick="LimpiarOrdenAgrupacion">Limpiar</button>
+                        }
+                    </div>
                 </div>
                 <div class="sn-modal-controls-r">
-                    <span class="sn-page-info">Pagina @_verPagina / @_verTotalPaginas &middot; @_verTotal filas</span>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina - 1)" disabled="@(_verPagina <= 1)">&lt;</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina + 1)" disabled="@(_verPagina >= _verTotalPaginas)">&gt;</button>
+                    @if (VerModoCliente)
+                    {
+                        <span class="sn-page-info">@_verTotal filas@(_groups.Count > 0 ? " (agrupado)" : "")</span>
+                    }
+                    else
+                    {
+                        <span class="sn-page-info">Pagina @_verPagina / @_verTotalPaginas &middot; @_verTotal filas</span>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina - 1)" disabled="@(_verPagina <= 1)">&lt;</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrPagina(_verPagina + 1)" disabled="@(_verPagina >= _verTotalPaginas)">&gt;</button>
+                    }
                 </div>
             </div>
 
@@ -538,7 +618,7 @@
                 {
                     <div class="sn-empty">Cargando...</div>
                 }
-                else if (_verFilas.Count == 0)
+                else if ((VerModoCliente ? _verItems.Count : _verFilas.Count) == 0)
                 {
                     <div class="sn-empty">No hay filas para mostrar.</div>
                 }
@@ -568,22 +648,41 @@
                                                     <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.9 5.9 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707s.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.9 5.9 0 0 1 1.013.16l3.134-3.133a3 3 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146"/></svg>
                                                 </button>
                                                 <span>@col</span>
-                                                @if (_verOrden == col) { <span>@(_verOrdenDesc ? " v" : " ^")</span> }
+                                                @{
+                                                    var _sIdx = _sorts.FindIndex(s => s.Col == col);
+                                                }
+                                                @if (_sIdx >= 0)
+                                                {
+                                                    <span class="sn-th-sortmark">@(_sorts[_sIdx].Desc ? "v" : "^")@(_sorts.Count > 1 ? (_sIdx + 1).ToString() : "")</span>
+                                                }
                                             </span>
                                         </th>
                                     }
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var fila in _verFilas)
+                                @foreach (var it in FilasParaRender)
                                 {
+                                    if (it.Kind == VerKind.Group)
+                                    {
+                                        <tr class="sn-vt-group" @key="@($"g{it.Seq}")">
+                                            <td class="sn-vt-group-cell" colspan="@(_verDetalle.Columnas.Count + 1)"
+                                                style="@($"padding-left:{8 + it.Level * 18}px;")">
+                                                <span class="sn-vt-group-lbl">@it.Label</span>
+                                                <span class="sn-vt-group-count">&middot; @it.Count reg.</span>
+                                            </td>
+                                        </tr>
+                                        continue;
+                                    }
+                                    var fila = it.Fila!;
                                     var filaIdObj = fila.TryGetValue("__filaId", out var fv) ? fv : null;
                                     var filaIdParsed = filaIdObj is Guid g ? g : (Guid.TryParse(filaIdObj?.ToString(), out var gg) ? gg : Guid.Empty);
                                     var rowColor = fila.TryGetValue("__color", out var cvv) ? cvv?.ToString() : null;
                                     var bgStyle = string.IsNullOrWhiteSpace(rowColor) ? "" : $"background:{rowColor} !important;";
                                     var numFila = fila.TryGetValue("__numeroFila", out var nfv) ? nfv?.ToString() ?? "" : "";
                                     var rowObs = fila.TryGetValue("__observacion", out var obv) ? obv?.ToString() : null;
-                                    <tr @oncontextmenu:preventDefault="true"
+                                    <tr @key="@(filaIdParsed != Guid.Empty ? (object)filaIdParsed : it.Seq)"
+                                        @oncontextmenu:preventDefault="true"
                                         @oncontextmenu="@((MouseEventArgs e) => AbrirMenuFila(e, filaIdParsed))">
                                         <td class="sn-vt-freeze sn-vt-counter" style="@($"left:0;min-width:{CounterW}px;max-width:{CounterW}px;width:{CounterW}px;" + bgStyle)">
                                             <span class="sn-cnt-n">@numFila</span>
@@ -1423,6 +1522,27 @@
     .fcc-arr:hover:not(:disabled) { background:#eff6ff; border-color:#93c5fd; }
     .fcc-arr:disabled { color:#cbd5e1; cursor:not-allowed; }
     .fcc-c-vis input { width:18px; height:18px; cursor:pointer; }
+
+    /* Barra Ordenar / Agrupar del detalle (modal Ver) */
+    .sn-tbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .sn-tbar-item { position:relative; }
+    .sn-tbtn { font-size:12px; font-weight:600; color:#334155; background:white; border:1px solid var(--border); border-radius:6px; padding:5px 10px; cursor:pointer; line-height:1.2; }
+    .sn-tbtn:hover { background:#eff6ff; border-color:#93c5fd; }
+    .sn-tbtn.on { background:#1d4ed8; border-color:#1d4ed8; color:white; }
+    .sn-tbar-back { position:fixed; inset:0; z-index:40; background:transparent; }
+    .sn-dd { position:absolute; top:calc(100% + 4px); left:0; z-index:41; min-width:320px; background:white; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.14); padding:10px; display:flex; flex-direction:column; gap:6px; }
+    .sn-dd-title { font-size:12px; font-weight:700; color:#0f172a; }
+    .sn-dd-empty { font-size:11.5px; color:var(--muted); }
+    .sn-dd-row { display:flex; align-items:center; gap:6px; }
+    .sn-dd-n { width:18px; height:18px; flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#475569; background:#e2e8f0; border-radius:50%; }
+    .sn-dd-dir { font-size:11px; font-weight:600; color:#1d4ed8; background:#eff6ff; border:1px solid #bfdbfe; border-radius:5px; padding:3px 7px; cursor:pointer; white-space:nowrap; }
+    .sn-dd-del { font-size:15px; line-height:1; color:#b91c1c; background:transparent; border:none; cursor:pointer; padding:0 4px; }
+    .sn-dd-add { font-size:12px; font-weight:600; color:#1d4ed8; background:#eff6ff; border:1px dashed #93c5fd; border-radius:6px; padding:5px 8px; cursor:pointer; margin-top:2px; }
+    .sn-th-sortmark { font-size:11px; font-weight:700; color:#1d4ed8; margin-left:3px; }
+    /* Cabecera de grupo en la parrilla */
+    .sn-vt-group td.sn-vt-group-cell { background:#eef2ff; border-top:1px solid #c7d2fe; border-bottom:1px solid #c7d2fe; padding:6px 8px; font-size:12.5px; position:sticky; left:0; }
+    .sn-vt-group-lbl { font-weight:700; color:#1e293b; }
+    .sn-vt-group-count { color:#64748b; font-weight:600; margin-left:6px; }
 </style>
 
 <script>
@@ -1543,8 +1663,6 @@
     private const int FreezeColW = 170;
     // Ancho (px) de la columna contador "Nº" (siempre fija a la izquierda).
     private const int CounterW = 56;
-    private string? _verOrden;
-    private bool _verOrdenDesc;
     // Filtro por color de fila: null=todos, "__sin__"=sin color, o un hex de la paleta.
     private string? _verColorFiltro;
     private string? _verObsFiltro;   // "__con__" = solo filas con observacion; null = todas.
@@ -1595,6 +1713,194 @@
         _verPagina = 1;
         await GuardarFiltrosVerAsync();
         await CargarPaginaVer();
+    }
+
+    // ── Orden multi-criterio y agrupacion apilable del detalle (modal "Ver") ──────────────
+    // Inspirado en /conciliacion-dian de ECOREX. Cuando hay orden o agrupacion activa se
+    // entra en "modo cliente": se cargan TODAS las filas filtradas y se ordenan/agrupan en
+    // memoria (sin paginar). Sin orden ni agrupacion se mantiene la parrilla paginada normal.
+    private sealed class SortCrit { public string Col = ""; public bool Desc; }
+    private enum VerKind { Group, Data }
+    private sealed class VerItem
+    {
+        public VerKind Kind;
+        public int Level;
+        public string? Label;
+        public int Count;
+        public IReadOnlyDictionary<string, object?>? Fila;
+        // Secuencia unica para @key de los <tr> (las filas de datos usan __filaId; las de
+        // grupo no tienen id). Sin @key, Blazor diffea por posicion y pega mal el color/nota.
+        public int Seq;
+    }
+
+    private readonly List<SortCrit> _sorts = new();
+    private readonly List<string> _groups = new();
+    private List<IReadOnlyDictionary<string, object?>> _verTodas = new();
+    private List<VerItem> _verItems = new();
+    private string? _openVerMenu; // "sort" | "group" | null
+
+    private bool VerModoCliente => _sorts.Count > 0 || _groups.Count > 0;
+
+    // Secuencia unificada para el render de la parrilla: en modo cliente son los items con
+    // cabeceras de grupo; en modo normal son las filas de la pagina envueltas como Data.
+    private IEnumerable<VerItem> FilasParaRender => VerModoCliente
+        ? _verItems
+        : _verFilas.Select(f => new VerItem { Kind = VerKind.Data, Fila = f });
+
+    private void ToggleVerMenu(string name) => _openVerMenu = _openVerMenu == name ? null : name;
+    private void CerrarVerMenu() => _openVerMenu = null;
+
+    // Columnas aun no usadas en orden/agrupacion (para el "+ Agregar").
+    private string? PrimeraColLibre(IEnumerable<string> usadas)
+        => _verDetalle?.Columnas.FirstOrDefault(c => !usadas.Contains(c));
+
+    private async Task AgregarSort()
+    {
+        var col = PrimeraColLibre(_sorts.Select(s => s.Col));
+        if (col is null) { return; }
+        _sorts.Add(new SortCrit { Col = col });
+        await CargarPaginaVer();
+    }
+
+    private async Task CambiarSortCol(int idx, ChangeEventArgs e)
+    {
+        if (idx < 0 || idx >= _sorts.Count) { return; }
+        _sorts[idx].Col = e.Value?.ToString() ?? _sorts[idx].Col;
+        await CargarPaginaVer();
+    }
+
+    private async Task ToggleSortDir(int idx)
+    {
+        if (idx < 0 || idx >= _sorts.Count) { return; }
+        _sorts[idx].Desc = !_sorts[idx].Desc;
+        await CargarPaginaVer();
+    }
+
+    private async Task QuitarSort(int idx)
+    {
+        if (idx < 0 || idx >= _sorts.Count) { return; }
+        _sorts.RemoveAt(idx);
+        await CargarPaginaVer();
+    }
+
+    private async Task AgregarGroup()
+    {
+        var col = PrimeraColLibre(_groups);
+        if (col is null) { return; }
+        _groups.Add(col);
+        await CargarPaginaVer();
+    }
+
+    private async Task CambiarGroupCol(int idx, ChangeEventArgs e)
+    {
+        if (idx < 0 || idx >= _groups.Count) { return; }
+        var nuevo = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(nuevo) || _groups.Contains(nuevo)) { return; }
+        _groups[idx] = nuevo;
+        await CargarPaginaVer();
+    }
+
+    private async Task QuitarGroup(int idx)
+    {
+        if (idx < 0 || idx >= _groups.Count) { return; }
+        _groups.RemoveAt(idx);
+        await CargarPaginaVer();
+    }
+
+    private async Task LimpiarOrdenAgrupacion()
+    {
+        _sorts.Clear();
+        _groups.Clear();
+        _openVerMenu = null;
+        _verPagina = 1;
+        await CargarPaginaVer();
+    }
+
+    // Trae TODAS las filas filtradas del snapshot (paginando de a 500, el tope del servicio)
+    // para poder ordenarlas/agruparlas en memoria.
+    private async Task CargarTodasVerAsync()
+    {
+        var todas = new List<IReadOnlyDictionary<string, object?>>();
+        const int tam = 500;
+        var pag = 1;
+        while (true)
+        {
+            var page = await Svc.ListarFilasAsync(_verSnapshotId, pag, tam,
+                ordenColumna: null, ordenDesc: false, buscar: null,
+                _verFiltros.Count > 0 ? _verFiltros : null,
+                colorFiltro: string.IsNullOrEmpty(_verColorFiltro) ? null : _verColorFiltro,
+                observacionFiltro: string.IsNullOrEmpty(_verObsFiltro) ? null : _verObsFiltro);
+            todas.AddRange(page.Items);
+            if (page.Items.Count == 0 || todas.Count >= page.Total) { break; }
+            pag++;
+        }
+        _verTodas = todas;
+    }
+
+    private sealed class VerCmp : IComparer<object?>
+    {
+        public static readonly VerCmp I = new();
+        public int Compare(object? a, object? b)
+        {
+            if (a is decimal da && b is decimal db) { return da.CompareTo(db); }
+            if (a is DateTime ta && b is DateTime tb) { return ta.CompareTo(tb); }
+            return string.Compare(a?.ToString(), b?.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    // Clave de orden: intenta numero y fecha (para ordenar bien montos/fechas), si no texto.
+    private static object ClaveOrden(string col, IReadOnlyDictionary<string, object?> f)
+    {
+        var s = f.TryGetValue(col, out var v) ? (v?.ToString() ?? "").Trim() : "";
+        if (decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n)) { return n; }
+        if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d)) { return d; }
+        return s;
+    }
+
+    private static string TextoGrupo(string col, IReadOnlyDictionary<string, object?> f)
+    {
+        var s = f.TryGetValue(col, out var v) ? (v?.ToString() ?? "").Trim() : "";
+        return string.IsNullOrWhiteSpace(s) ? "(sin dato)" : s;
+    }
+
+    private IEnumerable<IReadOnlyDictionary<string, object?>> OrdenarFilas(IEnumerable<IReadOnlyDictionary<string, object?>> src)
+    {
+        if (_sorts.Count == 0) { return src; }
+        IOrderedEnumerable<IReadOnlyDictionary<string, object?>>? o = null;
+        foreach (var s in _sorts)
+        {
+            var sc = s;
+            Func<IReadOnlyDictionary<string, object?>, object> k = f => ClaveOrden(sc.Col, f);
+            o = o is null
+                ? (sc.Desc ? src.OrderByDescending(k, VerCmp.I) : src.OrderBy(k, VerCmp.I))
+                : (sc.Desc ? o.ThenByDescending(k, VerCmp.I) : o.ThenBy(k, VerCmp.I));
+        }
+        return o!;
+    }
+
+    private void BuildVerItems(List<IReadOnlyDictionary<string, object?>> rows, int level, List<VerItem> outl)
+    {
+        if (level >= _groups.Count)
+        {
+            foreach (var r in OrdenarFilas(rows)) { outl.Add(new VerItem { Kind = VerKind.Data, Fila = r }); }
+            return;
+        }
+        var col = _groups[level];
+        var gs = rows.GroupBy(r => TextoGrupo(col, r)).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+        foreach (var g in gs)
+        {
+            var gl = g.ToList();
+            outl.Add(new VerItem { Kind = VerKind.Group, Level = level, Label = $"{col}: {g.Key}", Count = gl.Count });
+            BuildVerItems(gl, level + 1, outl);
+        }
+    }
+
+    private void RebuildVerItems()
+    {
+        var items = new List<VerItem>();
+        BuildVerItems(_verTodas.ToList(), 0, items);
+        for (var i = 0; i < items.Count; i++) { items[i].Seq = i; }
+        _verItems = items;
     }
 
     // ── Persistencia de los filtros del detalle (modal "Ver") ──────────────────────────
@@ -1648,6 +1954,75 @@
             _verFiltros.Clear();
             _verColorFiltro = null;
             _verObsFiltro = null;
+        }
+    }
+
+    // ── Persistencia del orden/agrupacion del detalle (modal "Ver") ────────────────────
+    // Mismo mecanismo que los filtros: localStorage del navegador, por snapshot, para que
+    // sobrevivan a cerrar y reabrir el modulo. Reabrir ESE snapshot restaura su orden y
+    // agrupacion; otro snapshot arranca limpio. Se valida contra las columnas vigentes del
+    // snapshot (si una columna guardada ya no existe, se ignora).
+    private static string VerOrdenAgrupKey(Guid id) => $"visal.snap.ordenagrup.{id:N}";
+
+    private sealed record SortPersist(string Col, bool Desc);
+    private sealed record OrdenAgrupPersist(List<SortPersist> Sorts, List<string> Groups);
+
+    private async Task GuardarOrdenAgrupVerAsync()
+    {
+        if (_verSnapshotId == Guid.Empty) { return; }
+        try
+        {
+            // Sin orden ni agrupacion: borramos la entrada (no dejamos basura).
+            if (_sorts.Count == 0 && _groups.Count == 0)
+            {
+                await JS.InvokeVoidAsync("localStorage.removeItem", VerOrdenAgrupKey(_verSnapshotId));
+                return;
+            }
+            var dto = new OrdenAgrupPersist(
+                _sorts.Select(s => new SortPersist(s.Col, s.Desc)).ToList(),
+                _groups.ToList());
+            var json = System.Text.Json.JsonSerializer.Serialize(dto);
+            await JS.InvokeVoidAsync("localStorage.setItem", VerOrdenAgrupKey(_verSnapshotId), json);
+        }
+        catch { /* localStorage no disponible (circuito/prerender): ignorar */ }
+    }
+
+    private async Task CargarOrdenAgrupVerAsync(Guid id)
+    {
+        _sorts.Clear();
+        _groups.Clear();
+        if (_verDetalle is null) { return; }
+        var columnas = _verDetalle.Columnas;
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", VerOrdenAgrupKey(id));
+            if (string.IsNullOrWhiteSpace(json)) { return; }
+            var dto = System.Text.Json.JsonSerializer.Deserialize<OrdenAgrupPersist>(json);
+            if (dto is null) { return; }
+            if (dto.Sorts is not null)
+            {
+                foreach (var s in dto.Sorts)
+                {
+                    if (s is null || string.IsNullOrWhiteSpace(s.Col)) { continue; }
+                    if (!columnas.Contains(s.Col)) { continue; }
+                    if (_sorts.Any(x => x.Col == s.Col)) { continue; }
+                    _sorts.Add(new SortCrit { Col = s.Col, Desc = s.Desc });
+                }
+            }
+            if (dto.Groups is not null)
+            {
+                foreach (var g in dto.Groups)
+                {
+                    if (string.IsNullOrWhiteSpace(g) || !columnas.Contains(g) || _groups.Contains(g)) { continue; }
+                    _groups.Add(g);
+                }
+            }
+        }
+        catch
+        {
+            // JSON corrupto o localStorage no disponible: arrancamos sin orden/agrupacion.
+            _sorts.Clear();
+            _groups.Clear();
         }
     }
 
@@ -2110,8 +2485,9 @@
         await CargarFiltrosVerAsync(id);
         _nfCol = "";
         _nfVal = "";
-        _verOrden = null;
-        _verOrdenDesc = false;
+        _sorts.Clear();
+        _groups.Clear();
+        _openVerMenu = null;
         _verFijar = 0;
         _verTab = VerTab.Datos;
         _tipCargado = false;
@@ -2125,6 +2501,9 @@
         try
         {
             _verDetalle = await Svc.ObtenerAsync(id);
+            // Orden/agrupacion guardados para ESTE snapshot (persisten al cerrar y reabrir).
+            // Se restauran despues de tener las columnas vigentes para poder validarlas.
+            await CargarOrdenAgrupVerAsync(id);
             await CargarPaginaVer();
         }
         catch (Exception ex) { _error = "Error al abrir snapshot: " + ex.Message; _showVer = false; }
@@ -2220,17 +2599,36 @@
     private async Task CargarPaginaVer()
     {
         if (_verDetalle is null) { return; }
+        // Persistimos orden/agrupacion por snapshot (sobrevive cerrar/reabrir). Es idempotente:
+        // re-escribir la misma config en cada recarga no tiene costo relevante y garantiza que
+        // ningun cambio de la barra (ordenar/agrupar) se quede sin guardar.
+        await GuardarOrdenAgrupVerAsync();
         _verCargando = true;
         try
         {
-            var page = await Svc.ListarFilasAsync(_verSnapshotId, _verPagina, VerTamano,
-                _verOrden, _verOrdenDesc, buscar: null,
-                _verFiltros.Count > 0 ? _verFiltros : null,
-                colorFiltro: string.IsNullOrEmpty(_verColorFiltro) ? null : _verColorFiltro,
-                observacionFiltro: string.IsNullOrEmpty(_verObsFiltro) ? null : _verObsFiltro);
-            _verFilas = page.Items.ToList();
-            _verTotal = page.Total;
-            _verTotalPaginas = Math.Max(1, (int)Math.Ceiling(_verTotal / (double)VerTamano));
+            if (VerModoCliente)
+            {
+                // Orden/agrupacion activos: carga todas las filas filtradas y arma los items
+                // (grupos + filas) en memoria. Sin paginar (se muestra todo).
+                await CargarTodasVerAsync();
+                RebuildVerItems();
+                _verFilas = new();
+                _verTotal = _verTodas.Count;
+                _verTotalPaginas = 1;
+                _verPagina = 1;
+            }
+            else
+            {
+                var page = await Svc.ListarFilasAsync(_verSnapshotId, _verPagina, VerTamano,
+                    ordenColumna: null, ordenDesc: false, buscar: null,
+                    _verFiltros.Count > 0 ? _verFiltros : null,
+                    colorFiltro: string.IsNullOrEmpty(_verColorFiltro) ? null : _verColorFiltro,
+                    observacionFiltro: string.IsNullOrEmpty(_verObsFiltro) ? null : _verObsFiltro);
+                _verFilas = page.Items.ToList();
+                _verItems = new();
+                _verTotal = page.Total;
+                _verTotalPaginas = Math.Max(1, (int)Math.Ceiling(_verTotal / (double)VerTamano));
+            }
         }
         finally { _verCargando = false; }
     }
@@ -2321,10 +2719,14 @@
         await CargarPaginaVer();
     }
 
+    // Click en el encabezado: ordena por esa columna. Si ya era el UNICO criterio, alterna
+    // asc/desc; si no, la pone como criterio unico. El orden multi se arma desde la barra.
     private async Task Ordenar(string col)
     {
-        if (_verOrden == col) { _verOrdenDesc = !_verOrdenDesc; }
-        else { _verOrden = col; _verOrdenDesc = false; }
+        var actual = _sorts.FirstOrDefault(s => s.Col == col);
+        if (_sorts.Count == 1 && actual is not null) { actual.Desc = !actual.Desc; }
+        else { _sorts.Clear(); _sorts.Add(new SortCrit { Col = col }); }
+        _verPagina = 1;
         await CargarPaginaVer();
     }
 

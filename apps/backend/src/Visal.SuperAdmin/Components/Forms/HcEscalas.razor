@@ -94,6 +94,10 @@ else
                             <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisorAsync(e.Id)" disabled="@_busy">
                                 &#9998; @(e.Estado == "Cerrada" ? "Ver" : "Diligenciar")
                             </button>
+                            @if (e.Estado == "Cerrada" && PuedeReabrir)
+                            {
+                                <button class="btn btn-outline-warning btn-sm" @onclick="() => ReabrirAsync(e)" disabled="@_busy" title="Reabrir para editar">&#128275; Reabrir</button>
+                            }
                             <button class="btn btn-link btn-sm text-danger" @onclick="() => EliminarAsync(e)" disabled="@_busy" title="Eliminar">&#128465;</button>
                         </div>
                     </div>
@@ -195,6 +199,10 @@ else
     /// backend puede volcar un resumen automatico al campo analisis de la HC
     /// (ver origen de prefill "escalas.resumen").</summary>
     [Parameter] public EventCallback OnEscalaCerrada { get; set; }
+    /// <summary>Si el usuario tiene permiso administrativo para reabrir escalas
+    /// Cerradas (claim "historias.reabrir" u Owner/Admin/SuperAdmin). Lo calcula el
+    /// modulo padre y se usa para mostrar el candado "Reabrir" en las tarjetas.</summary>
+    [Parameter] public bool PuedeReabrir { get; set; }
 
     /// <summary>Estado de autenticacion del usuario logueado. Se usa para
     /// resolver la firma del profesional logueado al iniciar una escala que
@@ -565,5 +573,40 @@ else
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    /// <summary>
+    /// Reabre una escala Cerrada para volver a editarla. Gateado por el permiso
+    /// administrativo (PuedeReabrir), con confirmacion y auditado en el backend.
+    /// Tras reabrir, la tarjeta vuelve a "Diligenciar".
+    /// </summary>
+    private async Task ReabrirAsync(EscalaItemDto e)
+    {
+        if (!PuedeReabrir) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Reabrir la escala '{e.FormatoNombre}' para editarla? Quedara en estado Abierta y se registrara quien la reabrio.");
+        if (!ok) { return; }
+        _busy = true; _msg = _error = null;
+        try
+        {
+            await EscSvc.ReabrirAsync(e.Id, await ResolverActorAsync());
+            await CargarEscalasAsync();
+            _msg = "Escala reabierta. Ya puedes editarla y volver a marcarla como definitiva.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Resuelve el id del usuario logueado (NameIdentifier) para auditar
+    /// la reapertura. Si no hay sesion, devuelve Guid.Empty.</summary>
+    private async Task<Guid> ResolverActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var state = await AuthState;
+            var idStr = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(idStr, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
     }
 }

@@ -150,7 +150,7 @@ public sealed class PacienteService : IPacienteService
         p.ClasificacionPacienteId = req.ClasificacionPacienteId;
         p.ClasificacionGrupoPatologiaId = req.ClasificacionGrupoPatologiaId;
         p.EstratoSocial = req.EstratoSocial?.Trim();
-        p.Sexo = req.Sexo?.Trim();
+        p.Sexo = Common.PacienteSexoHelper.ANombreCompleto(req.Sexo);
         p.EstadoCivil = req.EstadoCivil?.Trim();
         p.Zona = req.Zona?.Trim();
         p.Ocupacion = req.Ocupacion?.Trim();

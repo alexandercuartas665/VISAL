@@ -94,13 +94,27 @@ public sealed record ReporteFiltroDef(
 /// <param name="FechaCampoRef">Campo fecha del destino para acotar por rango (p.ej. "fecha_atencion"); null = sin rango.</param>
 /// <param name="ParamClave">Parametro de ejecucion que trae el rango (se resuelve antes de generar).</param>
 /// <param name="Valores">Rango resuelto (2 valores) cuando el parametro trae fechas; null = sin acotar por fecha.</param>
+/// <param name="FormatoRelDestinoCodigo">
+/// Si se indica, el EXISTS ademas exige que el destino (p.ej. la Historia Clinica) se haya
+/// diligenciado con un FORMATO que, en el modulo Relaciones de formularios, apunte (como ORIGEN)
+/// a un FormDefinition cuyo Codigo sea este (p.ej. "PP-FO-46" = escala Barthel). Resuelve el
+/// conjunto de formatos origen por una subconsulta a relaciones_formulario + form_definitions
+/// (activas, del tenant), sin importar el tipo de relacion. Null = sin restriccion de formato.
+/// </param>
+/// <param name="ToggleParamClave">
+/// Si se indica, esta existencia es un INTERRUPTOR: solo se aplica cuando el parametro de ejecucion
+/// con esta clave llega con valor (p.ej. un booleano "Si"); si llega vacio o no llega, la existencia
+/// se DESCARTA al resolver y la hoja sale como si no existiera. Null = la existencia siempre aplica.
+/// </param>
 public sealed record ReporteExisteDef(
     string TargetEntityKey,
     string LocalProperty,
     string TargetProperty,
     string? FechaCampoRef = null,
     string? ParamClave = null,
-    IReadOnlyList<string>? Valores = null);
+    IReadOnlyList<string>? Valores = null,
+    string? FormatoRelDestinoCodigo = null,
+    string? ToggleParamClave = null);
 
 /// <summary>Tipo de un parametro de ejecucion (define como se pide el valor al descargar).</summary>
 public enum ReporteParametroTipo
@@ -110,7 +124,9 @@ public enum ReporteParametroTipo
     Fecha,
     FechaHora,
     RangoFecha,
-    Lista
+    Lista,
+    /// <summary>Si/No: se pide como casilla. Resuelve a ["Si"] cuando esta marcada, vacio si no.</summary>
+    Booleano
 }
 
 /// <summary>Fuente de opciones para un parametro tipo lista (para ofrecer un desplegable).</summary>

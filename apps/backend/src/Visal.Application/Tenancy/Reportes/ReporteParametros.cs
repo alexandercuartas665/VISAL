@@ -27,7 +27,8 @@ public static class ReporteParametros
         ReporteHojaDef hoja, IReadOnlyDictionary<string, IReadOnlyList<string>> valores)
     {
         var hayFiltroParam = hoja.Filtros.Any(f => !string.IsNullOrWhiteSpace(f.ParamClave));
-        var hayExisteParam = (hoja.Existencias ?? []).Any(e => !string.IsNullOrWhiteSpace(e.ParamClave));
+        var hayExisteParam = (hoja.Existencias ?? []).Any(e =>
+            !string.IsNullOrWhiteSpace(e.ParamClave) || !string.IsNullOrWhiteSpace(e.ToggleParamClave));
         // Sin nada parametrizado: nada que reescribir.
         if (!hayFiltroParam && !hayExisteParam)
         {
@@ -66,15 +67,23 @@ public static class ReporteParametros
             var resueltas = new List<ReporteExisteDef>(existencias.Count);
             foreach (var e in existencias)
             {
-                if (string.IsNullOrWhiteSpace(e.ParamClave))
+                // Existencia-interruptor: solo entra si su parametro llega con valor; si no, se descarta
+                // (la hoja sale como si esta existencia no estuviera). Un booleano sin marcar llega vacio.
+                if (!string.IsNullOrWhiteSpace(e.ToggleParamClave) && Limpios(e.ToggleParamClave).Count == 0)
                 {
-                    resueltas.Add(e);
                     continue;
                 }
-                var limpios = Limpios(e.ParamClave);
+                var baseEx = string.IsNullOrWhiteSpace(e.ToggleParamClave) ? e : e with { ToggleParamClave = null };
+
+                if (string.IsNullOrWhiteSpace(baseEx.ParamClave))
+                {
+                    resueltas.Add(baseEx);
+                    continue;
+                }
+                var limpios = Limpios(baseEx.ParamClave);
                 resueltas.Add(limpios.Count >= 2
-                    ? e with { Valores = limpios, ParamClave = null }
-                    : e with { Valores = null, ParamClave = null });
+                    ? baseEx with { Valores = limpios, ParamClave = null }
+                    : baseEx with { Valores = null, ParamClave = null });
             }
             existencias = resueltas;
         }

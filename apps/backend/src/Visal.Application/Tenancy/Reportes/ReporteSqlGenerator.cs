@@ -345,6 +345,33 @@ public sealed class ReporteSqlGenerator(
             var p1 = AddParam(vals, 1, field.Kind, ref pIdx, parametros);
             sb.Append($" AND {expr} BETWEEN {p0} AND {p1}");
         }
+        // Restriccion por FORMATO relacionado (opcional): el destino (p.ej. la HC) debe haberse
+        // diligenciado con un formato que, en Relaciones de formularios, apunte como ORIGEN a un
+        // FormDefinition con este Codigo (p.ej. "PP-FO-46" = Barthel). Subconsulta tenant-scoped,
+        // relaciones activas, cualquier tipo. Alias r{idx}/d{idx} para no chocar entre existencias.
+        if (!string.IsNullOrWhiteSpace(ex.FormatoRelDestinoCodigo))
+        {
+            var relEt = Et(typeof(Visal.Domain.Entities.RelacionFormulario));
+            var formEt = Et(typeof(Visal.Domain.Entities.FormDefinition));
+            var formDefCol = Col(targetEt, nameof(Visal.Domain.Entities.HistoriaClinica.FormDefinitionId));
+            var origenCol = Col(relEt, nameof(Visal.Domain.Entities.RelacionFormulario.FormularioOrigenId));
+            var destinoCol = Col(relEt, nameof(Visal.Domain.Entities.RelacionFormulario.FormularioDestinoId));
+            var activoCol = Col(relEt, nameof(Visal.Domain.Entities.RelacionFormulario.Activo));
+            var relTenantCol = TenantColumn(relEt);
+            var formIdCol = Col(formEt, nameof(Visal.Domain.Entities.FormDefinition.Id));
+            var codigoCol = Col(formEt, nameof(Visal.Domain.Entities.FormDefinition.Codigo));
+            var formTenantCol = TenantColumn(formEt);
+            var rAlias = "r" + exIdx;
+            var dAlias = "d" + exIdx;
+            var pCode = $"@p{pIdx++}";
+            parametros.Add(new ReporteSqlParam(pCode[1..], ex.FormatoRelDestinoCodigo!, DbType.String));
+            sb.Append(
+                $" AND {alias}.{Q(formDefCol)} IN (SELECT {rAlias}.{Q(origenCol)} " +
+                $"FROM {TableRef(relEt)} AS {rAlias} " +
+                $"JOIN {TableRef(formEt)} AS {dAlias} ON {dAlias}.{Q(formIdCol)} = {rAlias}.{Q(destinoCol)} " +
+                $"WHERE {dAlias}.{Q(codigoCol)} = {pCode} AND {rAlias}.{Q(activoCol)} = TRUE " +
+                $"AND {rAlias}.{Q(relTenantCol)} = {TenantParam} AND {dAlias}.{Q(formTenantCol)} = {TenantParam})");
+        }
         sb.Append(')');
         return sb.ToString();
     }

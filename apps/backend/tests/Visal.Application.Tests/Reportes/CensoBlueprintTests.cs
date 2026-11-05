@@ -78,7 +78,7 @@ public sealed class CensoBlueprintTests
         var baseHoja = req.Hojas.Single(h => h.Nombre == "Base de Pacientes");
 
         // Solo atendidos: existencia (EXISTS) hacia la Historia Clinica, acotable por fecha_atencion.
-        var ex = Assert.Single(baseHoja.Existencias!);
+        var ex = Assert.Single(baseHoja.Existencias!, e => e.FechaCampoRef == "fecha_atencion");
         Assert.Equal("historia", ex.TargetEntityKey);
         Assert.Equal("fecha_atencion", ex.FechaCampoRef);
         Assert.Equal("rango_fecha", ex.ParamClave);
@@ -169,6 +169,40 @@ public sealed class CensoBlueprintTests
         Assert.Equal(66.7, (double)fila[2]!);     // 2/3
         Assert.Equal(1, fila[3]);                 // conteo "4" de P4
         Assert.Equal(3, fila[^1]);                // Llamadas Efectivas
+    }
+
+    [Fact]
+    public void Filtro_solo_barthel_es_un_interruptor_que_restringe_por_formato_relacionado()
+    {
+        var req = CensoBlueprint.Crear();
+
+        // Declara el parametro booleano de ejecucion.
+        Assert.Contains(req.Parametros!, p => p.Clave == "solo_barthel" && p.Tipo == ReporteParametroTipo.Booleano);
+
+        // La hoja "Base de Pacientes" trae la existencia-interruptor: destino PP-FO-46, toggle solo_barthel,
+        // SIN fecha (en la vida).
+        var baseHoja = req.Hojas.Single(h => h.Nombre == "Base de Pacientes");
+        var barthel = Assert.Single(baseHoja.Existencias!, e => e.ToggleParamClave == "solo_barthel");
+        Assert.Equal("PP-FO-46", barthel.FormatoRelDestinoCodigo);
+        Assert.Null(barthel.FechaCampoRef);
+
+        // Interruptor APAGADO (no llega "solo_barthel"): la existencia Barthel se descarta y el SQL no
+        // toca la tabla de relaciones de formularios.
+        var apagado = ReporteParametros.Resolver(
+            new ReportePackDef(req.Nombre, req.Hojas),
+            new Dictionary<string, IReadOnlyList<string>> { ["rango_fecha"] = ["2026-01-01", "2026-01-31"] });
+        var sqlApagado = Generador().Generar(apagado.Hojas.Single(h => h.Nombre == "Base de Pacientes")).Sql;
+        Assert.DoesNotContain("relaciones_formulario", sqlApagado);
+
+        // Interruptor ENCENDIDO: aparece la subconsulta a relaciones_formulario + form_definitions, y el
+        // codigo Barthel viaja como parametro (no como literal en el SQL).
+        var encendido = ReporteParametros.Resolver(
+            new ReportePackDef(req.Nombre, req.Hojas),
+            new Dictionary<string, IReadOnlyList<string>> { ["solo_barthel"] = ["Si"] });
+        var q = Generador().Generar(encendido.Hojas.Single(h => h.Nombre == "Base de Pacientes"));
+        Assert.Contains("relaciones_formulario", q.Sql);
+        Assert.Contains("form_definitions", q.Sql);
+        Assert.Contains(q.Parametros, p => Equals(p.Value, "PP-FO-46"));
     }
 
     private sealed class FakeTenant : ITenantContext

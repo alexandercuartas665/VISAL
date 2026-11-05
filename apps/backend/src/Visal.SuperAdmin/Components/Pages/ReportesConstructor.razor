@@ -126,9 +126,10 @@ else
                 <div class="rc-block-title">Parametros al ejecutar (filtros globales)</div>
                 <div class="rc-params-help">
                     Define filtros que se piden al descargar (ej. Fecha, Sede) y enlazalos en los filtros de cada hoja.
-                    Al descargar, lo que dejes en blanco no filtra esa hoja.
+                    Al descargar, lo que dejes en blanco no filtra esa hoja. Los interruptores que son propios de una
+                    hoja (ej. "Solo programa Barthel") NO salen aqui: se administran en esa hoja, en "Filtros especiales".
                 </div>
-                @foreach (var pa in _parametros)
+                @foreach (var pa in _parametros.Where(p => !EsParamToggleDeHoja(p.Clave)))
                 {
                     var par = pa;
                     <div class="rc-row rc-param-row">
@@ -150,6 +151,67 @@ else
                 }
                 <button class="btn-ghost" @onclick="AgregarParametro">+ Parametro</button>
             </div>
+
+            @{ SyncPreviewParams(); }
+            @if (_previewParams.Count > 0)
+            {
+                <div class="rc-params rc-preview-params">
+                    <div class="rc-block-title">Valores para la vista previa (simula la descarga)</div>
+                    <div class="rc-params-help">
+                        La "Vista previa" de cada hoja usa estos valores, igual que al descargar. Lo que dejes en
+                        blanco / sin marcar NO filtra. Incluye los interruptores de hoja (ej. "Solo programa Barthel"):
+                        marcalo y vuelve a dar "Vista previa" en la hoja 2 para ver el recorte.
+                    </div>
+                    <div class="rc-preview-params-grid">
+                        @foreach (var rp in _previewParams)
+                        {
+                            var par = rp;
+                            <div class="rc-field">
+                                <label>@(string.IsNullOrWhiteSpace(par.Etiqueta) ? par.Clave : par.Etiqueta)</label>
+                                @if (par.Tipo == ReporteParametroTipo.RangoFecha)
+                                {
+                                    <div class="rc-row rc-run-rango">
+                                        <input type="date" value="@par.Valor1" @onchange="e => par.Valor1 = e.Value?.ToString()" />
+                                        <span>a</span>
+                                        <input type="date" value="@par.Valor2" @onchange="e => par.Valor2 = e.Value?.ToString()" />
+                                    </div>
+                                }
+                                else if (par.Fuente == ReporteParametroFuente.Sedes)
+                                {
+                                    <select @bind="par.Valor1">
+                                        <option value="">(todas)</option>
+                                        @foreach (var s in _runSedes)
+                                        {
+                                            <option value="@s.Id">@s.Nombre</option>
+                                        }
+                                    </select>
+                                }
+                                else if (par.Tipo == ReporteParametroTipo.Fecha)
+                                {
+                                    <input type="date" value="@par.Valor1" @onchange="e => par.Valor1 = e.Value?.ToString()" />
+                                }
+                                else if (par.Tipo == ReporteParametroTipo.FechaHora)
+                                {
+                                    <input type="datetime-local" value="@par.Valor1" @onchange="e => par.Valor1 = e.Value?.ToString()" />
+                                }
+                                else if (par.Tipo == ReporteParametroTipo.Numero)
+                                {
+                                    <input type="number" @bind="par.Valor1" />
+                                }
+                                else if (par.Tipo == ReporteParametroTipo.Booleano)
+                                {
+                                    <label class="rc-check"><input type="checkbox" @bind="par.Marcado" /><span>Si</span></label>
+                                }
+                                else
+                                {
+                                    <input type="text" @bind="par.Valor1"
+                                           placeholder="@(par.Tipo == ReporteParametroTipo.Lista ? "Coma para varios" : "")" />
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
 
             <div class="rc-sheets">
                 @for (var hi = 0; hi < _hojas.Count; hi++)
@@ -352,7 +414,7 @@ else
                                         {
                                             <select @bind="fil.ParamClave" title="Valor fijo o parametro al ejecutar">
                                                 <option value="">(valor fijo)</option>
-                                                @foreach (var pa in _parametros)
+                                                @foreach (var pa in _parametros.Where(p => !EsParamToggleDeHoja(p.Clave)))
                                                 {
                                                     <option value="@pa.Clave">@(string.IsNullOrWhiteSpace(pa.Etiqueta) ? pa.Clave : pa.Etiqueta)</option>
                                                 }
@@ -371,6 +433,38 @@ else
                                 }
                                 <button class="btn-ghost" @onclick="() => hoja.Filtros.Add(new FiltroEdit())">+ Filtro</button>
                             </div>
+
+                            @if (hoja.Existencias is { Count: > 0 })
+                            {
+                                <div class="rc-block rc-exists">
+                                    <div class="rc-block-title">Filtros especiales de esta hoja (cruces)</div>
+                                    <div class="rc-params-help">
+                                        Reglas propias de ESTA hoja: limitan las filas a los registros que tienen (o no) un
+                                        cruce relacionado. No son columnas ni parametros globales: nacen aqui, en la hoja.
+                                    </div>
+                                    @for (var ei = 0; ei < hoja.Existencias.Count; ei++)
+                                    {
+                                        var ex = hoja.Existencias[ei];
+                                        var exIdx = ei;
+                                        <div class="rc-row rc-exist-row">
+                                            <span class="rc-exist-desc">@ExisteLabel(ex)</span>
+                                            @if (!string.IsNullOrWhiteSpace(ex.ToggleParamClave))
+                                            {
+                                                <span class="rc-param-pill">casilla al descargar: @ParamLabel(ex.ToggleParamClave!)</span>
+                                            }
+                                            else if (!string.IsNullOrWhiteSpace(ex.ParamClave))
+                                            {
+                                                <span class="rc-param-pill">acota con: @ParamLabel(ex.ParamClave!)</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="rc-param-pill">siempre aplica</span>
+                                            }
+                                            <button class="btn-ghost btn-danger" title="Quitar este filtro especial de la hoja" @onclick="() => QuitarExistencia(hoja, exIdx)">x</button>
+                                        </div>
+                                    }
+                                </div>
+                            }
 
                             <div class="rc-block rc-order">
                                 <div class="rc-block-title">Orden</div>
@@ -477,6 +571,13 @@ else
                             {
                                 <input type="number" @bind="par.Valor1" />
                             }
+                            else if (par.Tipo == ReporteParametroTipo.Booleano)
+                            {
+                                <label class="rc-check">
+                                    <input type="checkbox" @bind="par.Marcado" />
+                                    <span>Si</span>
+                                </label>
+                            }
                             else
                             {
                                 <input type="text" @bind="par.Valor1"
@@ -563,8 +664,16 @@ else
 .rc-param-row { align-items:center; }
 .rc-param-et { flex:1 1 180px; min-width:140px; }
 .rc-param-pill { font-size:.76rem; color:#1e3a8a; background:#eff6ff; border:1px solid #bfdbfe; border-radius:99px; padding:.2rem .55rem; white-space:nowrap; }
+.rc-preview-params { border:1px solid #bfdbfe; background:#f5f9ff; border-radius:8px; margin-top:.75rem; }
+.rc-preview-params-grid { display:flex; flex-wrap:wrap; gap:.75rem; }
+.rc-preview-params-grid .rc-field { min-width:210px; }
+.rc-exists { border:1px dashed #c7b3e6; background:#faf7ff; border-radius:8px; }
+.rc-exist-row { align-items:center; gap:.5rem; }
+.rc-exist-desc { flex:1; font-size:.86rem; color:#4c1d95; }
 .rc-modal-sm { width:min(520px,100%); }
 .rc-run-rango { align-items:center; gap:.4rem; }
+.rc-check { display:inline-flex; align-items:center; gap:.4rem; cursor:pointer; user-select:none; }
+.rc-check input { width:auto; margin:0; }
 .rc-block { margin-top:.75rem; }
 .rc-block-title { font-size:.78rem; font-weight:600; color:#334155; margin:.4rem 0 .35rem; text-transform:uppercase; letter-spacing:.04em; }
 .rc-chips { display:flex; flex-wrap:wrap; gap:.35rem; }
@@ -626,6 +735,30 @@ else
     private string _runNombre = "";
     private List<RunParam> _runParams = new();
     private List<SedeOpcionDto> _runSedes = new();
+
+    // Valores que la VISTA PREVIA usa para simular la descarga (incluye interruptores como Barthel).
+    // Se sincroniza con los parametros del reporte conservando lo que el usuario ya haya escrito.
+    private List<RunParam> _previewParams = new();
+
+    // Ajusta _previewParams a los parametros actuales: agrega los que falten, quita los que ya no
+    // existen y conserva los valores de los que siguen. Idempotente (seguro de llamar en cada render).
+    private void SyncPreviewParams()
+    {
+        var claves = _parametros.Select(p => p.Clave).ToHashSet();
+        _previewParams.RemoveAll(rp => !claves.Contains(rp.Clave));
+        foreach (var p in _parametros)
+        {
+            var ya = _previewParams.FirstOrDefault(rp => rp.Clave == p.Clave);
+            if (ya is null)
+            {
+                _previewParams.Add(new RunParam { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente });
+            }
+            else
+            {
+                ya.Etiqueta = p.Etiqueta; ya.Tipo = p.Tipo; ya.Fuente = p.Fuente;
+            }
+        }
+    }
 
     private DotNetObjectReference<ReportesConstructor>? _dnetRef;
 
@@ -723,6 +856,13 @@ else
         _parametros = (d.Parametros ?? [])
             .Select(p => new ParamEdit { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente })
             .ToList();
+        _previewParams = new();
+        SyncPreviewParams();
+        // Carga la lista de sedes si algun parametro la necesita (para el selector de la preview).
+        if (_parametros.Any(p => p.Fuente == ReporteParametroFuente.Sedes) && _runSedes.Count == 0)
+        {
+            try { _runSedes = (await Builder.ListarSedesAsync()).ToList(); } catch { /* el selector cae a (todas) */ }
+        }
         _preview = null; _previewHoja = -1;
         _error = "";
         _editando = true;
@@ -893,14 +1033,24 @@ else
                 h.PivotOn && !string.IsNullOrWhiteSpace(h.PivotFila) && !string.IsNullOrWhiteSpace(h.PivotColumna)
                     ? new ReportePivoteDef(h.PivotFila!, h.PivotColumna!)
                     : null;
-            return ReporteHojaDef.Agregado(h.Nombre, h.EntidadKey, groupBy, agg, filtros, orden, pivote: pivote);
+            return ReporteHojaDef.Agregado(h.Nombre, h.EntidadKey, groupBy, agg, filtros, orden, pivote: pivote) with
+            {
+                LimiteFilas = h.LimiteFilas,
+                Matriz = h.Matriz,
+                Existencias = h.Existencias,
+            };
         }
 
         var cols = h.Columnas.Select(c => new ReporteColumnaDef(
             c.Ref,
             string.IsNullOrWhiteSpace(c.Titulo) ? null : c.Titulo.Trim(),
             c.Formato)).ToList();
-        return ReporteHojaDef.Detalle(h.Nombre, h.EntidadKey, cols, filtros, orden);
+        return ReporteHojaDef.Detalle(h.Nombre, h.EntidadKey, cols, filtros, orden) with
+        {
+            LimiteFilas = h.LimiteFilas,
+            Matriz = h.Matriz,
+            Existencias = h.Existencias,
+        };
     }
 
     private async Task PreviewAsync(HojaEdit h)
@@ -909,7 +1059,19 @@ else
         _trabajando = true;
         try
         {
-            _preview = await Builder.PreviewAsync(ADef(h), 50);
+            // La vista previa SIMULA la descarga: aplica los valores que el usuario puso en el panel
+            // "Valores para la vista previa" (incluye interruptores como Barthel). Lo que deje en blanco
+            // / sin marcar no filtra, igual que al descargar.
+            SyncPreviewParams();
+            var dict = new Dictionary<string, IReadOnlyList<string>>();
+            foreach (var rp in _previewParams)
+            {
+                var vals = rp.Valores();
+                if (vals.Count > 0) { dict[rp.Clave] = vals; }
+            }
+            var resuelto = ReporteParametros.Resolver(
+                new ReportePackDef(_nombre ?? "", new[] { ADef(h) }), dict);
+            _preview = await Builder.PreviewAsync(resuelto.Hojas[0], 50);
             _previewHoja = _hojas.IndexOf(h);
         }
         catch (Exception ex) { _error = ex.Message; _preview = null; _previewHoja = -1; }
@@ -1052,6 +1214,45 @@ else
     private void AgregarParametro() =>
         _parametros.Add(new ParamEdit { Clave = "param_" + Guid.NewGuid().ToString("N")[..6] });
 
+    // Descripcion legible de una existencia (EXISTS) para mostrarla como "filtro especial" de la hoja.
+    private string ExisteLabel(ReporteExisteDef ex)
+    {
+        var ent = _entidades.FirstOrDefault(e => e.Key == ex.TargetEntityKey)?.Label ?? ex.TargetEntityKey;
+        if (!string.IsNullOrWhiteSpace(ex.FormatoRelDestinoCodigo))
+        {
+            return $"Solo pacientes con {ent} cuyo formato este relacionado (modulo Relaciones de formularios) al formato {ex.FormatoRelDestinoCodigo}";
+        }
+        if (!string.IsNullOrWhiteSpace(ex.FechaCampoRef))
+        {
+            return $"Solo pacientes que tengan {ent} (acotable por {ex.FechaCampoRef})";
+        }
+        return $"Solo pacientes que tengan {ent} relacionada";
+    }
+
+    // Un parametro es "interruptor de hoja" si alguna hoja lo usa como ToggleParamClave de una
+    // existencia (ej. Barthel). Esos NO se muestran en el bloque global ni en el binding de filtros:
+    // se administran dentro de su hoja, en "Filtros especiales". La casilla igual se pide al descargar.
+    private bool EsParamToggleDeHoja(string clave) =>
+        !string.IsNullOrWhiteSpace(clave)
+        && _hojas.Any(h => h.Existencias is { } exs && exs.Any(e => e.ToggleParamClave == clave));
+
+    // Etiqueta amigable de un parametro por su clave (cae a la clave si no tiene etiqueta).
+    private string ParamLabel(string clave)
+    {
+        var p = _parametros.FirstOrDefault(x => x.Clave == clave);
+        return p is null || string.IsNullOrWhiteSpace(p.Etiqueta) ? clave : p.Etiqueta;
+    }
+
+    // Quita una existencia de la hoja (se conserva en el round-trip; al Guardar queda eliminada).
+    private void QuitarExistencia(HojaEdit h, int idx)
+    {
+        if (h.Existencias is null) { return; }
+        var lista = h.Existencias.ToList();
+        if (idx < 0 || idx >= lista.Count) { return; }
+        lista.RemoveAt(idx);
+        h.Existencias = lista.Count == 0 ? null : lista;
+    }
+
     private static string ParamTipoLabel(ReporteParametroTipo t) => t switch
     {
         ReporteParametroTipo.Texto => "Texto",
@@ -1060,6 +1261,7 @@ else
         ReporteParametroTipo.FechaHora => "Fecha y hora",
         ReporteParametroTipo.RangoFecha => "Rango de fechas",
         ReporteParametroTipo.Lista => "Lista",
+        ReporteParametroTipo.Booleano => "Si / No",
         _ => t.ToString()
     };
 
@@ -1107,6 +1309,14 @@ else
         public string? PivotFila { get; set; } = "";
         public string? PivotColumna { get; set; } = "";
 
+        // Propiedades que el editor NO expone con UI pero debe CONSERVAR al guardar (nunca
+        // descartarlas): el tope de filas, la matriz de encuesta (hoja Consolidado) y las
+        // existencias/EXISTS (p.ej. "solo atendidos" y el interruptor Barthel del CENSO).
+        // Se transportan opacas: entran en Desde y se re-emiten en ADef via 'with'.
+        public int? LimiteFilas { get; set; }
+        public ReporteMatrizEncuestaDef? Matriz { get; set; }
+        public IReadOnlyList<ReporteExisteDef>? Existencias { get; set; }
+
         public static HojaEdit Desde(ReporteHojaDef d)
         {
             var h = new HojaEdit
@@ -1118,6 +1328,9 @@ else
                 GroupBy = d.GroupBy.Select(c => new ColSel { Ref = c.CampoRef }).ToList(),
                 Agregados = d.Agregados.Select(a => new AggEdit { Func = a.Func, CampoRef = a.CampoRef ?? "", Titulo = a.Titulo ?? "" }).ToList(),
                 Filtros = d.Filtros.Select(f => new FiltroEdit { CampoRef = f.CampoRef, Op = f.Op, Valor = f.Valores is null ? "" : string.Join(", ", f.Valores), ParamClave = f.ParamClave ?? "" }).ToList(),
+                LimiteFilas = d.LimiteFilas,
+                Matriz = d.Matriz,
+                Existencias = d.Existencias,
             };
             var o = d.Orden.FirstOrDefault();
             if (o is not null) { h.OrdenRef = o.CampoRef; h.OrdenDesc = o.Desc; }
@@ -1155,6 +1368,13 @@ else
         public string? Valor1 { get; set; }
         public string? Valor2 { get; set; }
 
+        // Casilla para los parametros booleanos (Si/No): mapea a Valor1 = "Si" / null.
+        public bool Marcado
+        {
+            get => string.Equals(Valor1, "Si", StringComparison.OrdinalIgnoreCase);
+            set => Valor1 = value ? "Si" : null;
+        }
+
         // Valores a enviar (vacio = no filtrar por este parametro en esta corrida).
         public IReadOnlyList<string> Valores()
         {
@@ -1166,6 +1386,11 @@ else
             if (Tipo == ReporteParametroTipo.Lista && Fuente == ReporteParametroFuente.Ninguna)
             {
                 return (Valor1 ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            }
+            if (Tipo == ReporteParametroTipo.Booleano)
+            {
+                return string.Equals(Valor1, "Si", StringComparison.OrdinalIgnoreCase)
+                    ? new[] { "Si" } : Array.Empty<string>();
             }
             return string.IsNullOrWhiteSpace(Valor1) ? Array.Empty<string>() : new[] { Valor1! };
         }

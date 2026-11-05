@@ -79,8 +79,14 @@ else
            ordenan/numeran por el numero de sesion RIGIDO (numero_sesion del turno),
            no por el orden de digitacion. Los documentos de evolucion sin sesion
            rigida caen al final y se numeran de corrido como respaldo. Cada una en
-           su propia pagina. *@
-        @if (_evolucionesUnificadas.Count > 0)
+           su propia pagina.
+           NOTA (v0.164.0): se condiciona por _incluirEvo igual que Escalas (_incluirEsc)
+           y Consentimientos (_incluirCon). En modelo PLANO (docs=HC, usado por las
+           tipologias/Snapshots) cada HC base renderiza SOLO su propia hoja; las
+           evoluciones llegan por el contenido EVOLUCION como documentos sueltos. Sin
+           este gate la HC base anidaba sus evoluciones de terapia Y ademas se pintaban
+           sueltas -> historias duplicadas dentro del PDF. *@
+        @if (_incluirEvo && _evolucionesUnificadas.Count > 0)
         {
             var _evoN = 0;
             @foreach (var evo in _evolucionesUnificadas)

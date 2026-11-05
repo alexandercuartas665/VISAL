@@ -49,13 +49,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// null = la parte no tiene CUP (autorizacion/firma/anexo) y no dispara separador.</summary>
     private readonly record struct PartePlan(
         byte[]? Inline, int RenderIdx, string? Cup = null, string? CupNombre = null, string? Sede = null,
-        string? Etiqueta = null);
+        string? Etiqueta = null, Guid HcId = default);
 
     /// <summary>URL de un documento de historia a renderizar + su CUP, nombre de servicio y
     /// sede (para el rotulo separador por CUP). Cup null = no se pidio rotulo. <see cref="Fecha"/>
     /// (fecha de atencion) permite ordenar JUNTAS las HC de varios contenidos "Formulario por
     /// tipo" por CUP->fecha, para que el archivo siga el mismo orden plano del snapshot.</summary>
-    private readonly record struct UrlCup(string Url, string? Cup, string? CupNombre, string? Sede, DateTimeOffset Fecha, long Consecutivo = 0);
+    private readonly record struct UrlCup(string Url, string? Cup, string? CupNombre, string? Sede, DateTimeOffset Fecha, long Consecutivo = 0, Guid HcId = default);
 
     /// <summary>Fila de HC para ordenar el contenido "Formulario por tipo": id + fecha
     /// de atencion (para orden cronologico) — el CUP se resuelve aparte por lote.</summary>
@@ -485,7 +485,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// resto), incluidas las repeticiones: asi el TXT delata la historia que sale dos veces.</summary>
     private sealed record SimFila(
         string Nombre, string Paciente, string TipoDoc, string Documento, string Autorizacion,
-        IReadOnlyList<string> Partes, string Estado);
+        IReadOnlyList<string> Partes, string Estado, IReadOnlyList<string>? Avisos = null);
 
     /// <inheritdoc />
     public async Task<ArchivoExportado?> SimularGeneracionAsync(
@@ -524,12 +524,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var allUrls = new List<string>();            // acumulador requerido por la planeacion (no se rinde)
         var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // El orden REAL de las partes del PDF = el orden de la lista 'partes' del plan.
-        // Cada parte lleva su etiqueta (HC-xxxxxx para historias, [AUT]/[FIRMA]/[ANEXO]
-        // para el resto), asi el TXT refleja 1:1 lo que encadenaria el motor de impresion,
-        // incluidas las historias repetidas, sin renderizar nada.
-        static List<string> EtiquetasDe(List<PartePlan> ps) =>
-            ps.Select(p => string.IsNullOrWhiteSpace(p.Etiqueta) ? "[?]" : p.Etiqueta!).ToList();
+        // v0.164.0: el simulador modela TAMBIEN lo que el motor ANIDA al renderizar cada HC
+        // base (una base de terapia mete sus evoluciones DENTRO de su hoja), no solo las
+        // partes de primer nivel del plan. El render anida evoluciones solo si el 'docs' de
+        // /p/hc-form incluye EVO (ver PaqueteHcImprimible L83, gateado por _incluirEvo). Las
+        // tipologias usan docs=HC (CalcularDocsRender) -> hoy NO anidan. ExpandirYDiagnosticar
+        // refleja ese anidado 1:1 con el PDF y, aparte, AVISA de "doble fuente" (una base de
+        // terapia + sus evoluciones tambien sueltas) que se duplicaria si el render anidara,
+        // para cazar el patron aunque cambie el gate.
+        var incluyeEvo = CalcularDocsRender(archivo).Contains("EVO", StringComparison.OrdinalIgnoreCase);
 
         if (archivo.UnoPorAutorizacion)
         {
@@ -572,8 +575,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     var n = 2;
                     while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
 
+                    var exp = await ExpandirYDiagnosticarAsync(partes, incluyeEvo, pDesde, pHasta, ct);
                     filas.Add(new SimFila(name, pac.Nombre ?? "", pac.TipoDocumento ?? "",
-                        pac.Documento ?? "", codigo, EtiquetasDe(partes), "OK"));
+                        pac.Documento ?? "", codigo, exp.Partes, "OK", exp.Avisos));
                 }
             }
         }
@@ -602,13 +606,130 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 var n = 2;
                 while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
 
+                var exp = await ExpandirYDiagnosticarAsync(partes, incluyeEvo, pDesde, pHasta, ct);
                 filas.Add(new SimFila(name, pac.Nombre ?? "", pac.TipoDocumento ?? "",
                     pac.Documento ?? "", string.Join(", ", pac.Autorizaciones.Where(x => !string.IsNullOrWhiteSpace(x))),
-                    EtiquetasDe(partes), "OK"));
+                    exp.Partes, "OK", exp.Avisos));
             }
         }
 
         return ConstruirTxtSimulacion(detalle.Metadata.Nombre, archivo, filas);
+    }
+
+    /// <summary>Resultado de expandir las partes de un PDF: la lista de etiquetas EN ORDEN REAL
+    /// (ya con las evoluciones que el motor anidaria bajo cada HC base, si <c>incluyeEvo</c>) y los
+    /// avisos de "doble fuente" encontrados.</summary>
+    private sealed record SimExpand(List<string> Partes, List<string> Avisos);
+
+    /// <summary>Expande las partes de primer nivel del plan agregando lo que el RENDER anida
+    /// dentro de cada HC base (evoluciones de terapia), modelando el motor de impresion sin
+    /// renderizar. Si una base de terapia tiene evoluciones que TAMBIEN van como documento
+    /// suelto en el mismo PDF, lo reporta como aviso de "doble fuente" (el patron que duplicaba
+    /// historias), aunque el gate de EVO este apagado.</summary>
+    private async Task<SimExpand> ExpandirYDiagnosticarAsync(
+        List<PartePlan> partes, bool incluyeEvo, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
+    {
+        var res = new List<string>(partes.Count);
+        var avisos = new List<string>();
+
+        // Consecutivos de HC que van como documento SUELTO (parte de primer nivel) en este PDF.
+        var sueltos = new HashSet<long>();
+        foreach (var p in partes)
+        {
+            if (p.HcId != Guid.Empty && TryConsecutivoDeEtiqueta(p.Etiqueta, out var cs)) { sueltos.Add(cs); }
+        }
+
+        foreach (var p in partes)
+        {
+            var etq = string.IsNullOrWhiteSpace(p.Etiqueta) ? "[?]" : p.Etiqueta!;
+            res.Add(etq);
+            if (p.HcId == Guid.Empty) { continue; }
+
+            var anidadas = await ConsultarEvolucionesAnidadasAsync(p.HcId, desde, hasta, ct);
+            if (anidadas.Count == 0) { continue; }
+
+            // Refleja el render: las evoluciones salen DENTRO de la hoja base solo si docs incluye EVO.
+            if (incluyeEvo)
+            {
+                foreach (var c in anidadas) { res.Add($"{CodigoPublico.Hc(c)} (anidada en {etq})"); }
+            }
+
+            // Diagnostico independiente del gate: evoluciones de esta base que ADEMAS van sueltas.
+            var doble = anidadas.Where(sueltos.Contains).Select(CodigoPublico.Hc).ToList();
+            if (doble.Count > 0)
+            {
+                avisos.Add(
+                    $"{etq} es base de terapia; sus evoluciones {string.Join(", ", doble)} tambien van " +
+                    "como documento suelto (doble fuente). " +
+                    (incluyeEvo
+                        ? "docs incluye EVO -> el render las ANIDA y SALEN DUPLICADAS."
+                        : "docs=HC -> hoy NO se anidan (no se duplican); vigilar si se activa EVO."));
+            }
+        }
+
+        return new SimExpand(res, avisos);
+    }
+
+    /// <summary>"HC-004270" -> 4270. False si la etiqueta no es un consecutivo HC-NNNNNN.</summary>
+    private static bool TryConsecutivoDeEtiqueta(string? etiqueta, out long consecutivo)
+    {
+        consecutivo = 0;
+        if (string.IsNullOrWhiteSpace(etiqueta)) { return false; }
+        var e = etiqueta.Trim();
+        if (!e.StartsWith("HC-", StringComparison.OrdinalIgnoreCase)) { return false; }
+        return long.TryParse(e.AsSpan(3), out consecutivo);
+    }
+
+    /// <summary>Evoluciones de terapia que el motor ANIDA bajo una HC base, como consecutivos
+    /// ordenados por numero_sesion rigido y fecha. Misma logica que
+    /// HistoriaClinicaService.GetEvolucionesLigadasAsync (base con FormatoEvolucionCodigo ->
+    /// HC del mismo formato de evolucion ligadas a la misma asignacion, Cerradas), acotada al
+    /// periodo por fecha de atencion igual que el render. Vacia si la HC no es base de terapia.</summary>
+    private async Task<List<long>> ConsultarEvolucionesAnidadasAsync(
+        Guid baseHcId, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
+    {
+        var evoCod = await _db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == baseHcId)
+            .Join(_db.FormDefinitions.AsNoTracking(),
+                  h => h.FormDefinitionId, f => f.Id, (h, f) => f.FormatoEvolucionCodigo)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(evoCod)) { return new(); }
+
+        var asigId = await _db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.HistoriaClinicaId == baseHcId)
+            .Join(_db.AsignacionTurnoSesiones.AsNoTracking(),
+                  p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
+            .Join(_db.AsignacionTurnos.AsNoTracking(),
+                  turnoId => turnoId, t => t.Id, (turnoId, t) => t.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        if (asigId == Guid.Empty) { return new(); }
+
+        var filas = await (
+            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in _db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            join f in _db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals f.Id
+            where t.AsignacionId == asigId
+                  && f.Codigo == evoCod
+                  && h.Estado == HistoriaClinicaEstado.Cerrada
+                  && h.Id != baseHcId
+            select new
+            {
+                h.Id,
+                h.Consecutivo,
+                Sesion = t.NumeroSesion,
+                Fecha = h.FechaAtencion ?? h.FechaCierre ?? h.FechaApertura
+            })
+            .ToListAsync(ct);
+
+        return filas
+            .Where(x => EnRango(x.Fecha, desde, hasta))
+            .GroupBy(x => x.Id).Select(g => g.First())
+            .OrderBy(x => x.Sesion ?? int.MaxValue)
+            .ThenBy(x => x.Fecha)
+            .Select(x => x.Consecutivo)
+            .ToList();
     }
 
     /// <summary>Arma el .txt del manifiesto de simulacion: por cada PDF que se generaria, lista
@@ -637,6 +758,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         }
 
         var conRepetidas = ok.Where(f => HistoriasRepetidas(f).Count > 0).ToList();
+        var conAvisos = ok.Where(f => f.Avisos is { Count: > 0 }).ToList();
 
         var sb = new StringBuilder();
         sb.AppendLine("====================================================================");
@@ -648,10 +770,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
         sb.AppendLine($" Generado : {DateTimeOffset.Now.ToLocalTime():yyyy-MM-dd HH:mm}");
         sb.AppendLine($" PDFs que saldrian : {ok.Count}   |   Omitidos/vacios : {omitidos}");
         sb.AppendLine($" PDFs con HISTORIA REPETIDA : {conRepetidas.Count}");
+        sb.AppendLine($" PDFs con AVISO DE DOBLE FUENTE : {conAvisos.Count}");
         sb.AppendLine();
-        sb.AppendLine(" Cada PDF lista sus partes en el ORDEN REAL en que el motor las encadena.");
+        sb.AppendLine(" Cada PDF lista sus partes en el ORDEN REAL en que el motor las encadena,");
+        sb.AppendLine(" incluidas las evoluciones que una HC base de terapia ANIDA al renderizar.");
         sb.AppendLine(" Historias = HC-xxxxxx ; otras partes = [AUT]/[FIRMA]/[ANEXO].");
+        sb.AppendLine(" '(anidada en HC-...)' = evolucion que el render mete DENTRO de la hoja base.");
         sb.AppendLine(" '<-- REPETIDA' marca una historia que ya habia salido en el mismo PDF.");
+        sb.AppendLine(" 'AVISO' = base de terapia con evoluciones que tambien van sueltas (doble");
+        sb.AppendLine("          fuente): se duplican si el render anida evoluciones (docs con EVO).");
         sb.AppendLine();
 
         if (conRepetidas.Count > 0)
@@ -661,6 +788,19 @@ public sealed class TipologiaZipService : ITipologiaZipService
             foreach (var f in conRepetidas)
             {
                 sb.AppendLine($"   * {f.Nombre}  ->  {string.Join(", ", HistoriasRepetidas(f))}");
+            }
+            sb.AppendLine("--------------------------------------------------------------------");
+            sb.AppendLine();
+        }
+
+        if (conAvisos.Count > 0)
+        {
+            sb.AppendLine("--------------------------------------------------------------------");
+            sb.AppendLine($" RESUMEN DE DOBLE FUENTE ({conAvisos.Count} archivo(s)):");
+            foreach (var f in conAvisos)
+            {
+                sb.AppendLine($"   * {f.Nombre}");
+                foreach (var a in f.Avisos!) { sb.AppendLine($"       - {a}"); }
             }
             sb.AppendLine("--------------------------------------------------------------------");
             sb.AppendLine();
@@ -691,6 +831,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 var esHc = e.StartsWith("HC-", StringComparison.OrdinalIgnoreCase);
                 var marca = esHc && !vistas.Add(e) ? "   <-- REPETIDA" : "";
                 sb.AppendLine($"       {n,3}. {e}{marca}");
+            }
+            if (f.Avisos is { Count: > 0 })
+            {
+                sb.AppendLine("     AVISO (doble fuente):");
+                foreach (var a in f.Avisos) { sb.AppendLine($"       - {a}"); }
             }
         }
 
@@ -963,7 +1108,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var u in ordenadas)
         {
             var etq = u.Consecutivo > 0 ? CodigoPublico.Hc(u.Consecutivo) : "HC (sin consecutivo)";
-            bloque.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede, Etiqueta: etq));
+            bloque.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede, Etiqueta: etq, HcId: u.HcId));
             allUrls.Add(u.Url);
         }
         partes.InsertRange(Math.Clamp(insertIdx ?? partes.Count, 0, partes.Count), bloque);
@@ -1421,9 +1566,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return filas.Select(f =>
         {
             var url = $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}{rango}";
-            if (!rotuloPorCup) { return new UrlCup(url, null, null, null, f.Fecha, f.Consecutivo); }
+            if (!rotuloPorCup) { return new UrlCup(url, null, null, null, f.Fecha, f.Consecutivo, f.Id); }
             var ci = cupInfo.TryGetValue(f.Id, out var c) ? c : ("", "", "");
-            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3, f.Fecha, f.Consecutivo);
+            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3, f.Fecha, f.Consecutivo, f.Id);
         }).ToList();
     }
 

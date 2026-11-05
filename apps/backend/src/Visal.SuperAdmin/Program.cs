@@ -1344,6 +1344,7 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
     Guid id,
     string? formato,
     bool? ignorarValidacion,
+    string? vista,
     Visal.Application.Facturacion.IFacturacionSnapshotService svc,
     CancellationToken ct) =>
 {
@@ -1371,9 +1372,22 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/download", async (
         if (r.Errores.Count > 0) { return Results.Problem(string.Join(" | ", r.Errores), statusCode: 422, title: "JSON RIPS invalido"); }
         return Results.NotFound();
     }
+    // Orden/agrupacion de la pantalla "Ver" (solo xlsx): llega como JSON url-encoded en
+    // `vista`. Si viene corrupto, se ignora y el export sale en orden natural.
+    Visal.Application.Facturacion.SnapshotVistaOrden? vistaDto = null;
+    if (fmt == "xlsx" && !string.IsNullOrWhiteSpace(vista))
+    {
+        try
+        {
+            vistaDto = System.Text.Json.JsonSerializer.Deserialize<Visal.Application.Facturacion.SnapshotVistaOrden>(
+                vista, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch { vistaDto = null; }
+    }
+
     Visal.Application.Facturacion.ArchivoExportado? archivo = fmt switch
     {
-        "xlsx" => await svc.ExportarExcelAsync(id, ct),
+        "xlsx" => await svc.ExportarExcelAsync(id, vistaDto, ct),
         "csv"  => await svc.ExportarCsvAsync(id, ct),
         _ => null
     };

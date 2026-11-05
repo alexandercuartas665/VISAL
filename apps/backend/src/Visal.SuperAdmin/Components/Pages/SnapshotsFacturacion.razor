@@ -1013,8 +1013,9 @@
             <div class="sn-modal-f">
                 <div class="d-flex gap-2">
                     <a class="btn btn-success btn-sm"
-                       href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=xlsx")"
-                       target="_blank" rel="noopener">Descargar Excel</a>
+                       href="@VerExcelUrl()"
+                       target="_blank" rel="noopener"
+                       title="@(VerModoCliente ? "Descarga con el orden y la agrupacion de la vista actual" : "Descarga en el orden natural del snapshot")">Descargar Excel</a>
                     <a class="btn btn-outline-success btn-sm"
                        href="@($"/facturacion-clinica/snapshots/{_verDetalle.Metadata.Id}/download?formato=csv")"
                        target="_blank" rel="noopener">Descargar CSV</a>
@@ -1901,6 +1902,23 @@
         BuildVerItems(_verTodas.ToList(), 0, items);
         for (var i = 0; i < items.Count; i++) { items[i].Seq = i; }
         _verItems = items;
+    }
+
+    // URL de descarga xlsx del detalle. Cuando hay orden/agrupacion activos, los lleva
+    // al servidor (JSON url-encoded en `vista`) para que el Excel salga igual que la
+    // pantalla (cabeceras de grupo con conteo + orden en cascada). Sin orden/agrupacion,
+    // es la descarga normal en orden natural.
+    private string VerExcelUrl()
+    {
+        var baseUrl = $"/facturacion-clinica/snapshots/{_verDetalle!.Metadata.Id}/download?formato=xlsx";
+        if (_sorts.Count == 0 && _groups.Count == 0) { return baseUrl; }
+        var dto = new
+        {
+            Orden = _sorts.Select(s => new { s.Col, s.Desc }).ToList(),
+            Grupos = _groups.ToList()
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(dto);
+        return baseUrl + "&vista=" + Uri.EscapeDataString(json);
     }
 
     // ── Persistencia de los filtros del detalle (modal "Ver") ──────────────────────────

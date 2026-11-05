@@ -40,9 +40,8 @@ public static class CensoBlueprint
         {
             new("sede", "Sede", ReporteParametroTipo.Lista, ReporteParametroFuente.Sedes),
             new("rango_fecha", "Rango de fechas (inicial / final)", ReporteParametroTipo.RangoFecha),
-            // Interruptor (solo afecta "Base de Pacientes"): si se marca, limita la hoja a los
-            // pacientes que ALGUNA VEZ fueron atendidos con un formato de HC relacionado al Barthel.
-            new("solo_barthel", "Solo programa Barthel (PP-FO-46)", ReporteParametroTipo.Booleano),
+            // El Barthel NO es un parametro opcional: es una condicion fija de la hoja "Base de
+            // Pacientes" (ver sus Existencias). No se pide al descargar.
         };
 
         return new GuardarPlantillaRequest(
@@ -62,7 +61,6 @@ public static class CensoBlueprint
     // Claves de los parametros de ejecucion (una sola fuente de verdad para los filtros).
     private const string ParamSede = "sede";
     private const string ParamRangoFecha = "rango_fecha";
-    private const string ParamSoloBarthel = "solo_barthel";
 
     // Codigo del FormDefinition de la escala Barthel (destino de la relacion de formularios).
     private const string CodigoBarthel = "PP-FO-46";
@@ -134,16 +132,14 @@ public static class CensoBlueprint
                     TargetProperty: nameof(Visal.Domain.Entities.HistoriaClinica.PacienteId),
                     FechaCampoRef: "fecha_atencion",
                     ParamClave: ParamRangoFecha),
-                // Interruptor "Solo programa Barthel": si se marca al descargar, exige que el paciente
-                // tenga ALGUNA Historia Clinica (en la vida, sin acotar por rango) cuyo formato apunte,
-                // en Relaciones de formularios, al Barthel (PP-FO-46). Si no se marca, esta existencia
-                // se descarta al resolver y la hoja sale igual que hoy.
+                // Condicion FIJA de la hoja (no es un parametro opcional): el paciente debe tener
+                // ALGUNA Historia Clinica (en la vida, sin acotar por rango) cuyo formato apunte, en
+                // Relaciones de formularios, al Barthel (PP-FO-46). Siempre se aplica.
                 new ReporteExisteDef(
                     TargetEntityKey: "historia",
                     LocalProperty: nameof(Visal.Domain.Entities.Paciente.Id),
                     TargetProperty: nameof(Visal.Domain.Entities.HistoriaClinica.PacienteId),
-                    FormatoRelDestinoCodigo: CodigoBarthel,
-                    ToggleParamClave: ParamSoloBarthel),
+                    FormatoRelDestinoCodigo: CodigoBarthel),
             ],
         };
 

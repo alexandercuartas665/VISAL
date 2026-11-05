@@ -38,6 +38,23 @@ public enum ReportDerivacion
 }
 
 /// <summary>
+/// Campo cuyo valor NO es una columna ni una derivacion de fecha, sino una subconsulta
+/// correlacionada curada por la plataforma (las tablas/columnas salen del metamodelo de EF,
+/// nunca de texto). Se usa para traer un valor desde una relacion a-muchos sin multiplicar filas.
+/// </summary>
+public enum ReportComputed
+{
+    /// <summary>Sin computo: el campo es una columna/derivacion normal.</summary>
+    Ninguna = 0,
+    /// <summary>
+    /// Codigo del contrato PRINCIPAL del paciente (orden=1) tomado de la lista
+    /// <c>paciente_contratos</c> -&gt; <c>contratos_aseguradora</c>. Reemplaza al viejo
+    /// escalar <c>Paciente.ContratoPrincipal</c> (en desuso / nulo).
+    /// </summary>
+    ContratoPrincipal,
+}
+
+/// <summary>
 /// Un campo expuesto al constructor de reportes. Referencia una PROPIEDAD CLR de
 /// la entidad (no una cadena SQL libre): el generador resuelve el nombre fisico
 /// de columna desde el metamodelo de EF, asi nunca entra texto del usuario como
@@ -58,7 +75,8 @@ public sealed record ReportableFieldDef(
     string PropertyName,
     ReportFieldKind Kind,
     string? JsonKey = null,
-    ReportDerivacion Derivacion = ReportDerivacion.Ninguna);
+    ReportDerivacion Derivacion = ReportDerivacion.Ninguna,
+    ReportComputed Computed = ReportComputed.Ninguna);
 
 /// <summary>
 /// Un cruce PERMITIDO entre una entidad reportable y otra (join declarado por la
@@ -167,7 +185,10 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("ingreso", "Ingreso", nameof(Paciente.Ingreso), ReportFieldKind.Bool),
                 new("motivo_no_ingreso", "Motivo de no ingreso", nameof(Paciente.MotivoNoIngreso), ReportFieldKind.Text),
                 new("usuario_ingreso", "Usuario del ingreso", nameof(Paciente.UsuarioIngresoNombre), ReportFieldKind.Text),
-                new("contrato_principal", "Contrato", nameof(Paciente.ContratoPrincipal), ReportFieldKind.Text),
+                // "Contrato" NO sale del escalar Paciente.ContratoPrincipal (en desuso / nulo para todos):
+                // se calcula como el codigo del contrato principal (orden=1) de la lista paciente_contratos.
+                new("contrato_principal", "Contrato", nameof(Paciente.ContratoPrincipal), ReportFieldKind.Text,
+                    Computed: ReportComputed.ContratoPrincipal),
                 new("condicion", "Condicion", nameof(Paciente.Condicion), ReportFieldKind.Text),
                 new("sla_ingreso_minutos", "Mins (SLA)", nameof(Paciente.SlaIngresoMinutos), ReportFieldKind.Integer),
                 // Mes del ingreso (derivado de Fecha Ingreso, hora local): columna C de "Base de Pacientes".

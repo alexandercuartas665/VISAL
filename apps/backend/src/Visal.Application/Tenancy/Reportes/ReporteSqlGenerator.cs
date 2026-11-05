@@ -229,6 +229,11 @@ public sealed class ReporteSqlGenerator(
     // derivada (mes/hora/minuto) de una fecha. La columna siempre sale del metamodelo de EF.
     private string Expr(string alias, Type clrType, ReportableFieldDef field)
     {
+        // Campo computado (subconsulta correlacionada curada): no es columna de la tabla.
+        if (field.Computed == ReportComputed.ContratoPrincipal)
+        {
+            return SubqueryContratoPrincipal(alias, clrType);
+        }
         var col = Col(Et(clrType), field.PropertyName);
         string baseExpr;
         if (field.JsonKey is { } jk)
@@ -247,6 +252,31 @@ public sealed class ReporteSqlGenerator(
             ReportDerivacion.Minuto => $"EXTRACT(MINUTE FROM {baseExpr} AT TIME ZONE '{ZonaLocal}')::int",
             _ => baseExpr,
         };
+    }
+
+    // Subconsulta escalar: codigo del contrato PRINCIPAL del paciente (orden=1) desde la lista
+    // paciente_contratos -> contratos_aseguradora. Correlaciona por el Id del paciente en el
+    // alias dado ({alias}.id) y filtra por tenant en ambas tablas. No multiplica filas (LIMIT 1).
+    // Tablas/columnas resueltas del metamodelo de EF (nunca texto). Aliases locales pcon/caseg.
+    private string SubqueryContratoPrincipal(string alias, Type pacienteClrType)
+    {
+        var pcEt = Et(typeof(Visal.Domain.Entities.PacienteContrato));
+        var caEt = Et(typeof(Visal.Domain.Entities.ContratoAseguradora));
+        var pacienteIdCol = Col(Et(pacienteClrType), nameof(Visal.Domain.Entities.Paciente.Id));
+        var pcPacienteId = Col(pcEt, nameof(Visal.Domain.Entities.PacienteContrato.PacienteId));
+        var pcContratoId = Col(pcEt, nameof(Visal.Domain.Entities.PacienteContrato.ContratoAseguradoraId));
+        var pcOrden = Col(pcEt, nameof(Visal.Domain.Entities.PacienteContrato.Orden));
+        var pcTenant = TenantColumn(pcEt);
+        var caId = Col(caEt, nameof(Visal.Domain.Entities.ContratoAseguradora.Id));
+        var caCodigo = Col(caEt, nameof(Visal.Domain.Entities.ContratoAseguradora.CodigoContrato));
+        var caTenant = TenantColumn(caEt);
+        return
+            $"(SELECT caseg.{Q(caCodigo)} FROM {TableRef(pcEt)} AS pcon " +
+            $"JOIN {TableRef(caEt)} AS caseg ON caseg.{Q(caId)} = pcon.{Q(pcContratoId)} " +
+            $"AND caseg.{Q(caTenant)} = {TenantParam} " +
+            $"WHERE pcon.{Q(pcPacienteId)} = {alias}.{Q(pacienteIdCol)} " +
+            $"AND pcon.{Q(pcTenant)} = {TenantParam} " +
+            $"ORDER BY pcon.{Q(pcOrden)} LIMIT 1)";
     }
 
     private (string Expr, string TituloDefault) ExprAgregado(

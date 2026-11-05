@@ -126,8 +126,8 @@ else
                 <div class="rc-block-title">Parametros al ejecutar (filtros globales)</div>
                 <div class="rc-params-help">
                     Define filtros que se piden al descargar (ej. Fecha, Sede) y enlazalos en los filtros de cada hoja.
-                    Al descargar, lo que dejes en blanco no filtra esa hoja. Los interruptores que son propios de una
-                    hoja (ej. "Solo programa Barthel") NO salen aqui: se administran en esa hoja, en "Filtros especiales".
+                    Al descargar, lo que dejes en blanco no filtra esa hoja. Las condiciones fijas propias de una hoja
+                    (ej. el cruce con un formato) NO salen aqui: viven en esa hoja, en "Filtros especiales".
                 </div>
                 @foreach (var pa in _parametros.Where(p => !EsParamToggleDeHoja(p.Clave)))
                 {
@@ -159,8 +159,8 @@ else
                     <div class="rc-block-title">Valores para la vista previa (simula la descarga)</div>
                     <div class="rc-params-help">
                         La "Vista previa" de cada hoja usa estos valores, igual que al descargar. Lo que dejes en
-                        blanco / sin marcar NO filtra. Incluye los interruptores de hoja (ej. "Solo programa Barthel"):
-                        marcalo y vuelve a dar "Vista previa" en la hoja 2 para ver el recorte.
+                        blanco NO filtra. Las condiciones fijas de cada hoja (ej. el cruce con un formato) se aplican
+                        siempre, no dependen de estos valores.
                     </div>
                     <div class="rc-preview-params-grid">
                         @foreach (var rp in _previewParams)
@@ -536,6 +536,10 @@ else
                 </div>
                 <div class="rc-editor">
                     <div class="rc-params-help">Deja en blanco lo que no quieras filtrar.</div>
+                    @if (_runHeredado)
+                    {
+                        <div class="rc-params-help rc-heredado">Se precargaron los valores que probaste en la vista previa. Revisalos antes de descargar.</div>
+                    }
                     @foreach (var rp in _runParams)
                     {
                         var par = rp;
@@ -672,6 +676,7 @@ else
 .rc-exist-desc { flex:1; font-size:.86rem; color:#4c1d95; }
 .rc-modal-sm { width:min(520px,100%); }
 .rc-run-rango { align-items:center; gap:.4rem; }
+.rc-heredado { color:#1d4ed8; font-weight:500; }
 .rc-check { display:inline-flex; align-items:center; gap:.4rem; cursor:pointer; user-select:none; }
 .rc-check input { width:auto; margin:0; }
 .rc-block { margin-top:.75rem; }
@@ -731,6 +736,7 @@ else
 
     // Dialogo de parametros al descargar.
     private bool _runAbierto;
+    private bool _runHeredado;
     private Guid _runId;
     private string _runNombre = "";
     private List<RunParam> _runParams = new();
@@ -751,7 +757,11 @@ else
             var ya = _previewParams.FirstOrDefault(rp => rp.Clave == p.Clave);
             if (ya is null)
             {
-                _previewParams.Add(new RunParam { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente });
+                var nuevo = new RunParam { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente };
+                // Los interruptores de hoja (ej. Barthel) arrancan MARCADOS: el filtro especial de la
+                // hoja aplica por defecto. El usuario lo desmarca si quiere el censo completo.
+                if (p.Tipo == ReporteParametroTipo.Booleano && EsParamToggleDeHoja(p.Clave)) { nuevo.Marcado = true; }
+                _previewParams.Add(nuevo);
             }
             else
             {
@@ -1133,6 +1143,31 @@ else
             _runParams = pars
                 .Select(p => new RunParam { Clave = p.Clave, Etiqueta = p.Etiqueta, Tipo = p.Tipo, Fuente = p.Fuente })
                 .ToList();
+            // Interruptores de hoja (ej. Barthel): arrancan MARCADOS al descargar. El filtro especial
+            // de la hoja aplica por defecto; el usuario lo desmarca si quiere el censo completo. Se
+            // detectan por las existencias de la plantilla (confiable aunque no se haya editado antes).
+            var togglesDeHoja = (d!.Hojas ?? [])
+                .SelectMany(h => h.Existencias ?? [])
+                .Where(e => !string.IsNullOrWhiteSpace(e.ToggleParamClave))
+                .Select(e => e.ToggleParamClave!)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var rp in _runParams)
+            {
+                if (rp.Tipo == ReporteParametroTipo.Booleano && togglesDeHoja.Contains(rp.Clave)) { rp.Marcado = true; }
+            }
+            // Si venimos de editar/previsualizar ESTA misma plantilla, arrastra los valores que el
+            // usuario ya probo en la vista previa (la casilla Barthel, la sede, el rango) para que
+            // "lo que previsualizas" sea "lo que descargas".
+            _runHeredado = false;
+            if (id == _edId)
+            {
+                foreach (var rp in _runParams)
+                {
+                    var pv = _previewParams.FirstOrDefault(x => x.Clave == rp.Clave);
+                    if (pv is not null) { rp.Valor1 = pv.Valor1; rp.Valor2 = pv.Valor2; }
+                }
+                _runHeredado = _runParams.Any(rp => rp.Valores().Count > 0);
+            }
             _runSedes = pars.Any(p => p.Fuente == ReporteParametroFuente.Sedes)
                 ? (await Builder.ListarSedesAsync()).ToList()
                 : new();

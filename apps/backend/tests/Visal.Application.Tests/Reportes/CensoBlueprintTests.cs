@@ -172,37 +172,60 @@ public sealed class CensoBlueprintTests
     }
 
     [Fact]
-    public void Filtro_solo_barthel_es_un_interruptor_que_restringe_por_formato_relacionado()
+    public void Base_de_pacientes_restringe_siempre_al_programa_barthel_como_condicion_fija()
     {
         var req = CensoBlueprint.Crear();
 
-        // Declara el parametro booleano de ejecucion.
-        Assert.Contains(req.Parametros!, p => p.Clave == "solo_barthel" && p.Tipo == ReporteParametroTipo.Booleano);
+        // El Barthel NO es un parametro opcional: no existe ningun parametro booleano de ejecucion.
+        Assert.DoesNotContain(req.Parametros!, p => p.Clave == "solo_barthel");
 
-        // La hoja "Base de Pacientes" trae la existencia-interruptor: destino PP-FO-46, toggle solo_barthel,
-        // SIN fecha (en la vida).
+        // La hoja "Base de Pacientes" trae la existencia Barthel como condicion FIJA: destino PP-FO-46,
+        // SIN toggle (siempre aplica) y SIN fecha (en la vida).
         var baseHoja = req.Hojas.Single(h => h.Nombre == "Base de Pacientes");
-        var barthel = Assert.Single(baseHoja.Existencias!, e => e.ToggleParamClave == "solo_barthel");
-        Assert.Equal("PP-FO-46", barthel.FormatoRelDestinoCodigo);
+        var barthel = Assert.Single(baseHoja.Existencias!, e => e.FormatoRelDestinoCodigo == "PP-FO-46");
+        Assert.Null(barthel.ToggleParamClave);
         Assert.Null(barthel.FechaCampoRef);
 
-        // Interruptor APAGADO (no llega "solo_barthel"): la existencia Barthel se descarta y el SQL no
-        // toca la tabla de relaciones de formularios.
-        var apagado = ReporteParametros.Resolver(
-            new ReportePackDef(req.Nombre, req.Hojas),
-            new Dictionary<string, IReadOnlyList<string>> { ["rango_fecha"] = ["2026-01-01", "2026-01-31"] });
-        var sqlApagado = Generador().Generar(apagado.Hojas.Single(h => h.Nombre == "Base de Pacientes")).Sql;
-        Assert.DoesNotContain("relaciones_formulario", sqlApagado);
+        // SIN resolver ningun parametro: la condicion ya esta en el SQL (subconsulta a
+        // relaciones_formulario + form_definitions) y el codigo Barthel viaja parametrizado.
+        var qSinParams = Generador().Generar(baseHoja);
+        Assert.Contains("relaciones_formulario", qSinParams.Sql);
+        Assert.Contains("form_definitions", qSinParams.Sql);
+        Assert.Contains(qSinParams.Parametros, p => Equals(p.Value, "PP-FO-46"));
 
-        // Interruptor ENCENDIDO: aparece la subconsulta a relaciones_formulario + form_definitions, y el
-        // codigo Barthel viaja como parametro (no como literal en el SQL).
-        var encendido = ReporteParametros.Resolver(
+        // Tras resolver sede + rango: la condicion Barthel sigue presente (no se descarta nunca).
+        var resuelto = ReporteParametros.Resolver(
             new ReportePackDef(req.Nombre, req.Hojas),
-            new Dictionary<string, IReadOnlyList<string>> { ["solo_barthel"] = ["Si"] });
-        var q = Generador().Generar(encendido.Hojas.Single(h => h.Nombre == "Base de Pacientes"));
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["sede"] = [Guid.NewGuid().ToString()],
+                ["rango_fecha"] = ["2026-01-01", "2026-01-31"],
+            });
+        var q = Generador().Generar(resuelto.Hojas.Single(h => h.Nombre == "Base de Pacientes"));
         Assert.Contains("relaciones_formulario", q.Sql);
-        Assert.Contains("form_definitions", q.Sql);
         Assert.Contains(q.Parametros, p => Equals(p.Value, "PP-FO-46"));
+    }
+
+    [Fact]
+    public void La_columna_contrato_sale_del_contrato_principal_de_la_lista_no_del_escalar_en_desuso()
+    {
+        var req = CensoBlueprint.Crear();
+        var gen = Generador();
+
+        // Las hojas que muestran "Contrato" (Base de Pacientes e Ingreso de Pacientes) ya NO leen la
+        // columna escalar contrato_principal (en desuso / nula): traen el codigo del contrato principal
+        // (orden=1) via subconsulta a paciente_contratos -> contratos_aseguradora, acotada por tenant.
+        foreach (var nombre in new[] { "Base de Pacientes", "Ingreso de Pacientes" })
+        {
+            var hoja = req.Hojas.Single(h => h.Nombre == nombre);
+            var sql = gen.Generar(hoja).Sql;
+            Assert.Contains("paciente_contratos", sql);
+            Assert.Contains("contratos_aseguradora", sql);
+            Assert.Contains("codigo_contrato", sql);      // codigo del contrato (ContratoAseguradora)
+            Assert.Contains("LIMIT 1", sql);              // un solo contrato por fila (no multiplica)
+            // Ya no lee el escalar en desuso Paciente.ContratoPrincipal.
+            Assert.DoesNotContain("contrato_principal", sql);
+        }
     }
 
     private sealed class FakeTenant : ITenantContext
